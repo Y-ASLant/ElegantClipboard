@@ -326,8 +326,10 @@ pub async fn select_folder_for_settings(app: tauri::AppHandle) -> Result<Option<
 /// Open data folder in file explorer
 #[tauri::command]
 pub async fn open_data_folder() -> Result<(), String> {
-    let data_path = crate::database::get_default_db_path();
-    if let Some(parent) = data_path.parent() {
+    let config = crate::config::AppConfig::load();
+    let data_dir = config.get_data_dir();
+    let parent = &data_dir;
+    {
         #[cfg(target_os = "windows")]
         {
             std::process::Command::new("explorer")

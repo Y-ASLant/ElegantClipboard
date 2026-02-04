@@ -96,7 +96,7 @@ export function Settings() {
   const saveSettings = async () => {
     setLoading(true);
     try {
-      await invoke("set_setting", { key: "data_path", value: settings.data_path });
+      // Save settings to database (data_path is handled separately by GeneralTab with migration)
       await invoke("set_setting", { key: "max_history_count", value: settings.max_history_count.toString() });
       await invoke("set_setting", { key: "max_content_size_kb", value: settings.max_content_size_kb.toString() });
       

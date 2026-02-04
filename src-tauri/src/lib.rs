@@ -1,5 +1,6 @@
 mod clipboard;
 mod commands;
+mod config;
 mod database;
 mod input_monitor;
 mod keyboard_hook;
@@ -8,7 +9,8 @@ mod win_v_registry;
 
 use clipboard::ClipboardMonitor;
 use commands::AppState;
-use database::{get_default_db_path, Database};
+use config::AppConfig;
+use database::Database;
 use std::sync::{Arc, RwLock};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -187,13 +189,59 @@ async fn close_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
-/// Tauri command: Get default data path
+/// Tauri command: Get default data path (returns current configured path)
 #[tauri::command]
 fn get_default_data_path() -> String {
-    let path = database::get_default_db_path();
-    path.parent()
+    let config = AppConfig::load();
+    config.get_data_dir().to_string_lossy().to_string()
+}
+
+/// Tauri command: Get the original default data path (not from config)
+#[tauri::command]
+fn get_original_default_path() -> String {
+    database::get_default_db_path()
+        .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+/// Tauri command: Set data path and save to config
+#[tauri::command]
+fn set_data_path(path: String) -> Result<(), String> {
+    let mut config = AppConfig::load();
+    config.data_path = if path.is_empty() { None } else { Some(path) };
+    config.save()
+}
+
+/// Tauri command: Migrate data to new path
+#[tauri::command]
+fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, String> {
+    let config = AppConfig::load();
+    let old_path = config.get_data_dir();
+    let new_path = std::path::PathBuf::from(&new_path);
+    
+    // Don't migrate if paths are the same
+    if old_path == new_path {
+        return Err("Source and destination paths are the same".to_string());
+    }
+    
+    // Perform migration
+    let result = config::migrate_data(&old_path, &new_path)?;
+    
+    // If migration successful, update config
+    if result.success() {
+        let mut new_config = AppConfig::load();
+        new_config.data_path = Some(new_path.to_string_lossy().to_string());
+        new_config.save()?;
+    }
+    
+    Ok(result)
+}
+
+/// Tauri command: Restart application
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    tauri::process::restart(&app.env());
 }
 
 /// Toggle window visibility (like QuickClipboard's toggle_main_window_visibility)
@@ -376,8 +424,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            // Initialize database
-            let db_path = get_default_db_path();
+            // Load configuration and initialize database
+            let config = AppConfig::load();
+            let db_path = config.get_db_path();
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
             // Initialize clipboard monitor
@@ -435,6 +484,10 @@ pub fn run() {
             // Window commands
             get_app_version,
             get_default_data_path,
+            get_original_default_path,
+            set_data_path,
+            migrate_data_to_path,
+            restart_app,
             show_window,
             hide_window,
             set_window_visibility,
