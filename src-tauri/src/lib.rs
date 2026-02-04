@@ -4,6 +4,7 @@ mod config;
 mod database;
 mod input_monitor;
 mod keyboard_hook;
+mod positioning;
 mod tray;
 mod win_v_registry;
 
@@ -252,6 +253,25 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             // Disable mouse monitoring when window is hidden
             input_monitor::disable_mouse_monitoring();
         } else {
+            // Check if follow_cursor is enabled
+            let follow_cursor = app.try_state::<std::sync::Arc<commands::AppState>>()
+                .map(|state| {
+                    let settings_repo = database::SettingsRepository::new(&state.db);
+                    settings_repo.get("follow_cursor")
+                        .ok()
+                        .flatten()
+                        .map(|v| v != "false")
+                        .unwrap_or(true) // Default to true
+                })
+                .unwrap_or(true);
+            
+            // Position window at cursor before showing (if enabled)
+            if follow_cursor {
+                if let Err(e) = positioning::position_at_cursor(&window) {
+                    tracing::warn!("Failed to position window at cursor: {}", e);
+                }
+            }
+            
             // Show window with always-on-top trick (like QuickClipboard)
             // NOTE: Do NOT call set_focus() - window is set to focusable=false
             let _ = window.show();

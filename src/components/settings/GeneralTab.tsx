@@ -26,6 +26,7 @@ export interface GeneralSettings {
   max_history_count: number;
   max_content_size_kb: number;
   auto_start: boolean;
+  follow_cursor: boolean;
 }
 
 interface GeneralTabProps {
@@ -230,6 +231,28 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <p className="text-xs text-muted-foreground">
               设为 0 表示无限制
             </p>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Window */}
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-medium">窗口</h3>
+            <p className="text-xs text-muted-foreground">配置窗口显示行为</p>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">跟随鼠标</Label>
+              <p className="text-xs text-muted-foreground">
+                窗口显示在鼠标位置附近
+              </p>
+            </div>
+            <Switch
+              checked={settings.follow_cursor}
+              onCheckedChange={(checked) => onSettingsChange({ ...settings, follow_cursor: checked })}
+            />
           </div>
         </div>
 

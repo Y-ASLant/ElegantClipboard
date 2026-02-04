@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClipboardList } from "@/components/ClipboardList";
@@ -30,7 +30,6 @@ function App() {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const { searchQuery, setSearchQuery, clearHistory, fetchItems } =
     useClipboardStore();
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {
@@ -41,30 +40,6 @@ function App() {
       // Sync state to backend for Win+V toggle
       await invoke("set_window_visibility", { visible: true });
     });
-  }, []);
-
-  // Handle window focusable state based on input focus
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    const handleFocus = async () => {
-      // Make window focusable when input is focused
-      await appWindow.setFocusable(true);
-      await appWindow.setFocus();
-    };
-    const handleBlur = async () => {
-      // Make window non-focusable when input loses focus
-      await appWindow.setFocusable(false);
-    };
-
-    const input = inputRef.current;
-    if (input) {
-      input.addEventListener("focus", handleFocus);
-      input.addEventListener("blur", handleBlur);
-      return () => {
-        input.removeEventListener("focus", handleFocus);
-        input.removeEventListener("blur", handleBlur);
-      };
-    }
   }, []);
 
   // Detect system dark mode
@@ -132,7 +107,6 @@ function App() {
         <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
           <Input
-            ref={inputRef}
             type="text"
             placeholder="搜索剪贴板..."
             value={searchQuery}

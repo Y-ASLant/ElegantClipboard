@@ -41,6 +41,7 @@ export function Settings() {
     max_history_count: 1000,
     max_content_size_kb: 1024,
     auto_start: false,
+    follow_cursor: true,
     shortcut: "Alt+C",
     winv_replacement: false,
   });
@@ -67,7 +68,7 @@ export function Settings() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start]);
+  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start, settings.follow_cursor]);
 
   const loadSettings = async () => {
     try {
@@ -75,6 +76,7 @@ export function Settings() {
       const dataPath = await invoke<string>("get_default_data_path");
       const maxHistoryCount = await invoke<string>("get_setting", { key: "max_history_count" });
       const maxContentSize = await invoke<string>("get_setting", { key: "max_content_size_kb" });
+      const followCursor = await invoke<string>("get_setting", { key: "follow_cursor" });
       const autoStart = await invoke<boolean>("is_autostart_enabled");
       const winvReplacement = await invoke<boolean>("is_winv_replacement_enabled");
       const currentShortcut = await invoke<string>("get_current_shortcut");
@@ -84,6 +86,7 @@ export function Settings() {
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
         auto_start: autoStart,
+        follow_cursor: followCursor !== "false", // Default to true
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
       });
@@ -98,6 +101,7 @@ export function Settings() {
       // Save settings to database (data_path is handled separately by GeneralTab with migration)
       await invoke("set_setting", { key: "max_history_count", value: settings.max_history_count.toString() });
       await invoke("set_setting", { key: "max_content_size_kb", value: settings.max_content_size_kb.toString() });
+      await invoke("set_setting", { key: "follow_cursor", value: settings.follow_cursor.toString() });
       
       if (settings.auto_start) {
         await invoke("enable_autostart");
