@@ -72,8 +72,8 @@ export function Settings() {
 
   const loadSettings = async () => {
     try {
-      const dataPath = await invoke<string>("get_setting", { key: "data_path" });
-      const defaultPath = await invoke<string>("get_default_data_path");
+      // Data path is now stored in config.json, not database
+      const dataPath = await invoke<string>("get_default_data_path");
       const maxHistoryCount = await invoke<string>("get_setting", { key: "max_history_count" });
       const maxContentSize = await invoke<string>("get_setting", { key: "max_content_size_kb" });
       const autoStart = await invoke<boolean>("is_autostart_enabled");
@@ -81,7 +81,7 @@ export function Settings() {
       const currentShortcut = await invoke<string>("get_current_shortcut");
       
       setSettings({
-        data_path: dataPath || defaultPath || "",
+        data_path: dataPath || "",
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
         auto_start: autoStart,
