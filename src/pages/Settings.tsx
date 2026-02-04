@@ -7,8 +7,6 @@ import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 import {
   Settings16Regular,
-  Dismiss16Regular,
-  Subtract16Regular,
   Database16Regular,
   Keyboard16Regular,
   Info16Regular,
@@ -137,18 +135,22 @@ export function Settings() {
             <Settings16Regular className="w-5 h-5 text-muted-foreground" />
             <span className="text-sm font-semibold">设置</span>
           </div>
-          <div className="flex" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <button
               onClick={minimizeWindow}
-              className="w-9 h-9 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
+              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
             >
-              <Subtract16Regular className="w-4 h-4" />
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="5.5" width="8" height="1" rx="0.5" fill="currentColor"/>
+              </svg>
             </button>
             <button
               onClick={closeWindow}
-              className="w-9 h-9 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
+              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
             >
-              <Dismiss16Regular className="w-4 h-4" />
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
             </button>
           </div>
         </div>
