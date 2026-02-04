@@ -252,32 +252,58 @@ impl ClipboardHandler {
     }
 
     /// Process image content
+    /// Uses background thread for heavy operations to avoid blocking the monitor
     fn process_image(&self, data: Vec<u8>, hash: String) -> Result<NewClipboardItem, String> {
         let byte_size = data.len() as i64;
         
         // Generate unique filename
         let filename = format!("{}.png", &hash[..16]);
         let image_path = self.images_path.join(&filename);
+        let image_path_str = image_path.to_string_lossy().to_string();
         
-        // Save image data directly (it's already PNG from monitor)
-        let mut file = std::fs::File::create(&image_path)
-            .map_err(|e| format!("Failed to create image file: {}", e))?;
-        file.write_all(&data)
-            .map_err(|e| format!("Failed to write image data: {}", e))?;
-        debug!("Saved image to {:?}", image_path);
-
-        // Generate thumbnail as base64 for fast preview
-        let thumbnail = self.generate_thumbnail(&data).unwrap_or_else(|e| {
-            warn!("Failed to generate thumbnail: {}", e);
-            "[Image]".to_string()
-        });
+        // For small images (< 500KB), process synchronously for immediate preview
+        // For large images, use background thread with placeholder
+        const SYNC_THRESHOLD: usize = 500 * 1024;
+        
+        let thumbnail = if data.len() < SYNC_THRESHOLD {
+            // Small image: process synchronously
+            let mut file = std::fs::File::create(&image_path)
+                .map_err(|e| format!("Failed to create image file: {}", e))?;
+            file.write_all(&data)
+                .map_err(|e| format!("Failed to write image data: {}", e))?;
+            debug!("Saved small image to {:?}", image_path);
+            
+            self.generate_thumbnail(&data).unwrap_or_else(|e| {
+                warn!("Failed to generate thumbnail: {}", e);
+                "[Image]".to_string()
+            })
+        } else {
+            // Large image: save file in background thread
+            let image_path_clone = image_path.clone();
+            let data_clone = data.clone();
+            
+            std::thread::spawn(move || {
+                if let Err(e) = std::fs::write(&image_path_clone, &data_clone) {
+                    tracing::error!("Failed to save large image: {}", e);
+                } else {
+                    tracing::debug!("Saved large image to {:?}", image_path_clone);
+                }
+            });
+            
+            // Generate thumbnail synchronously (still needed for UI)
+            // but with a smaller size for large images
+            self.generate_thumbnail_fast(&data).unwrap_or_else(|e| {
+                warn!("Failed to generate thumbnail for large image: {}", e);
+                "[Image]".to_string()
+            })
+        };
 
         Ok(NewClipboardItem {
             content_type: ContentType::Image,
             text_content: None,
             html_content: None,
             rtf_content: None,
-            image_path: Some(image_path.to_string_lossy().to_string()),
+            image_path: Some(image_path_str),
             file_paths: None,
             content_hash: hash,
             preview: Some(thumbnail),
@@ -306,6 +332,31 @@ impl ClipboardHandler {
         // Convert to base64 data URL
         let base64_str = STANDARD.encode(&png_bytes);
         Ok(format!("data:image/png;base64,{}", base64_str))
+    }
+
+    /// Generate a fast thumbnail for large images
+    /// Uses smaller dimensions and JPEG encoding for speed
+    fn generate_thumbnail_fast(&self, data: &[u8]) -> Result<String, String> {
+        // Load image from bytes
+        let img = ImageReader::new(Cursor::new(data))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+        // Create smaller thumbnail for large images (max 150x90)
+        let thumbnail = img.thumbnail(150, 90);
+
+        // Use JPEG for faster encoding (smaller file, faster processing)
+        let mut jpeg_bytes = Vec::new();
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_bytes, 70);
+        thumbnail
+            .write_with_encoder(encoder)
+            .map_err(|e| format!("Failed to encode thumbnail: {}", e))?;
+
+        // Convert to base64 data URL
+        let base64_str = STANDARD.encode(&jpeg_bytes);
+        Ok(format!("data:image/jpeg;base64,{}", base64_str))
     }
 
     /// Process file paths

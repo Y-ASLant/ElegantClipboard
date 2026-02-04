@@ -20,22 +20,10 @@ pub struct ClipboardItem {
     pub byte_size: i64,
     pub is_pinned: bool,
     pub is_favorite: bool,
-    pub category_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
     pub access_count: i64,
     pub last_accessed_at: Option<String>,
-}
-
-/// Category model
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Category {
-    pub id: i64,
-    pub name: String,
-    pub color: String,
-    pub icon: String,
-    pub sort_order: i64,
-    pub created_at: String,
 }
 
 /// New clipboard item (for insertion)
@@ -57,7 +45,6 @@ pub struct NewClipboardItem {
 pub struct QueryOptions {
     pub search: Option<String>,
     pub content_type: Option<String>,
-    pub category_id: Option<i64>,
     pub pinned_only: bool,
     pub favorite_only: bool,
     pub limit: Option<i64>,
@@ -65,20 +52,23 @@ pub struct QueryOptions {
 }
 
 /// Repository for clipboard items
+/// Uses read-write connection separation for better concurrency
 pub struct ClipboardRepository {
-    conn: Arc<Mutex<Connection>>,
+    write_conn: Arc<Mutex<Connection>>,
+    read_conn: Arc<Mutex<Connection>>,
 }
 
 impl ClipboardRepository {
     pub fn new(db: &Database) -> Self {
         Self {
-            conn: db.connection(),
+            write_conn: db.write_connection(),
+            read_conn: db.read_connection(),
         }
     }
 
     /// Insert a new clipboard item
     pub fn insert(&self, item: NewClipboardItem) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         
         let file_paths_json = item.file_paths.map(|paths| serde_json::to_string(&paths).unwrap_or_default());
         
@@ -105,7 +95,7 @@ impl ClipboardRepository {
 
     /// Check if item with hash exists
     pub fn exists_by_hash(&self, hash: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1",
             params![hash],
@@ -116,7 +106,7 @@ impl ClipboardRepository {
 
     /// Get item by hash and update access time
     pub fn touch_by_hash(&self, hash: &str) -> Result<Option<i64>, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         
         // Update access count and time
         conn.execute(
@@ -144,7 +134,7 @@ impl ClipboardRepository {
 
     /// Get item by ID
     pub fn get_by_id(&self, id: i64) -> Result<Option<ClipboardItem>, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         let result = conn.query_row(
             "SELECT * FROM clipboard_items WHERE id = ?1",
             params![id],
@@ -160,7 +150,7 @@ impl ClipboardRepository {
 
     /// List items with query options
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         
         let mut sql = String::from(
             "SELECT clipboard_items.* FROM clipboard_items"
@@ -190,12 +180,6 @@ impl ClipboardRepository {
         if let Some(ref content_type) = options.content_type {
             conditions.push("content_type = ?".to_string());
             params_vec.push(Box::new(content_type.clone()));
-        }
-
-        // Filter by category
-        if let Some(category_id) = options.category_id {
-            conditions.push("category_id = ?".to_string());
-            params_vec.push(Box::new(category_id));
         }
 
         // Filter pinned only
@@ -237,7 +221,7 @@ impl ClipboardRepository {
 
     /// Get total count
     pub fn count(&self, options: QueryOptions) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         
         let mut sql = String::from("SELECT COUNT(*) FROM clipboard_items");
         let mut conditions = Vec::new();
@@ -268,7 +252,7 @@ impl ClipboardRepository {
 
     /// Toggle pin status
     pub fn toggle_pin(&self, id: i64) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         conn.execute(
             "UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ?1",
             params![id],
@@ -285,7 +269,7 @@ impl ClipboardRepository {
 
     /// Toggle favorite status
     pub fn toggle_favorite(&self, id: i64) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         conn.execute(
             "UPDATE clipboard_items SET is_favorite = NOT is_favorite WHERE id = ?1",
             params![id],
@@ -302,7 +286,7 @@ impl ClipboardRepository {
 
     /// Delete item by ID
     pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         conn.execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
         debug!("Deleted clipboard item with id: {}", id);
         Ok(())
@@ -310,7 +294,7 @@ impl ClipboardRepository {
 
     /// Get image paths of items that will be cleared (non-pinned, non-favorite)
     pub fn get_clearable_image_paths(&self) -> Result<Vec<String>, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items 
              WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL"
@@ -324,7 +308,7 @@ impl ClipboardRepository {
 
     /// Delete all non-pinned items
     pub fn clear_history(&self) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         let deleted = conn.execute(
             "DELETE FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
             [],
@@ -335,7 +319,7 @@ impl ClipboardRepository {
     /// Delete items older than days
     #[allow(dead_code)]
     pub fn delete_older_than(&self, days: i64) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         let deleted = conn.execute(
             "DELETE FROM clipboard_items 
              WHERE is_pinned = 0 AND is_favorite = 0 
@@ -348,7 +332,7 @@ impl ClipboardRepository {
     /// Get total count of non-pinned, non-favorite items
     #[allow(dead_code)]
     pub fn get_non_protected_count(&self) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
             [],
@@ -365,7 +349,7 @@ impl ClipboardRepository {
             return Ok((0, vec![]));
         }
 
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         
         // Get current count of non-protected items
         let current_count: i64 = conn.query_row(
@@ -422,7 +406,6 @@ impl ClipboardRepository {
             byte_size: row.get("byte_size")?,
             is_pinned: row.get("is_pinned")?,
             is_favorite: row.get("is_favorite")?,
-            category_id: row.get("category_id")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
             access_count: row.get("access_count")?,
@@ -431,75 +414,24 @@ impl ClipboardRepository {
     }
 }
 
-/// Repository for categories
-pub struct CategoryRepository {
-    conn: Arc<Mutex<Connection>>,
-}
-
-impl CategoryRepository {
-    pub fn new(db: &Database) -> Self {
-        Self {
-            conn: db.connection(),
-        }
-    }
-
-    /// Create a new category
-    pub fn create(&self, name: &str, color: Option<&str>, icon: Option<&str>) -> Result<i64, rusqlite::Error> {
-        let conn = self.conn.lock();
-        conn.execute(
-            "INSERT INTO categories (name, color, icon) VALUES (?1, ?2, ?3)",
-            params![name, color.unwrap_or("#6366f1"), icon.unwrap_or("folder")],
-        )?;
-        Ok(conn.last_insert_rowid())
-    }
-
-    /// List all categories
-    pub fn list(&self) -> Result<Vec<Category>, rusqlite::Error> {
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT * FROM categories ORDER BY sort_order, name"
-        )?;
-        
-        let categories = stmt
-            .query_map([], |row| {
-                Ok(Category {
-                    id: row.get("id")?,
-                    name: row.get("name")?,
-                    color: row.get("color")?,
-                    icon: row.get("icon")?,
-                    sort_order: row.get("sort_order")?,
-                    created_at: row.get("created_at")?,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(categories)
-    }
-
-    /// Delete a category
-    pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock();
-        conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
-        Ok(())
-    }
-}
-
 /// Repository for settings
+/// Uses read-write connection separation for better concurrency
 pub struct SettingsRepository {
-    conn: Arc<Mutex<Connection>>,
+    write_conn: Arc<Mutex<Connection>>,
+    read_conn: Arc<Mutex<Connection>>,
 }
 
 impl SettingsRepository {
     pub fn new(db: &Database) -> Self {
         Self {
-            conn: db.connection(),
+            write_conn: db.write_connection(),
+            read_conn: db.read_connection(),
         }
     }
 
     /// Get a setting value
     pub fn get(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         let result = conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![key],
@@ -515,7 +447,7 @@ impl SettingsRepository {
 
     /// Set a setting value
     pub fn set(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.write_conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, datetime('now', 'localtime'))",
             params![key, value],
@@ -525,7 +457,7 @@ impl SettingsRepository {
 
     /// Get all settings
     pub fn get_all(&self) -> Result<std::collections::HashMap<String, String>, rusqlite::Error> {
-        let conn = self.conn.lock();
+        let conn = self.read_conn.lock();
         let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
         let settings = stmt
             .query_map([], |row| {

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ClipboardList } from "@/components/ClipboardList";
@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useClipboardStore } from "@/stores/clipboard";
+import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import {
   Search16Regular,
   Delete16Regular,
@@ -28,8 +28,9 @@ import debounce from "lodash.debounce";
 function App() {
   const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
-  const { searchQuery, setSearchQuery, clearHistory, fetchItems } =
+  const { searchQuery, setSearchQuery, clearHistory } =
     useClipboardStore();
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {
@@ -40,6 +41,30 @@ function App() {
       // Sync state to backend for Win+V toggle
       await invoke("set_window_visibility", { visible: true });
     });
+  }, []);
+
+  // Handle window focusable state based on input focus
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    const handleFocus = async () => {
+      // Make window focusable when input is focused
+      await appWindow.setFocusable(true);
+      await appWindow.setFocus();
+    };
+    const handleBlur = async () => {
+      // Make window non-focusable when input loses focus
+      await appWindow.setFocusable(false);
+    };
+
+    const input = inputRef.current;
+    if (input) {
+      input.addEventListener("focus", handleFocus);
+      input.addEventListener("blur", handleBlur);
+      return () => {
+        input.removeEventListener("focus", handleFocus);
+        input.removeEventListener("blur", handleBlur);
+      };
+    }
   }, []);
 
   // Detect system dark mode
@@ -62,12 +87,41 @@ function App() {
   // onFocusChanged events never fire. The backend uses rdev to monitor global
   // mouse clicks and hides the window when a click is detected outside its bounds.
 
+  // Request counter to handle out-of-order responses
+  const searchRequestIdRef = useRef(0);
+
+  // Search function with request ordering
+  const executeSearch = useCallback(async (query: string) => {
+    const requestId = ++searchRequestIdRef.current;
+    
+    try {
+      const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
+        search: query || null,
+        contentType: null,
+        pinnedOnly: false,
+        favoriteOnly: false,
+        limit: 100,
+        offset: 0,
+      });
+      
+      // Only update if this is still the latest request
+      if (requestId === searchRequestIdRef.current) {
+        useClipboardStore.setState({ items, isLoading: false });
+      }
+    } catch (error) {
+      if (requestId === searchRequestIdRef.current) {
+        console.error("Search failed:", error);
+        useClipboardStore.setState({ isLoading: false });
+      }
+    }
+  }, []);
+
   // Debounced search with proper cleanup
   const debouncedSearch = useMemo(
     () => debounce((query: string) => {
-      fetchItems({ search: query || undefined });
+      executeSearch(query);
     }, 300),
-    [fetchItems]
+    [executeSearch]
   );
 
   // Cleanup debounce on unmount
@@ -107,6 +161,7 @@ function App() {
         <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
           <Input
+            ref={inputRef}
             type="text"
             placeholder="搜索剪贴板..."
             value={searchQuery}

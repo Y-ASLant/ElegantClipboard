@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { Button } from "@/components/ui/button";
@@ -70,9 +71,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
-  const { togglePin, toggleFavorite, deleteItem, copyToClipboard, pasteContent } = useClipboardStore();
-  const { cardMaxLines, showTime, showCharCount, showByteSize } = useUISettings();
+// Use selectors for stable references to avoid unnecessary re-renders
+const clipboardActions = () => useClipboardStore.getState();
+
+export const ClipboardItemCard = memo(function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
+  // Get actions via getState() to avoid subscribing to store changes
+  const { togglePin, toggleFavorite, deleteItem, copyToClipboard, pasteContent } = clipboardActions();
+  // Subscribe only to specific UI settings using shallow comparison
+  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
+  const showTime = useUISettings((s) => s.showTime);
+  const showCharCount = useUISettings((s) => s.showCharCount);
+  const showByteSize = useUISettings((s) => s.showByteSize);
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
   
@@ -247,4 +256,18 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
       </div>
     </Card>
   );
-}
+}, (prevProps, nextProps) => {
+  // Custom comparison: only re-render if item data or index actually changed
+  return (
+    prevProps.index === nextProps.index &&
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.item.is_pinned === nextProps.item.is_pinned &&
+    prevProps.item.is_favorite === nextProps.item.is_favorite &&
+    prevProps.item.preview === nextProps.item.preview &&
+    prevProps.item.content_type === nextProps.item.content_type &&
+    prevProps.item.created_at === nextProps.item.created_at &&
+    prevProps.item.byte_size === nextProps.item.byte_size &&
+    prevProps.item.text_content === nextProps.item.text_content &&
+    prevProps.item.image_path === nextProps.item.image_path
+  );
+});

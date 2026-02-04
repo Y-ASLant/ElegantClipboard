@@ -1,7 +1,6 @@
 use crate::clipboard::ClipboardMonitor;
 use crate::database::{
-    Category, CategoryRepository, ClipboardItem, ClipboardRepository, Database, QueryOptions,
-    SettingsRepository,
+    ClipboardItem, ClipboardRepository, Database, QueryOptions, SettingsRepository,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -63,7 +62,6 @@ pub async fn get_clipboard_items(
     state: State<'_, Arc<AppState>>,
     search: Option<String>,
     content_type: Option<String>,
-    category_id: Option<i64>,
     pinned_only: Option<bool>,
     favorite_only: Option<bool>,
     limit: Option<i64>,
@@ -73,7 +71,6 @@ pub async fn get_clipboard_items(
     let options = QueryOptions {
         search,
         content_type,
-        category_id,
         pinned_only: pinned_only.unwrap_or(false),
         favorite_only: favorite_only.unwrap_or(false),
         limit,
@@ -215,40 +212,6 @@ pub async fn copy_to_clipboard(
 
     debug!("Copied item {} to clipboard", id);
     Ok(())
-}
-
-// ============ Category Commands ============
-
-/// Get all categories
-#[tauri::command]
-pub async fn get_categories(
-    state: State<'_, Arc<AppState>>,
-) -> Result<Vec<Category>, String> {
-    let repo = CategoryRepository::new(&state.db);
-    repo.list().map_err(|e| e.to_string())
-}
-
-/// Create a new category
-#[tauri::command]
-pub async fn create_category(
-    state: State<'_, Arc<AppState>>,
-    name: String,
-    color: Option<String>,
-    icon: Option<String>,
-) -> Result<i64, String> {
-    let repo = CategoryRepository::new(&state.db);
-    repo.create(&name, color.as_deref(), icon.as_deref())
-        .map_err(|e| e.to_string())
-}
-
-/// Delete a category
-#[tauri::command]
-pub async fn delete_category(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
-    let repo = CategoryRepository::new(&state.db);
-    repo.delete(id).map_err(|e| e.to_string())
 }
 
 // ============ Settings Commands ============

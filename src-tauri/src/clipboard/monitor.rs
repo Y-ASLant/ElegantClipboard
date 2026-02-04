@@ -2,7 +2,7 @@ use super::{ClipboardContent, ClipboardHandler};
 use crate::database::Database;
 use clipboard_master::{CallbackResult, ClipboardHandler as CMHandler, Master};
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use tauri::{AppHandle, Emitter};
@@ -12,7 +12,9 @@ use tracing::{debug, error, info, warn};
 #[derive(Clone)]
 pub struct ClipboardMonitor {
     running: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
+    /// Pause counter: when > 0, clipboard changes are ignored
+    /// This prevents race conditions when multiple copy operations overlap
+    pause_count: Arc<AtomicU32>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
@@ -21,7 +23,7 @@ impl ClipboardMonitor {
     pub fn new() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
-            paused: Arc::new(AtomicBool::new(false)),
+            pause_count: Arc::new(AtomicU32::new(0)),
             handler: Arc::new(Mutex::new(None)),
             thread_handle: Arc::new(Mutex::new(None)),
         }
@@ -43,7 +45,7 @@ impl ClipboardMonitor {
         }
 
         let running = self.running.clone();
-        let paused = self.paused.clone();
+        let pause_count = self.pause_count.clone();
         let handler = self.handler.clone();
 
         let handle = std::thread::spawn(move || {
@@ -51,7 +53,7 @@ impl ClipboardMonitor {
 
             let clipboard_handler = MonitorHandler {
                 running: running.clone(),
-                paused,
+                pause_count,
                 handler,
                 app_handle,
             };
@@ -90,21 +92,29 @@ impl ClipboardMonitor {
         }
     }
 
-    /// Pause monitoring
+    /// Pause monitoring (increments pause counter)
+    /// Multiple concurrent pauses are supported - monitoring resumes only when all are released
     pub fn pause(&self) {
-        self.paused.store(true, Ordering::SeqCst);
-        info!("Clipboard monitor paused");
+        let count = self.pause_count.fetch_add(1, Ordering::SeqCst);
+        debug!("Clipboard monitor paused (count: {})", count + 1);
     }
 
-    /// Resume monitoring
+    /// Resume monitoring (decrements pause counter)
+    /// Monitoring only actually resumes when counter reaches 0
     pub fn resume(&self) {
-        self.paused.store(false, Ordering::SeqCst);
-        info!("Clipboard monitor resumed");
+        let prev = self.pause_count.fetch_sub(1, Ordering::SeqCst);
+        if prev == 0 {
+            // Counter was already 0, restore it to avoid underflow
+            self.pause_count.store(0, Ordering::SeqCst);
+            warn!("Resume called when not paused");
+        } else {
+            debug!("Clipboard monitor resume (count: {})", prev - 1);
+        }
     }
 
-    /// Check if paused
+    /// Check if paused (pause count > 0)
     pub fn is_paused(&self) -> bool {
-        self.paused.load(Ordering::SeqCst)
+        self.pause_count.load(Ordering::SeqCst) > 0
     }
 
     /// Check if running
@@ -122,7 +132,7 @@ impl Default for ClipboardMonitor {
 /// Handler for clipboard-master
 struct MonitorHandler {
     running: Arc<AtomicBool>,
-    paused: Arc<AtomicBool>,
+    pause_count: Arc<AtomicU32>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     app_handle: AppHandle,
 }
@@ -134,8 +144,8 @@ impl CMHandler for MonitorHandler {
             return CallbackResult::Stop;
         }
 
-        // Check if paused
-        if self.paused.load(Ordering::SeqCst) {
+        // Check if paused (pause_count > 0)
+        if self.pause_count.load(Ordering::SeqCst) > 0 {
             debug!("Clipboard change ignored (paused)");
             return CallbackResult::Next;
         }

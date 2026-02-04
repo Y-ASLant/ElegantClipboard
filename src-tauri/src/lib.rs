@@ -528,10 +528,6 @@ pub fn run() {
             commands::clear_history,
             commands::copy_to_clipboard,
             commands::paste_content,
-            // Category commands
-            commands::get_categories,
-            commands::create_category,
-            commands::delete_category,
             // Settings commands
             commands::get_setting,
             commands::set_setting,
