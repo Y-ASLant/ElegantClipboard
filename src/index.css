@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* Custom Font */
+@font-face {
+  font-family: 'CustomFont';
+  src: url('/fonts.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* shadcn/ui standard theme */
 @theme {
   --color-background: hsl(0 0% 100%);
@@ -63,7 +72,7 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: 'CustomFont', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
@@ -130,4 +139,14 @@ input, textarea, [contenteditable="true"] {
 [data-tauri-drag-region] input,
 [data-tauri-drag-region] a {
   -webkit-app-region: no-drag;
+}
+
+/* Clipboard content uses system default font for better readability */
+.clipboard-content {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Path display uses system monospace font */
+.path-text {
+  font-family: "Cascadia Code", "Fira Code", Consolas, "SF Mono", Monaco, "Andale Mono", monospace;
 }

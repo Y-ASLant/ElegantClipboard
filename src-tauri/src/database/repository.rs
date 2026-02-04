@@ -323,6 +323,56 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
+    /// Get total count of non-pinned, non-favorite items
+    #[allow(dead_code)]
+    pub fn get_non_protected_count(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.conn.lock();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Delete oldest non-pinned, non-favorite items to maintain max count
+    /// Returns the number of deleted items
+    pub fn enforce_max_count(&self, max_count: i64) -> Result<i64, rusqlite::Error> {
+        if max_count <= 0 {
+            // 0 means unlimited
+            return Ok(0);
+        }
+
+        let conn = self.conn.lock();
+        
+        // Get current count of non-protected items
+        let current_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
+            [],
+            |row| row.get(0),
+        )?;
+
+        if current_count <= max_count {
+            return Ok(0);
+        }
+
+        let to_delete = current_count - max_count;
+        
+        // Delete oldest non-protected items
+        let deleted = conn.execute(
+            "DELETE FROM clipboard_items WHERE id IN (
+                SELECT id FROM clipboard_items 
+                WHERE is_pinned = 0 AND is_favorite = 0 
+                ORDER BY created_at ASC 
+                LIMIT ?1
+            )",
+            params![to_delete],
+        )?;
+
+        debug!("Enforced max count: deleted {} oldest items", deleted);
+        Ok(deleted as i64)
+    }
+
     /// Helper to convert row to ClipboardItem
     fn row_to_item(row: &Row) -> Result<ClipboardItem, rusqlite::Error> {
         Ok(ClipboardItem {

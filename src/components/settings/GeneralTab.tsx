@@ -142,7 +142,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                 value={settings.data_path}
                 placeholder="加载中..."
                 readOnly
-                className="flex-1 h-8 text-sm"
+                className="flex-1 h-8 text-sm path-text"
               />
               <Button variant="outline" size="icon" onClick={selectFolder} className="h-8 w-8" title="选择文件夹">
                 <Folder16Regular className="w-4 h-4" />
@@ -252,13 +252,13 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
           <div className="space-y-3 py-2">
             <div className="text-sm">
               <span className="text-muted-foreground">当前位置：</span>
-              <span className="font-mono text-xs block mt-1 p-2 bg-muted rounded">
+              <span className="path-text text-xs block mt-1 p-2 bg-muted rounded">
                 {settings.data_path}
               </span>
             </div>
             <div className="text-sm">
               <span className="text-muted-foreground">新位置：</span>
-              <span className="font-mono text-xs block mt-1 p-2 bg-muted rounded">
+              <span className="path-text text-xs block mt-1 p-2 bg-muted rounded">
                 {pendingPath}
               </span>
             </div>

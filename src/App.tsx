@@ -92,36 +92,39 @@ function App() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
+    <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
       {/* Header: Search + Actions */}
       <div
-        className="h-12 flex items-center gap-2 px-3 bg-background shrink-0 select-none"
+        className="flex items-center gap-2 p-2 shrink-0 select-none"
         data-tauri-drag-region
       >
-        {/* Search Bar */}
+        {/* Search Bar Card */}
         <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
           <Input
             type="text"
             placeholder="搜索剪贴板..."
             value={searchQuery}
             onChange={handleSearchChange}
-            className="pl-9 h-8 text-sm"
+            className="pl-9 h-9 text-sm bg-background border shadow-sm"
           />
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-0.5" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        {/* Action Buttons Card */}
+        <div 
+          className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <button
             onClick={() => setClearDialogOpen(true)}
-            className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
+            className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
             title="清空历史"
           >
             <Delete16Regular className="w-4 h-4" />
           </button>
           <button
             onClick={openSettings}
-            className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
+            className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
             title="设置"
           >
             <Settings16Regular className="w-4 h-4" />
@@ -137,9 +140,9 @@ function App() {
       {/* Clear History Dialog */}
       <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
         <DialogContent showCloseButton={false}>
-          <DialogHeader>
+          <DialogHeader className="text-left">
             <DialogTitle>清空历史记录</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-left">
               确定要清空所有非置顶的历史记录吗？此操作不可撤销。
             </DialogDescription>
           </DialogHeader>

@@ -79,26 +79,6 @@ export function AboutTab() {
           </div>
         </div>
       </div>
-
-      <Separator />
-
-      {/* Tech Stack */}
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium">技术信息</h3>
-        <div className="space-y-2">
-          {[
-            { label: "框架", value: "Tauri 2.0" },
-            { label: "前端", value: "React + shadcn/ui" },
-            { label: "数据库", value: "SQLite + FTS5" },
-            { label: "平台", value: "Windows" },
-          ].map((item, index) => (
-            <div key={index} className="flex items-center justify-between py-1.5">
-              <span className="text-sm text-muted-foreground">{item.label}</span>
-              <span className="text-sm font-medium">{item.value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

@@ -140,7 +140,7 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
           <div className="flex-1 min-w-0 px-3 py-2.5">
             {/* Preview Text */}
             <pre 
-              className="text-sm leading-relaxed text-foreground/90 font-[inherit] whitespace-pre-wrap break-all m-0"
+              className="clipboard-content text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-all m-0"
               style={{
                 display: "-webkit-box",
                 WebkitLineClamp: cardMaxLines,
