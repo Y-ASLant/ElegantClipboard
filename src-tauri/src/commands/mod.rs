@@ -1,7 +1,6 @@
 use crate::clipboard::ClipboardMonitor;
 use crate::database::{
-    Category, CategoryRepository, ClipboardItem, ClipboardRepository, Database, QueryOptions,
-    SettingsRepository,
+    ClipboardItem, ClipboardRepository, Database, QueryOptions, SettingsRepository,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,6 +13,47 @@ pub struct AppState {
     pub monitor: ClipboardMonitor,
 }
 
+// ============ Helper Functions ============
+
+/// Set clipboard content from a ClipboardItem (shared logic for copy and paste)
+fn set_clipboard_content(item: &ClipboardItem, clipboard: &mut arboard::Clipboard) -> Result<(), String> {
+    match item.content_type.as_str() {
+        "text" | "html" | "rtf" => {
+            if let Some(ref text) = item.text_content {
+                clipboard.set_text(text.clone())
+                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+            }
+        }
+        "image" => {
+            if let Some(ref path) = item.image_path {
+                let img = image::open(path)
+                    .map_err(|e| format!("Failed to open image: {}", e))?;
+                let rgba = img.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                let img_data = arboard::ImageData {
+                    width: width as usize,
+                    height: height as usize,
+                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+                };
+                clipboard.set_image(img_data)
+                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
+            }
+        }
+        "files" => {
+            if let Some(ref paths_json) = item.file_paths {
+                let paths: Vec<String> = serde_json::from_str(paths_json)
+                    .map_err(|e| format!("Failed to parse file paths: {}", e))?;
+                clipboard.set_text(paths.join("\n"))
+                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+            }
+        }
+        _ => {
+            return Err("Unsupported content type".to_string());
+        }
+    }
+    Ok(())
+}
+
 // ============ Clipboard Commands ============
 
 /// Get clipboard items with optional filtering
@@ -22,7 +62,6 @@ pub async fn get_clipboard_items(
     state: State<'_, Arc<AppState>>,
     search: Option<String>,
     content_type: Option<String>,
-    category_id: Option<i64>,
     pinned_only: Option<bool>,
     favorite_only: Option<bool>,
     limit: Option<i64>,
@@ -32,7 +71,6 @@ pub async fn get_clipboard_items(
     let options = QueryOptions {
         search,
         content_type,
-        category_id,
         pinned_only: pinned_only.unwrap_or(false),
         favorite_only: favorite_only.unwrap_or(false),
         limit,
@@ -91,24 +129,58 @@ pub async fn toggle_favorite(
     repo.toggle_favorite(id).map_err(|e| e.to_string())
 }
 
-/// Delete clipboard item
+/// Delete clipboard item (also deletes associated image file)
 #[tauri::command]
 pub async fn delete_clipboard_item(
     state: State<'_, Arc<AppState>>,
     id: i64,
 ) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
-    repo.delete(id).map_err(|e| e.to_string())
+    
+    // Get item first to find image path
+    if let Ok(Some(item)) = repo.get_by_id(id) {
+        // Delete database record
+        repo.delete(id).map_err(|e| e.to_string())?;
+        
+        // Delete associated image file if exists
+        if let Some(image_path) = item.image_path {
+            if let Err(e) = std::fs::remove_file(&image_path) {
+                debug!("Failed to delete image file {}: {}", image_path, e);
+            } else {
+                debug!("Deleted image file: {}", image_path);
+            }
+        }
+    } else {
+        repo.delete(id).map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
 }
 
-/// Clear all non-pinned history
+/// Clear all non-pinned history (also deletes associated image files)
 #[tauri::command]
 pub async fn clear_history(
     state: State<'_, Arc<AppState>>,
 ) -> Result<i64, String> {
     let repo = ClipboardRepository::new(&state.db);
+    
+    // Get image paths before clearing
+    let image_paths = repo.get_clearable_image_paths().unwrap_or_default();
+    
+    // Clear database records
     let deleted = repo.clear_history().map_err(|e| e.to_string())?;
-    info!("Cleared {} clipboard items", deleted);
+    
+    // Delete associated image files
+    let mut deleted_files = 0;
+    for path in image_paths {
+        if let Err(e) = std::fs::remove_file(&path) {
+            debug!("Failed to delete image file {}: {}", path, e);
+        } else {
+            deleted_files += 1;
+        }
+    }
+    
+    info!("Cleared {} clipboard items and {} image files", deleted, deleted_files);
     Ok(deleted)
 }
 
@@ -126,51 +198,10 @@ pub async fn copy_to_clipboard(
     // Pause monitor temporarily to avoid re-capturing
     state.monitor.pause();
     
-    // Use arboard for cross-platform clipboard access
+    // Set content to clipboard
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| format!("Failed to access clipboard: {}", e))?;
-
-    match item.content_type.as_str() {
-        "text" => {
-            if let Some(text) = item.text_content {
-                clipboard.set_text(text)
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        "html" => {
-            if let Some(text) = item.text_content {
-                clipboard.set_text(text)
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        "image" => {
-            if let Some(path) = item.image_path {
-                let img = image::open(&path)
-                    .map_err(|e| format!("Failed to open image: {}", e))?;
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let img_data = arboard::ImageData {
-                    width: width as usize,
-                    height: height as usize,
-                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-                };
-                clipboard.set_image(img_data)
-                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
-            }
-        }
-        "files" => {
-            // For files, just copy the paths as text
-            if let Some(paths_json) = item.file_paths {
-                let paths: Vec<String> = serde_json::from_str(&paths_json)
-                    .map_err(|e| format!("Failed to parse file paths: {}", e))?;
-                clipboard.set_text(paths.join("\n"))
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        _ => {
-            return Err("Unsupported content type".to_string());
-        }
-    }
+    set_clipboard_content(&item, &mut clipboard)?;
 
     // Resume monitor after a short delay
     let monitor = state.monitor.clone();
@@ -181,40 +212,6 @@ pub async fn copy_to_clipboard(
 
     debug!("Copied item {} to clipboard", id);
     Ok(())
-}
-
-// ============ Category Commands ============
-
-/// Get all categories
-#[tauri::command]
-pub async fn get_categories(
-    state: State<'_, Arc<AppState>>,
-) -> Result<Vec<Category>, String> {
-    let repo = CategoryRepository::new(&state.db);
-    repo.list().map_err(|e| e.to_string())
-}
-
-/// Create a new category
-#[tauri::command]
-pub async fn create_category(
-    state: State<'_, Arc<AppState>>,
-    name: String,
-    color: Option<String>,
-    icon: Option<String>,
-) -> Result<i64, String> {
-    let repo = CategoryRepository::new(&state.db);
-    repo.create(&name, color.as_deref(), icon.as_deref())
-        .map_err(|e| e.to_string())
-}
-
-/// Delete a category
-#[tauri::command]
-pub async fn delete_category(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
-    let repo = CategoryRepository::new(&state.db);
-    repo.delete(id).map_err(|e| e.to_string())
 }
 
 // ============ Settings Commands ============
@@ -326,8 +323,10 @@ pub async fn select_folder_for_settings(app: tauri::AppHandle) -> Result<Option<
 /// Open data folder in file explorer
 #[tauri::command]
 pub async fn open_data_folder() -> Result<(), String> {
-    let data_path = crate::database::get_default_db_path();
-    if let Some(parent) = data_path.parent() {
+    let config = crate::config::AppConfig::load();
+    let data_dir = config.get_data_dir();
+    let parent = &data_dir;
+    {
         #[cfg(target_os = "windows")]
         {
             std::process::Command::new("explorer")
@@ -403,41 +402,7 @@ pub async fn paste_content(
     // 1. Set content to system clipboard
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| format!("Failed to access clipboard: {}", e))?;
-
-    match item.content_type.as_str() {
-        "text" | "html" | "rtf" => {
-            if let Some(text) = item.text_content {
-                clipboard.set_text(text)
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        "image" => {
-            if let Some(path) = item.image_path {
-                let img = image::open(&path)
-                    .map_err(|e| format!("Failed to open image: {}", e))?;
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let img_data = arboard::ImageData {
-                    width: width as usize,
-                    height: height as usize,
-                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-                };
-                clipboard.set_image(img_data)
-                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
-            }
-        }
-        "files" => {
-            if let Some(paths_json) = item.file_paths {
-                let paths: Vec<String> = serde_json::from_str(&paths_json)
-                    .map_err(|e| format!("Failed to parse file paths: {}", e))?;
-                clipboard.set_text(paths.join("\n"))
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        _ => {
-            return Err("Unsupported content type".to_string());
-        }
-    }
+    set_clipboard_content(&item, &mut clipboard)?;
 
     // 2. Hide window and update state
     if let Some(window) = app.get_webview_window("main") {

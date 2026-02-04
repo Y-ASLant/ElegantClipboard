@@ -15,46 +15,31 @@ export interface ClipboardItem {
   byte_size: number;
   is_pinned: boolean;
   is_favorite: boolean;
-  category_id: number | null;
   created_at: string;
   updated_at: string;
   access_count: number;
   last_accessed_at: string | null;
 }
 
-export interface Category {
-  id: number;
-  name: string;
-  color: string;
-  icon: string;
-  sort_order: number;
-  created_at: string;
-}
-
 interface ClipboardState {
   items: ClipboardItem[];
   pinnedItems: ClipboardItem[];
-  categories: Category[];
   totalCount: number;
   isLoading: boolean;
   searchQuery: string;
   selectedType: string | null;
-  selectedCategory: number | null;
 
   // Actions
   fetchItems: (options?: {
     search?: string;
     content_type?: string;
-    category_id?: number;
     limit?: number;
     offset?: number;
   }) => Promise<void>;
   fetchPinnedItems: () => Promise<void>;
-  fetchCategories: () => Promise<void>;
   fetchCount: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSelectedType: (type: string | null) => void;
-  setSelectedCategory: (id: number | null) => void;
   togglePin: (id: number) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
   deleteItem: (id: number) => Promise<void>;
@@ -68,12 +53,10 @@ interface ClipboardState {
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
   items: [],
   pinnedItems: [],
-  categories: [],
   totalCount: 0,
   isLoading: false,
   searchQuery: "",
   selectedType: null,
-  selectedCategory: null,
 
   fetchItems: async (options = {}) => {
     set({ isLoading: true });
@@ -82,7 +65,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
         search: options.search ?? (state.searchQuery || null),
         contentType: options.content_type ?? state.selectedType,
-        categoryId: options.category_id ?? state.selectedCategory,
         pinnedOnly: false,
         favoriteOnly: false,
         limit: options.limit ?? 100,
@@ -107,15 +89,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
-  fetchCategories: async () => {
-    try {
-      const categories = await invoke<Category[]>("get_categories");
-      set({ categories });
-    } catch (error) {
-      console.error("Failed to fetch categories:", error);
-    }
-  },
-
   fetchCount: async () => {
     try {
       const count = await invoke<number>("get_clipboard_count", {});
@@ -127,20 +100,12 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   setSearchQuery: (query: string) => {
     set({ searchQuery: query });
-    // Debounced search
-    const timeoutId = setTimeout(() => {
-      get().fetchItems();
-    }, 300);
-    return () => clearTimeout(timeoutId);
+    // Note: Debouncing is handled in App.tsx with useMemo + debounce
+    // This just updates the query state
   },
 
   setSelectedType: (type: string | null) => {
     set({ selectedType: type });
-    get().fetchItems();
-  },
-
-  setSelectedCategory: (id: number | null) => {
-    set({ selectedCategory: id });
     get().fetchItems();
   },
 

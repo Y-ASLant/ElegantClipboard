@@ -1,6 +1,6 @@
 [package]
 name = "elegant-clipboard"
-version = "0.3.0"
+version = "0.4.0"
 description = "An elegant Windows clipboard manager"
 authors = ["ASLan"]
 edition = "2021"
@@ -47,6 +47,7 @@ lazy_static = "1.4"
 
 # Image handling
 image = "0.25"
+base64 = "0.22"
 
 # Directories
 dirs = "5"

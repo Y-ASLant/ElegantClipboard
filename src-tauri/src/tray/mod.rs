@@ -59,9 +59,15 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
                     if window.is_visible().unwrap_or(false) {
                         let _ = window.hide();
+                        // Disable mouse monitoring when hiding
+                        crate::input_monitor::disable_mouse_monitoring();
+                        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
                     } else {
                         let _ = window.show();
                         let _ = window.set_focus();
+                        // Enable mouse monitoring when showing
+                        crate::input_monitor::enable_mouse_monitoring();
+                        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
                     }
                 }
             }
@@ -79,6 +85,9 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
+                // Enable mouse monitoring when showing
+                crate::input_monitor::enable_mouse_monitoring();
+                crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
             }
         }
         "pause" => {

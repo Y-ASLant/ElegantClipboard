@@ -1,15 +1,33 @@
 use crate::database::{
-    get_images_path, ClipboardRepository, ContentType, Database, NewClipboardItem,
+    ClipboardRepository, ContentType, Database, NewClipboardItem,
+    SettingsRepository,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use blake3::Hasher;
-use std::io::Write;
+use image::ImageReader;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-/// Maximum text content length to store (1MB)
-const MAX_TEXT_LENGTH: usize = 1_048_576;
+/// Default maximum text content length (1MB)
+const DEFAULT_MAX_CONTENT_SIZE: usize = 1_048_576;
 /// Maximum preview length
 const MAX_PREVIEW_LENGTH: usize = 200;
+/// Default max history count (0 = unlimited)
+const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
+
+/// Truncate content at char boundary if exceeds max_size (0 = unlimited)
+fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
+    if max_size > 0 && content.len() > max_size {
+        warn!("{} content truncated from {} to {} bytes", content_type, content.len(), max_size);
+        content.char_indices()
+            .take_while(|(i, _)| *i < max_size)
+            .map(|(_, c)| c)
+            .collect()
+    } else {
+        content
+    }
+}
 
 /// Clipboard content from the system
 #[derive(Debug, Clone)]
@@ -25,23 +43,60 @@ pub enum ClipboardContent {
 /// Handler for processing clipboard content
 pub struct ClipboardHandler {
     repository: ClipboardRepository,
+    settings_repo: SettingsRepository,
     images_path: PathBuf,
 }
 
 impl ClipboardHandler {
-    pub fn new(db: &Database) -> Self {
-        let images_path = get_images_path();
+    pub fn new(db: &Database, images_path: PathBuf) -> Self {
         // Ensure images directory exists
         std::fs::create_dir_all(&images_path).ok();
         
         Self {
             repository: ClipboardRepository::new(db),
+            settings_repo: SettingsRepository::new(db),
             images_path,
         }
     }
 
+    /// Get max content size from settings (in bytes)
+    fn get_max_content_size(&self) -> usize {
+        self.settings_repo
+            .get("max_content_size_kb")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|kb| kb * 1024) // Convert KB to bytes
+            .unwrap_or(DEFAULT_MAX_CONTENT_SIZE)
+    }
+
+    /// Get max history count from settings
+    fn get_max_history_count(&self) -> i64 {
+        self.settings_repo
+            .get("max_history_count")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_MAX_HISTORY_COUNT)
+    }
+
     /// Process clipboard content and store if new
     pub fn process(&self, content: ClipboardContent) -> Result<Option<i64>, String> {
+        // Get settings
+        let max_content_size = self.get_max_content_size();
+        
+        // Check content size before processing (0 = unlimited)
+        if max_content_size > 0 {
+            let content_size = self.get_content_size(&content);
+            if content_size > max_content_size {
+                warn!(
+                    "Content size {} bytes exceeds max {} bytes, skipping",
+                    content_size, max_content_size
+                );
+                return Ok(None);
+            }
+        }
+
         // Calculate content hash
         let hash = self.calculate_hash(&content);
         
@@ -54,9 +109,9 @@ impl ClipboardHandler {
 
         // Create new item based on content type
         let item = match content {
-            ClipboardContent::Text(text) => self.process_text(text, hash)?,
-            ClipboardContent::Html { html, text } => self.process_html(html, text, hash)?,
-            ClipboardContent::Rtf { rtf, text } => self.process_rtf(rtf, text, hash)?,
+            ClipboardContent::Text(text) => self.process_text(text, hash, max_content_size)?,
+            ClipboardContent::Html { html, text } => self.process_html(html, text, hash, max_content_size)?,
+            ClipboardContent::Rtf { rtf, text } => self.process_rtf(rtf, text, hash, max_content_size)?,
             ClipboardContent::Image(data) => self.process_image(data, hash)?,
             ClipboardContent::Files(files) => self.process_files(files, hash)?,
         };
@@ -64,7 +119,42 @@ impl ClipboardHandler {
         // Insert into database
         let id = self.repository.insert(item).map_err(|e| e.to_string())?;
         info!("Stored new clipboard item with id: {}", id);
+
+        // Enforce max history count and clean up old image files
+        let max_history_count = self.get_max_history_count();
+        if max_history_count > 0 {
+            match self.repository.enforce_max_count(max_history_count) {
+                Ok((deleted, image_paths)) => {
+                    // Delete associated image files
+                    for path in image_paths {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            debug!("Failed to delete old image file {}: {}", path, e);
+                        } else {
+                            debug!("Deleted old image file: {}", path);
+                        }
+                    }
+                    if deleted > 0 {
+                        debug!("Enforced max count: removed {} old items", deleted);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to enforce max history count: {}", e);
+                }
+            }
+        }
+
         Ok(Some(id))
+    }
+
+    /// Get the size of clipboard content in bytes
+    fn get_content_size(&self, content: &ClipboardContent) -> usize {
+        match content {
+            ClipboardContent::Text(text) => text.len(),
+            ClipboardContent::Html { html, .. } => html.len(),
+            ClipboardContent::Rtf { rtf, .. } => rtf.len(),
+            ClipboardContent::Image(data) => data.len(),
+            ClipboardContent::Files(files) => files.iter().map(|f| f.len()).sum(),
+        }
     }
 
     /// Calculate hash of content
@@ -101,20 +191,10 @@ impl ClipboardHandler {
     }
 
     /// Process text content
-    fn process_text(&self, text: String, hash: String) -> Result<NewClipboardItem, String> {
+    fn process_text(&self, text: String, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = text.len() as i64;
         let preview = Self::create_preview(&text);
-        
-        // Truncate if too long (safely at char boundary)
-        let text_content = if text.len() > MAX_TEXT_LENGTH {
-            warn!("Text content truncated from {} to {} bytes", text.len(), MAX_TEXT_LENGTH);
-            text.char_indices()
-                .take_while(|(i, _)| *i < MAX_TEXT_LENGTH)
-                .map(|(_, c)| c)
-                .collect()
-        } else {
-            text
-        };
+        let text_content = truncate_content(text, max_size, "Text");
 
         Ok(NewClipboardItem {
             content_type: ContentType::Text,
@@ -130,16 +210,17 @@ impl ClipboardHandler {
     }
 
     /// Process HTML content
-    fn process_html(&self, html: String, text: Option<String>, hash: String) -> Result<NewClipboardItem, String> {
+    fn process_html(&self, html: String, text: Option<String>, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = html.len() as i64;
         let preview = text.as_ref()
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| Self::create_preview(&html));
+        let html_content = truncate_content(html, max_size, "HTML");
 
         Ok(NewClipboardItem {
             content_type: ContentType::Html,
             text_content: text,
-            html_content: Some(html),
+            html_content: Some(html_content),
             rtf_content: None,
             image_path: None,
             file_paths: None,
@@ -150,17 +231,18 @@ impl ClipboardHandler {
     }
 
     /// Process RTF content
-    fn process_rtf(&self, rtf: String, text: Option<String>, hash: String) -> Result<NewClipboardItem, String> {
+    fn process_rtf(&self, rtf: String, text: Option<String>, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = rtf.len() as i64;
         let preview = text.as_ref()
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| "[RTF Content]".to_string());
+        let rtf_content = truncate_content(rtf, max_size, "RTF");
 
         Ok(NewClipboardItem {
             content_type: ContentType::Rtf,
             text_content: text,
             html_content: None,
-            rtf_content: Some(rtf),
+            rtf_content: Some(rtf_content),
             image_path: None,
             file_paths: None,
             content_hash: hash,
@@ -170,31 +252,111 @@ impl ClipboardHandler {
     }
 
     /// Process image content
+    /// Uses background thread for heavy operations to avoid blocking the monitor
     fn process_image(&self, data: Vec<u8>, hash: String) -> Result<NewClipboardItem, String> {
         let byte_size = data.len() as i64;
         
         // Generate unique filename
         let filename = format!("{}.png", &hash[..16]);
         let image_path = self.images_path.join(&filename);
+        let image_path_str = image_path.to_string_lossy().to_string();
         
-        // Save image data directly (it's already PNG from monitor)
-        let mut file = std::fs::File::create(&image_path)
-            .map_err(|e| format!("Failed to create image file: {}", e))?;
-        file.write_all(&data)
-            .map_err(|e| format!("Failed to write image data: {}", e))?;
-        debug!("Saved image to {:?}", image_path);
+        // For small images (< 500KB), process synchronously for immediate preview
+        // For large images, use background thread with placeholder
+        const SYNC_THRESHOLD: usize = 500 * 1024;
+        
+        let thumbnail = if data.len() < SYNC_THRESHOLD {
+            // Small image: process synchronously
+            let mut file = std::fs::File::create(&image_path)
+                .map_err(|e| format!("Failed to create image file: {}", e))?;
+            file.write_all(&data)
+                .map_err(|e| format!("Failed to write image data: {}", e))?;
+            debug!("Saved small image to {:?}", image_path);
+            
+            self.generate_thumbnail(&data).unwrap_or_else(|e| {
+                warn!("Failed to generate thumbnail: {}", e);
+                "[Image]".to_string()
+            })
+        } else {
+            // Large image: save file in background thread
+            let image_path_clone = image_path.clone();
+            let data_clone = data.clone();
+            
+            std::thread::spawn(move || {
+                if let Err(e) = std::fs::write(&image_path_clone, &data_clone) {
+                    tracing::error!("Failed to save large image: {}", e);
+                } else {
+                    tracing::debug!("Saved large image to {:?}", image_path_clone);
+                }
+            });
+            
+            // Generate thumbnail synchronously (still needed for UI)
+            // but with a smaller size for large images
+            self.generate_thumbnail_fast(&data).unwrap_or_else(|e| {
+                warn!("Failed to generate thumbnail for large image: {}", e);
+                "[Image]".to_string()
+            })
+        };
 
         Ok(NewClipboardItem {
             content_type: ContentType::Image,
             text_content: None,
             html_content: None,
             rtf_content: None,
-            image_path: Some(image_path.to_string_lossy().to_string()),
+            image_path: Some(image_path_str),
             file_paths: None,
             content_hash: hash,
-            preview: Some("[Image]".to_string()),
+            preview: Some(thumbnail),
             byte_size,
         })
+    }
+
+    /// Generate a small thumbnail and return as base64 data URL
+    fn generate_thumbnail(&self, data: &[u8]) -> Result<String, String> {
+        // Load image from bytes
+        let img = ImageReader::new(Cursor::new(data))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+        // Create thumbnail (max 200x120, maintains aspect ratio)
+        let thumbnail = img.thumbnail(200, 120);
+
+        // Encode as PNG to bytes
+        let mut png_bytes = Vec::new();
+        thumbnail
+            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode thumbnail: {}", e))?;
+
+        // Convert to base64 data URL
+        let base64_str = STANDARD.encode(&png_bytes);
+        Ok(format!("data:image/png;base64,{}", base64_str))
+    }
+
+    /// Generate a fast thumbnail for large images
+    /// Uses smaller dimensions and JPEG encoding for speed
+    fn generate_thumbnail_fast(&self, data: &[u8]) -> Result<String, String> {
+        // Load image from bytes
+        let img = ImageReader::new(Cursor::new(data))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+        // Create smaller thumbnail for large images (max 150x90)
+        let thumbnail = img.thumbnail(150, 90);
+
+        // Use JPEG for faster encoding (smaller file, faster processing)
+        let mut jpeg_bytes = Vec::new();
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_bytes, 70);
+        thumbnail
+            .write_with_encoder(encoder)
+            .map_err(|e| format!("Failed to encode thumbnail: {}", e))?;
+
+        // Convert to base64 data URL
+        let base64_str = STANDARD.encode(&jpeg_bytes);
+        Ok(format!("data:image/jpeg;base64,{}", base64_str))
     }
 
     /// Process file paths
@@ -219,13 +381,14 @@ impl ClipboardHandler {
         })
     }
 
-    /// Create preview text
+    /// Create preview text (safely handles UTF-8)
     fn create_preview(text: &str) -> String {
         let trimmed = text.trim();
-        if trimmed.len() <= MAX_PREVIEW_LENGTH {
-            trimmed.to_string()
+        // Use char_indices to safely truncate at char boundary
+        if let Some((idx, _)) = trimmed.char_indices().nth(MAX_PREVIEW_LENGTH) {
+            format!("{}...", &trimmed[..idx])
         } else {
-            format!("{}...", &trimmed[..MAX_PREVIEW_LENGTH])
+            trimmed.to_string()
         }
     }
 }

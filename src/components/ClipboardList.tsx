@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
@@ -8,21 +8,24 @@ import { ClipboardMultiple16Regular, Pin16Regular } from "@fluentui/react-icons"
 
 export function ClipboardList() {
   const parentRef = useRef<HTMLDivElement>(null);
+  const listenerRef = useRef<(() => void) | null>(null);
   const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
-  // Initial data fetch
+  // Initial data fetch and event listener setup
   useEffect(() => {
     fetchItems();
     fetchPinnedItems();
     
+    // Avoid duplicate listener registration
+    if (listenerRef.current) return;
+    
     let mounted = true;
-    let cleanup: (() => void) | undefined;
     
     setupListener().then((unlisten) => {
       if (mounted) {
-        cleanup = unlisten;
+        listenerRef.current = unlisten;
       } else {
         unlisten();
       }
@@ -30,12 +33,18 @@ export function ClipboardList() {
     
     return () => {
       mounted = false;
-      if (cleanup) cleanup();
+      if (listenerRef.current) {
+        listenerRef.current();
+        listenerRef.current = null;
+      }
     };
-  }, [fetchItems, fetchPinnedItems, setupListener]);
+  }, []); // Empty deps - only run once on mount
 
-  // Filter out pinned items from regular list
-  const regularItems = items.filter((item) => !item.is_pinned);
+  // Memoize filtered items to avoid recalculation on every render
+  const regularItems = useMemo(
+    () => items.filter((item) => !item.is_pinned),
+    [items]
+  );
 
   // Estimate item height based on cardMaxLines setting
   const estimateSize = useCallback(() => {
@@ -79,7 +88,7 @@ export function ClipboardList() {
   }
 
   return (
-    <div ref={parentRef} className="h-full overflow-y-overlay overflow-x-hidden" style={{ overflow: 'overlay' } as React.CSSProperties}>
+    <div ref={parentRef} className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar">
       <div className="p-2">
         {/* Pinned Section */}
         {pinnedItems.length > 0 && (

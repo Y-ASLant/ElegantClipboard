@@ -14,39 +14,10 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     byte_size INTEGER DEFAULT 0,
     is_pinned INTEGER DEFAULT 0,
     is_favorite INTEGER DEFAULT 0,
-    category_id INTEGER,
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
     access_count INTEGER DEFAULT 0,
-    last_accessed_at TEXT,
-    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
-);
-
--- Categories table
-CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    color TEXT DEFAULT '#6366f1',
-    icon TEXT DEFAULT 'folder',
-    sort_order INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-);
-
--- Tags table for flexible tagging
-CREATE TABLE IF NOT EXISTS tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    color TEXT DEFAULT '#8b5cf6',
-    created_at TEXT DEFAULT (datetime('now', 'localtime'))
-);
-
--- Item-Tag relationship (many-to-many)
-CREATE TABLE IF NOT EXISTS item_tags (
-    item_id INTEGER NOT NULL,
-    tag_id INTEGER NOT NULL,
-    PRIMARY KEY (item_id, tag_id),
-    FOREIGN KEY (item_id) REFERENCES clipboard_items(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+    last_accessed_at TEXT
 );
 
 -- Settings table
@@ -95,7 +66,6 @@ END;
 CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite) WHERE is_favorite = 1;
-CREATE INDEX IF NOT EXISTS idx_clipboard_category ON clipboard_items(category_id);
 CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
 CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_items(content_hash);
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
@@ -103,15 +73,14 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES 
     ('hotkey', 'Ctrl+Shift+V'),
-    ('max_items', '10000'),
+    ('max_history_count', '10000'),
+    ('max_content_size_kb', '1024'),
     ('auto_start', 'true'),
     ('theme', 'system'),
     ('language', 'zh-CN'),
     ('save_images', 'true'),
     ('save_html', 'true'),
-    ('save_rtf', 'false'),
-    ('max_text_length', '1048576'),
-    ('max_image_size', '10485760');
+    ('save_rtf', 'false');
 "#;
 
 /// Content types enum

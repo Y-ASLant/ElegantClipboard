@@ -1,14 +1,17 @@
 mod clipboard;
 mod commands;
+mod config;
 mod database;
 mod input_monitor;
 mod keyboard_hook;
+mod positioning;
 mod tray;
 mod win_v_registry;
 
 use clipboard::ClipboardMonitor;
 use commands::AppState;
-use database::{get_default_db_path, Database};
+use config::AppConfig;
+use database::Database;
 use std::sync::{Arc, RwLock};
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -17,6 +20,68 @@ use tracing_subscriber::FmtSubscriber;
 
 /// Global state for current shortcut
 static CURRENT_SHORTCUT: RwLock<Option<String>> = RwLock::new(None);
+
+/// Parse a single key string to Code
+fn parse_key_code(key: &str) -> Option<Code> {
+    // Letters A-Z
+    const LETTERS: [Code; 26] = [
+        Code::KeyA, Code::KeyB, Code::KeyC, Code::KeyD, Code::KeyE, Code::KeyF,
+        Code::KeyG, Code::KeyH, Code::KeyI, Code::KeyJ, Code::KeyK, Code::KeyL,
+        Code::KeyM, Code::KeyN, Code::KeyO, Code::KeyP, Code::KeyQ, Code::KeyR,
+        Code::KeyS, Code::KeyT, Code::KeyU, Code::KeyV, Code::KeyW, Code::KeyX,
+        Code::KeyY, Code::KeyZ,
+    ];
+    // Digits 0-9
+    const DIGITS: [Code; 10] = [
+        Code::Digit0, Code::Digit1, Code::Digit2, Code::Digit3, Code::Digit4,
+        Code::Digit5, Code::Digit6, Code::Digit7, Code::Digit8, Code::Digit9,
+    ];
+    // Function keys F1-F12
+    const F_KEYS: [Code; 12] = [
+        Code::F1, Code::F2, Code::F3, Code::F4, Code::F5, Code::F6,
+        Code::F7, Code::F8, Code::F9, Code::F10, Code::F11, Code::F12,
+    ];
+
+    // Single letter
+    if key.len() == 1 {
+        let c = key.chars().next()?;
+        if c.is_ascii_uppercase() {
+            return Some(LETTERS[(c as usize) - ('A' as usize)]);
+        }
+        if c.is_ascii_digit() {
+            return Some(DIGITS[(c as usize) - ('0' as usize)]);
+        }
+    }
+
+    // Function keys F1-F12
+    if key.starts_with('F') && key.len() <= 3 {
+        if let Ok(n) = key[1..].parse::<usize>() {
+            if n >= 1 && n <= 12 {
+                return Some(F_KEYS[n - 1]);
+            }
+        }
+    }
+
+    // Special keys
+    match key {
+        "SPACE" => Some(Code::Space),
+        "TAB" => Some(Code::Tab),
+        "ENTER" | "RETURN" => Some(Code::Enter),
+        "BACKSPACE" => Some(Code::Backspace),
+        "DELETE" | "DEL" => Some(Code::Delete),
+        "ESCAPE" | "ESC" => Some(Code::Escape),
+        "HOME" => Some(Code::Home),
+        "END" => Some(Code::End),
+        "PAGEUP" => Some(Code::PageUp),
+        "PAGEDOWN" => Some(Code::PageDown),
+        "UP" | "ARROWUP" => Some(Code::ArrowUp),
+        "DOWN" | "ARROWDOWN" => Some(Code::ArrowDown),
+        "LEFT" | "ARROWLEFT" => Some(Code::ArrowLeft),
+        "RIGHT" | "ARROWRIGHT" => Some(Code::ArrowRight),
+        "`" | "BACKQUOTE" => Some(Code::Backquote),
+        _ => None,
+    }
+}
 
 /// Parse shortcut string to Shortcut object
 fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
@@ -29,79 +94,13 @@ fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
     let mut key_code = None;
 
     for part in parts {
-        match part.to_uppercase().as_str() {
+        let upper = part.to_uppercase();
+        match upper.as_str() {
             "CTRL" | "CONTROL" => modifiers |= Modifiers::CONTROL,
             "ALT" => modifiers |= Modifiers::ALT,
             "SHIFT" => modifiers |= Modifiers::SHIFT,
             "WIN" | "SUPER" | "META" | "CMD" => modifiers |= Modifiers::SUPER,
-            // Letters
-            "A" => key_code = Some(Code::KeyA),
-            "B" => key_code = Some(Code::KeyB),
-            "C" => key_code = Some(Code::KeyC),
-            "D" => key_code = Some(Code::KeyD),
-            "E" => key_code = Some(Code::KeyE),
-            "F" => key_code = Some(Code::KeyF),
-            "G" => key_code = Some(Code::KeyG),
-            "H" => key_code = Some(Code::KeyH),
-            "I" => key_code = Some(Code::KeyI),
-            "J" => key_code = Some(Code::KeyJ),
-            "K" => key_code = Some(Code::KeyK),
-            "L" => key_code = Some(Code::KeyL),
-            "M" => key_code = Some(Code::KeyM),
-            "N" => key_code = Some(Code::KeyN),
-            "O" => key_code = Some(Code::KeyO),
-            "P" => key_code = Some(Code::KeyP),
-            "Q" => key_code = Some(Code::KeyQ),
-            "R" => key_code = Some(Code::KeyR),
-            "S" => key_code = Some(Code::KeyS),
-            "T" => key_code = Some(Code::KeyT),
-            "U" => key_code = Some(Code::KeyU),
-            "V" => key_code = Some(Code::KeyV),
-            "W" => key_code = Some(Code::KeyW),
-            "X" => key_code = Some(Code::KeyX),
-            "Y" => key_code = Some(Code::KeyY),
-            "Z" => key_code = Some(Code::KeyZ),
-            // Numbers
-            "0" => key_code = Some(Code::Digit0),
-            "1" => key_code = Some(Code::Digit1),
-            "2" => key_code = Some(Code::Digit2),
-            "3" => key_code = Some(Code::Digit3),
-            "4" => key_code = Some(Code::Digit4),
-            "5" => key_code = Some(Code::Digit5),
-            "6" => key_code = Some(Code::Digit6),
-            "7" => key_code = Some(Code::Digit7),
-            "8" => key_code = Some(Code::Digit8),
-            "9" => key_code = Some(Code::Digit9),
-            // Function keys
-            "F1" => key_code = Some(Code::F1),
-            "F2" => key_code = Some(Code::F2),
-            "F3" => key_code = Some(Code::F3),
-            "F4" => key_code = Some(Code::F4),
-            "F5" => key_code = Some(Code::F5),
-            "F6" => key_code = Some(Code::F6),
-            "F7" => key_code = Some(Code::F7),
-            "F8" => key_code = Some(Code::F8),
-            "F9" => key_code = Some(Code::F9),
-            "F10" => key_code = Some(Code::F10),
-            "F11" => key_code = Some(Code::F11),
-            "F12" => key_code = Some(Code::F12),
-            // Special keys
-            "SPACE" => key_code = Some(Code::Space),
-            "TAB" => key_code = Some(Code::Tab),
-            "ENTER" | "RETURN" => key_code = Some(Code::Enter),
-            "BACKSPACE" => key_code = Some(Code::Backspace),
-            "DELETE" | "DEL" => key_code = Some(Code::Delete),
-            "ESCAPE" | "ESC" => key_code = Some(Code::Escape),
-            "HOME" => key_code = Some(Code::Home),
-            "END" => key_code = Some(Code::End),
-            "PAGEUP" => key_code = Some(Code::PageUp),
-            "PAGEDOWN" => key_code = Some(Code::PageDown),
-            "UP" | "ARROWUP" => key_code = Some(Code::ArrowUp),
-            "DOWN" | "ARROWDOWN" => key_code = Some(Code::ArrowDown),
-            "LEFT" | "ARROWLEFT" => key_code = Some(Code::ArrowLeft),
-            "RIGHT" | "ARROWRIGHT" => key_code = Some(Code::ArrowRight),
-            "`" | "BACKQUOTE" => key_code = Some(Code::Backquote),
-            _ => {}
+            _ => key_code = parse_key_code(&upper),
         }
     }
 
@@ -187,13 +186,59 @@ async fn close_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
-/// Tauri command: Get default data path
+/// Tauri command: Get default data path (returns current configured path)
 #[tauri::command]
 fn get_default_data_path() -> String {
-    let path = database::get_default_db_path();
-    path.parent()
+    let config = AppConfig::load();
+    config.get_data_dir().to_string_lossy().to_string()
+}
+
+/// Tauri command: Get the original default data path (not from config)
+#[tauri::command]
+fn get_original_default_path() -> String {
+    database::get_default_db_path()
+        .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+/// Tauri command: Set data path and save to config
+#[tauri::command]
+fn set_data_path(path: String) -> Result<(), String> {
+    let mut config = AppConfig::load();
+    config.data_path = if path.is_empty() { None } else { Some(path) };
+    config.save()
+}
+
+/// Tauri command: Migrate data to new path
+#[tauri::command]
+fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, String> {
+    let config = AppConfig::load();
+    let old_path = config.get_data_dir();
+    let new_path = std::path::PathBuf::from(&new_path);
+    
+    // Don't migrate if paths are the same
+    if old_path == new_path {
+        return Err("Source and destination paths are the same".to_string());
+    }
+    
+    // Perform migration
+    let result = config::migrate_data(&old_path, &new_path)?;
+    
+    // If migration successful, update config
+    if result.success() {
+        let mut new_config = AppConfig::load();
+        new_config.data_path = Some(new_path.to_string_lossy().to_string());
+        new_config.save()?;
+    }
+    
+    Ok(result)
+}
+
+/// Tauri command: Restart application
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    tauri::process::restart(&app.env());
 }
 
 /// Toggle window visibility (like QuickClipboard's toggle_main_window_visibility)
@@ -208,6 +253,25 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             // Disable mouse monitoring when window is hidden
             input_monitor::disable_mouse_monitoring();
         } else {
+            // Check if follow_cursor is enabled
+            let follow_cursor = app.try_state::<std::sync::Arc<commands::AppState>>()
+                .map(|state| {
+                    let settings_repo = database::SettingsRepository::new(&state.db);
+                    settings_repo.get("follow_cursor")
+                        .ok()
+                        .flatten()
+                        .map(|v| v != "false")
+                        .unwrap_or(true) // Default to true
+                })
+                .unwrap_or(true);
+            
+            // Position window at cursor before showing (if enabled)
+            if follow_cursor {
+                if let Err(e) = positioning::position_at_cursor(&window) {
+                    tracing::warn!("Failed to position window at cursor: {}", e);
+                }
+            }
+            
             // Show window with always-on-top trick (like QuickClipboard)
             // NOTE: Do NOT call set_focus() - window is set to focusable=false
             let _ = window.show();
@@ -376,13 +440,15 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            // Initialize database
-            let db_path = get_default_db_path();
+            // Load configuration and initialize database
+            let config = AppConfig::load();
+            let db_path = config.get_db_path();
+            let images_path = config.get_images_path();
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
-            // Initialize clipboard monitor
+            // Initialize clipboard monitor with configured images path
             let monitor = ClipboardMonitor::new();
-            monitor.init(&db);
+            monitor.init(&db, images_path);
 
             // Create app state
             let state = Arc::new(AppState { db, monitor });
@@ -435,6 +501,10 @@ pub fn run() {
             // Window commands
             get_app_version,
             get_default_data_path,
+            get_original_default_path,
+            set_data_path,
+            migrate_data_to_path,
+            restart_app,
             show_window,
             hide_window,
             set_window_visibility,
@@ -458,10 +528,6 @@ pub fn run() {
             commands::clear_history,
             commands::copy_to_clipboard,
             commands::paste_content,
-            // Category commands
-            commands::get_categories,
-            commands::create_category,
-            commands::delete_category,
             // Settings commands
             commands::get_setting,
             commands::set_setting,

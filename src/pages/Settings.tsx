@@ -2,12 +2,11 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Card, CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 import {
   Settings16Regular,
-  Dismiss16Regular,
-  Subtract16Regular,
   Database16Regular,
   Keyboard16Regular,
   Info16Regular,
@@ -42,6 +41,7 @@ export function Settings() {
     max_history_count: 1000,
     max_content_size_kb: 1024,
     auto_start: false,
+    follow_cursor: true,
     shortcut: "Alt+C",
     winv_replacement: false,
   });
@@ -68,23 +68,25 @@ export function Settings() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start]);
+  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start, settings.follow_cursor]);
 
   const loadSettings = async () => {
     try {
-      const dataPath = await invoke<string>("get_setting", { key: "data_path" });
-      const defaultPath = await invoke<string>("get_default_data_path");
+      // Data path is now stored in config.json, not database
+      const dataPath = await invoke<string>("get_default_data_path");
       const maxHistoryCount = await invoke<string>("get_setting", { key: "max_history_count" });
       const maxContentSize = await invoke<string>("get_setting", { key: "max_content_size_kb" });
+      const followCursor = await invoke<string>("get_setting", { key: "follow_cursor" });
       const autoStart = await invoke<boolean>("is_autostart_enabled");
       const winvReplacement = await invoke<boolean>("is_winv_replacement_enabled");
       const currentShortcut = await invoke<string>("get_current_shortcut");
       
       setSettings({
-        data_path: dataPath || defaultPath || "",
+        data_path: dataPath || "",
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
         auto_start: autoStart,
+        follow_cursor: followCursor !== "false", // Default to true
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
       });
@@ -96,9 +98,10 @@ export function Settings() {
   const saveSettings = async () => {
     setLoading(true);
     try {
-      await invoke("set_setting", { key: "data_path", value: settings.data_path });
+      // Save settings to database (data_path is handled separately by GeneralTab with migration)
       await invoke("set_setting", { key: "max_history_count", value: settings.max_history_count.toString() });
       await invoke("set_setting", { key: "max_content_size_kb", value: settings.max_content_size_kb.toString() });
+      await invoke("set_setting", { key: "follow_cursor", value: settings.follow_cursor.toString() });
       
       if (settings.auto_start) {
         await invoke("enable_autostart");
@@ -136,18 +139,22 @@ export function Settings() {
             <Settings16Regular className="w-5 h-5 text-muted-foreground" />
             <span className="text-sm font-semibold">设置</span>
           </div>
-          <div className="flex" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <button
               onClick={minimizeWindow}
-              className="w-9 h-9 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
+              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
             >
-              <Subtract16Regular className="w-4 h-4" />
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="5.5" width="8" height="1" rx="0.5" fill="currentColor"/>
+              </svg>
             </button>
             <button
               onClick={closeWindow}
-              className="w-9 h-9 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
+              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
             >
-              <Dismiss16Regular className="w-4 h-4" />
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              </svg>
             </button>
           </div>
         </div>
@@ -184,41 +191,45 @@ export function Settings() {
         </div>
 
         {/* Right Content */}
-        <div className="flex-1 overflow-auto">
-          <Card className="h-full">
-            <CardContent className="p-4 h-full overflow-auto">
-              {activeTab === "general" && (
-                <GeneralTab
-                  settings={settings}
-                  onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                />
-              )}
+        <div className="flex-1">
+          {activeTab === "about" ? (
+            <ScrollArea className="h-full">
+              <AboutTab />
+            </ScrollArea>
+          ) : (
+            <Card className="h-full overflow-hidden">
+              <ScrollArea className="h-full">
+                <CardContent className="p-4">
+                  {activeTab === "general" && (
+                    <GeneralTab
+                      settings={settings}
+                      onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
+                    />
+                  )}
 
-              {activeTab === "display" && (
-                <DisplayTab
-                  cardMaxLines={cardMaxLines}
-                  setCardMaxLines={setCardMaxLines}
-                  showTime={showTime}
-                  setShowTime={setShowTime}
-                  showCharCount={showCharCount}
-                  setShowCharCount={setShowCharCount}
-                  showByteSize={showByteSize}
-                  setShowByteSize={setShowByteSize}
-                />
-              )}
+                  {activeTab === "display" && (
+                    <DisplayTab
+                      cardMaxLines={cardMaxLines}
+                      setCardMaxLines={setCardMaxLines}
+                      showTime={showTime}
+                      setShowTime={setShowTime}
+                      showCharCount={showCharCount}
+                      setShowCharCount={setShowCharCount}
+                      showByteSize={showByteSize}
+                      setShowByteSize={setShowByteSize}
+                    />
+                  )}
 
-              {activeTab === "shortcuts" && (
-                <ShortcutsTab
-                  settings={settings}
-                  onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                />
-              )}
-
-              {activeTab === "about" && (
-                <AboutTab />
-              )}
-            </CardContent>
-          </Card>
+                  {activeTab === "shortcuts" && (
+                    <ShortcutsTab
+                      settings={settings}
+                      onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
+                    />
+                  )}
+                </CardContent>
+              </ScrollArea>
+            </Card>
+          )}
         </div>
       </div>
     </div>

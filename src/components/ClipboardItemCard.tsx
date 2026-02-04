@@ -1,8 +1,13 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { memo } from "react";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   Pin16Regular,
@@ -11,6 +16,7 @@ import {
   Star16Filled,
   Delete16Regular,
   Copy16Regular,
+  Image16Regular,
 } from "@fluentui/react-icons";
 
 interface ClipboardItemCardProps {
@@ -65,9 +71,17 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
-  const { togglePin, toggleFavorite, deleteItem, copyToClipboard, pasteContent } = useClipboardStore();
-  const { cardMaxLines, showTime, showCharCount, showByteSize } = useUISettings();
+// Use selectors for stable references to avoid unnecessary re-renders
+const clipboardActions = () => useClipboardStore.getState();
+
+export const ClipboardItemCard = memo(function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
+  // Get actions via getState() to avoid subscribing to store changes
+  const { togglePin, toggleFavorite, deleteItem, copyToClipboard, pasteContent } = clipboardActions();
+  // Subscribe only to specific UI settings using shallow comparison
+  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
+  const showTime = useUISettings((s) => s.showTime);
+  const showCharCount = useUISettings((s) => s.showCharCount);
+  const showByteSize = useUISettings((s) => s.showByteSize);
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
   
@@ -115,13 +129,17 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
         {/* Content - Different layout for images */}
         {item.content_type === "image" && item.image_path ? (
           <div className="flex-1 min-w-0 px-3 py-2.5">
-            {/* Image Preview - Full width thumbnail */}
-            <div className="relative w-full h-16 rounded overflow-hidden bg-muted/30">
-              <img
-                src={convertFileSrc(item.image_path)}
-                alt="Preview"
-                className="w-full h-full object-contain"
-              />
+            {/* Image Thumbnail - Base64 inline for instant display */}
+            <div className="relative w-full h-20 rounded overflow-hidden bg-muted/30 flex items-center justify-center">
+              {item.preview?.startsWith("data:image") ? (
+                <img
+                  src={item.preview}
+                  alt="Preview"
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <Image16Regular className="w-8 h-8 text-muted-foreground/40" />
+              )}
             </div>
             
             {/* Meta Info */}
@@ -140,7 +158,7 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
           <div className="flex-1 min-w-0 px-3 py-2.5">
             {/* Preview Text */}
             <pre 
-              className="text-sm leading-relaxed text-foreground/90 font-[inherit] whitespace-pre-wrap break-all m-0"
+              className="clipboard-content text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-all m-0"
               style={{
                 display: "-webkit-box",
                 WebkitLineClamp: cardMaxLines,
@@ -167,50 +185,66 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
 
         {/* Actions - show on hover using CSS */}
         <div className="absolute right-1 top-1 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleTogglePin}
-            className="h-6 w-6"
-            title={item.is_pinned ? "取消置顶" : "置顶"}
-          >
-            {item.is_pinned ? (
-              <Pin16Filled className="w-3.5 h-3.5 text-primary" />
-            ) : (
-              <Pin16Regular className="w-3.5 h-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleToggleFavorite}
-            className="h-6 w-6"
-            title={item.is_favorite ? "取消收藏" : "收藏"}
-          >
-            {item.is_favorite ? (
-              <Star16Filled className="w-3.5 h-3.5 text-yellow-500" />
-            ) : (
-              <Star16Regular className="w-3.5 h-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleCopy}
-            className="h-6 w-6"
-            title="复制"
-          >
-            <Copy16Regular className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleDelete}
-            className="h-6 w-6 hover:text-destructive"
-            title="删除"
-          >
-            <Delete16Regular className="w-3.5 h-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleTogglePin}
+                className="h-6 w-6"
+              >
+                {item.is_pinned ? (
+                  <Pin16Filled className="w-3.5 h-3.5 text-primary" />
+                ) : (
+                  <Pin16Regular className="w-3.5 h-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{item.is_pinned ? "取消置顶" : "置顶"}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleToggleFavorite}
+                className="h-6 w-6"
+              >
+                {item.is_favorite ? (
+                  <Star16Filled className="w-3.5 h-3.5 text-yellow-500" />
+                ) : (
+                  <Star16Regular className="w-3.5 h-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{item.is_favorite ? "取消收藏" : "收藏"}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleCopy}
+                className="h-6 w-6"
+              >
+                <Copy16Regular className="w-3.5 h-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>复制</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleDelete}
+                className="h-6 w-6 hover:text-destructive"
+              >
+                <Delete16Regular className="w-3.5 h-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>删除</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Index Badge */}
@@ -222,4 +256,18 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
       </div>
     </Card>
   );
-}
+}, (prevProps, nextProps) => {
+  // Custom comparison: only re-render if item data or index actually changed
+  return (
+    prevProps.index === nextProps.index &&
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.item.is_pinned === nextProps.item.is_pinned &&
+    prevProps.item.is_favorite === nextProps.item.is_favorite &&
+    prevProps.item.preview === nextProps.item.preview &&
+    prevProps.item.content_type === nextProps.item.content_type &&
+    prevProps.item.created_at === nextProps.item.created_at &&
+    prevProps.item.byte_size === nextProps.item.byte_size &&
+    prevProps.item.text_content === nextProps.item.text_content &&
+    prevProps.item.image_path === nextProps.item.image_path
+  );
+});
