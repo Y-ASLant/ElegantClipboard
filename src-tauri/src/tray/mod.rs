@@ -13,7 +13,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
     // Load tray icon from raw RGBA data
     // We'll use a simple colored square as placeholder
     // In production, you should use proper icon loading
-    let icon_data = include_bytes!("../../icons/32x32.png");
+    let icon_data = include_bytes!("../../icons/icon.png");
     let img = image::load_from_memory(icon_data)?;
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
