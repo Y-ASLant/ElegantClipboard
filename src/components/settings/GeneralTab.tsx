@@ -197,21 +197,23 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <div className="flex items-center justify-between">
               <Label className="text-xs">单条内容最大大小</Label>
               <span className="text-xs font-medium tabular-nums">
-                {settings.max_content_size_kb >= 1024 
-                  ? `${(settings.max_content_size_kb / 1024).toFixed(1)} MB`
-                  : `${settings.max_content_size_kb} KB`
+                {settings.max_content_size_kb === 0 
+                  ? "无限制"
+                  : settings.max_content_size_kb >= 1024 
+                    ? `${(settings.max_content_size_kb / 1024).toFixed(1)} MB`
+                    : `${settings.max_content_size_kb} KB`
                 }
               </span>
             </div>
             <Slider
               value={[settings.max_content_size_kb]}
               onValueChange={(value) => onSettingsChange({ ...settings, max_content_size_kb: value[0] })}
-              min={64}
+              min={0}
               max={10240}
               step={64}
             />
             <p className="text-xs text-muted-foreground">
-              超过此大小的内容将被截断保存
+              设为 0 表示无限制
             </p>
           </div>
         </div>

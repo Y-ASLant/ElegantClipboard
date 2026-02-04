@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import { Separator } from "@/components/ui/separator";
 import {
-  ClipboardMultiple16Regular,
   Person16Regular,
   Code16Regular,
   Open16Regular,
@@ -28,8 +27,8 @@ export function AboutTab() {
     <div className="space-y-6">
       {/* App Info */}
       <div className="flex flex-col items-center text-center space-y-4 py-6">
-        <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-          <ClipboardMultiple16Regular className="w-8 h-8 text-primary" />
+        <div className="h-16 w-16 rounded-2xl overflow-hidden">
+          <img src="/icon.png" alt="ElegantClipboard" className="w-full h-full object-contain" />
         </div>
         <div className="space-y-1">
           <h3 className="font-semibold text-lg">ElegantClipboard</h3>

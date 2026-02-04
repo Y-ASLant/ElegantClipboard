@@ -71,14 +71,16 @@ impl ClipboardHandler {
         // Get settings
         let max_content_size = self.get_max_content_size();
         
-        // Check content size before processing
-        let content_size = self.get_content_size(&content);
-        if content_size > max_content_size {
-            warn!(
-                "Content size {} bytes exceeds max {} bytes, skipping",
-                content_size, max_content_size
-            );
-            return Ok(None);
+        // Check content size before processing (0 = unlimited)
+        if max_content_size > 0 {
+            let content_size = self.get_content_size(&content);
+            if content_size > max_content_size {
+                warn!(
+                    "Content size {} bytes exceeds max {} bytes, skipping",
+                    content_size, max_content_size
+                );
+                return Ok(None);
+            }
         }
 
         // Calculate content hash
@@ -164,8 +166,8 @@ impl ClipboardHandler {
         let byte_size = text.len() as i64;
         let preview = Self::create_preview(&text);
         
-        // Truncate if too long (safely at char boundary)
-        let text_content = if text.len() > max_size {
+        // Truncate if too long (safely at char boundary), 0 = unlimited
+        let text_content = if max_size > 0 && text.len() > max_size {
             warn!("Text content truncated from {} to {} bytes", text.len(), max_size);
             text.char_indices()
                 .take_while(|(i, _)| *i < max_size)
@@ -195,8 +197,8 @@ impl ClipboardHandler {
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| Self::create_preview(&html));
 
-        // Truncate HTML if too long
-        let html_content = if html.len() > max_size {
+        // Truncate HTML if too long, 0 = unlimited
+        let html_content = if max_size > 0 && html.len() > max_size {
             warn!("HTML content truncated from {} to {} bytes", html.len(), max_size);
             html.char_indices()
                 .take_while(|(i, _)| *i < max_size)
@@ -226,8 +228,8 @@ impl ClipboardHandler {
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| "[RTF Content]".to_string());
 
-        // Truncate RTF if too long
-        let rtf_content = if rtf.len() > max_size {
+        // Truncate RTF if too long, 0 = unlimited
+        let rtf_content = if max_size > 0 && rtf.len() > max_size {
             warn!("RTF content truncated from {} to {} bytes", rtf.len(), max_size);
             rtf.char_indices()
                 .take_while(|(i, _)| *i < max_size)
