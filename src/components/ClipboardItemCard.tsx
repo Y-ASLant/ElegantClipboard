@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { Button } from "@/components/ui/button";
@@ -16,6 +15,7 @@ import {
   Star16Filled,
   Delete16Regular,
   Copy16Regular,
+  Image16Regular,
 } from "@fluentui/react-icons";
 
 interface ClipboardItemCardProps {
@@ -120,13 +120,17 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
         {/* Content - Different layout for images */}
         {item.content_type === "image" && item.image_path ? (
           <div className="flex-1 min-w-0 px-3 py-2.5">
-            {/* Image Preview - Full width thumbnail */}
-            <div className="relative w-full h-16 rounded overflow-hidden bg-muted/30">
-              <img
-                src={convertFileSrc(item.image_path)}
-                alt="Preview"
-                className="w-full h-full object-contain"
-              />
+            {/* Image Thumbnail - Base64 inline for instant display */}
+            <div className="relative w-full h-20 rounded overflow-hidden bg-muted/30 flex items-center justify-center">
+              {item.preview?.startsWith("data:image") ? (
+                <img
+                  src={item.preview}
+                  alt="Preview"
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <Image16Regular className="w-8 h-8 text-muted-foreground/40" />
+              )}
             </div>
             
             {/* Meta Info */}

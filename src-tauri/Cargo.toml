@@ -47,6 +47,7 @@ lazy_static = "1.4"
 
 # Image handling
 image = "0.25"
+base64 = "0.22"
 
 # Directories
 dirs = "5"

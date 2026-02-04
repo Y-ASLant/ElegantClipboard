@@ -2,8 +2,10 @@ use crate::database::{
     get_images_path, ClipboardRepository, ContentType, Database, NewClipboardItem,
     SettingsRepository,
 };
+use base64::{engine::general_purpose::STANDARD, Engine};
 use blake3::Hasher;
-use std::io::Write;
+use image::ImageReader;
+use std::io::{Cursor, Write};
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
@@ -267,6 +269,12 @@ impl ClipboardHandler {
             .map_err(|e| format!("Failed to write image data: {}", e))?;
         debug!("Saved image to {:?}", image_path);
 
+        // Generate thumbnail as base64 for fast preview
+        let thumbnail = self.generate_thumbnail(&data).unwrap_or_else(|e| {
+            warn!("Failed to generate thumbnail: {}", e);
+            "[Image]".to_string()
+        });
+
         Ok(NewClipboardItem {
             content_type: ContentType::Image,
             text_content: None,
@@ -275,9 +283,32 @@ impl ClipboardHandler {
             image_path: Some(image_path.to_string_lossy().to_string()),
             file_paths: None,
             content_hash: hash,
-            preview: Some("[Image]".to_string()),
+            preview: Some(thumbnail),
             byte_size,
         })
+    }
+
+    /// Generate a small thumbnail and return as base64 data URL
+    fn generate_thumbnail(&self, data: &[u8]) -> Result<String, String> {
+        // Load image from bytes
+        let img = ImageReader::new(Cursor::new(data))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+        // Create thumbnail (max 200x120, maintains aspect ratio)
+        let thumbnail = img.thumbnail(200, 120);
+
+        // Encode as PNG to bytes
+        let mut png_bytes = Vec::new();
+        thumbnail
+            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode thumbnail: {}", e))?;
+
+        // Convert to base64 data URL
+        let base64_str = STANDARD.encode(&png_bytes);
+        Ok(format!("data:image/png;base64,{}", base64_str))
     }
 
     /// Process file paths
@@ -302,13 +333,14 @@ impl ClipboardHandler {
         })
     }
 
-    /// Create preview text
+    /// Create preview text (safely handles UTF-8)
     fn create_preview(text: &str) -> String {
         let trimmed = text.trim();
-        if trimmed.len() <= MAX_PREVIEW_LENGTH {
-            trimmed.to_string()
+        // Use char_indices to safely truncate at char boundary
+        if let Some((idx, _)) = trimmed.char_indices().nth(MAX_PREVIEW_LENGTH) {
+            format!("{}...", &trimmed[..idx])
         } else {
-            format!("{}...", &trimmed[..MAX_PREVIEW_LENGTH])
+            trimmed.to_string()
         }
     }
 }

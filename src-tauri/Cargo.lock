@@ -1178,6 +1178,7 @@ name = "elegant-clipboard"
 version = "0.3.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "blake3",
  "clipboard-master",
  "clipboard-rs",
