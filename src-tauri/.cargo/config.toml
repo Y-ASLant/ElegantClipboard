@@ -1,0 +1,11 @@
+[build]
+# Move target to shared location to save space
+target-dir = "H:/Rust_Cache"
+
+[profile.dev]
+# Reduce debug info size
+debug = 1  # 0 = none, 1 = line tables, 2 = full
+
+[profile.dev.package."*"]
+# Optimize dependencies even in dev mode
+opt-level = 2

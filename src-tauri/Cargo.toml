@@ -1,0 +1,71 @@
+[package]
+name = "elegant-clipboard"
+version = "0.3.0"
+description = "An elegant Windows clipboard manager"
+authors = ["ASLan"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "elegant_clipboard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Hashing (fast)
+blake3 = "1"
+
+# High-performance locks
+parking_lot = "0.12"
+
+# Lazy static for global state
+lazy_static = "1.4"
+
+# Image handling
+image = "0.25"
+
+# Directories
+dirs = "5"
+
+# Cross-platform clipboard
+arboard = "3"
+clipboard-master = "4"
+clipboard-rs = "0.2"
+
+# Keyboard simulation for paste
+enigo = "0.6"
+
+# Windows API for low-level keyboard hook
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+# Windows registry for disabling system Win+V
+winreg = "0.55"
+
