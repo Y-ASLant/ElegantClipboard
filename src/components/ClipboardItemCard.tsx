@@ -3,6 +3,11 @@ import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   Pin16Regular,
@@ -167,50 +172,66 @@ export function ClipboardItemCard({ item, index }: ClipboardItemCardProps) {
 
         {/* Actions - show on hover using CSS */}
         <div className="absolute right-1 top-1 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleTogglePin}
-            className="h-6 w-6"
-            title={item.is_pinned ? "取消置顶" : "置顶"}
-          >
-            {item.is_pinned ? (
-              <Pin16Filled className="w-3.5 h-3.5 text-primary" />
-            ) : (
-              <Pin16Regular className="w-3.5 h-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleToggleFavorite}
-            className="h-6 w-6"
-            title={item.is_favorite ? "取消收藏" : "收藏"}
-          >
-            {item.is_favorite ? (
-              <Star16Filled className="w-3.5 h-3.5 text-yellow-500" />
-            ) : (
-              <Star16Regular className="w-3.5 h-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleCopy}
-            className="h-6 w-6"
-            title="复制"
-          >
-            <Copy16Regular className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleDelete}
-            className="h-6 w-6 hover:text-destructive"
-            title="删除"
-          >
-            <Delete16Regular className="w-3.5 h-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleTogglePin}
+                className="h-6 w-6"
+              >
+                {item.is_pinned ? (
+                  <Pin16Filled className="w-3.5 h-3.5 text-primary" />
+                ) : (
+                  <Pin16Regular className="w-3.5 h-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{item.is_pinned ? "取消置顶" : "置顶"}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleToggleFavorite}
+                className="h-6 w-6"
+              >
+                {item.is_favorite ? (
+                  <Star16Filled className="w-3.5 h-3.5 text-yellow-500" />
+                ) : (
+                  <Star16Regular className="w-3.5 h-3.5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{item.is_favorite ? "取消收藏" : "收藏"}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleCopy}
+                className="h-6 w-6"
+              >
+                <Copy16Regular className="w-3.5 h-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>复制</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleDelete}
+                className="h-6 w-6 hover:text-destructive"
+              >
+                <Delete16Regular className="w-3.5 h-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>删除</TooltipContent>
+          </Tooltip>
         </div>
 
         {/* Index Badge */}

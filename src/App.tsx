@@ -12,6 +12,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useClipboardStore } from "@/stores/clipboard";
 import {
   Search16Regular,
@@ -115,20 +120,28 @@ function App() {
           className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <button
-            onClick={() => setClearDialogOpen(true)}
-            className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
-            title="清空历史"
-          >
-            <Delete16Regular className="w-4 h-4" />
-          </button>
-          <button
-            onClick={openSettings}
-            className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
-            title="设置"
-          >
-            <Settings16Regular className="w-4 h-4" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setClearDialogOpen(true)}
+                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
+              >
+                <Delete16Regular className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>清空历史</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={openSettings}
+                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
+              >
+                <Settings16Regular className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>设置</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

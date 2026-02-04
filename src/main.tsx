@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { Settings } from "./pages/Settings";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 
 // Disable context menu (right-click)
@@ -46,6 +47,8 @@ function Router() {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <Router />
+    <TooltipProvider delayDuration={300}>
+      <Router />
+    </TooltipProvider>
   </React.StrictMode>,
 );

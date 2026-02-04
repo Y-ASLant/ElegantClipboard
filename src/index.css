@@ -99,35 +99,46 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text;
 }
 
-/* Custom scrollbar - overlay style */
+/* Custom scrollbar - ultra minimal style */
 * {
+  scrollbar-width: none;
+}
+
+*:hover {
   scrollbar-width: thin;
-  scrollbar-color: hsl(215 16% 47% / 0.2) transparent;
+  scrollbar-color: hsl(215 16% 47% / 0.15) transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 2px;
+  height: 2px;
   background: transparent;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+  margin: 4px 0;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(215 16% 47% / 0.2);
-  border-radius: 3px;
+  background: transparent;
+  border-radius: 2px;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background: hsl(215 16% 47% / 0.15);
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(215 16% 47% / 0.4);
 }
 
-/* Overlay scrollbar - doesn't take space */
-.overflow-y-overlay {
-  overflow-y: auto;
-  overflow-y: overlay;
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Draggable region for custom titlebar */

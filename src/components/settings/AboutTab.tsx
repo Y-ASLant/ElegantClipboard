@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
-import { Separator } from "@/components/ui/separator";
 import {
   Person16Regular,
   Code16Regular,
@@ -24,26 +23,28 @@ export function AboutTab() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* App Info */}
-      <div className="flex flex-col items-center text-center space-y-4 py-6">
-        <div className="h-16 w-16 rounded-2xl overflow-hidden">
-          <img src="/icon.png" alt="ElegantClipboard" className="w-full h-full object-contain" />
+    <div className="space-y-4">
+      {/* App Info Card */}
+      <div className="rounded-lg border bg-card p-6">
+        <div className="flex flex-col items-center text-center space-y-4">
+          <div className="h-16 w-16 rounded-2xl overflow-hidden">
+            <img src="/icon.png" alt="ElegantClipboard" className="w-full h-full object-contain" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold text-lg">ElegantClipboard</h3>
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+              v{appVersion}
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground max-w-xs">
+            高性能 Windows 剪贴板管理器，支持文本、图片、HTML、RTF、文件路径
+          </p>
         </div>
-        <div className="space-y-1">
-          <h3 className="font-semibold text-lg">ElegantClipboard</h3>
-          <p className="text-sm text-muted-foreground">版本 {appVersion}</p>
-        </div>
-        <p className="text-sm text-muted-foreground max-w-xs">
-          高性能 Windows 剪贴板管理器，支持文本、图片、HTML、RTF、文件路径
-        </p>
       </div>
 
-      <Separator />
-
-      {/* Author Info */}
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium">作者信息</h3>
+      {/* Author Info Card */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">作者信息</h3>
         <div className="space-y-2">
           <div className="flex items-center justify-between py-1.5">
             <div className="flex items-center gap-2">

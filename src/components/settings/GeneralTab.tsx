@@ -14,6 +14,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Folder16Regular, Open16Regular } from "@fluentui/react-icons";
 
 export interface GeneralSettings {
@@ -144,12 +149,22 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                 readOnly
                 className="flex-1 h-8 text-sm path-text"
               />
-              <Button variant="outline" size="icon" onClick={selectFolder} className="h-8 w-8" title="选择文件夹">
-                <Folder16Regular className="w-4 h-4" />
-              </Button>
-              <Button variant="outline" size="icon" onClick={openDataFolder} className="h-8 w-8" title="打开文件夹">
-                <Open16Regular className="w-4 h-4" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" onClick={selectFolder} className="h-8 w-8">
+                    <Folder16Regular className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>选择文件夹</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" onClick={openDataFolder} className="h-8 w-8">
+                    <Open16Regular className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>打开文件夹</TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">

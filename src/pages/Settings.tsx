@@ -185,40 +185,42 @@ export function Settings() {
 
         {/* Right Content */}
         <div className="flex-1 overflow-auto">
-          <Card className="h-full">
-            <CardContent className="p-4 h-full overflow-auto">
-              {activeTab === "general" && (
-                <GeneralTab
-                  settings={settings}
-                  onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                />
-              )}
+          {activeTab === "about" ? (
+            <div className="h-full overflow-auto">
+              <AboutTab />
+            </div>
+          ) : (
+            <Card className="h-full">
+              <CardContent className="p-4 h-full overflow-auto">
+                {activeTab === "general" && (
+                  <GeneralTab
+                    settings={settings}
+                    onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
+                  />
+                )}
 
-              {activeTab === "display" && (
-                <DisplayTab
-                  cardMaxLines={cardMaxLines}
-                  setCardMaxLines={setCardMaxLines}
-                  showTime={showTime}
-                  setShowTime={setShowTime}
-                  showCharCount={showCharCount}
-                  setShowCharCount={setShowCharCount}
-                  showByteSize={showByteSize}
-                  setShowByteSize={setShowByteSize}
-                />
-              )}
+                {activeTab === "display" && (
+                  <DisplayTab
+                    cardMaxLines={cardMaxLines}
+                    setCardMaxLines={setCardMaxLines}
+                    showTime={showTime}
+                    setShowTime={setShowTime}
+                    showCharCount={showCharCount}
+                    setShowCharCount={setShowCharCount}
+                    showByteSize={showByteSize}
+                    setShowByteSize={setShowByteSize}
+                  />
+                )}
 
-              {activeTab === "shortcuts" && (
-                <ShortcutsTab
-                  settings={settings}
-                  onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                />
-              )}
-
-              {activeTab === "about" && (
-                <AboutTab />
-              )}
-            </CardContent>
-          </Card>
+                {activeTab === "shortcuts" && (
+                  <ShortcutsTab
+                    settings={settings}
+                    onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
