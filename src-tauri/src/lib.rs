@@ -427,11 +427,12 @@ pub fn run() {
             // Load configuration and initialize database
             let config = AppConfig::load();
             let db_path = config.get_db_path();
+            let images_path = config.get_images_path();
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
-            // Initialize clipboard monitor
+            // Initialize clipboard monitor with configured images path
             let monitor = ClipboardMonitor::new();
-            monitor.init(&db);
+            monitor.init(&db, images_path);
 
             // Create app state
             let state = Arc::new(AppState { db, monitor });

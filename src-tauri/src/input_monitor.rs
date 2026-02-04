@@ -7,7 +7,7 @@
 
 use parking_lot::Mutex;
 use rdev::{listen, Event, EventType};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread::{self, JoinHandle};
 use tauri::WebviewWindow;
 use tracing::{info, warn};
@@ -21,8 +21,10 @@ static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 /// Whether the monitor thread is running
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Current cursor position
-static CURSOR_POSITION: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+/// Current cursor position (stored as i64 to use atomics, multiply by 100 for precision)
+/// This avoids lock contention on high-frequency mouse move events
+static CURSOR_X: AtomicI64 = AtomicI64::new(0);
+static CURSOR_Y: AtomicI64 = AtomicI64::new(0);
 
 /// Thread handle for cleanup
 static THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
@@ -80,14 +82,22 @@ pub fn is_mouse_monitoring_enabled() -> bool {
 /// Get current cursor position
 #[allow(dead_code)]
 pub fn get_cursor_position() -> (f64, f64) {
-    *CURSOR_POSITION.lock()
+    let x = CURSOR_X.load(Ordering::Relaxed) as f64;
+    let y = CURSOR_Y.load(Ordering::Relaxed) as f64;
+    (x, y)
 }
 
-/// Handle input events
+/// Handle input events with throttling for mouse moves
 fn handle_input_event(event: Event) {
     match event.event_type {
         EventType::MouseMove { x, y } => {
-            *CURSOR_POSITION.lock() = (x, y);
+            // Only track mouse position when monitoring is enabled
+            // This significantly reduces CPU usage when window is hidden
+            if MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
+                // Use atomic store - no lock needed
+                CURSOR_X.store(x as i64, Ordering::Relaxed);
+                CURSOR_Y.store(y as i64, Ordering::Relaxed);
+            }
         }
         EventType::ButtonPress(button) => {
             // Only handle left and right clicks
@@ -101,7 +111,9 @@ fn handle_input_event(event: Event) {
 
 /// Check if cursor is outside the window bounds
 fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
-    let (cursor_x, cursor_y) = *CURSOR_POSITION.lock();
+    // Get cursor position from atomics - no lock needed
+    let cursor_x = CURSOR_X.load(Ordering::Relaxed) as f64;
+    let cursor_y = CURSOR_Y.load(Ordering::Relaxed) as f64;
     
     // Get window position and size
     let position = match window.outer_position() {

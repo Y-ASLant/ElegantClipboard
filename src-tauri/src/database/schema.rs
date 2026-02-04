@@ -103,15 +103,14 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES 
     ('hotkey', 'Ctrl+Shift+V'),
-    ('max_items', '10000'),
+    ('max_history_count', '10000'),
+    ('max_content_size_kb', '1024'),
     ('auto_start', 'true'),
     ('theme', 'system'),
     ('language', 'zh-CN'),
     ('save_images', 'true'),
     ('save_html', 'true'),
-    ('save_rtf', 'false'),
-    ('max_text_length', '1048576'),
-    ('max_image_size', '10485760');
+    ('save_rtf', 'false');
 "#;
 
 /// Content types enum

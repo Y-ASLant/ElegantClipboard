@@ -1,5 +1,5 @@
 use crate::database::{
-    get_images_path, ClipboardRepository, ContentType, Database, NewClipboardItem,
+    ClipboardRepository, ContentType, Database, NewClipboardItem,
     SettingsRepository,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -35,8 +35,7 @@ pub struct ClipboardHandler {
 }
 
 impl ClipboardHandler {
-    pub fn new(db: &Database) -> Self {
-        let images_path = get_images_path();
+    pub fn new(db: &Database, images_path: PathBuf) -> Self {
         // Ensure images directory exists
         std::fs::create_dir_all(&images_path).ok();
         
@@ -108,11 +107,26 @@ impl ClipboardHandler {
         let id = self.repository.insert(item).map_err(|e| e.to_string())?;
         info!("Stored new clipboard item with id: {}", id);
 
-        // Enforce max history count
+        // Enforce max history count and clean up old image files
         let max_history_count = self.get_max_history_count();
         if max_history_count > 0 {
-            if let Err(e) = self.repository.enforce_max_count(max_history_count) {
-                warn!("Failed to enforce max history count: {}", e);
+            match self.repository.enforce_max_count(max_history_count) {
+                Ok((deleted, image_paths)) => {
+                    // Delete associated image files
+                    for path in image_paths {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            debug!("Failed to delete old image file {}: {}", path, e);
+                        } else {
+                            debug!("Deleted old image file: {}", path);
+                        }
+                    }
+                    if deleted > 0 {
+                        debug!("Enforced max count: removed {} old items", deleted);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to enforce max history count: {}", e);
+                }
             }
         }
 

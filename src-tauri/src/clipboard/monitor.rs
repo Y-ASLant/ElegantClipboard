@@ -27,9 +27,9 @@ impl ClipboardMonitor {
         }
     }
 
-    /// Initialize the monitor with database
-    pub fn init(&self, db: &Database) {
-        let handler = ClipboardHandler::new(db);
+    /// Initialize the monitor with database and images path
+    pub fn init(&self, db: &Database, images_path: std::path::PathBuf) {
+        let handler = ClipboardHandler::new(db, images_path);
         *self.handler.lock() = Some(handler);
         info!("Clipboard monitor initialized");
     }

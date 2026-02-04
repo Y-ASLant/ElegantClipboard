@@ -294,17 +294,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               取消
             </Button>
             <Button
-              variant="secondary"
+              variant="ghost"
               onClick={handleSkipMigration}
               disabled={migrating}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
             >
-              不迁移，直接使用新位置
+              删除数据
             </Button>
             <Button
               onClick={handleMigrate}
               disabled={migrating}
             >
-              {migrating ? "迁移中..." : "迁移数据"}
+              {migrating ? "迁移中..." : "保留数据"}
             </Button>
           </DialogFooter>
         </DialogContent>

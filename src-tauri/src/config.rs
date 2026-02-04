@@ -74,14 +74,13 @@ impl AppConfig {
     }
     
     /// Get the images path based on configuration
-    #[allow(dead_code)]
     pub fn get_images_path(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path {
             if !custom_path.is_empty() {
                 return PathBuf::from(custom_path).join("images");
             }
         }
-        crate::database::get_images_path()
+        crate::database::get_default_images_path()
     }
     
     /// Get the data directory path
@@ -102,7 +101,7 @@ impl AppConfig {
 fn get_config_path() -> PathBuf {
     let app_data = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."));
-    app_data.join("ClipboardManager").join("config.json")
+    app_data.join("ElegantClipboard").join("config.json")
 }
 
 /// Migrate data from old path to new path

@@ -91,24 +91,58 @@ pub async fn toggle_favorite(
     repo.toggle_favorite(id).map_err(|e| e.to_string())
 }
 
-/// Delete clipboard item
+/// Delete clipboard item (also deletes associated image file)
 #[tauri::command]
 pub async fn delete_clipboard_item(
     state: State<'_, Arc<AppState>>,
     id: i64,
 ) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
-    repo.delete(id).map_err(|e| e.to_string())
+    
+    // Get item first to find image path
+    if let Ok(Some(item)) = repo.get_by_id(id) {
+        // Delete database record
+        repo.delete(id).map_err(|e| e.to_string())?;
+        
+        // Delete associated image file if exists
+        if let Some(image_path) = item.image_path {
+            if let Err(e) = std::fs::remove_file(&image_path) {
+                debug!("Failed to delete image file {}: {}", image_path, e);
+            } else {
+                debug!("Deleted image file: {}", image_path);
+            }
+        }
+    } else {
+        repo.delete(id).map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
 }
 
-/// Clear all non-pinned history
+/// Clear all non-pinned history (also deletes associated image files)
 #[tauri::command]
 pub async fn clear_history(
     state: State<'_, Arc<AppState>>,
 ) -> Result<i64, String> {
     let repo = ClipboardRepository::new(&state.db);
+    
+    // Get image paths before clearing
+    let image_paths = repo.get_clearable_image_paths().unwrap_or_default();
+    
+    // Clear database records
     let deleted = repo.clear_history().map_err(|e| e.to_string())?;
-    info!("Cleared {} clipboard items", deleted);
+    
+    // Delete associated image files
+    let mut deleted_files = 0;
+    for path in image_paths {
+        if let Err(e) = std::fs::remove_file(&path) {
+            debug!("Failed to delete image file {}: {}", path, e);
+        } else {
+            deleted_files += 1;
+        }
+    }
+    
+    info!("Cleared {} clipboard items and {} image files", deleted, deleted_files);
     Ok(deleted)
 }
 

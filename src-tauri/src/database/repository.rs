@@ -308,6 +308,20 @@ impl ClipboardRepository {
         Ok(())
     }
 
+    /// Get image paths of items that will be cleared (non-pinned, non-favorite)
+    pub fn get_clearable_image_paths(&self) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_path FROM clipboard_items 
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL"
+        )?;
+        let paths = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(paths)
+    }
+
     /// Delete all non-pinned items
     pub fn clear_history(&self) -> Result<i64, rusqlite::Error> {
         let conn = self.conn.lock();
@@ -344,11 +358,11 @@ impl ClipboardRepository {
     }
 
     /// Delete oldest non-pinned, non-favorite items to maintain max count
-    /// Returns the number of deleted items
-    pub fn enforce_max_count(&self, max_count: i64) -> Result<i64, rusqlite::Error> {
+    /// Returns (deleted_count, image_paths_to_delete)
+    pub fn enforce_max_count(&self, max_count: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         if max_count <= 0 {
             // 0 means unlimited
-            return Ok(0);
+            return Ok((0, vec![]));
         }
 
         let conn = self.conn.lock();
@@ -361,10 +375,22 @@ impl ClipboardRepository {
         )?;
 
         if current_count <= max_count {
-            return Ok(0);
+            return Ok((0, vec![]));
         }
 
         let to_delete = current_count - max_count;
+        
+        // Get image paths of items to be deleted
+        let mut stmt = conn.prepare(
+            "SELECT image_path FROM clipboard_items 
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL
+             ORDER BY created_at ASC 
+             LIMIT ?1"
+        )?;
+        let image_paths: Vec<String> = stmt
+            .query_map(params![to_delete], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
         
         // Delete oldest non-protected items
         let deleted = conn.execute(
@@ -378,7 +404,7 @@ impl ClipboardRepository {
         )?;
 
         debug!("Enforced max count: deleted {} oldest items", deleted);
-        Ok(deleted as i64)
+        Ok((deleted as i64, image_paths))
     }
 
     /// Helper to convert row to ClipboardItem

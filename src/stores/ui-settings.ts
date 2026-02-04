@@ -51,9 +51,31 @@ export const useUISettings = create<UISettings>()(
   )
 );
 
-// Listen for settings changes from other windows via Tauri events
+// Track listener to prevent duplicate registration
+let unlistenFn: (() => void) | null = null;
+
+// Initialize settings listener (called once per window)
+export async function initUISettingsListener() {
+  if (unlistenFn) return; // Already initialized
+  
+  try {
+    unlistenFn = await listen<Partial<UISettings>>(SYNC_EVENT, (event) => {
+      useUISettings.setState(event.payload);
+    });
+  } catch {
+    // Ignore errors (e.g., in non-Tauri environment)
+  }
+}
+
+// Cleanup listener (call on window close if needed)
+export function cleanupUISettingsListener() {
+  if (unlistenFn) {
+    unlistenFn();
+    unlistenFn = null;
+  }
+}
+
+// Auto-initialize in browser environment
 if (typeof window !== "undefined") {
-  listen<Partial<UISettings>>(SYNC_EVENT, (event) => {
-    useUISettings.setState(event.payload);
-  }).catch(() => {});
+  initUISettingsListener();
 }

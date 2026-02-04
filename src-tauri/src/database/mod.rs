@@ -100,12 +100,12 @@ impl Clone for Database {
 pub fn get_default_db_path() -> PathBuf {
     let app_data = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."));
-    app_data.join("ClipboardManager").join("clipboard.db")
+    app_data.join("ElegantClipboard").join("clipboard.db")
 }
 
-/// Get the images storage path
-pub fn get_images_path() -> PathBuf {
+/// Get the default images storage path
+pub fn get_default_images_path() -> PathBuf {
     let app_data = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."));
-    app_data.join("ClipboardManager").join("images")
+    app_data.join("ElegantClipboard").join("images")
 }
