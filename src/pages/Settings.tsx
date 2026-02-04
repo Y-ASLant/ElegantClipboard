@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Card, CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 import {
@@ -184,41 +185,43 @@ export function Settings() {
         </div>
 
         {/* Right Content */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1">
           {activeTab === "about" ? (
-            <div className="h-full overflow-auto">
+            <ScrollArea className="h-full">
               <AboutTab />
-            </div>
+            </ScrollArea>
           ) : (
-            <Card className="h-full">
-              <CardContent className="p-4 h-full overflow-auto">
-                {activeTab === "general" && (
-                  <GeneralTab
-                    settings={settings}
-                    onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                  />
-                )}
+            <Card className="h-full overflow-hidden">
+              <ScrollArea className="h-full">
+                <CardContent className="p-4">
+                  {activeTab === "general" && (
+                    <GeneralTab
+                      settings={settings}
+                      onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
+                    />
+                  )}
 
-                {activeTab === "display" && (
-                  <DisplayTab
-                    cardMaxLines={cardMaxLines}
-                    setCardMaxLines={setCardMaxLines}
-                    showTime={showTime}
-                    setShowTime={setShowTime}
-                    showCharCount={showCharCount}
-                    setShowCharCount={setShowCharCount}
-                    showByteSize={showByteSize}
-                    setShowByteSize={setShowByteSize}
-                  />
-                )}
+                  {activeTab === "display" && (
+                    <DisplayTab
+                      cardMaxLines={cardMaxLines}
+                      setCardMaxLines={setCardMaxLines}
+                      showTime={showTime}
+                      setShowTime={setShowTime}
+                      showCharCount={showCharCount}
+                      setShowCharCount={setShowCharCount}
+                      showByteSize={showByteSize}
+                      setShowByteSize={setShowByteSize}
+                    />
+                  )}
 
-                {activeTab === "shortcuts" && (
-                  <ShortcutsTab
-                    settings={settings}
-                    onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                  />
-                )}
-              </CardContent>
+                  {activeTab === "shortcuts" && (
+                    <ShortcutsTab
+                      settings={settings}
+                      onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
+                    />
+                  )}
+                </CardContent>
+              </ScrollArea>
             </Card>
           )}
         </div>

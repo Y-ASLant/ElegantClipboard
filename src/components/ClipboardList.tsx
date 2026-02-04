@@ -79,7 +79,7 @@ export function ClipboardList() {
   }
 
   return (
-    <div ref={parentRef} className="h-full overflow-y-overlay overflow-x-hidden" style={{ overflow: 'overlay' } as React.CSSProperties}>
+    <div ref={parentRef} className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar">
       <div className="p-2">
         {/* Pinned Section */}
         {pinnedItems.length > 0 && (

@@ -99,46 +99,67 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text;
 }
 
-/* Custom scrollbar - ultra minimal style */
-* {
+/* Custom scrollbar - always reserve space, fade in/out smoothly */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: rgba(0, 0, 0, 0.08) transparent;
+}
+
+.custom-scrollbar:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+.dark .custom-scrollbar {
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+.dark .custom-scrollbar:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 3px;
+  transition: background 0.15s ease;
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* Hide scrollbars for other elements */
+*:not(.custom-scrollbar) {
   scrollbar-width: none;
 }
 
-*:hover {
-  scrollbar-width: thin;
-  scrollbar-color: hsl(215 16% 47% / 0.15) transparent;
-}
-
-::-webkit-scrollbar {
-  width: 2px;
-  height: 2px;
-  background: transparent;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 4px 0;
-}
-
-::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 2px;
-}
-
-*:hover::-webkit-scrollbar-thumb {
-  background: hsl(215 16% 47% / 0.15);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(215 16% 47% / 0.4);
-}
-
-::-webkit-scrollbar-button {
+*:not(.custom-scrollbar)::-webkit-scrollbar {
   display: none;
-}
-
-::-webkit-scrollbar-corner {
-  background: transparent;
 }
 
 /* Draggable region for custom titlebar */
