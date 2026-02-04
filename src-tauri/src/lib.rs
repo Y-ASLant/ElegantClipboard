@@ -20,6 +20,68 @@ use tracing_subscriber::FmtSubscriber;
 /// Global state for current shortcut
 static CURRENT_SHORTCUT: RwLock<Option<String>> = RwLock::new(None);
 
+/// Parse a single key string to Code
+fn parse_key_code(key: &str) -> Option<Code> {
+    // Letters A-Z
+    const LETTERS: [Code; 26] = [
+        Code::KeyA, Code::KeyB, Code::KeyC, Code::KeyD, Code::KeyE, Code::KeyF,
+        Code::KeyG, Code::KeyH, Code::KeyI, Code::KeyJ, Code::KeyK, Code::KeyL,
+        Code::KeyM, Code::KeyN, Code::KeyO, Code::KeyP, Code::KeyQ, Code::KeyR,
+        Code::KeyS, Code::KeyT, Code::KeyU, Code::KeyV, Code::KeyW, Code::KeyX,
+        Code::KeyY, Code::KeyZ,
+    ];
+    // Digits 0-9
+    const DIGITS: [Code; 10] = [
+        Code::Digit0, Code::Digit1, Code::Digit2, Code::Digit3, Code::Digit4,
+        Code::Digit5, Code::Digit6, Code::Digit7, Code::Digit8, Code::Digit9,
+    ];
+    // Function keys F1-F12
+    const F_KEYS: [Code; 12] = [
+        Code::F1, Code::F2, Code::F3, Code::F4, Code::F5, Code::F6,
+        Code::F7, Code::F8, Code::F9, Code::F10, Code::F11, Code::F12,
+    ];
+
+    // Single letter
+    if key.len() == 1 {
+        let c = key.chars().next()?;
+        if c.is_ascii_uppercase() {
+            return Some(LETTERS[(c as usize) - ('A' as usize)]);
+        }
+        if c.is_ascii_digit() {
+            return Some(DIGITS[(c as usize) - ('0' as usize)]);
+        }
+    }
+
+    // Function keys F1-F12
+    if key.starts_with('F') && key.len() <= 3 {
+        if let Ok(n) = key[1..].parse::<usize>() {
+            if n >= 1 && n <= 12 {
+                return Some(F_KEYS[n - 1]);
+            }
+        }
+    }
+
+    // Special keys
+    match key {
+        "SPACE" => Some(Code::Space),
+        "TAB" => Some(Code::Tab),
+        "ENTER" | "RETURN" => Some(Code::Enter),
+        "BACKSPACE" => Some(Code::Backspace),
+        "DELETE" | "DEL" => Some(Code::Delete),
+        "ESCAPE" | "ESC" => Some(Code::Escape),
+        "HOME" => Some(Code::Home),
+        "END" => Some(Code::End),
+        "PAGEUP" => Some(Code::PageUp),
+        "PAGEDOWN" => Some(Code::PageDown),
+        "UP" | "ARROWUP" => Some(Code::ArrowUp),
+        "DOWN" | "ARROWDOWN" => Some(Code::ArrowDown),
+        "LEFT" | "ARROWLEFT" => Some(Code::ArrowLeft),
+        "RIGHT" | "ARROWRIGHT" => Some(Code::ArrowRight),
+        "`" | "BACKQUOTE" => Some(Code::Backquote),
+        _ => None,
+    }
+}
+
 /// Parse shortcut string to Shortcut object
 fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
@@ -31,79 +93,13 @@ fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
     let mut key_code = None;
 
     for part in parts {
-        match part.to_uppercase().as_str() {
+        let upper = part.to_uppercase();
+        match upper.as_str() {
             "CTRL" | "CONTROL" => modifiers |= Modifiers::CONTROL,
             "ALT" => modifiers |= Modifiers::ALT,
             "SHIFT" => modifiers |= Modifiers::SHIFT,
             "WIN" | "SUPER" | "META" | "CMD" => modifiers |= Modifiers::SUPER,
-            // Letters
-            "A" => key_code = Some(Code::KeyA),
-            "B" => key_code = Some(Code::KeyB),
-            "C" => key_code = Some(Code::KeyC),
-            "D" => key_code = Some(Code::KeyD),
-            "E" => key_code = Some(Code::KeyE),
-            "F" => key_code = Some(Code::KeyF),
-            "G" => key_code = Some(Code::KeyG),
-            "H" => key_code = Some(Code::KeyH),
-            "I" => key_code = Some(Code::KeyI),
-            "J" => key_code = Some(Code::KeyJ),
-            "K" => key_code = Some(Code::KeyK),
-            "L" => key_code = Some(Code::KeyL),
-            "M" => key_code = Some(Code::KeyM),
-            "N" => key_code = Some(Code::KeyN),
-            "O" => key_code = Some(Code::KeyO),
-            "P" => key_code = Some(Code::KeyP),
-            "Q" => key_code = Some(Code::KeyQ),
-            "R" => key_code = Some(Code::KeyR),
-            "S" => key_code = Some(Code::KeyS),
-            "T" => key_code = Some(Code::KeyT),
-            "U" => key_code = Some(Code::KeyU),
-            "V" => key_code = Some(Code::KeyV),
-            "W" => key_code = Some(Code::KeyW),
-            "X" => key_code = Some(Code::KeyX),
-            "Y" => key_code = Some(Code::KeyY),
-            "Z" => key_code = Some(Code::KeyZ),
-            // Numbers
-            "0" => key_code = Some(Code::Digit0),
-            "1" => key_code = Some(Code::Digit1),
-            "2" => key_code = Some(Code::Digit2),
-            "3" => key_code = Some(Code::Digit3),
-            "4" => key_code = Some(Code::Digit4),
-            "5" => key_code = Some(Code::Digit5),
-            "6" => key_code = Some(Code::Digit6),
-            "7" => key_code = Some(Code::Digit7),
-            "8" => key_code = Some(Code::Digit8),
-            "9" => key_code = Some(Code::Digit9),
-            // Function keys
-            "F1" => key_code = Some(Code::F1),
-            "F2" => key_code = Some(Code::F2),
-            "F3" => key_code = Some(Code::F3),
-            "F4" => key_code = Some(Code::F4),
-            "F5" => key_code = Some(Code::F5),
-            "F6" => key_code = Some(Code::F6),
-            "F7" => key_code = Some(Code::F7),
-            "F8" => key_code = Some(Code::F8),
-            "F9" => key_code = Some(Code::F9),
-            "F10" => key_code = Some(Code::F10),
-            "F11" => key_code = Some(Code::F11),
-            "F12" => key_code = Some(Code::F12),
-            // Special keys
-            "SPACE" => key_code = Some(Code::Space),
-            "TAB" => key_code = Some(Code::Tab),
-            "ENTER" | "RETURN" => key_code = Some(Code::Enter),
-            "BACKSPACE" => key_code = Some(Code::Backspace),
-            "DELETE" | "DEL" => key_code = Some(Code::Delete),
-            "ESCAPE" | "ESC" => key_code = Some(Code::Escape),
-            "HOME" => key_code = Some(Code::Home),
-            "END" => key_code = Some(Code::End),
-            "PAGEUP" => key_code = Some(Code::PageUp),
-            "PAGEDOWN" => key_code = Some(Code::PageDown),
-            "UP" | "ARROWUP" => key_code = Some(Code::ArrowUp),
-            "DOWN" | "ARROWDOWN" => key_code = Some(Code::ArrowDown),
-            "LEFT" | "ARROWLEFT" => key_code = Some(Code::ArrowLeft),
-            "RIGHT" | "ARROWRIGHT" => key_code = Some(Code::ArrowRight),
-            "`" | "BACKQUOTE" => key_code = Some(Code::Backquote),
-            _ => {}
+            _ => key_code = parse_key_code(&upper),
         }
     }
 

@@ -16,6 +16,19 @@ const MAX_PREVIEW_LENGTH: usize = 200;
 /// Default max history count (0 = unlimited)
 const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
 
+/// Truncate content at char boundary if exceeds max_size (0 = unlimited)
+fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
+    if max_size > 0 && content.len() > max_size {
+        warn!("{} content truncated from {} to {} bytes", content_type, content.len(), max_size);
+        content.char_indices()
+            .take_while(|(i, _)| *i < max_size)
+            .map(|(_, c)| c)
+            .collect()
+    } else {
+        content
+    }
+}
+
 /// Clipboard content from the system
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -181,17 +194,7 @@ impl ClipboardHandler {
     fn process_text(&self, text: String, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = text.len() as i64;
         let preview = Self::create_preview(&text);
-        
-        // Truncate if too long (safely at char boundary), 0 = unlimited
-        let text_content = if max_size > 0 && text.len() > max_size {
-            warn!("Text content truncated from {} to {} bytes", text.len(), max_size);
-            text.char_indices()
-                .take_while(|(i, _)| *i < max_size)
-                .map(|(_, c)| c)
-                .collect()
-        } else {
-            text
-        };
+        let text_content = truncate_content(text, max_size, "Text");
 
         Ok(NewClipboardItem {
             content_type: ContentType::Text,
@@ -212,17 +215,7 @@ impl ClipboardHandler {
         let preview = text.as_ref()
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| Self::create_preview(&html));
-
-        // Truncate HTML if too long, 0 = unlimited
-        let html_content = if max_size > 0 && html.len() > max_size {
-            warn!("HTML content truncated from {} to {} bytes", html.len(), max_size);
-            html.char_indices()
-                .take_while(|(i, _)| *i < max_size)
-                .map(|(_, c)| c)
-                .collect()
-        } else {
-            html
-        };
+        let html_content = truncate_content(html, max_size, "HTML");
 
         Ok(NewClipboardItem {
             content_type: ContentType::Html,
@@ -243,17 +236,7 @@ impl ClipboardHandler {
         let preview = text.as_ref()
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| "[RTF Content]".to_string());
-
-        // Truncate RTF if too long, 0 = unlimited
-        let rtf_content = if max_size > 0 && rtf.len() > max_size {
-            warn!("RTF content truncated from {} to {} bytes", rtf.len(), max_size);
-            rtf.char_indices()
-                .take_while(|(i, _)| *i < max_size)
-                .map(|(_, c)| c)
-                .collect()
-        } else {
-            rtf
-        };
+        let rtf_content = truncate_content(rtf, max_size, "RTF");
 
         Ok(NewClipboardItem {
             content_type: ContentType::Rtf,

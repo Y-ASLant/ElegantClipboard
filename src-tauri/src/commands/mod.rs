@@ -14,6 +14,47 @@ pub struct AppState {
     pub monitor: ClipboardMonitor,
 }
 
+// ============ Helper Functions ============
+
+/// Set clipboard content from a ClipboardItem (shared logic for copy and paste)
+fn set_clipboard_content(item: &ClipboardItem, clipboard: &mut arboard::Clipboard) -> Result<(), String> {
+    match item.content_type.as_str() {
+        "text" | "html" | "rtf" => {
+            if let Some(ref text) = item.text_content {
+                clipboard.set_text(text.clone())
+                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+            }
+        }
+        "image" => {
+            if let Some(ref path) = item.image_path {
+                let img = image::open(path)
+                    .map_err(|e| format!("Failed to open image: {}", e))?;
+                let rgba = img.to_rgba8();
+                let (width, height) = rgba.dimensions();
+                let img_data = arboard::ImageData {
+                    width: width as usize,
+                    height: height as usize,
+                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+                };
+                clipboard.set_image(img_data)
+                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
+            }
+        }
+        "files" => {
+            if let Some(ref paths_json) = item.file_paths {
+                let paths: Vec<String> = serde_json::from_str(paths_json)
+                    .map_err(|e| format!("Failed to parse file paths: {}", e))?;
+                clipboard.set_text(paths.join("\n"))
+                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+            }
+        }
+        _ => {
+            return Err("Unsupported content type".to_string());
+        }
+    }
+    Ok(())
+}
+
 // ============ Clipboard Commands ============
 
 /// Get clipboard items with optional filtering
@@ -160,51 +201,10 @@ pub async fn copy_to_clipboard(
     // Pause monitor temporarily to avoid re-capturing
     state.monitor.pause();
     
-    // Use arboard for cross-platform clipboard access
+    // Set content to clipboard
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| format!("Failed to access clipboard: {}", e))?;
-
-    match item.content_type.as_str() {
-        "text" => {
-            if let Some(text) = item.text_content {
-                clipboard.set_text(text)
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        "html" => {
-            if let Some(text) = item.text_content {
-                clipboard.set_text(text)
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        "image" => {
-            if let Some(path) = item.image_path {
-                let img = image::open(&path)
-                    .map_err(|e| format!("Failed to open image: {}", e))?;
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let img_data = arboard::ImageData {
-                    width: width as usize,
-                    height: height as usize,
-                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-                };
-                clipboard.set_image(img_data)
-                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
-            }
-        }
-        "files" => {
-            // For files, just copy the paths as text
-            if let Some(paths_json) = item.file_paths {
-                let paths: Vec<String> = serde_json::from_str(&paths_json)
-                    .map_err(|e| format!("Failed to parse file paths: {}", e))?;
-                clipboard.set_text(paths.join("\n"))
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        _ => {
-            return Err("Unsupported content type".to_string());
-        }
-    }
+    set_clipboard_content(&item, &mut clipboard)?;
 
     // Resume monitor after a short delay
     let monitor = state.monitor.clone();
@@ -439,41 +439,7 @@ pub async fn paste_content(
     // 1. Set content to system clipboard
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| format!("Failed to access clipboard: {}", e))?;
-
-    match item.content_type.as_str() {
-        "text" | "html" | "rtf" => {
-            if let Some(text) = item.text_content {
-                clipboard.set_text(text)
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        "image" => {
-            if let Some(path) = item.image_path {
-                let img = image::open(&path)
-                    .map_err(|e| format!("Failed to open image: {}", e))?;
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let img_data = arboard::ImageData {
-                    width: width as usize,
-                    height: height as usize,
-                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-                };
-                clipboard.set_image(img_data)
-                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
-            }
-        }
-        "files" => {
-            if let Some(paths_json) = item.file_paths {
-                let paths: Vec<String> = serde_json::from_str(&paths_json)
-                    .map_err(|e| format!("Failed to parse file paths: {}", e))?;
-                clipboard.set_text(paths.join("\n"))
-                    .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
-            }
-        }
-        _ => {
-            return Err("Unsupported content type".to_string());
-        }
-    }
+    set_clipboard_content(&item, &mut clipboard)?;
 
     // 2. Hide window and update state
     if let Some(window) = app.get_webview_window("main") {
