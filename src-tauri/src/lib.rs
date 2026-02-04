@@ -1,6 +1,7 @@
 mod clipboard;
 mod commands;
 mod database;
+mod input_monitor;
 mod keyboard_hook;
 mod tray;
 mod win_v_registry;
@@ -198,6 +199,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             // Hide window
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
+            // Disable mouse monitoring when window is hidden
+            input_monitor::disable_mouse_monitoring();
         } else {
             // Show window with always-on-top trick (like QuickClipboard)
             // NOTE: Do NOT call set_focus() - window is set to focusable=false
@@ -206,6 +209,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             std::thread::sleep(std::time::Duration::from_millis(10));
             let _ = window.set_always_on_top(true);
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
+            // Enable mouse monitoring to detect clicks outside window
+            input_monitor::enable_mouse_monitoring();
         }
     }
 }
@@ -411,6 +416,11 @@ pub fn run() {
             // This allows hotkeys to work even when Start Menu or other system UI is open
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focusable(false);
+                
+                // Initialize and start input monitor for click-outside detection
+                // This is necessary because non-focusable windows don't trigger onFocusChanged
+                input_monitor::init(window);
+                input_monitor::start_monitoring();
             }
 
             Ok(())

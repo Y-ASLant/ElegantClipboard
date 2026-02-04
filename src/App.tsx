@@ -52,26 +52,10 @@ function App() {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
 
-  // Auto-hide on blur (lose focus)
-  // NOTE: With focus: false in tauri.conf.json, this may not trigger as expected
-  // The window will primarily be hidden via hotkey toggle
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    
-    // Listen for focus changes - this is a backup mechanism
-    // Primary hide/show is controlled by backend hotkey
-    const unlisten = appWindow.onFocusChanged(async ({ payload: focused }) => {
-      if (!focused) {
-        // Sync state to backend when window loses focus
-        await invoke("set_window_visibility", { visible: false });
-        await appWindow.hide();
-      }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
+  // NOTE: Click-outside detection is handled by the backend input_monitor module
+  // because the window is set to non-focusable (focus: false), which means
+  // onFocusChanged events never fire. The backend uses rdev to monitor global
+  // mouse clicks and hides the window when a click is detected outside its bounds.
 
   // Debounced search with proper cleanup
   const debouncedSearch = useMemo(
