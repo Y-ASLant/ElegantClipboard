@@ -4,6 +4,7 @@ use clipboard_master::{CallbackResult, ClipboardHandler as CMHandler, Master};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
@@ -13,6 +14,7 @@ pub struct ClipboardMonitor {
     running: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
+    thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl ClipboardMonitor {
@@ -21,6 +23,7 @@ impl ClipboardMonitor {
             running: Arc::new(AtomicBool::new(false)),
             paused: Arc::new(AtomicBool::new(false)),
             handler: Arc::new(Mutex::new(None)),
+            thread_handle: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -33,17 +36,17 @@ impl ClipboardMonitor {
 
     /// Start monitoring clipboard changes
     pub fn start(&self, app_handle: AppHandle) {
-        if self.running.load(Ordering::SeqCst) {
+        // Use compare_exchange to avoid race condition
+        if self.running.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             warn!("Clipboard monitor already running");
             return;
         }
 
-        self.running.store(true, Ordering::SeqCst);
         let running = self.running.clone();
         let paused = self.paused.clone();
         let handler = self.handler.clone();
 
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             info!("Clipboard monitor thread started");
 
             let clipboard_handler = MonitorHandler {
@@ -68,13 +71,23 @@ impl ClipboardMonitor {
             running.store(false, Ordering::SeqCst);
             info!("Clipboard monitor thread stopped");
         });
+
+        // Store thread handle for cleanup
+        *self.thread_handle.lock() = Some(handle);
     }
 
-    /// Stop monitoring
+    /// Stop monitoring and wait for thread to finish
     #[allow(dead_code)]
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
         info!("Clipboard monitor stopping");
+        
+        // Wait for thread to finish (with timeout)
+        if let Some(handle) = self.thread_handle.lock().take() {
+            // Don't block indefinitely - the thread should stop on its own
+            // when running flag is set to false
+            let _ = handle.join();
+        }
     }
 
     /// Pause monitoring

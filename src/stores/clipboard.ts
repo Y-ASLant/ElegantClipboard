@@ -127,11 +127,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   setSearchQuery: (query: string) => {
     set({ searchQuery: query });
-    // Debounced search
-    const timeoutId = setTimeout(() => {
-      get().fetchItems();
-    }, 300);
-    return () => clearTimeout(timeoutId);
+    // Note: Debouncing is handled in App.tsx with useMemo + debounce
+    // This just updates the query state
   },
 
   setSelectedType: (type: string | null) => {

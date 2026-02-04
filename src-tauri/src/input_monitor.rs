@@ -8,9 +8,9 @@
 use parking_lot::Mutex;
 use rdev::{listen, Event, EventType};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
+use std::thread::{self, JoinHandle};
 use tauri::WebviewWindow;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Main window reference for click detection
 static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
@@ -18,8 +18,14 @@ static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
 /// Whether mouse monitoring is currently active
 static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// Whether the monitor thread is running
+static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
+
 /// Current cursor position
 static CURSOR_POSITION: Mutex<(f64, f64)> = Mutex::new((0.0, 0.0));
+
+/// Thread handle for cleanup
+static THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
 /// Initialize input monitor with main window reference
 pub fn init(window: WebviewWindow) {
@@ -28,14 +34,31 @@ pub fn init(window: WebviewWindow) {
 
 /// Start the global input monitoring thread
 pub fn start_monitoring() {
-    thread::spawn(|| {
+    // Prevent multiple starts
+    if MONITOR_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        warn!("Input monitor already running");
+        return;
+    }
+
+    let handle = thread::spawn(|| {
         if let Err(error) = listen(move |event| {
             handle_input_event(event);
         }) {
             eprintln!("Input monitor error: {:?}", error);
         }
+        MONITOR_RUNNING.store(false, Ordering::SeqCst);
     });
+    
+    *THREAD_HANDLE.lock() = Some(handle);
     info!("Input monitor started");
+}
+
+/// Stop the input monitor (note: rdev::listen cannot be gracefully stopped)
+#[allow(dead_code)]
+pub fn stop_monitoring() {
+    MONITOR_RUNNING.store(false, Ordering::SeqCst);
+    // Note: rdev::listen runs in a blocking loop and cannot be interrupted gracefully
+    // The thread will only stop when the application exits
 }
 
 /// Enable mouse click monitoring (call when window becomes visible)

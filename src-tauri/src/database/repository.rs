@@ -168,7 +168,7 @@ impl ClipboardRepository {
         let mut conditions = Vec::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        // Full-text search
+        // Full-text search - escape special FTS characters
         if let Some(ref search) = options.search {
             if !search.is_empty() {
                 sql = format!(
@@ -176,7 +176,13 @@ impl ClipboardRepository {
                      INNER JOIN clipboard_fts ON clipboard_items.id = clipboard_fts.rowid"
                 );
                 conditions.push("clipboard_fts MATCH ?".to_string());
-                params_vec.push(Box::new(format!("{}*", search)));
+                // Escape special FTS5 characters and add prefix matching
+                let escaped_search = search
+                    .replace('"', "\"\"")
+                    .replace('*', "")
+                    .replace('(', "")
+                    .replace(')', "");
+                params_vec.push(Box::new(format!("\"{}\"*", escaped_search)));
             }
         }
 
@@ -211,10 +217,12 @@ impl ClipboardRepository {
         // Order by: pinned first, then by created_at
         sql.push_str(" ORDER BY is_pinned DESC, created_at DESC");
 
-        // Limit and offset
+        // Limit and offset - use parameterized query
+        sql.push_str(" LIMIT ? OFFSET ?");
         let limit = options.limit.unwrap_or(100);
         let offset = options.offset.unwrap_or(0);
-        sql.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+        params_vec.push(Box::new(limit));
+        params_vec.push(Box::new(offset));
 
         // Execute query
         let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
