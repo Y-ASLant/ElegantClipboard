@@ -6,11 +6,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 import {
-  Settings16Regular,
-  Database16Regular,
-  Keyboard16Regular,
-  Info16Regular,
-  TextDescription16Regular,
+  Settings16Filled,
+  Options16Filled,
+  Eye16Filled,
+  Keyboard16Filled,
+  Info16Filled,
 } from "@fluentui/react-icons";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
@@ -22,10 +22,10 @@ interface AppSettings extends GeneralSettings, ShortcutSettings {}
 type TabType = "general" | "display" | "shortcuts" | "about";
 
 const navItems: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: "general", label: "常规设置", icon: Database16Regular },
-  { id: "display", label: "显示设置", icon: TextDescription16Regular },
-  { id: "shortcuts", label: "快捷键", icon: Keyboard16Regular },
-  { id: "about", label: "关于", icon: Info16Regular },
+  { id: "general", label: "常规设置", icon: Options16Filled },
+  { id: "display", label: "显示设置", icon: Eye16Filled },
+  { id: "shortcuts", label: "快捷键", icon: Keyboard16Filled },
+  { id: "about", label: "关于", icon: Info16Filled },
 ];
 
 export function Settings() {
@@ -136,7 +136,7 @@ export function Settings() {
           data-tauri-drag-region
         >
           <div className="flex items-center gap-3">
-            <Settings16Regular className="w-5 h-5 text-muted-foreground" />
+            <Settings16Filled className="w-5 h-5 text-muted-foreground" />
             <span className="text-sm font-semibold">设置</span>
           </div>
           <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>

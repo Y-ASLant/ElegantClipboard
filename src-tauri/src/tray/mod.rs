@@ -1,18 +1,14 @@
-use crate::commands::AppState;
-use std::sync::Arc;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, Runtime,
+    AppHandle, Manager, Runtime,
 };
 use tracing::info;
 
 /// Setup system tray icon and menu
 pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
     // Load tray icon from raw RGBA data
-    // We'll use a simple colored square as placeholder
-    // In production, you should use proper icon loading
     let icon_data = include_bytes!("../../icons/icon.png");
     let img = image::load_from_memory(icon_data)?;
     let rgba = img.to_rgba8();
@@ -20,22 +16,18 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
     let icon = Image::new_owned(rgba.into_raw(), width, height);
 
     // Create menu items
-    let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-    let pause_item = MenuItem::with_id(app, "pause", "暂停监听", true, None::<&str>)?;
-    let resume_item = MenuItem::with_id(app, "resume", "恢复监听", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
+    let restart_item = MenuItem::with_id(app, "restart", "重启程序", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
 
     // Build menu
     let menu = Menu::with_items(
         app,
         &[
-            &show_item,
+            &settings_item,
+            &restart_item,
             &separator,
-            &pause_item,
-            &resume_item,
-            &separator2,
             &quit_item,
         ],
     )?;
@@ -81,28 +73,13 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
 /// Handle tray menu events
 fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
-        "show" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-                // Enable mouse monitoring when showing
-                crate::input_monitor::enable_mouse_monitoring();
-                crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
-            }
+        "settings" => {
+            info!("Opening settings from tray");
+            open_settings_window_sync(app);
         }
-        "pause" => {
-            if let Some(state) = app.try_state::<Arc<AppState>>() {
-                state.monitor.pause();
-                let _ = app.emit("monitor-paused", ());
-                info!("Clipboard monitoring paused from tray");
-            }
-        }
-        "resume" => {
-            if let Some(state) = app.try_state::<Arc<AppState>>() {
-                state.monitor.resume();
-                let _ = app.emit("monitor-resumed", ());
-                info!("Clipboard monitoring resumed from tray");
-            }
+        "restart" => {
+            info!("Restarting application from tray");
+            app.restart();
         }
         "quit" => {
             info!("Quitting application from tray");
@@ -110,6 +87,31 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         }
         _ => {}
     }
+}
+
+/// Open settings window (sync version for tray menu)
+fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
+    // Check if settings window already exists
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    // Create new settings window
+    let _ = tauri::WebviewWindowBuilder::new(
+        app,
+        "settings",
+        tauri::WebviewUrl::App("/settings".into()),
+    )
+    .title("设置")
+    .inner_size(800.0, 560.0)
+    .min_inner_size(580.0, 480.0)
+    .center()
+    .decorations(false)
+    .visible(false)
+    .resizable(true)
+    .build();
 }
 
 /// Update tray tooltip with item count
