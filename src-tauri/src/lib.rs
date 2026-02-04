@@ -157,6 +157,12 @@ fn set_window_visibility(visible: bool) {
     } else { 
         keyboard_hook::WindowState::Hidden 
     });
+    // Also enable/disable mouse monitoring for click-outside detection
+    if visible {
+        input_monitor::enable_mouse_monitoring();
+    } else {
+        input_monitor::disable_mouse_monitoring();
+    }
 }
 
 /// Tauri command: Minimize window
