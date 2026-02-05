@@ -85,35 +85,14 @@ export function useSortableList<T extends SortableItem>({
     })
   );
 
-  // Optimized collision detection with early exit and memoization
+  // Collision detection - allow cross-region drag (pinned <-> regular)
   const customCollisionDetection: CollisionDetection = useCallback(
     (args) => {
-      const { active } = args;
-      const activeIdStr = String(active.id);
-
-      // Use ref to avoid recreating when items change
-      const currentItems = itemsRef.current;
-
-      // Find active item once
-      const activeItem = currentItems.find(
-        (item) => item._sortId === activeIdStr || String(item.id) === activeIdStr
-      );
-
-      // Get all collisions first
-      const collisions = closestCenter(args);
-      if (!collisions.length || !activeItem) return collisions;
-
-      // Filter out items with different pinned status
-      return collisions.filter((collision) => {
-        const collisionIdStr = String(collision.id);
-        const overItem = currentItems.find(
-          (item) => item._sortId === collisionIdStr || String(item.id) === collisionIdStr
-        );
-        if (!overItem) return true;
-        return activeItem.is_pinned === overItem.is_pinned;
-      });
+      // Simply use closestCenter without filtering by pinned status
+      // This allows dragging between pinned and regular areas
+      return closestCenter(args);
     },
-    [] // No dependencies - uses ref instead
+    []
   );
 
   const handleDragStart = useCallback((event: DragStartEvent) => {

@@ -13,7 +13,7 @@ interface SortableClipboardItem extends ClipboardItem {
 
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
-  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener, moveItem } =
+  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
@@ -49,17 +49,36 @@ export function ClipboardList() {
     [itemsWithSortId]
   );
 
+  // 合并所有卡片：置顶在前，非置顶在后
+  const allItemsWithSortId = useMemo(
+    () => [...pinnedItemsWithSortId, ...regularItemsWithSortId],
+    [pinnedItemsWithSortId, regularItemsWithSortId]
+  );
+
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
       if (oldIndex === newIndex) return;
-      const allSortableItems = [...pinnedItemsWithSortId, ...regularItemsWithSortId];
-      const fromItem = allSortableItems[oldIndex];
-      const toItem = allSortableItems[newIndex];
-      if (fromItem && toItem && fromItem.is_pinned === toItem.is_pinned) {
+      const fromItem = allItemsWithSortId[oldIndex];
+      const toItem = allItemsWithSortId[newIndex];
+      if (!fromItem || !toItem) return;
+
+      const pinnedCount = pinnedItemsWithSortId.length;
+      const fromIsPinned = oldIndex < pinnedCount;
+      const toIsPinned = newIndex < pinnedCount;
+
+      // 跨区域拖拽：自动改变置顶状态
+      if (fromIsPinned !== toIsPinned) {
+        // 非置顶拖入置顶区域 -> 标记为置顶
+        // 置顶拖入非置顶区域 -> 取消置顶
+        await togglePin(fromItem.id);
+      }
+      
+      // 同区域拖拽：移动位置
+      if (fromIsPinned === toIsPinned) {
         await moveItem(fromItem.id, toItem.id);
       }
     },
-    [pinnedItemsWithSortId, regularItemsWithSortId, moveItem]
+    [allItemsWithSortId, pinnedItemsWithSortId.length, moveItem, togglePin]
   );
 
   const {
@@ -77,7 +96,7 @@ export function ClipboardList() {
     collisionDetection,
     measuring,
   } = useSortableList({
-    items: itemsWithSortId,
+    items: allItemsWithSortId,
     onDragEnd: handleDragEnd,
   });
 
@@ -104,22 +123,32 @@ export function ClipboardList() {
     20 + cardMaxLines * 20 + 20 + 8,
   [cardMaxLines]);
 
+  const pinnedCount = pinnedItemsWithSortId.length;
+
   const itemContent = useCallback(
     (index: number) => {
-      const item = regularItemsWithSortId[index];
+      const item = allItemsWithSortId[index];
       if (!item) return null;
+      
+      // 计算显示序号：置顶区域从0开始，非置顶区域也从0开始
+      const displayIndex = item.is_pinned ? index : index - pinnedCount;
+      
+      // 在置顶区域和非置顶区域之间添加分隔线
+      const showSeparator = index === pinnedCount && pinnedCount > 0;
+      
       return (
         <div className="px-2 pb-2">
-          <ClipboardItemCard item={item} index={index} sortId={item._sortId} />
+          {showSeparator && <Separator className="mb-2" />}
+          <ClipboardItemCard item={item} index={displayIndex} sortId={item._sortId} />
         </div>
       );
     },
-    [regularItemsWithSortId]
+    [allItemsWithSortId, pinnedCount]
   );
 
   const computeItemKey = useCallback(
-    (index: number) => regularItemsWithSortId[index]?._sortId || `item-${index}`,
-    [regularItemsWithSortId]
+    (index: number) => allItemsWithSortId[index]?._sortId || `item-${index}`,
+    [allItemsWithSortId]
   );
 
   if (isLoading && items.length === 0) {
@@ -161,34 +190,17 @@ export function ClipboardList() {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full overflow-hidden flex flex-col">
-        {pinnedItemsWithSortId.length > 0 && (
-          <div className="flex-none px-2 pb-0">
-            <SortableContext items={pinnedItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
-              <div className="space-y-2">
-                {pinnedItemsWithSortId.map((item, idx) => (
-                  <ClipboardItemCard key={item.id} item={item} index={idx} sortId={item._sortId} />
-                ))}
-              </div>
-            </SortableContext>
-            {regularItemsWithSortId.length > 0 && <Separator className="my-3" />}
-          </div>
-        )}
-
-        {regularItemsWithSortId.length > 0 && (
-          <div className="flex-1 min-h-0 overflow-x-hidden">
-            <SortableContext items={regularItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
-              <Virtuoso
-                totalCount={regularItemsWithSortId.length}
-                itemContent={itemContent}
-                computeItemKey={computeItemKey}
-                defaultItemHeight={defaultItemHeight}
-                increaseViewportBy={{ top: 400, bottom: 400 }}
-                className="custom-scrollbar"
-              />
-            </SortableContext>
-          </div>
-        )}
+      <div className="h-full overflow-hidden">
+        <SortableContext items={allItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
+          <Virtuoso
+            totalCount={allItemsWithSortId.length}
+            itemContent={itemContent}
+            computeItemKey={computeItemKey}
+            defaultItemHeight={defaultItemHeight}
+            increaseViewportBy={{ top: 400, bottom: 400 }}
+            className="custom-scrollbar"
+          />
+        </SortableContext>
       </div>
 
       <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>

@@ -167,8 +167,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   <Image16Regular className="w-8 h-8 text-muted-foreground/40" />
                 )}
               </div>
-              {metaItems.length > 0 && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5">
+              <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5">
+                <div className="flex items-center gap-1.5">
                   {metaItems.map((info, i) => (
                     <span key={i} className="flex items-center gap-1.5">
                       {i > 0 && <span className="text-muted-foreground/50">·</span>}
@@ -176,7 +176,12 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                     </span>
                   ))}
                 </div>
-              )}
+                {index !== undefined && index >= 0 && !isDragOverlay && (
+                  <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                )}
+              </div>
             </div>
           ) : (
             <div className="flex-1 min-w-0 px-3 py-2.5">
@@ -191,8 +196,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               >
                 {item.preview || item.text_content || `[${config.label}]`}
               </pre>
-              {metaItems.length > 0 && (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5">
+              <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5">
+                <div className="flex items-center gap-1.5">
                   {metaItems.map((info, i) => (
                     <span key={i} className="flex items-center gap-1.5">
                       {i > 0 && <span className="text-muted-foreground/50">·</span>}
@@ -200,7 +205,12 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                     </span>
                   ))}
                 </div>
-              )}
+                {index !== undefined && index >= 0 && !isDragOverlay && (
+                  <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
+                    {index + 1}
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
@@ -252,15 +262,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             </div>
           )}
 
+          {/* 右上角斜角标 - 置顶标识 */}
           {item.is_pinned && !isDragging && !isDragOverlay && (
-            <div className="absolute right-2 top-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-500 border border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900 opacity-100 group-hover:opacity-0 transition-opacity">
-              置顶
-            </div>
+            <div className="absolute -right-6 -top-6 w-12 h-12 rotate-45 bg-primary opacity-100 group-hover:opacity-0 transition-opacity" />
           )}
-
-          {index !== undefined && index >= 0 && !isDragOverlay && (
-            <div className="absolute right-2 bottom-2 min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center">
-              <span className="text-[10px] font-semibold text-primary">{index + 1}</span>
+          {item.is_pinned && !isDragging && !isDragOverlay && (
+            <div className="absolute right-0.5 top-0.5 opacity-100 group-hover:opacity-0 transition-opacity">
+              <Pin16Filled className="w-3 h-3 text-primary-foreground" />
             </div>
           )}
         </div>
