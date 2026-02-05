@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     byte_size INTEGER DEFAULT 0,
     is_pinned INTEGER DEFAULT 0,
     is_favorite INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
     access_count INTEGER DEFAULT 0,
@@ -69,6 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite
 CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
 CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_items(content_hash);
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES 

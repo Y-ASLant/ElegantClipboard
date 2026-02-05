@@ -1,36 +1,31 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useClipboardStore } from "@/stores/clipboard";
+import { Virtuoso } from "react-virtuoso";
+import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
 import { Separator } from "@/components/ui/separator";
 import { ClipboardMultiple16Regular } from "@fluentui/react-icons";
+import { useSortableList } from "@/hooks/useSortableList";
+
+interface SortableClipboardItem extends ClipboardItem {
+  _sortId: string;
+}
 
 export function ClipboardList() {
-  const parentRef = useRef<HTMLDivElement>(null);
   const listenerRef = useRef<(() => void) | null>(null);
-  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener } =
+  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener, moveItem } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
-  // Initial data fetch and event listener setup
   useEffect(() => {
     fetchItems();
     fetchPinnedItems();
-    
-    // Avoid duplicate listener registration
     if (listenerRef.current) return;
-    
     let mounted = true;
-    
     setupListener().then((unlisten) => {
-      if (mounted) {
-        listenerRef.current = unlisten;
-      } else {
-        unlisten();
-      }
+      if (mounted) listenerRef.current = unlisten;
+      else unlisten();
     });
-    
     return () => {
       mounted = false;
       if (listenerRef.current) {
@@ -38,27 +33,94 @@ export function ClipboardList() {
         listenerRef.current = null;
       }
     };
-  }, []); // Empty deps - only run once on mount
+  }, []);
 
-  // Memoize filtered items to avoid recalculation on every render
-  const regularItems = useMemo(
-    () => items.filter((item) => !item.is_pinned),
-    [items]
+  const itemsWithSortId = useMemo((): SortableClipboardItem[] =>
+    items.map((item) => ({ ...item, _sortId: `item-${item.id}` })),
+  [items]);
+
+  const pinnedItemsWithSortId = useMemo(
+    () => itemsWithSortId.filter((item) => item.is_pinned),
+    [itemsWithSortId]
   );
 
-  // Estimate item height based on cardMaxLines setting
-  const estimateSize = useCallback(() => {
-    return 20 + cardMaxLines * 20 + 20 + 8;
-  }, [cardMaxLines]);
+  const regularItemsWithSortId = useMemo(
+    () => itemsWithSortId.filter((item) => !item.is_pinned),
+    [itemsWithSortId]
+  );
 
-  // Virtual list for history items with proper key tracking
-  const virtualizer = useVirtualizer({
-    count: regularItems.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize,
-    overscan: 5,
-    getItemKey: (index) => regularItems[index]?.id ?? index,
+  const handleDragEnd = useCallback(
+    async (oldIndex: number, newIndex: number) => {
+      if (oldIndex === newIndex) return;
+      const allSortableItems = [...pinnedItemsWithSortId, ...regularItemsWithSortId];
+      const fromItem = allSortableItems[oldIndex];
+      const toItem = allSortableItems[newIndex];
+      if (fromItem && toItem && fromItem.is_pinned === toItem.is_pinned) {
+        await moveItem(fromItem.id, toItem.id);
+      }
+    },
+    [pinnedItemsWithSortId, regularItemsWithSortId, moveItem]
+  );
+
+  const {
+    DndContext,
+    SortableContext,
+    DragOverlay,
+    sensors,
+    handleDragStart,
+    handleDragEnd: onDragEnd,
+    handleDragCancel,
+    activeId,
+    activeItem,
+    strategy,
+    modifiers,
+    collisionDetection,
+    measuring,
+  } = useSortableList({
+    items: itemsWithSortId,
+    onDragEnd: handleDragEnd,
   });
+
+  // 拖拽时接管滚轮事件 - QuickClipboard 优化
+  useEffect(() => {
+    if (!activeId) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const scrollerElement = document.querySelector('[data-virtuoso-scroller="true"]') as HTMLElement;
+      if (scrollerElement) scrollerElement.scrollTop += e.deltaY;
+    };
+    document.addEventListener('wheel', handleWheel, { passive: false } as AddEventListenerOptions);
+    return () => document.removeEventListener('wheel', handleWheel);
+  }, [activeId]);
+
+  // 拖拽时添加全局光标样式
+  useEffect(() => {
+    if (!activeId) return;
+    document.body.classList.add('dragging-cursor');
+    return () => document.body.classList.remove('dragging-cursor');
+  }, [activeId]);
+
+  const defaultItemHeight = useMemo(() =>
+    20 + cardMaxLines * 20 + 20 + 8,
+  [cardMaxLines]);
+
+  const itemContent = useCallback(
+    (index: number) => {
+      const item = regularItemsWithSortId[index];
+      if (!item) return null;
+      return (
+        <div className="px-2 pb-2">
+          <ClipboardItemCard item={item} index={index} sortId={item._sortId} />
+        </div>
+      );
+    },
+    [regularItemsWithSortId]
+  );
+
+  const computeItemKey = useCallback(
+    (index: number) => regularItemsWithSortId[index]?._sortId || `item-${index}`,
+    [regularItemsWithSortId]
+  );
 
   if (isLoading && items.length === 0) {
     return (
@@ -87,53 +149,53 @@ export function ClipboardList() {
     );
   }
 
+  const activeItemData = activeItem as SortableClipboardItem | null;
+
   return (
-    <div ref={parentRef} className="h-full overflow-y-auto overflow-x-hidden custom-scrollbar">
-      <div className="p-2">
-        {/* Pinned Section */}
-        {pinnedItems.length > 0 && (
-          <div className="mb-2">
-            <div className="space-y-2">
-              {pinnedItems.map((item, idx) => (
-                <ClipboardItemCard key={item.id} item={item} index={idx} />
-              ))}
-            </div>
-            {regularItems.length > 0 && <Separator className="my-3" />}
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      onDragStart={handleDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={handleDragCancel}
+      modifiers={modifiers}
+      measuring={measuring}
+    >
+      <div className="h-full overflow-hidden flex flex-col">
+        {pinnedItemsWithSortId.length > 0 && (
+          <div className="flex-none px-2 pb-0">
+            <SortableContext items={pinnedItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
+              <div className="space-y-2">
+                {pinnedItemsWithSortId.map((item, idx) => (
+                  <ClipboardItemCard key={item.id} item={item} index={idx} sortId={item._sortId} />
+                ))}
+              </div>
+            </SortableContext>
+            {regularItemsWithSortId.length > 0 && <Separator className="my-3" />}
           </div>
         )}
 
-        {/* Virtualized History Section */}
-        {regularItems.length > 0 && (
-          <div
-            style={{
-              height: `${virtualizer.getTotalSize()}px`,
-              width: "100%",
-              position: "relative",
-            }}
-          >
-            {virtualizer.getVirtualItems().map((virtualItem) => {
-              const item = regularItems[virtualItem.index];
-              return (
-                <div
-                  key={item.id}
-                  data-index={virtualItem.index}
-                  ref={virtualizer.measureElement}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: "100%",
-                    transform: `translateY(${virtualItem.start}px)`,
-                    paddingBottom: "8px",
-                  }}
-                >
-                  <ClipboardItemCard item={item} index={virtualItem.index} />
-                </div>
-              );
-            })}
+        {regularItemsWithSortId.length > 0 && (
+          <div className="flex-1 min-h-0 overflow-x-hidden">
+            <SortableContext items={regularItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
+              <Virtuoso
+                totalCount={regularItemsWithSortId.length}
+                itemContent={itemContent}
+                computeItemKey={computeItemKey}
+                defaultItemHeight={defaultItemHeight}
+                increaseViewportBy={{ top: 400, bottom: 400 }}
+                className="custom-scrollbar"
+              />
+            </SortableContext>
           </div>
         )}
       </div>
-    </div>
+
+      <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>
+        {activeItemData && (
+          <ClipboardItemCard item={activeItemData} index={-1} isDragOverlay={true} />
+        )}
+      </DragOverlay>
+    </DndContext>
   );
 }

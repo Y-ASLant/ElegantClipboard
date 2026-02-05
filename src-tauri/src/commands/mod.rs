@@ -129,6 +129,19 @@ pub async fn toggle_favorite(
     repo.toggle_favorite(id).map_err(|e| e.to_string())
 }
 
+/// Move clipboard item by swapping sort order with target
+#[tauri::command]
+pub async fn move_clipboard_item(
+    state: State<'_, Arc<AppState>>,
+    from_id: i64,
+    to_id: i64,
+) -> Result<(), String> {
+    let repo = ClipboardRepository::new(&state.db);
+    repo.move_item_by_id(from_id, to_id).map_err(|e| e.to_string())?;
+    debug!("Moved clipboard item {} to position of {}", from_id, to_id);
+    Ok(())
+}
+
 /// Delete clipboard item (also deletes associated image file)
 #[tauri::command]
 pub async fn delete_clipboard_item(

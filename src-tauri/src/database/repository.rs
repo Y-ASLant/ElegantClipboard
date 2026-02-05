@@ -20,6 +20,7 @@ pub struct ClipboardItem {
     pub byte_size: i64,
     pub is_pinned: bool,
     pub is_favorite: bool,
+    pub sort_order: i64,
     pub created_at: String,
     pub updated_at: String,
     pub access_count: i64,
@@ -72,9 +73,17 @@ impl ClipboardRepository {
         
         let file_paths_json = item.file_paths.map(|paths| serde_json::to_string(&paths).unwrap_or_default());
         
+        // Get max sort_order and increment
+        let max_sort_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        let new_sort_order = max_sort_order + 1;
+        
         conn.execute(
-            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size, sort_order)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 item.content_type.as_str(),
                 item.text_content,
@@ -85,11 +94,12 @@ impl ClipboardRepository {
                 item.content_hash,
                 item.preview,
                 item.byte_size,
+                new_sort_order,
             ],
         )?;
 
         let id = conn.last_insert_rowid();
-        debug!("Inserted clipboard item with id: {}", id);
+        debug!("Inserted clipboard item with id: {}, sort_order: {}", id, new_sort_order);
         Ok(id)
     }
 
@@ -198,8 +208,8 @@ impl ClipboardRepository {
             sql.push_str(&conditions.join(" AND "));
         }
 
-        // Order by: pinned first, then by created_at
-        sql.push_str(" ORDER BY is_pinned DESC, created_at DESC");
+        // Order by: pinned first, then by sort_order (higher = newer), then by created_at
+        sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
 
         // Limit and offset - use parameterized query
         sql.push_str(" LIMIT ? OFFSET ?");
@@ -391,6 +401,41 @@ impl ClipboardRepository {
         Ok((deleted as i64, image_paths))
     }
 
+    /// Move item by swapping sort_order with target item
+    pub fn move_item_by_id(&self, from_id: i64, to_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        
+        // Get sort_order of both items
+        let from_sort_order: i64 = conn.query_row(
+            "SELECT sort_order FROM clipboard_items WHERE id = ?1",
+            params![from_id],
+            |row| row.get(0),
+        )?;
+        
+        let to_sort_order: i64 = conn.query_row(
+            "SELECT sort_order FROM clipboard_items WHERE id = ?1",
+            params![to_id],
+            |row| row.get(0),
+        )?;
+        
+        // Swap sort_order values
+        conn.execute(
+            "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2",
+            params![to_sort_order, from_id],
+        )?;
+        
+        conn.execute(
+            "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2",
+            params![from_sort_order, to_id],
+        )?;
+        
+        debug!("Moved item {} (sort_order: {} -> {}) with item {} (sort_order: {} -> {})",
+            from_id, from_sort_order, to_sort_order,
+            to_id, to_sort_order, from_sort_order);
+        
+        Ok(())
+    }
+
     /// Helper to convert row to ClipboardItem
     fn row_to_item(row: &Row) -> Result<ClipboardItem, rusqlite::Error> {
         Ok(ClipboardItem {
@@ -406,6 +451,7 @@ impl ClipboardRepository {
             byte_size: row.get("byte_size")?,
             is_pinned: row.get("is_pinned")?,
             is_favorite: row.get("is_favorite")?,
+            sort_order: row.get("sort_order")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
             access_count: row.get("access_count")?,

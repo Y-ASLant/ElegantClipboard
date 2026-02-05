@@ -524,6 +524,7 @@ pub fn run() {
             commands::get_clipboard_count,
             commands::toggle_pin,
             commands::toggle_favorite,
+            commands::move_clipboard_item,
             commands::delete_clipboard_item,
             commands::clear_history,
             commands::copy_to_clipboard,
