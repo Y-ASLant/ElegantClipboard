@@ -12,6 +12,10 @@ document.addEventListener("contextmenu", (e) => {
 
 // Disable browser shortcuts
 document.addEventListener("keydown", (e) => {
+  // Disable Tab navigation (Tauri app doesn't need it)
+  if (e.key === "Tab") {
+    e.preventDefault();
+  }
   // Disable F5 refresh
   if (e.key === "F5") {
     e.preventDefault();

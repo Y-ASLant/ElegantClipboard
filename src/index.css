@@ -69,6 +69,13 @@
   border-color: var(--color-border);
 }
 
+/* Remove focus outline globally (Tauri app doesn't need keyboard navigation indicators) */
+*:focus,
+*:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
