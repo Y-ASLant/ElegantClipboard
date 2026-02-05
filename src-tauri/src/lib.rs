@@ -13,7 +13,7 @@ use commands::AppState;
 use config::AppConfig;
 use database::Database;
 use std::sync::{Arc, RwLock};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -139,6 +139,8 @@ async fn show_window(window: tauri::WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
+    // Emit event to frontend for cache invalidation
+    let _ = window.emit("window-shown", ());
 }
 
 /// Tauri command: Hide main window
@@ -281,6 +283,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
             // Enable mouse monitoring to detect clicks outside window
             input_monitor::enable_mouse_monitoring();
+            // Emit event to frontend for cache invalidation
+            let _ = window.emit("window-shown", ());
         }
     }
 }
@@ -561,6 +565,12 @@ pub fn run() {
             commands::is_autostart_enabled,
             commands::enable_autostart,
             commands::disable_autostart,
+            // File validation commands
+            commands::check_files_exist,
+            // File operation commands
+            commands::show_in_explorer,
+            commands::paste_as_path,
+            commands::get_file_details,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -194,7 +194,15 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
         }
     };
 
-    // Try to get image first using clipboard-rs
+    // Try to get files first (file paths from explorer copy)
+    if let Ok(files) = ctx.get_files() {
+        if !files.is_empty() {
+            debug!("Got {} files from clipboard", files.len());
+            return Some(ClipboardContent::Files(files));
+        }
+    }
+
+    // Try to get image using clipboard-rs
     if let Ok(img) = ctx.get_image() {
         let (width, height) = img.get_size();
         debug!("Got image from clipboard: {}x{}", width, height);

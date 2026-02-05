@@ -361,7 +361,21 @@ impl ClipboardHandler {
 
     /// Process file paths
     fn process_files(&self, files: Vec<String>, hash: String) -> Result<NewClipboardItem, String> {
-        let byte_size = files.iter().map(|f| f.len()).sum::<usize>() as i64;
+        use std::path::Path;
+        
+        // Calculate file sizes (only for regular files, skip directories)
+        // Directory size calculation is expensive and low value
+        let byte_size: i64 = files.iter()
+            .filter_map(|f| {
+                let path = Path::new(f);
+                if path.is_file() {
+                    std::fs::metadata(path).ok().map(|m| m.len() as i64)
+                } else {
+                    None // Skip directories - too expensive to calculate
+                }
+            })
+            .sum();
+        
         let preview = if files.len() == 1 {
             files[0].clone()
         } else {

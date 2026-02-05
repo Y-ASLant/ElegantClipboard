@@ -7,6 +7,7 @@ import {
   LockClosed16Filled,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import debounce from "lodash.debounce";
 import { ClipboardList } from "@/components/ClipboardList";
@@ -31,7 +32,7 @@ function App() {
   const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const { searchQuery, setSearchQuery, clearHistory } =
+  const { searchQuery, setSearchQuery, clearHistory, checkFileValidity, clearFileValidityCache } =
     useClipboardStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -39,6 +40,17 @@ function App() {
   useEffect(() => {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
   }, []);
+
+  // Check file validity when window is shown (batch check with single IPC call)
+  useEffect(() => {
+    const unlisten = listen("window-shown", () => {
+      clearFileValidityCache();
+      checkFileValidity();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [checkFileValidity, clearFileValidityCache]);
 
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {

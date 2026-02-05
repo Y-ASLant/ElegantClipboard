@@ -11,7 +11,8 @@
       "Bash(findstr:*)",
       "WebSearch",
       "Bash(cargo build:*)",
-      "Bash(npm run build)"
+      "Bash(npm run build)",
+      "Bash(netstat:*)",
     ]
   }
 }
