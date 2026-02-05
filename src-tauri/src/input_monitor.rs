@@ -18,6 +18,9 @@ static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
 /// Whether mouse monitoring is currently active
 static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// Whether the window is pinned (won't hide on click outside)
+static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
+
 /// Whether the monitor thread is running
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -77,6 +80,16 @@ pub fn disable_mouse_monitoring() {
 #[allow(dead_code)]
 pub fn is_mouse_monitoring_enabled() -> bool {
     MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Set window pinned state (when pinned, window won't hide on click outside)
+pub fn set_window_pinned(pinned: bool) {
+    WINDOW_PINNED.store(pinned, Ordering::Relaxed);
+}
+
+/// Check if window is pinned
+pub fn is_window_pinned() -> bool {
+    WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
 /// Get current cursor position
@@ -139,6 +152,11 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
 fn handle_click_outside() {
     // Only process if monitoring is enabled
     if !MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    
+    // Don't hide if window is pinned
+    if WINDOW_PINNED.load(Ordering::Relaxed) {
         return;
     }
     

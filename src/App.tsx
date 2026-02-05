@@ -22,15 +22,23 @@ import {
   Search16Regular,
   Delete16Regular,
   Settings16Regular,
+  LockClosed16Regular,
+  LockClosed16Filled,
 } from "@fluentui/react-icons";
 import debounce from "lodash.debounce";
 
 function App() {
   const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [isPinned, setIsPinned] = useState(false);
   const { searchQuery, setSearchQuery, clearHistory } =
     useClipboardStore();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Load pinned state on mount
+  useEffect(() => {
+    invoke<boolean>("is_window_pinned").then(setIsPinned);
+  }, []);
 
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {
@@ -150,6 +158,16 @@ function App() {
     }
   };
 
+  const togglePinned = async () => {
+    const newState = !isPinned;
+    try {
+      await invoke("set_window_pinned", { pinned: newState });
+      setIsPinned(newState);
+    } catch (error) {
+      console.error("Failed to toggle pinned state:", error);
+    }
+  };
+
   return (
     <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
       {/* Header: Search + Actions */}
@@ -185,6 +203,25 @@ function App() {
               </button>
             </TooltipTrigger>
             <TooltipContent>清空历史</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={togglePinned}
+                className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+                  isPinned
+                    ? "text-primary bg-primary/10"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                }`}
+              >
+                {isPinned ? (
+                  <LockClosed16Filled className="w-4 h-4" />
+                ) : (
+                  <LockClosed16Regular className="w-4 h-4" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{isPinned ? "解除锁定" : "锁定窗口"}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

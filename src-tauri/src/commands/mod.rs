@@ -2,6 +2,7 @@ use crate::clipboard::ClipboardMonitor;
 use crate::database::{
     ClipboardItem, ClipboardRepository, Database, QueryOptions, SettingsRepository,
 };
+use crate::input_monitor;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{Manager, State};
@@ -417,10 +418,12 @@ pub async fn paste_content(
         .map_err(|e| format!("Failed to access clipboard: {}", e))?;
     set_clipboard_content(&item, &mut clipboard)?;
 
-    // 2. Hide window and update state
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+    // 2. Hide window and update state (skip if window is pinned)
+    if !input_monitor::is_window_pinned() {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.hide();
+            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+        }
     }
 
     // 3. Simulate Ctrl+V after a small delay

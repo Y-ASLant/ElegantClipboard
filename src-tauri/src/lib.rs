@@ -397,6 +397,18 @@ fn get_current_shortcut() -> String {
     guard.clone().unwrap_or_else(|| "Alt+C".to_string())
 }
 
+/// Tauri command: Set window pinned state
+#[tauri::command]
+fn set_window_pinned(pinned: bool) {
+    input_monitor::set_window_pinned(pinned);
+}
+
+/// Tauri command: Get window pinned state
+#[tauri::command]
+fn is_window_pinned() -> bool {
+    input_monitor::is_window_pinned()
+}
+
 /// Tauri command: Open settings window
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
@@ -512,6 +524,8 @@ pub fn run() {
             toggle_maximize,
             close_window,
             open_settings_window,
+            set_window_pinned,
+            is_window_pinned,
             // Shortcut commands
             enable_winv_replacement,
             disable_winv_replacement,
