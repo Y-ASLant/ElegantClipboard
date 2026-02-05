@@ -20,6 +20,8 @@ export interface ClipboardItem {
   updated_at: string;
   access_count: number;
   last_accessed_at: string | null;
+  /** Whether all files exist (only for "files" content_type, computed at query time) */
+  files_valid?: boolean;
 }
 
 interface ClipboardState {
@@ -29,8 +31,6 @@ interface ClipboardState {
   isLoading: boolean;
   searchQuery: string;
   selectedType: string | null;
-  // File validity cache: item.id -> valid (true = all files exist)
-  fileValidityMap: Map<number, boolean>;
 
   // Actions
   fetchItems: (options?: {
@@ -52,10 +52,6 @@ interface ClipboardState {
   clearHistory: () => Promise<void>;
   refresh: () => Promise<void>;
   setupListener: () => Promise<() => void>;
-  // File validity actions
-  checkFileValidity: () => Promise<void>;
-  isFileValid: (itemId: number) => boolean | undefined;
-  clearFileValidityCache: () => void;
 }
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
@@ -65,7 +61,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   isLoading: false,
   searchQuery: "",
   selectedType: null,
-  fileValidityMap: new Map(),
 
   fetchItems: async (options = {}) => {
     set({ isLoading: true });
@@ -210,65 +205,5 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       get().refresh();
     });
     return unlisten;
-  },
-
-  // Batch check file validity for all file-type items (single IPC call)
-  checkFileValidity: async () => {
-    const { items, pinnedItems } = get();
-    // Dedupe items by id (pinnedItems might overlap with items)
-    const seenIds = new Set<number>();
-    const allItems = [...pinnedItems, ...items].filter((item) => {
-      if (seenIds.has(item.id)) return false;
-      seenIds.add(item.id);
-      return true;
-    });
-    
-    // Collect all file paths from file-type items
-    const fileItemsMap: Map<number, string[]> = new Map();
-    const allPaths: string[] = [];
-    
-    for (const item of allItems) {
-      if (item.content_type === "files" && item.file_paths) {
-        try {
-          const paths = JSON.parse(item.file_paths) as string[];
-          if (Array.isArray(paths) && paths.length > 0) {
-            fileItemsMap.set(item.id, paths);
-            allPaths.push(...paths);
-          }
-        } catch {
-          // Invalid JSON, skip
-        }
-      }
-    }
-    
-    if (allPaths.length === 0) return;
-    
-    try {
-      // Single IPC call to check all files
-      const result = await invoke<Record<string, { exists: boolean; is_dir: boolean }>>("check_files_exist", { 
-        paths: [...new Set(allPaths)] // Dedupe paths
-      });
-      
-      // Build validity map: item is valid only if ALL its files exist
-      const newValidityMap = new Map<number, boolean>();
-      for (const [itemId, paths] of fileItemsMap) {
-        const allExist = paths.every((p) => result[p]?.exists === true);
-        newValidityMap.set(itemId, allExist);
-      }
-      
-      set({ fileValidityMap: newValidityMap });
-    } catch (error) {
-      console.error("Failed to check file validity:", error);
-    }
-  },
-
-  // Get file validity for a specific item
-  isFileValid: (itemId: number) => {
-    return get().fileValidityMap.get(itemId);
-  },
-
-  // Clear file validity cache
-  clearFileValidityCache: () => {
-    set({ fileValidityMap: new Map() });
   },
 }));

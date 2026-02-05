@@ -25,6 +25,10 @@ pub struct ClipboardItem {
     pub updated_at: String,
     pub access_count: i64,
     pub last_accessed_at: Option<String>,
+    /// Whether all files in file_paths exist (only for "files" content_type)
+    /// This field is computed at query time, not stored in database
+    #[serde(default, skip_deserializing)]
+    pub files_valid: Option<bool>,
 }
 
 /// New clipboard item (for insertion)
@@ -456,6 +460,7 @@ impl ClipboardRepository {
             updated_at: row.get("updated_at")?,
             access_count: row.get("access_count")?,
             last_accessed_at: row.get("last_accessed_at")?,
+            files_valid: None, // Computed at query time, not stored in database
         })
     }
 }

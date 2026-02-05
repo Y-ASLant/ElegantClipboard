@@ -145,8 +145,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   isDragOverlay = false,
 }: ClipboardItemCardProps) {
   const { togglePin, toggleFavorite, deleteItem, copyToClipboard, pasteContent } = clipboardActions();
-  // Get file validity from store (batch checked, not per-component IPC)
-  const isFileValid = useClipboardStore((s) => s.isFileValid);
   const cardMaxLines = useUISettings((s) => s.cardMaxLines);
   const showTime = useUISettings((s) => s.showTime);
   const showCharCount = useUISettings((s) => s.showCharCount);
@@ -157,9 +155,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Get file validity from store (undefined = not yet checked)
-  const fileValidity = item.content_type === "files" ? isFileValid(item.id) : undefined;
-  const filesInvalid = fileValidity === false; // Only invalid if explicitly false
+  // File validity is now included in item from backend (no extra IPC needed)
+  const filesInvalid = item.content_type === "files" && item.files_valid === false;
 
   // Parse file paths for file-type items
   const filePaths = item.content_type === "files" ? parseFilePaths(item.file_paths) : [];
@@ -537,6 +534,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     prevProps.item.created_at === nextProps.item.created_at &&
     prevProps.item.byte_size === nextProps.item.byte_size &&
     prevProps.item.text_content === nextProps.item.text_content &&
-    prevProps.item.image_path === nextProps.item.image_path
+    prevProps.item.image_path === nextProps.item.image_path &&
+    prevProps.item.files_valid === nextProps.item.files_valid
   );
 });

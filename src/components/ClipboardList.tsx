@@ -13,15 +13,13 @@ interface SortableClipboardItem extends ClipboardItem {
 
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
-  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin, checkFileValidity } =
+  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
   useEffect(() => {
-    // Fetch items then check file validity
-    Promise.all([fetchItems(), fetchPinnedItems()]).then(() => {
-      checkFileValidity();
-    });
+    // Fetch items (files_valid is computed by backend, no extra IPC needed)
+    Promise.all([fetchItems(), fetchPinnedItems()]);
     if (listenerRef.current) return;
     let mounted = true;
     setupListener().then((unlisten) => {

@@ -32,8 +32,7 @@ function App() {
   const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const { searchQuery, setSearchQuery, clearHistory, checkFileValidity, clearFileValidityCache } =
-    useClipboardStore();
+  const { searchQuery, setSearchQuery, clearHistory, refresh } = useClipboardStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Load pinned state on mount
@@ -41,16 +40,15 @@ function App() {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
   }, []);
 
-  // Check file validity when window is shown (batch check with single IPC call)
+  // Refresh data when window is shown (files_valid is computed by backend)
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
-      clearFileValidityCache();
-      checkFileValidity();
+      refresh();
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [checkFileValidity, clearFileValidityCache]);
+  }, [refresh]);
 
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {

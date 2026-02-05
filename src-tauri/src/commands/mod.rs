@@ -91,7 +91,31 @@ pub async fn get_clipboard_items(
         offset,
     };
     
-    repo.list(options).map_err(|e| e.to_string())
+    let mut items = repo.list(options).map_err(|e| e.to_string())?;
+    
+    // Fill files_valid for file-type items (parallel check using rayon)
+    fill_files_valid(&mut items);
+    
+    Ok(items)
+}
+
+/// Check file existence and fill files_valid field for file-type items
+fn fill_files_valid(items: &mut [ClipboardItem]) {
+    use rayon::prelude::*;
+    use std::path::Path;
+    
+    // Parallel iteration over items
+    items.par_iter_mut().for_each(|item| {
+        if item.content_type == "files" {
+            if let Some(ref paths_json) = item.file_paths {
+                if let Ok(paths) = serde_json::from_str::<Vec<String>>(paths_json) {
+                    // Check if ALL files exist
+                    let all_exist = paths.iter().all(|p| Path::new(p).exists());
+                    item.files_valid = Some(all_exist);
+                }
+            }
+        }
+    });
 }
 
 /// Get clipboard item by ID
