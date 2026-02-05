@@ -120,8 +120,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({ item, index }
     <Card
       className={cn(
         "group relative cursor-pointer transition-all duration-150 overflow-hidden",
-        "hover:shadow-md hover:border-primary/30",
-        item.is_pinned && "border-primary/50 bg-primary/5"
+        "hover:shadow-md hover:border-primary/30"
       )}
       onClick={handlePaste}
     >
@@ -246,6 +245,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({ item, index }
             <TooltipContent>删除</TooltipContent>
           </Tooltip>
         </div>
+
+        {/* Pinned Badge - hide on hover when action buttons show */}
+        {item.is_pinned && (
+          <div className="absolute right-2 top-2 inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium bg-blue-50 text-blue-500 border border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900 opacity-100 group-hover:opacity-0 transition-opacity">
+            已置顶
+          </div>
+        )}
 
         {/* Index Badge */}
         {index !== undefined && (

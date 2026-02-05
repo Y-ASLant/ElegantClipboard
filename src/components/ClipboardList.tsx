@@ -4,7 +4,7 @@ import { useClipboardStore } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
 import { Separator } from "@/components/ui/separator";
-import { ClipboardMultiple16Regular, Pin16Regular } from "@fluentui/react-icons";
+import { ClipboardMultiple16Regular } from "@fluentui/react-icons";
 
 export function ClipboardList() {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -93,12 +93,6 @@ export function ClipboardList() {
         {/* Pinned Section */}
         {pinnedItems.length > 0 && (
           <div className="mb-2">
-            <div className="flex items-center gap-2 px-3 py-2">
-              <Pin16Regular className="w-4 h-4 text-muted-foreground" />
-              <span className="text-xs font-medium text-muted-foreground">
-                已置顶 ({pinnedItems.length})
-              </span>
-            </div>
             <div className="space-y-2">
               {pinnedItems.map((item, idx) => (
                 <ClipboardItemCard key={item.id} item={item} index={idx} />
