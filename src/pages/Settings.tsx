@@ -1,10 +1,4 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Card, CardContent } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-import { useUISettings } from "@/stores/ui-settings";
 import {
   Settings16Filled,
   Options16Filled,
@@ -12,10 +6,16 @@ import {
   Keyboard16Filled,
   Info16Filled,
 } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
-import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
+import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
 import { ShortcutsTab, ShortcutSettings } from "@/components/settings/ShortcutsTab";
+import { Card, CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { useUISettings } from "@/stores/ui-settings";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings {}
 

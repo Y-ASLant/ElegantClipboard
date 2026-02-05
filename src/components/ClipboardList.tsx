@@ -1,11 +1,11 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
+import { ClipboardMultiple16Regular } from "@fluentui/react-icons";
 import { Virtuoso } from "react-virtuoso";
+import { Separator } from "@/components/ui/separator";
+import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
-import { Separator } from "@/components/ui/separator";
-import { ClipboardMultiple16Regular } from "@fluentui/react-icons";
-import { useSortableList } from "@/hooks/useSortableList";
 
 interface SortableClipboardItem extends ClipboardItem {
   _sortId: string;

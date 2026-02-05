@@ -1,14 +1,4 @@
 import { memo, useEffect, useState, useRef } from "react";
-import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
-import { useUISettings } from "@/stores/ui-settings";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import {
   Pin16Regular,
   Pin16Filled,
@@ -18,7 +8,17 @@ import {
   Copy16Regular,
   Image16Regular,
 } from "@fluentui/react-icons";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useSortable, CSS } from "@/hooks/useSortableList";
+import { cn } from "@/lib/utils";
+import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
+import { useUISettings } from "@/stores/ui-settings";
 
 interface ClipboardItemCardProps {
   item: ClipboardItem;

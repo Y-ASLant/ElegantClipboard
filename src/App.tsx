@@ -1,8 +1,15 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import {
+  Search16Regular,
+  Delete16Regular,
+  Settings16Regular,
+  LockClosed16Regular,
+  LockClosed16Filled,
+} from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import debounce from "lodash.debounce";
 import { ClipboardList } from "@/components/ClipboardList";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,20 +19,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
-import {
-  Search16Regular,
-  Delete16Regular,
-  Settings16Regular,
-  LockClosed16Regular,
-  LockClosed16Filled,
-} from "@fluentui/react-icons";
-import debounce from "lodash.debounce";
 
 function App() {
   const [isDark, setIsDark] = useState(false);

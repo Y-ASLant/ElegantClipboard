@@ -1,6 +1,6 @@
+import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { emit, listen } from "@tauri-apps/api/event";
 
 interface UISettings {
   cardMaxLines: number;

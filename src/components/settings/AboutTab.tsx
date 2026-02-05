@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import {
   Person16Regular,
   Code16Regular,
   Open16Regular,
 } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
+import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 
 export function AboutTab() {
   const [appVersion, setAppVersion] = useState("0.0.0");

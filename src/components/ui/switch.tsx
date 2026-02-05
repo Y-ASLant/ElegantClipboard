@@ -1,7 +1,7 @@
 import * as React from "react"
+import { Checkmark12Filled, Dismiss12Filled } from "@fluentui/react-icons"
 import * as SwitchPrimitives from "@radix-ui/react-switch"
 import { cn } from "@/lib/utils"
-import { Checkmark12Filled, Dismiss12Filled } from "@fluentui/react-icons"
 
 interface SwitchProps extends React.ComponentPropsWithoutRef<typeof SwitchPrimitives.Root> {
   /** Show indicator icons on thumb */
