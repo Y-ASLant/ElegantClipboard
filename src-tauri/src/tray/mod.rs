@@ -36,6 +36,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
     let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(icon)
         .menu(&menu)
+        .show_menu_on_left_click(false)
         .tooltip("ElegantClipboard")
         .on_menu_event(move |app, event| {
             handle_menu_event(app, event.id.as_ref());
