@@ -1,11 +1,7 @@
 import { useState } from "react";
+import { Folder16Regular, Open16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -14,18 +10,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Folder16Regular, Open16Regular } from "@fluentui/react-icons";
 
 export interface GeneralSettings {
   data_path: string;
   max_history_count: number;
   max_content_size_kb: number;
   auto_start: boolean;
+  admin_launch: boolean;
+  is_running_as_admin: boolean;
   follow_cursor: boolean;
 }
 
@@ -47,6 +49,8 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
+  const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
 
   const selectFolder = async () => {
     try {
@@ -276,6 +280,28 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               onCheckedChange={(checked) => onSettingsChange({ ...settings, auto_start: checked })}
             />
           </div>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs flex items-center gap-2">
+                以管理员身份启动
+                {settings.is_running_as_admin && (
+                  <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded">
+                    当前已提权
+                  </span>
+                )}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                允许监听任务管理器等高权限窗口的点击
+              </p>
+            </div>
+            <Switch
+              checked={settings.admin_launch}
+              onCheckedChange={(checked) => {
+                setPendingAdminLaunch(checked);
+                setAdminRestartDialogOpen(true);
+              }}
+            />
+          </div>
         </div>
       </div>
 
@@ -329,6 +355,76 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               disabled={migrating}
             >
               {migrating ? "迁移中..." : "保留数据"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Launch Restart Dialog */}
+      <Dialog open={adminRestartDialogOpen} onOpenChange={setAdminRestartDialogOpen}>
+        <DialogContent className="max-w-sm" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>
+              {pendingAdminLaunch ? "启用管理员模式" : "关闭管理员模式"}
+            </DialogTitle>
+            <DialogDescription>
+              此设置需要重启应用后才能生效
+            </DialogDescription>
+          </DialogHeader>
+          
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAdminRestartDialogOpen(false);
+                setPendingAdminLaunch(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (pendingAdminLaunch !== null) {
+                  try {
+                    // Directly save to backend
+                    if (pendingAdminLaunch) {
+                      await invoke("enable_admin_launch");
+                    } else {
+                      await invoke("disable_admin_launch");
+                    }
+                    onSettingsChange({ ...settings, admin_launch: pendingAdminLaunch });
+                  } catch (error) {
+                    alert(`操作失败: ${error}`);
+                  }
+                }
+                setAdminRestartDialogOpen(false);
+                setPendingAdminLaunch(null);
+              }}
+            >
+              稍后重启
+            </Button>
+            <Button
+              onClick={async () => {
+                if (pendingAdminLaunch !== null) {
+                  try {
+                    // Directly save to backend before restart
+                    if (pendingAdminLaunch) {
+                      await invoke("enable_admin_launch");
+                    } else {
+                      await invoke("disable_admin_launch");
+                    }
+                    onSettingsChange({ ...settings, admin_launch: pendingAdminLaunch });
+                    await invoke("restart_app");
+                  } catch (error) {
+                    alert(`操作失败: ${error}`);
+                    setAdminRestartDialogOpen(false);
+                    setPendingAdminLaunch(null);
+                  }
+                }
+              }}
+            >
+              立即重启
             </Button>
           </DialogFooter>
         </DialogContent>

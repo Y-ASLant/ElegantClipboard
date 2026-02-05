@@ -2,7 +2,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, Runtime,
+    AppHandle, Emitter, Manager, Runtime,
 };
 use tracing::info;
 
@@ -61,6 +61,8 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         // Enable mouse monitoring when showing
                         crate::input_monitor::enable_mouse_monitoring();
                         crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
+                        // Emit event to frontend for cache invalidation
+                        let _ = window.emit("window-shown", ());
                     }
                 }
             }

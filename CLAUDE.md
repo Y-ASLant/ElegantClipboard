@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## 开发命令
+### 开发命令
 
 ```bash
 # 安装依赖
@@ -22,6 +22,15 @@ npm run preview
 
 # 构建生产版本
 npm run tauri build
+
+# 代码检查
+npm run lint
+
+# 自动修复代码问题
+npm run lint:fix
+
+# Rust 测试
+cd src-tauri && cargo test
 ```
 
 ## 项目架构
@@ -127,9 +136,9 @@ listen("ui-settings-changed", (event) => { ... });
 
 ## 窗口配置
 
-主窗口（`main`）采用特殊配置以支持全局快捷键：
+主窗口（`main`）采用特殊配置以支���全局快捷键：
 - `decorations: false` - 无边框窗口
-- `focus: false` - **运行时设置**（`lib.rs:470` `set_focusable(false)`）
+- `focus: false` - **运行时设置**（`lib.rs:502` `set_focusable(false)`）
 - `alwaysOnTop: true` - 置顶显示
 - `skipTaskbar: true` - 不显示在任务栏
 - `visibleOnAllWorkspaces: true` - 所有工作区可见
@@ -143,6 +152,10 @@ listen("ui-settings-changed", (event) => { ... });
 - 使用 `input_monitor.rs` 中的全局鼠标监控（`rdev`）
 - 仅在窗口可见时启用监控，降低 CPU 占用
 - 使用 `AtomicI64` 实现无锁光标位置追踪
+
+**窗口置顶锁定**（`set_window_pinned`）：
+- 运行时控制窗口是否可被其他置顶窗口覆盖
+- 用于在需要固定显示时切换置顶状态
 
 ## Win+V 替换功能
 
@@ -191,11 +204,36 @@ listen("ui-settings-changed", (event) => { ... });
 - **文本**：使用 `arboard`
 - **粘贴**：使用 `enigo` 模拟 Ctrl+V
 
+## 关键依赖
+
+**Rust 后端**：
+- `tauri 2` - 应用框架
+- `rusqlite` - SQLite 数据库（bundled 特性）
+- `tokio` - 异步运行时
+- `clipboard-master` - 剪贴板监控
+- `clipboard-rs` / `arboard` - 剪贴板操作
+- `enigo` - 键盘模拟粘贴
+- `rdev` - 全局鼠标/键盘监控
+- `parking_lot` - 高性能锁
+- `blake3` - 内容哈希去重
+- `tracing` - 日志记录
+
+**前端**：
+- React 19 + TypeScript
+- Vite 7 - 构建工具
+- Tailwind CSS 4 - 样式
+- Zustand 5 - 状态管理
+- react-virtuoso - 虚拟列表
+- @dnd-kit - 拖拽排序
+- Fluent UI Icons - 图标库
+- Radix UI - 无障碍组件基础
+
 ## 性能优化
 
-- **虚拟列表**：`@tanstack/react-virtual` 处理万级记录
-- **鼠标事件**：无锁原子操作，仅窗口可见时监控
+- **虚拟列表**：`react-virtuoso` 处理万级记录
+- **鼠标事件**：无锁原子操作（`AtomicI64`），仅窗口可见时监控
 - **SQLite**：WAL 模式，内存临时存储
+- **锁优化**：`parking_lot` 替代标准库 `Mutex`/`RwLock`，性能更优
 
 ## 命名约定
 
@@ -225,3 +263,15 @@ Rust 编译缓存目录配置在 `src-tauri/.cargo/config.toml`：
 - 修饰符：`CTRL`、`ALT`、`SHIFT`、`WIN`/`SUPER`/`META`/`CMD`
 - 特殊键：`SPACE`、`TAB`、`ENTER`、`ESC`、方向键等
 - 解析函数：`parse_shortcut()` → `Shortcut` 对象
+- 快捷键注册：通过 `tauri-plugin-global-shortcut` 在运行时动态注册
+- Win+V 替换模式：检测 `win_v_registry::is_win_v_hotkey_disabled()` 自动切换到 Win+V
+
+## ESLint 配置
+
+位置：项目根目录 `eslint.config.mjs`
+
+- 使用 `@eslint/js` 基础配置
+- TypeScript ESLint 解析器和插件
+- Import 插件用于导入排序
+- 运行 `npm run lint` 检查代码规范
+- 运行 `npm run lint:fix` 自动修复问题

@@ -1,8 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
 import { Settings } from "./pages/Settings";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 
 // Disable context menu (right-click)
@@ -12,6 +12,10 @@ document.addEventListener("contextmenu", (e) => {
 
 // Disable browser shortcuts
 document.addEventListener("keydown", (e) => {
+  // Disable Tab navigation (Tauri app doesn't need it)
+  if (e.key === "Tab") {
+    e.preventDefault();
+  }
   // Disable F5 refresh
   if (e.key === "F5") {
     e.preventDefault();

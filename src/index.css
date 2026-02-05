@@ -69,6 +69,13 @@
   border-color: var(--color-border);
 }
 
+/* Remove focus outline globally (Tauri app doesn't need keyboard navigation indicators) */
+*:focus,
+*:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
@@ -181,4 +188,27 @@ input, textarea, [contenteditable="true"] {
 /* Path display uses system monospace font */
 .path-text {
   font-family: "Cascadia Code", "Fira Code", Consolas, "SF Mono", Monaco, "Andale Mono", monospace;
+}
+
+/* Drag drop bounce animation */
+@keyframes scale-bounce {
+  0% {
+    transform: scale(0.95);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-scale-bounce {
+  animation: scale-bounce 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Dragging cursor - from QuickClipboard optimization */
+body.dragging-cursor,
+body.dragging-cursor * {
+  cursor: grabbing !important;
 }

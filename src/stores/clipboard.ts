@@ -1,6 +1,6 @@
-import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { create } from "zustand";
 
 export interface ClipboardItem {
   id: number;
@@ -15,10 +15,13 @@ export interface ClipboardItem {
   byte_size: number;
   is_pinned: boolean;
   is_favorite: boolean;
+  sort_order: number;
   created_at: string;
   updated_at: string;
   access_count: number;
   last_accessed_at: string | null;
+  /** Whether all files exist (only for "files" content_type, computed at query time) */
+  files_valid?: boolean;
 }
 
 interface ClipboardState {
@@ -42,6 +45,7 @@ interface ClipboardState {
   setSelectedType: (type: string | null) => void;
   togglePin: (id: number) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
+  moveItem: (fromId: number, toId: number) => Promise<void>;
   deleteItem: (id: number) => Promise<void>;
   copyToClipboard: (id: number) => Promise<void>;
   pasteContent: (id: number) => Promise<void>;
@@ -135,6 +139,16 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }));
     } catch (error) {
       console.error("Failed to toggle favorite:", error);
+    }
+  },
+
+  moveItem: async (fromId: number, toId: number) => {
+    try {
+      await invoke("move_clipboard_item", { fromId, toId });
+      // Refresh to get updated order
+      await get().refresh();
+    } catch (error) {
+      console.error("Failed to move item:", error);
     }
   },
 

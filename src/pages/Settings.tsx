@@ -1,10 +1,4 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Card, CardContent } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-import { useUISettings } from "@/stores/ui-settings";
 import {
   Settings16Filled,
   Options16Filled,
@@ -12,10 +6,16 @@ import {
   Keyboard16Filled,
   Info16Filled,
 } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
-import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
+import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
 import { ShortcutsTab, ShortcutSettings } from "@/components/settings/ShortcutsTab";
+import { Card, CardContent } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
+import { useUISettings } from "@/stores/ui-settings";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings {}
 
@@ -41,6 +41,8 @@ export function Settings() {
     max_history_count: 1000,
     max_content_size_kb: 1024,
     auto_start: false,
+    admin_launch: false,
+    is_running_as_admin: false,
     follow_cursor: true,
     shortcut: "Alt+C",
     winv_replacement: false,
@@ -68,7 +70,7 @@ export function Settings() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start, settings.follow_cursor]);
+  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start, settings.admin_launch, settings.follow_cursor]);
 
   const loadSettings = async () => {
     try {
@@ -78,6 +80,8 @@ export function Settings() {
       const maxContentSize = await invoke<string>("get_setting", { key: "max_content_size_kb" });
       const followCursor = await invoke<string>("get_setting", { key: "follow_cursor" });
       const autoStart = await invoke<boolean>("is_autostart_enabled");
+      const adminLaunch = await invoke<boolean>("is_admin_launch_enabled");
+      const isRunningAsAdmin = await invoke<boolean>("is_running_as_admin");
       const winvReplacement = await invoke<boolean>("is_winv_replacement_enabled");
       const currentShortcut = await invoke<string>("get_current_shortcut");
       
@@ -86,6 +90,8 @@ export function Settings() {
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
         auto_start: autoStart,
+        admin_launch: adminLaunch,
+        is_running_as_admin: isRunningAsAdmin,
         follow_cursor: followCursor !== "false", // Default to true
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
@@ -107,6 +113,13 @@ export function Settings() {
         await invoke("enable_autostart");
       } else {
         await invoke("disable_autostart");
+      }
+      
+      // Handle admin launch setting
+      if (settings.admin_launch) {
+        await invoke("enable_admin_launch");
+      } else {
+        await invoke("disable_admin_launch");
       }
       
       console.log("Settings saved");

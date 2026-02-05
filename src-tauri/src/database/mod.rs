@@ -81,8 +81,48 @@ impl Database {
     /// Initialize database schema
     fn init_schema(&self) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
+        
+        // Run migrations FIRST (for existing databases)
+        Self::run_migrations(&conn)?;
+        
+        // Then execute schema (CREATE IF NOT EXISTS is safe for new tables/indexes)
         conn.execute_batch(SCHEMA_SQL)?;
         info!("Database schema initialized");
+        
+        Ok(())
+    }
+    
+    /// Run database migrations for schema updates
+    /// This runs BEFORE schema creation to handle existing databases
+    fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+        // Check if clipboard_items table exists (skip migrations for new databases)
+        let table_exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+        
+        if !table_exists {
+            // New database, no migrations needed
+            return Ok(());
+        }
+        
+        // Check if sort_order column exists
+        let has_sort_order: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'sort_order'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+        
+        if !has_sort_order {
+            info!("Migrating database: adding sort_order column");
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN sort_order INTEGER DEFAULT 0;
+                 UPDATE clipboard_items SET sort_order = id;"
+            )?;
+            info!("Migration complete: sort_order column added");
+        }
+        
         Ok(())
     }
 

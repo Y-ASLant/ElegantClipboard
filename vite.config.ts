@@ -16,6 +16,38 @@ export default defineConfig(async () => ({
     },
   },
 
+  // Build optimization
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            // React core
+            if (id.includes('/react-dom/') || id.includes('/react/')) {
+              return 'vendor-react';
+            }
+            // Radix UI components
+            if (id.includes('@radix-ui')) {
+              return 'vendor-radix';
+            }
+            // DnD Kit
+            if (id.includes('@dnd-kit')) {
+              return 'vendor-dnd';
+            }
+            // Tauri API
+            if (id.includes('@tauri-apps')) {
+              return 'vendor-tauri';
+            }
+            // Virtual list
+            if (id.includes('react-virtuoso')) {
+              return 'vendor-virtuoso';
+            }
+          }
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
