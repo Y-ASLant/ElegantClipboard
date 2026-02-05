@@ -1,3 +1,4 @@
+mod admin_launch;
 mod clipboard;
 mod commands;
 mod config;
@@ -238,9 +239,17 @@ fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, Str
 }
 
 /// Tauri command: Restart application
+/// Uses ShellExecuteW to properly handle UAC elevation when admin launch is enabled
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
-    tauri::process::restart(&app.env());
+    // Use our custom restart that works with UAC elevation
+    if admin_launch::restart_app() {
+        // Exit current process after new instance is started
+        app.exit(0);
+    } else {
+        // Fallback to Tauri's restart
+        tauri::process::restart(&app.env());
+    }
 }
 
 /// Toggle window visibility (like QuickClipboard's toggle_main_window_visibility)
@@ -413,6 +422,31 @@ fn is_window_pinned() -> bool {
     input_monitor::is_window_pinned()
 }
 
+/// Tauri command: Check if admin launch is enabled
+#[tauri::command]
+fn is_admin_launch_enabled() -> bool {
+    admin_launch::is_admin_launch_enabled()
+}
+
+/// Tauri command: Enable admin launch
+#[tauri::command]
+fn enable_admin_launch() -> Result<(), String> {
+    admin_launch::enable_admin_launch()
+}
+
+/// Tauri command: Disable admin launch
+#[tauri::command]
+fn disable_admin_launch() -> Result<(), String> {
+    admin_launch::disable_admin_launch()
+}
+
+/// Tauri command: Check if currently running as admin
+#[tauri::command]
+fn is_running_as_admin() -> bool {
+    admin_launch::is_running_as_admin()
+}
+
+
 /// Tauri command: Open settings window
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
@@ -530,6 +564,11 @@ pub fn run() {
             open_settings_window,
             set_window_pinned,
             is_window_pinned,
+            // Admin launch commands
+            is_admin_launch_enabled,
+            enable_admin_launch,
+            disable_admin_launch,
+            is_running_as_admin,
             // Shortcut commands
             enable_winv_replacement,
             disable_winv_replacement,

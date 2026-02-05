@@ -66,13 +66,16 @@ enigo = "0.6"
 # Global input monitoring (for click outside detection)
 rdev = "0.5"
 
-# Windows API for low-level keyboard hook
+# Windows API for low-level keyboard hook and admin check
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
 ] }
-# Windows registry for disabling system Win+V
+# Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"
 
