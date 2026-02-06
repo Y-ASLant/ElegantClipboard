@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  高性能 Windows 剪贴板管理工具，基于 Tauri 2.0 构建，可完全替代系统剪贴板。
+  低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板。
 </p>
 
 <p align="center">
