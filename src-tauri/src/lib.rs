@@ -14,15 +14,15 @@ use clipboard::ClipboardMonitor;
 use commands::AppState;
 use config::AppConfig;
 use database::Database;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use shortcut::parse_shortcut;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
-/// Global state for current shortcut
-static CURRENT_SHORTCUT: RwLock<Option<String>> = RwLock::new(None);
+/// Global state for current shortcut (parking_lot::RwLock: no poison, consistent with codebase)
+static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
 
 /// Initialize logging system
 fn init_logging() {
@@ -213,11 +213,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 #[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     // Unregister current custom shortcut
-    let current_shortcut_str = {
-        let guard = CURRENT_SHORTCUT.read().unwrap();
-        guard.clone().unwrap_or_else(|| "Alt+C".to_string())
-    };
-    if let Some(shortcut) = parse_shortcut(&current_shortcut_str) {
+    if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut().unregister(shortcut);
     }
     
@@ -254,11 +250,7 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     win_v_registry::enable_win_v_hotkey(true)?;
     
     // Re-register custom shortcut with toggle handler
-    let current_shortcut_str = {
-        let guard = CURRENT_SHORTCUT.read().unwrap();
-        guard.clone().unwrap_or_else(|| "Alt+C".to_string())
-    };
-    if let Some(shortcut) = parse_shortcut(&current_shortcut_str) {
+    if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut()
             .on_shortcut(shortcut, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
@@ -288,14 +280,8 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
     let new_sc = parse_shortcut(&new_shortcut)
         .ok_or_else(|| format!("Invalid shortcut: {}", new_shortcut))?;
 
-    // Get current shortcut
-    let current_shortcut_str = {
-        let guard = CURRENT_SHORTCUT.read().unwrap();
-        guard.clone().unwrap_or_else(|| "Alt+C".to_string())
-    };
-
     // Unregister current shortcut
-    if let Some(current_sc) = parse_shortcut(&current_shortcut_str) {
+    if let Some(current_sc) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut().unregister(current_sc);
     }
 
@@ -305,10 +291,7 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
 
     // Update global state
-    {
-        let mut guard = CURRENT_SHORTCUT.write().unwrap();
-        *guard = Some(new_shortcut.clone());
-    }
+    *CURRENT_SHORTCUT.write() = Some(new_shortcut.clone());
 
     Ok(new_shortcut)
 }
@@ -316,8 +299,10 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
 /// Tauri command: Get current shortcut
 #[tauri::command]
 fn get_current_shortcut() -> String {
-    let guard = CURRENT_SHORTCUT.read().unwrap();
-    guard.clone().unwrap_or_else(|| "Alt+C".to_string())
+    CURRENT_SHORTCUT
+        .read()
+        .clone()
+        .unwrap_or_else(|| "Alt+C".to_string())
 }
 
 /// Tauri command: Set window pinned state
@@ -428,7 +413,7 @@ pub fn run() {
             let _ = tray::setup_tray(app.handle());
             
             // Initialize global shortcut state
-            *CURRENT_SHORTCUT.write().unwrap() = Some(saved_shortcut.clone());
+            *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
             
             // Register shortcut based on Win+V replacement setting
             let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {

@@ -1,11 +1,12 @@
 use crate::database::ClipboardRepository;
-use crate::input_monitor;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::State;
 use tracing::debug;
 
-use super::{clipboard::simulate_paste, AppState};
+use super::{
+    clipboard::simulate_paste, hide_main_window_if_not_pinned, with_paused_monitor, AppState,
+};
 
 // ============ File Validation Commands ============
 
@@ -40,36 +41,38 @@ pub async fn check_files_exist(
 
 // ============ File Operation Commands ============
 
-/// Show file/folder in system file explorer (Windows Explorer, Finder, etc.)
+/// Show file/folder in system file explorer, highlighting the file
 #[tauri::command]
 pub async fn show_in_explorer(path: String) -> Result<(), String> {
     use std::path::Path;
-    use std::process::Command;
 
     let path = Path::new(&path);
 
+    // show_in_explorer uses /select to highlight the file (different from open_path_in_explorer)
     #[cfg(target_os = "windows")]
     {
         let path_str = path.to_string_lossy();
-        Command::new("explorer.exe")
+        std::process::Command::new("explorer.exe")
             .args(["/select,", &path_str])
             .spawn()
             .map_err(|e| format!("Failed to open explorer: {}", e))?;
     }
-
     #[cfg(target_os = "macos")]
     {
-        Command::new("open")
+        std::process::Command::new("open")
             .args(["-R", &path.to_string_lossy()])
             .spawn()
             .map_err(|e| format!("Failed to open Finder: {}", e))?;
     }
-
     #[cfg(target_os = "linux")]
     {
         let parent = path.parent().unwrap_or(path);
-        if Command::new("xdg-open").arg(parent).spawn().is_err() {
-            Command::new("nautilus")
+        if std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .is_err()
+        {
+            std::process::Command::new("nautilus")
                 .arg(&path.to_string_lossy().to_string())
                 .spawn()
                 .map_err(|e| format!("Failed to open file manager: {}", e))?;
@@ -104,33 +107,21 @@ pub async fn paste_as_path(
         return Err("Item is not a file type".to_string());
     };
 
-    state.monitor.pause();
+    with_paused_monitor(&state, || {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+        clipboard
+            .set_text(&paths_text)
+            .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
 
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
-    clipboard
-        .set_text(&paths_text)
-        .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+        hide_main_window_if_not_pinned(&app);
 
-    // Hide window (skip if pinned)
-    if !input_monitor::is_window_pinned() {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.hide();
-            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-        }
-    }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        simulate_paste()?;
 
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    simulate_paste()?;
-
-    let monitor = state.monitor.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        monitor.resume();
-    });
-
-    debug!("Pasted file path as text for item {}", id);
-    Ok(())
+        debug!("Pasted file path as text for item {}", id);
+        Ok(())
+    })
 }
 
 /// Get file details for display

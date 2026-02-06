@@ -1,10 +1,9 @@
 use crate::database::{ClipboardItem, ClipboardRepository};
-use crate::input_monitor;
 use std::sync::Arc;
-use tauri::{Manager, State};
+use tauri::State;
 use tracing::debug;
 
-use super::AppState;
+use super::{hide_main_window_if_not_pinned, with_paused_monitor, AppState};
 
 // ============ Helper Functions ============
 
@@ -278,20 +277,13 @@ pub async fn copy_to_clipboard(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Item not found".to_string())?;
 
-    state.monitor.pause();
-
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
-    set_clipboard_content(&item, &mut clipboard)?;
-
-    let monitor = state.monitor.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        monitor.resume();
-    });
-
-    debug!("Copied item {} to clipboard", id);
-    Ok(())
+    with_paused_monitor(&state, || {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+        set_clipboard_content(&item, &mut clipboard)?;
+        debug!("Copied item {} to clipboard", id);
+        Ok(())
+    })
 }
 
 /// Paste clipboard item content directly
@@ -308,29 +300,17 @@ pub async fn paste_content(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Item not found".to_string())?;
 
-    state.monitor.pause();
+    with_paused_monitor(&state, || {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+        set_clipboard_content(&item, &mut clipboard)?;
 
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
-    set_clipboard_content(&item, &mut clipboard)?;
+        hide_main_window_if_not_pinned(&app);
 
-    // Hide window (skip if pinned)
-    if !input_monitor::is_window_pinned() {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.hide();
-            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-        }
-    }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        simulate_paste()?;
 
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    simulate_paste()?;
-
-    let monitor = state.monitor.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        monitor.resume();
-    });
-
-    debug!("Pasted item {} to active window", id);
-    Ok(())
+        debug!("Pasted item {} to active window", id);
+        Ok(())
+    })
 }

@@ -45,9 +45,6 @@ parking_lot = "0.12"
 # Parallel processing
 rayon = "1.10"
 
-# Lazy static for global state
-lazy_static = "1.4"
-
 # Image handling
 image = "0.25"
 
