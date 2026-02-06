@@ -6,6 +6,7 @@ mod database;
 mod input_monitor;
 mod keyboard_hook;
 mod positioning;
+mod shortcut;
 mod tray;
 mod win_v_registry;
 
@@ -15,104 +16,13 @@ use config::AppConfig;
 use database::Database;
 use std::sync::{Arc, RwLock};
 use tauri::{Emitter, Manager};
+use shortcut::parse_shortcut;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 /// Global state for current shortcut
 static CURRENT_SHORTCUT: RwLock<Option<String>> = RwLock::new(None);
-
-/// Parse a single key string to Code
-fn parse_key_code(key: &str) -> Option<Code> {
-    // Letters A-Z
-    const LETTERS: [Code; 26] = [
-        Code::KeyA, Code::KeyB, Code::KeyC, Code::KeyD, Code::KeyE, Code::KeyF,
-        Code::KeyG, Code::KeyH, Code::KeyI, Code::KeyJ, Code::KeyK, Code::KeyL,
-        Code::KeyM, Code::KeyN, Code::KeyO, Code::KeyP, Code::KeyQ, Code::KeyR,
-        Code::KeyS, Code::KeyT, Code::KeyU, Code::KeyV, Code::KeyW, Code::KeyX,
-        Code::KeyY, Code::KeyZ,
-    ];
-    // Digits 0-9
-    const DIGITS: [Code; 10] = [
-        Code::Digit0, Code::Digit1, Code::Digit2, Code::Digit3, Code::Digit4,
-        Code::Digit5, Code::Digit6, Code::Digit7, Code::Digit8, Code::Digit9,
-    ];
-    // Function keys F1-F12
-    const F_KEYS: [Code; 12] = [
-        Code::F1, Code::F2, Code::F3, Code::F4, Code::F5, Code::F6,
-        Code::F7, Code::F8, Code::F9, Code::F10, Code::F11, Code::F12,
-    ];
-
-    // Single letter
-    if key.len() == 1 {
-        let c = key.chars().next()?;
-        if c.is_ascii_uppercase() {
-            return Some(LETTERS[(c as usize) - ('A' as usize)]);
-        }
-        if c.is_ascii_digit() {
-            return Some(DIGITS[(c as usize) - ('0' as usize)]);
-        }
-    }
-
-    // Function keys F1-F12
-    if key.starts_with('F') && key.len() <= 3 {
-        if let Ok(n) = key[1..].parse::<usize>() {
-            if n >= 1 && n <= 12 {
-                return Some(F_KEYS[n - 1]);
-            }
-        }
-    }
-
-    // Special keys
-    match key {
-        "SPACE" => Some(Code::Space),
-        "TAB" => Some(Code::Tab),
-        "ENTER" | "RETURN" => Some(Code::Enter),
-        "BACKSPACE" => Some(Code::Backspace),
-        "DELETE" | "DEL" => Some(Code::Delete),
-        "ESCAPE" | "ESC" => Some(Code::Escape),
-        "HOME" => Some(Code::Home),
-        "END" => Some(Code::End),
-        "PAGEUP" => Some(Code::PageUp),
-        "PAGEDOWN" => Some(Code::PageDown),
-        "UP" | "ARROWUP" => Some(Code::ArrowUp),
-        "DOWN" | "ARROWDOWN" => Some(Code::ArrowDown),
-        "LEFT" | "ARROWLEFT" => Some(Code::ArrowLeft),
-        "RIGHT" | "ARROWRIGHT" => Some(Code::ArrowRight),
-        "`" | "BACKQUOTE" => Some(Code::Backquote),
-        _ => None,
-    }
-}
-
-/// Parse shortcut string to Shortcut object
-fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
-    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
-    if parts.is_empty() {
-        return None;
-    }
-
-    let mut modifiers = Modifiers::empty();
-    let mut key_code = None;
-
-    for part in parts {
-        let upper = part.to_uppercase();
-        match upper.as_str() {
-            "CTRL" | "CONTROL" => modifiers |= Modifiers::CONTROL,
-            "ALT" => modifiers |= Modifiers::ALT,
-            "SHIFT" => modifiers |= Modifiers::SHIFT,
-            "WIN" | "SUPER" | "META" | "CMD" => modifiers |= Modifiers::SUPER,
-            _ => key_code = parse_key_code(&upper),
-        }
-    }
-
-    key_code.map(|code| {
-        if modifiers.is_empty() {
-            Shortcut::new(None, code)
-        } else {
-            Shortcut::new(Some(modifiers), code)
-        }
-    })
-}
 
 /// Initialize logging system
 fn init_logging() {
@@ -576,40 +486,35 @@ pub fn run() {
             update_shortcut,
             get_current_shortcut,
             // Clipboard commands
-            commands::get_clipboard_items,
-            commands::get_clipboard_item,
-            commands::get_clipboard_count,
-            commands::toggle_pin,
-            commands::toggle_favorite,
-            commands::move_clipboard_item,
-            commands::delete_clipboard_item,
-            commands::clear_history,
-            commands::copy_to_clipboard,
-            commands::paste_content,
-            // Settings commands
-            commands::get_setting,
-            commands::set_setting,
-            commands::get_all_settings,
-            // Monitor commands
-            commands::pause_monitor,
-            commands::resume_monitor,
-            commands::get_monitor_status,
-            // Database commands
-            commands::optimize_database,
-            commands::vacuum_database,
-            // Folder commands
-            commands::select_folder_for_settings,
-            commands::open_data_folder,
-            // Autostart commands
-            commands::is_autostart_enabled,
-            commands::enable_autostart,
-            commands::disable_autostart,
-            // File validation commands
-            commands::check_files_exist,
+            commands::clipboard::get_clipboard_items,
+            commands::clipboard::get_clipboard_item,
+            commands::clipboard::get_clipboard_count,
+            commands::clipboard::toggle_pin,
+            commands::clipboard::toggle_favorite,
+            commands::clipboard::move_clipboard_item,
+            commands::clipboard::delete_clipboard_item,
+            commands::clipboard::clear_history,
+            commands::clipboard::copy_to_clipboard,
+            commands::clipboard::paste_content,
+            // Settings, monitor, database, folder, autostart commands
+            commands::settings::get_setting,
+            commands::settings::set_setting,
+            commands::settings::get_all_settings,
+            commands::settings::pause_monitor,
+            commands::settings::resume_monitor,
+            commands::settings::get_monitor_status,
+            commands::settings::optimize_database,
+            commands::settings::vacuum_database,
+            commands::settings::select_folder_for_settings,
+            commands::settings::open_data_folder,
+            commands::settings::is_autostart_enabled,
+            commands::settings::enable_autostart,
+            commands::settings::disable_autostart,
             // File operation commands
-            commands::show_in_explorer,
-            commands::paste_as_path,
-            commands::get_file_details,
+            commands::file_ops::check_files_exist,
+            commands::file_ops::show_in_explorer,
+            commands::file_ops::paste_as_path,
+            commands::file_ops::get_file_details,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

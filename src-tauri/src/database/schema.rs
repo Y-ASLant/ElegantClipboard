@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     content_hash TEXT NOT NULL UNIQUE,
     preview TEXT,
     byte_size INTEGER DEFAULT 0,
+    image_width INTEGER,
+    image_height INTEGER,
     is_pinned INTEGER DEFAULT 0,
     is_favorite INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0,

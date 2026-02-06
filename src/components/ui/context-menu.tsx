@@ -1,6 +1,6 @@
 import * as React from "react"
-import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
 import { Checkmark16Regular, ChevronRight16Regular } from "@fluentui/react-icons"
+import * as ContextMenuPrimitive from "@radix-ui/react-context-menu"
 import { cn } from "@/lib/utils"
 
 const ContextMenu = ContextMenuPrimitive.Root
