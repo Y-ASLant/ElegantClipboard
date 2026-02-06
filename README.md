@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  高性能 Windows 剪贴板管理工具，基于 Tauri 2.0 构建，可完全替代系统剪贴板。
+  低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板。
 </p>
 
 <p align="center">
@@ -13,6 +13,15 @@
   <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license">
 </p>
+
+## 设计理念
+
+**低占用 · 高性能 · 现代化 · 完全本地化离线**
+
+- **低占用** - 托盘常驻，不打扰核心工作流，窗口不抢占焦点，仅可见时启用监控
+- **高性能** - SQLite FTS5 全文搜索、虚拟列表处理万级记录、异步图像处理、内容哈希去重
+- **现代化** - Tauri 2.0 + React 19 + Tailwind CSS 4，类型安全，优雅架构
+- **本地化离线** - 数据完全本地存储，无网络请求，无云同步，隐私至上
 
 ## 功能特性
 

@@ -37,7 +37,7 @@ export function AboutTab() {
             </span>
           </div>
           <p className="text-sm text-muted-foreground max-w-xs">
-            高性能 Windows 剪贴板管理器，支持文本、图片、HTML、RTF、文件路径
+            低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板
           </p>
         </div>
       </div>
