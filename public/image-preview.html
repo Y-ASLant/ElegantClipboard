@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    img {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+    img.loaded {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <img id="preview" />
+  <script>
+    const img = document.getElementById('preview');
+
+    // Listen for image-preview-update event from main window
+    if (window.__TAURI__) {
+      const { listen } = window.__TAURI__.event;
+      const { convertFileSrc } = window.__TAURI__.core;
+
+      listen('image-preview-update', (event) => {
+        const { imagePath } = event.payload;
+        img.classList.remove('loaded');
+        img.src = convertFileSrc(imagePath);
+      });
+
+      img.addEventListener('load', () => {
+        img.classList.add('loaded');
+      });
+
+      img.addEventListener('error', () => {
+        img.classList.remove('loaded');
+      });
+    }
+  </script>
+</body>
+</html>

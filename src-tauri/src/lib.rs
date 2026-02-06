@@ -342,6 +342,63 @@ fn is_running_as_admin() -> bool {
 }
 
 
+// ============ Image Preview Window ============
+
+/// Tauri command: Show/resize image preview window
+/// If `image_path` is provided, updates the displayed image. Otherwise just repositions/resizes.
+#[tauri::command]
+async fn show_image_preview(
+    app: tauri::AppHandle,
+    image_path: Option<String>,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    // Create preview window on first use (lazy init), reuse afterwards
+    let window = if let Some(w) = app.get_webview_window("image-preview") {
+        w
+    } else {
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "image-preview",
+            tauri::WebviewUrl::App("/image-preview.html".into()),
+        )
+        .title("")
+        .inner_size(width, height)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|e| format!("Failed to create preview window: {}", e))?
+    };
+
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+    let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
+
+    // Only emit image update when a new image path is provided (skip for pure resize)
+    if let Some(ref path) = image_path {
+        let _ = window.emit("image-preview-update", serde_json::json!({ "imagePath": path }));
+    }
+
+    let _ = window.show();
+    Ok(())
+}
+
+/// Tauri command: Hide image preview window
+#[tauri::command]
+async fn hide_image_preview(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("image-preview") {
+        let _ = window.hide();
+    }
+}
+
 /// Tauri command: Open settings window
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
@@ -457,6 +514,8 @@ pub fn run() {
             toggle_maximize,
             close_window,
             open_settings_window,
+            show_image_preview,
+            hide_image_preview,
             set_window_pinned,
             is_window_pinned,
             // Admin launch commands
