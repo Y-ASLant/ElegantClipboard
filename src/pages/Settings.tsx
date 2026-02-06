@@ -35,6 +35,9 @@ export function Settings() {
     showTime, setShowTime,
     showCharCount, setShowCharCount,
     showByteSize, setShowByteSize,
+    imagePreviewEnabled, setImagePreviewEnabled,
+    previewZoomStep, setPreviewZoomStep,
+    previewPosition, setPreviewPosition,
   } = useUISettings();
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
@@ -230,6 +233,12 @@ export function Settings() {
                       setShowCharCount={setShowCharCount}
                       showByteSize={showByteSize}
                       setShowByteSize={setShowByteSize}
+                      imagePreviewEnabled={imagePreviewEnabled}
+                      setImagePreviewEnabled={setImagePreviewEnabled}
+                      previewZoomStep={previewZoomStep}
+                      setPreviewZoomStep={setPreviewZoomStep}
+                      previewPosition={previewPosition}
+                      setPreviewPosition={setPreviewPosition}
                     />
                   )}
 

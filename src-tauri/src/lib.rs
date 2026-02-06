@@ -344,29 +344,33 @@ fn is_running_as_admin() -> bool {
 
 // ============ Image Preview Window ============
 
-/// Tauri command: Show/resize image preview window
-/// If `image_path` is provided, updates the displayed image. Otherwise just repositions/resizes.
+/// Tauri command: Show image preview in a fixed-size transparent window
+/// The window fills the available space to the left (or right) of the main window.
+/// Image sizing is handled by CSS inside the webview — no window resize during zoom.
 #[tauri::command]
 async fn show_image_preview(
     app: tauri::AppHandle,
-    image_path: Option<String>,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
+    image_path: String,
+    img_width: f64,
+    img_height: f64,
+    win_x: f64,
+    win_y: f64,
+    win_width: f64,
+    win_height: f64,
 ) -> Result<(), String> {
-    // Create preview window on first use (lazy init), reuse afterwards
+    let mut newly_created = false;
     let window = if let Some(w) = app.get_webview_window("image-preview") {
         w
     } else {
+        newly_created = true;
         tauri::WebviewWindowBuilder::new(
             &app,
             "image-preview",
             tauri::WebviewUrl::App("/image-preview.html".into()),
         )
         .title("")
-        .inner_size(width, height)
-        .position(x, y)
+        .inner_size(win_width, win_height)
+        .position(win_x, win_y)
         .decorations(false)
         .transparent(true)
         .shadow(false)
@@ -379,23 +383,33 @@ async fn show_image_preview(
         .map_err(|e| format!("Failed to create preview window: {}", e))?
     };
 
-    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
-    let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x, y }));
-
-    // Only emit image update when a new image path is provided (skip for pure resize)
-    if let Some(ref path) = image_path {
-        let _ = window.emit("image-preview-update", serde_json::json!({ "imagePath": path }));
+    if newly_created {
+        // First creation: wait for HTML to load before emitting events
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    } else {
+        // Reposition if main window may have moved since last show
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: win_width, height: win_height }));
+        let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: win_x, y: win_y }));
     }
+
+    // Send image path + initial CSS size to the preview window
+    let _ = window.emit("image-preview-update", serde_json::json!({
+        "imagePath": image_path,
+        "width": img_width,
+        "height": img_height,
+    }));
 
     let _ = window.show();
     Ok(())
 }
 
-/// Tauri command: Hide image preview window
+/// Tauri command: Hide image preview window and clear its content
 #[tauri::command]
 async fn hide_image_preview(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("image-preview") {
         let _ = window.hide();
+        // Clear the image so next show doesn't flash the old content
+        let _ = window.emit("image-preview-clear", ());
     }
 }
 

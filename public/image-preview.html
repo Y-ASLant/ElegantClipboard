@@ -11,43 +11,98 @@
       background: transparent;
       user-select: none;
       -webkit-user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #wrap {
+      position: relative;
+      display: inline-block;
+      will-change: width, height;
+      transition: width 0.15s ease-out, height 0.15s ease-out;
     }
     img {
       display: block;
-      width: 100vw;
-      height: 100vh;
+      width: 100%;
+      height: 100%;
       object-fit: contain;
       opacity: 0;
       transition: opacity 0.15s ease;
     }
-    img.loaded {
-      opacity: 1;
+    img.loaded { opacity: 1; }
+    #badge {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      white-space: nowrap;
     }
+    #badge.visible { opacity: 1; }
   </style>
 </head>
 <body>
-  <img id="preview" />
+  <div id="wrap">
+    <img id="preview" />
+    <div id="badge"></div>
+  </div>
   <script>
+    const wrap = document.getElementById('wrap');
     const img = document.getElementById('preview');
+    const badge = document.getElementById('badge');
+    let hideTimer = null;
 
-    // Listen for image-preview-update event from main window
+    function showBadge(text) {
+      badge.textContent = text;
+      badge.classList.add('visible');
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => badge.classList.remove('visible'), 1200);
+    }
+
+    function clearBadge() {
+      badge.classList.remove('visible');
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
+
     if (window.__TAURI__) {
       const { listen } = window.__TAURI__.event;
       const { convertFileSrc } = window.__TAURI__.core;
 
       listen('image-preview-update', (event) => {
-        const { imagePath } = event.payload;
+        const { imagePath, width, height } = event.payload;
         img.classList.remove('loaded');
+        clearBadge();
+        wrap.style.width = width + 'px';
+        wrap.style.height = height + 'px';
         img.src = convertFileSrc(imagePath);
       });
 
-      img.addEventListener('load', () => {
-        img.classList.add('loaded');
+      listen('image-preview-zoom', (event) => {
+        const { width, height, percent, active } = event.payload;
+        wrap.style.width = width + 'px';
+        wrap.style.height = height + 'px';
+        if (active) showBadge(percent + '%');
       });
 
-      img.addEventListener('error', () => {
+      listen('image-preview-clear', () => {
         img.classList.remove('loaded');
+        img.removeAttribute('src');
+        clearBadge();
+        // Reset wrap size to prevent stale dimensions on next show
+        wrap.style.width = '0';
+        wrap.style.height = '0';
       });
+
+      img.addEventListener('load', () => img.classList.add('loaded'));
+      img.addEventListener('error', () => img.classList.remove('loaded'));
     }
   </script>
 </body>

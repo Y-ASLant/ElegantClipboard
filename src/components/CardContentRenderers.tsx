@@ -8,8 +8,10 @@ import {
   Warning16Regular,
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useUISettings } from "@/stores/ui-settings";
 
 // ============ Card Footer ============
 
@@ -43,28 +45,33 @@ const HOVER_DELAY_MS = 300;
 const PREVIEW_GAP = 12;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 5.0;
-const SCALE_STEP = 0.15;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
 
-/** Get available space on each side of the main window */
-function getAvailableSpace() {
+/** Get the fixed window rect: fills the available space beside the main window */
+function getPreviewWindowRect(position: "auto" | "left" | "right") {
   const winX = window.screenX ?? window.screenLeft ?? 0;
   const mainW = window.innerWidth || 380;
   const screenW = window.screen.availWidth;
+  const screenH = window.screen.availHeight;
 
   const leftSpace = winX - PREVIEW_GAP;
   const rightSpace = screenW - (winX + mainW) - PREVIEW_GAP;
 
-  // Prefer left; fall back to right
-  if (leftSpace >= 200) {
-    return { side: "left" as const, maxW: leftSpace };
+  const useLeft =
+    position === "left" ? true :
+    position === "right" ? false :
+    leftSpace >= rightSpace && leftSpace >= 200;
+
+  if (useLeft) {
+    return { x: 0, y: 0, w: Math.max(200, leftSpace), h: screenH };
   }
-  return { side: "right" as const, maxW: rightSpace };
+  return { x: winX + mainW + PREVIEW_GAP, y: 0, w: Math.max(200, rightSpace), h: screenH };
 }
 
-/** Calculate the scaled window size, clamped to available space */
-function calcPreviewSize(imgW: number, imgH: number, scale: number, maxAvailW: number) {
+/** Calculate image CSS size at a given scale, fitted into available space */
+function calcImageSize(imgW: number, imgH: number, scale: number, maxW: number, maxH: number) {
+  // Fit to base bounds at scale=1
   let baseW = imgW;
   let baseH = imgH;
   if (baseW > BASE_PREVIEW_W || baseH > BASE_PREVIEW_H) {
@@ -72,45 +79,20 @@ function calcPreviewSize(imgW: number, imgH: number, scale: number, maxAvailW: n
     baseW *= ratio;
     baseH *= ratio;
   }
-
   let w = baseW * scale;
   let h = baseH * scale;
-
-  const absMaxH = window.screen.availHeight * 0.95;
-  if (w > maxAvailW || h > absMaxH) {
-    const ratio = Math.min(maxAvailW / w, absMaxH / h);
+  // Clamp to available space
+  if (w > maxW || h > maxH) {
+    const ratio = Math.min(maxW / w, maxH / h);
     w *= ratio;
     h *= ratio;
   }
-
-  return { width: Math.max(200, w), height: Math.max(150, h) };
+  return { width: Math.max(100, w), height: Math.max(80, h) };
 }
 
-/** Calculate preview x position based on side */
-function calcPreviewX(side: "left" | "right", w: number) {
-  const winX = window.screenX ?? window.screenLeft ?? 0;
-  if (side === "left") {
-    return Math.max(0, winX - w - PREVIEW_GAP);
-  }
-  return winX + (window.innerWidth || 380) + PREVIEW_GAP;
-}
-
-/** Clamp x so preview never overlaps main window */
-function clampPreviewX(x: number, w: number, side: "left" | "right") {
-  if (side === "left") {
-    const maxRight = (window.screenX ?? 0) - PREVIEW_GAP;
-    return Math.max(0, Math.min(x, maxRight - w));
-  }
-  const minLeft = (window.screenX ?? 0) + (window.innerWidth || 380) + PREVIEW_GAP;
-  return Math.max(minLeft, x);
-}
-
-// ---- Preview state stored in a single ref to reduce ref count ----
 interface PreviewState {
   visible: boolean;
   scale: number;
-  center: { cx: number; cy: number };
-  lastSize: { w: number; h: number };
   imgNatural: { w: number; h: number };
   currentPath: string | undefined;
 }
@@ -118,8 +100,6 @@ interface PreviewState {
 const defaultPreviewState = (): PreviewState => ({
   visible: false,
   scale: 1.0,
-  center: { cx: 0, cy: 0 },
-  lastSize: { w: 0, h: 0 },
   imgNatural: { w: BASE_PREVIEW_W, h: BASE_PREVIEW_H },
   currentPath: undefined,
 });
@@ -137,6 +117,9 @@ const ImagePreview = memo(function ImagePreview({
   overlay?: React.ReactNode;
   imagePath?: string;
 }) {
+  const imagePreviewEnabled = useUISettings((s) => s.imagePreviewEnabled);
+  const previewZoomStep = useUISettings((s) => s.previewZoomStep);
+  const previewPosition = useUISettings((s) => s.previewPosition);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const ps = useRef<PreviewState>(defaultPreviewState());
@@ -154,70 +137,57 @@ const ImagePreview = memo(function ImagePreview({
     ps.current.scale = 1.0;
   }, [clearTimer]);
 
-  const updatePreview = useCallback(async (withImage: boolean) => {
-    if (!containerRef.current) return;
-    const { imgNatural, scale, visible } = ps.current;
-    const space = getAvailableSpace();
-    const { width, height } = calcPreviewSize(imgNatural.w, imgNatural.h, scale, space.maxW);
+  // Show preview: open fixed-size window, send image + initial CSS size
+  const showPreview = useCallback(async () => {
+    if (!containerRef.current || !ps.current.currentPath) return;
+    const rect = getPreviewWindowRect(previewPosition);
+    const { imgNatural } = ps.current;
+    const { width, height } = calcImageSize(imgNatural.w, imgNatural.h, 1.0, rect.w, rect.h);
 
-    // For resize: skip if size didn't actually change (hit clamp)
-    if (visible && Math.abs(width - ps.current.lastSize.w) < 1 && Math.abs(height - ps.current.lastSize.h) < 1) {
-      return;
+    ps.current.visible = true;
+    ps.current.scale = 1.0;
+    try {
+      await invoke("show_image_preview", {
+        imagePath: ps.current.currentPath,
+        imgWidth: width,
+        imgHeight: height,
+        winX: rect.x,
+        winY: rect.y,
+        winWidth: rect.w,
+        winHeight: rect.h,
+      });
+    } catch {
+      ps.current.visible = false;
     }
-
-    let x: number, y: number;
-    const screenH = window.screen.availHeight;
-
-    if (!visible) {
-      // Initial show: position relative to card
-      const rect = containerRef.current.getBoundingClientRect();
-      const winY = window.screenY ?? window.screenTop ?? 0;
-      x = calcPreviewX(space.side, width);
-      y = winY + rect.top + rect.height / 2 - height / 2;
-      y = Math.max(0, Math.min(y, screenH - height));
-      ps.current.center = { cx: x + width / 2, cy: y + height / 2 };
-    } else {
-      // Resize: expand/shrink around stored center
-      x = clampPreviewX(ps.current.center.cx - width / 2, width, space.side);
-      y = Math.max(0, Math.min(ps.current.center.cy - height / 2, screenH - height));
-    }
-
-    ps.current.lastSize = { w: width, h: height };
-
-    if (!visible) {
-      ps.current.visible = true;
-      try {
-        await invoke("show_image_preview", {
-          imagePath: withImage ? ps.current.currentPath : null,
-          x, y, width, height,
-        });
-      } catch {
-        ps.current.visible = false;
-      }
-    } else {
-      invoke("show_image_preview", {
-        imagePath: null, x, y, width, height,
-      }).catch(() => {});
-    }
-  }, []);
+  }, [previewPosition]);
 
   const handleMouseEnter = useCallback(() => {
-    if (!imagePath) return;
+    if (!imagePath || !imagePreviewEnabled) return;
     ps.current.currentPath = imagePath;
     clearTimer();
-    timerRef.current = setTimeout(() => updatePreview(true), HOVER_DELAY_MS);
-  }, [imagePath, clearTimer, updatePreview]);
+    timerRef.current = setTimeout(showPreview, HOVER_DELAY_MS);
+  }, [imagePath, imagePreviewEnabled, clearTimer, showPreview]);
 
+  // Ctrl+Scroll: emit CSS size change (smooth transition in webview, no window resize)
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (!e.ctrlKey || !ps.current.visible) return;
       e.preventDefault();
       e.stopPropagation();
-      const delta = e.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
+
+      const step = previewZoomStep / 100;
+      const delta = e.deltaY > 0 ? -step : step;
       ps.current.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, ps.current.scale + delta));
-      updatePreview(false);
+
+      const rect = getPreviewWindowRect(previewPosition);
+      const { width, height } = calcImageSize(
+        ps.current.imgNatural.w, ps.current.imgNatural.h,
+        ps.current.scale, rect.w, rect.h,
+      );
+      const percent = Math.round(ps.current.scale * 100);
+      emit("image-preview-zoom", { width, height, percent, active: true }).catch(() => {});
     },
-    [updatePreview],
+    [previewZoomStep, previewPosition],
   );
 
   const handleImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
