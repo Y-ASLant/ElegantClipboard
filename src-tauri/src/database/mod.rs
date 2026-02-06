@@ -101,19 +101,19 @@ impl Database {
             [],
             |row| row.get(0),
         ).unwrap_or(false);
-        
+
         if !table_exists {
             // New database, no migrations needed
             return Ok(());
         }
-        
-        // Check if sort_order column exists
+
+        // Migration 1: Add sort_order column
         let has_sort_order: bool = conn.query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'sort_order'",
             [],
             |row| row.get(0),
         ).unwrap_or(false);
-        
+
         if !has_sort_order {
             info!("Migrating database: adding sort_order column");
             conn.execute_batch(
@@ -122,7 +122,23 @@ impl Database {
             )?;
             info!("Migration complete: sort_order column added");
         }
-        
+
+        // Migration 2: Add image_width and image_height columns
+        let has_image_width: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'image_width'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_image_width {
+            info!("Migrating database: adding image_width and image_height columns");
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN image_width INTEGER;
+                 ALTER TABLE clipboard_items ADD COLUMN image_height INTEGER;"
+            )?;
+            info!("Migration complete: image_width and image_height columns added");
+        }
+
         Ok(())
     }
 

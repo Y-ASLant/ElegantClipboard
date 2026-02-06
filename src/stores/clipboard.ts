@@ -13,6 +13,8 @@ export interface ClipboardItem {
   content_hash: string;
   preview: string | null;
   byte_size: number;
+  image_width: number | null;
+  image_height: number | null;
   is_pinned: boolean;
   is_favorite: boolean;
   sort_order: number;

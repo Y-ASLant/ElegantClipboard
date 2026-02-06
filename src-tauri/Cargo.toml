@@ -2,7 +2,7 @@
 name = "elegant-clipboard"
 version = "0.4.0"
 description = "An elegant Windows clipboard manager"
-authors = ["ASLan"]
+authors = ["ASLant"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Tauri core
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
@@ -45,12 +45,8 @@ parking_lot = "0.12"
 # Parallel processing
 rayon = "1.10"
 
-# Lazy static for global state
-lazy_static = "1.4"
-
 # Image handling
 image = "0.25"
-base64 = "0.22"
 
 # Directories
 dirs = "5"

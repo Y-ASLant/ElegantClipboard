@@ -69,11 +69,11 @@
   border-color: var(--color-border);
 }
 
-/* Remove focus outline globally (Tauri app doesn't need keyboard navigation indicators) */
+/* Remove focus outline globally (Tauri app doesn't need keyboard navigation indicators).
+   Do not remove box-shadow here: it would kill shadows on context menu, cards, etc. when they receive focus. */
 *:focus,
 *:focus-visible {
   outline: none !important;
-  box-shadow: none !important;
 }
 
 body {

@@ -41,42 +41,51 @@ ElegantClipboard 是一个基于 Tauri 2.0 的剪贴板管理工具，采用 Rea
 
 ```
 src/                    # React 前端
-├── components/         # shadcn/ui 组件
-├── pages/             # 设置页面
+├── components/
+│   ├── ClipboardList.tsx        # 虚拟滚动列表
+│   ├── ClipboardItemCard.tsx    # 卡片组件
+│   ├── CardContentRenderers.tsx # 内容渲染器（图片/文件预览）
+│   ├── settings/                # 设置页面组件
+│   └── ui/                      # shadcn/ui 基础组件
+├── hooks/
+│   └── useSortableList.ts       # 拖拽排序 Hook
 ├── stores/            # Zustand 状态管理
 └── main.tsx           # 入口点（简单路由）
 
 src-tauri/              # Rust 后端
 ├── src/
-│   ├── main.rs         # 入口点
-│   ├── lib.rs          # 核心库（Tauri 命令注册与设置）
-│   ├── config.rs       # 配置文件管理
-│   ├── commands/       # Tauri 命令处理器
-│   ├── clipboard/      # 剪贴板监控模块（monitor.rs, handler.rs）
-│   ├── database/       # SQLite 数据库（schema.rs, repository.rs）
-│   ├── tray/           # 系统托盘
+│   ├── main.rs             # 入口点
+│   ├── lib.rs              # 核心库（Tauri 命令注册、窗口管理）
+│   ├── config.rs           # 配置文件管理
+│   ├── shortcut.rs         # 快捷键解析模块
+│   ├── positioning.rs      # 窗口定位（多显示器支持）
+│   ├── admin_launch.rs     # 管理员启动功能
 │   ├── keyboard_hook.rs    # 窗口状态追踪
 │   ├── input_monitor.rs    # 全局鼠标监控（点击外部检测）
-│   └── win_v_registry.rs   # Win+V 替换（注册表）
+│   ├── win_v_registry.rs   # Win+V 替换（注册表）
+│   ├── commands/           # Tauri 命令（按功能拆分）
+│   │   ├── mod.rs          # AppState 定义 + 模块导出
+│   │   ├── clipboard.rs    # 剪贴板 CRUD 命令
+│   │   ├── settings.rs     # 设置/监控/自启动命令
+│   │   └── file_ops.rs     # 文件操作命令（并行检查）
+│   ├── clipboard/          # 剪贴板监控模块
+│   ├── database/           # SQLite 数据库
+│   └── tray/               # 系统托盘
 ```
 
 ### Tauri 命令架构
 
-**后端（Rust）**：所有命令在 `src-tauri/src/lib.rs:480-533` 通过 `invoke_handler` 注册。
+**后端（Rust）**：命令按功能模块化组织，在 `lib.rs` 通过 `invoke_handler` 注册。
 
-```rust
-.invoke_handler(tauri::generate_handler![
-    // 窗口管理
-    show_window,
-    hide_window,
-    set_window_visibility,
-    // 剪贴板操作
-    commands::get_clipboard_items,
-    commands::toggle_pin,
-    commands::copy_to_clipboard,
-    // ... 更多命令
-])
-```
+**命令模块**（`src-tauri/src/commands/`）：
+- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`toggle_pin`、`copy_to_clipboard`、`paste_content`
+- `settings.rs` - 设置/监控：`get_setting`、`pause_monitor`、`optimize_database`、`enable_autostart`
+- `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`
+
+**窗口/系统命令**（`lib.rs`）：
+- 窗口管理：`show_window`、`hide_window`、`set_window_pinned`、`open_settings_window`
+- 管理员启动：`is_admin_launch_enabled`、`enable_admin_launch`、`is_running_as_admin`
+- 快捷键：`update_shortcut`、`enable_winv_replacement`
 
 **前端（TypeScript）**：通过 `@tauri-apps/api/core` 的 `invoke()` 函数调用：
 
@@ -136,16 +145,16 @@ listen("ui-settings-changed", (event) => { ... });
 
 ## 窗口配置
 
-主窗口（`main`）采用特殊配置以支���全局快捷键：
+主窗口（`main`）采用特殊配置以支持全局快捷键：
 - `decorations: false` - 无边框窗口
-- `focus: false` - **运行时设置**（`lib.rs:502` `set_focusable(false)`）
+- `focus: false` - 运行时设置 `set_focusable(false)`
 - `alwaysOnTop: true` - 置顶显示
 - `skipTaskbar: true` - 不显示在任务栏
-- `visibleOnAllWorkspaces: true` - 所有工作区可见
 
-**窗口切换逻辑**（`lib.rs:244-266`）：
-- 使用 `always_on_top` 技巧确保窗口出现
-- 管理 `WindowState`（Hidden/Visible）通过 `keyboard_hook.rs`
+**窗口定位**（`positioning.rs`）：
+- `get_cursor_position()` - Windows API 获取光标位置
+- `position_at_cursor()` - 智能边界检测，支持多显示器
+- `calculate_best_position()` - 计算最佳窗口位置
 
 **点击外部隐藏**：
 - 由于窗口不可获取焦点，`onFocusChanged` 不会触发
@@ -155,7 +164,16 @@ listen("ui-settings-changed", (event) => { ... });
 
 **窗口置顶锁定**（`set_window_pinned`）：
 - 运行时控制窗口是否可被其他置顶窗口覆盖
-- 用于在需要固定显示时切换置顶状态
+
+## 管理员启动
+
+位置：`src-tauri/src/admin_launch.rs`
+
+通过 Windows 注册表 `AppCompatFlags\Layers` 实现：
+- `is_admin_launch_enabled()` - 检查是否启用
+- `enable_admin_launch()` / `disable_admin_launch()` - 启用/禁用
+- `is_running_as_admin()` - 检查当前权限
+- `restart_app()` - 支持 UAC 提权的重启
 
 ## Win+V 替换功能
 
@@ -188,7 +206,9 @@ listen("ui-settings-changed", (event) => { ... });
 - FTS5 全文搜索（`text_content`、`preview` 字段）
 - 内容哈希去重（`content_hash` UNIQUE 约束）
 - 自动时间戳更新触发器
-- 性能索引：`created_at`、`is_pinned`、`is_favorite`、`category_id`、`content_type`、`content_hash`
+- 性能索引：`created_at`、`is_pinned`、`is_favorite`、`content_type`、`sort_order`
+- 图片元数据：`image_width`、`image_height` 字段
+- 运行时字段：`files_valid`（文件有效性检查结果，不存储）
 
 ## 前端路由
 
@@ -210,13 +230,14 @@ listen("ui-settings-changed", (event) => { ... });
 - `tauri 2` - 应用框架
 - `rusqlite` - SQLite 数据库（bundled 特性）
 - `tokio` - 异步运行时
+- `rayon` - 并行处理（文件检查）
 - `clipboard-master` - 剪贴板监控
 - `clipboard-rs` / `arboard` - 剪贴板操作
 - `enigo` - 键盘模拟粘贴
 - `rdev` - 全局鼠标/键盘监控
 - `parking_lot` - 高性能锁
 - `blake3` - 内容哈希去重
-- `tracing` - 日志记录
+- `windows` / `winreg` - Windows API 和注册表
 
 **前端**：
 - React 19 + TypeScript
@@ -230,10 +251,84 @@ listen("ui-settings-changed", (event) => { ... });
 
 ## 性能优化
 
-- **虚拟列表**：`react-virtuoso` 处理万级记录
-- **鼠标事件**：无锁原子操作（`AtomicI64`），仅窗口可见时监控
-- **SQLite**：WAL 模式，内存临时存储
-- **锁优化**：`parking_lot` 替代标准库 `Mutex`/`RwLock`，性能更优
+项目以**低占用、高性能、完全本地化**为核心设计理念，面对万条数据依旧保持高性能低占用。
+
+### 数据库层
+
+位置：`src-tauri/src/database/mod.rs`
+
+**读写连接分离**：
+```rust
+pub struct Database {
+    write_conn: Arc<Mutex<Connection>>,  // 写操作专用
+    read_conn: Arc<Mutex<Connection>>,   // 读操作专用
+}
+```
+- WAL 模式支持读写并发，读操作互不阻塞
+- 写连接：64MB 缓存，读连接：32MB 缓存
+- `mmap_size = 256MB` 内存映射加速文件访问
+- `temp_store = MEMORY` 临时表存内存
+
+**索引优化**（`schema.rs`）：
+- 部分索引：`WHERE is_pinned = 1` 仅索引匹配行，减小索引体积
+- 降序索引：`created_at DESC` 优化常见查询模式
+- FTS5 全文搜索：`unicode61` 分词器支持中文
+
+### 无锁设计
+
+位置：`src-tauri/src/input_monitor.rs`
+
+**原子变量追踪光标**：
+```rust
+static CURSOR_X: AtomicI64 = AtomicI64::new(0);
+static CURSOR_Y: AtomicI64 = AtomicI64::new(0);
+```
+- 鼠标移动事件每秒触发数百次，使用 `AtomicI64` 避免锁竞争
+- `Ordering::Relaxed` 最小化同步开销
+
+**条件监控**：
+- 窗口隐藏时完全跳过鼠标位置处理，CPU 占用趋近于零
+- `MOUSE_MONITORING_ENABLED` 原子开关控制
+
+### 剪贴板监控
+
+位置：`src-tauri/src/clipboard/monitor.rs`
+
+**原子暂停计数器**：
+```rust
+pause_count: Arc<AtomicU32>  // 计数器而非布尔值
+```
+- 解决多操作重叠时的竞态条件：A 暂停 → B 暂停 → A 恢复 → B 仍在运行
+- 计数器确保所有操作完成后才恢复监控
+
+**图片异步写入**（`handler.rs`）：
+```rust
+std::thread::spawn(move || {
+    std::fs::write(&image_path, data).ok();
+});
+```
+- 文件 I/O 在后台线程执行，不阻塞剪贴板监控
+- BLAKE3 哈希生成文件名，自动去重
+
+### 前端虚拟化
+
+位置：`src/components/ClipboardList.tsx`
+
+**react-virtuoso 配置**：
+- `increaseViewportBy: { top: 400, bottom: 400 }` 预渲染缓冲区
+- `defaultItemHeight` 预计算避免布局抖动
+- `useMemo` / `useCallback` 防止不必要的重渲染
+
+**万级数据表现**：
+- DOM 节点数 = 可视区域项数（约 10-20 个），而非全部数据
+- 滚动时仅更新可见项，内存占用恒定
+
+### 锁优化
+
+全局使用 `parking_lot` 替代 `std::sync`：
+- Mutex 体积：40 字节 → 1 字节
+- 无锁中毒机制，API 更简洁
+- 自旋等待减少系统调用，竞争场景下性能提升 2-3 倍
 
 ## 命名约定
 
@@ -257,7 +352,7 @@ Rust 编译缓存目录配置在 `src-tauri/.cargo/config.toml`：
 
 ## 快捷键解析
 
-位置：`src-tauri/src/lib.rs:24-113`
+位置：`src-tauri/src/shortcut.rs`
 
 - 支持字母 A-Z、数字 0-9、功能键 F1-F12
 - 修饰符：`CTRL`、`ALT`、`SHIFT`、`WIN`/`SUPER`/`META`/`CMD`

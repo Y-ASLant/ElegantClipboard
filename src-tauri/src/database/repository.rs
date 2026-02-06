@@ -18,6 +18,8 @@ pub struct ClipboardItem {
     pub content_hash: String,
     pub preview: Option<String>,
     pub byte_size: i64,
+    pub image_width: Option<i64>,
+    pub image_height: Option<i64>,
     pub is_pinned: bool,
     pub is_favorite: bool,
     pub sort_order: i64,
@@ -43,6 +45,8 @@ pub struct NewClipboardItem {
     pub content_hash: String,
     pub preview: Option<String>,
     pub byte_size: i64,
+    pub image_width: Option<i64>,
+    pub image_height: Option<i64>,
 }
 
 /// Query options for listing items
@@ -74,9 +78,9 @@ impl ClipboardRepository {
     /// Insert a new clipboard item
     pub fn insert(&self, item: NewClipboardItem) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        
+
         let file_paths_json = item.file_paths.map(|paths| serde_json::to_string(&paths).unwrap_or_default());
-        
+
         // Get max sort_order and increment
         let max_sort_order: i64 = conn.query_row(
             "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
@@ -84,10 +88,10 @@ impl ClipboardRepository {
             |row| row.get(0),
         ).unwrap_or(0);
         let new_sort_order = max_sort_order + 1;
-        
+
         conn.execute(
-            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size, sort_order)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, sort_order)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 item.content_type.as_str(),
                 item.text_content,
@@ -98,6 +102,8 @@ impl ClipboardRepository {
                 item.content_hash,
                 item.preview,
                 item.byte_size,
+                item.image_width,
+                item.image_height,
                 new_sort_order,
             ],
         )?;
@@ -453,6 +459,8 @@ impl ClipboardRepository {
             content_hash: row.get("content_hash")?,
             preview: row.get("preview")?,
             byte_size: row.get("byte_size")?,
+            image_width: row.get("image_width")?,
+            image_height: row.get("image_height")?,
             is_pinned: row.get("is_pinned")?,
             is_favorite: row.get("is_favorite")?,
             sort_order: row.get("sort_order")?,
