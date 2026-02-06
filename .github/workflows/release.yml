@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Extract version from tag (v0.6.0 → 0.6.0)
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      # Sync version in package.json, tauri.conf.json, Cargo.toml
+      - name: Bump version to ${{ steps.version.outputs.VERSION }}
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.VERSION }}"
+          $root = $env:GITHUB_WORKSPACE
+
+          # package.json
+          $pkgPath = Join-Path $root "package.json"
+          $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
+          $pkg.version = $v
+          $pkg | ConvertTo-Json -Depth 10 | Set-Content $pkgPath -Encoding utf8NoBOM
+
+          # src-tauri/tauri.conf.json
+          $tauriPath = Join-Path $root "src-tauri\tauri.conf.json"
+          $tauri = Get-Content $tauriPath -Raw | ConvertFrom-Json
+          $tauri.version = $v
+          $tauri | ConvertTo-Json -Depth 10 | Set-Content $tauriPath -Encoding utf8NoBOM
+
+          # src-tauri/Cargo.toml
+          $cargoPath = Join-Path $root "src-tauri\Cargo.toml"
+          $cargo = Get-Content $cargoPath -Raw
+          $cargo = $cargo -replace '(?m)^(version\s*=\s*")[^"]*(")', "`${1}$v`${2}"
+          Set-Content $cargoPath $cargo -Encoding utf8NoBOM -NoNewline
+
+          Write-Host "Version synced to $v in all 3 files"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "ElegantClipboard ${{ github.ref_name }}"
+          releaseBody: "See the assets to download and install."
+          releaseDraft: true
+          prerelease: false

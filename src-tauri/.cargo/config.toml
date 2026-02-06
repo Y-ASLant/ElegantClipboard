@@ -1,6 +1,6 @@
 [build]
 # Move target to shared location to save space
-target-dir = "H:/Rust_Cache"
+# target-dir = "H:/Rust_Cache"
 
 [profile.dev]
 # Reduce debug info size
