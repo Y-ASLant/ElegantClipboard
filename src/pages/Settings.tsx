@@ -50,8 +50,6 @@ export function Settings() {
     shortcut: "Alt+C",
     winv_replacement: false,
   });
-  const [, setLoading] = useState(false);
-
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {
     const settingsWindow = getCurrentWindow();
@@ -105,7 +103,6 @@ export function Settings() {
   };
 
   const saveSettings = async () => {
-    setLoading(true);
     try {
       // Save settings to database (data_path is handled separately by GeneralTab with migration)
       await invoke("set_setting", { key: "max_history_count", value: settings.max_history_count.toString() });
@@ -125,11 +122,10 @@ export function Settings() {
         await invoke("disable_admin_launch");
       }
       
-      console.log("Settings saved");
     } catch (error) {
       console.error("Failed to save settings:", error);
     } finally {
-      setLoading(false);
+      // Settings saved
     }
   };
 
