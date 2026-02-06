@@ -185,8 +185,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   clearHistory: async () => {
     try {
-      const deleted = await invoke<number>("clear_history");
-      console.log(`Cleared ${deleted} items`);
+      await invoke<number>("clear_history");
       get().refresh();
     } catch (error) {
       console.error("Failed to clear history:", error);
@@ -202,8 +201,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   setupListener: async () => {
-    const unlisten = await listen<number>("clipboard-updated", (event) => {
-      console.log("Clipboard updated:", event.payload);
+    const unlisten = await listen<number>("clipboard-updated", () => {
       get().refresh();
     });
     return unlisten;

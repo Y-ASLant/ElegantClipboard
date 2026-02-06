@@ -92,8 +92,7 @@ pub fn is_window_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
-/// Get current cursor position
-#[allow(dead_code)]
+/// Get current cursor position (used by positioning module)
 pub fn get_cursor_position() -> (f64, f64) {
     let x = CURSOR_X.load(Ordering::Relaxed) as f64;
     let y = CURSOR_Y.load(Ordering::Relaxed) as f64;

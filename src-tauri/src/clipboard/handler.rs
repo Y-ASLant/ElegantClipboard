@@ -29,10 +29,11 @@ fn truncate_content(content: String, max_size: usize, content_type: &str) -> Str
 
 /// Clipboard content from the system
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum ClipboardContent {
     Text(String),
+    #[allow(dead_code)] // Reserved: not yet captured by monitor, but handled if received
     Html { html: String, text: Option<String> },
+    #[allow(dead_code)] // Reserved: not yet captured by monitor, but handled if received
     Rtf { rtf: String, text: Option<String> },
     Image(Vec<u8>),
     Files(Vec<String>),

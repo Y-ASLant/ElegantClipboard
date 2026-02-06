@@ -132,7 +132,7 @@ const ImagePreview = memo(function ImagePreview({
     clearTimer();
     if (ps.current.visible) {
       ps.current.visible = false;
-      invoke("hide_image_preview").catch(() => {});
+      invoke("hide_image_preview").catch((e) => console.error("Failed to hide preview:", e));
     }
     ps.current.scale = 1.0;
   }, [clearTimer]);
@@ -185,7 +185,7 @@ const ImagePreview = memo(function ImagePreview({
         ps.current.scale, rect.w, rect.h,
       );
       const percent = Math.round(ps.current.scale * 100);
-      emit("image-preview-zoom", { width, height, percent, active: true }).catch(() => {});
+      emit("image-preview-zoom", { width, height, percent, active: true }).catch((e) => console.error("Failed to emit zoom:", e));
     },
     [previewZoomStep, previewPosition],
   );
@@ -200,7 +200,7 @@ const ImagePreview = memo(function ImagePreview({
   useEffect(() => {
     return () => {
       clearTimer();
-      if (ps.current.visible) invoke("hide_image_preview").catch(() => {});
+      if (ps.current.visible) invoke("hide_image_preview").catch((e) => console.error("Failed to hide preview:", e));
     };
   }, [clearTimer]);
 
