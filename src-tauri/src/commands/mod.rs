@@ -15,6 +15,7 @@ pub struct AppState {
 // ============ Shared Helpers ============
 
 /// Hide the main window if it's not pinned, updating the window state accordingly.
+/// Also hides the image preview window to prevent it from lingering.
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
     use tauri::Manager;
 
@@ -23,6 +24,20 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
         }
+        // Hide image preview window (it won't receive onMouseLeave when main window disappears)
+        hide_image_preview_window(app);
+    }
+}
+
+/// Hide the image preview window if it exists.
+/// Called when the main window is hidden to prevent the preview from lingering,
+/// since onMouseLeave won't fire when the main window disappears.
+pub(crate) fn hide_image_preview_window(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
+
+    if let Some(preview) = app.get_webview_window("image-preview") {
+        let _ = preview.hide();
+        let _ = preview.emit("image-preview-clear", ());
     }
 }
 

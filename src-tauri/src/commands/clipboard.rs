@@ -8,6 +8,9 @@ use super::{hide_main_window_if_not_pinned, with_paused_monitor, AppState};
 // ============ Helper Functions ============
 
 /// Set clipboard content from a ClipboardItem (shared logic for copy and paste)
+///
+/// Uses clipboard-rs for image/file operations (like EcoPaste's tauri-plugin-clipboard-x)
+/// to avoid the expensive image::open() → to_rgba8() → arboard decode chain.
 pub(super) fn set_clipboard_content(
     item: &ClipboardItem,
     clipboard: &mut arboard::Clipboard,
@@ -22,18 +25,7 @@ pub(super) fn set_clipboard_content(
         }
         "image" => {
             if let Some(ref path) = item.image_path {
-                let img =
-                    image::open(path).map_err(|e| format!("Failed to open image: {}", e))?;
-                let rgba = img.to_rgba8();
-                let (width, height) = rgba.dimensions();
-                let img_data = arboard::ImageData {
-                    width: width as usize,
-                    height: height as usize,
-                    bytes: std::borrow::Cow::Owned(rgba.into_raw()),
-                };
-                clipboard
-                    .set_image(img_data)
-                    .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
+                set_clipboard_image(path)?;
             }
         }
         "files" => {
@@ -47,6 +39,27 @@ pub(super) fn set_clipboard_content(
             return Err("Unsupported content type".to_string());
         }
     }
+    Ok(())
+}
+
+/// Set image to clipboard using clipboard-rs RustImageData::from_path
+/// (same approach as EcoPaste's tauri-plugin-clipboard-x write_image)
+///
+/// This avoids the expensive path of: image::open() → to_rgba8() → arboard::ImageData
+/// Instead, clipboard-rs handles the decode and platform conversion internally.
+fn set_clipboard_image(path: &str) -> Result<(), String> {
+    use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
+    use clipboard_rs::common::RustImage;
+
+    let image = RustImageData::from_path(path)
+        .map_err(|e| format!("Failed to load image from path: {}", e))?;
+
+    let ctx = ClipboardContext::new()
+        .map_err(|e| format!("Failed to create clipboard context: {}", e))?;
+
+    ctx.set_image(image)
+        .map_err(|e| format!("Failed to set clipboard image: {}", e))?;
+
     Ok(())
 }
 

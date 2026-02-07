@@ -7,10 +7,12 @@
 
 use parking_lot::Mutex;
 use rdev::{listen, Event, EventType};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread::{self, JoinHandle};
-use tauri::WebviewWindow;
-use tracing::{info, warn};
+use std::time::{Duration, Instant};
+use tauri::{Manager, WebviewWindow};
+use tracing::{error, info, warn};
 
 /// Main window reference for click detection
 static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
@@ -37,7 +39,8 @@ pub fn init(window: WebviewWindow) {
     *MAIN_WINDOW.lock() = Some(window);
 }
 
-/// Start the global input monitoring thread
+/// Start the global input monitoring thread with crash recovery.
+/// Uses catch_unwind + exponential backoff to automatically restart on panic.
 pub fn start_monitoring() {
     // Prevent multiple starts
     if MONITOR_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
@@ -46,11 +49,49 @@ pub fn start_monitoring() {
     }
 
     let handle = thread::spawn(|| {
-        if let Err(error) = listen(move |event| {
-            handle_input_event(event);
-        }) {
-            eprintln!("Input monitor error: {:?}", error);
+        let mut retry_count: u32 = 0;
+        const MAX_BACKOFF_SECS: u64 = 30;
+        const STABLE_THRESHOLD_SECS: u64 = 60;
+
+        loop {
+            let start = Instant::now();
+
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                if let Err(e) = listen(move |event| {
+                    handle_input_event(event);
+                }) {
+                    error!("Input monitor listen error: {:?}", e);
+                }
+            }));
+
+            // If we should stop, break out
+            if !MONITOR_RUNNING.load(Ordering::SeqCst) {
+                break;
+            }
+
+            // Log what happened
+            match result {
+                Ok(_) => warn!("Input monitor exited unexpectedly, restarting..."),
+                Err(panic_info) => error!(
+                    "Input monitor panicked: {:?}, restarting...",
+                    panic_info.downcast_ref::<&str>().copied()
+                        .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
+                        .unwrap_or("unknown panic")
+                ),
+            }
+
+            // Reset backoff if listener ran stably for a while
+            if start.elapsed().as_secs() > STABLE_THRESHOLD_SECS {
+                retry_count = 0;
+            }
+
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
+            let backoff_secs = MAX_BACKOFF_SECS.min(1u64 << retry_count);
+            info!("Restarting input monitor in {}s (attempt {})", backoff_secs, retry_count + 1);
+            thread::sleep(Duration::from_secs(backoff_secs));
+            retry_count = retry_count.saturating_add(1);
         }
+
         MONITOR_RUNNING.store(false, Ordering::SeqCst);
     });
     
@@ -167,6 +208,8 @@ fn handle_click_outside() {
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             // Disable monitoring since window is now hidden
             disable_mouse_monitoring();
+            // Hide image preview window (onMouseLeave won't fire when main window disappears)
+            crate::commands::hide_image_preview_window(window.app_handle());
         }
     }
 }

@@ -28,6 +28,7 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "notification:default"
   ]
 }

@@ -295,15 +295,15 @@ impl ClipboardHandler {
         })
     }
 
-    /// Extract image dimensions from image data
+    /// Extract image dimensions from image data (header-only, no full decode)
     fn extract_image_dimensions(&self, data: &[u8]) -> Result<(i64, i64), String> {
-        let img = ImageReader::new(std::io::Cursor::new(data))
+        let (w, h) = ImageReader::new(std::io::Cursor::new(data))
             .with_guessed_format()
             .map_err(|e| format!("Failed to guess image format: {}", e))?
-            .decode()
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
+            .into_dimensions()
+            .map_err(|e| format!("Failed to read image dimensions: {}", e))?;
 
-        Ok((img.width() as i64, img.height() as i64))
+        Ok((w as i64, h as i64))
     }
 
     /// Process file paths

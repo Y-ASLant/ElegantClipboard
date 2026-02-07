@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
-import { ClipboardMultiple16Regular } from "@fluentui/react-icons";
+import { ClipboardMultiple16Regular, Search16Regular } from "@fluentui/react-icons";
 import { Virtuoso } from "react-virtuoso";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
@@ -13,7 +13,7 @@ interface SortableClipboardItem extends ClipboardItem {
 
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
-  const { items, pinnedItems, isLoading, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
+  const { items, pinnedItems, isLoading, searchQuery, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
@@ -157,6 +157,23 @@ export function ClipboardList() {
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-sm text-muted-foreground">加载中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 搜索无结果：在 Virtuoso 外层条件渲染（react-virtuoso 没有内置 empty placeholder）
+  if (allItemsWithSortId.length === 0 && searchQuery) {
+    return (
+      <div className="flex-1 flex items-center justify-center h-full">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto">
+            <Search16Regular className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium">未找到匹配的内容</p>
+            <p className="text-sm text-muted-foreground">试试其他关键词</p>
+          </div>
         </div>
       </div>
     );

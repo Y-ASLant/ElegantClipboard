@@ -50,16 +50,9 @@ function App() {
     };
   }, [refresh]);
 
-  // Show window after content is loaded (prevent white flash)
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    // Small delay to ensure content is rendered
-    requestAnimationFrame(async () => {
-      await appWindow.show();
-      // Sync state to backend for Win+V toggle
-      await invoke("set_window_visibility", { visible: true });
-    });
-  }, []);
+  // Window starts hidden (visible: false in tauri.conf.json, backend defaults to Hidden).
+  // It will be shown only via hotkey (toggle_window_visibility) or tray click.
+  // No need to show on startup — clipboard managers should start minimized to tray.
 
   // Handle window focusable state based on input focus
   useEffect(() => {
