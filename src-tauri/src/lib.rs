@@ -59,6 +59,8 @@ async fn show_window(window: tauri::WebviewWindow) {
 async fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
+    // Hide image preview window
+    commands::hide_image_preview_window(window.app_handle());
 }
 
 /// Tauri command: Set window visibility state (for sync with backend)
@@ -97,6 +99,8 @@ async fn toggle_maximize(window: tauri::WebviewWindow) {
 #[tauri::command]
 async fn close_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
+    // Hide image preview window
+    commands::hide_image_preview_window(window.app_handle());
 }
 
 /// Tauri command: Get default data path (returns current configured path)
@@ -173,6 +177,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
             // Disable mouse monitoring when window is hidden
             input_monitor::disable_mouse_monitoring();
+            // Hide image preview window (onMouseLeave won't fire when main window disappears)
+            commands::hide_image_preview_window(app);
         } else {
             // Check if follow_cursor is enabled
             let follow_cursor = app.try_state::<std::sync::Arc<commands::AppState>>()
@@ -392,6 +398,9 @@ async fn show_image_preview(
         let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: win_x, y: win_y }));
     }
 
+    // Ensure always_on_top is active (in case main window focus state affected window hierarchy)
+    let _ = window.set_always_on_top(true);
+
     // Send image path + initial CSS size to the preview window
     let _ = window.emit("image-preview-update", serde_json::json!({
         "imagePath": image_path,
@@ -454,6 +463,7 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             // Load configuration and initialize database
@@ -509,6 +519,21 @@ pub fn run() {
                 // This is necessary because non-focusable windows don't trigger onFocusChanged
                 input_monitor::init(window);
                 input_monitor::start_monitoring();
+            }
+
+            // Send startup notification so user knows the app is running in tray
+            {
+                use tauri_plugin_notification::NotificationExt;
+                let shortcut_display = if win_v_registry::is_win_v_hotkey_disabled() {
+                    "Win+V".to_string()
+                } else {
+                    saved_shortcut.clone()
+                };
+                let _ = app.notification()
+                    .builder()
+                    .title("ElegantClipboard 已启动")
+                    .body(format!("程序已在后台运行，按 {} 打开剪贴板", shortcut_display))
+                    .show();
             }
 
             Ok(())
