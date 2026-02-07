@@ -130,16 +130,13 @@ export function ClipboardList() {
       const item = allItemsWithSortId[index];
       if (!item) return null;
       
-      // 计算显示序号：置顶区域从0开始，非置顶区域也从0开始
-      const displayIndex = item.is_pinned ? index : index - pinnedCount;
-      
       // 在置顶区域和非置顶区域之间添加分隔线
       const showSeparator = index === pinnedCount && pinnedCount > 0;
       
       return (
         <div className="px-2 pb-2">
           {showSeparator && <Separator className="mb-2" />}
-          <ClipboardItemCard item={item} index={displayIndex} sortId={item._sortId} />
+          <ClipboardItemCard item={item} index={index} sortId={item._sortId} />
         </div>
       );
     },
