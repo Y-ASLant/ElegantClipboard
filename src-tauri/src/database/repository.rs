@@ -124,18 +124,27 @@ impl ClipboardRepository {
         Ok(count > 0)
     }
 
-    /// Get item by hash and update access time
+    /// Get item by hash, update access time, and move to top of list
     pub fn touch_by_hash(&self, hash: &str) -> Result<Option<i64>, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        
-        // Update access count and time
+
+        // Get new max sort_order to move item to top
+        let max_sort_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        // Update access count, time, sort_order and created_at to move to top
         conn.execute(
             "UPDATE clipboard_items 
              SET access_count = access_count + 1, 
                  last_accessed_at = datetime('now', 'localtime'),
-                 updated_at = datetime('now', 'localtime')
+                 updated_at = datetime('now', 'localtime'),
+                 created_at = datetime('now', 'localtime'),
+                 sort_order = ?2
              WHERE content_hash = ?1",
-            params![hash],
+            params![hash, max_sort_order + 1],
         )?;
 
         // Get the id
