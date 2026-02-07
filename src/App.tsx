@@ -57,14 +57,29 @@ function App() {
   // Handle window focusable state based on input focus
   useEffect(() => {
     const appWindow = getCurrentWindow();
+    let blurTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
     const handleFocus = async () => {
+      // Cancel pending blur if user re-focuses quickly (e.g., clicked scrollbar then back)
+      if (blurTimeoutId) {
+        clearTimeout(blurTimeoutId);
+        blurTimeoutId = null;
+      }
       // Make window focusable when input is focused
       await appWindow.setFocusable(true);
       await appWindow.setFocus();
     };
+
     const handleBlur = async () => {
-      // Make window non-focusable when input loses focus
-      await appWindow.setFocusable(false);
+      // Delay setFocusable(false) to allow in-window interactions (scrollbar, cards, etc.)
+      // If user clicks scrollbar, we don't want to immediately disable focusable
+      blurTimeoutId = setTimeout(async () => {
+        // Check if focus moved outside the window (not just to scrollbar/card)
+        if (document.activeElement === document.body || !document.hasFocus()) {
+          await appWindow.setFocusable(false);
+        }
+        blurTimeoutId = null;
+      }, 100);
     };
 
     const input = inputRef.current;
@@ -74,6 +89,7 @@ function App() {
       return () => {
         input.removeEventListener("focus", handleFocus);
         input.removeEventListener("blur", handleBlur);
+        if (blurTimeoutId) clearTimeout(blurTimeoutId);
       };
     }
   }, []);

@@ -398,6 +398,9 @@ async fn show_image_preview(
         let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: win_x, y: win_y }));
     }
 
+    // Ensure always_on_top is active (in case main window focus state affected window hierarchy)
+    let _ = window.set_always_on_top(true);
+
     // Send image path + initial CSS size to the preview window
     let _ = window.emit("image-preview-update", serde_json::json!({
         "imagePath": image_path,
