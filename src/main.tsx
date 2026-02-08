@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
 import { Settings } from "./pages/Settings";
+import "overlayscrollbars/overlayscrollbars.css";
 import "./index.css";
 
 // Disable context menu (right-click)

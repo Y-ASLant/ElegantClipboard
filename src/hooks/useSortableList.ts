@@ -31,11 +31,20 @@ interface UseSortableListOptions<T extends SortableItem> {
   onDragEnd: (oldIndex: number, newIndex: number) => void;
 }
 
-// Check if element or parents have data-drag-ignore attribute
+// Check if element or parents have data-drag-ignore, data-no-drag, or is scrollbar
 function shouldHandleDrag(element: EventTarget | null): boolean {
   let cur = element as HTMLElement | null;
   while (cur) {
-    if (cur.dataset && cur.dataset.dragIgnore === "true") {
+    // Ignore drag on elements with data-drag-ignore or data-no-drag
+    if (cur.dataset && (cur.dataset.dragIgnore === "true" || cur.dataset.noDrag === "true")) {
+      return false;
+    }
+    // Ignore drag on OverlayScrollbars elements
+    if (cur.classList && (
+      cur.classList.contains('os-scrollbar') ||
+      cur.classList.contains('os-scrollbar-track') ||
+      cur.classList.contains('os-scrollbar-handle')
+    )) {
       return false;
     }
     cur = cur.parentElement;
