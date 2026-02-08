@@ -106,58 +106,53 @@ input, textarea, [contenteditable="true"] {
   -webkit-user-select: text;
 }
 
-/* Custom scrollbar - always reserve space, fade in/out smoothly */
-.custom-scrollbar {
-  scrollbar-width: thin;
-  scrollbar-gutter: stable;
-  scrollbar-color: rgba(0, 0, 0, 0.08) transparent;
+/* OverlayScrollbars custom styling */
+.os-theme-custom {
+  --os-size: 4px;
+  --os-padding-perpendicular: 0px;
+  --os-padding-axis: 0px;
+  --os-track-border-radius: 2px;
+  --os-track-bg: transparent;
+  --os-track-bg-hover: transparent;
+  --os-track-bg-active: transparent;
+  --os-handle-border-radius: 2px;
+  --os-handle-bg: rgba(0, 0, 0, 0.12);
+  --os-handle-bg-hover: rgba(0, 0, 0, 0.2);
+  --os-handle-bg-active: rgba(0, 0, 0, 0.25);
+  --os-handle-min-size: 40px;
+  --os-handle-max-size: none;
+  --os-handle-perpendicular-size: 100%;
+  --os-handle-perpendicular-size-hover: 100%;
+  --os-handle-perpendicular-size-active: 100%;
+  --os-handle-interactive-area-offset: 0px;
 }
 
-.custom-scrollbar:hover {
-  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+.dark .os-theme-custom {
+  --os-handle-bg: rgba(255, 255, 255, 0.12);
+  --os-handle-bg-hover: rgba(255, 255, 255, 0.2);
+  --os-handle-bg-active: rgba(255, 255, 255, 0.25);
 }
 
-.dark .custom-scrollbar {
-  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+/* Scrollbar always visible during scroll, auto-hide after delay */
+.os-theme-custom > .os-scrollbar {
+  transition: opacity 0.3s ease;
 }
 
-.dark .custom-scrollbar:hover {
-  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+/* Ensure scrollbar is overlay (floating above content) */
+.os-theme-custom .os-scrollbar {
+  z-index: 100;
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Ensure scrollbar doesn't trigger drag */
+.os-scrollbar,
+.os-scrollbar-track,
+.os-scrollbar-handle {
+  pointer-events: auto !important;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.08);
-  border-radius: 3px;
-  transition: background 0.15s ease;
-}
-
-.custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.35);
-}
-
-.dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.35);
+.os-scrollbar * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
 }
 
 /* Hide scrollbars for other elements */

@@ -1,6 +1,8 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { ClipboardMultiple16Regular, Search16Regular } from "@fluentui/react-icons";
 import { Virtuoso } from "react-virtuoso";
+import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
+import type { OverlayScrollbars } from "overlayscrollbars";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
@@ -30,6 +32,9 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
 
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
+  const scrollerRef = useRef<HTMLElement | null>(null);
+  const osInstanceRef = useRef<OverlayScrollbars | null>(null);
+  const [customScrollParent, setCustomScrollParent] = useState<HTMLElement | null>(null);
   const { items, pinnedItems, isLoading, searchQuery, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
@@ -119,11 +124,12 @@ export function ClipboardList() {
 
   // 拖拽时接管滚轮事件 - QuickClipboard 优化
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId || !scrollerRef.current) return;
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const scrollerElement = document.querySelector('[data-virtuoso-scroller="true"]') as HTMLElement;
-      if (scrollerElement) scrollerElement.scrollTop += e.deltaY;
+      if (scrollerRef.current) {
+        scrollerRef.current.scrollTop += e.deltaY;
+      }
     };
     document.addEventListener('wheel', handleWheel, { passive: false } as AddEventListenerOptions);
     return () => document.removeEventListener('wheel', handleWheel);
@@ -221,22 +227,54 @@ export function ClipboardList() {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full overflow-hidden">
-        <SortableContext items={allItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
-          <Virtuoso
-            totalCount={allItemsWithSortId.length}
-            itemContent={itemContent}
-            computeItemKey={computeItemKey}
-            defaultItemHeight={defaultItemHeight}
-            increaseViewportBy={{ top: 400, bottom: 400 }}
-            scrollSeekConfiguration={{
-              enter: (velocity) => Math.abs(velocity) > 500,
-              exit: (velocity) => Math.abs(velocity) < 100,
-            }}
-            components={{ ScrollSeekPlaceholder }}
-            className="custom-scrollbar"
-          />
-        </SortableContext>
+      <div className="h-full">
+        <OverlayScrollbarsComponent
+          element="div"
+          options={{
+            scrollbars: {
+              theme: "os-theme-custom",
+              visibility: "auto",
+              autoHide: "scroll",
+              autoHideDelay: 1000,
+            },
+            overflow: {
+              x: "hidden",
+              y: "scroll",
+            },
+          }}
+          events={{
+            initialized: (instance) => {
+              osInstanceRef.current = instance;
+              const viewport = instance.elements().viewport;
+              setCustomScrollParent(viewport);
+            },
+          }}
+          defer
+          style={{ height: "100%" }}
+        >
+          <SortableContext items={allItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
+            {customScrollParent && (
+              <Virtuoso
+                totalCount={allItemsWithSortId.length}
+                itemContent={itemContent}
+                computeItemKey={computeItemKey}
+                defaultItemHeight={defaultItemHeight}
+                increaseViewportBy={{ top: 400, bottom: 400 }}
+                scrollSeekConfiguration={{
+                  enter: (velocity) => Math.abs(velocity) > 500,
+                  exit: (velocity) => Math.abs(velocity) < 100,
+                }}
+                components={{ ScrollSeekPlaceholder }}
+                customScrollParent={customScrollParent}
+                scrollerRef={(ref) => {
+                  if (ref instanceof HTMLElement) {
+                    scrollerRef.current = ref;
+                  }
+                }}
+              />
+            )}
+          </SortableContext>
+        </OverlayScrollbarsComponent>
       </div>
 
       <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>
