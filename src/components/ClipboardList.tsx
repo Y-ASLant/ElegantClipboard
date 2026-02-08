@@ -11,6 +11,23 @@ interface SortableClipboardItem extends ClipboardItem {
   _sortId: string;
 }
 
+// Virtuoso scrollSeek 占位符 — 快速滚动时替代完整卡片，接收精确高度避免布局抖动
+const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
+  <div style={{ height }} className="px-2 pb-2">
+    <div className="rounded-lg border bg-card overflow-hidden px-3 py-2.5 h-full">
+      <div className="space-y-1.5">
+        <div className="h-4 bg-muted rounded w-4/5" />
+        <div className="h-3.5 bg-muted/70 rounded w-3/5" />
+        <div className="h-3 bg-muted/50 rounded w-2/5" />
+      </div>
+      <div className="flex items-center gap-1.5 mt-1.5">
+        <div className="h-3 bg-muted/40 rounded w-16" />
+        <div className="h-3 bg-muted/40 rounded w-12" />
+      </div>
+    </div>
+  </div>
+);
+
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
   const { items, pinnedItems, isLoading, searchQuery, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
@@ -212,6 +229,11 @@ export function ClipboardList() {
             computeItemKey={computeItemKey}
             defaultItemHeight={defaultItemHeight}
             increaseViewportBy={{ top: 400, bottom: 400 }}
+            scrollSeekConfiguration={{
+              enter: (velocity) => Math.abs(velocity) > 500,
+              exit: (velocity) => Math.abs(velocity) < 100,
+            }}
+            components={{ ScrollSeekPlaceholder }}
             className="custom-scrollbar"
           />
         </SortableContext>
