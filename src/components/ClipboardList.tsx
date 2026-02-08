@@ -1,13 +1,13 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { ClipboardMultiple16Regular, Search16Regular } from "@fluentui/react-icons";
-import { Virtuoso } from "react-virtuoso";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
-import type { OverlayScrollbars } from "overlayscrollbars";
+import { Virtuoso } from "react-virtuoso";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
+import type { OverlayScrollbars } from "overlayscrollbars";
 
 interface SortableClipboardItem extends ClipboardItem {
   _sortId: string;
