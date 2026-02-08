@@ -10,6 +10,8 @@ interface UISettings {
   imagePreviewEnabled: boolean;
   previewZoomStep: number;
   previewPosition: "auto" | "left" | "right";
+  imageAutoHeight: boolean;
+  imageMaxHeight: number;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -17,6 +19,8 @@ interface UISettings {
   setImagePreviewEnabled: (enabled: boolean) => void;
   setPreviewZoomStep: (step: number) => void;
   setPreviewPosition: (pos: "auto" | "left" | "right") => void;
+  setImageAutoHeight: (auto: boolean) => void;
+  setImageMaxHeight: (height: number) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -37,6 +41,8 @@ export const useUISettings = create<UISettings>()(
       imagePreviewEnabled: true,
       previewZoomStep: 15,
       previewPosition: "auto" as "auto" | "left" | "right",
+      imageAutoHeight: true,
+      imageMaxHeight: 400,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -64,6 +70,14 @@ export const useUISettings = create<UISettings>()(
       setPreviewPosition: (pos) => {
         set({ previewPosition: pos });
         broadcastChange({ previewPosition: pos });
+      },
+      setImageAutoHeight: (auto) => {
+        set({ imageAutoHeight: auto });
+        broadcastChange({ imageAutoHeight: auto });
+      },
+      setImageMaxHeight: (height) => {
+        set({ imageMaxHeight: height });
+        broadcastChange({ imageMaxHeight: height });
       },
     }),
     {

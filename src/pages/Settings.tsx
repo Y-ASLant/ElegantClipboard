@@ -38,6 +38,8 @@ export function Settings() {
     imagePreviewEnabled, setImagePreviewEnabled,
     previewZoomStep, setPreviewZoomStep,
     previewPosition, setPreviewPosition,
+    imageAutoHeight, setImageAutoHeight,
+    imageMaxHeight, setImageMaxHeight,
   } = useUISettings();
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
@@ -235,6 +237,10 @@ export function Settings() {
                       setPreviewZoomStep={setPreviewZoomStep}
                       previewPosition={previewPosition}
                       setPreviewPosition={setPreviewPosition}
+                      imageAutoHeight={imageAutoHeight}
+                      setImageAutoHeight={setImageAutoHeight}
+                      imageMaxHeight={imageMaxHeight}
+                      setImageMaxHeight={setImageMaxHeight}
                     />
                   )}
 
