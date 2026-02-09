@@ -38,11 +38,11 @@ export const useUISettings = create<UISettings>()(
       showTime: true,
       showCharCount: true,
       showByteSize: true,
-      imagePreviewEnabled: true,
+      imagePreviewEnabled: false,
       previewZoomStep: 15,
       previewPosition: "auto" as "auto" | "left" | "right",
       imageAutoHeight: true,
-      imageMaxHeight: 400,
+      imageMaxHeight: 512,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });

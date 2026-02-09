@@ -109,6 +109,27 @@ function App() {
     document.documentElement.classList.toggle("dark", isDark);
   }, [isDark]);
 
+  // Handle ESC key (emitted by backend global keyboard hook, works without focus)
+  useEffect(() => {
+    const unlisten = listen("escape-pressed", async () => {
+      // Check if any overlay (dialog, context menu, etc.) is open via DOM
+      const hasOverlay = document.querySelector(
+        '[role="dialog"], [data-radix-popper-content-wrapper]'
+      );
+      if (hasOverlay) {
+        // Dispatch synthetic ESC to let Radix close the overlay
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        return;
+      }
+      try {
+        await invoke("hide_window");
+      } catch (error) {
+        console.error("Failed to hide window:", error);
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
   // NOTE: Click-outside detection is handled by the backend input_monitor module
   // because the window is set to non-focusable (focus: false), which means
   // onFocusChanged events never fire. The backend uses rdev to monitor global

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
-import { ClipboardMultiple16Regular, Search16Regular } from "@fluentui/react-icons";
+import { ClipboardMultiple16Regular, Search16Regular, ArrowUp16Regular } from "@fluentui/react-icons";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
@@ -33,8 +33,10 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const osInstanceRef = useRef<OverlayScrollbars | null>(null);
   const [customScrollParent, setCustomScrollParent] = useState<HTMLElement | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const { items, isLoading, searchQuery, fetchItems, setupListener, moveItem, togglePin } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
@@ -132,6 +134,21 @@ export function ClipboardList() {
     return () => document.removeEventListener('wheel', handleWheel);
   }, [activeId]);
 
+  // 监听滚动位置，控制回到顶部按钮的显示
+  useEffect(() => {
+    if (!customScrollParent) return;
+    const handleScroll = () => {
+      setShowScrollTop(customScrollParent.scrollTop > 200);
+    };
+    customScrollParent.addEventListener('scroll', handleScroll);
+    return () => customScrollParent.removeEventListener('scroll', handleScroll);
+  }, [customScrollParent]);
+
+  // 回到顶部 - 使用 Virtuoso scrollToIndex API（虚拟列表直接操作 scrollTop 无法正确回到顶部）
+  const scrollToTop = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({ index: 0, align: 'start', behavior: 'auto' });
+  }, []);
+
   // 拖拽时添加全局光标样式
   useEffect(() => {
     if (!activeId) return;
@@ -224,7 +241,7 @@ export function ClipboardList() {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full">
+      <div className="h-full relative">
         <OverlayScrollbarsComponent
           element="div"
           options={{
@@ -252,6 +269,7 @@ export function ClipboardList() {
           <SortableContext items={allItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
             {customScrollParent && (
               <Virtuoso
+                ref={virtuosoRef}
                 totalCount={allItemsWithSortId.length}
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
@@ -272,6 +290,16 @@ export function ClipboardList() {
             )}
           </SortableContext>
         </OverlayScrollbarsComponent>
+        {/* 回到顶部悬浮按钮 */}
+        {showScrollTop && (
+          <button
+            onClick={scrollToTop}
+            className="absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors z-10"
+            title="回到顶部"
+          >
+            <ArrowUp16Regular className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>

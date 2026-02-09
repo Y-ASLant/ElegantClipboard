@@ -11,3 +11,12 @@
   nsExec::ExecToLog `powershell -NoProfile -Command "if(Get-Process 'elegant-clipboard' -EA 0){Start-Process taskkill -ArgumentList '/F','/T','/IM','elegant-clipboard.exe' -Verb RunAs -Wait -WindowStyle Hidden -EA 0}"`
   Sleep 500
 !macroend
+
+!macro NSIS_HOOK_PREUNINSTALL
+  ; Same as PREINSTALL: kill running instance before uninstalling
+  nsExec::ExecToLog 'taskkill /F /T /IM "elegant-clipboard.exe"'
+  Sleep 500
+
+  nsExec::ExecToLog `powershell -NoProfile -Command "if(Get-Process 'elegant-clipboard' -EA 0){Start-Process taskkill -ArgumentList '/F','/T','/IM','elegant-clipboard.exe' -Verb RunAs -Wait -WindowStyle Hidden -EA 0}"`
+  Sleep 500
+!macroend
