@@ -197,6 +197,7 @@ export const ClipboardItemCard = memo(
     const [detailsOpen, setDetailsOpen] = useState(false);
     const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
     const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const hasDraggedRef = useRef(false);
 
     const filesInvalid = item.content_type === "files" && item.files_valid === false;
     const filePaths = item.content_type === "files" ? parseFilePaths(item.file_paths) : [];
@@ -206,9 +207,11 @@ export const ClipboardItemCard = memo(
       disabled: isDragOverlay,
     });
 
-    // Bounce animation after drag
+    // Bounce animation after drag (skip initial mount)
     useEffect(() => {
-      if (!isDragging && !isDragOverlay) {
+      if (isDragging) {
+        hasDraggedRef.current = true;
+      } else if (hasDraggedRef.current && !isDragOverlay) {
         setJustDropped(true);
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
         timeoutRef.current = setTimeout(() => setJustDropped(false), 300);
@@ -395,7 +398,10 @@ export const ClipboardItemCard = memo(
       prevProps.item.image_path === nextProps.item.image_path &&
       prevProps.item.image_width === nextProps.item.image_width &&
       prevProps.item.image_height === nextProps.item.image_height &&
-      prevProps.item.files_valid === nextProps.item.files_valid
+      prevProps.item.files_valid === nextProps.item.files_valid &&
+      prevProps.item.text_content === nextProps.item.text_content &&
+      prevProps.item.preview === nextProps.item.preview &&
+      prevProps.item.file_paths === nextProps.item.file_paths
     );
   }
 );

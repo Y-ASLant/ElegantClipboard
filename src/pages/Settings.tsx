@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Settings16Filled,
   Options16Filled,
@@ -52,6 +52,8 @@ export function Settings() {
     shortcut: "Alt+C",
     winv_replacement: false,
   });
+  const settingsLoadedRef = useRef(false);
+
   // Show window after content is loaded (prevent white flash)
   useEffect(() => {
     const settingsWindow = getCurrentWindow();
@@ -65,12 +67,11 @@ export function Settings() {
     loadSettings();
   }, []);
 
-  // Auto save when settings change
+  // Auto save when settings change (skip until initial load completes)
   useEffect(() => {
+    if (!settingsLoadedRef.current) return;
     const timer = setTimeout(() => {
-      if (settings.data_path !== "" || settings.max_history_count !== 1000 || settings.max_content_size_kb !== 1024) {
-        saveSettings();
-      }
+      saveSettings();
     }, 500);
     return () => clearTimeout(timer);
   }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start, settings.admin_launch, settings.follow_cursor]);
@@ -99,6 +100,7 @@ export function Settings() {
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
       });
+      settingsLoadedRef.current = true;
     } catch (error) {
       console.error("Failed to load settings:", error);
     }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import {
   Search16Regular,
   Delete16Regular,
@@ -26,13 +26,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
+import { useClipboardStore } from "@/stores/clipboard";
 
 function App() {
   const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const { searchQuery, setSearchQuery, clearHistory, refresh } = useClipboardStore();
+  const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh } = useClipboardStore();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Load pinned state on mount
@@ -114,41 +114,12 @@ function App() {
   // onFocusChanged events never fire. The backend uses rdev to monitor global
   // mouse clicks and hides the window when a click is detected outside its bounds.
 
-  // Request counter to handle out-of-order responses
-  const searchRequestIdRef = useRef(0);
-
-  // Search function with request ordering
-  const executeSearch = useCallback(async (query: string) => {
-    const requestId = ++searchRequestIdRef.current;
-    
-    try {
-      const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
-        search: query || null,
-        contentType: null,
-        pinnedOnly: false,
-        favoriteOnly: false,
-        limit: 100,
-        offset: 0,
-      });
-      
-      // Only update if this is still the latest request
-      if (requestId === searchRequestIdRef.current) {
-        useClipboardStore.setState({ items, isLoading: false });
-      }
-    } catch (error) {
-      if (requestId === searchRequestIdRef.current) {
-        console.error("Search failed:", error);
-        useClipboardStore.setState({ isLoading: false });
-      }
-    }
-  }, []);
-
-  // Debounced search with proper cleanup
+  // Debounced search — delegates to store's fetchItems which has its own _fetchId guard
   const debouncedSearch = useMemo(
-    () => debounce((query: string) => {
-      executeSearch(query);
+    () => debounce(() => {
+      fetchItems();
     }, 300),
-    [executeSearch]
+    [fetchItems]
   );
 
   // Cleanup debounce on unmount
@@ -161,7 +132,7 @@ function App() {
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSearchQuery(value);
-    debouncedSearch(value);
+    debouncedSearch();
   };
 
   const handleClearHistory = () => {

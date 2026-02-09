@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   DndContext,
   closestCenter,
@@ -78,10 +78,10 @@ export function useSortableList<T extends SortableItem>({
   const [activeId, setActiveId] = useState<string | null>(null);
   const itemsRef = useRef(items);
 
-  // Keep itemsRef updated without triggering re-renders
-  if (itemsRef.current !== items) {
+  // Keep itemsRef in sync (via effect to avoid writing refs during render)
+  useEffect(() => {
     itemsRef.current = items;
-  }
+  }, [items]);
 
   const sensors = useSensors(
     useSensor(CustomMouseSensor, {
