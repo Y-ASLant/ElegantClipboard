@@ -32,9 +32,12 @@ export function AboutTab() {
           </div>
           <div className="space-y-2">
             <h3 className="font-semibold text-lg">ElegantClipboard</h3>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+            <button
+              onClick={() => openUrl("https://github.com/Y-ASLant/ElegantClipboard/releases")}
+              className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 cursor-pointer hover:shadow-sm hover:scale-105 active:scale-95 transition-all duration-200"
+            >
               v{appVersion}
-            </span>
+            </button>
           </div>
           <p className="text-sm text-muted-foreground max-w-xs">
             低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板

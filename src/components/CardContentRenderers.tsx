@@ -1,7 +1,7 @@
 // Content-type-specific renderers for clipboard item cards
 // Handles: image preview, file content, and shared footer
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useMemo } from "react";
 import {
   Document16Regular,
   Folder16Regular,
@@ -120,6 +120,9 @@ const ImagePreview = memo(function ImagePreview({
   const imagePreviewEnabled = useUISettings((s) => s.imagePreviewEnabled);
   const previewZoomStep = useUISettings((s) => s.previewZoomStep);
   const previewPosition = useUISettings((s) => s.previewPosition);
+  const imageAutoHeight = useUISettings((s) => s.imageAutoHeight);
+  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
+  const imageMaxHeight = useUISettings((s) => s.imageMaxHeight);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const ps = useRef<PreviewState>(defaultPreviewState());
@@ -204,10 +207,33 @@ const ImagePreview = memo(function ImagePreview({
     };
   }, [clearTimer]);
 
+  // Calculate height based on cardMaxLines when imageAutoHeight is false
+  const containerStyle = useMemo(() => {
+    if (imageAutoHeight) {
+      // 自适应模式：使用用户设置的最大高度
+      return { maxHeight: `${imageMaxHeight}px` };
+    }
+    // 固定模式：跟随 cardMaxLines
+    return { maxHeight: `${cardMaxLines * 1.5}rem` };
+  }, [imageAutoHeight, cardMaxLines, imageMaxHeight]);
+  
+  const imgClass = useMemo(() => {
+    return imageAutoHeight 
+      ? "w-full h-auto object-contain" 
+      : "w-full h-full object-contain";
+  }, [imageAutoHeight]);
+
+  const imgStyle = useMemo(() => {
+    return imageAutoHeight 
+      ? { maxHeight: `${imageMaxHeight}px` }
+      : {};
+  }, [imageAutoHeight, imageMaxHeight]);
+
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-20 rounded overflow-hidden bg-muted/30 flex items-center justify-center"
+      className="relative w-full rounded overflow-hidden bg-muted/30 flex items-center justify-center"
+      style={containerStyle}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={hidePreview}
       onWheel={handleWheel}
@@ -216,7 +242,8 @@ const ImagePreview = memo(function ImagePreview({
         src={src}
         alt={alt}
         loading="lazy"
-        className="w-full h-full object-contain"
+        className={imgClass}
+        style={imgStyle}
         onError={onError}
         onLoad={handleImgLoad}
       />
@@ -245,7 +272,7 @@ export const ImageCard = memo(function ImageCard({
   return (
     <div className="flex-1 min-w-0 px-3 py-2.5">
       {error ? (
-        <div className="relative w-full h-20 rounded overflow-hidden bg-muted/30 flex items-center justify-center">
+        <div className="relative w-full h-32 rounded overflow-hidden bg-muted/30 flex items-center justify-center">
           <div className="text-center">
             <Warning16Regular className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
             <p className="text-xs text-muted-foreground/60">图片加载失败</p>

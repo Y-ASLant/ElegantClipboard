@@ -1,13 +1,13 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { ClipboardMultiple16Regular, Search16Regular } from "@fluentui/react-icons";
-import { Virtuoso } from "react-virtuoso";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
-import type { OverlayScrollbars } from "overlayscrollbars";
+import { Virtuoso } from "react-virtuoso";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
+import type { OverlayScrollbars } from "overlayscrollbars";
 
 interface SortableClipboardItem extends ClipboardItem {
   _sortId: string;
@@ -35,13 +35,13 @@ export function ClipboardList() {
   const scrollerRef = useRef<HTMLElement | null>(null);
   const osInstanceRef = useRef<OverlayScrollbars | null>(null);
   const [customScrollParent, setCustomScrollParent] = useState<HTMLElement | null>(null);
-  const { items, pinnedItems, isLoading, searchQuery, fetchItems, fetchPinnedItems, setupListener, moveItem, togglePin } =
+  const { items, isLoading, searchQuery, fetchItems, setupListener, moveItem, togglePin } =
     useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
   useEffect(() => {
     // Fetch items (files_valid is computed by backend, no extra IPC needed)
-    Promise.all([fetchItems(), fetchPinnedItems()]);
+    fetchItems();
     if (listenerRef.current) return;
     let mounted = true;
     setupListener().then((unlisten) => {
@@ -88,15 +88,12 @@ export function ClipboardList() {
       const fromIsPinned = oldIndex < pinnedCount;
       const toIsPinned = newIndex < pinnedCount;
 
-      // 跨区域拖拽：自动改变置顶状态
+      // 跨区域拖拽：自动改变置顶状态，然后移动到目标位置
       if (fromIsPinned !== toIsPinned) {
-        // 非置顶拖入置顶区域 -> 标记为置顶
-        // 置顶拖入非置顶区域 -> 取消置顶
         await togglePin(fromItem.id);
-      }
-      
-      // 同区域拖拽：移动位置
-      if (fromIsPinned === toIsPinned) {
+        await moveItem(fromItem.id, toItem.id);
+      } else {
+        // 同区域拖拽：移动位置
         await moveItem(fromItem.id, toItem.id);
       }
     },
@@ -199,7 +196,7 @@ export function ClipboardList() {
     );
   }
 
-  if (items.length === 0 && pinnedItems.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">
@@ -243,7 +240,7 @@ export function ClipboardList() {
             },
           }}
           events={{
-            initialized: (instance) => {
+            initialized: (instance: OverlayScrollbars) => {
               osInstanceRef.current = instance;
               const viewport = instance.elements().viewport;
               setCustomScrollParent(viewport);

@@ -291,9 +291,13 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
         let _ = app.global_shortcut().unregister(current_sc);
     }
 
-    // Register new shortcut
+    // Register new shortcut with toggle handler
     app.global_shortcut()
-        .register(new_sc)
+        .on_shortcut(new_sc, |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                toggle_window_visibility(app);
+            }
+        })
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
 
     // Update global state

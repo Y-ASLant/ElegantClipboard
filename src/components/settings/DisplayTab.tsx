@@ -18,6 +18,10 @@ interface DisplayTabProps {
   setPreviewZoomStep: (value: number) => void;
   previewPosition: "auto" | "left" | "right";
   setPreviewPosition: (value: "auto" | "left" | "right") => void;
+  imageAutoHeight: boolean;
+  setImageAutoHeight: (value: boolean) => void;
+  imageMaxHeight: number;
+  setImageMaxHeight: (value: number) => void;
 }
 
 const positionOptions: { value: "auto" | "left" | "right"; label: string }[] = [
@@ -41,6 +45,10 @@ export function DisplayTab({
   setPreviewZoomStep,
   previewPosition,
   setPreviewPosition,
+  imageAutoHeight,
+  setImageAutoHeight,
+  imageMaxHeight,
+  setImageMaxHeight,
 }: DisplayTabProps) {
   return (
     <div className="space-y-6">
@@ -68,6 +76,37 @@ export function DisplayTab({
             超过此行数的内容将被截断显示，内容不足时按实际高度显示
           </p>
         </div>
+
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label className="text-xs">图片自适应高度</Label>
+            <p className="text-xs text-muted-foreground">
+              关闭后图片高度跟随预览最大行数
+            </p>
+          </div>
+          <Switch checked={imageAutoHeight} onCheckedChange={setImageAutoHeight} />
+        </div>
+
+        {imageAutoHeight && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs">图片最大高度</Label>
+              <span className="text-xs font-medium tabular-nums">
+                {imageMaxHeight} px
+              </span>
+            </div>
+            <Slider
+              value={[imageMaxHeight]}
+              onValueChange={(value) => setImageMaxHeight(value[0])}
+              min={128}
+              max={1024}
+              step={32}
+            />
+            <p className="text-xs text-muted-foreground">
+              自适应模式下图片的最大显示高度
+            </p>
+          </div>
+        )}
       </div>
 
       <Separator />

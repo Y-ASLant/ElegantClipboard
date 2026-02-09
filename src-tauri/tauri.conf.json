@@ -61,6 +61,7 @@
         "headerImage": null,
         "sidebarImage": null,
         "installMode": "currentUser",
+        "installerHooks": "nsis/hooks.nsh",
         "languages": [
           "SimpChinese",
           "English"

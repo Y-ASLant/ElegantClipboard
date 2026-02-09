@@ -270,15 +270,12 @@ impl ClipboardHandler {
         // Extract image dimensions (width, height)
         let (image_width, image_height) = self.extract_image_dimensions(&data)?;
 
-        // Save image file in background thread to avoid blocking
-        let image_path_clone = image_path.clone();
-        std::thread::spawn(move || {
-            if let Err(e) = std::fs::write(&image_path_clone, data) {
-                tracing::error!("Failed to save image: {}", e);
-            } else {
-                tracing::debug!("Saved image to {:?}", image_path_clone);
-            }
-        });
+        // Save image file synchronously to ensure it exists before DB insert
+        // (async write caused race: frontend could query the item before file was written)
+        if let Err(e) = std::fs::write(&image_path, &data) {
+            return Err(format!("Failed to save image: {}", e));
+        }
+        debug!("Saved image to {:?}", image_path);
 
         Ok(NewClipboardItem {
             content_type: ContentType::Image,

@@ -28,11 +28,12 @@ export interface ClipboardItem {
 
 interface ClipboardState {
   items: ClipboardItem[];
-  pinnedItems: ClipboardItem[];
   totalCount: number;
   isLoading: boolean;
   searchQuery: string;
   selectedType: string | null;
+  /** Monotonic counter to discard stale fetch results */
+  _fetchId: number;
 
   // Actions
   fetchItems: (options?: {
@@ -41,7 +42,6 @@ interface ClipboardState {
     limit?: number;
     offset?: number;
   }) => Promise<void>;
-  fetchPinnedItems: () => Promise<void>;
   fetchCount: () => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSelectedType: (type: string | null) => void;
@@ -58,16 +58,17 @@ interface ClipboardState {
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
   items: [],
-  pinnedItems: [],
   totalCount: 0,
   isLoading: false,
   searchQuery: "",
   selectedType: null,
+  _fetchId: 0,
 
   fetchItems: async (options = {}) => {
-    set({ isLoading: true });
+    const state = get();
+    const fetchId = state._fetchId + 1;
+    set({ isLoading: true, _fetchId: fetchId });
     try {
-      const state = get();
       const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
         search: options.search ?? (state.searchQuery || null),
         contentType: options.content_type ?? state.selectedType,
@@ -76,22 +77,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         limit: options.limit ?? 100,
         offset: options.offset ?? 0,
       });
-      set({ items, isLoading: false });
+      // Only apply result if no newer fetch has started
+      if (get()._fetchId === fetchId) {
+        set({ items, isLoading: false });
+      }
     } catch (error) {
-      console.error("Failed to fetch items:", error);
-      set({ isLoading: false });
-    }
-  },
-
-  fetchPinnedItems: async () => {
-    try {
-      const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
-        pinnedOnly: true,
-        limit: 50,
-      });
-      set({ pinnedItems: items });
-    } catch (error) {
-      console.error("Failed to fetch pinned items:", error);
+      if (get()._fetchId === fetchId) {
+        console.error("Failed to fetch items:", error);
+        set({ isLoading: false });
+      }
     }
   },
 
@@ -124,8 +118,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           item.id === id ? { ...item, is_pinned: newState } : item
         ),
       }));
-      // Refresh pinned items
-      get().fetchPinnedItems();
     } catch (error) {
       console.error("Failed to toggle pin:", error);
     }
@@ -159,7 +151,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       await invoke("delete_clipboard_item", { id });
       set((state) => ({
         items: state.items.filter((item) => item.id !== id),
-        pinnedItems: state.pinnedItems.filter((item) => item.id !== id),
         totalCount: state.totalCount - 1,
       }));
     } catch (error) {
@@ -195,7 +186,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   refresh: async () => {
     await Promise.all([
       get().fetchItems(),
-      get().fetchPinnedItems(),
       get().fetchCount(),
     ]);
   },
