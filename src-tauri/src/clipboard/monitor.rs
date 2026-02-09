@@ -102,13 +102,12 @@ impl ClipboardMonitor {
     /// Resume monitoring (decrements pause counter)
     /// Monitoring only actually resumes when counter reaches 0
     pub fn resume(&self) {
-        let prev = self.pause_count.fetch_sub(1, Ordering::SeqCst);
-        if prev == 0 {
-            // Counter was already 0, restore it to avoid underflow
-            self.pause_count.store(0, Ordering::SeqCst);
-            warn!("Resume called when not paused");
-        } else {
-            debug!("Clipboard monitor resume (count: {})", prev - 1);
+        // Use fetch_update to atomically decrement only if > 0, avoiding u32 underflow
+        match self.pause_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+            if current > 0 { Some(current - 1) } else { None }
+        }) {
+            Ok(prev) => debug!("Clipboard monitor resume (count: {})", prev - 1),
+            Err(_) => warn!("Resume called when not paused"),
         }
     }
 

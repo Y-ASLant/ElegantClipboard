@@ -243,7 +243,7 @@ export function ClipboardList() {
             },
           }}
           events={{
-            initialized: (instance) => {
+            initialized: (instance: OverlayScrollbars) => {
               osInstanceRef.current = instance;
               const viewport = instance.elements().viewport;
               setCustomScrollParent(viewport);
