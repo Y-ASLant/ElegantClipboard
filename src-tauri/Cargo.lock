@@ -1175,7 +1175,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "elegant-clipboard"
-version = "0.4.0"
+version = "0.0.0"
 dependencies = [
  "arboard",
  "blake3",

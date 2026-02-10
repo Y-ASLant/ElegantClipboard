@@ -24,6 +24,13 @@ const _readyPromise = new Promise<void>((resolve) => {
   _readyResolve = resolve;
 });
 
+// Subscribers for accent color changes (for ThemeTab preview)
+const _accentSubscribers = new Set<(color: string | null) => void>();
+
+function notifyAccentSubscribers() {
+  _accentSubscribers.forEach((fn) => fn(_accentColor));
+}
+
 function apply() {
   const { colorTheme } = useUISettings.getState();
   const root = document.documentElement;
@@ -31,12 +38,14 @@ function apply() {
   root.classList.remove(...THEME_CLASSES);
   root.style.removeProperty("--system-accent-h");
   root.style.removeProperty("--system-accent-s");
+  root.style.removeProperty("--system-accent-l");
 
   if (colorTheme === "system" && _accentColor) {
     const parts = _accentColor.split(" ");
     root.classList.add("theme-system");
     root.style.setProperty("--system-accent-h", parts[0]);
     root.style.setProperty("--system-accent-s", parts[1] || "65%");
+    root.style.setProperty("--system-accent-l", parts[2] || "50%");
   } else if (colorTheme !== "default" && colorTheme !== "system") {
     root.classList.add(`theme-${colorTheme}`);
   }
@@ -72,23 +81,20 @@ export function initTheme(): Promise<void> {
   // --- Backend pushes new accent color directly (no re-fetch IPC) ---
   listen<string | null>("system-accent-color-changed", (event) => {
     _accentColor = event.payload;
+    notifyAccentSubscribers();
     apply();
   });
 
   // --- Initial apply ---
-  const { colorTheme } = useUISettings.getState();
-  if (colorTheme === "system") {
-    invoke<string | null>("get_system_accent_color")
-      .then((color) => {
-        _accentColor = color;
-        apply();
-      })
-      .catch(() => apply())
-      .finally(() => _readyResolve?.());
-  } else {
-    apply();
-    _readyResolve?.();
-  }
+  // Always fetch accent color for ThemeTab preview, regardless of current theme
+  invoke<string | null>("get_system_accent_color")
+    .then((color) => {
+      _accentColor = color;
+      notifyAccentSubscribers();
+      apply();
+    })
+    .catch(() => apply())
+    .finally(() => _readyResolve?.());
 
   return _readyPromise;
 }
@@ -96,4 +102,12 @@ export function initTheme(): Promise<void> {
 /** Read the cached accent color (for ThemeTab preview). */
 export function getAccentColor(): string | null {
   return _accentColor;
+}
+
+/** Subscribe to accent color changes. Returns unsubscribe function. */
+export function subscribeAccentColor(
+  fn: (color: string | null) => void,
+): () => void {
+  _accentSubscribers.add(fn);
+  return () => _accentSubscribers.delete(fn);
 }

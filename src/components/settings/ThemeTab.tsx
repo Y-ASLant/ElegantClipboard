@@ -1,14 +1,18 @@
+import { useState, useEffect } from "react";
 import {
   PaintBrush16Regular,
   Checkmark16Filled,
   Desktop16Regular,
 } from "@fluentui/react-icons";
-import { getAccentColor } from "@/lib/theme-applier";
+import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme } from "@/stores/ui-settings";
 
 export function ThemeTab() {
   const { colorTheme, setColorTheme } = useUISettings();
-  const systemAccentColor = getAccentColor();
+  const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
+
+  // Re-render when accent color changes
+  useEffect(() => subscribeAccentColor(setSystemAccentColor), []);
 
   const themes: {
     id: ColorTheme;
@@ -28,7 +32,7 @@ export function ThemeTab() {
         if (!systemAccentColor) return { primary: "#0078d4", secondary: "#f0f0f0" };
         const parts = systemAccentColor.split(" ");
         return {
-          primary: `hsl(${parts[0]} ${parts[1] || "65%"} 35%)`,
+          primary: `hsl(${parts[0]} ${parts[1] || "65%"} ${parts[2] || "50%"})`,
           secondary: `hsl(${parts[0]} 40% 95%)`,
         };
       },
