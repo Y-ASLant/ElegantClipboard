@@ -141,7 +141,23 @@ impl Database {
             info!("Migration complete: FTS5 removed");
         }
 
-        // Migration 3: Add image_width and image_height columns
+        // Migration 3: Add char_count column
+        let has_char_count: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'char_count'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_char_count {
+            info!("Migrating database: adding char_count column");
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN char_count INTEGER;
+                 UPDATE clipboard_items SET char_count = LENGTH(text_content) WHERE text_content IS NOT NULL;"
+            )?;
+            info!("Migration complete: char_count column added");
+        }
+
+        // Migration 4: Add image_width and image_height columns
         let has_image_width: bool = conn.query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'image_width'",
             [],

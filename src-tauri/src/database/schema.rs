@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
     access_count INTEGER DEFAULT 0,
-    last_accessed_at TEXT
+    last_accessed_at TEXT,
+    char_count INTEGER
 );
 
 -- Settings table

@@ -22,6 +22,7 @@ export interface ClipboardItem {
   updated_at: string;
   access_count: number;
   last_accessed_at: string | null;
+  char_count: number | null;
   /** Whether all files exist (only for "files" content_type, computed at query time) */
   files_valid?: boolean;
 }
@@ -177,17 +178,14 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   clearHistory: async () => {
     try {
       await invoke<number>("clear_history");
-      get().refresh();
+      await get().refresh();
     } catch (error) {
       console.error("Failed to clear history:", error);
     }
   },
 
   refresh: async () => {
-    await Promise.all([
-      get().fetchItems(),
-      get().fetchCount(),
-    ]);
+    await get().fetchItems();
   },
 
   setupListener: async () => {

@@ -76,6 +76,76 @@ fn set_clipboard_files(paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Extract a context snippet centered around the first occurrence of `keyword` in `text`.
+/// Returns `...prefix KEYWORD suffix...` with the keyword in the middle.
+///
+/// Uses char-index searching to avoid byte-position mismatches between
+/// `text` and `text.to_lowercase()` (e.g. Turkish İ changes byte length on lowercasing).
+fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String {
+    let keyword_lower = keyword.to_lowercase();
+    let keyword_char_len = keyword_lower.chars().count();
+
+    // Find the char-index of the first case-insensitive match
+    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
+    let text_char_count = char_indices.len();
+
+    let keyword_char_pos = {
+        let mut found = None;
+        // Sliding window over chars: compare lowercased slices
+        'outer: for i in 0..text_char_count {
+            if i + keyword_char_len > text_char_count {
+                break;
+            }
+            let byte_start = char_indices[i].0;
+            let byte_end = if i + keyword_char_len < text_char_count {
+                char_indices[i + keyword_char_len].0
+            } else {
+                text.len()
+            };
+            if text[byte_start..byte_end].to_lowercase() == keyword_lower {
+                found = Some(i);
+                break 'outer;
+            }
+        }
+        found
+    };
+
+    let keyword_char_pos = match keyword_char_pos {
+        Some(pos) => pos,
+        None => {
+            // Keyword not in text_content (matched via file_paths); return original preview truncation
+            return text.chars().take(max_len).collect();
+        }
+    };
+
+    let context_before = max_len / 3;
+    let start_char = keyword_char_pos.saturating_sub(context_before);
+    let end_char = (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
+
+    if end_char <= start_char {
+        return text.chars().take(max_len).collect();
+    }
+
+    // Convert char indices back to byte slicing
+    let byte_start = char_indices[start_char].0;
+    let byte_end = if end_char < text_char_count {
+        char_indices[end_char].0
+    } else {
+        text.len()
+    };
+
+    let slice = &text[byte_start..byte_end];
+    let mut result = String::with_capacity(slice.len() + 6);
+    if start_char > 0 {
+        result.push_str("...");
+    }
+    result.push_str(slice);
+    if end_char < text_char_count {
+        result.push_str("...");
+    }
+    result
+}
+
 /// Check file existence and fill files_valid field for file-type items
 fn fill_files_valid(items: &mut [ClipboardItem]) {
     use rayon::prelude::*;
@@ -155,6 +225,8 @@ pub async fn get_clipboard_items(
     use crate::database::QueryOptions;
 
     let repo = ClipboardRepository::new(&state.db);
+    let is_searching = search.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+    let search_keyword = search.clone();
     let options = QueryOptions {
         search,
         content_type,
@@ -163,9 +235,29 @@ pub async fn get_clipboard_items(
         limit,
         offset,
     };
-
     let mut items = repo.list(options).map_err(|e| e.to_string())?;
-    fill_files_valid(&mut items);
+    // When searching: replace preview with keyword-centered context snippet,
+    // then strip text_content to avoid heavy IPC transfer.
+    if let Some(ref keyword) = search_keyword {
+        for item in &mut items {
+            if let Some(ref text) = item.text_content {
+                // Only replace preview if keyword is NOT in the original preview
+                let preview_has_match = item.preview.as_ref()
+                    .map(|p| p.to_lowercase().contains(&keyword.to_lowercase()))
+                    .unwrap_or(false);
+                if !preview_has_match {
+                    item.preview = Some(extract_keyword_context(text, keyword, 200));
+                }
+            }
+            // Strip heavy field after context extraction
+            item.text_content = None;
+        }
+    }
+    // Skip expensive file-existence checks during search (disk I/O per file item);
+    // only needed for non-search browsing where user might paste files.
+    if !is_searching {
+        fill_files_valid(&mut items);
+    }
     Ok(items)
 }
 

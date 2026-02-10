@@ -9,8 +9,8 @@ import {
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { HighlightText } from "@/components/HighlightText";
+import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 

@@ -27,6 +27,7 @@ pub struct ClipboardItem {
     pub updated_at: String,
     pub access_count: i64,
     pub last_accessed_at: Option<String>,
+    pub char_count: Option<i64>,
     /// Whether all files in file_paths exist (only for "files" content_type)
     /// This field is computed at query time, not stored in database
     #[serde(default, skip_deserializing)]
@@ -47,6 +48,7 @@ pub struct NewClipboardItem {
     pub byte_size: i64,
     pub image_width: Option<i64>,
     pub image_height: Option<i64>,
+    pub char_count: Option<i64>,
 }
 
 /// Query options for listing items
@@ -90,8 +92,8 @@ impl ClipboardRepository {
         let new_sort_order = max_sort_order + 1;
 
         conn.execute(
-            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, sort_order)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, sort_order, char_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 item.content_type.as_str(),
                 item.text_content,
@@ -105,6 +107,7 @@ impl ClipboardRepository {
                 item.image_width,
                 item.image_height,
                 new_sort_order,
+                item.char_count,
             ],
         )?;
 
@@ -177,25 +180,41 @@ impl ClipboardRepository {
         }
     }
 
+    /// Columns for list queries: excludes heavy text fields to minimize IPC transfer.
+    const LIST_COLUMNS: &'static str =
+        "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \
+         image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, \
+         is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count";
+
+    /// Columns for search queries: includes text_content for context-aware preview extraction.
+    /// text_content is stripped after computing keyword-centered previews.
+    const SEARCH_COLUMNS: &'static str =
+        "id, content_type, text_content, NULL AS html_content, NULL AS rtf_content, \
+         image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, \
+         is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count";
+
     /// List items with query options
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        
-        let mut sql = String::from(
-            "SELECT clipboard_items.* FROM clipboard_items"
+
+        let is_searching = options.search.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+        let columns = if is_searching { Self::SEARCH_COLUMNS } else { Self::LIST_COLUMNS };
+        let mut sql = format!(
+            "SELECT {} FROM clipboard_items", columns
         );
         let mut conditions = Vec::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        // Substring search using LIKE on lightweight fields only.
-        // preview (max 200 chars) covers visible card text; file_paths covers file names.
-        // Skipping text_content (up to 1MB) avoids full-table scan on large data.
+        // Substring search using LIKE on full text_content (matches any position in content)
+        // and file_paths. The LIKE scan runs in native SQLite C code on mmap'd data;
+        // the real bottleneck was IPC transfer of heavy fields, solved by NULL-ing them above.
         if let Some(ref search) = options.search {
             if !search.is_empty() {
                 conditions.push(
-                    "(preview LIKE ? OR file_paths LIKE ?)".to_string(),
+                    "(text_content LIKE ? ESCAPE '\\' OR file_paths LIKE ? ESCAPE '\\')".to_string(),
                 );
-                let pattern = format!("%{}%", search.replace('%', "\\%").replace('_', "\\_"));
+                // Escape the ESCAPE char itself, then LIKE wildcards % and _
+                let pattern = format!("%{}%", search.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
                 params_vec.push(Box::new(pattern.clone()));
                 params_vec.push(Box::new(pattern));
             }
@@ -473,6 +492,7 @@ impl ClipboardRepository {
             updated_at: row.get("updated_at")?,
             access_count: row.get("access_count")?,
             last_accessed_at: row.get("last_accessed_at")?,
+            char_count: row.get("char_count")?,
             files_valid: None, // Computed at query time, not stored in database
         })
     }

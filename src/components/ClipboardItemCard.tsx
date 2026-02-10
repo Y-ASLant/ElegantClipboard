@@ -325,8 +325,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const metaItems: string[] = [];
   if (showTime) metaItems.push(formatTime(item.created_at));
-  if (showCharCount && item.text_content)
-    metaItems.push(formatCharCount(item.text_content));
+  if (showCharCount && item.char_count)
+    metaItems.push(formatCharCount(item.char_count));
   if (showByteSize) metaItems.push(formatSize(item.byte_size));
 
   // ---- Event handlers ----
