@@ -9,6 +9,7 @@ import {
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { currentMonitor } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -49,25 +50,37 @@ const MAX_SCALE = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
 
-/** Get the fixed window rect: fills the available space beside the main window */
-function getPreviewWindowRect(position: "auto" | "left" | "right") {
+/** Get the fixed window rect in physical pixels: fills the available space beside the main window on its current monitor */
+async function getPreviewWindowRect(position: "auto" | "left" | "right") {
   const winX = window.screenX ?? window.screenLeft ?? 0;
   const mainW = window.innerWidth || 380;
-  const screenW = window.screen.availWidth;
-  const screenH = window.screen.availHeight;
 
-  const leftSpace = winX - PREVIEW_GAP;
-  const rightSpace = screenW - (winX + mainW) - PREVIEW_GAP;
+  // Get the monitor the main window is on (handles multi-monitor correctly)
+  const monitor = await currentMonitor();
+  const monX = monitor?.position.x ?? 0;
+  const monY = monitor?.position.y ?? 0;
+  const monW = monitor?.size.width ?? window.screen.availWidth;
+  const monH = monitor?.size.height ?? window.screen.availHeight;
+  const scale = monitor?.scaleFactor ?? 1;
+
+  // Convert CSS pixels to physical for consistent multi-DPI positioning
+  const physWinX = Math.round(winX * scale);
+  const physMainW = Math.round(mainW * scale);
+  const physGap = Math.round(PREVIEW_GAP * scale);
+  const physMinW = Math.round(200 * scale);
+
+  const leftSpace = physWinX - monX - physGap;
+  const rightSpace = (monX + monW) - (physWinX + physMainW) - physGap;
 
   const useLeft =
     position === "left" ? true :
     position === "right" ? false :
-    leftSpace >= rightSpace && leftSpace >= 200;
+    leftSpace >= rightSpace && leftSpace >= physMinW;
 
   if (useLeft) {
-    return { x: 0, y: 0, w: Math.max(200, leftSpace), h: screenH };
+    return { x: monX, y: monY, w: Math.max(physMinW, leftSpace), h: monH, scale };
   }
-  return { x: winX + mainW + PREVIEW_GAP, y: 0, w: Math.max(200, rightSpace), h: screenH };
+  return { x: physWinX + physMainW + physGap, y: monY, w: Math.max(physMinW, rightSpace), h: monH, scale };
 }
 
 /** Calculate image CSS size at a given scale, fitted into available space */
@@ -144,9 +157,10 @@ const ImagePreview = memo(function ImagePreview({
   // Show preview: open fixed-size window, send image + initial CSS size
   const showPreview = useCallback(async () => {
     if (!containerRef.current || !ps.current.currentPath) return;
-    const rect = getPreviewWindowRect(previewPosition);
+    const rect = await getPreviewWindowRect(previewPosition);
     const { imgNatural } = ps.current;
-    const { width, height } = calcImageSize(imgNatural.w, imgNatural.h, 1.0, rect.w, rect.h);
+    // calcImageSize needs logical max dimensions for CSS output
+    const { width, height } = calcImageSize(imgNatural.w, imgNatural.h, 1.0, rect.w / rect.scale, rect.h / rect.scale);
 
     ps.current.visible = true;
     ps.current.scale = 1.0;
@@ -183,13 +197,14 @@ const ImagePreview = memo(function ImagePreview({
       const delta = e.deltaY > 0 ? -step : step;
       ps.current.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, ps.current.scale + delta));
 
-      const rect = getPreviewWindowRect(previewPosition);
-      const { width, height } = calcImageSize(
-        ps.current.imgNatural.w, ps.current.imgNatural.h,
-        ps.current.scale, rect.w, rect.h,
-      );
-      const percent = Math.round(ps.current.scale * 100);
-      emit("image-preview-zoom", { width, height, percent, active: true }).catch((e) => console.error("Failed to emit zoom:", e));
+      getPreviewWindowRect(previewPosition).then((rect) => {
+        const { width, height } = calcImageSize(
+          ps.current.imgNatural.w, ps.current.imgNatural.h,
+          ps.current.scale, rect.w / rect.scale, rect.h / rect.scale,
+        );
+        const percent = Math.round(ps.current.scale * 100);
+        emit("image-preview-zoom", { width, height, percent, active: true }).catch((e) => console.error("Failed to emit zoom:", e));
+      });
     },
     [previewZoomStep, previewPosition],
   );
