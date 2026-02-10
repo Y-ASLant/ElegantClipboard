@@ -37,6 +37,10 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "f") {
     e.preventDefault();
   }
+  // Disable Ctrl+Shift+S WebView2 web capture
+  if (e.ctrlKey && e.shiftKey && e.key === "S") {
+    e.preventDefault();
+  }
 });
 
 // Simple router based on URL path

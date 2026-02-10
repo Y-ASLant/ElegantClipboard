@@ -281,9 +281,9 @@ export function Settings() {
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-all duration-200",
                         activeTab === item.id
-                          ? "bg-primary text-primary-foreground"
+                          ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
@@ -299,12 +299,12 @@ export function Settings() {
 
         {/* Right Content - Full width with scrollbar at edge */}
         {activeTab === "about" ? (
-          <div className="flex-1 flex flex-col gap-3">
+          <div key="about" className="flex-1 flex flex-col gap-3 animate-settings-in">
             <AboutTab />
           </div>
         ) : (
           <ScrollArea className="flex-1">
-            <div className="space-y-3">
+            <div key={activeTab} className="space-y-3 animate-settings-in">
               {activeTab === "general" && (
                 <GeneralTab
                   settings={settings}
