@@ -207,13 +207,11 @@ export function Settings() {
         </div>
 
         {/* Right Content */}
-        <div className="flex-1">
+        <div className="flex-1 flex flex-col gap-3 overflow-hidden">
           {activeTab === "about" ? (
-            <ScrollArea className="h-full">
-              <AboutTab />
-            </ScrollArea>
+            <AboutTab />
           ) : (
-            <Card className="h-full overflow-hidden">
+            <Card className="flex-1 overflow-hidden">
               <ScrollArea className="h-full">
                 <CardContent className="p-4">
                   {activeTab === "general" && (
