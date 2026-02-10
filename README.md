@@ -15,6 +15,32 @@
   <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
+## 效果预览
+
+### 外观主题
+
+#### 跟随系统强调色
+
+![跟随系统](img/theme_0.png)
+
+| 经典黑白 | 翡翠绿 | 天空青 |
+|:-:|:-:|:-:|
+| ![经典黑白](img/theme_1.png) | ![翡翠绿](img/theme_2.png) | ![天空青](img/theme_3.png) |
+
+### 设置界面
+
+| 常规设置 | 显示设置 | 快捷按键 |
+|:-:|:-:|:-:|
+| ![常规设置](img/setting_1.png) | ![显示设置](img/setting_2.png) | ![快捷按键](img/setting_3.png) |
+
+### 图片预览
+
+![图片预览](img/preview_mode.png)
+
+### 启动通知
+
+![启动通知](img/启动弹窗.png)
+
 ## 设计理念
 
 **低占用 · 高性能 · 现代化 · 完全本地化离线**
@@ -66,11 +92,18 @@
 - **管理员启动** - 可选以管理员权限运行（UAC 提升）
 - **数据库优化** - 手动触发 OPTIMIZE / VACUUM
 
+### 外观主题
+- **跟随系统强调色**（默认） - 自动读取 Windows 系统强调色，实时跟随变更（WM_SETTINGCHANGE）
+- **经典黑白** - 简约黑白灰配色
+- **翡翠绿 / 天空青** - 预设配色方案
+- **暗色模式** - 自动跟随系统深色/浅色模式
+- **零开销实现** - 模块级单例，无 React 渲染开销，单次 IPC 取色后缓存
+- **系统消息机制** - Windows WM_SETTINGCHANGE 消息通知，无轮询等额外 CPU 消耗
+
 ### 系统集成
 - **系统托盘** - 左键切换窗口、右键菜单（显示/隐藏、暂停/恢复监控、退出）
 - **非焦点窗口** - 窗口不抢占焦点，不影响当前操作
 - **键盘模拟** - 使用 enigo 模拟 Ctrl+V 实现粘贴
-- **暗色模式** - 跟随系统主题自动切换
 
 ## 快捷键
 
@@ -163,6 +196,7 @@ src/                          # React 前端
 │   ├── clipboard.ts              # 剪贴板状态（Zustand）
 │   └── ui-settings.ts            # UI 设置（持久化+多窗口同步）
 ├── lib/
+│   ├── theme-applier.ts          # 主题系统（模块级单例，零 React 开销）
 │   ├── format.ts                 # 工具函数（格式化/解析/判断）
 │   └── utils.ts                  # 通用工具（cn）
 ├── hooks/
@@ -176,7 +210,7 @@ src-tauri/src/                # Rust 后端
 ├── commands/
 │   ├── mod.rs                    # 命令注册 + 共享辅助函数
 │   ├── clipboard.rs              # 剪贴板 CRUD + 复制粘贴
-│   ├── settings.rs               # 设置/监控/数据库/自启动
+│   ├── settings.rs               # 设置/监控/数据库/自启动/系统强调色
 │   └── file_ops.rs               # 文件验证/详情/路径粘贴
 ├── clipboard/
 │   ├── handler.rs                # 内容处理（文本/HTML/RTF/图片/文件）

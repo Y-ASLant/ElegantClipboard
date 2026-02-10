@@ -26,10 +26,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { initTheme } from "@/lib/theme-applier";
 import { useClipboardStore } from "@/stores/clipboard";
 
+// Initialize theme once for this window (runs before component mounts)
+initTheme();
+
 function App() {
-  const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh } = useClipboardStore();
@@ -94,20 +97,26 @@ function App() {
     }
   }, []);
 
-  // Detect system dark mode
+  // Handle ESC key (emitted by backend global keyboard hook, works without focus)
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mediaQuery.matches);
-
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
+    const unlisten = listen("escape-pressed", async () => {
+      // Check if any overlay (dialog, context menu, etc.) is open via DOM
+      const hasOverlay = document.querySelector(
+        '[role="dialog"], [data-radix-popper-content-wrapper]'
+      );
+      if (hasOverlay) {
+        // Dispatch synthetic ESC to let Radix close the overlay
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        return;
+      }
+      try {
+        await invoke("hide_window");
+      } catch (error) {
+        console.error("Failed to hide window:", error);
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
   }, []);
-
-  // Apply dark class to html element
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-  }, [isDark]);
 
   // NOTE: Click-outside detection is handled by the backend input_monitor module
   // because the window is set to non-focusable (focus: false), which means

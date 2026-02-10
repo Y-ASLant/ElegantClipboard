@@ -11,7 +11,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use tauri::{Manager, WebviewWindow};
+use tauri::{Emitter, Manager, WebviewWindow};
 use tracing::{error, info, warn};
 
 /// Main window reference for click detection
@@ -158,6 +158,12 @@ fn handle_input_event(event: Event) {
                 handle_click_outside();
             }
         }
+        EventType::KeyPress(key) => {
+            // Handle ESC key to hide window (global, works even when window is not focused)
+            if matches!(key, rdev::Key::Escape) {
+                handle_escape_key();
+            }
+        }
         _ => {}
     }
 }
@@ -186,6 +192,27 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
     
     cursor_x < win_x || cursor_x > win_x + win_width
         || cursor_y < win_y || cursor_y > win_y + win_height
+}
+
+/// Handle ESC key press - emit event to frontend so it can decide
+/// whether to close a dialog or hide the window
+fn handle_escape_key() {
+    // Only process if window is visible
+    if !MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+
+    // Don't hide if window is pinned
+    if WINDOW_PINNED.load(Ordering::Relaxed) {
+        return;
+    }
+
+    if let Some(window) = MAIN_WINDOW.lock().as_ref() {
+        if window.is_visible().unwrap_or(false) {
+            // Emit to frontend — let it close dialogs first or hide window
+            let _ = window.emit("escape-pressed", ());
+        }
+    }
 }
 
 /// Handle click outside event - hide window if click is outside

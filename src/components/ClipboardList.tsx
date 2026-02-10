@@ -1,7 +1,11 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
-import { ClipboardMultiple16Regular, Search16Regular } from "@fluentui/react-icons";
+import {
+  ClipboardMultiple16Regular,
+  Search16Regular,
+  ArrowUp16Regular,
+} from "@fluentui/react-icons";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
@@ -33,10 +37,20 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
 export function ClipboardList() {
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const osInstanceRef = useRef<OverlayScrollbars | null>(null);
-  const [customScrollParent, setCustomScrollParent] = useState<HTMLElement | null>(null);
-  const { items, isLoading, searchQuery, fetchItems, setupListener, moveItem, togglePin } =
-    useClipboardStore();
+  const [customScrollParent, setCustomScrollParent] =
+    useState<HTMLElement | null>(null);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  const {
+    items,
+    isLoading,
+    searchQuery,
+    fetchItems,
+    setupListener,
+    moveItem,
+    togglePin,
+  } = useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
   useEffect(() => {
@@ -57,24 +71,26 @@ export function ClipboardList() {
     };
   }, []);
 
-  const itemsWithSortId = useMemo((): SortableClipboardItem[] =>
-    items.map((item) => ({ ...item, _sortId: `item-${item.id}` })),
-  [items]);
+  const itemsWithSortId = useMemo(
+    (): SortableClipboardItem[] =>
+      items.map((item) => ({ ...item, _sortId: `item-${item.id}` })),
+    [items],
+  );
 
   const pinnedItemsWithSortId = useMemo(
     () => itemsWithSortId.filter((item) => item.is_pinned),
-    [itemsWithSortId]
+    [itemsWithSortId],
   );
 
   const regularItemsWithSortId = useMemo(
     () => itemsWithSortId.filter((item) => !item.is_pinned),
-    [itemsWithSortId]
+    [itemsWithSortId],
   );
 
   // 合并所有卡片：置顶在前，非置顶在后
   const allItemsWithSortId = useMemo(
     () => [...pinnedItemsWithSortId, ...regularItemsWithSortId],
-    [pinnedItemsWithSortId, regularItemsWithSortId]
+    [pinnedItemsWithSortId, regularItemsWithSortId],
   );
 
   const handleDragEnd = useCallback(
@@ -97,7 +113,7 @@ export function ClipboardList() {
         await moveItem(fromItem.id, toItem.id);
       }
     },
-    [allItemsWithSortId, pinnedItemsWithSortId.length, moveItem, togglePin]
+    [allItemsWithSortId, pinnedItemsWithSortId.length, moveItem, togglePin],
   );
 
   const {
@@ -121,27 +137,58 @@ export function ClipboardList() {
 
   // 拖拽时接管滚轮事件 - QuickClipboard 优化
   useEffect(() => {
-    if (!activeId || !scrollerRef.current) return;
+    if (!activeId) return;
+
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (scrollerRef.current) {
         scrollerRef.current.scrollTop += e.deltaY;
       }
     };
-    document.addEventListener('wheel', handleWheel, { passive: false } as AddEventListenerOptions);
-    return () => document.removeEventListener('wheel', handleWheel);
+
+    // 使用 capture phase 确保在其他事件处理器之前捕获
+    document.addEventListener("wheel", handleWheel, {
+      passive: false,
+      capture: true,
+    });
+
+    return () => {
+      document.removeEventListener("wheel", handleWheel, {
+        capture: true,
+      });
+    };
   }, [activeId]);
+
+  // 监听滚动位置，控制回到顶部按钮的显示
+  useEffect(() => {
+    if (!customScrollParent) return;
+    const handleScroll = () => {
+      setShowScrollTop(customScrollParent.scrollTop > 200);
+    };
+    customScrollParent.addEventListener("scroll", handleScroll);
+    return () => customScrollParent.removeEventListener("scroll", handleScroll);
+  }, [customScrollParent]);
+
+  // 回到顶部 - 使用 Virtuoso scrollToIndex API（虚拟列表直接操作 scrollTop 无法正确回到顶部）
+  const scrollToTop = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({
+      index: 0,
+      align: "start",
+      behavior: "auto",
+    });
+  }, []);
 
   // 拖拽时添加全局光标样式
   useEffect(() => {
     if (!activeId) return;
-    document.body.classList.add('dragging-cursor');
-    return () => document.body.classList.remove('dragging-cursor');
+    document.body.classList.add("dragging-cursor");
+    return () => document.body.classList.remove("dragging-cursor");
   }, [activeId]);
 
-  const defaultItemHeight = useMemo(() =>
-    20 + cardMaxLines * 20 + 20 + 8,
-  [cardMaxLines]);
+  const defaultItemHeight = useMemo(
+    () => 20 + cardMaxLines * 20 + 20 + 8,
+    [cardMaxLines],
+  );
 
   const pinnedCount = pinnedItemsWithSortId.length;
 
@@ -149,10 +196,10 @@ export function ClipboardList() {
     (index: number) => {
       const item = allItemsWithSortId[index];
       if (!item) return null;
-      
+
       // 在置顶区域和非置顶区域之间添加分隔线
       const showSeparator = index === pinnedCount && pinnedCount > 0;
-      
+
       return (
         <div className="px-2 pb-2">
           {showSeparator && <Separator className="mb-2" />}
@@ -160,12 +207,12 @@ export function ClipboardList() {
         </div>
       );
     },
-    [allItemsWithSortId, pinnedCount]
+    [allItemsWithSortId, pinnedCount],
   );
 
   const computeItemKey = useCallback(
     (index: number) => allItemsWithSortId[index]?._sortId || `item-${index}`,
-    [allItemsWithSortId]
+    [allItemsWithSortId],
   );
 
   if (isLoading && items.length === 0) {
@@ -205,7 +252,9 @@ export function ClipboardList() {
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">暂无剪贴板历史</p>
-            <p className="text-sm text-muted-foreground">复制任意内容开始记录</p>
+            <p className="text-sm text-muted-foreground">
+              复制任意内容开始记录
+            </p>
           </div>
         </div>
       </div>
@@ -224,7 +273,7 @@ export function ClipboardList() {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full">
+      <div className="h-full relative">
         <OverlayScrollbarsComponent
           element="div"
           options={{
@@ -249,9 +298,13 @@ export function ClipboardList() {
           defer
           style={{ height: "100%" }}
         >
-          <SortableContext items={allItemsWithSortId.map((i) => i._sortId)} strategy={strategy}>
+          <SortableContext
+            items={allItemsWithSortId.map((i) => i._sortId)}
+            strategy={strategy}
+          >
             {customScrollParent && (
               <Virtuoso
+                ref={virtuosoRef}
                 totalCount={allItemsWithSortId.length}
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
@@ -272,11 +325,25 @@ export function ClipboardList() {
             )}
           </SortableContext>
         </OverlayScrollbarsComponent>
+        {/* 回到顶部悬浮按钮 */}
+        {showScrollTop && (
+          <button
+            onClick={scrollToTop}
+            className="absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors z-10"
+            title="回到顶部"
+          >
+            <ArrowUp16Regular className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>
         {activeItemData && (
-          <ClipboardItemCard item={activeItemData} index={-1} isDragOverlay={true} />
+          <ClipboardItemCard
+            item={activeItemData}
+            index={-1}
+            isDragOverlay={true}
+          />
         )}
       </DragOverlay>
     </DndContext>

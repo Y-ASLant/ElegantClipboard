@@ -64,6 +64,100 @@
   --color-ring: hsl(212.7 26.8% 83.9%);
 }
 
+/* ========== Theme Color Variants ========== */
+
+/* Emerald Theme - Light */
+.theme-emerald {
+  --color-primary: hsl(158 64% 22%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(158 50% 95%);
+  --color-secondary-foreground: hsl(158 64% 22%);
+  --color-accent: hsl(158 50% 95%);
+  --color-accent-foreground: hsl(158 64% 22%);
+  --color-muted: hsl(158 30% 96%);
+  --color-muted-foreground: hsl(158 20% 40%);
+  --color-border: hsl(158 30% 90%);
+  --color-input: hsl(158 30% 90%);
+  --color-ring: hsl(158 64% 22%);
+}
+
+/* Cyan Theme - Light */
+.theme-cyan {
+  --color-primary: hsl(188 70% 25%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(188 50% 95%);
+  --color-secondary-foreground: hsl(188 70% 25%);
+  --color-accent: hsl(188 50% 95%);
+  --color-accent-foreground: hsl(188 70% 25%);
+  --color-muted: hsl(188 30% 96%);
+  --color-muted-foreground: hsl(188 20% 40%);
+  --color-border: hsl(188 30% 90%);
+  --color-input: hsl(188 30% 90%);
+  --color-ring: hsl(188 70% 25%);
+}
+
+/* Emerald Theme - Dark */
+.dark.theme-emerald {
+  --color-primary: hsl(158 70% 45%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(158 25% 20%);
+  --color-secondary-foreground: hsl(158 70% 45%);
+  --color-accent: hsl(158 25% 20%);
+  --color-accent-foreground: hsl(158 70% 45%);
+  --color-muted: hsl(158 20% 18%);
+  --color-muted-foreground: hsl(158 30% 70%);
+  --color-border: hsl(158 20% 20%);
+  --color-input: hsl(158 20% 20%);
+  --color-ring: hsl(158 70% 45%);
+}
+
+/* Cyan Theme - Dark */
+.dark.theme-cyan {
+  --color-primary: hsl(188 80% 50%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(188 25% 20%);
+  --color-secondary-foreground: hsl(188 80% 50%);
+  --color-accent: hsl(188 25% 20%);
+  --color-accent-foreground: hsl(188 80% 50%);
+  --color-muted: hsl(188 20% 18%);
+  --color-muted-foreground: hsl(188 30% 70%);
+  --color-border: hsl(188 20% 20%);
+  --color-input: hsl(188 20% 20%);
+  --color-ring: hsl(188 80% 50%);
+}
+
+/* ========== System Theme (Dynamic Accent Color) ========== */
+
+/* System Theme - Light - uses --system-accent-h (hue) and --system-accent-s (saturation) set by JS */
+.theme-system {
+  --color-primary: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(var(--system-accent-h) 40% 95%);
+  --color-secondary-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+  --color-accent: hsl(var(--system-accent-h) 40% 95%);
+  --color-accent-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+  --color-muted: hsl(var(--system-accent-h) 25% 96%);
+  --color-muted-foreground: hsl(var(--system-accent-h) 20% 40%);
+  --color-border: hsl(var(--system-accent-h) 25% 90%);
+  --color-input: hsl(var(--system-accent-h) 25% 90%);
+  --color-ring: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+}
+
+/* System Theme - Dark */
+.dark.theme-system {
+  --color-primary: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(var(--system-accent-h) 20% 20%);
+  --color-secondary-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+  --color-accent: hsl(var(--system-accent-h) 20% 20%);
+  --color-accent-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+  --color-muted: hsl(var(--system-accent-h) 15% 18%);
+  --color-muted-foreground: hsl(var(--system-accent-h) 25% 70%);
+  --color-border: hsl(var(--system-accent-h) 15% 20%);
+  --color-input: hsl(var(--system-accent-h) 15% 20%);
+  --color-ring: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+}
+
 /* Base styles */
 * {
   border-color: var(--color-border);

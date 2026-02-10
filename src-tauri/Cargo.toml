@@ -1,6 +1,6 @@
 [package]
 name = "elegant-clipboard"
-version = "0.4.0"
+version = "0.0.0"
 description = "An elegant Windows clipboard manager"
 authors = ["ASLant"]
 edition = "2021"
@@ -72,7 +72,9 @@ windows = { version = "0.61", features = [
     "Win32_Security",
     "Win32_System_Threading",
     "Win32_UI_Shell",
+    "Win32_Graphics_Dwm",
 ] }
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"
+windows-core = "0.61"
 

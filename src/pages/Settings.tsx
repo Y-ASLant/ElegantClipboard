@@ -5,41 +5,64 @@ import {
   Eye16Filled,
   Keyboard16Filled,
   Info16Filled,
+  Database16Filled,
+  PaintBrush16Filled,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
+import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
-import { ShortcutsTab, ShortcutSettings } from "@/components/settings/ShortcutsTab";
+import {
+  ShortcutsTab,
+  ShortcutSettings,
+} from "@/components/settings/ShortcutsTab";
+import { ThemeTab } from "@/components/settings/ThemeTab";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 
-interface AppSettings extends GeneralSettings, ShortcutSettings {}
+interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
-type TabType = "general" | "display" | "shortcuts" | "about";
+type TabType = "general" | "data" | "display" | "theme" | "shortcuts" | "about";
 
-const navItems: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+const navItems: {
+  id: TabType;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
   { id: "general", label: "常规设置", icon: Options16Filled },
+  { id: "data", label: "数据管理", icon: Database16Filled },
   { id: "display", label: "显示设置", icon: Eye16Filled },
-  { id: "shortcuts", label: "快捷键", icon: Keyboard16Filled },
+  { id: "theme", label: "外观主题", icon: PaintBrush16Filled },
+  { id: "shortcuts", label: "快捷按键", icon: Keyboard16Filled },
   { id: "about", label: "关于", icon: Info16Filled },
 ];
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>("general");
-  const { 
-    cardMaxLines, setCardMaxLines,
-    showTime, setShowTime,
-    showCharCount, setShowCharCount,
-    showByteSize, setShowByteSize,
-    imagePreviewEnabled, setImagePreviewEnabled,
-    previewZoomStep, setPreviewZoomStep,
-    previewPosition, setPreviewPosition,
-    imageAutoHeight, setImageAutoHeight,
-    imageMaxHeight, setImageMaxHeight,
+  const {
+    cardMaxLines,
+    setCardMaxLines,
+    showTime,
+    setShowTime,
+    showCharCount,
+    setShowCharCount,
+    showByteSize,
+    setShowByteSize,
+    imagePreviewEnabled,
+    setImagePreviewEnabled,
+    previewZoomStep,
+    setPreviewZoomStep,
+    previewPosition,
+    setPreviewPosition,
+    imageAutoHeight,
+    setImageAutoHeight,
+    imageMaxHeight,
+    setImageMaxHeight,
   } = useUISettings();
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
@@ -54,12 +77,14 @@ export function Settings() {
   });
   const settingsLoadedRef = useRef(false);
 
-  // Show window after content is loaded (prevent white flash)
+  // Show window only after theme is applied (prevent flash)
   useEffect(() => {
-    const settingsWindow = getCurrentWindow();
-    requestAnimationFrame(() => {
-      settingsWindow.show();
-      settingsWindow.setFocus();
+    initTheme().then(() => {
+      const settingsWindow = getCurrentWindow();
+      requestAnimationFrame(() => {
+        settingsWindow.show();
+        settingsWindow.setFocus();
+      });
     });
   }, []);
 
@@ -74,21 +99,35 @@ export function Settings() {
       saveSettings();
     }, 500);
     return () => clearTimeout(timer);
-  }, [settings.max_history_count, settings.max_content_size_kb, settings.auto_start, settings.admin_launch, settings.follow_cursor]);
+  }, [
+    settings.max_history_count,
+    settings.max_content_size_kb,
+    settings.auto_start,
+    settings.admin_launch,
+    settings.follow_cursor,
+  ]);
 
   const loadSettings = async () => {
     try {
       // Data path is now stored in config.json, not database
       const dataPath = await invoke<string>("get_default_data_path");
-      const maxHistoryCount = await invoke<string>("get_setting", { key: "max_history_count" });
-      const maxContentSize = await invoke<string>("get_setting", { key: "max_content_size_kb" });
-      const followCursor = await invoke<string>("get_setting", { key: "follow_cursor" });
+      const maxHistoryCount = await invoke<string>("get_setting", {
+        key: "max_history_count",
+      });
+      const maxContentSize = await invoke<string>("get_setting", {
+        key: "max_content_size_kb",
+      });
+      const followCursor = await invoke<string>("get_setting", {
+        key: "follow_cursor",
+      });
       const autoStart = await invoke<boolean>("is_autostart_enabled");
       const adminLaunch = await invoke<boolean>("is_admin_launch_enabled");
       const isRunningAsAdmin = await invoke<boolean>("is_running_as_admin");
-      const winvReplacement = await invoke<boolean>("is_winv_replacement_enabled");
+      const winvReplacement = await invoke<boolean>(
+        "is_winv_replacement_enabled",
+      );
       const currentShortcut = await invoke<string>("get_current_shortcut");
-      
+
       setSettings({
         data_path: dataPath || "",
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
@@ -109,23 +148,31 @@ export function Settings() {
   const saveSettings = async () => {
     try {
       // Save settings to database (data_path is handled separately by GeneralTab with migration)
-      await invoke("set_setting", { key: "max_history_count", value: settings.max_history_count.toString() });
-      await invoke("set_setting", { key: "max_content_size_kb", value: settings.max_content_size_kb.toString() });
-      await invoke("set_setting", { key: "follow_cursor", value: settings.follow_cursor.toString() });
-      
+      await invoke("set_setting", {
+        key: "max_history_count",
+        value: settings.max_history_count.toString(),
+      });
+      await invoke("set_setting", {
+        key: "max_content_size_kb",
+        value: settings.max_content_size_kb.toString(),
+      });
+      await invoke("set_setting", {
+        key: "follow_cursor",
+        value: settings.follow_cursor.toString(),
+      });
+
       if (settings.auto_start) {
         await invoke("enable_autostart");
       } else {
         await invoke("disable_autostart");
       }
-      
+
       // Handle admin launch setting
       if (settings.admin_launch) {
         await invoke("enable_admin_launch");
       } else {
         await invoke("disable_admin_launch");
       }
-      
     } catch (error) {
       console.error("Failed to save settings:", error);
     } finally {
@@ -155,21 +202,48 @@ export function Settings() {
             <Settings16Filled className="w-5 h-5 text-muted-foreground" />
             <span className="text-sm font-semibold">设置</span>
           </div>
-          <div className="flex gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div
+            className="flex gap-1"
+            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          >
             <button
               onClick={minimizeWindow}
               className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="2" y="5.5" width="8" height="1" rx="0.5" fill="currentColor"/>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  x="2"
+                  y="5.5"
+                  width="8"
+                  height="1"
+                  rx="0.5"
+                  fill="currentColor"
+                />
               </svg>
             </button>
             <button
               onClick={closeWindow}
               className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 12 12"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
               </svg>
             </button>
           </div>
@@ -193,7 +267,7 @@ export function Settings() {
                         "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
                         activeTab === item.id
                           ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
                       <Icon className="w-4 h-4" />
@@ -206,57 +280,68 @@ export function Settings() {
           </Card>
         </div>
 
-        {/* Right Content */}
-        <div className="flex-1">
-          {activeTab === "about" ? (
-            <ScrollArea className="h-full">
-              <AboutTab />
-            </ScrollArea>
-          ) : (
-            <Card className="h-full overflow-hidden">
-              <ScrollArea className="h-full">
-                <CardContent className="p-4">
-                  {activeTab === "general" && (
-                    <GeneralTab
-                      settings={settings}
-                      onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                    />
-                  )}
+        {/* Right Content - Full width with scrollbar at edge */}
+        {activeTab === "about" ? (
+          <div className="flex-1 flex flex-col gap-3">
+            <AboutTab />
+          </div>
+        ) : (
+          <ScrollArea className="flex-1">
+            <div className="space-y-3">
+              {activeTab === "general" && (
+                <GeneralTab
+                  settings={settings}
+                  onSettingsChange={(newSettings) =>
+                    setSettings({ ...settings, ...newSettings })
+                  }
+                />
+              )}
 
-                  {activeTab === "display" && (
-                    <DisplayTab
-                      cardMaxLines={cardMaxLines}
-                      setCardMaxLines={setCardMaxLines}
-                      showTime={showTime}
-                      setShowTime={setShowTime}
-                      showCharCount={showCharCount}
-                      setShowCharCount={setShowCharCount}
-                      showByteSize={showByteSize}
-                      setShowByteSize={setShowByteSize}
-                      imagePreviewEnabled={imagePreviewEnabled}
-                      setImagePreviewEnabled={setImagePreviewEnabled}
-                      previewZoomStep={previewZoomStep}
-                      setPreviewZoomStep={setPreviewZoomStep}
-                      previewPosition={previewPosition}
-                      setPreviewPosition={setPreviewPosition}
-                      imageAutoHeight={imageAutoHeight}
-                      setImageAutoHeight={setImageAutoHeight}
-                      imageMaxHeight={imageMaxHeight}
-                      setImageMaxHeight={setImageMaxHeight}
-                    />
-                  )}
+              {activeTab === "data" && (
+                <DataTab
+                  settings={settings}
+                  onSettingsChange={(newSettings) =>
+                    setSettings({ ...settings, ...newSettings })
+                  }
+                />
+              )}
 
-                  {activeTab === "shortcuts" && (
-                    <ShortcutsTab
-                      settings={settings}
-                      onSettingsChange={(newSettings) => setSettings({ ...settings, ...newSettings })}
-                    />
-                  )}
-                </CardContent>
-              </ScrollArea>
-            </Card>
-          )}
-        </div>
+              {activeTab === "display" && (
+                <DisplayTab
+                  cardMaxLines={cardMaxLines}
+                  setCardMaxLines={setCardMaxLines}
+                  showTime={showTime}
+                  setShowTime={setShowTime}
+                  showCharCount={showCharCount}
+                  setShowCharCount={setShowCharCount}
+                  showByteSize={showByteSize}
+                  setShowByteSize={setShowByteSize}
+                  imagePreviewEnabled={imagePreviewEnabled}
+                  setImagePreviewEnabled={setImagePreviewEnabled}
+                  previewZoomStep={previewZoomStep}
+                  setPreviewZoomStep={setPreviewZoomStep}
+                  previewPosition={previewPosition}
+                  setPreviewPosition={setPreviewPosition}
+                  imageAutoHeight={imageAutoHeight}
+                  setImageAutoHeight={setImageAutoHeight}
+                  imageMaxHeight={imageMaxHeight}
+                  setImageMaxHeight={setImageMaxHeight}
+                />
+              )}
+
+              {activeTab === "theme" && <ThemeTab />}
+
+              {activeTab === "shortcuts" && (
+                <ShortcutsTab
+                  settings={settings}
+                  onSettingsChange={(newSettings) =>
+                    setSettings({ ...settings, ...newSettings })
+                  }
+                />
+              )}
+            </div>
+          </ScrollArea>
+        )}
       </div>
     </div>
   );
