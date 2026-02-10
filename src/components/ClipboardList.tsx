@@ -319,8 +319,8 @@ export function ClipboardList() {
                 defaultItemHeight={defaultItemHeight}
                 increaseViewportBy={{ top: 400, bottom: 400 }}
                 scrollSeekConfiguration={{
-                  enter: (velocity) => Math.abs(velocity) > 500,
-                  exit: (velocity) => Math.abs(velocity) < 100,
+                  enter: (velocity) => Math.abs(velocity) > 2000,
+                  exit: (velocity) => Math.abs(velocity) < 500,
                 }}
                 components={{ ScrollSeekPlaceholder }}
                 customScrollParent={customScrollParent}
