@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Folder16Regular, Open16Regular } from "@fluentui/react-icons";
+import { useState, useCallback } from "react";
+import { Folder16Regular, Open16Regular, ArrowSync16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,11 +38,50 @@ interface MigrationResult {
   errors: string[];
 }
 
+interface DataSizeInfo {
+  db_size: number;
+  images_size: number;
+  images_count: number;
+  total_size: number;
+}
+
+function formatDataSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [dataSize, setDataSize] = useState<DataSizeInfo | null>(() => {
+    try {
+      const cached = sessionStorage.getItem("data-size-cache");
+      return cached ? JSON.parse(cached).info : null;
+    } catch { return null; }
+  });
+  const [dataSizeTime, setDataSizeTime] = useState<string | null>(() => {
+    try {
+      const cached = sessionStorage.getItem("data-size-cache");
+      return cached ? JSON.parse(cached).time : null;
+    } catch { return null; }
+  });
+  const [dataSizeLoading, setDataSizeLoading] = useState(false);
+
+  const refreshDataSize = useCallback(async () => {
+    setDataSizeLoading(true);
+    try {
+      const info = await invoke<DataSizeInfo>("get_data_size");
+      const time = new Date().toLocaleTimeString();
+      setDataSize(info);
+      setDataSizeTime(time);
+      sessionStorage.setItem("data-size-cache", JSON.stringify({ info, time }));
+    } catch { /* ignore */ }
+    setDataSizeLoading(false);
+  }, []);
 
   const selectFolder = async () => {
     try {
@@ -130,6 +169,45 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   return (
     <>
       <div className="space-y-4">
+        {/* Data Size Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium">数据统计</h3>
+            <div className="flex items-center gap-2">
+              {dataSizeTime && (
+                <span className="text-xs text-muted-foreground">更新于 {dataSizeTime}</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={refreshDataSize}
+                disabled={dataSizeLoading}
+                className="h-6 w-6"
+              >
+                <ArrowSync16Regular className={`w-3.5 h-3.5 ${dataSizeLoading ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </div>
+          {dataSize ? (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.total_size)}</p>
+                <p className="text-xs text-muted-foreground">总大小</p>
+              </div>
+              <div className="text-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.db_size)}</p>
+                <p className="text-xs text-muted-foreground">数据库</p>
+              </div>
+              <div className="text-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.images_size)}</p>
+                <p className="text-xs text-muted-foreground">图片（{dataSize.images_count} 张）</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">点击右上角刷新按钮查看数据大小</p>
+          )}
+        </div>
+
         {/* Storage Path Card */}
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium mb-3">数据存储</h3>

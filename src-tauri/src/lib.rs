@@ -616,6 +616,7 @@ pub fn run() {
             commands::file_ops::paste_as_path,
             commands::file_ops::get_file_details,
             commands::file_ops::save_file_as,
+            commands::file_ops::get_data_size,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

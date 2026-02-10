@@ -158,6 +158,54 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
     }
 }
 
+/// Get data directory size breakdown (database + images)
+#[tauri::command]
+pub async fn get_data_size() -> Result<DataSizeInfo, String> {
+    let config = crate::config::AppConfig::load();
+    let data_dir = config.get_data_dir();
+
+    let db_size = ["clipboard.db", "clipboard.db-wal", "clipboard.db-shm"]
+        .iter()
+        .map(|name| {
+            std::fs::metadata(data_dir.join(name))
+                .map(|m| m.len())
+                .unwrap_or(0)
+        })
+        .sum::<u64>();
+
+    let images_dir = data_dir.join("images");
+    let (images_size, images_count) = if images_dir.is_dir() {
+        let mut size = 0u64;
+        let mut count = 0u64;
+        if let Ok(entries) = std::fs::read_dir(&images_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_file() {
+                    size += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    count += 1;
+                }
+            }
+        }
+        (size, count)
+    } else {
+        (0, 0)
+    };
+
+    Ok(DataSizeInfo {
+        db_size,
+        images_size,
+        images_count,
+        total_size: db_size + images_size,
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct DataSizeInfo {
+    pub db_size: u64,
+    pub images_size: u64,
+    pub images_count: u64,
+    pub total_size: u64,
+}
+
 /// Get file details for display
 #[tauri::command]
 pub async fn get_file_details(path: String) -> Result<FileDetails, String> {

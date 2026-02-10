@@ -33,6 +33,16 @@ npm run lint:fix
 cd src-tauri && cargo test
 ```
 
+### 最近更新
+
+**v0.x 新功能**：
+- **图片预览窗口**：独立悬浮窗口显示图片，支持缩放和左右定位
+- **动态主题系统**：支持 default/emerald/cyan/system 四种主题，system 主题跟随 Windows 系统强调色
+- **搜索高亮**：搜索结果自动提取关键词上下文，提升搜索体验
+- **一键回到顶部**：滚动超过 200px 显示悬浮按钮
+- **窗口状态重置**：关闭时自动重置搜索和滚动位置（可通过 `autoResetState` 配置）
+- **文件操作增强**：文件有效性检查、另存为、显示在资源管理器等功能
+
 ## 项目架构
 
 ElegantClipboard 是一个基于 Tauri 2.0 的剪贴板管理工具，采用 React 前端 + Rust 后端的架构。
@@ -78,9 +88,9 @@ src-tauri/              # Rust 后端
 **后端（Rust）**：命令按功能模块化组织，在 `lib.rs` 通过 `invoke_handler` 注册。
 
 **命令模块**（`src-tauri/src/commands/`）：
-- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`toggle_pin`、`copy_to_clipboard`、`paste_content`
-- `settings.rs` - 设置/监控：`get_setting`、`pause_monitor`、`optimize_database`、`enable_autostart`
-- `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`
+- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`get_clipboard_item`、`get_clipboard_count`、`toggle_pin`、`toggle_favorite`、`move_clipboard_item`、`delete_clipboard_item`、`clear_history`、`copy_to_clipboard`、`paste_content`
+- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`select_folder_for_settings`、`open_data_folder`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`
+- `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`、`get_file_details`、`save_file_as`
 
 **窗口/系统命令**（`lib.rs`）：
 - 窗口管理：`show_window`、`hide_window`、`set_window_pinned`、`open_settings_window`
@@ -116,6 +126,14 @@ const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
 - **前端**：Zustand stores（`src/stores/`）
   - `clipboard.ts` - 剪贴板数据状态
   - `ui-settings.ts` - UI 设置（持久化 + 多窗口同步）
+    - `cardMaxLines` - 卡片最大行数
+    - `showTime/CharCount/ByteSize` - 元数据显示开关
+    - `imagePreviewEnabled` - 图片预览开关
+    - `previewZoomStep` - 缩放步进
+    - `previewPosition` - 预览位置（auto/left/right）
+    - `imageAutoHeight/imageMaxHeight` - 图片高度设置
+    - `colorTheme` - 颜色主题（default/emerald/cyan/system）
+    - `autoResetState` - 关闭时重置状态
 - **后端**：`AppState` 通过 Tauri State 共享
   ```rust
   pub struct AppState {
@@ -196,19 +214,21 @@ listen("ui-settings-changed", (event) => { ... });
 位置：`src-tauri/src/database/schema.rs`
 
 **表结构**：
-- `clipboard_items` - 剪贴板历史（支持 FTS5）
-- `categories` - 用户分类
-- `tags` - 标签系统
-- `item_tags` - 多对多关系
+- `clipboard_items` - 剪贴板历史
 - `settings` - 键值对配置
 
 **特性**：
-- FTS5 全文搜索（`text_content`、`preview` 字段）
 - 内容哈希去重（`content_hash` UNIQUE 约束）
 - 自动时间戳更新触发器
-- 性能索引：`created_at`、`is_pinned`、`is_favorite`、`content_type`、`sort_order`
+- 性能索引：`created_at`、`is_pinned`、`is_favorite`、`content_type`、`sort_order`、`access_count`
 - 图片元数据：`image_width`、`image_height` 字段
-- 运行时字段：`files_valid`（文件有效性检查结果，不存储）
+- 运行时字段：`files_valid`（文��有效性检查结果，不存储）
+
+**搜索实现**：
+- 使用 SQL `LIKE` 查询，无需 FTS5
+- 搜索时提取关键词上下文（`extract_keyword_context`），替换 `preview` 字段
+- `text_content` 在搜索结果中置空以减少 IPC 传输
+- 文件类型项搜索时跳过磁盘检查（`fill_files_valid` 仅在浏览时执行）
 
 ## 前端路由
 
@@ -217,6 +237,17 @@ listen("ui-settings-changed", (event) => { ... });
 使用简单的基于路径的路由：
 - `/` 或默认 → 主窗口（`App` 组件）
 - `/settings` 或 `/settings.html` → 设置窗口（`Settings` 组件）
+- `/image-preview.html` → 图片预览窗口（独立透明窗口）
+
+## 图片预览窗口
+
+位置：`src-tauri/src/lib.rs:show_image_preview`
+
+独立透明悬浮窗口，用于大图预览：
+- 窗口定位自动计算，填充主窗口左侧或右侧可用空间
+- 支持缩放（previewZoomStep 配置，默认 15%）
+- 鼠标离开预览区域或主窗口隐藏时自动隐藏
+- CSS `object-fit` 处理图片尺寸，窗口大小不变
 
 ## 剪贴板处理
 
@@ -228,6 +259,7 @@ listen("ui-settings-changed", (event) => { ... });
 
 **Rust 后端**：
 - `tauri 2` - 应用框架
+- `tauri-plugin-*` - 全局快捷键、自动启动、对话框、通知
 - `rusqlite` - SQLite 数据库（bundled 特性）
 - `tokio` - 异步运行时
 - `rayon` - 并行处理（文件检查）
@@ -238,16 +270,18 @@ listen("ui-settings-changed", (event) => { ... });
 - `parking_lot` - 高性能锁
 - `blake3` - 内容哈希去重
 - `windows` / `winreg` - Windows API 和注册表
+- `tracing` - 日志系统
 
 **前端**：
 - React 19 + TypeScript
 - Vite 7 - 构建工具
 - Tailwind CSS 4 - 样式
-- Zustand 5 - 状态管理
+- Zustand 5 - 状态管理（persist 中间件）
 - react-virtuoso - 虚拟列表
 - @dnd-kit - 拖拽排序
+- OverlayScrollbars - 自定义滚动条
 - Fluent UI Icons - 图标库
-- Radix UI - 无障碍组件基础
+- Radix UI - 无障碍组件基础（Dialog、Tooltip、Context Menu 等）
 
 ## 性能优化
 
@@ -272,7 +306,7 @@ pub struct Database {
 **索引优化**（`schema.rs`）：
 - 部分索引：`WHERE is_pinned = 1` 仅索引匹配行，减小索引体积
 - 降序索引：`created_at DESC` 优化常见查询模式
-- FTS5 全文搜索：`unicode61` 分词器支持中文
+- 访问统计索引：`(access_count DESC, last_accessed_at DESC)` 支持常用内容排序
 
 ### 无锁设计
 
@@ -329,6 +363,24 @@ std::thread::spawn(move || {
 - Mutex 体积：40 字节 → 1 字节
 - 无锁中毒机制，API 更简洁
 - 自旋等待减少系统调用，竞争场景下性能提升 2-3 倍
+
+## 动态主题系统
+
+位置：`src/lib/theme-applier.ts`
+
+支持四种颜色主题：`default`、`emerald`、`cyan`、`system`
+
+**System 主题工作原理**：
+- Windows 端监听注册表 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent\AccentColorMenu`
+- 后台线程监听 `WM_SETTINGCHANGE` 消息（参数 `ImmersiveColorSet`），实时推送 `system-accent-color-changed` 事件
+- 前端接收 HSL 格式颜色值，应用 CSS 变量 `--system-accent-h/s/l`
+- 零 React 开销：模块级初始化，直接 DOM 操作
+
+**主题应用流程**：
+1. `initTheme()` 在窗口加载时调用（`App.tsx:34`）
+2. 读取 zustand store 的 `colorTheme`
+3. 若为 `system`，获取并应用系统强调色
+4. 监听 store 变化和系统主题变化事件
 
 ## 命名约定
 
