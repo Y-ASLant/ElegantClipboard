@@ -345,7 +345,7 @@ textarea,
 }
 
 .animate-settings-in {
-    animation: settings-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: settings-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-settings-in > * {

@@ -81,9 +81,15 @@ export function Settings() {
   useEffect(() => {
     initTheme().then(() => {
       const settingsWindow = getCurrentWindow();
+      // Force reflow so theme CSS is fully computed
+      document.body.getBoundingClientRect();
+      // Double rAF: ensure one full paint is committed before showing,
+      // priming the WebView2 compositor to avoid first-interaction flash
       requestAnimationFrame(() => {
-        settingsWindow.show();
-        settingsWindow.setFocus();
+        requestAnimationFrame(() => {
+          settingsWindow.show();
+          settingsWindow.setFocus();
+        });
       });
     });
   }, []);
@@ -281,7 +287,7 @@ export function Settings() {
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-all duration-200",
+"w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
                         activeTab === item.id
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
