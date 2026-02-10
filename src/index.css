@@ -320,6 +320,18 @@ textarea,
         "Andale Mono", monospace;
 }
 
+/* Search highlight */
+.search-highlight {
+    background-color: hsl(from var(--color-primary) h s l / 0.2);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.dark .search-highlight {
+    background-color: hsl(from var(--color-primary) h s l / 0.3);
+}
+
 /* Drag drop bounce animation */
 @keyframes scale-bounce {
     0% {

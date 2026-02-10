@@ -20,6 +20,7 @@ import {
   ImageCard,
   FileContent,
 } from "@/components/CardContentRenderers";
+import { HighlightText } from "@/components/HighlightText";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -426,7 +427,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   overflow: "hidden",
                 }}
               >
-                {item.preview || item.text_content || `[${config.label}]`}
+                <HighlightText text={item.preview || item.text_content || `[${config.label}]`} />
               </pre>
               <CardFooter
                 metaItems={metaItems}
