@@ -21,6 +21,7 @@ import {
 import { ThemeTab } from "@/components/settings/ThemeTab";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 
@@ -76,12 +77,14 @@ export function Settings() {
   });
   const settingsLoadedRef = useRef(false);
 
-  // Show window after content is loaded (prevent white flash)
+  // Show window only after theme is applied (prevent flash)
   useEffect(() => {
-    const settingsWindow = getCurrentWindow();
-    requestAnimationFrame(() => {
-      settingsWindow.show();
-      settingsWindow.setFocus();
+    initTheme().then(() => {
+      const settingsWindow = getCurrentWindow();
+      requestAnimationFrame(() => {
+        settingsWindow.show();
+        settingsWindow.setFocus();
+      });
     });
   }, []);
 

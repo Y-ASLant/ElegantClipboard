@@ -2,7 +2,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type ColorTheme = "default" | "emerald" | "cyan" | "violet";
+export type ColorTheme = "default" | "emerald" | "cyan" | "system";
 
 interface UISettings {
   cardMaxLines: number;
@@ -47,7 +47,7 @@ export const useUISettings = create<UISettings>()(
       previewPosition: "auto" as "auto" | "left" | "right",
       imageAutoHeight: true,
       imageMaxHeight: 512,
-      colorTheme: "default" as ColorTheme,
+      colorTheme: "system" as ColorTheme,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });

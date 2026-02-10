@@ -8,6 +8,20 @@
   </head>
 
   <body>
+    <script>
+      // Apply theme & dark mode synchronously before React renders to prevent flash
+      try {
+        var s = JSON.parse(localStorage.getItem('clipboard-ui-settings') || '{}');
+        var t = s && s.state && s.state.colorTheme;
+        if (t && t !== 'default' && t !== 'system') {
+          document.documentElement.classList.add('theme-' + t);
+        }
+        // Dark mode
+        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

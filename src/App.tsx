@@ -26,26 +26,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { initTheme } from "@/lib/theme-applier";
 import { useClipboardStore } from "@/stores/clipboard";
-import { useUISettings } from "@/stores/ui-settings";
+
+// Initialize theme once for this window (runs before component mounts)
+initTheme();
 
 function App() {
-  const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh } = useClipboardStore();
-  const { colorTheme } = useUISettings();
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Apply theme to document
-  useEffect(() => {
-    // Remove all theme classes
-    document.documentElement.classList.remove("theme-emerald", "theme-cyan", "theme-violet");
-    // Add current theme class (default doesn't need a class)
-    if (colorTheme !== "default") {
-      document.documentElement.classList.add(`theme-${colorTheme}`);
-    }
-  }, [colorTheme]);
 
   // Load pinned state on mount
   useEffect(() => {
@@ -105,21 +96,6 @@ function App() {
       };
     }
   }, []);
-
-  // Detect system dark mode
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    setIsDark(mediaQuery.matches);
-
-    const handler = (e: MediaQueryListEvent) => setIsDark(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
-
-  // Apply dark class to html element
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", isDark);
-  }, [isDark]);
 
   // Handle ESC key (emitted by backend global keyboard hook, works without focus)
   useEffect(() => {

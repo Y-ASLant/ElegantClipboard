@@ -36,22 +36,15 @@
       "assetProtocol": {
         "enable": true,
         "scope": {
-          "allow": [
-            "**"
-          ]
+          "allow": ["**"]
         }
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "nsis"
-    ],
-    "icon": [
-      "icons/icon.png",
-      "icons/icon.ico"
-    ],
+    "targets": ["nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
@@ -62,10 +55,7 @@
         "sidebarImage": null,
         "installMode": "currentUser",
         "installerHooks": "nsis/hooks.nsh",
-        "languages": [
-          "SimpChinese",
-          "English"
-        ],
+        "languages": ["SimpChinese", "English"],
         "displayLanguageSelector": false
       }
     }

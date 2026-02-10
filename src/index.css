@@ -126,34 +126,36 @@
   --color-ring: hsl(188 80% 50%);
 }
 
-/* Violet Theme - Light */
-.theme-violet {
-  --color-primary: hsl(263 70% 30%);
+/* ========== System Theme (Dynamic Accent Color) ========== */
+
+/* System Theme - Light - uses --system-accent-h (hue) and --system-accent-s (saturation) set by JS */
+.theme-system {
+  --color-primary: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
   --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(263 50% 95%);
-  --color-secondary-foreground: hsl(263 70% 30%);
-  --color-accent: hsl(263 50% 95%);
-  --color-accent-foreground: hsl(263 70% 30%);
-  --color-muted: hsl(263 30% 96%);
-  --color-muted-foreground: hsl(263 20% 40%);
-  --color-border: hsl(263 30% 90%);
-  --color-input: hsl(263 30% 90%);
-  --color-ring: hsl(263 70% 30%);
+  --color-secondary: hsl(var(--system-accent-h) 40% 95%);
+  --color-secondary-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+  --color-accent: hsl(var(--system-accent-h) 40% 95%);
+  --color-accent-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+  --color-muted: hsl(var(--system-accent-h) 25% 96%);
+  --color-muted-foreground: hsl(var(--system-accent-h) 20% 40%);
+  --color-border: hsl(var(--system-accent-h) 25% 90%);
+  --color-input: hsl(var(--system-accent-h) 25% 90%);
+  --color-ring: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
 }
 
-/* Violet Theme - Dark */
-.dark.theme-violet {
-  --color-primary: hsl(263 70% 65%);
+/* System Theme - Dark */
+.dark.theme-system {
+  --color-primary: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
   --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(263 25% 20%);
-  --color-secondary-foreground: hsl(263 70% 65%);
-  --color-accent: hsl(263 25% 20%);
-  --color-accent-foreground: hsl(263 70% 65%);
-  --color-muted: hsl(263 20% 18%);
-  --color-muted-foreground: hsl(263 30% 70%);
-  --color-border: hsl(263 20% 20%);
-  --color-input: hsl(263 20% 20%);
-  --color-ring: hsl(263 70% 65%);
+  --color-secondary: hsl(var(--system-accent-h) 20% 20%);
+  --color-secondary-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+  --color-accent: hsl(var(--system-accent-h) 20% 20%);
+  --color-accent-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+  --color-muted: hsl(var(--system-accent-h) 15% 18%);
+  --color-muted-foreground: hsl(var(--system-accent-h) 25% 70%);
+  --color-border: hsl(var(--system-accent-h) 15% 20%);
+  --color-input: hsl(var(--system-accent-h) 15% 20%);
+  --color-ring: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
 }
 
 /* Base styles */

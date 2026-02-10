@@ -529,6 +529,10 @@ pub fn run() {
                 input_monitor::start_monitoring();
             }
 
+            // Start system accent color watcher for live theme updates
+            #[cfg(target_os = "windows")]
+            commands::settings::start_accent_color_watcher(app.handle().clone());
+
             // Send startup notification so user knows the app is running in tray
             {
                 use tauri_plugin_notification::NotificationExt;
@@ -601,6 +605,7 @@ pub fn run() {
             commands::settings::is_autostart_enabled,
             commands::settings::enable_autostart,
             commands::settings::disable_autostart,
+            commands::settings::get_system_accent_color,
             // File operation commands
             commands::file_ops::check_files_exist,
             commands::file_ops::show_in_explorer,
