@@ -11,34 +11,18 @@ document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
 
-// Disable browser shortcuts
+// Disable WebView2 browser shortcuts that leak through to desktop apps
 document.addEventListener("keydown", (e) => {
-  // Disable Tab navigation (Tauri app doesn't need it)
-  if (e.key === "Tab") {
-    e.preventDefault();
+  // Block Ctrl+letter browser shortcuts (Ctrl+R/F/S/P/etc.)
+  // Only target single-letter keys so Ctrl+Backspace, Ctrl+Arrow etc. still work
+  if (e.ctrlKey && !e.altKey && e.key.length === 1) {
+    const allowed = new Set(["a", "c", "v", "x", "z", "y"]);
+    if (!allowed.has(e.key.toLowerCase())) {
+      e.preventDefault();
+    }
   }
-  // Disable F5 refresh
-  if (e.key === "F5") {
-    e.preventDefault();
-  }
-  // Disable Ctrl+R refresh
-  if (e.ctrlKey && e.key === "r") {
-    e.preventDefault();
-  }
-  // Disable Ctrl+Shift+R hard refresh
-  if (e.ctrlKey && e.shiftKey && e.key === "R") {
-    e.preventDefault();
-  }
-  // Disable Ctrl+F5 hard refresh
-  if (e.ctrlKey && e.key === "F5") {
-    e.preventDefault();
-  }
-  // Disable Ctrl+F browser search
-  if (e.ctrlKey && e.key === "f") {
-    e.preventDefault();
-  }
-  // Disable Ctrl+Shift+S WebView2 web capture
-  if (e.ctrlKey && e.shiftKey && e.key === "S") {
+  // Block Tab navigation, F5 refresh, F7 caret browsing
+  if (e.key === "Tab" || e.key === "F5" || e.key === "F7") {
     e.preventDefault();
   }
 });
