@@ -27,13 +27,25 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useClipboardStore } from "@/stores/clipboard";
+import { useUISettings } from "@/stores/ui-settings";
 
 function App() {
   const [isDark, setIsDark] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh } = useClipboardStore();
+  const { colorTheme } = useUISettings();
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Apply theme to document
+  useEffect(() => {
+    // Remove all theme classes
+    document.documentElement.classList.remove("theme-emerald", "theme-cyan", "theme-violet");
+    // Add current theme class (default doesn't need a class)
+    if (colorTheme !== "default") {
+      document.documentElement.classList.add(`theme-${colorTheme}`);
+    }
+  }, [colorTheme]);
 
   // Load pinned state on mount
   useEffect(() => {

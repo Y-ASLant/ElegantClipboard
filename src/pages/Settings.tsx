@@ -6,6 +6,7 @@ import {
   Keyboard16Filled,
   Info16Filled,
   Database16Filled,
+  PaintBrush16Filled,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -17,6 +18,7 @@ import {
   ShortcutsTab,
   ShortcutSettings,
 } from "@/components/settings/ShortcutsTab";
+import { ThemeTab } from "@/components/settings/ThemeTab";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -24,7 +26,7 @@ import { useUISettings } from "@/stores/ui-settings";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
-type TabType = "general" | "data" | "display" | "shortcuts" | "about";
+type TabType = "general" | "data" | "display" | "theme" | "shortcuts" | "about";
 
 const navItems: {
   id: TabType;
@@ -34,6 +36,7 @@ const navItems: {
   { id: "general", label: "常规设置", icon: Options16Filled },
   { id: "data", label: "数据管理", icon: Database16Filled },
   { id: "display", label: "显示设置", icon: Eye16Filled },
+  { id: "theme", label: "外观主题", icon: PaintBrush16Filled },
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Filled },
   { id: "about", label: "关于", icon: Info16Filled },
 ];
@@ -322,6 +325,8 @@ export function Settings() {
                   setImageMaxHeight={setImageMaxHeight}
                 />
               )}
+
+              {activeTab === "theme" && <ThemeTab />}
 
               {activeTab === "shortcuts" && (
                 <ShortcutsTab

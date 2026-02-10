@@ -2,6 +2,8 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type ColorTheme = "default" | "emerald" | "cyan" | "violet";
+
 interface UISettings {
   cardMaxLines: number;
   showTime: boolean;
@@ -12,6 +14,7 @@ interface UISettings {
   previewPosition: "auto" | "left" | "right";
   imageAutoHeight: boolean;
   imageMaxHeight: number;
+  colorTheme: ColorTheme;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -21,6 +24,7 @@ interface UISettings {
   setPreviewPosition: (pos: "auto" | "left" | "right") => void;
   setImageAutoHeight: (auto: boolean) => void;
   setImageMaxHeight: (height: number) => void;
+  setColorTheme: (theme: ColorTheme) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -43,6 +47,7 @@ export const useUISettings = create<UISettings>()(
       previewPosition: "auto" as "auto" | "left" | "right",
       imageAutoHeight: true,
       imageMaxHeight: 512,
+      colorTheme: "default" as ColorTheme,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -78,6 +83,10 @@ export const useUISettings = create<UISettings>()(
       setImageMaxHeight: (height) => {
         set({ imageMaxHeight: height });
         broadcastChange({ imageMaxHeight: height });
+      },
+      setColorTheme: (theme) => {
+        set({ colorTheme: theme });
+        broadcastChange({ colorTheme: theme });
       },
     }),
     {
