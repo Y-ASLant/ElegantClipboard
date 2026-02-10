@@ -124,6 +124,40 @@ pub async fn paste_as_path(
     })
 }
 
+/// Save a file to user-chosen location via system save dialog
+#[tauri::command]
+pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<bool, String> {
+    use std::path::Path;
+    use tauri_plugin_dialog::DialogExt;
+
+    let src = Path::new(&source_path);
+    if !src.exists() {
+        return Err("源文件不存在".to_string());
+    }
+
+    let file_name = src
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "file".to_string());
+
+    let dest = app
+        .dialog()
+        .file()
+        .set_title("另存为")
+        .set_file_name(&file_name)
+        .blocking_save_file();
+
+    match dest {
+        Some(dest_path) => {
+            let dest_str = dest_path.to_string();
+            std::fs::copy(&source_path, &dest_str)
+                .map_err(|e| format!("保存失败: {}", e))?;
+            Ok(true)
+        }
+        None => Ok(false), // User cancelled
+    }
+}
+
 /// Get file details for display
 #[tauri::command]
 pub async fn get_file_details(path: String) -> Result<FileDetails, String> {
