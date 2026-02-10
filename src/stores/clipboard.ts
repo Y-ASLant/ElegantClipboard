@@ -74,7 +74,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         contentType: options.content_type ?? state.selectedType,
         pinnedOnly: false,
         favoriteOnly: false,
-        limit: options.limit ?? 100,
+        limit: options.limit ?? null,
         offset: options.offset ?? 0,
       });
       // Only apply result if no newer fetch has started

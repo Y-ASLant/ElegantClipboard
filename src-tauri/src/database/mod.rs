@@ -123,7 +123,25 @@ impl Database {
             info!("Migration complete: sort_order column added");
         }
 
-        // Migration 2: Add image_width and image_height columns
+        // Migration 2: Drop FTS5 table and triggers (replaced by LIKE search for CJK support)
+        let has_fts: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_fts'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if has_fts {
+            info!("Migrating database: removing FTS5 table and triggers");
+            conn.execute_batch(
+                "DROP TRIGGER IF EXISTS clipboard_items_ai;
+                 DROP TRIGGER IF EXISTS clipboard_items_ad;
+                 DROP TRIGGER IF EXISTS clipboard_items_au;
+                 DROP TABLE IF EXISTS clipboard_fts;"
+            )?;
+            info!("Migration complete: FTS5 removed");
+        }
+
+        // Migration 3: Add image_width and image_height columns
         let has_image_width: bool = conn.query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'image_width'",
             [],

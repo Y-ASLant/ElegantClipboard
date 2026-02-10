@@ -187,21 +187,17 @@ impl ClipboardRepository {
         let mut conditions = Vec::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-        // Full-text search - escape special FTS characters
+        // Substring search using LIKE on lightweight fields only.
+        // preview (max 200 chars) covers visible card text; file_paths covers file names.
+        // Skipping text_content (up to 1MB) avoids full-table scan on large data.
         if let Some(ref search) = options.search {
             if !search.is_empty() {
-                sql = format!(
-                    "SELECT clipboard_items.* FROM clipboard_items 
-                     INNER JOIN clipboard_fts ON clipboard_items.id = clipboard_fts.rowid"
+                conditions.push(
+                    "(preview LIKE ? OR file_paths LIKE ?)".to_string(),
                 );
-                conditions.push("clipboard_fts MATCH ?".to_string());
-                // Escape special FTS5 characters and add prefix matching
-                let escaped_search = search
-                    .replace('"', "\"\"")
-                    .replace('*', "")
-                    .replace('(', "")
-                    .replace(')', "");
-                params_vec.push(Box::new(format!("\"{}\"*", escaped_search)));
+                let pattern = format!("%{}%", search.replace('%', "\\%").replace('_', "\\_"));
+                params_vec.push(Box::new(pattern.clone()));
+                params_vec.push(Box::new(pattern));
             }
         }
 
@@ -230,12 +226,12 @@ impl ClipboardRepository {
         // Order by: pinned first, then by sort_order (higher = newer), then by created_at
         sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
 
-        // Limit and offset - use parameterized query
-        sql.push_str(" LIMIT ? OFFSET ?");
-        let limit = options.limit.unwrap_or(100);
-        let offset = options.offset.unwrap_or(0);
-        params_vec.push(Box::new(limit));
-        params_vec.push(Box::new(offset));
+        // Limit and offset
+        if let Some(limit) = options.limit {
+            sql.push_str(" LIMIT ? OFFSET ?");
+            params_vec.push(Box::new(limit));
+            params_vec.push(Box::new(options.offset.unwrap_or(0)));
+        }
 
         // Execute query
         let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();

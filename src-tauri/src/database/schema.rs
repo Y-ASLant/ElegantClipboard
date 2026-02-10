@@ -30,33 +30,6 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
--- Full-text search index
-CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
-    text_content,
-    preview,
-    content='clipboard_items',
-    content_rowid='id',
-    tokenize='unicode61'
-);
-
--- Triggers to keep FTS index in sync
-CREATE TRIGGER IF NOT EXISTS clipboard_items_ai AFTER INSERT ON clipboard_items BEGIN
-    INSERT INTO clipboard_fts(rowid, text_content, preview)
-    VALUES (new.id, new.text_content, new.preview);
-END;
-
-CREATE TRIGGER IF NOT EXISTS clipboard_items_ad AFTER DELETE ON clipboard_items BEGIN
-    INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, preview)
-    VALUES ('delete', old.id, old.text_content, old.preview);
-END;
-
-CREATE TRIGGER IF NOT EXISTS clipboard_items_au AFTER UPDATE ON clipboard_items BEGIN
-    INSERT INTO clipboard_fts(clipboard_fts, rowid, text_content, preview)
-    VALUES ('delete', old.id, old.text_content, old.preview);
-    INSERT INTO clipboard_fts(rowid, text_content, preview)
-    VALUES (new.id, new.text_content, new.preview);
-END;
-
 -- Update timestamp trigger
 CREATE TRIGGER IF NOT EXISTS clipboard_items_update_timestamp 
 AFTER UPDATE ON clipboard_items
