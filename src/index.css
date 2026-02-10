@@ -239,7 +239,7 @@ textarea,
 
 /* OverlayScrollbars custom styling */
 .os-theme-custom {
-    --os-size: 4px;
+    --os-size: 6px;
     --os-padding-perpendicular: 0px;
     --os-padding-axis: 0px;
     --os-track-border-radius: 2px;
@@ -247,9 +247,9 @@ textarea,
     --os-track-bg-hover: transparent;
     --os-track-bg-active: transparent;
     --os-handle-border-radius: 2px;
-    --os-handle-bg: rgba(0, 0, 0, 0.12);
-    --os-handle-bg-hover: rgba(0, 0, 0, 0.2);
-    --os-handle-bg-active: rgba(0, 0, 0, 0.25);
+    --os-handle-bg: hsl(from var(--color-primary) h s l / 0.2);
+    --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.35);
+    --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.45);
     --os-handle-min-size: 40px;
     --os-handle-max-size: none;
     --os-handle-perpendicular-size: 100%;
@@ -259,9 +259,9 @@ textarea,
 }
 
 .dark .os-theme-custom {
-    --os-handle-bg: rgba(255, 255, 255, 0.12);
-    --os-handle-bg-hover: rgba(255, 255, 255, 0.2);
-    --os-handle-bg-active: rgba(255, 255, 255, 0.25);
+    --os-handle-bg: hsl(from var(--color-primary) h s l / 0.25);
+    --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.4);
+    --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.5);
 }
 
 /* Scrollbar always visible during scroll, auto-hide after delay */
