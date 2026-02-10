@@ -237,6 +237,8 @@ fn handle_click_outside() {
             disable_mouse_monitoring();
             // Hide image preview window (onMouseLeave won't fire when main window disappears)
             crate::commands::hide_image_preview_window(window.app_handle());
+            // Emit event to frontend so it can reset state while hidden
+            let _ = window.emit("window-hidden", ());
         }
     }
 }

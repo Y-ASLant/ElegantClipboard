@@ -192,6 +192,7 @@ impl ClipboardHandler {
     /// Process text content
     fn process_text(&self, text: String, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = text.len() as i64;
+        let char_count = Some(text.chars().count() as i64);
         let preview = Self::create_preview(&text);
         let text_content = truncate_content(text, max_size, "Text");
 
@@ -207,6 +208,7 @@ impl ClipboardHandler {
             byte_size,
             image_width: None,
             image_height: None,
+            char_count,
         })
     }
 
@@ -217,6 +219,8 @@ impl ClipboardHandler {
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| Self::create_preview(&html));
         let html_content = truncate_content(html, max_size, "HTML");
+
+        let char_count = text.as_ref().map(|t| t.chars().count() as i64);
 
         Ok(NewClipboardItem {
             content_type: ContentType::Html,
@@ -230,6 +234,7 @@ impl ClipboardHandler {
             byte_size,
             image_width: None,
             image_height: None,
+            char_count,
         })
     }
 
@@ -240,6 +245,8 @@ impl ClipboardHandler {
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| "[RTF Content]".to_string());
         let rtf_content = truncate_content(rtf, max_size, "RTF");
+
+        let char_count = text.as_ref().map(|t| t.chars().count() as i64);
 
         Ok(NewClipboardItem {
             content_type: ContentType::Rtf,
@@ -253,6 +260,7 @@ impl ClipboardHandler {
             byte_size,
             image_width: None,
             image_height: None,
+            char_count,
         })
     }
 
@@ -289,6 +297,7 @@ impl ClipboardHandler {
             byte_size,
             image_width: Some(image_width),
             image_height: Some(image_height),
+            char_count: None,
         })
     }
 
@@ -338,6 +347,7 @@ impl ClipboardHandler {
             byte_size,
             image_width: None,
             image_height: None,
+            char_count: None,
         })
     }
 

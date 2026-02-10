@@ -2,302 +2,355 @@
 
 /* Custom Font */
 @font-face {
-  font-family: 'CustomFont';
-  src: url('/fonts.woff2') format('woff2');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
+    font-family: "CustomFont";
+    src: url("/fonts.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
 }
 
 /* shadcn/ui standard theme */
 @theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222.2 84% 4.9%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222.2 84% 4.9%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(222.2 84% 4.9%);
-  --color-primary: hsl(222.2 47.4% 11.2%);
-  --color-primary-foreground: hsl(210 40% 98%);
-  --color-secondary: hsl(210 40% 96.1%);
-  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-muted: hsl(210 40% 96.1%);
-  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
-  --color-accent: hsl(210 40% 96.1%);
-  --color-accent-foreground: hsl(222.2 47.4% 11.2%);
-  --color-destructive: hsl(0 84.2% 60.2%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-border: hsl(214.3 31.8% 91.4%);
-  --color-input: hsl(214.3 31.8% 91.4%);
-  --color-ring: hsl(222.2 84% 4.9%);
-  --color-chart-1: hsl(12 76% 61%);
-  --color-chart-2: hsl(173 58% 39%);
-  --color-chart-3: hsl(197 37% 24%);
-  --color-chart-4: hsl(43 74% 66%);
-  --color-chart-5: hsl(27 87% 67%);
-  --radius: 0.5rem;
-  --radius-lg: 0.5rem;
-  --radius-md: calc(0.5rem - 2px);
-  --radius-sm: calc(0.5rem - 4px);
+    --color-background: hsl(0 0% 100%);
+    --color-foreground: hsl(222.2 84% 4.9%);
+    --color-card: hsl(0 0% 100%);
+    --color-card-foreground: hsl(222.2 84% 4.9%);
+    --color-popover: hsl(0 0% 100%);
+    --color-popover-foreground: hsl(222.2 84% 4.9%);
+    --color-primary: hsl(222.2 47.4% 11.2%);
+    --color-primary-foreground: hsl(210 40% 98%);
+    --color-secondary: hsl(210 40% 96.1%);
+    --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
+    --color-muted: hsl(210 40% 96.1%);
+    --color-muted-foreground: hsl(215.4 16.3% 46.9%);
+    --color-accent: hsl(210 40% 96.1%);
+    --color-accent-foreground: hsl(222.2 47.4% 11.2%);
+    --color-destructive: hsl(0 84.2% 60.2%);
+    --color-destructive-foreground: hsl(210 40% 98%);
+    --color-border: hsl(214.3 31.8% 91.4%);
+    --color-input: hsl(214.3 31.8% 91.4%);
+    --color-ring: hsl(222.2 84% 4.9%);
+    --color-chart-1: hsl(12 76% 61%);
+    --color-chart-2: hsl(173 58% 39%);
+    --color-chart-3: hsl(197 37% 24%);
+    --color-chart-4: hsl(43 74% 66%);
+    --color-chart-5: hsl(27 87% 67%);
+    --radius: 0.5rem;
+    --radius-lg: 0.5rem;
+    --radius-md: calc(0.5rem - 2px);
+    --radius-sm: calc(0.5rem - 4px);
 }
 
 /* Dark mode */
 .dark {
-  --color-background: hsl(222.2 84% 4.9%);
-  --color-foreground: hsl(210 40% 98%);
-  --color-card: hsl(222.2 84% 4.9%);
-  --color-card-foreground: hsl(210 40% 98%);
-  --color-popover: hsl(222.2 84% 4.9%);
-  --color-popover-foreground: hsl(210 40% 98%);
-  --color-primary: hsl(210 40% 98%);
-  --color-primary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-secondary: hsl(217.2 32.6% 17.5%);
-  --color-secondary-foreground: hsl(210 40% 98%);
-  --color-muted: hsl(217.2 32.6% 17.5%);
-  --color-muted-foreground: hsl(215 20.2% 65.1%);
-  --color-accent: hsl(217.2 32.6% 17.5%);
-  --color-accent-foreground: hsl(210 40% 98%);
-  --color-destructive: hsl(0 62.8% 30.6%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-border: hsl(217.2 32.6% 17.5%);
-  --color-input: hsl(217.2 32.6% 17.5%);
-  --color-ring: hsl(212.7 26.8% 83.9%);
+    --color-background: hsl(222.2 84% 4.9%);
+    --color-foreground: hsl(210 40% 98%);
+    --color-card: hsl(222.2 84% 4.9%);
+    --color-card-foreground: hsl(210 40% 98%);
+    --color-popover: hsl(222.2 84% 4.9%);
+    --color-popover-foreground: hsl(210 40% 98%);
+    --color-primary: hsl(210 40% 98%);
+    --color-primary-foreground: hsl(222.2 47.4% 11.2%);
+    --color-secondary: hsl(217.2 32.6% 17.5%);
+    --color-secondary-foreground: hsl(210 40% 98%);
+    --color-muted: hsl(217.2 32.6% 17.5%);
+    --color-muted-foreground: hsl(215 20.2% 65.1%);
+    --color-accent: hsl(217.2 32.6% 17.5%);
+    --color-accent-foreground: hsl(210 40% 98%);
+    --color-destructive: hsl(0 62.8% 30.6%);
+    --color-destructive-foreground: hsl(210 40% 98%);
+    --color-border: hsl(217.2 32.6% 17.5%);
+    --color-input: hsl(217.2 32.6% 17.5%);
+    --color-ring: hsl(212.7 26.8% 83.9%);
 }
 
 /* ========== Theme Color Variants ========== */
 
 /* Emerald Theme - Light */
 .theme-emerald {
-  --color-primary: hsl(158 64% 22%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(158 50% 95%);
-  --color-secondary-foreground: hsl(158 64% 22%);
-  --color-accent: hsl(158 50% 95%);
-  --color-accent-foreground: hsl(158 64% 22%);
-  --color-muted: hsl(158 30% 96%);
-  --color-muted-foreground: hsl(158 20% 40%);
-  --color-border: hsl(158 30% 90%);
-  --color-input: hsl(158 30% 90%);
-  --color-ring: hsl(158 64% 22%);
+    --color-primary: hsl(158 64% 22%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(158 50% 95%);
+    --color-secondary-foreground: hsl(158 64% 22%);
+    --color-accent: hsl(158 50% 95%);
+    --color-accent-foreground: hsl(158 64% 22%);
+    --color-muted: hsl(158 30% 96%);
+    --color-muted-foreground: hsl(158 20% 40%);
+    --color-border: hsl(158 30% 90%);
+    --color-input: hsl(158 30% 90%);
+    --color-ring: hsl(158 64% 22%);
 }
 
 /* Cyan Theme - Light */
 .theme-cyan {
-  --color-primary: hsl(188 70% 25%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(188 50% 95%);
-  --color-secondary-foreground: hsl(188 70% 25%);
-  --color-accent: hsl(188 50% 95%);
-  --color-accent-foreground: hsl(188 70% 25%);
-  --color-muted: hsl(188 30% 96%);
-  --color-muted-foreground: hsl(188 20% 40%);
-  --color-border: hsl(188 30% 90%);
-  --color-input: hsl(188 30% 90%);
-  --color-ring: hsl(188 70% 25%);
+    --color-primary: hsl(188 70% 25%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(188 50% 95%);
+    --color-secondary-foreground: hsl(188 70% 25%);
+    --color-accent: hsl(188 50% 95%);
+    --color-accent-foreground: hsl(188 70% 25%);
+    --color-muted: hsl(188 30% 96%);
+    --color-muted-foreground: hsl(188 20% 40%);
+    --color-border: hsl(188 30% 90%);
+    --color-input: hsl(188 30% 90%);
+    --color-ring: hsl(188 70% 25%);
 }
 
 /* Emerald Theme - Dark */
 .dark.theme-emerald {
-  --color-primary: hsl(158 70% 45%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(158 25% 20%);
-  --color-secondary-foreground: hsl(158 70% 45%);
-  --color-accent: hsl(158 25% 20%);
-  --color-accent-foreground: hsl(158 70% 45%);
-  --color-muted: hsl(158 20% 18%);
-  --color-muted-foreground: hsl(158 30% 70%);
-  --color-border: hsl(158 20% 20%);
-  --color-input: hsl(158 20% 20%);
-  --color-ring: hsl(158 70% 45%);
+    --color-primary: hsl(158 70% 45%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(158 25% 20%);
+    --color-secondary-foreground: hsl(158 70% 45%);
+    --color-accent: hsl(158 25% 20%);
+    --color-accent-foreground: hsl(158 70% 45%);
+    --color-muted: hsl(158 20% 18%);
+    --color-muted-foreground: hsl(158 30% 70%);
+    --color-border: hsl(158 20% 20%);
+    --color-input: hsl(158 20% 20%);
+    --color-ring: hsl(158 70% 45%);
 }
 
 /* Cyan Theme - Dark */
 .dark.theme-cyan {
-  --color-primary: hsl(188 80% 50%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(188 25% 20%);
-  --color-secondary-foreground: hsl(188 80% 50%);
-  --color-accent: hsl(188 25% 20%);
-  --color-accent-foreground: hsl(188 80% 50%);
-  --color-muted: hsl(188 20% 18%);
-  --color-muted-foreground: hsl(188 30% 70%);
-  --color-border: hsl(188 20% 20%);
-  --color-input: hsl(188 20% 20%);
-  --color-ring: hsl(188 80% 50%);
+    --color-primary: hsl(188 80% 50%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(188 25% 20%);
+    --color-secondary-foreground: hsl(188 80% 50%);
+    --color-accent: hsl(188 25% 20%);
+    --color-accent-foreground: hsl(188 80% 50%);
+    --color-muted: hsl(188 20% 18%);
+    --color-muted-foreground: hsl(188 30% 70%);
+    --color-border: hsl(188 20% 20%);
+    --color-input: hsl(188 20% 20%);
+    --color-ring: hsl(188 80% 50%);
 }
 
 /* ========== System Theme (Dynamic Accent Color) ========== */
 
-/* System Theme - Light - uses --system-accent-h (hue) and --system-accent-s (saturation) set by JS */
+/* System Theme - Light - uses --system-accent-h (hue), --system-accent-s (saturation), and --system-accent-l (lightness) set by JS */
 .theme-system {
-  --color-primary: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(var(--system-accent-h) 40% 95%);
-  --color-secondary-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
-  --color-accent: hsl(var(--system-accent-h) 40% 95%);
-  --color-accent-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
-  --color-muted: hsl(var(--system-accent-h) 25% 96%);
-  --color-muted-foreground: hsl(var(--system-accent-h) 20% 40%);
-  --color-border: hsl(var(--system-accent-h) 25% 90%);
-  --color-input: hsl(var(--system-accent-h) 25% 90%);
-  --color-ring: hsl(var(--system-accent-h) var(--system-accent-s) 35%);
+    --color-primary: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(var(--system-accent-h) 40% 95%);
+    --color-secondary-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+    --color-accent: hsl(var(--system-accent-h) 40% 95%);
+    --color-accent-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+    --color-muted: hsl(var(--system-accent-h) 25% 96%);
+    --color-muted-foreground: hsl(var(--system-accent-h) 20% 40%);
+    --color-border: hsl(var(--system-accent-h) 25% 90%);
+    --color-input: hsl(var(--system-accent-h) 25% 90%);
+    --color-ring: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
 }
 
 /* System Theme - Dark */
 .dark.theme-system {
-  --color-primary: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(var(--system-accent-h) 20% 20%);
-  --color-secondary-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
-  --color-accent: hsl(var(--system-accent-h) 20% 20%);
-  --color-accent-foreground: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
-  --color-muted: hsl(var(--system-accent-h) 15% 18%);
-  --color-muted-foreground: hsl(var(--system-accent-h) 25% 70%);
-  --color-border: hsl(var(--system-accent-h) 15% 20%);
-  --color-input: hsl(var(--system-accent-h) 15% 20%);
-  --color-ring: hsl(var(--system-accent-h) var(--system-accent-s) 55%);
+    /* For dark mode, we adjust the lightness to be brighter than the original for better visibility */
+    --color-primary: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(var(--system-accent-h) 20% 20%);
+    --color-secondary-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+    --color-accent: hsl(var(--system-accent-h) 20% 20%);
+    --color-accent-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+    --color-muted: hsl(var(--system-accent-h) 15% 18%);
+    --color-muted-foreground: hsl(var(--system-accent-h) 25% 70%);
+    --color-border: hsl(var(--system-accent-h) 15% 20%);
+    --color-input: hsl(var(--system-accent-h) 15% 20%);
+    --color-ring: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
 }
 
 /* Base styles */
 * {
-  border-color: var(--color-border);
+    border-color: var(--color-border);
 }
 
 /* Remove focus outline globally (Tauri app doesn't need keyboard navigation indicators).
    Do not remove box-shadow here: it would kill shadows on context menu, cards, etc. when they receive focus. */
 *:focus,
 *:focus-visible {
-  outline: none !important;
+    outline: none !important;
 }
 
 body {
-  background-color: var(--color-background);
-  color: var(--color-foreground);
-  font-family: 'CustomFont', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+        "CustomFont",
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        Arial,
+        sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 /* Base layout */
-html, body, #root {
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow: hidden;
+html,
+body,
+#root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
 }
 
 /* Disable text selection except for inputs */
 body {
-  user-select: none;
-  -webkit-user-select: none;
+    user-select: none;
+    -webkit-user-select: none;
 }
 
 /* Allow text selection in input fields */
-input, textarea, [contenteditable="true"] {
-  user-select: text;
-  -webkit-user-select: text;
+input,
+textarea,
+[contenteditable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 /* OverlayScrollbars custom styling */
 .os-theme-custom {
-  --os-size: 4px;
-  --os-padding-perpendicular: 0px;
-  --os-padding-axis: 0px;
-  --os-track-border-radius: 2px;
-  --os-track-bg: transparent;
-  --os-track-bg-hover: transparent;
-  --os-track-bg-active: transparent;
-  --os-handle-border-radius: 2px;
-  --os-handle-bg: rgba(0, 0, 0, 0.12);
-  --os-handle-bg-hover: rgba(0, 0, 0, 0.2);
-  --os-handle-bg-active: rgba(0, 0, 0, 0.25);
-  --os-handle-min-size: 40px;
-  --os-handle-max-size: none;
-  --os-handle-perpendicular-size: 100%;
-  --os-handle-perpendicular-size-hover: 100%;
-  --os-handle-perpendicular-size-active: 100%;
-  --os-handle-interactive-area-offset: 0px;
+    --os-size: 4px;
+    --os-padding-perpendicular: 0px;
+    --os-padding-axis: 0px;
+    --os-track-border-radius: 2px;
+    --os-track-bg: transparent;
+    --os-track-bg-hover: transparent;
+    --os-track-bg-active: transparent;
+    --os-handle-border-radius: 2px;
+    --os-handle-bg: rgba(0, 0, 0, 0.12);
+    --os-handle-bg-hover: rgba(0, 0, 0, 0.2);
+    --os-handle-bg-active: rgba(0, 0, 0, 0.25);
+    --os-handle-min-size: 40px;
+    --os-handle-max-size: none;
+    --os-handle-perpendicular-size: 100%;
+    --os-handle-perpendicular-size-hover: 100%;
+    --os-handle-perpendicular-size-active: 100%;
+    --os-handle-interactive-area-offset: 0px;
 }
 
 .dark .os-theme-custom {
-  --os-handle-bg: rgba(255, 255, 255, 0.12);
-  --os-handle-bg-hover: rgba(255, 255, 255, 0.2);
-  --os-handle-bg-active: rgba(255, 255, 255, 0.25);
+    --os-handle-bg: rgba(255, 255, 255, 0.12);
+    --os-handle-bg-hover: rgba(255, 255, 255, 0.2);
+    --os-handle-bg-active: rgba(255, 255, 255, 0.25);
 }
 
 /* Scrollbar always visible during scroll, auto-hide after delay */
 .os-theme-custom > .os-scrollbar {
-  transition: opacity 0.3s ease;
+    transition: opacity 0.3s ease;
 }
 
 /* Ensure scrollbar is overlay (floating above content) */
 .os-theme-custom .os-scrollbar {
-  z-index: 100;
+    z-index: 100;
 }
 
 /* Ensure scrollbar doesn't trigger drag */
 .os-scrollbar,
 .os-scrollbar-track,
 .os-scrollbar-handle {
-  pointer-events: auto !important;
+    pointer-events: auto !important;
 }
 
 .os-scrollbar * {
-  user-select: none !important;
-  -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
 }
 
 /* Hide scrollbars for other elements */
 *:not(.custom-scrollbar) {
-  scrollbar-width: none;
+    scrollbar-width: none;
 }
 
 *:not(.custom-scrollbar)::-webkit-scrollbar {
-  display: none;
+    display: none;
 }
 
 /* Draggable region for custom titlebar */
 [data-tauri-drag-region] {
-  -webkit-app-region: drag;
+    -webkit-app-region: drag;
 }
 
 [data-tauri-drag-region] button,
 [data-tauri-drag-region] input,
 [data-tauri-drag-region] a {
-  -webkit-app-region: no-drag;
+    -webkit-app-region: no-drag;
 }
 
 /* Clipboard content uses system default font for better readability */
 .clipboard-content {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+        Arial, sans-serif;
 }
 
 /* Path display uses system monospace font */
 .path-text {
-  font-family: "Cascadia Code", "Fira Code", Consolas, "SF Mono", Monaco, "Andale Mono", monospace;
+    font-family:
+        "Cascadia Code", "Fira Code", Consolas, "SF Mono", Monaco,
+        "Andale Mono", monospace;
+}
+
+/* Search highlight */
+.search-highlight {
+    background-color: hsl(from var(--color-primary) h s l / 0.2);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.dark .search-highlight {
+    background-color: hsl(from var(--color-primary) h s l / 0.3);
 }
 
 /* Drag drop bounce animation */
 @keyframes scale-bounce {
-  0% {
-    transform: scale(0.95);
-  }
-  50% {
-    transform: scale(1.02);
-  }
-  100% {
-    transform: scale(1);
-  }
+    0% {
+        transform: scale(0.95);
+    }
+    50% {
+        transform: scale(1.02);
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
 .animate-scale-bounce {
-  animation: scale-bounce 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: scale-bounce 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 /* Dragging cursor - from QuickClipboard optimization */
 body.dragging-cursor,
 body.dragging-cursor * {
-  cursor: grabbing !important;
+    cursor: grabbing !important;
 }

@@ -50,6 +50,7 @@ export function ClipboardList() {
     setupListener,
     moveItem,
     togglePin,
+    _resetToken,
   } = useClipboardStore();
   const { cardMaxLines } = useUISettings();
 
@@ -177,6 +178,13 @@ export function ClipboardList() {
       behavior: "auto",
     });
   }, []);
+
+  // 窗口重新打开时重置滚动位置
+  useEffect(() => {
+    if (_resetToken > 0) {
+      scrollToTop();
+    }
+  }, [_resetToken, scrollToTop]);
 
   // 拖拽时添加全局光标样式
   useEffect(() => {

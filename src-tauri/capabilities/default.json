@@ -29,6 +29,7 @@
     "autostart:allow-is-enabled",
     "dialog:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "notification:default"
   ]
 }

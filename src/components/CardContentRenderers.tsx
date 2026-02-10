@@ -9,6 +9,7 @@ import {
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
@@ -315,8 +316,8 @@ const FileImagePreview = memo(function FileImagePreview({
             <Document16Regular className="w-5 h-5 text-blue-500" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-foreground">{fileName}</p>
-            <p className="text-xs truncate mt-0.5 text-muted-foreground">{filePath}</p>
+            <p className="text-sm font-medium truncate text-foreground"><HighlightText text={fileName} /></p>
+            <p className="text-xs truncate mt-0.5 text-muted-foreground"><HighlightText text={filePath} /></p>
           </div>
         </div>
         <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
@@ -401,18 +402,17 @@ export const FileContent = memo(function FileContent({
                 {filesInvalid && <span className="ml-1.5 text-xs font-normal">(已失效)</span>}
               </p>
               <p className={cn("text-xs truncate mt-0.5", filesInvalid ? "text-red-400" : "text-muted-foreground")}>
-                {filePaths.map((p) => getFileNameFromPath(p)).slice(0, 3).join(", ")}
-                {filePaths.length > 3 && "..."}
+                <HighlightText text={filePaths.map((p) => getFileNameFromPath(p)).slice(0, 3).join(", ") + (filePaths.length > 3 ? "..." : "")} />
               </p>
             </>
           ) : (
             <>
               <p className={cn("text-sm font-medium truncate", filesInvalid ? "text-red-500" : "text-foreground")}>
-                {getFileNameFromPath(filePaths[0] || preview || "")}
+                <HighlightText text={getFileNameFromPath(filePaths[0] || preview || "")} />
                 {filesInvalid && <span className="ml-1.5 text-xs font-normal">(已失效)</span>}
               </p>
               <p className={cn("text-xs truncate mt-0.5", filesInvalid ? "text-red-400 line-through" : "text-muted-foreground")}>
-                {filePaths[0] || preview}
+                <HighlightText text={filePaths[0] || preview || ""} />
               </p>
             </>
           )}

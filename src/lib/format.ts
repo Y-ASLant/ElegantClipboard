@@ -28,9 +28,8 @@ export function formatTime(dateStr: string): string {
   return `${month}-${day} ${time}`;
 }
 
-export function formatCharCount(text: string | null): string {
-  if (!text) return "0 字符";
-  const count = text.length;
+export function formatCharCount(count: number | null): string {
+  if (!count) return "0 字符";
   return count >= 10000
     ? `${(count / 10000).toFixed(1)}万 字符`
     : `${count.toLocaleString()} 字符`;

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useUISettings } from "@/stores/ui-settings";
 
 export interface GeneralSettings {
   auto_start: boolean;
@@ -25,6 +26,8 @@ interface GeneralTabProps {
 }
 
 export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
+  const autoResetState = useUISettings((s) => s.autoResetState);
+  const setAutoResetState = useUISettings((s) => s.setAutoResetState);
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
 
@@ -45,6 +48,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <Switch
               checked={settings.follow_cursor}
               onCheckedChange={(checked) => onSettingsChange({ ...settings, follow_cursor: checked })}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">自动重置状态</Label>
+              <p className="text-xs text-muted-foreground">
+                关闭窗口时自动清空搜索并回到顶部
+              </p>
+            </div>
+            <Switch
+              checked={autoResetState}
+              onCheckedChange={setAutoResetState}
             />
           </div>
         </div>

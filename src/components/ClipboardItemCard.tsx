@@ -13,6 +13,7 @@ import {
   Info16Regular,
   TextDescription16Regular,
   ClipboardPaste16Regular,
+  ArrowDownload16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -20,6 +21,7 @@ import {
   ImageCard,
   FileContent,
 } from "@/components/CardContentRenderers";
+import { HighlightText } from "@/components/HighlightText";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -324,8 +326,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const metaItems: string[] = [];
   if (showTime) metaItems.push(formatTime(item.created_at));
-  if (showCharCount && item.text_content)
-    metaItems.push(formatCharCount(item.text_content));
+  if (showCharCount && item.char_count)
+    metaItems.push(formatCharCount(item.char_count));
   if (showByteSize) metaItems.push(formatSize(item.byte_size));
 
   // ---- Event handlers ----
@@ -337,6 +339,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     e.stopPropagation();
     copyToClipboard(item.id);
   };
+  const handleCopyCtxMenu = () => copyToClipboard(item.id);
   const handleTogglePin = (e: React.MouseEvent) => {
     e.stopPropagation();
     togglePin(item.id);
@@ -386,6 +389,27 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     }
   };
 
+  const handleSaveAs = async () => {
+    // For images: save from image_path; for files: save the first file
+    const sourcePath =
+      item.content_type === "image" ? item.image_path : filePaths[0];
+    if (!sourcePath) return;
+    try {
+      await invoke("save_file_as", { sourcePath });
+    } catch (error) {
+      console.error("Failed to save file:", error);
+    }
+  };
+
+  const handleShowImageInExplorer = async () => {
+    if (!item.image_path) return;
+    try {
+      await invoke("show_in_explorer", { path: item.image_path });
+    } catch (error) {
+      console.error("Failed to show in explorer:", error);
+    }
+  };
+
   // ---- Card content ----
 
   const cardContent = (
@@ -426,7 +450,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   overflow: "hidden",
                 }}
               >
-                {item.preview || item.text_content || `[${config.label}]`}
+                <HighlightText text={item.preview || item.text_content || `[${config.label}]`} />
               </pre>
               <CardFooter
                 metaItems={metaItems}
@@ -483,6 +507,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               <span>在资源管理器中显示</span>
             </ContextMenuItem>
             <ContextMenuItem
+              onClick={handleSaveAs}
+              disabled={filesInvalid}
+            >
+              <ArrowDownload16Regular className="mr-2 h-4 w-4" />
+              <span>另存为</span>
+            </ContextMenuItem>
+            <ContextMenuItem
               onClick={handleShowDetails}
               disabled={filesInvalid}
             >
@@ -505,6 +536,41 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
           fileListItems={fileListItems}
         />
       </>
+    );
+  }
+
+  // Image items get a context menu wrapper
+  if (item.content_type === "image" && item.image_path && !isDragOverlay) {
+    return (
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
+        <ContextMenuContent className="w-48">
+          <ContextMenuItem onClick={handlePaste}>
+            <ClipboardPaste16Regular className="mr-2 h-4 w-4" />
+            <span>粘贴</span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleCopyCtxMenu}>
+            <Copy16Regular className="mr-2 h-4 w-4" />
+            <span>复制</span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleShowImageInExplorer}>
+            <FolderOpen16Regular className="mr-2 h-4 w-4" />
+            <span>在资源管理器中显示</span>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={handleSaveAs}>
+            <ArrowDownload16Regular className="mr-2 h-4 w-4" />
+            <span>另存为</span>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onClick={() => deleteItem(item.id)}
+            className="text-destructive focus:text-destructive"
+          >
+            <Delete16Regular className="mr-2 h-4 w-4" />
+            <span>删除</span>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     );
   }
 

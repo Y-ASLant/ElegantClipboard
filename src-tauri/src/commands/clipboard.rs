@@ -76,6 +76,108 @@ fn set_clipboard_files(paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Extract a context snippet centered around the first occurrence of `keyword` in `text`.
+/// Returns `...prefix KEYWORD suffix...` with the keyword in the middle.
+///
+/// Fast path (O(n)): lowercase entire text once, find byte offset, convert to char index.
+/// This works for CJK/ASCII where to_lowercase() preserves byte offsets.
+/// Fallback (O(n*k)): sliding-window per-char comparison for rare Unicode edge cases
+/// (e.g. Turkish İ where lowercasing changes byte length).
+fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String {
+    let keyword_lower = keyword.to_lowercase();
+
+    // Fast path: lowercase entire text, find with byte-level search
+    let text_lower = text.to_lowercase();
+    let keyword_char_pos = if let Some(byte_pos) = text_lower.find(&keyword_lower) {
+        // Convert byte position in text_lower to char index
+        let char_idx_in_lower = text_lower[..byte_pos].chars().count();
+        // Verify: check that the same char index in `text` actually matches.
+        // For CJK/ASCII this is always true; only fails for rare Unicode case mappings.
+        let mut ci = text.char_indices().skip(char_idx_in_lower);
+        let valid = if let Some((bs, _)) = ci.next() {
+            // Find byte_end by advancing keyword_lower.chars().count() more chars
+            let kw_char_len = keyword_lower.chars().count();
+            let be = ci.nth(kw_char_len.saturating_sub(2))
+                .map(|(b, _)| b)
+                .unwrap_or(text.len());
+            // Cheap verification: the slice at this char position should lowercase-match
+            text.get(bs..be)
+                .map(|s| s.to_lowercase() == keyword_lower)
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        if valid {
+            Some(char_idx_in_lower)
+        } else {
+            // Fallback: sliding window (rare path)
+            find_keyword_char_pos_slow(text, &keyword_lower)
+        }
+    } else {
+        None
+    };
+
+    let keyword_char_len = keyword_lower.chars().count();
+    let keyword_char_pos = match keyword_char_pos {
+        Some(pos) => pos,
+        None => {
+            // Keyword not in text_content (matched via file_paths); return original preview truncation
+            return text.chars().take(max_len).collect();
+        }
+    };
+
+    build_context_snippet(text, keyword_char_pos, keyword_char_len, max_len)
+}
+
+/// Slow fallback: O(n*k) sliding window to find keyword char position.
+/// Only called for rare Unicode where to_lowercase() shifts byte positions.
+fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> {
+    let keyword_char_len = keyword_lower.chars().count();
+    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
+    let n = char_indices.len();
+    for i in 0..n {
+        if i + keyword_char_len > n { break; }
+        let bs = char_indices[i].0;
+        let be = if i + keyword_char_len < n { char_indices[i + keyword_char_len].0 } else { text.len() };
+        if text[bs..be].to_lowercase() == *keyword_lower {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Build the `...context...` snippet given char-level position info.
+fn build_context_snippet(text: &str, keyword_char_pos: usize, keyword_char_len: usize, max_len: usize) -> String {
+    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
+    let text_char_count = char_indices.len();
+
+    let context_before = max_len / 3;
+    let start_char = keyword_char_pos.saturating_sub(context_before);
+    let end_char = (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
+
+    if end_char <= start_char {
+        return text.chars().take(max_len).collect();
+    }
+
+    let byte_start = char_indices[start_char].0;
+    let byte_end = if end_char < text_char_count {
+        char_indices[end_char].0
+    } else {
+        text.len()
+    };
+
+    let slice = &text[byte_start..byte_end];
+    let mut result = String::with_capacity(slice.len() + 6);
+    if start_char > 0 {
+        result.push_str("...");
+    }
+    result.push_str(slice);
+    if end_char < text_char_count {
+        result.push_str("...");
+    }
+    result
+}
+
 /// Check file existence and fill files_valid field for file-type items
 fn fill_files_valid(items: &mut [ClipboardItem]) {
     use rayon::prelude::*;
@@ -155,6 +257,8 @@ pub async fn get_clipboard_items(
     use crate::database::QueryOptions;
 
     let repo = ClipboardRepository::new(&state.db);
+    let is_searching = search.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+    let search_keyword = search.clone();
     let options = QueryOptions {
         search,
         content_type,
@@ -163,9 +267,30 @@ pub async fn get_clipboard_items(
         limit,
         offset,
     };
-
     let mut items = repo.list(options).map_err(|e| e.to_string())?;
-    fill_files_valid(&mut items);
+    // When searching: replace preview with keyword-centered context snippet,
+    // then strip text_content to avoid heavy IPC transfer.
+    if let Some(ref keyword) = search_keyword {
+        let keyword_lower = keyword.to_lowercase();
+        for item in &mut items {
+            if let Some(ref text) = item.text_content {
+                // Only replace preview if keyword is NOT in the original preview
+                let preview_has_match = item.preview.as_ref()
+                    .map(|p| p.to_lowercase().contains(&keyword_lower))
+                    .unwrap_or(false);
+                if !preview_has_match {
+                    item.preview = Some(extract_keyword_context(text, keyword, 200));
+                }
+            }
+            // Strip heavy field after context extraction
+            item.text_content = None;
+        }
+    }
+    // Skip expensive file-existence checks during search (disk I/O per file item);
+    // only needed for non-search browsing where user might paste files.
+    if !is_searching {
+        fill_files_valid(&mut items);
+    }
     Ok(items)
 }
 

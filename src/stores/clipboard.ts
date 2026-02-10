@@ -22,6 +22,7 @@ export interface ClipboardItem {
   updated_at: string;
   access_count: number;
   last_accessed_at: string | null;
+  char_count: number | null;
   /** Whether all files exist (only for "files" content_type, computed at query time) */
   files_valid?: boolean;
 }
@@ -34,6 +35,8 @@ interface ClipboardState {
   selectedType: string | null;
   /** Monotonic counter to discard stale fetch results */
   _fetchId: number;
+  /** Incremented when the view should reset (scroll to top, etc.) */
+  _resetToken: number;
 
   // Actions
   fetchItems: (options?: {
@@ -53,6 +56,8 @@ interface ClipboardState {
   pasteContent: (id: number) => Promise<void>;
   clearHistory: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** Reset view state: clear search, clear type filter, scroll to top, refresh */
+  resetView: () => Promise<void>;
   setupListener: () => Promise<() => void>;
 }
 
@@ -63,6 +68,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   searchQuery: "",
   selectedType: null,
   _fetchId: 0,
+  _resetToken: 0,
 
   fetchItems: async (options = {}) => {
     const state = get();
@@ -74,7 +80,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         contentType: options.content_type ?? state.selectedType,
         pinnedOnly: false,
         favoriteOnly: false,
-        limit: options.limit ?? 100,
+        limit: options.limit ?? null,
         offset: options.offset ?? 0,
       });
       // Only apply result if no newer fetch has started
@@ -177,17 +183,23 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   clearHistory: async () => {
     try {
       await invoke<number>("clear_history");
-      get().refresh();
+      await get().refresh();
     } catch (error) {
       console.error("Failed to clear history:", error);
     }
   },
 
   refresh: async () => {
-    await Promise.all([
-      get().fetchItems(),
-      get().fetchCount(),
-    ]);
+    await get().fetchItems();
+  },
+
+  resetView: async () => {
+    set((state) => ({
+      searchQuery: "",
+      selectedType: null,
+      _resetToken: state._resetToken + 1,
+    }));
+    await get().fetchItems({ search: "" });
   },
 
   setupListener: async () => {
