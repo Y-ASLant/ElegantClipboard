@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useRef } from "react";
+import { memo, useEffect, useState, useRef, useMemo } from "react";
 import {
   Pin16Regular,
   Pin16Filled,
@@ -285,8 +285,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const filesInvalid =
     item.content_type === "files" && item.files_valid === false;
-  const filePaths =
-    item.content_type === "files" ? parseFilePaths(item.file_paths) : [];
+  const filePaths = useMemo(
+    () => item.content_type === "files" ? parseFilePaths(item.file_paths) : [],
+    [item.content_type, item.file_paths],
+  );
 
   const {
     attributes,
