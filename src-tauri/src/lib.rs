@@ -431,7 +431,11 @@ async fn hide_image_preview(app: tauri::AppHandle) {
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     // Check if settings window already exists
     if let Some(window) = app.get_webview_window("settings") {
+        // Unminimize if the window is minimized
+        let _ = window.unminimize();
+        // Show the window (in case it's hidden)
         let _ = window.show();
+        // Set focus to bring it to front
         let _ = window.set_focus();
         return Ok(());
     }
