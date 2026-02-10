@@ -88,6 +88,23 @@ export function Settings() {
     });
   }, []);
 
+  // ESC to close settings window
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Don't close if a dialog is open
+        const hasOverlay = document.querySelector(
+          '[role="dialog"], [data-radix-popper-content-wrapper]'
+        );
+        if (!hasOverlay) {
+          getCurrentWindow().close();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   useEffect(() => {
     loadSettings();
   }, []);
