@@ -1,7 +1,7 @@
 {
   "name": "elegant-clipboard",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

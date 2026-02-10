@@ -15,6 +15,32 @@
   <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
+## 效果预览
+
+### 外观主题
+
+#### 跟随系统强调色
+
+![跟随系统](img/theme_0.png)
+
+| 经典黑白 | 翡翠绿 | 天空青 |
+|:-:|:-:|:-:|
+| ![经典黑白](img/theme_1.png) | ![翡翠绿](img/theme_2.png) | ![天空青](img/theme_3.png) |
+
+### 设置界面
+
+| 常规设置 | 显示设置 | 快捷按键 |
+|:-:|:-:|:-:|
+| ![常规设置](img/setting_1.png) | ![显示设置](img/setting_2.png) | ![快捷按键](img/setting_3.png) |
+
+### 图片预览
+
+![图片预览](img/preview_mode.png)
+
+### 启动通知
+
+![启动通知](img/启动弹窗.png)
+
 ## 设计理念
 
 **低占用 · 高性能 · 现代化 · 完全本地化离线**
