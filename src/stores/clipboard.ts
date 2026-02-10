@@ -35,6 +35,8 @@ interface ClipboardState {
   selectedType: string | null;
   /** Monotonic counter to discard stale fetch results */
   _fetchId: number;
+  /** Incremented when the view should reset (scroll to top, etc.) */
+  _resetToken: number;
 
   // Actions
   fetchItems: (options?: {
@@ -54,6 +56,8 @@ interface ClipboardState {
   pasteContent: (id: number) => Promise<void>;
   clearHistory: () => Promise<void>;
   refresh: () => Promise<void>;
+  /** Reset view state: clear search, clear type filter, scroll to top, refresh */
+  resetView: () => Promise<void>;
   setupListener: () => Promise<() => void>;
 }
 
@@ -64,6 +68,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   searchQuery: "",
   selectedType: null,
   _fetchId: 0,
+  _resetToken: 0,
 
   fetchItems: async (options = {}) => {
     const state = get();
@@ -186,6 +191,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   refresh: async () => {
     await get().fetchItems();
+  },
+
+  resetView: async () => {
+    set((state) => ({
+      searchQuery: "",
+      selectedType: null,
+      _resetToken: state._resetToken + 1,
+    }));
+    await get().fetchItems({ search: "" });
   },
 
   setupListener: async () => {

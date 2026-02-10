@@ -61,6 +61,8 @@ async fn hide_window(window: tauri::WebviewWindow) {
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
     // Hide image preview window
     commands::hide_image_preview_window(window.app_handle());
+    // Emit event to frontend so it can reset state while hidden
+    let _ = window.emit("window-hidden", ());
 }
 
 /// Tauri command: Set window visibility state (for sync with backend)
@@ -179,6 +181,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             input_monitor::disable_mouse_monitoring();
             // Hide image preview window (onMouseLeave won't fire when main window disappears)
             commands::hide_image_preview_window(app);
+            // Emit event to frontend so it can reset state while hidden
+            let _ = window.emit("window-hidden", ());
         } else {
             // Check if follow_cursor is enabled
             let follow_cursor = app.try_state::<std::sync::Arc<commands::AppState>>()

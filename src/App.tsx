@@ -28,14 +28,28 @@ import {
 } from "@/components/ui/tooltip";
 import { initTheme } from "@/lib/theme-applier";
 import { useClipboardStore } from "@/stores/clipboard";
+import { useUISettings } from "@/stores/ui-settings";
 
 // Initialize theme once for this window (runs before component mounts)
 initTheme();
 
+/** Dismiss any open Radix overlay (context menu, dialog, etc.) via synthetic ESC */
+function dismissOverlays(): boolean {
+  const overlay = document.querySelector(
+    '[role="dialog"], [data-radix-popper-content-wrapper]'
+  );
+  if (overlay) {
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    return true;
+  }
+  return false;
+}
+
 function App() {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh } = useClipboardStore();
+  const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
+  const autoResetState = useUISettings((s) => s.autoResetState);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Load pinned state on mount
@@ -52,6 +66,19 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, [refresh]);
+
+  // Dismiss overlays & optionally reset view state when window is hidden
+  useEffect(() => {
+    const unlisten = listen("window-hidden", () => {
+      dismissOverlays();
+      if (autoResetState) {
+        resetView();
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [resetView, autoResetState]);
 
   // Window starts hidden (visible: false in tauri.conf.json, backend defaults to Hidden).
   // It will be shown only via hotkey (toggle_window_visibility) or tray click.
@@ -100,15 +127,7 @@ function App() {
   // Handle ESC key (emitted by backend global keyboard hook, works without focus)
   useEffect(() => {
     const unlisten = listen("escape-pressed", async () => {
-      // Check if any overlay (dialog, context menu, etc.) is open via DOM
-      const hasOverlay = document.querySelector(
-        '[role="dialog"], [data-radix-popper-content-wrapper]'
-      );
-      if (hasOverlay) {
-        // Dispatch synthetic ESC to let Radix close the overlay
-        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-        return;
-      }
+      if (dismissOverlays()) return;
       try {
         await invoke("hide_window");
       } catch (error) {

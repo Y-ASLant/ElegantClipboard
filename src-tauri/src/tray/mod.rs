@@ -55,6 +55,8 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         // Disable mouse monitoring when hiding
                         crate::input_monitor::disable_mouse_monitoring();
                         crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+                        // Emit event to frontend so it can reset state while hidden
+                        let _ = window.emit("window-hidden", ());
                     } else {
                         let _ = window.show();
                         let _ = window.set_focus();

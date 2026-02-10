@@ -15,6 +15,7 @@ interface UISettings {
   imageAutoHeight: boolean;
   imageMaxHeight: number;
   colorTheme: ColorTheme;
+  autoResetState: boolean;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -25,6 +26,7 @@ interface UISettings {
   setImageAutoHeight: (auto: boolean) => void;
   setImageMaxHeight: (height: number) => void;
   setColorTheme: (theme: ColorTheme) => void;
+  setAutoResetState: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -48,6 +50,7 @@ export const useUISettings = create<UISettings>()(
       imageAutoHeight: true,
       imageMaxHeight: 512,
       colorTheme: "system" as ColorTheme,
+      autoResetState: true,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -87,6 +90,10 @@ export const useUISettings = create<UISettings>()(
       setColorTheme: (theme) => {
         set({ colorTheme: theme });
         broadcastChange({ colorTheme: theme });
+      },
+      setAutoResetState: (enabled) => {
+        set({ autoResetState: enabled });
+        broadcastChange({ autoResetState: enabled });
       },
     }),
     {
