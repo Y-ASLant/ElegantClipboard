@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -159,12 +158,11 @@ export function ShortcutsTab({ settings, onSettingsChange }: ShortcutsTabProps) 
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-sm font-medium">自定义快捷键</h3>
-            <p className="text-xs text-muted-foreground">自定义呼出剪贴板的快捷键</p>
-          </div>
+      <div className="space-y-4">
+        {/* Custom Shortcut Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">自定义快捷键</h3>
+          <p className="text-xs text-muted-foreground mb-4">自定义呼出剪贴板的快捷键</p>
           <div className={cn("space-y-2", settings.winv_replacement && "opacity-50")}>
             <Label className="text-xs">呼出快捷键</Label>
             <div className="flex gap-2">
@@ -191,13 +189,10 @@ export function ShortcutsTab({ settings, onSettingsChange }: ShortcutsTabProps) 
           </div>
         </div>
 
-        <Separator />
-
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-sm font-medium">使用 Win+V</h3>
-            <p className="text-xs text-muted-foreground">用 Win+V 替代系统剪贴板</p>
-          </div>
+        {/* Win+V Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">使用 Win+V</h3>
+          <p className="text-xs text-muted-foreground mb-4">用 Win+V 替代系统剪贴板</p>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -228,22 +223,19 @@ export function ShortcutsTab({ settings, onSettingsChange }: ShortcutsTabProps) 
           </div>
         </div>
 
-        <Separator />
-
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-sm font-medium">当前生效</h3>
-            <p className="text-xs text-muted-foreground">
-              {settings.winv_replacement ? "使用 Win+V 呼出剪贴板" : `使用 ${settings.shortcut} 呼出剪贴板`}
-            </p>
-          </div>
+        {/* Current Active Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">当前生效</h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            {settings.winv_replacement ? "使用 Win+V 呼出剪贴板" : `使用 ${settings.shortcut} 呼出剪贴板`}
+          </p>
           <div className="flex items-center justify-between py-2 px-3 rounded-md bg-primary/10 border border-primary/20">
             <span className="text-sm font-medium">呼出/隐藏窗口</span>
             <kbd className="pointer-events-none inline-flex h-6 select-none items-center gap-1 rounded border bg-background px-2 font-mono text-xs font-medium">
               {settings.winv_replacement ? "Win+V" : settings.shortcut}
             </kbd>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground mt-2">
             注：自定义快捷键和 Win+V 只能二选一，不能同时生效
           </p>
         </div>

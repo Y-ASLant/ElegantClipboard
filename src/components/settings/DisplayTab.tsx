@@ -1,5 +1,4 @@
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
@@ -51,73 +50,71 @@ export function DisplayTab({
   setImageMaxHeight,
 }: DisplayTabProps) {
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-medium">内容预览</h3>
-          <p className="text-xs text-muted-foreground">配置剪贴板卡片的内容显示</p>
-        </div>
+    <div className="space-y-4">
+      {/* Content Preview Card */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">内容预览</h3>
+        <p className="text-xs text-muted-foreground mb-4">配置剪贴板卡片的内容显示</p>
         
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">预览最大行数</Label>
-            <span className="text-xs font-medium tabular-nums">
-              {cardMaxLines} 行
-            </span>
-          </div>
-          <Slider
-            value={[cardMaxLines]}
-            onValueChange={(value) => setCardMaxLines(value[0])}
-            min={1}
-            max={10}
-            step={1}
-          />
-          <p className="text-xs text-muted-foreground">
-            超过此行数的内容将被截断显示，内容不足时按实际高度显示
-          </p>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label className="text-xs">图片自适应高度</Label>
-            <p className="text-xs text-muted-foreground">
-              关闭后图片高度跟随预览最大行数
-            </p>
-          </div>
-          <Switch checked={imageAutoHeight} onCheckedChange={setImageAutoHeight} />
-        </div>
-
-        {imageAutoHeight && (
+        <div className="space-y-4">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label className="text-xs">图片最大高度</Label>
+              <Label className="text-xs">预览最大行数</Label>
               <span className="text-xs font-medium tabular-nums">
-                {imageMaxHeight} px
+                {cardMaxLines} 行
               </span>
             </div>
             <Slider
-              value={[imageMaxHeight]}
-              onValueChange={(value) => setImageMaxHeight(value[0])}
-              min={128}
-              max={1024}
-              step={32}
+              value={[cardMaxLines]}
+              onValueChange={(value) => setCardMaxLines(value[0])}
+              min={1}
+              max={10}
+              step={1}
             />
             <p className="text-xs text-muted-foreground">
-              自适应模式下图片的最大显示高度
+              超过此行数的内容将被截断显示，内容不足时按实际高度显示
             </p>
           </div>
-        )}
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">图片自适应高度</Label>
+              <p className="text-xs text-muted-foreground">
+                关闭后图片高度跟随预览最大行数
+              </p>
+            </div>
+            <Switch checked={imageAutoHeight} onCheckedChange={setImageAutoHeight} />
+          </div>
+
+          {imageAutoHeight && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">图片最大高度</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {imageMaxHeight} px
+                </span>
+              </div>
+              <Slider
+                value={[imageMaxHeight]}
+                onValueChange={(value) => setImageMaxHeight(value[0])}
+                min={128}
+                max={1024}
+                step={32}
+              />
+              <p className="text-xs text-muted-foreground">
+                自适应模式下图片的最大显示高度
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
-      <Separator />
+      {/* Image Preview Card */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">图片预览</h3>
+        <p className="text-xs text-muted-foreground mb-4">鼠标悬停时在窗口旁显示大图预览</p>
 
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-medium">图片预览</h3>
-          <p className="text-xs text-muted-foreground">鼠标悬停时在窗口旁显示大图预览</p>
-        </div>
-
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">启用图片悬浮预览</Label>
@@ -150,34 +147,33 @@ export function DisplayTab({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">缩放步进</Label>
-                <span className="text-xs font-medium tabular-nums">
-                  {previewZoomStep}%
-                </span>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">缩放步进</Label>
+                  <span className="text-xs font-medium tabular-nums">
+                    {previewZoomStep}%
+                  </span>
+                </div>
+                <Slider
+                  value={[previewZoomStep]}
+                  onValueChange={(value) => setPreviewZoomStep(value[0])}
+                  min={5}
+                  max={50}
+                  step={5}
+                />
+                <p className="text-xs text-muted-foreground">
+                  每次 Ctrl+滚轮缩放的幅度
+                </p>
               </div>
-              <Slider
-                value={[previewZoomStep]}
-                onValueChange={(value) => setPreviewZoomStep(value[0])}
-                min={5}
-                max={50}
-                step={5}
-              />
-              <p className="text-xs text-muted-foreground">
-                每次 Ctrl+滚轮缩放的幅度
-              </p>
             </>
           )}
         </div>
       </div>
 
-      <Separator />
-
-      <div className="space-y-4">
-        <div>
-          <h3 className="text-sm font-medium">信息显示</h3>
-          <p className="text-xs text-muted-foreground">配置卡片底部显示的信息</p>
-        </div>
+      {/* Info Display Card */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">信息显示</h3>
+        <p className="text-xs text-muted-foreground mb-4">配置卡片底部显示的信息</p>
         
         <div className="space-y-3">
           <div className="flex items-center justify-between">
