@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /* Custom Font */
 @font-face {
@@ -332,18 +333,11 @@ textarea,
     background-color: hsl(from var(--color-primary) h s l / 0.3);
 }
 
-/* Settings page animations */
-@keyframes settings-fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-.animate-settings-in {
-    animation: settings-fade-in 0.2s ease-out both;
-}
-
+/* Settings page staggered fade-in (reuses tw-animate-css enter keyframe) */
+.animate-settings-in,
 .animate-settings-in > * {
-    animation: settings-fade-in 0.2s ease-out both;
+    --tw-enter-opacity: 0;
+    animation: enter 0.2s ease-out both;
 }
 
 .animate-settings-in > *:nth-child(1) { animation-delay: 0ms; }
