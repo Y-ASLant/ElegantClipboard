@@ -246,7 +246,7 @@ const arePropsEqual = (
   prevProps: ClipboardItemCardProps,
   nextProps: ClipboardItemCardProps,
 ) => {
-  // Don't re-render if only index changed (virtual list optimization)
+  if (prevProps.index !== nextProps.index) return false;
   if (prevProps.sortId !== nextProps.sortId) return false;
   if (prevProps.isDragOverlay !== nextProps.isDragOverlay) return false;
 
