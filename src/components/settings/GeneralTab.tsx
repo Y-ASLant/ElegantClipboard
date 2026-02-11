@@ -86,7 +86,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                 <Label className="text-xs flex items-center gap-2">
                   以管理员身份启动
                   {settings.is_running_as_admin && (
-                    <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded animate-settings-in">
                       当前已提权
                     </span>
                   )}
