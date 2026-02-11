@@ -7,6 +7,7 @@ mod input_monitor;
 mod keyboard_hook;
 mod positioning;
 mod shortcut;
+mod task_scheduler;
 mod tray;
 mod win_v_registry;
 
@@ -574,6 +575,27 @@ pub fn run() {
                 // This is necessary because non-focusable windows don't trigger onFocusChanged
                 input_monitor::init(window);
                 input_monitor::start_monitoring();
+            }
+
+            // 自启动机制迁移：管理员模式用任务计划程序，普通模式用注册表 Run
+            {
+                use tauri_plugin_autostart::ManagerExt;
+                let is_admin = admin_launch::is_admin_launch_enabled()
+                    && admin_launch::is_running_as_admin();
+
+                if is_admin && app.autolaunch().is_enabled().unwrap_or(false) {
+                    if task_scheduler::create_autostart_task().is_ok() {
+                        let _ = app.autolaunch().disable();
+                        tracing::info!("自启动迁移: 注册表 Run → 任务计划程序");
+                    }
+                } else if !admin_launch::is_admin_launch_enabled()
+                    && task_scheduler::is_autostart_task_exists()
+                {
+                    if app.autolaunch().enable().is_ok() {
+                        let _ = task_scheduler::delete_autostart_task();
+                        tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
+                    }
+                }
             }
 
             // Start system accent color watcher for live theme updates

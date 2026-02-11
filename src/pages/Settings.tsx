@@ -78,19 +78,19 @@ export function Settings() {
     winv_replacement: false,
   });
   const settingsLoadedRef = useRef(false);
+  const [transitionsReady, setTransitionsReady] = useState(false);
 
-  // Show window only after theme is applied (prevent flash)
+  // 等待主题和设置都加载完成后再显示窗口，避免开关状态闪烁
   useEffect(() => {
-    initTheme().then(() => {
+    Promise.all([initTheme(), loadSettings()]).then(() => {
       const settingsWindow = getCurrentWindow();
-      // Force reflow so theme CSS is fully computed
       document.body.getBoundingClientRect();
-      // Double rAF: ensure one full paint is committed before showing,
-      // priming the WebView2 compositor to avoid first-interaction flash
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           settingsWindow.show();
           settingsWindow.setFocus();
+          // 窗口显示后下一帧再启用过渡动画，避免开关从默认值到加载值的过渡
+          requestAnimationFrame(() => setTransitionsReady(true));
         });
       });
     });
@@ -100,7 +100,6 @@ export function Settings() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        // Don't close if a dialog is open
         const hasOverlay = document.querySelector(
           '[role="dialog"], [data-radix-popper-content-wrapper]'
         );
@@ -111,10 +110,6 @@ export function Settings() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  useEffect(() => {
-    loadSettings();
   }, []);
 
   // Auto save when settings change (skip until initial load completes)
@@ -216,7 +211,7 @@ export function Settings() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3">
+    <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3", !transitionsReady && "[&_*]:!transition-none")}>
       {/* Title Bar Card */}
       <Card className="shrink-0">
         <div

@@ -193,6 +193,18 @@ listen("ui-settings-changed", (event) => { ... });
 - `is_running_as_admin()` - 检查当前权限
 - `restart_app()` - 支持 UAC 提权的重启
 
+## 开机自启动（双机制）
+
+位置：`src-tauri/src/commands/settings.rs`、`src-tauri/src/task_scheduler.rs`
+
+Windows 的注册表 `Run` 键会静默跳过需要 UAC 提权的程序，因此管理员模式下自启动需要使用不同机制：
+- **普通模式**：`tauri-plugin-autostart`（写入 `HKCU\..\Run` 注册表）
+- **管理员模式**：Windows 任务计划程序（`schtasks`，`HIGHEST` 运行级别）
+
+**自动迁移**（`lib.rs` setup）：应用启动时自动检测并切换机制：
+- 管理员模式 + 已提权 + 旧注册表自启动 → 迁移到任务计划程序
+- 普通模式 + 存在任务计划程序 → 迁移到注册表 `Run`
+
 ## Win+V 替换功能
 
 通过修改 Windows 注册表禁用系统 Win+V：
