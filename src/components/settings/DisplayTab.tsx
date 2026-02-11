@@ -11,6 +11,8 @@ interface DisplayTabProps {
   setShowCharCount: (value: boolean) => void;
   showByteSize: boolean;
   setShowByteSize: (value: boolean) => void;
+  showSourceApp: boolean;
+  setShowSourceApp: (value: boolean) => void;
   imagePreviewEnabled: boolean;
   setImagePreviewEnabled: (value: boolean) => void;
   previewZoomStep: number;
@@ -38,6 +40,8 @@ export function DisplayTab({
   setShowCharCount,
   showByteSize,
   setShowByteSize,
+  showSourceApp,
+  setShowSourceApp,
   imagePreviewEnabled,
   setImagePreviewEnabled,
   previewZoomStep,
@@ -198,6 +202,14 @@ export function DisplayTab({
               <p className="text-xs text-muted-foreground">显示内容的字节大小</p>
             </div>
             <Switch checked={showByteSize} onCheckedChange={setShowByteSize} />
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">显示复制来源</Label>
+              <p className="text-xs text-muted-foreground">显示复制内容的来源应用</p>
+            </div>
+            <Switch checked={showSourceApp} onCheckedChange={setShowSourceApp} />
           </div>
         </div>
       </div>

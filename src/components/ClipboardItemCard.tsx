@@ -276,6 +276,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const showTime = useUISettings((s) => s.showTime);
   const showCharCount = useUISettings((s) => s.showCharCount);
   const showByteSize = useUISettings((s) => s.showByteSize);
+  const showSourceApp = useUISettings((s) => s.showSourceApp);
 
   const [justDropped, setJustDropped] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -431,6 +432,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               metaItems={metaItems}
               index={index}
               isDragOverlay={isDragOverlay}
+              sourceAppName={showSourceApp ? item.source_app_name : undefined}
+              sourceAppIcon={showSourceApp ? item.source_app_icon : undefined}
             />
           ) : item.content_type === "files" ? (
             <FileContent
@@ -440,6 +443,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               metaItems={metaItems}
               index={index}
               isDragOverlay={isDragOverlay}
+              sourceAppName={showSourceApp ? item.source_app_name : undefined}
+              sourceAppIcon={showSourceApp ? item.source_app_icon : undefined}
             />
           ) : (
             <div className="flex-1 min-w-0 px-3 py-2.5">
@@ -458,6 +463,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                 metaItems={metaItems}
                 index={index}
                 isDragOverlay={isDragOverlay}
+                sourceAppName={showSourceApp ? item.source_app_name : undefined}
+                sourceAppIcon={showSourceApp ? item.source_app_icon : undefined}
               />
             </div>
           )}

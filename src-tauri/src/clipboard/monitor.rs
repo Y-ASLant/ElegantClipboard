@@ -8,7 +8,7 @@ use std::thread::JoinHandle;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
 
-/// Clipboard monitor service
+/// 剪贴板监听服务
 #[derive(Clone)]
 pub struct ClipboardMonitor {
     running: Arc<AtomicBool>,
@@ -36,7 +36,7 @@ impl ClipboardMonitor {
         info!("Clipboard monitor initialized");
     }
 
-    /// Start monitoring clipboard changes
+    /// 启动剪贴板监听
     pub fn start(&self, app_handle: AppHandle) {
         // Use compare_exchange to avoid race condition
         if self.running.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
@@ -149,6 +149,9 @@ impl CMHandler for MonitorHandler {
             return CallbackResult::Next;
         }
 
+        // 先获取来源应用（在读取内容之前）
+        let source = super::source_app::get_clipboard_source_app();
+
         // Read clipboard content using arboard
         let content = match read_clipboard_content() {
             Some(c) => c,
@@ -157,7 +160,7 @@ impl CMHandler for MonitorHandler {
 
         // Process the content
         if let Some(ref handler) = *self.handler.lock() {
-            match handler.process(content) {
+            match handler.process(content, source) {
                 Ok(Some(id)) => {
                     debug!("Processed clipboard item: {}", id);
                     let _ = self.app_handle.emit("clipboard-updated", id);
@@ -180,7 +183,7 @@ impl CMHandler for MonitorHandler {
     }
 }
 
-/// Read current clipboard content using clipboard-rs (better Windows compatibility)
+/// 读取当前剪贴板内容
 fn read_clipboard_content() -> Option<ClipboardContent> {
     use clipboard_rs::{Clipboard, ClipboardContext};
     use clipboard_rs::common::RustImage;
@@ -193,7 +196,7 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
         }
     };
 
-    // Try to get files first (file paths from explorer copy)
+    // 优先尝试获取文件
     if let Ok(files) = ctx.get_files() {
         if !files.is_empty() {
             debug!("Got {} files from clipboard", files.len());
@@ -201,7 +204,7 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
         }
     }
 
-    // Try to get image using clipboard-rs
+    // 尝试获取图片
     if let Ok(img) = ctx.get_image() {
         let (width, height) = img.get_size();
         debug!("Got image from clipboard: {}x{}", width, height);
@@ -216,7 +219,7 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
         warn!("Failed to convert image to PNG");
     }
 
-    // Try to get text using arboard (more reliable for text)
+    // 尝试获取文本
     if let Ok(mut clipboard) = arboard::Clipboard::new() {
         if let Ok(text) = clipboard.get_text() {
             if !text.is_empty() {

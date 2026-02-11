@@ -21,11 +21,13 @@ interface CardFooterProps {
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }
 
-export const CardFooter = ({ metaItems, index, isDragOverlay }: CardFooterProps) => (
+export const CardFooter = ({ metaItems, index, isDragOverlay, sourceAppName, sourceAppIcon }: CardFooterProps) => (
   <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5">
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 min-w-0">
       {metaItems.map((info, i) => (
         <span key={i} className="flex items-center gap-1.5">
           {i > 0 && <span className="text-muted-foreground/50">·</span>}
@@ -33,11 +35,24 @@ export const CardFooter = ({ metaItems, index, isDragOverlay }: CardFooterProps)
         </span>
       ))}
     </div>
-    {index !== undefined && index >= 0 && !isDragOverlay && (
-      <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
-        {index + 1}
-      </span>
-    )}
+    <div className="flex items-center gap-1.5 flex-shrink-0">
+      {sourceAppIcon && (
+        <img
+          src={convertFileSrc(sourceAppIcon)}
+          alt=""
+          className="w-3.5 h-3.5 flex-shrink-0"
+          draggable={false}
+        />
+      )}
+      {sourceAppName && (
+        <span className="truncate max-w-[80px]">{sourceAppName}</span>
+      )}
+      {index !== undefined && index >= 0 && !isDragOverlay && (
+        <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
+          {index + 1}
+        </span>
+      )}
+    </div>
   </div>
 );
 
@@ -275,6 +290,8 @@ interface ImageCardProps {
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }
 
 export const ImageCard = memo(function ImageCard({
@@ -282,6 +299,8 @@ export const ImageCard = memo(function ImageCard({
   metaItems,
   index,
   isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
 }: ImageCardProps) {
   const [error, setError] = useState(false);
 
@@ -302,7 +321,7 @@ export const ImageCard = memo(function ImageCard({
           imagePath={image_path}
         />
       )}
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
     </div>
   );
 });
@@ -314,11 +333,15 @@ const FileImagePreview = memo(function FileImagePreview({
   metaItems,
   index,
   isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
 }: {
   filePath: string;
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }) {
   const [imgError, setImgError] = useState(false);
   const fileName = getFileNameFromPath(filePath);
@@ -335,7 +358,7 @@ const FileImagePreview = memo(function FileImagePreview({
             <p className="text-xs truncate mt-0.5 text-muted-foreground"><HighlightText text={filePath} /></p>
           </div>
         </div>
-        <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+        <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
       </div>
     );
   }
@@ -353,7 +376,7 @@ const FileImagePreview = memo(function FileImagePreview({
           </div>
         }
       />
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
     </div>
   );
 });
@@ -367,6 +390,8 @@ interface FileContentProps {
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }
 
 export const FileContent = memo(function FileContent({
@@ -376,6 +401,8 @@ export const FileContent = memo(function FileContent({
   metaItems,
   index,
   isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
 }: FileContentProps) {
   const isMultiple = filePaths.length > 1;
   const isSingleImage =
@@ -388,6 +415,8 @@ export const FileContent = memo(function FileContent({
         metaItems={metaItems}
         index={index}
         isDragOverlay={isDragOverlay}
+        sourceAppName={sourceAppName}
+        sourceAppIcon={sourceAppIcon}
       />
     );
   }
@@ -433,7 +462,7 @@ export const FileContent = memo(function FileContent({
           )}
         </div>
       </div>
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
     </div>
   );
 });
