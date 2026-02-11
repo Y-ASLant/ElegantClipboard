@@ -1,4 +1,4 @@
-import { memo, useEffect, useState, useRef, useMemo } from "react";
+import { Fragment, memo, useEffect, useState, useRef, useMemo } from "react";
 import {
   Pin16Regular,
   Pin16Filled,
@@ -62,6 +62,15 @@ interface FileListItem {
   path: string;
   isDir: boolean;
   exists: boolean;
+}
+
+interface ContextMenuItemConfig {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+  separator?: boolean;
 }
 
 interface ClipboardItemCardProps {
@@ -493,93 +502,60 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     </div>
   );
 
-  // File items get a context menu wrapper
-  if (item.content_type === "files" && !isDragOverlay) {
+  // 文件/图片上下文菜单配置
+  const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
+    if (isDragOverlay) return null;
+    if (item.content_type === "files") {
+      return [
+        { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },
+        { icon: TextDescription16Regular, label: "粘贴为路径", onClick: handlePasteAsPath },
+        { icon: FolderOpen16Regular, label: "在资源管理器中显示", onClick: handleShowInExplorer, disabled: filesInvalid },
+        { icon: ArrowDownload16Regular, label: "另存为", onClick: handleSaveAs, disabled: filesInvalid },
+        { icon: Info16Regular, label: "查看详细信息", onClick: handleShowDetails, disabled: filesInvalid },
+        { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
+      ];
+    }
+    if (item.content_type === "image" && item.image_path) {
+      return [
+        { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },
+        { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
+        { icon: FolderOpen16Regular, label: "在资源管理器中显示", onClick: handleShowImageInExplorer },
+        { icon: ArrowDownload16Regular, label: "另存为", onClick: handleSaveAs },
+        { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
+      ];
+    }
+    return null;
+  })();
+
+  if (contextMenuItems) {
     return (
       <>
         <ContextMenu>
           <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
           <ContextMenuContent className="w-48">
-            <ContextMenuItem onClick={handlePaste}>
-              <ClipboardPaste16Regular className="mr-2 h-4 w-4" />
-              <span>粘贴</span>
-            </ContextMenuItem>
-            <ContextMenuItem onClick={handlePasteAsPath}>
-              <TextDescription16Regular className="mr-2 h-4 w-4" />
-              <span>粘贴为路径</span>
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={handleShowInExplorer}
-              disabled={filesInvalid}
-            >
-              <FolderOpen16Regular className="mr-2 h-4 w-4" />
-              <span>在资源管理器中显示</span>
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={handleSaveAs}
-              disabled={filesInvalid}
-            >
-              <ArrowDownload16Regular className="mr-2 h-4 w-4" />
-              <span>另存为</span>
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={handleShowDetails}
-              disabled={filesInvalid}
-            >
-              <Info16Regular className="mr-2 h-4 w-4" />
-              <span>查看详细信息</span>
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              onClick={() => deleteItem(item.id)}
-              className="text-destructive focus:text-destructive"
-            >
-              <Delete16Regular className="mr-2 h-4 w-4" />
-              <span>删除</span>
-            </ContextMenuItem>
+            {contextMenuItems.map((mi, idx) => (
+              <Fragment key={idx}>
+                {mi.separator && <ContextMenuSeparator />}
+                <ContextMenuItem
+                  onClick={mi.onClick}
+                  disabled={mi.disabled}
+                  className={mi.destructive ? "text-destructive focus:text-destructive" : undefined}
+                >
+                  <mi.icon className="mr-2 h-4 w-4" />
+                  <span>{mi.label}</span>
+                </ContextMenuItem>
+              </Fragment>
+            ))}
           </ContextMenuContent>
         </ContextMenu>
-        <FileDetailsDialog
-          open={detailsOpen}
-          onOpenChange={setDetailsOpen}
-          fileListItems={fileListItems}
-        />
+        {item.content_type === "files" && (
+          <FileDetailsDialog
+            open={detailsOpen}
+            onOpenChange={setDetailsOpen}
+            fileListItems={fileListItems}
+          />
+        )}
       </>
-    );
-  }
-
-  // Image items get a context menu wrapper
-  if (item.content_type === "image" && item.image_path && !isDragOverlay) {
-    return (
-      <ContextMenu>
-        <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
-        <ContextMenuContent className="w-48">
-          <ContextMenuItem onClick={handlePaste}>
-            <ClipboardPaste16Regular className="mr-2 h-4 w-4" />
-            <span>粘贴</span>
-          </ContextMenuItem>
-          <ContextMenuItem onClick={handleCopyCtxMenu}>
-            <Copy16Regular className="mr-2 h-4 w-4" />
-            <span>复制</span>
-          </ContextMenuItem>
-          <ContextMenuItem onClick={handleShowImageInExplorer}>
-            <FolderOpen16Regular className="mr-2 h-4 w-4" />
-            <span>在资源管理器中显示</span>
-          </ContextMenuItem>
-          <ContextMenuItem onClick={handleSaveAs}>
-            <ArrowDownload16Regular className="mr-2 h-4 w-4" />
-            <span>另存为</span>
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem
-            onClick={() => deleteItem(item.id)}
-            className="text-destructive focus:text-destructive"
-          >
-            <Delete16Regular className="mr-2 h-4 w-4" />
-            <span>删除</span>
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
     );
   }
 
