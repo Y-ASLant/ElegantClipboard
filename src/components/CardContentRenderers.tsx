@@ -25,7 +25,13 @@ interface CardFooterProps {
   sourceAppIcon?: string | null;
 }
 
-export const CardFooter = ({ metaItems, index, isDragOverlay, sourceAppName, sourceAppIcon }: CardFooterProps) => (
+export const CardFooter = ({
+  metaItems,
+  index,
+  isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
+}: CardFooterProps) => (
   <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5">
     <div className="flex items-center gap-1.5 min-w-0">
       {metaItems.map((info, i) => (
@@ -45,7 +51,7 @@ export const CardFooter = ({ metaItems, index, isDragOverlay, sourceAppName, sou
         />
       )}
       {sourceAppName && (
-        <span className="truncate max-w-[80px]">{sourceAppName}</span>
+        <span className="truncate max-w-[128px]">{sourceAppName}</span>
       )}
       {index !== undefined && index >= 0 && !isDragOverlay && (
         <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
@@ -85,21 +91,41 @@ async function getPreviewWindowRect(position: "auto" | "left" | "right") {
   const physMinW = Math.round(200 * scale);
 
   const leftSpace = physWinX - monX - physGap;
-  const rightSpace = (monX + monW) - (physWinX + physMainW) - physGap;
+  const rightSpace = monX + monW - (physWinX + physMainW) - physGap;
 
   const useLeft =
-    position === "left" ? true :
-    position === "right" ? false :
-    leftSpace >= rightSpace && leftSpace >= physMinW;
+    position === "left"
+      ? true
+      : position === "right"
+        ? false
+        : leftSpace >= rightSpace && leftSpace >= physMinW;
 
   if (useLeft) {
-    return { x: monX, y: monY, w: Math.max(physMinW, leftSpace), h: monH, scale };
+    return {
+      x: monX,
+      y: monY,
+      w: Math.max(physMinW, leftSpace),
+      h: monH,
+      scale,
+    };
   }
-  return { x: physWinX + physMainW + physGap, y: monY, w: Math.max(physMinW, rightSpace), h: monH, scale };
+  return {
+    x: physWinX + physMainW + physGap,
+    y: monY,
+    w: Math.max(physMinW, rightSpace),
+    h: monH,
+    scale,
+  };
 }
 
 /** Calculate image CSS size at a given scale, fitted into available space */
-function calcImageSize(imgW: number, imgH: number, scale: number, maxW: number, maxH: number) {
+function calcImageSize(
+  imgW: number,
+  imgH: number,
+  scale: number,
+  maxW: number,
+  maxH: number,
+) {
   // Fit to base bounds at scale=1
   let baseW = imgW;
   let baseH = imgH;
@@ -157,14 +183,19 @@ const ImagePreview = memo(function ImagePreview({
   const ps = useRef<PreviewState>(defaultPreviewState());
 
   const clearTimer = useCallback(() => {
-    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
   }, []);
 
   const hidePreview = useCallback(() => {
     clearTimer();
     if (ps.current.visible) {
       ps.current.visible = false;
-      invoke("hide_image_preview").catch((e) => console.error("Failed to hide preview:", e));
+      invoke("hide_image_preview").catch((e) =>
+        console.error("Failed to hide preview:", e),
+      );
     }
     ps.current.scale = 1.0;
   }, [clearTimer]);
@@ -175,7 +206,13 @@ const ImagePreview = memo(function ImagePreview({
     const rect = await getPreviewWindowRect(previewPosition);
     const { imgNatural } = ps.current;
     // calcImageSize needs logical max dimensions for CSS output
-    const { width, height } = calcImageSize(imgNatural.w, imgNatural.h, 1.0, rect.w / rect.scale, rect.h / rect.scale);
+    const { width, height } = calcImageSize(
+      imgNatural.w,
+      imgNatural.h,
+      1.0,
+      rect.w / rect.scale,
+      rect.h / rect.scale,
+    );
 
     ps.current.visible = true;
     ps.current.scale = 1.0;
@@ -210,31 +247,48 @@ const ImagePreview = memo(function ImagePreview({
 
       const step = previewZoomStep / 100;
       const delta = e.deltaY > 0 ? -step : step;
-      ps.current.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, ps.current.scale + delta));
+      ps.current.scale = Math.max(
+        MIN_SCALE,
+        Math.min(MAX_SCALE, ps.current.scale + delta),
+      );
 
       getPreviewWindowRect(previewPosition).then((rect) => {
         const { width, height } = calcImageSize(
-          ps.current.imgNatural.w, ps.current.imgNatural.h,
-          ps.current.scale, rect.w / rect.scale, rect.h / rect.scale,
+          ps.current.imgNatural.w,
+          ps.current.imgNatural.h,
+          ps.current.scale,
+          rect.w / rect.scale,
+          rect.h / rect.scale,
         );
         const percent = Math.round(ps.current.scale * 100);
-        emit("image-preview-zoom", { width, height, percent, active: true }).catch((e) => console.error("Failed to emit zoom:", e));
+        emit("image-preview-zoom", {
+          width,
+          height,
+          percent,
+          active: true,
+        }).catch((e) => console.error("Failed to emit zoom:", e));
       });
     },
     [previewZoomStep, previewPosition],
   );
 
-  const handleImgLoad = useCallback((e: React.SyntheticEvent<HTMLImageElement>) => {
-    const img = e.currentTarget;
-    if (img.naturalWidth > 0) {
-      ps.current.imgNatural = { w: img.naturalWidth, h: img.naturalHeight };
-    }
-  }, []);
+  const handleImgLoad = useCallback(
+    (e: React.SyntheticEvent<HTMLImageElement>) => {
+      const img = e.currentTarget;
+      if (img.naturalWidth > 0) {
+        ps.current.imgNatural = { w: img.naturalWidth, h: img.naturalHeight };
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     return () => {
       clearTimer();
-      if (ps.current.visible) invoke("hide_image_preview").catch((e) => console.error("Failed to hide preview:", e));
+      if (ps.current.visible)
+        invoke("hide_image_preview").catch((e) =>
+          console.error("Failed to hide preview:", e),
+        );
     };
   }, [clearTimer]);
 
@@ -247,17 +301,15 @@ const ImagePreview = memo(function ImagePreview({
     // 固定模式：跟随 cardMaxLines
     return { maxHeight: `${cardMaxLines * 1.5}rem` };
   }, [imageAutoHeight, cardMaxLines, imageMaxHeight]);
-  
+
   const imgClass = useMemo(() => {
-    return imageAutoHeight 
-      ? "w-full h-auto object-contain" 
+    return imageAutoHeight
+      ? "w-full h-auto object-contain"
       : "w-full h-full object-contain";
   }, [imageAutoHeight]);
 
   const imgStyle = useMemo(() => {
-    return imageAutoHeight 
-      ? { maxHeight: `${imageMaxHeight}px` }
-      : {};
+    return imageAutoHeight ? { maxHeight: `${imageMaxHeight}px` } : {};
   }, [imageAutoHeight, imageMaxHeight]);
 
   return (
@@ -321,7 +373,13 @@ export const ImageCard = memo(function ImageCard({
           imagePath={image_path}
         />
       )}
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
+      <CardFooter
+        metaItems={metaItems}
+        index={index}
+        isDragOverlay={isDragOverlay}
+        sourceAppName={sourceAppName}
+        sourceAppIcon={sourceAppIcon}
+      />
     </div>
   );
 });
@@ -354,11 +412,21 @@ const FileImagePreview = memo(function FileImagePreview({
             <Document16Regular className="w-5 h-5 text-blue-500" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-foreground"><HighlightText text={fileName} /></p>
-            <p className="text-xs truncate mt-0.5 text-muted-foreground"><HighlightText text={filePath} /></p>
+            <p className="text-sm font-medium truncate text-foreground">
+              <HighlightText text={fileName} />
+            </p>
+            <p className="text-xs truncate mt-0.5 text-muted-foreground">
+              <HighlightText text={filePath} />
+            </p>
           </div>
         </div>
-        <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
+        <CardFooter
+          metaItems={metaItems}
+          index={index}
+          isDragOverlay={isDragOverlay}
+          sourceAppName={sourceAppName}
+          sourceAppIcon={sourceAppIcon}
+        />
       </div>
     );
   }
@@ -376,7 +444,13 @@ const FileImagePreview = memo(function FileImagePreview({
           </div>
         }
       />
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
+      <CardFooter
+        metaItems={metaItems}
+        index={index}
+        isDragOverlay={isDragOverlay}
+        sourceAppName={sourceAppName}
+        sourceAppIcon={sourceAppIcon}
+      />
     </div>
   );
 });
@@ -406,7 +480,10 @@ export const FileContent = memo(function FileContent({
 }: FileContentProps) {
   const isMultiple = filePaths.length > 1;
   const isSingleImage =
-    !isMultiple && filePaths.length === 1 && !filesInvalid && isImageFile(filePaths[0]);
+    !isMultiple &&
+    filePaths.length === 1 &&
+    !filesInvalid &&
+    isImageFile(filePaths[0]);
 
   if (isSingleImage) {
     return (
@@ -427,7 +504,9 @@ export const FileContent = memo(function FileContent({
         <div
           className={cn(
             "flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center",
-            filesInvalid ? "bg-red-50 dark:bg-red-950" : "bg-blue-50 dark:bg-blue-950"
+            filesInvalid
+              ? "bg-red-50 dark:bg-red-950"
+              : "bg-blue-50 dark:bg-blue-950",
           )}
         >
           {filesInvalid ? (
@@ -441,28 +520,69 @@ export const FileContent = memo(function FileContent({
         <div className="flex-1 min-w-0">
           {isMultiple ? (
             <>
-              <p className={cn("text-sm font-medium", filesInvalid ? "text-red-500" : "text-foreground")}>
+              <p
+                className={cn(
+                  "text-sm font-medium",
+                  filesInvalid ? "text-red-500" : "text-foreground",
+                )}
+              >
                 {filePaths.length} 个文件
-                {filesInvalid && <span className="ml-1.5 text-xs font-normal">(已失效)</span>}
+                {filesInvalid && (
+                  <span className="ml-1.5 text-xs font-normal">(已失效)</span>
+                )}
               </p>
-              <p className={cn("text-xs truncate mt-0.5", filesInvalid ? "text-red-400" : "text-muted-foreground")}>
-                <HighlightText text={filePaths.map((p) => getFileNameFromPath(p)).slice(0, 3).join(", ") + (filePaths.length > 3 ? "..." : "")} />
+              <p
+                className={cn(
+                  "text-xs truncate mt-0.5",
+                  filesInvalid ? "text-red-400" : "text-muted-foreground",
+                )}
+              >
+                <HighlightText
+                  text={
+                    filePaths
+                      .map((p) => getFileNameFromPath(p))
+                      .slice(0, 3)
+                      .join(", ") + (filePaths.length > 3 ? "..." : "")
+                  }
+                />
               </p>
             </>
           ) : (
             <>
-              <p className={cn("text-sm font-medium truncate", filesInvalid ? "text-red-500" : "text-foreground")}>
-                <HighlightText text={getFileNameFromPath(filePaths[0] || preview || "")} />
-                {filesInvalid && <span className="ml-1.5 text-xs font-normal">(已失效)</span>}
+              <p
+                className={cn(
+                  "text-sm font-medium truncate",
+                  filesInvalid ? "text-red-500" : "text-foreground",
+                )}
+              >
+                <HighlightText
+                  text={getFileNameFromPath(filePaths[0] || preview || "")}
+                />
+                {filesInvalid && (
+                  <span className="ml-1.5 text-xs font-normal">(已失效)</span>
+                )}
               </p>
-              <p className={cn("text-xs truncate mt-0.5", filesInvalid ? "text-red-400 line-through" : "text-muted-foreground")}>
+              <p
+                className={cn(
+                  "text-xs truncate mt-0.5",
+                  filesInvalid
+                    ? "text-red-400 line-through"
+                    : "text-muted-foreground",
+                )}
+              >
                 <HighlightText text={filePaths[0] || preview || ""} />
               </p>
             </>
           )}
         </div>
       </div>
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
+      <CardFooter
+        metaItems={metaItems}
+        index={index}
+        isDragOverlay={isDragOverlay}
+        sourceAppName={sourceAppName}
+        sourceAppIcon={sourceAppIcon}
+      />
     </div>
   );
 });

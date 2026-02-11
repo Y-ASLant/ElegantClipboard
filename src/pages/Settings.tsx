@@ -55,6 +55,8 @@ export function Settings() {
     setShowByteSize,
     showSourceApp,
     setShowSourceApp,
+    sourceAppDisplay,
+    setSourceAppDisplay,
     imagePreviewEnabled,
     setImagePreviewEnabled,
     previewZoomStep,
@@ -328,6 +330,8 @@ export function Settings() {
                   setShowByteSize={setShowByteSize}
                   showSourceApp={showSourceApp}
                   setShowSourceApp={setShowSourceApp}
+                  sourceAppDisplay={sourceAppDisplay}
+                  setSourceAppDisplay={setSourceAppDisplay}
                   imagePreviewEnabled={imagePreviewEnabled}
                   setImagePreviewEnabled={setImagePreviewEnabled}
                   previewZoomStep={previewZoomStep}

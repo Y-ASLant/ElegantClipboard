@@ -286,6 +286,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const showCharCount = useUISettings((s) => s.showCharCount);
   const showByteSize = useUISettings((s) => s.showByteSize);
   const showSourceApp = useUISettings((s) => s.showSourceApp);
+  const sourceAppDisplay = useUISettings((s) => s.sourceAppDisplay);
 
   const [justDropped, setJustDropped] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -328,7 +329,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
-    transition: transition || "transform 200ms ease",
+    transition: transition || undefined,
     opacity: isDragging ? 0 : 1,
     cursor: isDragging ? "grabbing" : "pointer",
     zIndex: isDragging ? 1000 : "auto",
@@ -441,8 +442,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               metaItems={metaItems}
               index={index}
               isDragOverlay={isDragOverlay}
-              sourceAppName={showSourceApp ? item.source_app_name : undefined}
-              sourceAppIcon={showSourceApp ? item.source_app_icon : undefined}
+              sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
+              sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
             />
           ) : item.content_type === "files" ? (
             <FileContent
@@ -452,8 +453,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               metaItems={metaItems}
               index={index}
               isDragOverlay={isDragOverlay}
-              sourceAppName={showSourceApp ? item.source_app_name : undefined}
-              sourceAppIcon={showSourceApp ? item.source_app_icon : undefined}
+              sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
+              sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
             />
           ) : (
             <div className="flex-1 min-w-0 px-3 py-2.5">
@@ -472,8 +473,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                 metaItems={metaItems}
                 index={index}
                 isDragOverlay={isDragOverlay}
-                sourceAppName={showSourceApp ? item.source_app_name : undefined}
-                sourceAppIcon={showSourceApp ? item.source_app_icon : undefined}
+                sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
+                sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
               />
             </div>
           )}
