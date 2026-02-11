@@ -3,10 +3,10 @@
 <p align="center">
   <img src="src-tauri/icons/icon.png" alt="ElegantClipboard" width="128" height="128">
 </p>
-
 <p align="center">
-  低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板。经大量优化和架构改进。
+  低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板。
 </p>
+
 
 <p align="center">
   <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/v/release/Y-ASLant/ElegantClipboard?label=version&color=blue" alt="version"></a>
@@ -27,11 +27,15 @@
 |:-:|:-:|:-:|
 | ![经典黑白](img/theme_1.png) | ![翡翠绿](img/theme_2.png) | ![天空青](img/theme_3.png) |
 
+#### 暗色模式
+
+自动跟随系统深色/浅色模式，实时切换
+
 ### 设置界面
 
-| 常规设置 | 显示设置 | 快捷按键 |
+| 数据管理 | 显示设置 | 快捷按键 |
 |:-:|:-:|:-:|
-| ![常规设置](img/setting_1.png) | ![显示设置](img/setting_2.png) | ![快捷按键](img/setting_3.png) |
+| ![数据管理](img/setting_1.png) | ![显示设置](img/setting_2.png) | ![快捷按键](img/setting_3.png) |
 
 ### 图片预览
 
@@ -39,30 +43,16 @@
 
 ### 启动通知
 
-![启动通知](img/启动弹窗.png)
+![启动通知](img/startup_notification.png)
 
 ## 设计理念
 
 **低占用 · 高性能 · 现代化 · 完全本地化离线**
 
 - **低占用** - 托盘常驻，不打扰核心工作流，窗口不抢占焦点，仅可见时启用监控
-- **高性能** - 优化的 LIKE 搜索（兼容 CJK 文本）、虚拟列表处理万级记录、异步图像处理、内容哈希去重
+- **高性能** - 优化的 LIKE 搜索（兼容 CJK 文本、长文本搜索）、虚拟列表处理万级记录、异步图像处理、内容哈希去重、关键词高亮显示
 - **现代化** - Tauri 2.0 + React 19 + Tailwind CSS 4，类型安全，优雅架构
 - **本地化离线** - 数据完全本地存储，无网络请求，无云同步，隐私至上
-
-## 项目优化历程
-
-ElegantClipboard 经历了多次重要的架构优化：
-
-### 搜索算法演进
-- **早期版本**：使用 SQLite FTS5 全文搜索
-- **中文优化**：发现 FTS5 对中文支持不佳，切换到优化的 LIKE 查询
-- **性能平衡**：在搜索准确性和性能之间找到最佳平衡点
-
-### 架构改进
-- **数据库优化**：实现读写连接分离，WAL 模式，内存优化配置
-- **并发优化**：引入无锁设计，使用原子变量减少锁竞争
-- **用户体验**：优化虚拟列表，支持万条数据流畅滚动
 
 ## 功能特性
 
@@ -76,9 +66,10 @@ ElegantClipboard 经历了多次重要的架构优化：
 - **点击即粘贴** - 点击记录直接粘贴到活动窗口
 
 ### 搜索优化
-- **中文兼容性** - 从 FTS5 切换到优化的 LIKE 搜索，完美支持中文等 CJK 文本
+- **中文兼容性** - 使用优化的 LIKE 查询，完美支持中文等 CJK 文本
 - **字段智能选择** - 仅在预览字段和文件路径上搜索，避免大文本字段全表扫描
 - **性能平衡** - 在搜索准确性和性能之间取得最佳平衡
+- **关键词高亮** - 搜索时自动提取关键词上下文，提升搜索体验
 
 ### 图片预览
 - **缩略图预览** - 图片类型自动生成缩略图（Asset Protocol 零开销加载）
@@ -113,19 +104,19 @@ ElegantClipboard 经历了多次重要的架构优化：
 - **自定义存储路径** - 支持数据迁移和路径自定义
 - **历史记录限制** - 可设置最大记录数（0 为无限制）
 - **内容大小限制** - 单条内容最大大小可配置
-- **显示设置** - 预览行数（1-10 行）、时间/字符数/大小显示可选
+- **显示设置** - 预览行数（1-10 行）、时间/字符数/大小/来源应用显示可选
 - **图片预览设置** - 启用/禁用悬浮预览、缩放步进（5%-50%）、预览位置偏好
+- **窗口状态重置** - 窗口隐藏时自动重置搜索和滚动位置（可选）
 - **开机自启** - 支持系统启动时自动运行
 - **管理员启动** - 可选以管理员权限运行（UAC 提升）
 - **数据库优化** - 手动触发 OPTIMIZE / VACUUM
+- **数据统计** - 实时查看数据库、图片缓存大小和文件数量
 
 ### 外观主题
-- **跟随系统强调色**（默认） - 自动读取 Windows 系统强调色，实时跟随变更（WM_SETTINGCHANGE）
+- **跟随系统强调色**（默认） - 自动读取 Windows 系统强调色，实时跟随变更
 - **经典黑白** - 简约黑白灰配色
 - **翡翠绿 / 天空青** - 预设配色方案
 - **暗色模式** - 自动跟随系统深色/浅色模式
-- **零开销实现** - 模块级单例，无 React 渲染开销，单次 IPC 取色后缓存
-- **系统消息机制** - Windows WM_SETTINGCHANGE 消息通知，无轮询等额外 CPU 消耗
 
 ### 系统集成
 - **系统托盘** - 左键切换窗口、右键菜单（显示/隐藏、暂停/恢复监控、退出）
@@ -139,20 +130,7 @@ ElegantClipboard 经历了多次重要的架构优化：
 | `Alt+C` | 显示/隐藏窗口（默认，可自定义） |
 | `Win+V` | 显示/隐藏窗口（可选，需在设置中开启） |
 | `Ctrl+滚轮` | 缩放图片预览 |
-
-## 项目特色
-
-### 架构设计
-- **读写分离** - 数据库连接读写分离架构，显著提高并发性能
-- **无锁设计** - 大量使用原子变量和无锁编程，减少锁竞争
-- **模块化架构** - 命令模块化组织，仓储和服务模式，职责清晰
-- **性能导向** - 从 FTS5 切换到优化的 LIKE 搜索，专为中文文本优化
-
-### 稳定性优化
-- **原子暂停计数器** - 解决多操作重叠时的竞态条件问题
-- **条件监控** - 窗口隐藏时完全跳过监控，CPU 占用趋近于零
-- **图片异步写入** - 文件 I/O 在后台线程执行，不阻塞主流程
-- **锁优化** - 全面使用 parking_lot 替代标准库锁，性能提升 2-3 倍
+| `ESC` | 隐藏窗口/关闭对话框 |
 
 ## 技术栈
 
@@ -186,7 +164,7 @@ ElegantClipboard 经历了多次重要的架构优化：
 
 #### 环境要求
 
-- Node.js 22+
+- Node.js 18+（推荐 LTS 版本）
 - Rust 1.80+（需要 `std::sync::LazyLock`）
 - Windows 10/11
 
@@ -222,54 +200,6 @@ npm run lint
 ```bash
 git tag v0.5.0
 git push origin v0.5.0
-```
-
-## 项目结构
-
-```
-src/                          # React 前端
-├── components/
-│   ├── CardContentRenderers.tsx  # 图片/文件/文本渲染器
-│   ├── ClipboardItemCard.tsx     # 卡片组件（交互+菜单+布局）
-│   ├── ClipboardList.tsx         # 虚拟列表 + 拖拽排序
-│   └── settings/                 # 设置页面各 Tab
-├── stores/
-│   ├── clipboard.ts              # 剪贴板状态（Zustand）
-│   └── ui-settings.ts            # UI 设置（持久化+多窗口同步）
-├── lib/
-│   ├── theme-applier.ts          # 主题系统（模块级单例，零 React 开销）
-│   ├── format.ts                 # 工具函数（格式化/解析/判断）
-│   └── utils.ts                  # 通用工具（cn）
-├── hooks/
-│   └── useSortableList.ts        # 拖拽排序 Hook
-├── App.tsx                       # 主窗口
-└── pages/Settings.tsx            # 设置窗口
-
-src-tauri/src/                # Rust 后端
-├── lib.rs                        # 应用初始化 + 窗口管理 + 预览窗口
-├── shortcut.rs                   # 快捷键解析
-├── commands/
-│   ├── mod.rs                    # 命令注册 + 共享辅助函数
-│   ├── clipboard.rs              # 剪贴板 CRUD + 复制粘贴
-│   ├── settings.rs               # 设置/监控/数据库/自启动/系统强调色
-│   └── file_ops.rs               # 文件验证/详情/路径粘贴
-├── clipboard/
-│   ├── handler.rs                # 内容处理（文本/HTML/RTF/图片/文件）
-│   └── monitor.rs                # 剪贴板监控服务
-├── database/
-│   ├── schema.rs                 # 数据库 Schema + FTS5
-│   ├── repository.rs             # CRUD 操作 + 查询构建
-│   └── mod.rs                    # 读写分离连接管理
-├── config.rs                     # 配置文件管理 + 数据迁移
-├── keyboard_hook.rs              # 窗口状态追踪
-├── input_monitor.rs              # 全局鼠标监控
-├── positioning.rs                # 窗口定位工具
-├── tray/mod.rs                   # 系统托盘
-├── win_v_registry.rs             # Win+V 注册表管理
-└── admin_launch.rs               # 管理员启动
-
-public/
-└── image-preview.html            # 独立预览窗口页面
 ```
 
 ## 数据存储
