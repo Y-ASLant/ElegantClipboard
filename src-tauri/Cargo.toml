@@ -3,6 +3,7 @@ name = "elegant-clipboard"
 version = "0.0.0"
 description = "An elegant Windows clipboard manager"
 authors = ["ASLant"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,6 +11,13 @@ edition = "2021"
 [lib]
 name = "elegant_clipboard_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "abort"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -30,12 +38,12 @@ serde_json = "1"
 # Database
 rusqlite = { version = "0.32", features = ["bundled"] }
 
-# Async runtime
-tokio = { version = "1", features = ["full"] }
+# Async runtime (only the features Tauri commands actually need)
+tokio = { version = "1", features = ["rt", "time"] }
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = "0.3"
 
 # Hashing (fast)
 blake3 = "1"
@@ -46,8 +54,8 @@ parking_lot = "0.12"
 # Parallel processing
 rayon = "1.10"
 
-# Image handling
-image = "0.25"
+# Image handling (PNG-only for clipboard screenshots)
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Directories
 dirs = "5"
@@ -73,6 +81,9 @@ windows = { version = "0.61", features = [
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_Graphics_Dwm",
+    "Win32_System_DataExchange",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
 ] }
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"

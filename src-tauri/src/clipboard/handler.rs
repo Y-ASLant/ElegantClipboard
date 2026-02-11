@@ -2,19 +2,17 @@ use crate::database::{
     ClipboardRepository, ContentType, Database, NewClipboardItem,
     SettingsRepository,
 };
+use super::source_app::{self, SourceAppInfo};
 use blake3::Hasher;
 use image::ImageReader;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
-/// Default maximum text content length (1MB)
 const DEFAULT_MAX_CONTENT_SIZE: usize = 1_048_576;
-/// Maximum preview length
 const MAX_PREVIEW_LENGTH: usize = 200;
-/// Default max history count (0 = unlimited)
 const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
 
-/// Truncate content at char boundary if exceeds max_size (0 = unlimited)
+/// 按字符边界截断超长内容
 fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
     if max_size > 0 && content.len() > max_size {
         warn!("{} content truncated from {} to {} bytes", content_type, content.len(), max_size);
@@ -27,49 +25,52 @@ fn truncate_content(content: String, max_size: usize, content_type: &str) -> Str
     }
 }
 
-/// Clipboard content from the system
 #[derive(Debug, Clone)]
 pub enum ClipboardContent {
     Text(String),
-    #[allow(dead_code)] // Reserved: not yet captured by monitor, but handled if received
+    #[allow(dead_code)] // 预留: 监听器尚未捕获
     Html { html: String, text: Option<String> },
-    #[allow(dead_code)] // Reserved: not yet captured by monitor, but handled if received
+    #[allow(dead_code)] // 预留: 监听器尚未捕获
     Rtf { rtf: String, text: Option<String> },
     Image(Vec<u8>),
     Files(Vec<String>),
 }
 
-/// Handler for processing clipboard content
 pub struct ClipboardHandler {
     repository: ClipboardRepository,
     settings_repo: SettingsRepository,
     images_path: PathBuf,
+    icons_path: PathBuf,
 }
 
 impl ClipboardHandler {
     pub fn new(db: &Database, images_path: PathBuf) -> Self {
-        // Ensure images directory exists
         std::fs::create_dir_all(&images_path).ok();
-        
+
+        // 图标目录与图片目录同级
+        let icons_path = images_path.parent()
+            .unwrap_or(&images_path)
+            .join("icons");
+        std::fs::create_dir_all(&icons_path).ok();
+
         Self {
             repository: ClipboardRepository::new(db),
             settings_repo: SettingsRepository::new(db),
             images_path,
+            icons_path,
         }
     }
 
-    /// Get max content size from settings (in bytes)
     fn get_max_content_size(&self) -> usize {
         self.settings_repo
             .get("max_content_size_kb")
             .ok()
             .flatten()
             .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb * 1024) // Convert KB to bytes
+            .map(|kb| kb * 1024)
             .unwrap_or(DEFAULT_MAX_CONTENT_SIZE)
     }
 
-    /// Get max history count from settings
     fn get_max_history_count(&self) -> i64 {
         self.settings_repo
             .get("max_history_count")
@@ -79,12 +80,10 @@ impl ClipboardHandler {
             .unwrap_or(DEFAULT_MAX_HISTORY_COUNT)
     }
 
-    /// Process clipboard content and store if new
-    pub fn process(&self, content: ClipboardContent) -> Result<Option<i64>, String> {
-        // Get settings
+    /// 处理剪贴板内容，去重后存入数据库
+    pub fn process(&self, content: ClipboardContent, source: Option<SourceAppInfo>) -> Result<Option<i64>, String> {
         let max_content_size = self.get_max_content_size();
         
-        // Check content size before processing (0 = unlimited)
         if max_content_size > 0 {
             let content_size = self.get_content_size(&content);
             if content_size > max_content_size {
@@ -96,18 +95,26 @@ impl ClipboardHandler {
             }
         }
 
-        // Calculate content hash
         let hash = self.calculate_hash(&content);
         
-        // Check if already exists
         if self.repository.exists_by_hash(&hash).map_err(|e| e.to_string())? {
-            // Update access time and return existing id
             debug!("Content already exists, updating access time");
             return self.repository.touch_by_hash(&hash).map_err(|e| e.to_string());
         }
 
-        // Create new item based on content type
-        let item = match content {
+        let (source_app_name, source_app_icon) = match source {
+            Some(ref info) => {
+                let icon_path = source_app::extract_and_cache_icon(
+                    &info.exe_path,
+                    &self.icons_path,
+                    &info.icon_cache_key,
+                );
+                (Some(info.app_name.clone()), icon_path)
+            }
+            None => (None, None),
+        };
+
+        let mut item = match content {
             ClipboardContent::Text(text) => self.process_text(text, hash, max_content_size)?,
             ClipboardContent::Html { html, text } => self.process_html(html, text, hash, max_content_size)?,
             ClipboardContent::Rtf { rtf, text } => self.process_rtf(rtf, text, hash, max_content_size)?,
@@ -115,16 +122,17 @@ impl ClipboardHandler {
             ClipboardContent::Files(files) => self.process_files(files, hash)?,
         };
 
-        // Insert into database
+        item.source_app_name = source_app_name;
+        item.source_app_icon = source_app_icon;
+
         let id = self.repository.insert(item).map_err(|e| e.to_string())?;
         info!("Stored new clipboard item with id: {}", id);
 
-        // Enforce max history count and clean up old image files
+        // 执行最大历史数限制，清理旧图片
         let max_history_count = self.get_max_history_count();
         if max_history_count > 0 {
             match self.repository.enforce_max_count(max_history_count) {
                 Ok((deleted, image_paths)) => {
-                    // Delete associated image files
                     for path in image_paths {
                         if let Err(e) = std::fs::remove_file(&path) {
                             debug!("Failed to delete old image file {}: {}", path, e);
@@ -145,7 +153,6 @@ impl ClipboardHandler {
         Ok(Some(id))
     }
 
-    /// Get the size of clipboard content in bytes
     fn get_content_size(&self, content: &ClipboardContent) -> usize {
         match content {
             ClipboardContent::Text(text) => text.len(),
@@ -156,7 +163,6 @@ impl ClipboardHandler {
         }
     }
 
-    /// Calculate hash of content
     fn calculate_hash(&self, content: &ClipboardContent) -> String {
         let mut hasher = Hasher::new();
         
@@ -189,7 +195,6 @@ impl ClipboardHandler {
         hasher.finalize().to_hex().to_string()
     }
 
-    /// Process text content
     fn process_text(&self, text: String, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = text.len() as i64;
         let char_count = Some(text.chars().count() as i64);
@@ -209,10 +214,11 @@ impl ClipboardHandler {
             image_width: None,
             image_height: None,
             char_count,
+            source_app_name: None,
+            source_app_icon: None,
         })
     }
 
-    /// Process HTML content
     fn process_html(&self, html: String, text: Option<String>, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = html.len() as i64;
         let preview = text.as_ref()
@@ -235,10 +241,11 @@ impl ClipboardHandler {
             image_width: None,
             image_height: None,
             char_count,
+            source_app_name: None,
+            source_app_icon: None,
         })
     }
 
-    /// Process RTF content
     fn process_rtf(&self, rtf: String, text: Option<String>, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
         let byte_size = rtf.len() as i64;
         let preview = text.as_ref()
@@ -261,6 +268,8 @@ impl ClipboardHandler {
             image_width: None,
             image_height: None,
             char_count,
+            source_app_name: None,
+            source_app_icon: None,
         })
     }
 
@@ -270,12 +279,10 @@ impl ClipboardHandler {
     fn process_image(&self, data: Vec<u8>, hash: String) -> Result<NewClipboardItem, String> {
         let byte_size = data.len() as i64;
 
-        // Generate unique filename
         let filename = format!("{}.png", &hash[..16]);
         let image_path = self.images_path.join(&filename);
         let image_path_str = image_path.to_string_lossy().to_string();
 
-        // Extract image dimensions (width, height)
         let (image_width, image_height) = self.extract_image_dimensions(&data)?;
 
         // Save image file synchronously to ensure it exists before DB insert
@@ -298,10 +305,11 @@ impl ClipboardHandler {
             image_width: Some(image_width),
             image_height: Some(image_height),
             char_count: None,
+            source_app_name: None,
+            source_app_icon: None,
         })
     }
 
-    /// Extract image dimensions from image data (header-only, no full decode)
     fn extract_image_dimensions(&self, data: &[u8]) -> Result<(i64, i64), String> {
         let (w, h) = ImageReader::new(std::io::Cursor::new(data))
             .with_guessed_format()
@@ -312,7 +320,6 @@ impl ClipboardHandler {
         Ok((w as i64, h as i64))
     }
 
-    /// Process file paths
     fn process_files(&self, files: Vec<String>, hash: String) -> Result<NewClipboardItem, String> {
         use std::path::Path;
 
@@ -324,7 +331,7 @@ impl ClipboardHandler {
                 if path.is_file() {
                     std::fs::metadata(path).ok().map(|m| m.len() as i64)
                 } else {
-                    None // Skip directories - too expensive to calculate
+                    None // 跳过目录
                 }
             })
             .sum();
@@ -348,13 +355,13 @@ impl ClipboardHandler {
             image_width: None,
             image_height: None,
             char_count: None,
+            source_app_name: None,
+            source_app_icon: None,
         })
     }
 
-    /// Create preview text (safely handles UTF-8)
     fn create_preview(text: &str) -> String {
         let trimmed = text.trim();
-        // Use char_indices to safely truncate at char boundary
         if let Some((idx, _)) = trimmed.char_indices().nth(MAX_PREVIEW_LENGTH) {
             format!("{}...", &trimmed[..idx])
         } else {

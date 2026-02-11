@@ -98,13 +98,14 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
     // Check if settings window already exists
     if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
         return;
     }
 
     // Create new settings window
-    let _ = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "settings",
         tauri::WebviewUrl::App("/settings".into()),
@@ -112,11 +113,48 @@ fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
     .title("设置")
     .inner_size(800.0, 560.0)
     .min_inner_size(580.0, 480.0)
-    .center()
     .decorations(false)
     .visible(false)
-    .resizable(true)
-    .build();
+    .resizable(true);
+
+    // Center on the monitor where the main window is, not the primary monitor.
+    // Use physical pixel coordinates to avoid mixed-DPI conversion errors.
+    let mut phys_pos: Option<tauri::PhysicalPosition<i32>> = None;
+    if let Some(main_win) = app.get_webview_window("main") {
+        if let (Ok(pos), Ok(size)) = (main_win.outer_position(), main_win.outer_size()) {
+            let center_x = pos.x + size.width as i32 / 2;
+            let center_y = pos.y + size.height as i32 / 2;
+            if let Ok(Some(monitor)) = main_win.available_monitors().map(|monitors| {
+                monitors.into_iter().find(|m| {
+                    let mp = m.position();
+                    let ms = m.size();
+                    center_x >= mp.x && center_x < mp.x + ms.width as i32
+                        && center_y >= mp.y && center_y < mp.y + ms.height as i32
+                })
+            }) {
+                let mp = monitor.position();
+                let ms = monitor.size();
+                let scale = monitor.scale_factor();
+                let win_phys_w = (800.0 * scale) as i32;
+                let win_phys_h = (560.0 * scale) as i32;
+                let x = mp.x + (ms.width as i32 - win_phys_w) / 2;
+                let y = mp.y + (ms.height as i32 - win_phys_h) / 2;
+                phys_pos = Some(tauri::PhysicalPosition::new(x, y));
+            } else {
+                builder = builder.center();
+            }
+        } else {
+            builder = builder.center();
+        }
+    } else {
+        builder = builder.center();
+    }
+
+    if let Ok(window) = builder.build() {
+        if let Some(pos) = phys_pos {
+            let _ = window.set_position(tauri::Position::Physical(pos));
+        }
+    }
 }
 
 /// Update tray tooltip with item count

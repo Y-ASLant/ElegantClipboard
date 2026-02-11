@@ -9,6 +9,7 @@ import {
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { currentMonitor } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -20,11 +21,13 @@ interface CardFooterProps {
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }
 
-export const CardFooter = ({ metaItems, index, isDragOverlay }: CardFooterProps) => (
+export const CardFooter = ({ metaItems, index, isDragOverlay, sourceAppName, sourceAppIcon }: CardFooterProps) => (
   <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5">
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 min-w-0">
       {metaItems.map((info, i) => (
         <span key={i} className="flex items-center gap-1.5">
           {i > 0 && <span className="text-muted-foreground/50">·</span>}
@@ -32,11 +35,24 @@ export const CardFooter = ({ metaItems, index, isDragOverlay }: CardFooterProps)
         </span>
       ))}
     </div>
-    {index !== undefined && index >= 0 && !isDragOverlay && (
-      <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
-        {index + 1}
-      </span>
-    )}
+    <div className="flex items-center gap-1.5 flex-shrink-0">
+      {sourceAppIcon && (
+        <img
+          src={convertFileSrc(sourceAppIcon)}
+          alt=""
+          className="w-3.5 h-3.5 flex-shrink-0"
+          draggable={false}
+        />
+      )}
+      {sourceAppName && (
+        <span className="truncate max-w-[80px]">{sourceAppName}</span>
+      )}
+      {index !== undefined && index >= 0 && !isDragOverlay && (
+        <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
+          {index + 1}
+        </span>
+      )}
+    </div>
   </div>
 );
 
@@ -49,25 +65,37 @@ const MAX_SCALE = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
 
-/** Get the fixed window rect: fills the available space beside the main window */
-function getPreviewWindowRect(position: "auto" | "left" | "right") {
+/** Get the fixed window rect in physical pixels: fills the available space beside the main window on its current monitor */
+async function getPreviewWindowRect(position: "auto" | "left" | "right") {
   const winX = window.screenX ?? window.screenLeft ?? 0;
   const mainW = window.innerWidth || 380;
-  const screenW = window.screen.availWidth;
-  const screenH = window.screen.availHeight;
 
-  const leftSpace = winX - PREVIEW_GAP;
-  const rightSpace = screenW - (winX + mainW) - PREVIEW_GAP;
+  // Get the monitor the main window is on (handles multi-monitor correctly)
+  const monitor = await currentMonitor();
+  const monX = monitor?.position.x ?? 0;
+  const monY = monitor?.position.y ?? 0;
+  const monW = monitor?.size.width ?? window.screen.availWidth;
+  const monH = monitor?.size.height ?? window.screen.availHeight;
+  const scale = monitor?.scaleFactor ?? 1;
+
+  // Convert CSS pixels to physical for consistent multi-DPI positioning
+  const physWinX = Math.round(winX * scale);
+  const physMainW = Math.round(mainW * scale);
+  const physGap = Math.round(PREVIEW_GAP * scale);
+  const physMinW = Math.round(200 * scale);
+
+  const leftSpace = physWinX - monX - physGap;
+  const rightSpace = (monX + monW) - (physWinX + physMainW) - physGap;
 
   const useLeft =
     position === "left" ? true :
     position === "right" ? false :
-    leftSpace >= rightSpace && leftSpace >= 200;
+    leftSpace >= rightSpace && leftSpace >= physMinW;
 
   if (useLeft) {
-    return { x: 0, y: 0, w: Math.max(200, leftSpace), h: screenH };
+    return { x: monX, y: monY, w: Math.max(physMinW, leftSpace), h: monH, scale };
   }
-  return { x: winX + mainW + PREVIEW_GAP, y: 0, w: Math.max(200, rightSpace), h: screenH };
+  return { x: physWinX + physMainW + physGap, y: monY, w: Math.max(physMinW, rightSpace), h: monH, scale };
 }
 
 /** Calculate image CSS size at a given scale, fitted into available space */
@@ -144,9 +172,10 @@ const ImagePreview = memo(function ImagePreview({
   // Show preview: open fixed-size window, send image + initial CSS size
   const showPreview = useCallback(async () => {
     if (!containerRef.current || !ps.current.currentPath) return;
-    const rect = getPreviewWindowRect(previewPosition);
+    const rect = await getPreviewWindowRect(previewPosition);
     const { imgNatural } = ps.current;
-    const { width, height } = calcImageSize(imgNatural.w, imgNatural.h, 1.0, rect.w, rect.h);
+    // calcImageSize needs logical max dimensions for CSS output
+    const { width, height } = calcImageSize(imgNatural.w, imgNatural.h, 1.0, rect.w / rect.scale, rect.h / rect.scale);
 
     ps.current.visible = true;
     ps.current.scale = 1.0;
@@ -183,13 +212,14 @@ const ImagePreview = memo(function ImagePreview({
       const delta = e.deltaY > 0 ? -step : step;
       ps.current.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, ps.current.scale + delta));
 
-      const rect = getPreviewWindowRect(previewPosition);
-      const { width, height } = calcImageSize(
-        ps.current.imgNatural.w, ps.current.imgNatural.h,
-        ps.current.scale, rect.w, rect.h,
-      );
-      const percent = Math.round(ps.current.scale * 100);
-      emit("image-preview-zoom", { width, height, percent, active: true }).catch((e) => console.error("Failed to emit zoom:", e));
+      getPreviewWindowRect(previewPosition).then((rect) => {
+        const { width, height } = calcImageSize(
+          ps.current.imgNatural.w, ps.current.imgNatural.h,
+          ps.current.scale, rect.w / rect.scale, rect.h / rect.scale,
+        );
+        const percent = Math.round(ps.current.scale * 100);
+        emit("image-preview-zoom", { width, height, percent, active: true }).catch((e) => console.error("Failed to emit zoom:", e));
+      });
     },
     [previewZoomStep, previewPosition],
   );
@@ -260,6 +290,8 @@ interface ImageCardProps {
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }
 
 export const ImageCard = memo(function ImageCard({
@@ -267,6 +299,8 @@ export const ImageCard = memo(function ImageCard({
   metaItems,
   index,
   isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
 }: ImageCardProps) {
   const [error, setError] = useState(false);
 
@@ -287,7 +321,7 @@ export const ImageCard = memo(function ImageCard({
           imagePath={image_path}
         />
       )}
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
     </div>
   );
 });
@@ -299,11 +333,15 @@ const FileImagePreview = memo(function FileImagePreview({
   metaItems,
   index,
   isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
 }: {
   filePath: string;
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }) {
   const [imgError, setImgError] = useState(false);
   const fileName = getFileNameFromPath(filePath);
@@ -320,7 +358,7 @@ const FileImagePreview = memo(function FileImagePreview({
             <p className="text-xs truncate mt-0.5 text-muted-foreground"><HighlightText text={filePath} /></p>
           </div>
         </div>
-        <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+        <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
       </div>
     );
   }
@@ -338,7 +376,7 @@ const FileImagePreview = memo(function FileImagePreview({
           </div>
         }
       />
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
     </div>
   );
 });
@@ -352,6 +390,8 @@ interface FileContentProps {
   metaItems: string[];
   index?: number;
   isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
 }
 
 export const FileContent = memo(function FileContent({
@@ -361,6 +401,8 @@ export const FileContent = memo(function FileContent({
   metaItems,
   index,
   isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
 }: FileContentProps) {
   const isMultiple = filePaths.length > 1;
   const isSingleImage =
@@ -373,6 +415,8 @@ export const FileContent = memo(function FileContent({
         metaItems={metaItems}
         index={index}
         isDragOverlay={isDragOverlay}
+        sourceAppName={sourceAppName}
+        sourceAppIcon={sourceAppIcon}
       />
     );
   }
@@ -418,7 +462,7 @@ export const FileContent = memo(function FileContent({
           )}
         </div>
       </div>
-      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} />
+      <CardFooter metaItems={metaItems} index={index} isDragOverlay={isDragOverlay} sourceAppName={sourceAppName} sourceAppIcon={sourceAppIcon} />
     </div>
   );
 });

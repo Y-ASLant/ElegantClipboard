@@ -53,6 +53,8 @@ export function Settings() {
     setShowCharCount,
     showByteSize,
     setShowByteSize,
+    showSourceApp,
+    setShowSourceApp,
     imagePreviewEnabled,
     setImagePreviewEnabled,
     previewZoomStep,
@@ -81,11 +83,34 @@ export function Settings() {
   useEffect(() => {
     initTheme().then(() => {
       const settingsWindow = getCurrentWindow();
+      // Force reflow so theme CSS is fully computed
+      document.body.getBoundingClientRect();
+      // Double rAF: ensure one full paint is committed before showing,
+      // priming the WebView2 compositor to avoid first-interaction flash
       requestAnimationFrame(() => {
-        settingsWindow.show();
-        settingsWindow.setFocus();
+        requestAnimationFrame(() => {
+          settingsWindow.show();
+          settingsWindow.setFocus();
+        });
       });
     });
+  }, []);
+
+  // ESC to close settings window
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Don't close if a dialog is open
+        const hasOverlay = document.querySelector(
+          '[role="dialog"], [data-radix-popper-content-wrapper]'
+        );
+        if (!hasOverlay) {
+          getCurrentWindow().close();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   useEffect(() => {
@@ -264,9 +289,9 @@ export function Settings() {
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+"w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
                         activeTab === item.id
-                          ? "bg-primary text-primary-foreground"
+                          ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
@@ -282,12 +307,12 @@ export function Settings() {
 
         {/* Right Content - Full width with scrollbar at edge */}
         {activeTab === "about" ? (
-          <div className="flex-1 flex flex-col gap-3">
+          <div key="about" className="flex-1 flex flex-col gap-3 animate-settings-in">
             <AboutTab />
           </div>
         ) : (
           <ScrollArea className="flex-1">
-            <div className="space-y-3">
+            <div key={activeTab} className="space-y-3 animate-settings-in">
               {activeTab === "general" && (
                 <GeneralTab
                   settings={settings}
@@ -316,6 +341,8 @@ export function Settings() {
                   setShowCharCount={setShowCharCount}
                   showByteSize={showByteSize}
                   setShowByteSize={setShowByteSize}
+                  showSourceApp={showSourceApp}
+                  setShowSourceApp={setShowSourceApp}
                   imagePreviewEnabled={imagePreviewEnabled}
                   setImagePreviewEnabled={setImagePreviewEnabled}
                   previewZoomStep={previewZoomStep}

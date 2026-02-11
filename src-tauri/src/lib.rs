@@ -383,8 +383,6 @@ async fn show_image_preview(
             tauri::WebviewUrl::App("/image-preview.html".into()),
         )
         .title("")
-        .inner_size(win_width, win_height)
-        .position(win_x, win_y)
         .decorations(false)
         .transparent(true)
         .shadow(false)
@@ -397,13 +395,19 @@ async fn show_image_preview(
         .map_err(|e| format!("Failed to create preview window: {}", e))?
     };
 
+    // Always set position/size in physical pixels to avoid mixed-DPI conversion errors
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: win_width as u32,
+        height: win_height as u32,
+    }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: win_x as i32,
+        y: win_y as i32,
+    }));
+
     if newly_created {
         // First creation: wait for HTML to load before emitting events
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    } else {
-        // Reposition if main window may have moved since last show
-        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: win_width, height: win_height }));
-        let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: win_x, y: win_y }));
     }
 
     // Ensure always_on_top is active (in case main window focus state affected window hierarchy)
@@ -444,8 +448,8 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    // Create new settings window (initially hidden to prevent white flash)
-    let _window = tauri::WebviewWindowBuilder::new(
+    // Calculate center position on the same monitor as the main window
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
         tauri::WebviewUrl::App("/settings".into()),
@@ -453,12 +457,51 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     .title("设置")
     .inner_size(800.0, 560.0)
     .min_inner_size(580.0, 480.0)
-    .center()
     .decorations(false)
     .visible(false)
-    .resizable(true)
-    .build()
-    .map_err(|e| format!("Failed to create settings window: {}", e))?;
+    .resizable(true);
+
+    // Center on the monitor where the main window is, not the primary monitor.
+    // Use physical pixel coordinates to avoid mixed-DPI conversion errors.
+    let mut phys_pos: Option<tauri::PhysicalPosition<i32>> = None;
+    if let Some(main_win) = app.get_webview_window("main") {
+        if let (Ok(pos), Ok(size)) = (main_win.outer_position(), main_win.outer_size()) {
+            let center_x = pos.x + size.width as i32 / 2;
+            let center_y = pos.y + size.height as i32 / 2;
+            if let Ok(Some(monitor)) = main_win.available_monitors().map(|monitors| {
+                monitors.into_iter().find(|m| {
+                    let mp = m.position();
+                    let ms = m.size();
+                    center_x >= mp.x && center_x < mp.x + ms.width as i32
+                        && center_y >= mp.y && center_y < mp.y + ms.height as i32
+                })
+            }) {
+                let mp = monitor.position();
+                let ms = monitor.size();
+                let scale = monitor.scale_factor();
+                // Calculate window physical size and center within monitor physical bounds
+                let win_phys_w = (800.0 * scale) as i32;
+                let win_phys_h = (560.0 * scale) as i32;
+                let x = mp.x + (ms.width as i32 - win_phys_w) / 2;
+                let y = mp.y + (ms.height as i32 - win_phys_h) / 2;
+                phys_pos = Some(tauri::PhysicalPosition::new(x, y));
+            } else {
+                builder = builder.center();
+            }
+        } else {
+            builder = builder.center();
+        }
+    } else {
+        builder = builder.center();
+    }
+
+    let window = builder.build()
+        .map_err(|e| format!("Failed to create settings window: {}", e))?;
+
+    // Apply physical position after build to bypass logical-to-physical conversion ambiguity
+    if let Some(pos) = phys_pos {
+        let _ = window.set_position(tauri::Position::Physical(pos));
+    }
 
     // Window will be shown by frontend after content is loaded
     Ok(())

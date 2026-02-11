@@ -239,7 +239,7 @@ textarea,
 
 /* OverlayScrollbars custom styling */
 .os-theme-custom {
-    --os-size: 4px;
+    --os-size: 6px;
     --os-padding-perpendicular: 0px;
     --os-padding-axis: 0px;
     --os-track-border-radius: 2px;
@@ -247,9 +247,9 @@ textarea,
     --os-track-bg-hover: transparent;
     --os-track-bg-active: transparent;
     --os-handle-border-radius: 2px;
-    --os-handle-bg: rgba(0, 0, 0, 0.12);
-    --os-handle-bg-hover: rgba(0, 0, 0, 0.2);
-    --os-handle-bg-active: rgba(0, 0, 0, 0.25);
+    --os-handle-bg: hsl(from var(--color-primary) h s l / 0.2);
+    --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.35);
+    --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.45);
     --os-handle-min-size: 40px;
     --os-handle-max-size: none;
     --os-handle-perpendicular-size: 100%;
@@ -259,9 +259,9 @@ textarea,
 }
 
 .dark .os-theme-custom {
-    --os-handle-bg: rgba(255, 255, 255, 0.12);
-    --os-handle-bg-hover: rgba(255, 255, 255, 0.2);
-    --os-handle-bg-active: rgba(255, 255, 255, 0.25);
+    --os-handle-bg: hsl(from var(--color-primary) h s l / 0.25);
+    --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.4);
+    --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.5);
 }
 
 /* Scrollbar always visible during scroll, auto-hide after delay */
@@ -331,6 +331,32 @@ textarea,
 .dark .search-highlight {
     background-color: hsl(from var(--color-primary) h s l / 0.3);
 }
+
+/* Settings page animations */
+@keyframes settings-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-settings-in {
+    animation: settings-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-settings-in > * {
+    animation: settings-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-settings-in > *:nth-child(1) { animation-delay: 0ms; }
+.animate-settings-in > *:nth-child(2) { animation-delay: 40ms; }
+.animate-settings-in > *:nth-child(3) { animation-delay: 80ms; }
+.animate-settings-in > *:nth-child(4) { animation-delay: 120ms; }
+.animate-settings-in > *:nth-child(5) { animation-delay: 160ms; }
 
 /* Drag drop bounce animation */
 @keyframes scale-bounce {

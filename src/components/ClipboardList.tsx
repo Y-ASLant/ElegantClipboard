@@ -160,22 +160,28 @@ export function ClipboardList() {
     };
   }, [activeId]);
 
-  // 监听滚动位置，控制回到顶部按钮的显示
+  // 监听滚动位置，控制回到顶部按钮的显示——节流避免滚动时大量 re-render
   useEffect(() => {
     if (!customScrollParent) return;
+    let ticking = false;
     const handleScroll = () => {
-      setShowScrollTop(customScrollParent.scrollTop > 200);
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        setShowScrollTop(customScrollParent.scrollTop > 200);
+        ticking = false;
+      });
     };
-    customScrollParent.addEventListener("scroll", handleScroll);
+    customScrollParent.addEventListener("scroll", handleScroll, { passive: true });
     return () => customScrollParent.removeEventListener("scroll", handleScroll);
   }, [customScrollParent]);
 
   // 回到顶部 - 使用 Virtuoso scrollToIndex API（虚拟列表直接操作 scrollTop 无法正确回到顶部）
-  const scrollToTop = useCallback(() => {
+  const scrollToTop = useCallback((smooth = false) => {
     virtuosoRef.current?.scrollToIndex({
       index: 0,
       align: "start",
-      behavior: "auto",
+      behavior: smooth ? "smooth" : "auto",
     });
   }, []);
 
@@ -200,12 +206,16 @@ export function ClipboardList() {
 
   const pinnedCount = pinnedItemsWithSortId.length;
 
+  const sortableIds = useMemo(
+    () => allItemsWithSortId.map((i) => i._sortId),
+    [allItemsWithSortId],
+  );
+
   const itemContent = useCallback(
     (index: number) => {
       const item = allItemsWithSortId[index];
       if (!item) return null;
 
-      // 在置顶区域和非置顶区域之间添加分隔线
       const showSeparator = index === pinnedCount && pinnedCount > 0;
 
       return (
@@ -307,7 +317,7 @@ export function ClipboardList() {
           style={{ height: "100%" }}
         >
           <SortableContext
-            items={allItemsWithSortId.map((i) => i._sortId)}
+            items={sortableIds}
             strategy={strategy}
           >
             {customScrollParent && (
@@ -319,8 +329,8 @@ export function ClipboardList() {
                 defaultItemHeight={defaultItemHeight}
                 increaseViewportBy={{ top: 400, bottom: 400 }}
                 scrollSeekConfiguration={{
-                  enter: (velocity) => Math.abs(velocity) > 500,
-                  exit: (velocity) => Math.abs(velocity) < 100,
+                  enter: (velocity) => Math.abs(velocity) > 2000,
+                  exit: (velocity) => Math.abs(velocity) < 500,
                 }}
                 components={{ ScrollSeekPlaceholder }}
                 customScrollParent={customScrollParent}
@@ -336,7 +346,7 @@ export function ClipboardList() {
         {/* 回到顶部悬浮按钮 */}
         {showScrollTop && (
           <button
-            onClick={scrollToTop}
+            onClick={() => scrollToTop(true)}
             className="absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors z-10"
             title="回到顶部"
           >

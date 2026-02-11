@@ -1,4 +1,3 @@
-/// Database schema SQL
 pub const SCHEMA_SQL: &str = r#"
 -- Clipboard items table
 CREATE TABLE IF NOT EXISTS clipboard_items (
@@ -21,7 +20,9 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
     access_count INTEGER DEFAULT 0,
     last_accessed_at TEXT,
-    char_count INTEGER
+    char_count INTEGER,
+    source_app_name TEXT,
+    source_app_icon TEXT
 );
 
 -- Settings table
@@ -61,7 +62,6 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('save_rtf', 'false');
 "#;
 
-/// Content types enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentType {

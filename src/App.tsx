@@ -57,13 +57,22 @@ function App() {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
   }, []);
 
+  // Suppress toolbar tooltips briefly when window appears (prevents tooltip flash
+  // when cursor happens to be over a toolbar button, e.g. opening via tray click)
+  const [suppressTooltips, setSuppressTooltips] = useState(false);
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Refresh data when window is shown (files_valid is computed by backend)
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
       refresh();
+      setSuppressTooltips(true);
+      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+      suppressTimerRef.current = setTimeout(() => setSuppressTooltips(false), 400);
     });
     return () => {
       unlisten.then((fn) => fn());
+      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
     };
   }, [refresh]);
 
@@ -209,7 +218,7 @@ function App() {
         {/* Action Buttons Card */}
         <div 
           className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          style={{ WebkitAppRegion: 'no-drag', pointerEvents: suppressTooltips ? 'none' : undefined } as React.CSSProperties}
         >
           <Tooltip>
             <TooltipTrigger asChild>

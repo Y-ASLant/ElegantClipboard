@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import {
-  PaintBrush16Regular,
   Checkmark16Filled,
   Desktop16Regular,
 } from "@fluentui/react-icons";
@@ -68,55 +67,56 @@ export function ThemeTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 pb-2 border-b">
-        <PaintBrush16Regular className="w-4 h-4 text-muted-foreground" />
-        <h3 className="text-sm font-medium">外观主题</h3>
-      </div>
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">外观主题</h3>
+        <p className="text-xs text-muted-foreground mb-4">选择应用的配色方案</p>
 
-      <div className="space-y-3">
-        {themes.map((theme) => {
-          const preview = theme.getPreview();
-          const Icon = theme.icon;
-          return (
-            <button
-              key={theme.id}
-              onClick={() => setColorTheme(theme.id)}
-              className={`
-                w-full flex items-center gap-4 p-4 rounded-lg border-2 transition-all duration-200
-                ${colorTheme === theme.id
-                  ? "border-primary bg-primary/5"
-                  : "border-border hover:border-primary/50 hover:bg-accent"
-                }
-              `}
-            >
-              {/* Color Preview */}
-              <div className="flex gap-1.5 shrink-0">
-                <div
-                  className="w-10 h-10 rounded-lg shadow-sm"
-                  style={{ backgroundColor: preview.primary }}
-                />
-                <div
-                  className="w-10 h-10 rounded-lg border shadow-sm"
-                  style={{ backgroundColor: preview.secondary }}
-                />
-              </div>
-
-              {/* Theme Info */}
-              <div className="flex-1 text-left">
-                <div className="flex items-center gap-2">
-                  {Icon && <Icon className="w-4 h-4 text-muted-foreground" />}
-                  <span className="text-sm font-medium">{theme.name}</span>
-                  {colorTheme === theme.id && (
-                    <Checkmark16Filled className="w-4 h-4 text-primary" />
-                  )}
+        <div className="space-y-2">
+          {themes.map((theme) => {
+            const preview = theme.getPreview();
+            const Icon = theme.icon;
+            const isActive = colorTheme === theme.id;
+            return (
+              <button
+                key={theme.id}
+                onClick={() => setColorTheme(theme.id)}
+                className={`
+                  w-full flex items-center gap-3 p-3 rounded-md border transition-all duration-200
+                  ${isActive
+                    ? "border-primary bg-primary/5"
+                    : "border-transparent hover:bg-accent"
+                  }
+                `}
+              >
+                {/* Color Preview */}
+                <div className="flex gap-1.5 shrink-0">
+                  <div
+                    className="w-8 h-8 rounded-md shadow-sm"
+                    style={{ backgroundColor: preview.primary }}
+                  />
+                  <div
+                    className="w-8 h-8 rounded-md border shadow-sm"
+                    style={{ backgroundColor: preview.secondary }}
+                  />
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {theme.description}
-                </span>
-              </div>
-            </button>
-          );
-        })}
+
+                {/* Theme Info */}
+                <div className="flex-1 text-left">
+                  <div className="flex items-center gap-2">
+                    {Icon && <Icon className="w-3.5 h-3.5 text-muted-foreground" />}
+                    <span className="text-xs font-medium">{theme.name}</span>
+                    {isActive && (
+                      <Checkmark16Filled className="w-3.5 h-3.5 text-primary" />
+                    )}
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    {theme.description}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

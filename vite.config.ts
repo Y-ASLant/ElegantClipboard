@@ -18,6 +18,11 @@ export default defineConfig(async () => ({
 
   // Build optimization
   build: {
+    // WebView2 is Chromium-based — target esnext to skip all transpilation
+    target: 'esnext',
+    // Smaller output
+    minify: 'esbuild',
+    cssMinify: 'esbuild',
     rollupOptions: {
       output: {
         manualChunks(id) {

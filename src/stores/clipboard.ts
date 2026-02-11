@@ -23,6 +23,8 @@ export interface ClipboardItem {
   access_count: number;
   last_accessed_at: string | null;
   char_count: number | null;
+  source_app_name: string | null;
+  source_app_icon: string | null;
   /** Whether all files exist (only for "files" content_type, computed at query time) */
   files_valid?: boolean;
 }
