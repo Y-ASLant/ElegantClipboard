@@ -55,6 +55,8 @@ export function Settings() {
     setShowByteSize,
     showSourceApp,
     setShowSourceApp,
+    sourceAppDisplay,
+    setSourceAppDisplay,
     imagePreviewEnabled,
     setImagePreviewEnabled,
     previewZoomStep,
@@ -78,21 +80,20 @@ export function Settings() {
     winv_replacement: false,
   });
   const settingsLoadedRef = useRef(false);
+  const [themeReady, setThemeReady] = useState(false);
 
-  // Show window only after theme is applied (prevent flash)
+  // 主题加载完成后显示窗口（此时过渡被禁用，主题色瞬间就位）
+  // 启用过渡后再加载设置，开关会有完整的状态切换动画
   useEffect(() => {
-    initTheme().then(() => {
-      const settingsWindow = getCurrentWindow();
-      // Force reflow so theme CSS is fully computed
+    initTheme().then(async () => {
+      const win = getCurrentWindow();
       document.body.getBoundingClientRect();
-      // Double rAF: ensure one full paint is committed before showing,
-      // priming the WebView2 compositor to avoid first-interaction flash
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          settingsWindow.show();
-          settingsWindow.setFocus();
-        });
-      });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      win.show();
+      win.setFocus();
+      await new Promise((r) => requestAnimationFrame(r));
+      setThemeReady(true);
+      loadSettings();
     });
   }, []);
 
@@ -100,7 +101,6 @@ export function Settings() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        // Don't close if a dialog is open
         const hasOverlay = document.querySelector(
           '[role="dialog"], [data-radix-popper-content-wrapper]'
         );
@@ -111,10 +111,6 @@ export function Settings() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
-  useEffect(() => {
-    loadSettings();
   }, []);
 
   // Auto save when settings change (skip until initial load completes)
@@ -134,24 +130,27 @@ export function Settings() {
 
   const loadSettings = async () => {
     try {
-      // Data path is now stored in config.json, not database
-      const dataPath = await invoke<string>("get_default_data_path");
-      const maxHistoryCount = await invoke<string>("get_setting", {
-        key: "max_history_count",
-      });
-      const maxContentSize = await invoke<string>("get_setting", {
-        key: "max_content_size_kb",
-      });
-      const followCursor = await invoke<string>("get_setting", {
-        key: "follow_cursor",
-      });
-      const autoStart = await invoke<boolean>("is_autostart_enabled");
-      const adminLaunch = await invoke<boolean>("is_admin_launch_enabled");
-      const isRunningAsAdmin = await invoke<boolean>("is_running_as_admin");
-      const winvReplacement = await invoke<boolean>(
-        "is_winv_replacement_enabled",
-      );
-      const currentShortcut = await invoke<string>("get_current_shortcut");
+      const [
+        dataPath,
+        maxHistoryCount,
+        maxContentSize,
+        followCursor,
+        autoStart,
+        adminLaunch,
+        isRunningAsAdmin,
+        winvReplacement,
+        currentShortcut,
+      ] = await Promise.all([
+        invoke<string>("get_default_data_path"),
+        invoke<string>("get_setting", { key: "max_history_count" }),
+        invoke<string>("get_setting", { key: "max_content_size_kb" }),
+        invoke<string>("get_setting", { key: "follow_cursor" }),
+        invoke<boolean>("is_autostart_enabled"),
+        invoke<boolean>("is_admin_launch_enabled"),
+        invoke<boolean>("is_running_as_admin"),
+        invoke<boolean>("is_winv_replacement_enabled"),
+        invoke<string>("get_current_shortcut"),
+      ]);
 
       setSettings({
         data_path: dataPath || "",
@@ -160,7 +159,7 @@ export function Settings() {
         auto_start: autoStart,
         admin_launch: adminLaunch,
         is_running_as_admin: isRunningAsAdmin,
-        follow_cursor: followCursor !== "false", // Default to true
+        follow_cursor: followCursor !== "false",
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
       });
@@ -200,23 +199,11 @@ export function Settings() {
       }
     } catch (error) {
       console.error("Failed to save settings:", error);
-    } finally {
-      // Settings saved
     }
   };
 
-  const minimizeWindow = async () => {
-    const window = getCurrentWindow();
-    await window.minimize();
-  };
-
-  const closeWindow = async () => {
-    const window = getCurrentWindow();
-    await window.close();
-  };
-
   return (
-    <div className="h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3">
+    <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3", !themeReady && "[&_*]:!transition-none")}>
       {/* Title Bar Card */}
       <Card className="shrink-0">
         <div
@@ -232,7 +219,7 @@ export function Settings() {
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           >
             <button
-              onClick={minimizeWindow}
+              onClick={() => getCurrentWindow().minimize()}
               className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
             >
               <svg
@@ -253,7 +240,7 @@ export function Settings() {
               </svg>
             </button>
             <button
-              onClick={closeWindow}
+              onClick={() => getCurrentWindow().close()}
               className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
             >
               <svg
@@ -343,6 +330,8 @@ export function Settings() {
                   setShowByteSize={setShowByteSize}
                   showSourceApp={showSourceApp}
                   setShowSourceApp={setShowSourceApp}
+                  sourceAppDisplay={sourceAppDisplay}
+                  setSourceAppDisplay={setSourceAppDisplay}
                   imagePreviewEnabled={imagePreviewEnabled}
                   setImagePreviewEnabled={setImagePreviewEnabled}
                   previewZoomStep={previewZoomStep}

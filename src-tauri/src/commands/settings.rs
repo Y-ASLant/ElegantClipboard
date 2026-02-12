@@ -113,33 +113,47 @@ pub async fn open_data_folder() -> Result<(), String> {
     super::open_path_in_explorer(&data_dir)
 }
 
-// ============ Autostart Commands ============
+// ============ 自启动命令 ============
+// 普通模式：tauri_plugin_autostart（注册表 Run 键）
+// 管理员模式：任务计划程序（HIGHEST 运行级别）
+// Windows 会静默跳过注册表 Run 中需要 UAC 提权的条目
 
-/// Check if autostart is enabled
+/// 检查自启动是否启用（同时检查两种机制）
 #[tauri::command]
 pub async fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    if crate::task_scheduler::is_autostart_task_exists() {
+        return Ok(true);
+    }
     use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch()
-        .is_enabled()
-        .map_err(|e| format!("Failed to check autostart: {}", e))
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
-/// Enable autostart
+/// 启用自启动（根据管理员模式选择机制）
 #[tauri::command]
 pub async fn enable_autostart(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch()
-        .enable()
-        .map_err(|e| format!("Failed to enable autostart: {}", e))
+
+    if crate::admin_launch::is_admin_launch_enabled()
+        && crate::admin_launch::is_running_as_admin()
+    {
+        // 管理员模式：使用任务计划程序，清理注册表自启动
+        crate::task_scheduler::create_autostart_task()?;
+        let _ = app.autolaunch().disable();
+        Ok(())
+    } else {
+        // 普通模式：使用注册表自启动，清理计划任务
+        let _ = crate::task_scheduler::delete_autostart_task();
+        app.autolaunch().enable().map_err(|e| e.to_string())
+    }
 }
 
-/// Disable autostart
+/// 禁用自启动（同时清理两种机制）
 #[tauri::command]
 pub async fn disable_autostart(app: tauri::AppHandle) -> Result<(), String> {
+    let _ = crate::task_scheduler::delete_autostart_task();
     use tauri_plugin_autostart::ManagerExt;
-    app.autolaunch()
-        .disable()
-        .map_err(|e| format!("Failed to disable autostart: {}", e))
+    let _ = app.autolaunch().disable();
+    Ok(())
 }
 
 // ============ System Theme Commands ============

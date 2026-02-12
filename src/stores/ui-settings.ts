@@ -10,6 +10,7 @@ interface UISettings {
   showCharCount: boolean;
   showByteSize: boolean;
   showSourceApp: boolean;
+  sourceAppDisplay: "both" | "name" | "icon";
   imagePreviewEnabled: boolean;
   previewZoomStep: number;
   previewPosition: "auto" | "left" | "right";
@@ -22,6 +23,7 @@ interface UISettings {
   setShowCharCount: (show: boolean) => void;
   setShowByteSize: (show: boolean) => void;
   setShowSourceApp: (show: boolean) => void;
+  setSourceAppDisplay: (mode: "both" | "name" | "icon") => void;
   setImagePreviewEnabled: (enabled: boolean) => void;
   setPreviewZoomStep: (step: number) => void;
   setPreviewPosition: (pos: "auto" | "left" | "right") => void;
@@ -47,6 +49,7 @@ export const useUISettings = create<UISettings>()(
       showCharCount: true,
       showByteSize: true,
       showSourceApp: true,
+      sourceAppDisplay: "both" as "both" | "name" | "icon",
       imagePreviewEnabled: false,
       previewZoomStep: 15,
       previewPosition: "auto" as "auto" | "left" | "right",
@@ -73,6 +76,10 @@ export const useUISettings = create<UISettings>()(
       setShowSourceApp: (show) => {
         set({ showSourceApp: show });
         broadcastChange({ showSourceApp: show });
+      },
+      setSourceAppDisplay: (mode) => {
+        set({ sourceAppDisplay: mode });
+        broadcastChange({ sourceAppDisplay: mode });
       },
       setImagePreviewEnabled: (enabled) => {
         set({ imagePreviewEnabled: enabled });

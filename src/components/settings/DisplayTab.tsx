@@ -13,6 +13,8 @@ interface DisplayTabProps {
   setShowByteSize: (value: boolean) => void;
   showSourceApp: boolean;
   setShowSourceApp: (value: boolean) => void;
+  sourceAppDisplay: "both" | "name" | "icon";
+  setSourceAppDisplay: (value: "both" | "name" | "icon") => void;
   imagePreviewEnabled: boolean;
   setImagePreviewEnabled: (value: boolean) => void;
   previewZoomStep: number;
@@ -31,6 +33,12 @@ const positionOptions: { value: "auto" | "left" | "right"; label: string }[] = [
   { value: "right", label: "右侧" },
 ];
 
+const sourceDisplayOptions: { value: "both" | "name" | "icon"; label: string }[] = [
+  { value: "both", label: "完整" },
+  { value: "name", label: "仅名称" },
+  { value: "icon", label: "仅图标" },
+];
+
 export function DisplayTab({
   cardMaxLines,
   setCardMaxLines,
@@ -42,6 +50,8 @@ export function DisplayTab({
   setShowByteSize,
   showSourceApp,
   setShowSourceApp,
+  sourceAppDisplay,
+  setSourceAppDisplay,
   imagePreviewEnabled,
   setImagePreviewEnabled,
   previewZoomStep,
@@ -211,6 +221,30 @@ export function DisplayTab({
             </div>
             <Switch checked={showSourceApp} onCheckedChange={setShowSourceApp} />
           </div>
+
+          {showSourceApp && (
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">显示方式</Label>
+                <p className="text-xs text-muted-foreground">选择显示图标、名称或两者都显示</p>
+              </div>
+              <div className="flex gap-1">
+                {sourceDisplayOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setSourceAppDisplay(opt.value)}
+                    className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                      sourceAppDisplay === opt.value
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-foreground border-input hover:bg-accent"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
