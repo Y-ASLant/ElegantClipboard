@@ -1,20 +1,12 @@
-import { useState, useEffect } from "react";
 import {
   Person16Regular,
   Code16Regular,
   Star16Regular,
   Alert16Regular,
 } from "@fluentui/react-icons";
-import { invoke } from "@tauri-apps/api/core";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 
 export function AboutTab() {
-  const [appVersion, setAppVersion] = useState("0.0.0");
-
-  useEffect(() => {
-    invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
-  }, []);
-
   const openUrl = async (url: string) => {
     try {
       await tauriOpenUrl(url);
@@ -35,17 +27,7 @@ export function AboutTab() {
               className="w-full h-full object-contain"
             />
           </div>
-          <div className="space-y-2">
-            <h3 className="font-semibold text-lg">ElegantClipboard</h3>
-            <button
-              onClick={() =>
-                openUrl("https://github.com/Y-ASLant/ElegantClipboard/releases")
-              }
-              className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary cursor-pointer hover:shadow-sm hover:scale-105 active:scale-95 transition-all duration-200"
-            >
-              v{appVersion}
-            </button>
-          </div>
+          <h3 className="font-semibold text-lg">ElegantClipboard</h3>
           <p className="text-sm text-muted-foreground max-w-xs">
             低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板
           </p>

@@ -9,6 +9,7 @@ mod positioning;
 mod shortcut;
 mod task_scheduler;
 mod tray;
+mod updater;
 mod win_v_registry;
 
 use clipboard::ClipboardMonitor;
@@ -357,6 +358,38 @@ fn is_running_as_admin() -> bool {
 }
 
 
+// ============ Update Commands ============
+
+/// Tauri command: Check GitHub for updates
+#[tauri::command]
+async fn check_for_update() -> Result<updater::UpdateInfo, String> {
+    tokio::task::spawn_blocking(updater::check_update)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Tauri command: Download update installer with progress events
+#[tauri::command]
+async fn download_update(
+    app: tauri::AppHandle,
+    download_url: String,
+    file_name: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || updater::download(&app, &download_url, &file_name))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Tauri command: Launch installer and exit application
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
+    updater::install(&installer_path)?;
+    // Brief delay to let the installer process start before exiting
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    app.exit(0);
+    Ok(())
+}
+
 // ============ Image Preview Window ============
 
 /// Tauri command: Show image preview in a fixed-size transparent window
@@ -513,6 +546,14 @@ pub fn run() {
     init_logging();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app.notification()
+                .builder()
+                .title("ElegantClipboard")
+                .body("程序已在运行中")
+                .show();
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -649,6 +690,10 @@ pub fn run() {
             is_winv_replacement_enabled,
             update_shortcut,
             get_current_shortcut,
+            // Update commands
+            check_for_update,
+            download_update,
+            install_update,
             // Clipboard commands
             commands::clipboard::get_clipboard_items,
             commands::clipboard::get_clipboard_item,

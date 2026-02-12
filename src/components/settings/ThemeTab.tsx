@@ -3,11 +3,13 @@ import {
   Checkmark16Filled,
   Desktop16Regular,
 } from "@fluentui/react-icons";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme } from "@/stores/ui-settings";
 
 export function ThemeTab() {
-  const { colorTheme, setColorTheme } = useUISettings();
+  const { colorTheme, setColorTheme, sharpCorners, setSharpCorners } = useUISettings();
   const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
 
   // Re-render when accent color changes
@@ -116,6 +118,23 @@ export function ThemeTab() {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Sharp Corners */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">圆角</h3>
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label className="text-xs">直角模式</Label>
+            <p className="text-xs text-muted-foreground">
+              使用直角样式，类似 Windows 10 风格
+            </p>
+          </div>
+          <Switch
+            checked={sharpCorners}
+            onCheckedChange={setSharpCorners}
+          />
         </div>
       </div>
     </div>

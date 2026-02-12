@@ -184,6 +184,16 @@
     );
 }
 
+/* Sharp corners mode (Windows 10 style) */
+.sharp-corners,
+.sharp-corners * {
+    --radius: 0px !important;
+    --radius-lg: 0px !important;
+    --radius-md: 0px !important;
+    --radius-sm: 0px !important;
+    border-radius: 0px !important;
+}
+
 /* Base styles */
 * {
     border-color: var(--color-border);
