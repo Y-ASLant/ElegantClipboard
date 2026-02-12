@@ -10,7 +10,7 @@ edition = "2021"
 
 [lib]
 name = "elegant_clipboard_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["cdylib", "rlib"]
 
 [profile.release]
 codegen-units = 1
@@ -30,6 +30,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

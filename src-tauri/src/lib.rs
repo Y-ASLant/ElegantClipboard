@@ -546,6 +546,14 @@ pub fn run() {
     init_logging();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app.notification()
+                .builder()
+                .title("ElegantClipboard")
+                .body("程序已在运行中")
+                .show();
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
