@@ -409,6 +409,29 @@ impl ClipboardRepository {
         Ok((deleted as i64, image_paths))
     }
 
+    /// 更新文本内容（编辑功能）
+    pub fn update_text_content(&self, id: i64, new_text: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let preview: String = new_text.chars().take(200).collect();
+        let byte_size = new_text.len() as i64;
+        let char_count = new_text.chars().count() as i64;
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"text:");
+        hasher.update(new_text.as_bytes());
+        let content_hash = hasher.finalize().to_hex().to_string();
+
+        // Clear html/rtf content and downgrade to text type — formatted content
+        // is no longer valid after plain-text editing.
+        conn.execute(
+            "UPDATE clipboard_items SET text_content = ?1, preview = ?2, content_hash = ?3, \
+             byte_size = ?4, char_count = ?5, content_type = 'text', \
+             html_content = NULL, rtf_content = NULL WHERE id = ?6",
+            params![new_text, preview, content_hash, byte_size, char_count, id],
+        )?;
+        debug!("Updated text content for item {}", id);
+        Ok(())
+    }
+
     /// 交换两个条目的排序位置
     pub fn move_item_by_id(&self, from_id: i64, to_id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();

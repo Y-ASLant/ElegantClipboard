@@ -468,6 +468,39 @@ async fn hide_image_preview(app: tauri::AppHandle) {
     }
 }
 
+/// Tauri command: Open text editor window
+#[tauri::command]
+async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), String> {
+    let label = format!("text-editor-{}", id);
+
+    // If editor for this item already exists, focus it
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App(format!("/editor?id={}", id).into()),
+    )
+    .title("编辑")
+    .inner_size(600.0, 460.0)
+    .min_inner_size(400.0, 300.0)
+    .decorations(false)
+    .visible(false)
+    .resizable(true)
+    .center()
+    .build()
+    .map_err(|e| format!("Failed to create editor window: {}", e))?;
+
+    // Window will be shown by frontend after content is loaded
+    let _ = window;
+    Ok(())
+}
+
 /// Tauri command: Open settings window
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
@@ -677,6 +710,7 @@ pub fn run() {
             open_settings_window,
             show_image_preview,
             hide_image_preview,
+            open_text_editor_window,
             set_window_pinned,
             is_window_pinned,
             // Admin launch commands
@@ -705,6 +739,7 @@ pub fn run() {
             commands::clipboard::clear_history,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::paste_content,
+            commands::clipboard::update_text_content,
             // Settings, monitor, database, folder, autostart commands
             commands::settings::get_setting,
             commands::settings::set_setting,

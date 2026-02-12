@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
 import { Settings } from "./pages/Settings";
+import { TextEditor } from "./pages/TextEditor";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./index.css";
 
@@ -33,6 +34,9 @@ function Router() {
   
   if (path === "/settings" || path === "/settings.html") {
     return <Settings />;
+  }
+  if (path === "/editor" || path === "/editor.html") {
+    return <TextEditor />;
   }
   
   return <App />;

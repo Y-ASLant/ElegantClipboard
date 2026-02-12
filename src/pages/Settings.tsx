@@ -11,6 +11,7 @@ import {
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
@@ -212,63 +213,10 @@ export function Settings() {
 
   return (
     <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3", !themeReady && "[&_*]:!transition-none")}>
-      {/* Title Bar Card */}
-      <Card className="shrink-0">
-        <div
-          className="h-11 flex items-center justify-between px-4 select-none"
-          data-tauri-drag-region
-        >
-          <div className="flex items-center gap-3">
-            <Settings16Filled className="w-5 h-5 text-muted-foreground" />
-            <span className="text-sm font-semibold">设置</span>
-          </div>
-          <div
-            className="flex gap-1"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <button
-              onClick={() => getCurrentWindow().minimize()}
-              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect
-                  x="2"
-                  y="5.5"
-                  width="8"
-                  height="1"
-                  rx="0.5"
-                  fill="currentColor"
-                />
-              </svg>
-            </button>
-            <button
-              onClick={() => getCurrentWindow().close()}
-              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </Card>
+      <WindowTitleBar
+        icon={<Settings16Filled className="w-5 h-5 text-muted-foreground" />}
+        title="设置"
+      />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden gap-3">

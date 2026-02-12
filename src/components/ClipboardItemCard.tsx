@@ -14,6 +14,7 @@ import {
   TextDescription16Regular,
   ClipboardPaste16Regular,
   ArrowDownload16Regular,
+  Edit16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -503,9 +504,26 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     </div>
   );
 
-  // 文件/图片上下文菜单配置
+  const handleEdit = async () => {
+    try {
+      await invoke("open_text_editor_window", { id: item.id });
+    } catch (error) {
+      console.error("Failed to open editor:", error);
+    }
+  };
+
+  // 上下文菜单配置
   const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
     if (isDragOverlay) return null;
+    // 文本类内容（text/html/rtf）可编辑
+    if (item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf") {
+      return [
+        { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },
+        { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
+        { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
+        { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
+      ];
+    }
     if (item.content_type === "files") {
       return [
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },

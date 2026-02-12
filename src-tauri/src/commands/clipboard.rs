@@ -401,6 +401,29 @@ pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, Strin
     Ok(deleted)
 }
 
+// ============ Edit Commands ============
+
+/// Update text content of a clipboard item (edit feature)
+/// Returns true if the item was deleted (empty content), false if updated.
+#[tauri::command]
+pub async fn update_text_content(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+    new_text: String,
+) -> Result<bool, String> {
+    let repo = ClipboardRepository::new(&state.db);
+    if new_text.trim().is_empty() {
+        repo.delete(id).map_err(|e| e.to_string())?;
+        debug!("Deleted empty item {}", id);
+        Ok(true)
+    } else {
+        repo.update_text_content(id, &new_text)
+            .map_err(|e| e.to_string())?;
+        debug!("Updated text content for item {}", id);
+        Ok(false)
+    }
+}
+
 // ============ Copy & Paste Commands ============
 
 /// Copy item to system clipboard
