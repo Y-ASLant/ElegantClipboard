@@ -17,6 +17,7 @@ interface UISettings {
   imageAutoHeight: boolean;
   imageMaxHeight: number;
   colorTheme: ColorTheme;
+  sharpCorners: boolean;
   autoResetState: boolean;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
@@ -30,6 +31,7 @@ interface UISettings {
   setImageAutoHeight: (auto: boolean) => void;
   setImageMaxHeight: (height: number) => void;
   setColorTheme: (theme: ColorTheme) => void;
+  setSharpCorners: (enabled: boolean) => void;
   setAutoResetState: (enabled: boolean) => void;
 }
 
@@ -56,6 +58,7 @@ export const useUISettings = create<UISettings>()(
       imageAutoHeight: true,
       imageMaxHeight: 512,
       colorTheme: "system" as ColorTheme,
+      sharpCorners: false,
       autoResetState: true,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
@@ -104,6 +107,10 @@ export const useUISettings = create<UISettings>()(
       setColorTheme: (theme) => {
         set({ colorTheme: theme });
         broadcastChange({ colorTheme: theme });
+      },
+      setSharpCorners: (enabled) => {
+        set({ sharpCorners: enabled });
+        broadcastChange({ sharpCorners: enabled });
       },
       setAutoResetState: (enabled) => {
         set({ autoResetState: enabled });

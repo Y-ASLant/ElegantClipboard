@@ -31,6 +31,11 @@ function notifyAccentSubscribers() {
   _accentSubscribers.forEach((fn) => fn(_accentColor));
 }
 
+function applySharpCorners() {
+  const { sharpCorners } = useUISettings.getState();
+  document.documentElement.classList.toggle("sharp-corners", sharpCorners);
+}
+
 function apply() {
   const { colorTheme } = useUISettings.getState();
   const root = document.documentElement;
@@ -63,8 +68,11 @@ export function initTheme(): Promise<void> {
     document.documentElement.classList.toggle("dark", e.matches);
   });
 
-  // --- React-free store subscription: re-apply on theme change ---
+  // --- React-free store subscription: re-apply on theme/corners change ---
   useUISettings.subscribe((state, prev) => {
+    if (state.sharpCorners !== prev.sharpCorners) {
+      applySharpCorners();
+    }
     if (state.colorTheme !== prev.colorTheme) {
       if (state.colorTheme === "system" && !_accentColor) {
         // Switching TO system theme but we don't have the color yet
@@ -86,6 +94,7 @@ export function initTheme(): Promise<void> {
   });
 
   // --- Initial apply ---
+  applySharpCorners();
   // Always fetch accent color for ThemeTab preview, regardless of current theme
   invoke<string | null>("get_system_accent_color")
     .then((color) => {
