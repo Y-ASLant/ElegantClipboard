@@ -43,10 +43,6 @@ export function ShortcutsTab({
 
   // Handle keyboard event for shortcut recording
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // Remove recordingShortcut from dependency array to avoid re-creating the function
-    // We'll check the state directly inside the handler
-    if (!recordingShortcut) return;
-
     e.preventDefault();
     e.stopPropagation();
 
@@ -97,7 +93,7 @@ export function ShortcutsTab({
     } else if (key && parts.length === 0) {
       setShortcutError("请至少使用一个修饰键 (Ctrl/Alt/Shift/Win)");
     }
-  }, []); // Remove recordingShortcut from dependencies
+  }, []);
 
   // Start/stop recording
   useEffect(() => {
@@ -291,7 +287,7 @@ export function ShortcutsTab({
               onClick={startRecording}
             >
               {recordingShortcut ? (
-                <span className="text-lg font-mono font-medium">
+                <span className={cn("text-lg font-medium", tempShortcut && "font-mono")}>
                   {tempShortcut || "按下快捷键..."}
                 </span>
               ) : (
