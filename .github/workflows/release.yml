@@ -67,6 +67,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPDATER_GITHUB_TOKEN: ${{ secrets.UPDATER_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "ElegantClipboard ${{ github.ref_name }}"

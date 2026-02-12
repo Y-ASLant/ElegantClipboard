@@ -54,6 +54,9 @@ parking_lot = "0.12"
 # Parallel processing
 rayon = "1.10"
 
+# HTTP client (for update checker)
+ureq = { version = "2", features = ["json"] }
+
 # Image handling (PNG-only for clipboard screenshots)
 image = { version = "0.25", default-features = false, features = ["png"] }
 

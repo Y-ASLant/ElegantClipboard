@@ -7,6 +7,7 @@ import {
   Info16Filled,
   Database16Filled,
   PaintBrush16Filled,
+  ArrowSync16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -19,6 +20,7 @@ import {
   ShortcutSettings,
 } from "@/components/settings/ShortcutsTab";
 import { ThemeTab } from "@/components/settings/ThemeTab";
+import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { initTheme } from "@/lib/theme-applier";
@@ -81,6 +83,12 @@ export function Settings() {
   });
   const settingsLoadedRef = useRef(false);
   const [themeReady, setThemeReady] = useState(false);
+  const [appVersion, setAppVersion] = useState("0.0.0");
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+
+  useEffect(() => {
+    invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
+  }, []);
 
   // 主题加载完成后显示窗口（此时过渡被禁用，主题色瞬间就位）
   // 启用过渡后再加载设置，开关会有完整的状态切换动画
@@ -267,8 +275,8 @@ export function Settings() {
         {/* Left Navigation */}
         <div className="w-44 shrink-0">
           <Card className="h-full">
-            <CardContent className="p-2">
-              <nav className="space-y-1">
+            <CardContent className="p-2 h-full flex flex-col">
+              <nav className="space-y-1 flex-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;
                   return (
@@ -288,6 +296,19 @@ export function Settings() {
                   );
                 })}
               </nav>
+              <div className="pt-2 mt-2 border-t px-2 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">版本号</span>
+                  <span className="text-[11px] font-medium text-primary">v{appVersion}</span>
+                </div>
+                <button
+                  onClick={() => setUpdateDialogOpen(true)}
+                  className="flex items-center justify-between w-full group"
+                >
+                  <span className="text-[11px] text-muted-foreground">检查更新</span>
+                  <ArrowSync16Regular className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                </button>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -359,6 +380,7 @@ export function Settings() {
           </ScrollArea>
         )}
       </div>
+      <UpdateDialog open={updateDialogOpen} onOpenChange={setUpdateDialogOpen} />
     </div>
   );
 }
