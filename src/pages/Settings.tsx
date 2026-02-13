@@ -97,7 +97,9 @@ export function Settings() {
     initTheme().then(async () => {
       const win = getCurrentWindow();
       document.body.getBoundingClientRect();
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(r)),
+      );
       win.show();
       win.setFocus();
       await new Promise((r) => requestAnimationFrame(r));
@@ -111,7 +113,7 @@ export function Settings() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         const hasOverlay = document.querySelector(
-          '[role="dialog"], [data-radix-popper-content-wrapper]'
+          '[role="dialog"], [data-radix-popper-content-wrapper]',
         );
         if (!hasOverlay) {
           getCurrentWindow().close();
@@ -212,7 +214,12 @@ export function Settings() {
   };
 
   return (
-    <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3", !themeReady && "[&_*]:!transition-none")}>
+    <div
+      className={cn(
+        "h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3",
+        !themeReady && "[&_*]:!transition-none",
+      )}
+    >
       <WindowTitleBar
         icon={<Settings16Filled className="w-5 h-5 text-muted-foreground" />}
         title="设置"
@@ -232,7 +239,7 @@ export function Settings() {
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-"w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
+                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
                         activeTab === item.id
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -246,14 +253,20 @@ export function Settings() {
               </nav>
               <div className="pt-2 mt-2 border-t px-2 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">版本号</span>
-                  <span className="text-[11px] font-medium text-primary">v{appVersion}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    版本号
+                  </span>
+                  <span className="text-[11px] font-medium text-primary">
+                    v{appVersion}
+                  </span>
                 </div>
                 <button
                   onClick={() => setUpdateDialogOpen(true)}
                   className="flex items-center justify-between w-full group"
                 >
-                  <span className="text-[11px] text-muted-foreground">检查更新</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    检查更新
+                  </span>
                   <ArrowSync16Regular className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                 </button>
               </div>
@@ -263,7 +276,10 @@ export function Settings() {
 
         {/* Right Content - Full width with scrollbar at edge */}
         {activeTab === "about" ? (
-          <div key="about" className="flex-1 flex flex-col gap-3 animate-settings-in">
+          <div
+            key="about"
+            className="flex-1 flex flex-col gap-3 animate-settings-in"
+          >
             <AboutTab />
           </div>
         ) : (
@@ -328,7 +344,10 @@ export function Settings() {
           </ScrollArea>
         )}
       </div>
-      <UpdateDialog open={updateDialogOpen} onOpenChange={setUpdateDialogOpen} />
+      <UpdateDialog
+        open={updateDialogOpen}
+        onOpenChange={setUpdateDialogOpen}
+      />
     </div>
   );
 }

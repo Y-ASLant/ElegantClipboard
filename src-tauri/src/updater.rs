@@ -56,31 +56,29 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION");
     info!("Checking for updates (current: v{})", current_version);
 
-    let agent = ureq::AgentBuilder::new().build();
-
-    let mut req = agent
-        .get(GITHUB_API_URL)
-        .set("Accept", "application/vnd.github.v3+json")
-        .set("User-Agent", "ElegantClipboard");
+    let mut req = ureq::get(GITHUB_API_URL)
+        .header("Accept", "application/vnd.github.v3+json")
+        .header("User-Agent", "ElegantClipboard");
 
     if let Some(token) = GITHUB_TOKEN {
         if !token.is_empty() {
-            req = req.set("Authorization", &format!("Bearer {}", token));
+            req = req.header("Authorization", &format!("Bearer {}", token));
         }
     }
 
     let release: GitHubRelease = match req.call() {
-        Ok(resp) => resp
-            .into_json()
+        Ok(mut resp) => resp
+            .body_mut()
+            .read_json()
             .map_err(|e| format!("解析响应失败: {}", e))?,
-        Err(ureq::Error::Status(403, _)) => {
+        Err(ureq::Error::StatusCode(403)) => {
             return Err("GitHub API 请求限额已用尽，请稍后再试".into())
         }
-        Err(ureq::Error::Status(404, _)) => return Err("未找到发布版本".into()),
-        Err(ureq::Error::Status(code, _)) => {
+        Err(ureq::Error::StatusCode(404)) => return Err("未找到发布版本".into()),
+        Err(ureq::Error::StatusCode(code)) => {
             return Err(format!("GitHub API 返回错误: {}", code))
         }
-        Err(ureq::Error::Transport(e)) => return Err(format!("网络连接失败: {}", e)),
+        Err(e) => return Err(format!("网络连接失败: {}", e)),
     };
 
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
@@ -120,24 +118,23 @@ pub fn check_update() -> Result<UpdateInfo, String> {
 pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<String, String> {
     info!("Downloading update: {}", file_name);
 
-    let agent = ureq::AgentBuilder::new().build();
-
-    let response = match agent
-        .get(url)
-        .set("User-Agent", "ElegantClipboard")
+    let response = match ureq::get(url)
+        .header("User-Agent", "ElegantClipboard")
         .call()
     {
         Ok(resp) => resp,
-        Err(ureq::Error::Status(code, _)) => {
+        Err(ureq::Error::StatusCode(code)) => {
             return Err(format!("下载服务器返回错误 (HTTP {})", code))
         }
-        Err(ureq::Error::Transport(_)) => {
+        Err(_) => {
             return Err("网络连接失败，请检查网络后重试".into())
         }
     };
 
     let total: u64 = response
-        .header("Content-Length")
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
@@ -147,7 +144,8 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
 
     let mut file =
         std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {}", e))?;
-    let mut reader = response.into_reader();
+    let mut body = response.into_body();
+    let mut reader = body.as_reader();
     let mut buf = vec![0u8; 65536]; // 64 KB chunks
     let mut downloaded = 0u64;
     let mut last_emit = std::time::Instant::now();
