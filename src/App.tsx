@@ -26,6 +26,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
@@ -140,7 +141,7 @@ function App() {
       try {
         await invoke("hide_window");
       } catch (error) {
-        console.error("Failed to hide window:", error);
+        logError("Failed to hide window:", error);
       }
     });
     return () => { unlisten.then((fn) => fn()); };
@@ -181,7 +182,7 @@ function App() {
     try {
       await invoke("open_settings_window");
     } catch (error) {
-      console.error("Failed to open settings:", error);
+      logError("Failed to open settings:", error);
     }
   };
 
@@ -191,7 +192,7 @@ function App() {
       await invoke("set_window_pinned", { pinned: newState });
       setIsPinned(newState);
     } catch (error) {
-      console.error("Failed to toggle pinned state:", error);
+      logError("Failed to toggle pinned state:", error);
     }
   };
 
@@ -293,3 +294,4 @@ function App() {
 }
 
 export default App;
+

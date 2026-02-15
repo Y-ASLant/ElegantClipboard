@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
+import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 
@@ -74,7 +75,7 @@ export function TextEditor() {
       }
       setOriginalText(text);
     } catch (error) {
-      console.error("Failed to save:", error);
+      logError("Failed to save:", error);
     } finally {
       setSaving(false);
     }
@@ -87,7 +88,7 @@ export function TextEditor() {
       try {
         await invoke<boolean>("update_text_content", { id, newText: text });
       } catch (error) {
-        console.error("Failed to save:", error);
+        logError("Failed to save:", error);
         setSaving(false);
         return;
       }
@@ -154,3 +155,4 @@ export function TextEditor() {
     </div>
   );
 }
+

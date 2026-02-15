@@ -18,6 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { logError } from "@/lib/logger";
 
 export interface DataSettings {
   data_path: string;
@@ -100,7 +101,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         }
       }
     } catch (error) {
-      console.error("Failed to select folder:", error);
+      logError("Failed to select folder:", error);
     }
   };
 
@@ -149,7 +150,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     try {
       await invoke("open_data_folder");
     } catch (error) {
-      console.error("Failed to open folder:", error);
+      logError("Failed to open folder:", error);
     }
   };
 
@@ -162,7 +163,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         setMigrationDialogOpen(true);
       }
     } catch (error) {
-      console.error("Failed to reset path:", error);
+      logError("Failed to reset path:", error);
     }
   };
 
@@ -362,3 +363,4 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     </>
   );
 }
+

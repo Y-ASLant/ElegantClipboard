@@ -52,6 +52,7 @@ import {
   getFileNameFromPath,
   parseFilePaths,
 } from "@/lib/format";
+import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
@@ -372,7 +373,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       try {
         await invoke("show_in_explorer", { path: filePaths[0] });
       } catch (error) {
-        console.error("Failed to show in explorer:", error);
+        logError("Failed to show in explorer:", error);
       }
     }
   };
@@ -381,7 +382,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("paste_as_path", { id: item.id });
     } catch (error) {
-      console.error("Failed to paste as path:", error);
+      logError("Failed to paste as path:", error);
     }
   };
 
@@ -399,7 +400,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       setFileListItems(items);
       setDetailsOpen(true);
     } catch (error) {
-      console.error("Failed to get file details:", error);
+      logError("Failed to get file details:", error);
     }
   };
 
@@ -411,7 +412,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("save_file_as", { sourcePath });
     } catch (error) {
-      console.error("Failed to save file:", error);
+      logError("Failed to save file:", error);
     }
   };
 
@@ -420,7 +421,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("show_in_explorer", { path: item.image_path });
     } catch (error) {
-      console.error("Failed to show in explorer:", error);
+      logError("Failed to show in explorer:", error);
     }
   };
 
@@ -508,7 +509,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("open_text_editor_window", { id: item.id });
     } catch (error) {
-      console.error("Failed to open editor:", error);
+      logError("Failed to open editor:", error);
     }
   };
 
@@ -580,3 +581,4 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   return cardContent;
 }, arePropsEqual);
+

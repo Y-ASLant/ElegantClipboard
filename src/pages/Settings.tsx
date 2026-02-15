@@ -24,6 +24,7 @@ import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
+import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
@@ -176,7 +177,7 @@ export function Settings() {
       });
       settingsLoadedRef.current = true;
     } catch (error) {
-      console.error("Failed to load settings:", error);
+      logError("Failed to load settings:", error);
     }
   };
 
@@ -209,7 +210,7 @@ export function Settings() {
         await invoke("disable_admin_launch");
       }
     } catch (error) {
-      console.error("Failed to save settings:", error);
+      logError("Failed to save settings:", error);
     }
   };
 
@@ -351,3 +352,4 @@ export function Settings() {
     </div>
   );
 }
+

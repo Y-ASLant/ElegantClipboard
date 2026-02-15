@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 
 export interface ShortcutSettings {
@@ -154,7 +155,7 @@ export function ShortcutsTab({
         onSettingsChange({ ...settings, winv_replacement: false });
       }
     } catch (error) {
-      console.error("Failed to toggle Win+V replacement:", error);
+      logError("Failed to toggle Win+V replacement:", error);
       setWinvError(String(error));
     } finally {
       setWinvLoading(false);
@@ -372,3 +373,4 @@ export function ShortcutsTab({
     </>
   );
 }
+

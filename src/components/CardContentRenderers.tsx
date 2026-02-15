@@ -12,6 +12,7 @@ import { emit } from "@tauri-apps/api/event";
 import { currentMonitor } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
+import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 
@@ -194,7 +195,7 @@ const ImagePreview = memo(function ImagePreview({
     if (ps.current.visible) {
       ps.current.visible = false;
       invoke("hide_image_preview").catch((e) =>
-        console.error("Failed to hide preview:", e),
+        logError("Failed to hide preview:", e),
       );
     }
     ps.current.scale = 1.0;
@@ -266,7 +267,7 @@ const ImagePreview = memo(function ImagePreview({
           height,
           percent,
           active: true,
-        }).catch((e) => console.error("Failed to emit zoom:", e));
+        }).catch((e) => logError("Failed to emit zoom:", e));
       });
     },
     [previewZoomStep, previewPosition],
@@ -287,7 +288,7 @@ const ImagePreview = memo(function ImagePreview({
       clearTimer();
       if (ps.current.visible)
         invoke("hide_image_preview").catch((e) =>
-          console.error("Failed to hide preview:", e),
+          logError("Failed to hide preview:", e),
         );
     };
   }, [clearTimer]);
@@ -586,3 +587,4 @@ export const FileContent = memo(function FileContent({
     </div>
   );
 });
+
