@@ -43,7 +43,10 @@ pub fn init(window: WebviewWindow) {
 /// Uses catch_unwind + exponential backoff to automatically restart on panic.
 pub fn start_monitoring() {
     // Prevent multiple starts
-    if MONITOR_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+    if MONITOR_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         warn!("Input monitor already running");
         return;
     }
@@ -74,7 +77,9 @@ pub fn start_monitoring() {
                 Ok(_) => warn!("Input monitor exited unexpectedly, restarting..."),
                 Err(panic_info) => error!(
                     "Input monitor panicked: {:?}, restarting...",
-                    panic_info.downcast_ref::<&str>().copied()
+                    panic_info
+                        .downcast_ref::<&str>()
+                        .copied()
                         .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
                         .unwrap_or("unknown panic")
                 ),
@@ -87,14 +92,18 @@ pub fn start_monitoring() {
 
             // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
             let backoff_secs = MAX_BACKOFF_SECS.min(1u64 << retry_count);
-            info!("Restarting input monitor in {}s (attempt {})", backoff_secs, retry_count + 1);
+            info!(
+                "Restarting input monitor in {}s (attempt {})",
+                backoff_secs,
+                retry_count + 1
+            );
             thread::sleep(Duration::from_secs(backoff_secs));
             retry_count = retry_count.saturating_add(1);
         }
 
         MONITOR_RUNNING.store(false, Ordering::SeqCst);
     });
-    
+
     *THREAD_HANDLE.lock() = Some(handle);
     info!("Input monitor started");
 }
@@ -173,25 +182,27 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
     // Get cursor position from atomics - no lock needed
     let cursor_x = CURSOR_X.load(Ordering::Relaxed) as f64;
     let cursor_y = CURSOR_Y.load(Ordering::Relaxed) as f64;
-    
+
     // Get window position and size
     let position = match window.outer_position() {
         Ok(pos) => pos,
         Err(_) => return false,
     };
-    
+
     let size = match window.outer_size() {
         Ok(s) => s,
         Err(_) => return false,
     };
-    
+
     let win_x = position.x as f64;
     let win_y = position.y as f64;
     let win_width = size.width as f64;
     let win_height = size.height as f64;
-    
-    cursor_x < win_x || cursor_x > win_x + win_width
-        || cursor_y < win_y || cursor_y > win_y + win_height
+
+    cursor_x < win_x
+        || cursor_x > win_x + win_width
+        || cursor_y < win_y
+        || cursor_y > win_y + win_height
 }
 
 /// Handle ESC key press - emit event to frontend so it can decide
@@ -221,12 +232,12 @@ fn handle_click_outside() {
     if !MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    
+
     // Don't hide if window is pinned
     if WINDOW_PINNED.load(Ordering::Relaxed) {
         return;
     }
-    
+
     if let Some(window) = MAIN_WINDOW.lock().as_ref() {
         // Check if window is visible and click is outside
         if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {

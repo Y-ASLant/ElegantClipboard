@@ -48,8 +48,8 @@ pub(super) fn set_clipboard_content(
 /// This avoids the expensive path of: image::open() → to_rgba8() → arboard::ImageData
 /// Instead, clipboard-rs handles the decode and platform conversion internally.
 fn set_clipboard_image(path: &str) -> Result<(), String> {
-    use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
     use clipboard_rs::common::RustImage;
+    use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
 
     let image = RustImageData::from_path(path)
         .map_err(|e| format!("Failed to load image from path: {}", e))?;
@@ -97,7 +97,8 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
         let valid = if let Some((bs, _)) = ci.next() {
             // Find byte_end by advancing keyword_lower.chars().count() more chars
             let kw_char_len = keyword_lower.chars().count();
-            let be = ci.nth(kw_char_len.saturating_sub(2))
+            let be = ci
+                .nth(kw_char_len.saturating_sub(2))
                 .map(|(b, _)| b)
                 .unwrap_or(text.len());
             // Cheap verification: the slice at this char position should lowercase-match
@@ -136,9 +137,15 @@ fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> 
     let char_indices: Vec<(usize, char)> = text.char_indices().collect();
     let n = char_indices.len();
     for i in 0..n {
-        if i + keyword_char_len > n { break; }
+        if i + keyword_char_len > n {
+            break;
+        }
         let bs = char_indices[i].0;
-        let be = if i + keyword_char_len < n { char_indices[i + keyword_char_len].0 } else { text.len() };
+        let be = if i + keyword_char_len < n {
+            char_indices[i + keyword_char_len].0
+        } else {
+            text.len()
+        };
         if text[bs..be].to_lowercase() == *keyword_lower {
             return Some(i);
         }
@@ -147,13 +154,19 @@ fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> 
 }
 
 /// Build the `...context...` snippet given char-level position info.
-fn build_context_snippet(text: &str, keyword_char_pos: usize, keyword_char_len: usize, max_len: usize) -> String {
+fn build_context_snippet(
+    text: &str,
+    keyword_char_pos: usize,
+    keyword_char_len: usize,
+    max_len: usize,
+) -> String {
     let char_indices: Vec<(usize, char)> = text.char_indices().collect();
     let text_char_count = char_indices.len();
 
     let context_before = max_len / 3;
     let start_char = keyword_char_pos.saturating_sub(context_before);
-    let end_char = (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
+    let end_char =
+        (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
 
     if end_char <= start_char {
         return text.chars().take(max_len).collect();
@@ -275,7 +288,9 @@ pub async fn get_clipboard_items(
         for item in &mut items {
             if let Some(ref text) = item.text_content {
                 // Only replace preview if keyword is NOT in the original preview
-                let preview_has_match = item.preview.as_ref()
+                let preview_has_match = item
+                    .preview
+                    .as_ref()
                     .map(|p| p.to_lowercase().contains(&keyword_lower))
                     .unwrap_or(false);
                 if !preview_has_match {
@@ -354,10 +369,7 @@ pub async fn move_clipboard_item(
 
 /// Delete clipboard item (also deletes associated image file)
 #[tauri::command]
-pub async fn delete_clipboard_item(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
 
     if let Ok(Some(item)) = repo.get_by_id(id) {
@@ -428,10 +440,7 @@ pub async fn update_text_content(
 
 /// Copy item to system clipboard
 #[tauri::command]
-pub async fn copy_to_clipboard(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
     let item = repo
         .get_by_id(id)

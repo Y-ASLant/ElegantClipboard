@@ -18,9 +18,16 @@ pub fn create_autostart_task() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let output = Command::new("schtasks")
         .args([
-            "/Create", "/TN", TASK_NAME,
-            "/TR", &format!("\"{}\" --hidden", exe.to_string_lossy()),
-            "/SC", "ONLOGON", "/RL", "HIGHEST", "/F",
+            "/Create",
+            "/TN",
+            TASK_NAME,
+            "/TR",
+            &format!("\"{}\" --hidden", exe.to_string_lossy()),
+            "/SC",
+            "ONLOGON",
+            "/RL",
+            "HIGHEST",
+            "/F",
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .output()
@@ -29,12 +36,17 @@ pub fn create_autostart_task() -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!("创建计划任务失败: {}", String::from_utf8_lossy(&output.stderr).trim()))
+        Err(format!(
+            "创建计划任务失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn create_autostart_task() -> Result<(), String> { Err("仅限 Windows".into()) }
+pub fn create_autostart_task() -> Result<(), String> {
+    Err("仅限 Windows".into())
+}
 
 /// 删除自启动计划任务（任务不存在时静默忽略）
 #[cfg(target_os = "windows")]
@@ -47,7 +59,9 @@ pub fn delete_autostart_task() -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn delete_autostart_task() -> Result<(), String> { Ok(()) }
+pub fn delete_autostart_task() -> Result<(), String> {
+    Ok(())
+}
 
 /// 检查自启动计划任务是否存在
 #[cfg(target_os = "windows")]
@@ -61,4 +75,6 @@ pub fn is_autostart_task_exists() -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn is_autostart_task_exists() -> bool { false }
+pub fn is_autostart_task_exists() -> bool {
+    false
+}

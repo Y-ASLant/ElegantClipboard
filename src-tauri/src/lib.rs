@@ -16,9 +16,9 @@ use clipboard::ClipboardMonitor;
 use commands::AppState;
 use config::AppConfig;
 use database::Database;
+use shortcut::parse_shortcut;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
-use shortcut::parse_shortcut;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -36,8 +36,9 @@ fn init_logging() {
         .with_line_number(true)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Failed to set tracing subscriber");
+    if let Err(err) = tracing::subscriber::set_global_default(subscriber) {
+        eprintln!("Failed to set tracing subscriber: {err}");
+    }
 }
 
 /// Tauri command: Get app version
@@ -70,10 +71,10 @@ async fn hide_window(window: tauri::WebviewWindow) {
 /// Tauri command: Set window visibility state (for sync with backend)
 #[tauri::command]
 fn set_window_visibility(visible: bool) {
-    keyboard_hook::set_window_state(if visible { 
-        keyboard_hook::WindowState::Visible 
-    } else { 
-        keyboard_hook::WindowState::Hidden 
+    keyboard_hook::set_window_state(if visible {
+        keyboard_hook::WindowState::Visible
+    } else {
+        keyboard_hook::WindowState::Hidden
     });
     // Also enable/disable mouse monitoring for click-outside detection
     if visible {
@@ -137,22 +138,22 @@ fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, Str
     let config = AppConfig::load();
     let old_path = config.get_data_dir();
     let new_path = std::path::PathBuf::from(&new_path);
-    
+
     // Don't migrate if paths are the same
     if old_path == new_path {
         return Err("Source and destination paths are the same".to_string());
     }
-    
+
     // Perform migration
     let result = config::migrate_data(&old_path, &new_path)?;
-    
+
     // If migration successful, update config
     if result.success() {
         let mut new_config = AppConfig::load();
         new_config.data_path = Some(new_path.to_string_lossy().to_string());
         new_config.save()?;
     }
-    
+
     Ok(result)
 }
 
@@ -174,7 +175,7 @@ fn restart_app(app: tauri::AppHandle) {
 fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let current_state = keyboard_hook::get_window_state();
-        
+
         if current_state == keyboard_hook::WindowState::Visible {
             // Hide window
             let _ = window.hide();
@@ -187,24 +188,26 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             let _ = window.emit("window-hidden", ());
         } else {
             // Check if follow_cursor is enabled
-            let follow_cursor = app.try_state::<std::sync::Arc<commands::AppState>>()
+            let follow_cursor = app
+                .try_state::<std::sync::Arc<commands::AppState>>()
                 .map(|state| {
                     let settings_repo = database::SettingsRepository::new(&state.db);
-                    settings_repo.get("follow_cursor")
+                    settings_repo
+                        .get("follow_cursor")
                         .ok()
                         .flatten()
                         .map(|v| v != "false")
                         .unwrap_or(true) // Default to true
                 })
                 .unwrap_or(true);
-            
+
             // Position window at cursor before showing (if enabled)
             if follow_cursor {
                 if let Err(e) = positioning::position_at_cursor(&window) {
                     tracing::warn!("Failed to position window at cursor: {}", e);
                 }
             }
-            
+
             // Show window with always-on-top trick (like QuickClipboard)
             // NOTE: Do NOT call set_focus() - window is set to focusable=false
             let _ = window.show();
@@ -228,10 +231,10 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut().unregister(shortcut);
     }
-    
+
     // Disable system Win+V via registry (restart explorer to apply)
     win_v_registry::disable_win_v_hotkey(true)?;
-    
+
     // Now register Win+V using Tauri's global_shortcut (system Win+V is disabled)
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
     app.global_shortcut()
@@ -242,7 +245,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
             }
         })
         .map_err(|e| format!("Failed to register Win+V shortcut: {}", e))?;
-    
+
     // Save setting
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
@@ -257,20 +260,21 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     // Unregister Win+V shortcut
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
     let _ = app.global_shortcut().unregister(winv_shortcut);
-    
+
     // Re-enable system Win+V via registry (restart explorer to apply)
     win_v_registry::enable_win_v_hotkey(true)?;
-    
+
     // Re-register custom shortcut with toggle handler
     if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
-        let _ = app.global_shortcut()
+        let _ = app
+            .global_shortcut()
             .on_shortcut(shortcut, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     toggle_window_visibility(app);
                 }
             });
     }
-    
+
     // Save setting
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
@@ -356,7 +360,6 @@ fn disable_admin_launch() -> Result<(), String> {
 fn is_running_as_admin() -> bool {
     admin_launch::is_running_as_admin()
 }
-
 
 // ============ Update Commands ============
 
@@ -448,11 +451,14 @@ async fn show_image_preview(
     let _ = window.set_always_on_top(true);
 
     // Send image path + initial CSS size to the preview window
-    let _ = window.emit("image-preview-update", serde_json::json!({
-        "imagePath": image_path,
-        "width": img_width,
-        "height": img_height,
-    }));
+    let _ = window.emit(
+        "image-preview-update",
+        serde_json::json!({
+            "imagePath": image_path,
+            "width": img_width,
+            "height": img_height,
+        }),
+    );
 
     let _ = window.show();
     Ok(())
@@ -539,8 +545,10 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
                 monitors.into_iter().find(|m| {
                     let mp = m.position();
                     let ms = m.size();
-                    center_x >= mp.x && center_x < mp.x + ms.width as i32
-                        && center_y >= mp.y && center_y < mp.y + ms.height as i32
+                    center_x >= mp.x
+                        && center_x < mp.x + ms.width as i32
+                        && center_y >= mp.y
+                        && center_y < mp.y + ms.height as i32
                 })
             }) {
                 let mp = monitor.position();
@@ -562,7 +570,8 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
         builder = builder.center();
     }
 
-    let window = builder.build()
+    let window = builder
+        .build()
         .map_err(|e| format!("Failed to create settings window: {}", e))?;
 
     // Apply physical position after build to bypass logical-to-physical conversion ambiguity
@@ -578,10 +587,11 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
 pub fn run() {
     init_logging();
 
-    tauri::Builder::default()
+    let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             use tauri_plugin_notification::NotificationExt;
-            let _ = app.notification()
+            let _ = app
+                .notification()
                 .builder()
                 .title("ElegantClipboard")
                 .body("程序已在运行中")
@@ -611,7 +621,8 @@ pub fn run() {
 
             // Load saved shortcut from settings
             let settings_repo = database::SettingsRepository::new(&state.db);
-            let saved_shortcut = settings_repo.get("global_shortcut")
+            let saved_shortcut = settings_repo
+                .get("global_shortcut")
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "Alt+C".to_string());
@@ -622,10 +633,10 @@ pub fn run() {
 
             // Setup system tray
             let _ = tray::setup_tray(app.handle());
-            
+
             // Initialize global shortcut state
             *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
-            
+
             // Register shortcut based on Win+V replacement setting
             let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {
                 Shortcut::new(Some(Modifiers::SUPER), Code::KeyV)
@@ -633,18 +644,20 @@ pub fn run() {
                 parse_shortcut(&saved_shortcut)
                     .unwrap_or_else(|| Shortcut::new(Some(Modifiers::ALT), Code::KeyC))
             };
-            
-            let _ = app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    toggle_window_visibility(app);
-                }
-            });
+
+            let _ = app
+                .global_shortcut()
+                .on_shortcut(shortcut, |app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        toggle_window_visibility(app);
+                    }
+                });
 
             // Set main window as non-focusable to prevent stealing focus from other apps
             // This allows hotkeys to work even when Start Menu or other system UI is open
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focusable(false);
-                
+
                 // Initialize and start input monitor for click-outside detection
                 // This is necessary because non-focusable windows don't trigger onFocusChanged
                 input_monitor::init(window);
@@ -654,8 +667,8 @@ pub fn run() {
             // 自启动机制迁移：管理员模式用任务计划程序，普通模式用注册表 Run
             {
                 use tauri_plugin_autostart::ManagerExt;
-                let is_admin = admin_launch::is_admin_launch_enabled()
-                    && admin_launch::is_running_as_admin();
+                let is_admin =
+                    admin_launch::is_admin_launch_enabled() && admin_launch::is_running_as_admin();
 
                 if is_admin && app.autolaunch().is_enabled().unwrap_or(false) {
                     if task_scheduler::create_autostart_task().is_ok() {
@@ -684,10 +697,14 @@ pub fn run() {
                 } else {
                     saved_shortcut.clone()
                 };
-                let _ = app.notification()
+                let _ = app
+                    .notification()
                     .builder()
                     .title("ElegantClipboard 已启动")
-                    .body(format!("程序已在后台运行，按 {} 打开剪贴板", shortcut_display))
+                    .body(format!(
+                        "程序已在后台运行，按 {} 打开剪贴板",
+                        shortcut_display
+                    ))
                     .show();
             }
 
@@ -763,6 +780,9 @@ pub fn run() {
             commands::file_ops::save_file_as,
             commands::file_ops::get_data_size,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .run(tauri::generate_context!());
+
+    if let Err(err) = run_result {
+        eprintln!("error while running tauri application: {err}");
+    }
 }

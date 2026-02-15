@@ -36,7 +36,11 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
         let app_name = get_app_display_name(&exe_path);
         let icon_cache_key = compute_icon_cache_key(&exe_path);
 
-        Some(SourceAppInfo { app_name, exe_path, icon_cache_key })
+        Some(SourceAppInfo {
+            app_name,
+            exe_path,
+            icon_cache_key,
+        })
     }
 
     unsafe {
@@ -87,7 +91,11 @@ unsafe fn get_exe_path_from_pid(pid: u32) -> Option<String> {
     result.ok()?;
 
     let path = String::from_utf16_lossy(&buf[..size as usize]);
-    if path.is_empty() { None } else { Some(path) }
+    if path.is_empty() {
+        None
+    } else {
+        Some(path)
+    }
 }
 
 /// UWP 应用通过 ApplicationFrameHost 托管，遍历子窗口找到真实进程
@@ -131,7 +139,10 @@ unsafe fn resolve_uwp_app(
         }
     }
 
-    let mut data = CallbackData { host_pid, found_path: None };
+    let mut data = CallbackData {
+        host_pid,
+        found_path: None,
+    };
     let _ = EnumChildWindows(
         Some(owner_hwnd),
         Some(enum_callback),
@@ -174,14 +185,20 @@ fn get_file_description(exe_path: &str) -> Option<String> {
             &mut ptr,
             &mut len,
         )
-        .as_bool() || ptr.is_null() || len == 0
+        .as_bool()
+            || ptr.is_null()
+            || len == 0
         {
             return None;
         }
         let slice = std::slice::from_raw_parts(ptr as *const u16, len as usize);
         let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
         let s = String::from_utf16_lossy(&slice[..end]).trim().to_string();
-        if s.is_empty() { None } else { Some(s) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
     }
 
     unsafe {
@@ -205,11 +222,16 @@ fn get_file_description(exe_path: &str) -> Option<String> {
             &mut lang_ptr,
             &mut lang_len,
         )
-        .as_bool() && !lang_ptr.is_null() && lang_len >= 4
+        .as_bool()
+            && !lang_ptr.is_null()
+            && lang_len >= 4
         {
             let lang = *(lang_ptr as *const u16);
             let cp = *((lang_ptr as *const u16).add(1));
-            let path = format!("\\StringFileInfo\\{:04x}{:04x}\\FileDescription\0", lang, cp);
+            let path = format!(
+                "\\StringFileInfo\\{:04x}{:04x}\\FileDescription\0",
+                lang, cp
+            );
             if let Some(desc) = query_string(&buf, &path) {
                 return Some(desc);
             }
@@ -244,7 +266,11 @@ pub fn extract_and_cache_icon(exe_path: &str, icons_dir: &Path, cache_key: &str)
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn extract_and_cache_icon(_exe_path: &str, _icons_dir: &Path, _cache_key: &str) -> Option<String> {
+pub fn extract_and_cache_icon(
+    _exe_path: &str,
+    _icons_dir: &Path,
+    _cache_key: &str,
+) -> Option<String> {
     None
 }
 
@@ -304,15 +330,27 @@ fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
             ..Default::default()
         };
         let mut pixels = vec![0u8; (w * h * 4) as usize];
-        let lines = GetDIBits(mem_dc, mem_bmp, 0, h as u32, Some(pixels.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+        let lines = GetDIBits(
+            mem_dc,
+            mem_bmp,
+            0,
+            h as u32,
+            Some(pixels.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
 
         // 清理 GDI 资源
         SelectObject(mem_dc, old_bmp);
         let _ = DeleteObject(mem_bmp.into());
         let _ = DeleteDC(mem_dc);
         ReleaseDC(None, screen_dc);
-        if !color_bmp.0.is_null() { let _ = DeleteObject(color_bmp.into()); }
-        if !mask_bmp.0.is_null() { let _ = DeleteObject(mask_bmp.into()); }
+        if !color_bmp.0.is_null() {
+            let _ = DeleteObject(color_bmp.into());
+        }
+        if !mask_bmp.0.is_null() {
+            let _ = DeleteObject(mask_bmp.into());
+        }
         let _ = DestroyIcon(hicon);
 
         if lines == 0 {
@@ -320,7 +358,9 @@ fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
         }
 
         // BGRA → RGBA → PNG
-        for chunk in pixels.chunks_exact_mut(4) { chunk.swap(0, 2); }
+        for chunk in pixels.chunks_exact_mut(4) {
+            chunk.swap(0, 2);
+        }
         let img = image::RgbaImage::from_raw(w as u32, h as u32, pixels)?;
         let mut buf = std::io::Cursor::new(Vec::new());
         img.write_to(&mut buf, image::ImageFormat::Png).ok()?;

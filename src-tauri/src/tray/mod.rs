@@ -24,12 +24,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
     // Build menu
     let menu = Menu::with_items(
         app,
-        &[
-            &settings_item,
-            &restart_item,
-            &separator,
-            &quit_item,
-        ],
+        &[&settings_item, &restart_item, &separator, &quit_item],
     )?;
 
     // Create tray icon
@@ -54,7 +49,9 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         let _ = window.hide();
                         // Disable mouse monitoring when hiding
                         crate::input_monitor::disable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+                        crate::keyboard_hook::set_window_state(
+                            crate::keyboard_hook::WindowState::Hidden,
+                        );
                         // Emit event to frontend so it can reset state while hidden
                         let _ = window.emit("window-hidden", ());
                     } else {
@@ -62,7 +59,9 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         let _ = window.set_focus();
                         // Enable mouse monitoring when showing
                         crate::input_monitor::enable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
+                        crate::keyboard_hook::set_window_state(
+                            crate::keyboard_hook::WindowState::Visible,
+                        );
                         // Emit event to frontend for cache invalidation
                         let _ = window.emit("window-shown", ());
                     }
@@ -128,8 +127,10 @@ fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
                 monitors.into_iter().find(|m| {
                     let mp = m.position();
                     let ms = m.size();
-                    center_x >= mp.x && center_x < mp.x + ms.width as i32
-                        && center_y >= mp.y && center_y < mp.y + ms.height as i32
+                    center_x >= mp.x
+                        && center_x < mp.x + ms.width as i32
+                        && center_y >= mp.y
+                        && center_y < mp.y + ms.height as i32
                 })
             }) {
                 let mp = monitor.position();

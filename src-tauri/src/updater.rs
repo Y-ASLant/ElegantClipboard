@@ -75,9 +75,7 @@ pub fn check_update() -> Result<UpdateInfo, String> {
             return Err("GitHub API 请求限额已用尽，请稍后再试".into())
         }
         Err(ureq::Error::StatusCode(404)) => return Err("未找到发布版本".into()),
-        Err(ureq::Error::StatusCode(code)) => {
-            return Err(format!("GitHub API 返回错误: {}", code))
-        }
+        Err(ureq::Error::StatusCode(code)) => return Err(format!("GitHub API 返回错误: {}", code)),
         Err(e) => return Err(format!("网络连接失败: {}", e)),
     };
 
@@ -126,9 +124,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
         Err(ureq::Error::StatusCode(code)) => {
             return Err(format!("下载服务器返回错误 (HTTP {})", code))
         }
-        Err(_) => {
-            return Err("网络连接失败，请检查网络后重试".into())
-        }
+        Err(_) => return Err("网络连接失败，请检查网络后重试".into()),
     };
 
     let total: u64 = response
@@ -142,8 +138,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
     let file_path = temp_dir.join(file_name);
 
-    let mut file =
-        std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {}", e))?;
+    let mut file = std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {}", e))?;
     let mut body = response.into_body();
     let mut reader = body.as_reader();
     let mut buf = vec![0u8; 65536]; // 64 KB chunks

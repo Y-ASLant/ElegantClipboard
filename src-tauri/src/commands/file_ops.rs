@@ -150,8 +150,7 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
     match dest {
         Some(dest_path) => {
             let dest_str = dest_path.to_string();
-            std::fs::copy(&source_path, &dest_str)
-                .map_err(|e| format!("保存失败: {}", e))?;
+            std::fs::copy(&source_path, &dest_str).map_err(|e| format!("保存失败: {}", e))?;
             Ok(true)
         }
         None => Ok(false), // User cancelled
@@ -213,8 +212,7 @@ pub async fn get_file_details(path: String) -> Result<FileDetails, String> {
     use std::path::Path;
 
     let path = Path::new(&path);
-    let metadata =
-        fs::metadata(path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
+    let metadata = fs::metadata(path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
 
     let file_type = if metadata.is_dir() {
         "folder".to_string()

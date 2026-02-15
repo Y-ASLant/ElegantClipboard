@@ -1,8 +1,7 @@
-use crate::database::{
-    ClipboardRepository, ContentType, Database, NewClipboardItem,
-    SettingsRepository,
-};
 use super::source_app::{self, SourceAppInfo};
+use crate::database::{
+    ClipboardRepository, ContentType, Database, NewClipboardItem, SettingsRepository,
+};
 use blake3::Hasher;
 use image::ImageReader;
 use std::path::PathBuf;
@@ -15,8 +14,14 @@ const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
 /// 按字符边界截断超长内容
 fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
     if max_size > 0 && content.len() > max_size {
-        warn!("{} content truncated from {} to {} bytes", content_type, content.len(), max_size);
-        content.char_indices()
+        warn!(
+            "{} content truncated from {} to {} bytes",
+            content_type,
+            content.len(),
+            max_size
+        );
+        content
+            .char_indices()
             .take_while(|(i, _)| *i < max_size)
             .map(|(_, c)| c)
             .collect()
@@ -29,9 +34,15 @@ fn truncate_content(content: String, max_size: usize, content_type: &str) -> Str
 pub enum ClipboardContent {
     Text(String),
     #[allow(dead_code)] // 预留: 监听器尚未捕获
-    Html { html: String, text: Option<String> },
+    Html {
+        html: String,
+        text: Option<String>,
+    },
     #[allow(dead_code)] // 预留: 监听器尚未捕获
-    Rtf { rtf: String, text: Option<String> },
+    Rtf {
+        rtf: String,
+        text: Option<String>,
+    },
     Image(Vec<u8>),
     Files(Vec<String>),
 }
@@ -48,9 +59,7 @@ impl ClipboardHandler {
         std::fs::create_dir_all(&images_path).ok();
 
         // 图标目录与图片目录同级
-        let icons_path = images_path.parent()
-            .unwrap_or(&images_path)
-            .join("icons");
+        let icons_path = images_path.parent().unwrap_or(&images_path).join("icons");
         std::fs::create_dir_all(&icons_path).ok();
 
         Self {
@@ -81,9 +90,13 @@ impl ClipboardHandler {
     }
 
     /// 处理剪贴板内容，去重后存入数据库
-    pub fn process(&self, content: ClipboardContent, source: Option<SourceAppInfo>) -> Result<Option<i64>, String> {
+    pub fn process(
+        &self,
+        content: ClipboardContent,
+        source: Option<SourceAppInfo>,
+    ) -> Result<Option<i64>, String> {
         let max_content_size = self.get_max_content_size();
-        
+
         if max_content_size > 0 {
             let content_size = self.get_content_size(&content);
             if content_size > max_content_size {
@@ -96,10 +109,17 @@ impl ClipboardHandler {
         }
 
         let hash = self.calculate_hash(&content);
-        
-        if self.repository.exists_by_hash(&hash).map_err(|e| e.to_string())? {
+
+        if self
+            .repository
+            .exists_by_hash(&hash)
+            .map_err(|e| e.to_string())?
+        {
             debug!("Content already exists, updating access time");
-            return self.repository.touch_by_hash(&hash).map_err(|e| e.to_string());
+            return self
+                .repository
+                .touch_by_hash(&hash)
+                .map_err(|e| e.to_string());
         }
 
         let (source_app_name, source_app_icon) = match source {
@@ -116,8 +136,12 @@ impl ClipboardHandler {
 
         let mut item = match content {
             ClipboardContent::Text(text) => self.process_text(text, hash, max_content_size)?,
-            ClipboardContent::Html { html, text } => self.process_html(html, text, hash, max_content_size)?,
-            ClipboardContent::Rtf { rtf, text } => self.process_rtf(rtf, text, hash, max_content_size)?,
+            ClipboardContent::Html { html, text } => {
+                self.process_html(html, text, hash, max_content_size)?
+            }
+            ClipboardContent::Rtf { rtf, text } => {
+                self.process_rtf(rtf, text, hash, max_content_size)?
+            }
             ClipboardContent::Image(data) => self.process_image(data, hash)?,
             ClipboardContent::Files(files) => self.process_files(files, hash)?,
         };
@@ -165,7 +189,7 @@ impl ClipboardHandler {
 
     fn calculate_hash(&self, content: &ClipboardContent) -> String {
         let mut hasher = Hasher::new();
-        
+
         match content {
             ClipboardContent::Text(text) => {
                 hasher.update(b"text:");
@@ -195,7 +219,12 @@ impl ClipboardHandler {
         hasher.finalize().to_hex().to_string()
     }
 
-    fn process_text(&self, text: String, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
+    fn process_text(
+        &self,
+        text: String,
+        hash: String,
+        max_size: usize,
+    ) -> Result<NewClipboardItem, String> {
         let byte_size = text.len() as i64;
         let char_count = Some(text.chars().count() as i64);
         let preview = Self::create_preview(&text);
@@ -219,9 +248,16 @@ impl ClipboardHandler {
         })
     }
 
-    fn process_html(&self, html: String, text: Option<String>, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
+    fn process_html(
+        &self,
+        html: String,
+        text: Option<String>,
+        hash: String,
+        max_size: usize,
+    ) -> Result<NewClipboardItem, String> {
         let byte_size = html.len() as i64;
-        let preview = text.as_ref()
+        let preview = text
+            .as_ref()
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| Self::create_preview(&html));
         let html_content = truncate_content(html, max_size, "HTML");
@@ -246,9 +282,16 @@ impl ClipboardHandler {
         })
     }
 
-    fn process_rtf(&self, rtf: String, text: Option<String>, hash: String, max_size: usize) -> Result<NewClipboardItem, String> {
+    fn process_rtf(
+        &self,
+        rtf: String,
+        text: Option<String>,
+        hash: String,
+        max_size: usize,
+    ) -> Result<NewClipboardItem, String> {
         let byte_size = rtf.len() as i64;
-        let preview = text.as_ref()
+        let preview = text
+            .as_ref()
             .map(|t| Self::create_preview(t))
             .unwrap_or_else(|| "[RTF Content]".to_string());
         let rtf_content = truncate_content(rtf, max_size, "RTF");
@@ -325,7 +368,8 @@ impl ClipboardHandler {
 
         // Calculate file sizes (only for regular files, skip directories)
         // Directory size calculation is expensive and low value
-        let byte_size: i64 = files.iter()
+        let byte_size: i64 = files
+            .iter()
             .filter_map(|f| {
                 let path = Path::new(f);
                 if path.is_file() {

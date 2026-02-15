@@ -39,7 +39,11 @@ impl ClipboardMonitor {
     /// 启动剪贴板监听
     pub fn start(&self, app_handle: AppHandle) {
         // Use compare_exchange to avoid race condition
-        if self.running.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             warn!("Clipboard monitor already running");
             return;
         }
@@ -83,7 +87,7 @@ impl ClipboardMonitor {
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
         info!("Clipboard monitor stopping");
-        
+
         // Wait for thread to finish (with timeout)
         if let Some(handle) = self.thread_handle.lock().take() {
             // Don't block indefinitely - the thread should stop on its own
@@ -103,9 +107,15 @@ impl ClipboardMonitor {
     /// Monitoring only actually resumes when counter reaches 0
     pub fn resume(&self) {
         // Use fetch_update to atomically decrement only if > 0, avoiding u32 underflow
-        match self.pause_count.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-            if current > 0 { Some(current - 1) } else { None }
-        }) {
+        match self
+            .pause_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                if current > 0 {
+                    Some(current - 1)
+                } else {
+                    None
+                }
+            }) {
             Ok(prev) => debug!("Clipboard monitor resume (count: {})", prev - 1),
             Err(_) => warn!("Resume called when not paused"),
         }
@@ -185,9 +195,9 @@ impl CMHandler for MonitorHandler {
 
 /// 读取当前剪贴板内容
 fn read_clipboard_content() -> Option<ClipboardContent> {
-    use clipboard_rs::{Clipboard, ClipboardContext};
     use clipboard_rs::common::RustImage;
-    
+    use clipboard_rs::{Clipboard, ClipboardContext};
+
     let ctx = match ClipboardContext::new() {
         Ok(c) => c,
         Err(e) => {
@@ -208,14 +218,14 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
     if let Ok(img) = ctx.get_image() {
         let (width, height) = img.get_size();
         debug!("Got image from clipboard: {}x{}", width, height);
-        
+
         // Get PNG bytes directly from clipboard-rs
         if let Ok(png_buffer) = img.to_png() {
             let bytes: Vec<u8> = png_buffer.get_bytes().to_vec();
             debug!("Got PNG image: {} bytes", bytes.len());
             return Some(ClipboardContent::Image(bytes));
         }
-        
+
         warn!("Failed to convert image to PNG");
     }
 
