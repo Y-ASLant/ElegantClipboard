@@ -82,11 +82,16 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let has_update = is_newer(&latest_version, current_version);
 
-    // Find NSIS setup executable in release assets
+    // Find NSIS setup executable matching current architecture
+    let arch_suffix = match std::env::consts::ARCH {
+        "aarch64" => "arm64-setup.exe",
+        _ => "x64-setup.exe",
+    };
     let setup_asset = release
         .assets
         .iter()
-        .find(|a| a.name.ends_with("-setup.exe"));
+        .find(|a| a.name.ends_with(arch_suffix))
+        .or_else(|| release.assets.iter().find(|a| a.name.ends_with("-setup.exe")));
 
     let (download_url, file_name, file_size) = match setup_asset {
         Some(a) => (a.browser_download_url.clone(), a.name.clone(), a.size),

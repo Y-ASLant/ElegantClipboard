@@ -9,6 +9,14 @@ jobs:
   build-and-release:
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            rust-target: x86_64-pc-windows-msvc
+          - arch: arm64
+            rust-target: aarch64-pc-windows-msvc
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,11 +62,14 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          key: ${{ matrix.arch }}
 
       - name: Install dependencies
         run: npm ci
@@ -74,3 +85,4 @@ jobs:
           releaseBody: "See the assets to download and install."
           releaseDraft: true
           prerelease: false
+          args: --target ${{ matrix.rust-target }}

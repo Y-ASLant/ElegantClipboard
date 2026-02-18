@@ -215,16 +215,29 @@ pub fn simulate_paste() -> Result<(), String> {
 
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
-
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("Failed to press Ctrl: {}", e))?;
-    enigo
+
+    let click_result = enigo
         .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Failed to press V: {}", e))?;
-    enigo
+        .map_err(|e| format!("Failed to press V: {}", e));
+
+    let release_result = enigo
         .key(Key::Control, Direction::Release)
-        .map_err(|e| format!("Failed to release Ctrl: {}", e))?;
+        .map_err(|e| format!("Failed to release Ctrl: {}", e));
+
+    if let Err(click_error) = click_result {
+        if let Err(release_error) = release_result {
+            return Err(format!(
+                "{}; additionally failed to release Ctrl: {}",
+                click_error, release_error
+            ));
+        }
+        return Err(click_error);
+    }
+
+    release_result?;
 
     Ok(())
 }
@@ -244,12 +257,26 @@ pub fn simulate_paste() -> Result<(), String> {
     enigo
         .key(modifier, Direction::Press)
         .map_err(|e| format!("Failed to press modifier: {}", e))?;
-    enigo
+
+    let click_result = enigo
         .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Failed to press V: {}", e))?;
-    enigo
+        .map_err(|e| format!("Failed to press V: {}", e));
+
+    let release_result = enigo
         .key(modifier, Direction::Release)
-        .map_err(|e| format!("Failed to release modifier: {}", e))?;
+        .map_err(|e| format!("Failed to release modifier: {}", e));
+
+    if let Err(click_error) = click_result {
+        if let Err(release_error) = release_result {
+            return Err(format!(
+                "{}; additionally failed to release modifier: {}",
+                click_error, release_error
+            ));
+        }
+        return Err(click_error);
+    }
+
+    release_result?;
 
     Ok(())
 }
