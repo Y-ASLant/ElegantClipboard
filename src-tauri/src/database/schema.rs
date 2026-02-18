@@ -59,7 +59,8 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('language', 'zh-CN'),
     ('save_images', 'true'),
     ('save_html', 'true'),
-    ('save_rtf', 'false');
+    ('save_rtf', 'false'),
+    ('auto_cleanup_days', '30');
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

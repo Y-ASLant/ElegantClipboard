@@ -76,6 +76,7 @@ export function Settings() {
     data_path: "",
     max_history_count: 1000,
     max_content_size_kb: 1024,
+    auto_cleanup_days: 30,
     auto_start: false,
     admin_launch: false,
     is_running_as_admin: false,
@@ -135,6 +136,7 @@ export function Settings() {
   }, [
     settings.max_history_count,
     settings.max_content_size_kb,
+    settings.auto_cleanup_days,
     settings.auto_start,
     settings.admin_launch,
     settings.follow_cursor,
@@ -146,6 +148,7 @@ export function Settings() {
         dataPath,
         maxHistoryCount,
         maxContentSize,
+        autoCleanupDays,
         followCursor,
         autoStart,
         adminLaunch,
@@ -156,6 +159,7 @@ export function Settings() {
         invoke<string>("get_default_data_path"),
         invoke<string>("get_setting", { key: "max_history_count" }),
         invoke<string>("get_setting", { key: "max_content_size_kb" }),
+        invoke<string>("get_setting", { key: "auto_cleanup_days" }),
         invoke<string>("get_setting", { key: "follow_cursor" }),
         invoke<boolean>("is_autostart_enabled"),
         invoke<boolean>("is_admin_launch_enabled"),
@@ -168,6 +172,7 @@ export function Settings() {
         data_path: dataPath || "",
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
+        auto_cleanup_days: autoCleanupDays ? parseInt(autoCleanupDays) : 30,
         auto_start: autoStart,
         admin_launch: adminLaunch,
         is_running_as_admin: isRunningAsAdmin,
@@ -191,6 +196,10 @@ export function Settings() {
       await invoke("set_setting", {
         key: "max_content_size_kb",
         value: settings.max_content_size_kb.toString(),
+      });
+      await invoke("set_setting", {
+        key: "auto_cleanup_days",
+        value: settings.auto_cleanup_days.toString(),
       });
       await invoke("set_setting", {
         key: "follow_cursor",

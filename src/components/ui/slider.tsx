@@ -43,7 +43,7 @@ const Slider = React.forwardRef<
         "transition-all duration-150",
         "hover:scale-110 hover:shadow-lg",
         "disabled:pointer-events-none disabled:opacity-50",
-        "cursor-grab active:cursor-grabbing active:scale-105"
+        "active:scale-105"
       )}
     />
   </SliderPrimitive.Root>

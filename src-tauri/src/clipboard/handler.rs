@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 const DEFAULT_MAX_CONTENT_SIZE: usize = 1_048_576;
 const MAX_PREVIEW_LENGTH: usize = 200;
 const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
+const DEFAULT_AUTO_CLEANUP_DAYS: i64 = 30;
 
 /// 按字符边界截断超长内容
 fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
@@ -87,6 +88,15 @@ impl ClipboardHandler {
             .flatten()
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(DEFAULT_MAX_HISTORY_COUNT)
+    }
+
+    fn get_auto_cleanup_days(&self) -> i64 {
+        self.settings_repo
+            .get("auto_cleanup_days")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS)
     }
 
     /// 处理剪贴板内容，去重后存入数据库
@@ -170,6 +180,28 @@ impl ClipboardHandler {
                 }
                 Err(e) => {
                     warn!("Failed to enforce max history count: {}", e);
+                }
+            }
+        }
+
+        // 自动清理超过指定天数的旧记录
+        let auto_cleanup_days = self.get_auto_cleanup_days();
+        if auto_cleanup_days > 0 {
+            match self.repository.delete_older_than(auto_cleanup_days) {
+                Ok((deleted, image_paths)) => {
+                    for path in image_paths {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            debug!("Failed to delete old image file {}: {}", path, e);
+                        } else {
+                            debug!("Deleted old image file: {}", path);
+                        }
+                    }
+                    if deleted > 0 {
+                        info!("Auto-cleanup: removed {} items older than {} days", deleted, auto_cleanup_days);
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to auto-cleanup old items: {}", e);
                 }
             }
         }

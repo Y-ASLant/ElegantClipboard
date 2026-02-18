@@ -79,7 +79,7 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
         "settings" => {
             info!("Opening settings from tray");
-            open_settings_window_sync(app);
+            let _ = open_settings_window(app);
         }
         "restart" => {
             info!("Restarting application from tray");
@@ -99,14 +99,14 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
-/// Open settings window (sync version for tray menu)
-fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
-    // Check if settings window already exists
+/// Open or focus the settings window, centered on the same monitor as the main window.
+pub(crate) fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    // If settings window already exists, focus it
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        return;
+        return Ok(());
     }
 
     // Create new settings window
@@ -157,11 +157,16 @@ fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
         builder = builder.center();
     }
 
-    if let Ok(window) = builder.build() {
-        if let Some(pos) = phys_pos {
-            let _ = window.set_position(tauri::Position::Physical(pos));
-        }
+    let window = builder
+        .build()
+        .map_err(|e| format!("Failed to create settings window: {}", e))?;
+
+    // Apply physical position after build to bypass logical-to-physical conversion ambiguity
+    if let Some(pos) = phys_pos {
+        let _ = window.set_position(tauri::Position::Physical(pos));
     }
+
+    Ok(())
 }
 
 /// Update tray tooltip with item count

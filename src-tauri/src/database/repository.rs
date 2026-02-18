@@ -365,27 +365,31 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
-    #[allow(dead_code)]
-    pub fn delete_older_than(&self, days: i64) -> Result<i64, rusqlite::Error> {
+    /// 删除 N 天前的非置顶/非收藏条目，返回 (删除数, 关联图片路径)
+    pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
+
+        // Collect image paths before deleting
+        let mut stmt = conn.prepare(
+            "SELECT image_path FROM clipboard_items 
+             WHERE is_pinned = 0 AND is_favorite = 0 
+             AND image_path IS NOT NULL
+             AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')",
+        )?;
+        let image_paths: Vec<String> = stmt
+            .query_map(params![days], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
         let deleted = conn.execute(
             "DELETE FROM clipboard_items 
              WHERE is_pinned = 0 AND is_favorite = 0 
-             AND created_at < datetime('now', '-' || ?1 || ' days')",
+             AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')",
             params![days],
         )?;
-        Ok(deleted as i64)
-    }
 
-    #[allow(dead_code)]
-    pub fn get_non_protected_count(&self) -> Result<i64, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(count)
+        debug!("Auto-cleanup: deleted {} items older than {} days", deleted, days);
+        Ok((deleted as i64, image_paths))
     }
 
     /// 执行最大数量限制，返回 (删除数, 图片路径)
