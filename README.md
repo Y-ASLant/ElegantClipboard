@@ -178,15 +178,27 @@ cd ElegantClipboard
 # 安装依赖
 npm install
 
+# 仅构建前端静态资源（dist/）
+npm run build
+
 # 开发模式
 npm run tauri dev
 
-# 构建生产版本
+# 构建生产版本（默认仅当前机器架构）
 npm run tauri build
+
+# 分别构建 x64 / arm64 安装包（需执行两次）
+npm run tauri build -- --target x86_64-pc-windows-msvc
+npm run tauri build -- --target aarch64-pc-windows-msvc
 
 # 代码检查
 npm run lint
 ```
+
+说明：
+- `npm run build` 只会执行 `tsc && vite build`，用于前端资源构建，不会生成安装包。
+- 安装包由 `npm run tauri build` 生成；不指定 `--target` 时只构建当前环境对应架构。
+- 需要同时发布 `x64` 和 `arm64` 时，需分别执行两次带 `--target` 的构建命令（或在 CI 中分架构构建）。
 
 #### 版本管理
 

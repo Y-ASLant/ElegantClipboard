@@ -5,13 +5,14 @@ import {
   Alert16Regular,
 } from "@fluentui/react-icons";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
+import { logError } from "@/lib/logger";
 
 export function AboutTab() {
   const openUrl = async (url: string) => {
     try {
       await tauriOpenUrl(url);
     } catch (error) {
-      console.error("Failed to open URL:", error);
+      logError("Failed to open URL:", error);
     }
   };
 
@@ -92,3 +93,4 @@ export function AboutTab() {
     </>
   );
 }
+

@@ -91,9 +91,7 @@ pub async fn vacuum_database(state: State<'_, Arc<AppState>>) -> Result<(), Stri
 
 /// Open folder selection dialog (for settings window)
 #[tauri::command]
-pub async fn select_folder_for_settings(
-    app: tauri::AppHandle,
-) -> Result<Option<String>, String> {
+pub async fn select_folder_for_settings(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
 
     let result = app
@@ -133,8 +131,7 @@ pub async fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String>
 pub async fn enable_autostart(app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
 
-    if crate::admin_launch::is_admin_launch_enabled()
-        && crate::admin_launch::is_running_as_admin()
+    if crate::admin_launch::is_admin_launch_enabled() && crate::admin_launch::is_running_as_admin()
     {
         // 管理员模式：使用任务计划程序，清理注册表自启动
         crate::task_scheduler::create_autostart_task()?;
@@ -189,7 +186,12 @@ fn rgb_to_hsl_string(r: f64, g: f64, b: f64) -> String {
         h *= 60.0;
     }
 
-    format!("{} {}% {}%", h.round(), (s * 100.0).round(), (l * 100.0).round())
+    format!(
+        "{} {}% {}%",
+        h.round(),
+        (s * 100.0).round(),
+        (l * 100.0).round()
+    )
 }
 
 /// Read the current accent color from registry (sync helper)
@@ -199,7 +201,9 @@ fn read_accent_color_from_registry() -> Option<String> {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let accent_key = hkcu.open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent").ok()?;
+    let accent_key = hkcu
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent")
+        .ok()?;
     let color_value: u32 = accent_key.get_value("AccentColorMenu").ok()?;
     // ABGR format
     let r = (color_value & 0xFF) as f64;
@@ -235,9 +239,7 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
                     let ptr = lparam.0 as *const u16;
                     if !ptr.is_null() {
                         // Read null-terminated wide string from lParam
-                        let len = (0usize..256)
-                            .find(|&i| *ptr.add(i) == 0)
-                            .unwrap_or(0);
+                        let len = (0usize..256).find(|&i| *ptr.add(i) == 0).unwrap_or(0);
                         let slice = std::slice::from_raw_parts(ptr, len);
                         if slice == windows::core::w!("ImmersiveColorSet").as_wide() {
                             if let Some(handle) = WATCHER_APP_HANDLE.get() {
@@ -269,7 +271,10 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
                 class_name,
                 windows::core::w!(""),
                 WINDOW_STYLE::default(),
-                0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
                 None,
                 None,
                 None,

@@ -48,8 +48,8 @@ pub(super) fn set_clipboard_content(
 /// This avoids the expensive path of: image::open() → to_rgba8() → arboard::ImageData
 /// Instead, clipboard-rs handles the decode and platform conversion internally.
 fn set_clipboard_image(path: &str) -> Result<(), String> {
-    use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
     use clipboard_rs::common::RustImage;
+    use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
 
     let image = RustImageData::from_path(path)
         .map_err(|e| format!("Failed to load image from path: {}", e))?;
@@ -97,7 +97,8 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
         let valid = if let Some((bs, _)) = ci.next() {
             // Find byte_end by advancing keyword_lower.chars().count() more chars
             let kw_char_len = keyword_lower.chars().count();
-            let be = ci.nth(kw_char_len.saturating_sub(2))
+            let be = ci
+                .nth(kw_char_len.saturating_sub(2))
                 .map(|(b, _)| b)
                 .unwrap_or(text.len());
             // Cheap verification: the slice at this char position should lowercase-match
@@ -136,9 +137,15 @@ fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> 
     let char_indices: Vec<(usize, char)> = text.char_indices().collect();
     let n = char_indices.len();
     for i in 0..n {
-        if i + keyword_char_len > n { break; }
+        if i + keyword_char_len > n {
+            break;
+        }
         let bs = char_indices[i].0;
-        let be = if i + keyword_char_len < n { char_indices[i + keyword_char_len].0 } else { text.len() };
+        let be = if i + keyword_char_len < n {
+            char_indices[i + keyword_char_len].0
+        } else {
+            text.len()
+        };
         if text[bs..be].to_lowercase() == *keyword_lower {
             return Some(i);
         }
@@ -147,13 +154,19 @@ fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> 
 }
 
 /// Build the `...context...` snippet given char-level position info.
-fn build_context_snippet(text: &str, keyword_char_pos: usize, keyword_char_len: usize, max_len: usize) -> String {
+fn build_context_snippet(
+    text: &str,
+    keyword_char_pos: usize,
+    keyword_char_len: usize,
+    max_len: usize,
+) -> String {
     let char_indices: Vec<(usize, char)> = text.char_indices().collect();
     let text_char_count = char_indices.len();
 
     let context_before = max_len / 3;
     let start_char = keyword_char_pos.saturating_sub(context_before);
-    let end_char = (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
+    let end_char =
+        (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
 
     if end_char <= start_char {
         return text.chars().take(max_len).collect();
@@ -202,16 +215,29 @@ pub fn simulate_paste() -> Result<(), String> {
 
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
-
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("Failed to press Ctrl: {}", e))?;
-    enigo
+
+    let click_result = enigo
         .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Failed to press V: {}", e))?;
-    enigo
+        .map_err(|e| format!("Failed to press V: {}", e));
+
+    let release_result = enigo
         .key(Key::Control, Direction::Release)
-        .map_err(|e| format!("Failed to release Ctrl: {}", e))?;
+        .map_err(|e| format!("Failed to release Ctrl: {}", e));
+
+    if let Err(click_error) = click_result {
+        if let Err(release_error) = release_result {
+            return Err(format!(
+                "{}; additionally failed to release Ctrl: {}",
+                click_error, release_error
+            ));
+        }
+        return Err(click_error);
+    }
+
+    release_result?;
 
     Ok(())
 }
@@ -231,12 +257,26 @@ pub fn simulate_paste() -> Result<(), String> {
     enigo
         .key(modifier, Direction::Press)
         .map_err(|e| format!("Failed to press modifier: {}", e))?;
-    enigo
+
+    let click_result = enigo
         .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Failed to press V: {}", e))?;
-    enigo
+        .map_err(|e| format!("Failed to press V: {}", e));
+
+    let release_result = enigo
         .key(modifier, Direction::Release)
-        .map_err(|e| format!("Failed to release modifier: {}", e))?;
+        .map_err(|e| format!("Failed to release modifier: {}", e));
+
+    if let Err(click_error) = click_result {
+        if let Err(release_error) = release_result {
+            return Err(format!(
+                "{}; additionally failed to release modifier: {}",
+                click_error, release_error
+            ));
+        }
+        return Err(click_error);
+    }
+
+    release_result?;
 
     Ok(())
 }
@@ -275,7 +315,9 @@ pub async fn get_clipboard_items(
         for item in &mut items {
             if let Some(ref text) = item.text_content {
                 // Only replace preview if keyword is NOT in the original preview
-                let preview_has_match = item.preview.as_ref()
+                let preview_has_match = item
+                    .preview
+                    .as_ref()
                     .map(|p| p.to_lowercase().contains(&keyword_lower))
                     .unwrap_or(false);
                 if !preview_has_match {
@@ -354,10 +396,7 @@ pub async fn move_clipboard_item(
 
 /// Delete clipboard item (also deletes associated image file)
 #[tauri::command]
-pub async fn delete_clipboard_item(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
 
     if let Ok(Some(item)) = repo.get_by_id(id) {
@@ -401,14 +440,34 @@ pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, Strin
     Ok(deleted)
 }
 
+// ============ Edit Commands ============
+
+/// Update text content of a clipboard item (edit feature)
+/// Returns true if the item was deleted (empty content), false if updated.
+#[tauri::command]
+pub async fn update_text_content(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+    new_text: String,
+) -> Result<bool, String> {
+    let repo = ClipboardRepository::new(&state.db);
+    if new_text.trim().is_empty() {
+        repo.delete(id).map_err(|e| e.to_string())?;
+        debug!("Deleted empty item {}", id);
+        Ok(true)
+    } else {
+        repo.update_text_content(id, &new_text)
+            .map_err(|e| e.to_string())?;
+        debug!("Updated text content for item {}", id);
+        Ok(false)
+    }
+}
+
 // ============ Copy & Paste Commands ============
 
 /// Copy item to system clipboard
 #[tauri::command]
-pub async fn copy_to_clipboard(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
     let item = repo
         .get_by_id(id)

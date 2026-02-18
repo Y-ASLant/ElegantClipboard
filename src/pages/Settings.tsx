@@ -23,6 +23,8 @@ import { ThemeTab } from "@/components/settings/ThemeTab";
 import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { WindowTitleBar } from "@/components/WindowTitleBar";
+import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
@@ -74,6 +76,7 @@ export function Settings() {
     data_path: "",
     max_history_count: 1000,
     max_content_size_kb: 1024,
+    auto_cleanup_days: 30,
     auto_start: false,
     admin_launch: false,
     is_running_as_admin: false,
@@ -96,7 +99,9 @@ export function Settings() {
     initTheme().then(async () => {
       const win = getCurrentWindow();
       document.body.getBoundingClientRect();
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await new Promise((r) =>
+        requestAnimationFrame(() => requestAnimationFrame(r)),
+      );
       win.show();
       win.setFocus();
       await new Promise((r) => requestAnimationFrame(r));
@@ -110,7 +115,7 @@ export function Settings() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         const hasOverlay = document.querySelector(
-          '[role="dialog"], [data-radix-popper-content-wrapper]'
+          '[role="dialog"], [data-radix-popper-content-wrapper]',
         );
         if (!hasOverlay) {
           getCurrentWindow().close();
@@ -131,6 +136,7 @@ export function Settings() {
   }, [
     settings.max_history_count,
     settings.max_content_size_kb,
+    settings.auto_cleanup_days,
     settings.auto_start,
     settings.admin_launch,
     settings.follow_cursor,
@@ -142,6 +148,7 @@ export function Settings() {
         dataPath,
         maxHistoryCount,
         maxContentSize,
+        autoCleanupDays,
         followCursor,
         autoStart,
         adminLaunch,
@@ -152,6 +159,7 @@ export function Settings() {
         invoke<string>("get_default_data_path"),
         invoke<string>("get_setting", { key: "max_history_count" }),
         invoke<string>("get_setting", { key: "max_content_size_kb" }),
+        invoke<string>("get_setting", { key: "auto_cleanup_days" }),
         invoke<string>("get_setting", { key: "follow_cursor" }),
         invoke<boolean>("is_autostart_enabled"),
         invoke<boolean>("is_admin_launch_enabled"),
@@ -164,6 +172,7 @@ export function Settings() {
         data_path: dataPath || "",
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
+        auto_cleanup_days: autoCleanupDays ? parseInt(autoCleanupDays) : 30,
         auto_start: autoStart,
         admin_launch: adminLaunch,
         is_running_as_admin: isRunningAsAdmin,
@@ -173,7 +182,7 @@ export function Settings() {
       });
       settingsLoadedRef.current = true;
     } catch (error) {
-      console.error("Failed to load settings:", error);
+      logError("Failed to load settings:", error);
     }
   };
 
@@ -187,6 +196,10 @@ export function Settings() {
       await invoke("set_setting", {
         key: "max_content_size_kb",
         value: settings.max_content_size_kb.toString(),
+      });
+      await invoke("set_setting", {
+        key: "auto_cleanup_days",
+        value: settings.auto_cleanup_days.toString(),
       });
       await invoke("set_setting", {
         key: "follow_cursor",
@@ -206,69 +219,21 @@ export function Settings() {
         await invoke("disable_admin_launch");
       }
     } catch (error) {
-      console.error("Failed to save settings:", error);
+      logError("Failed to save settings:", error);
     }
   };
 
   return (
-    <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3", !themeReady && "[&_*]:!transition-none")}>
-      {/* Title Bar Card */}
-      <Card className="shrink-0">
-        <div
-          className="h-11 flex items-center justify-between px-4 select-none"
-          data-tauri-drag-region
-        >
-          <div className="flex items-center gap-3">
-            <Settings16Filled className="w-5 h-5 text-muted-foreground" />
-            <span className="text-sm font-semibold">设置</span>
-          </div>
-          <div
-            className="flex gap-1"
-            style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-          >
-            <button
-              onClick={() => getCurrentWindow().minimize()}
-              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-colors"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect
-                  x="2"
-                  y="5.5"
-                  width="8"
-                  height="1"
-                  rx="0.5"
-                  fill="currentColor"
-                />
-              </svg>
-            </button>
-            <button
-              onClick={() => getCurrentWindow().close()}
-              className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-colors"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  d="M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </Card>
+    <div
+      className={cn(
+        "h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3",
+        !themeReady && "[&_*]:!transition-none",
+      )}
+    >
+      <WindowTitleBar
+        icon={<Settings16Filled className="w-5 h-5 text-muted-foreground" />}
+        title="设置"
+      />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden gap-3">
@@ -284,7 +249,7 @@ export function Settings() {
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-"w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
+                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
                         activeTab === item.id
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -298,14 +263,20 @@ export function Settings() {
               </nav>
               <div className="pt-2 mt-2 border-t px-2 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">版本号</span>
-                  <span className="text-[11px] font-medium text-primary">v{appVersion}</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    版本号
+                  </span>
+                  <span className="text-[11px] font-medium text-primary">
+                    v{appVersion}
+                  </span>
                 </div>
                 <button
                   onClick={() => setUpdateDialogOpen(true)}
                   className="flex items-center justify-between w-full group"
                 >
-                  <span className="text-[11px] text-muted-foreground">检查更新</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    检查更新
+                  </span>
                   <ArrowSync16Regular className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                 </button>
               </div>
@@ -315,7 +286,10 @@ export function Settings() {
 
         {/* Right Content - Full width with scrollbar at edge */}
         {activeTab === "about" ? (
-          <div key="about" className="flex-1 flex flex-col gap-3 animate-settings-in">
+          <div
+            key="about"
+            className="flex-1 flex flex-col gap-3 animate-settings-in"
+          >
             <AboutTab />
           </div>
         ) : (
@@ -380,7 +354,11 @@ export function Settings() {
           </ScrollArea>
         )}
       </div>
-      <UpdateDialog open={updateDialogOpen} onOpenChange={setUpdateDialogOpen} />
+      <UpdateDialog
+        open={updateDialogOpen}
+        onOpenChange={setUpdateDialogOpen}
+      />
     </div>
   );
 }
+

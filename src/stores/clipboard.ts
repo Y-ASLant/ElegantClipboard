@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { logError } from "@/lib/logger";
 
 export interface ClipboardItem {
   id: number;
@@ -91,7 +92,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }
     } catch (error) {
       if (get()._fetchId === fetchId) {
-        console.error("Failed to fetch items:", error);
+        logError("Failed to fetch items:", error);
         set({ isLoading: false });
       }
     }
@@ -102,7 +103,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       const count = await invoke<number>("get_clipboard_count", {});
       set({ totalCount: count });
     } catch (error) {
-      console.error("Failed to fetch count:", error);
+      logError("Failed to fetch count:", error);
     }
   },
 
@@ -127,7 +128,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         ),
       }));
     } catch (error) {
-      console.error("Failed to toggle pin:", error);
+      logError("Failed to toggle pin:", error);
     }
   },
 
@@ -140,7 +141,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         ),
       }));
     } catch (error) {
-      console.error("Failed to toggle favorite:", error);
+      logError("Failed to toggle favorite:", error);
     }
   },
 
@@ -150,7 +151,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       // Refresh to get updated order
       await get().refresh();
     } catch (error) {
-      console.error("Failed to move item:", error);
+      logError("Failed to move item:", error);
     }
   },
 
@@ -162,7 +163,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         totalCount: state.totalCount - 1,
       }));
     } catch (error) {
-      console.error("Failed to delete item:", error);
+      logError("Failed to delete item:", error);
     }
   },
 
@@ -170,7 +171,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       await invoke("copy_to_clipboard", { id });
     } catch (error) {
-      console.error("Failed to copy to clipboard:", error);
+      logError("Failed to copy to clipboard:", error);
     }
   },
 
@@ -178,7 +179,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       await invoke("paste_content", { id });
     } catch (error) {
-      console.error("Failed to paste content:", error);
+      logError("Failed to paste content:", error);
     }
   },
 
@@ -187,7 +188,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       await invoke<number>("clear_history");
       await get().refresh();
     } catch (error) {
-      console.error("Failed to clear history:", error);
+      logError("Failed to clear history:", error);
     }
   },
 
@@ -211,3 +212,4 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     return unlisten;
   },
 }));
+

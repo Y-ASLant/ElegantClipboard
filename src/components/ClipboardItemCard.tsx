@@ -14,6 +14,7 @@ import {
   TextDescription16Regular,
   ClipboardPaste16Regular,
   ArrowDownload16Regular,
+  Edit16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -51,6 +52,7 @@ import {
   getFileNameFromPath,
   parseFilePaths,
 } from "@/lib/format";
+import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
@@ -371,7 +373,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       try {
         await invoke("show_in_explorer", { path: filePaths[0] });
       } catch (error) {
-        console.error("Failed to show in explorer:", error);
+        logError("Failed to show in explorer:", error);
       }
     }
   };
@@ -380,7 +382,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("paste_as_path", { id: item.id });
     } catch (error) {
-      console.error("Failed to paste as path:", error);
+      logError("Failed to paste as path:", error);
     }
   };
 
@@ -398,7 +400,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       setFileListItems(items);
       setDetailsOpen(true);
     } catch (error) {
-      console.error("Failed to get file details:", error);
+      logError("Failed to get file details:", error);
     }
   };
 
@@ -410,7 +412,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("save_file_as", { sourcePath });
     } catch (error) {
-      console.error("Failed to save file:", error);
+      logError("Failed to save file:", error);
     }
   };
 
@@ -419,7 +421,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("show_in_explorer", { path: item.image_path });
     } catch (error) {
-      console.error("Failed to show in explorer:", error);
+      logError("Failed to show in explorer:", error);
     }
   };
 
@@ -503,9 +505,26 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     </div>
   );
 
-  // 文件/图片上下文菜单配置
+  const handleEdit = async () => {
+    try {
+      await invoke("open_text_editor_window", { id: item.id });
+    } catch (error) {
+      logError("Failed to open editor:", error);
+    }
+  };
+
+  // 上下文菜单配置
   const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
     if (isDragOverlay) return null;
+    // 文本类内容（text/html/rtf）可编辑
+    if (item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf") {
+      return [
+        { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },
+        { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
+        { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
+        { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
+      ];
+    }
     if (item.content_type === "files") {
       return [
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },
@@ -562,3 +581,4 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   return cardContent;
 }, arePropsEqual);
+

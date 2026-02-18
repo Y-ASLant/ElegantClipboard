@@ -37,7 +37,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 
 # Async runtime (only the features Tauri commands actually need)
 tokio = { version = "1", features = ["rt", "time"] }
@@ -56,13 +56,13 @@ parking_lot = "0.12"
 rayon = "1.10"
 
 # HTTP client (for update checker)
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 
 # Image handling (PNG-only for clipboard screenshots)
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Directories
-dirs = "5"
+dirs = "6"
 
 # Cross-platform clipboard
 arboard = "3"
@@ -92,4 +92,3 @@ windows = { version = "0.61", features = [
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"
 windows-core = "0.61"
-

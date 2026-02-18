@@ -1,8 +1,8 @@
-mod schema;
 mod repository;
+mod schema;
 
-pub use schema::*;
 pub use repository::*;
+pub use schema::*;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OpenFlags};
@@ -25,7 +25,7 @@ impl Database {
 
         let write_conn = Connection::open(&db_path)?;
         Self::configure_connection(&write_conn, false)?;
-        
+
         let read_conn = Connection::open_with_flags(
             &db_path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -51,7 +51,7 @@ impl Database {
                 "PRAGMA query_only = ON;
                  PRAGMA cache_size = -32000;
                  PRAGMA temp_store = MEMORY;
-                 PRAGMA mmap_size = 268435456;"
+                 PRAGMA mmap_size = 268435456;",
             )?;
         } else {
             conn.execute_batch(
@@ -60,7 +60,7 @@ impl Database {
                  PRAGMA cache_size = -64000;
                  PRAGMA temp_store = MEMORY;
                  PRAGMA mmap_size = 268435456;
-                 PRAGMA foreign_keys = ON;"
+                 PRAGMA foreign_keys = ON;",
             )?;
         }
         Ok(())
@@ -68,15 +68,15 @@ impl Database {
 
     fn init_schema(&self) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
-        
+
         Self::run_migrations(&conn)?;
-        
+
         conn.execute_batch(SCHEMA_SQL)?;
         info!("Database schema initialized");
-        
+
         Ok(())
     }
-    
+
     /// 数据库迁移（在 schema 创建前执行）
     fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         let table_exists: bool = conn.query_row(
@@ -100,7 +100,7 @@ impl Database {
             info!("Migrating database: adding sort_order column");
             conn.execute_batch(
                 "ALTER TABLE clipboard_items ADD COLUMN sort_order INTEGER DEFAULT 0;
-                 UPDATE clipboard_items SET sort_order = id;"
+                 UPDATE clipboard_items SET sort_order = id;",
             )?;
             info!("Migration complete: sort_order column added");
         }
@@ -118,7 +118,7 @@ impl Database {
                 "DROP TRIGGER IF EXISTS clipboard_items_ai;
                  DROP TRIGGER IF EXISTS clipboard_items_ad;
                  DROP TRIGGER IF EXISTS clipboard_items_au;
-                 DROP TABLE IF EXISTS clipboard_fts;"
+                 DROP TABLE IF EXISTS clipboard_fts;",
             )?;
             info!("Migration complete: FTS5 removed");
         }
@@ -150,7 +150,7 @@ impl Database {
             info!("Migrating database: adding image_width and image_height columns");
             conn.execute_batch(
                 "ALTER TABLE clipboard_items ADD COLUMN image_width INTEGER;
-                 ALTER TABLE clipboard_items ADD COLUMN image_height INTEGER;"
+                 ALTER TABLE clipboard_items ADD COLUMN image_height INTEGER;",
             )?;
             info!("Migration complete: image_width and image_height columns added");
         }
@@ -166,7 +166,7 @@ impl Database {
             info!("Migrating database: adding source_app_name and source_app_icon columns");
             conn.execute_batch(
                 "ALTER TABLE clipboard_items ADD COLUMN source_app_name TEXT;
-                 ALTER TABLE clipboard_items ADD COLUMN source_app_icon TEXT;"
+                 ALTER TABLE clipboard_items ADD COLUMN source_app_icon TEXT;",
             )?;
             info!("Migration complete: source_app columns added");
         }
@@ -213,13 +213,11 @@ impl Clone for Database {
 }
 
 pub fn get_default_db_path() -> PathBuf {
-    let app_data = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let app_data = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     app_data.join("ElegantClipboard").join("clipboard.db")
 }
 
 pub fn get_default_images_path() -> PathBuf {
-    let app_data = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let app_data = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     app_data.join("ElegantClipboard").join("images")
 }

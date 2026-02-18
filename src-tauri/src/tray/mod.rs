@@ -24,12 +24,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
     // Build menu
     let menu = Menu::with_items(
         app,
-        &[
-            &settings_item,
-            &restart_item,
-            &separator,
-            &quit_item,
-        ],
+        &[&settings_item, &restart_item, &separator, &quit_item],
     )?;
 
     // Create tray icon
@@ -54,7 +49,9 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         let _ = window.hide();
                         // Disable mouse monitoring when hiding
                         crate::input_monitor::disable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+                        crate::keyboard_hook::set_window_state(
+                            crate::keyboard_hook::WindowState::Hidden,
+                        );
                         // Emit event to frontend so it can reset state while hidden
                         let _ = window.emit("window-hidden", ());
                     } else {
@@ -62,7 +59,9 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         let _ = window.set_focus();
                         // Enable mouse monitoring when showing
                         crate::input_monitor::enable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
+                        crate::keyboard_hook::set_window_state(
+                            crate::keyboard_hook::WindowState::Visible,
+                        );
                         // Emit event to frontend for cache invalidation
                         let _ = window.emit("window-shown", ());
                     }
@@ -80,11 +79,17 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     match id {
         "settings" => {
             info!("Opening settings from tray");
-            open_settings_window_sync(app);
+            let _ = open_settings_window(app);
         }
         "restart" => {
             info!("Restarting application from tray");
-            app.restart();
+            // Use the same UAC-aware restart logic as the restart_app command
+            // (app.restart() bypasses admin_launch and won't elevate properly)
+            if crate::admin_launch::restart_app() {
+                app.exit(0);
+            } else {
+                app.restart();
+            }
         }
         "quit" => {
             info!("Quitting application from tray");
@@ -94,14 +99,14 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     }
 }
 
-/// Open settings window (sync version for tray menu)
-fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
-    // Check if settings window already exists
+/// Open or focus the settings window, centered on the same monitor as the main window.
+pub(crate) fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    // If settings window already exists, focus it
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        return;
+        return Ok(());
     }
 
     // Create new settings window
@@ -128,8 +133,10 @@ fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
                 monitors.into_iter().find(|m| {
                     let mp = m.position();
                     let ms = m.size();
-                    center_x >= mp.x && center_x < mp.x + ms.width as i32
-                        && center_y >= mp.y && center_y < mp.y + ms.height as i32
+                    center_x >= mp.x
+                        && center_x < mp.x + ms.width as i32
+                        && center_y >= mp.y
+                        && center_y < mp.y + ms.height as i32
                 })
             }) {
                 let mp = monitor.position();
@@ -150,11 +157,16 @@ fn open_settings_window_sync<R: Runtime>(app: &AppHandle<R>) {
         builder = builder.center();
     }
 
-    if let Ok(window) = builder.build() {
-        if let Some(pos) = phys_pos {
-            let _ = window.set_position(tauri::Position::Physical(pos));
-        }
+    let window = builder
+        .build()
+        .map_err(|e| format!("Failed to create settings window: {}", e))?;
+
+    // Apply physical position after build to bypass logical-to-physical conversion ambiguity
+    if let Some(pos) = phys_pos {
+        let _ = window.set_position(tauri::Position::Physical(pos));
     }
+
+    Ok(())
 }
 
 /// Update tray tooltip with item count

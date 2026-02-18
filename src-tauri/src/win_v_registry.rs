@@ -1,5 +1,5 @@
 //! Windows Registry management for disabling/enabling system Win+V hotkey
-//! 
+//!
 //! This approach completely disables the Windows built-in clipboard history
 //! by modifying the registry, which is more reliable than keyboard hooks.
 

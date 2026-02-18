@@ -79,13 +79,17 @@ impl ClipboardRepository {
     pub fn insert(&self, item: NewClipboardItem) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
 
-        let file_paths_json = item.file_paths.map(|paths| serde_json::to_string(&paths).unwrap_or_default());
+        let file_paths_json = item
+            .file_paths
+            .map(|paths| serde_json::to_string(&paths).unwrap_or_default());
 
-        let max_sort_order: i64 = conn.query_row(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let max_sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         let new_sort_order = max_sort_order + 1;
 
         conn.execute(
@@ -111,7 +115,10 @@ impl ClipboardRepository {
         )?;
 
         let id = conn.last_insert_rowid();
-        debug!("Inserted clipboard item with id: {}, sort_order: {}", id, new_sort_order);
+        debug!(
+            "Inserted clipboard item with id: {}, sort_order: {}",
+            id, new_sort_order
+        );
         Ok(id)
     }
 
@@ -129,11 +136,13 @@ impl ClipboardRepository {
     pub fn touch_by_hash(&self, hash: &str) -> Result<Option<i64>, rusqlite::Error> {
         let conn = self.write_conn.lock();
 
-        let max_sort_order: i64 = conn.query_row(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let max_sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
 
         conn.execute(
             "UPDATE clipboard_items 
@@ -191,11 +200,17 @@ impl ClipboardRepository {
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
 
-        let is_searching = options.search.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-        let columns = if is_searching { Self::SEARCH_COLUMNS } else { Self::LIST_COLUMNS };
-        let mut sql = format!(
-            "SELECT {} FROM clipboard_items", columns
-        );
+        let is_searching = options
+            .search
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let columns = if is_searching {
+            Self::SEARCH_COLUMNS
+        } else {
+            Self::LIST_COLUMNS
+        };
+        let mut sql = format!("SELECT {} FROM clipboard_items", columns);
         let mut conditions = Vec::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -203,9 +218,16 @@ impl ClipboardRepository {
         if let Some(ref search) = options.search {
             if !search.is_empty() {
                 conditions.push(
-                    "(text_content LIKE ? ESCAPE '\\' OR file_paths LIKE ? ESCAPE '\\')".to_string(),
+                    "(text_content LIKE ? ESCAPE '\\' OR file_paths LIKE ? ESCAPE '\\')"
+                        .to_string(),
                 );
-                let pattern = format!("%{}%", search.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+                let pattern = format!(
+                    "%{}%",
+                    search
+                        .replace('\\', "\\\\")
+                        .replace('%', "\\%")
+                        .replace('_', "\\_")
+                );
                 params_vec.push(Box::new(pattern.clone()));
                 params_vec.push(Box::new(pattern));
             }
@@ -238,7 +260,8 @@ impl ClipboardRepository {
             params_vec.push(Box::new(options.offset.unwrap_or(0)));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let items = stmt
             .query_map(params_refs.as_slice(), Self::row_to_item)?
@@ -250,7 +273,7 @@ impl ClipboardRepository {
 
     pub fn count(&self, options: QueryOptions) -> Result<i64, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        
+
         let mut sql = String::from("SELECT COUNT(*) FROM clipboard_items");
         let mut conditions = Vec::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -273,7 +296,8 @@ impl ClipboardRepository {
             sql.push_str(&conditions.join(" AND "));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
         let count: i64 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
         Ok(count)
     }
@@ -284,13 +308,13 @@ impl ClipboardRepository {
             "UPDATE clipboard_items SET is_pinned = NOT is_pinned WHERE id = ?1",
             params![id],
         )?;
-        
+
         let pinned: bool = conn.query_row(
             "SELECT is_pinned FROM clipboard_items WHERE id = ?1",
             params![id],
             |row| row.get(0),
         )?;
-        
+
         Ok(pinned)
     }
 
@@ -300,13 +324,13 @@ impl ClipboardRepository {
             "UPDATE clipboard_items SET is_favorite = NOT is_favorite WHERE id = ?1",
             params![id],
         )?;
-        
+
         let favorite: bool = conn.query_row(
             "SELECT is_favorite FROM clipboard_items WHERE id = ?1",
             params![id],
             |row| row.get(0),
         )?;
-        
+
         Ok(favorite)
     }
 
@@ -322,7 +346,7 @@ impl ClipboardRepository {
         let conn = self.read_conn.lock();
         let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items 
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL"
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL",
         )?;
         let paths = stmt
             .query_map([], |row| row.get::<_, String>(0))?
@@ -341,27 +365,31 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
-    #[allow(dead_code)]
-    pub fn delete_older_than(&self, days: i64) -> Result<i64, rusqlite::Error> {
+    /// 删除 N 天前的非置顶/非收藏条目，返回 (删除数, 关联图片路径)
+    pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
+
+        // Collect image paths before deleting
+        let mut stmt = conn.prepare(
+            "SELECT image_path FROM clipboard_items 
+             WHERE is_pinned = 0 AND is_favorite = 0 
+             AND image_path IS NOT NULL
+             AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')",
+        )?;
+        let image_paths: Vec<String> = stmt
+            .query_map(params![days], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
         let deleted = conn.execute(
             "DELETE FROM clipboard_items 
              WHERE is_pinned = 0 AND is_favorite = 0 
-             AND created_at < datetime('now', '-' || ?1 || ' days')",
+             AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')",
             params![days],
         )?;
-        Ok(deleted as i64)
-    }
 
-    #[allow(dead_code)]
-    pub fn get_non_protected_count(&self) -> Result<i64, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(count)
+        debug!("Auto-cleanup: deleted {} items older than {} days", deleted, days);
+        Ok((deleted as i64, image_paths))
     }
 
     /// 执行最大数量限制，返回 (删除数, 图片路径)
@@ -371,7 +399,7 @@ impl ClipboardRepository {
         }
 
         let conn = self.write_conn.lock();
-        
+
         let current_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
             [],
@@ -383,18 +411,18 @@ impl ClipboardRepository {
         }
 
         let to_delete = current_count - max_count;
-        
+
         let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items 
              WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL
              ORDER BY created_at ASC 
-             LIMIT ?1"
+             LIMIT ?1",
         )?;
         let image_paths: Vec<String> = stmt
             .query_map(params![to_delete], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
-        
+
         let deleted = conn.execute(
             "DELETE FROM clipboard_items WHERE id IN (
                 SELECT id FROM clipboard_items 
@@ -409,36 +437,60 @@ impl ClipboardRepository {
         Ok((deleted as i64, image_paths))
     }
 
+    /// 更新文本内容（编辑功能）
+    pub fn update_text_content(&self, id: i64, new_text: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let preview: String = new_text.chars().take(200).collect();
+        let byte_size = new_text.len() as i64;
+        let char_count = new_text.chars().count() as i64;
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"text:");
+        hasher.update(new_text.as_bytes());
+        let content_hash = hasher.finalize().to_hex().to_string();
+
+        // Clear html/rtf content and downgrade to text type — formatted content
+        // is no longer valid after plain-text editing.
+        conn.execute(
+            "UPDATE clipboard_items SET text_content = ?1, preview = ?2, content_hash = ?3, \
+             byte_size = ?4, char_count = ?5, content_type = 'text', \
+             html_content = NULL, rtf_content = NULL WHERE id = ?6",
+            params![new_text, preview, content_hash, byte_size, char_count, id],
+        )?;
+        debug!("Updated text content for item {}", id);
+        Ok(())
+    }
+
     /// 交换两个条目的排序位置
     pub fn move_item_by_id(&self, from_id: i64, to_id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
-        
+
         let from_sort_order: i64 = conn.query_row(
             "SELECT sort_order FROM clipboard_items WHERE id = ?1",
             params![from_id],
             |row| row.get(0),
         )?;
-        
+
         let to_sort_order: i64 = conn.query_row(
             "SELECT sort_order FROM clipboard_items WHERE id = ?1",
             params![to_id],
             |row| row.get(0),
         )?;
-        
+
         conn.execute(
             "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2",
             params![to_sort_order, from_id],
         )?;
-        
+
         conn.execute(
             "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2",
             params![from_sort_order, to_id],
         )?;
-        
-        debug!("Moved item {} (sort_order: {} -> {}) with item {} (sort_order: {} -> {})",
-            from_id, from_sort_order, to_sort_order,
-            to_id, to_sort_order, from_sort_order);
-        
+
+        debug!(
+            "Moved item {} (sort_order: {} -> {}) with item {} (sort_order: {} -> {})",
+            from_id, from_sort_order, to_sort_order, to_id, to_sort_order, from_sort_order
+        );
+
         Ok(())
     }
 

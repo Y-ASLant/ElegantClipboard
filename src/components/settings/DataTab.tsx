@@ -18,11 +18,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { logError } from "@/lib/logger";
 
 export interface DataSettings {
   data_path: string;
   max_history_count: number;
   max_content_size_kb: number;
+  auto_cleanup_days: number;
 }
 
 interface DataTabProps {
@@ -100,7 +102,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         }
       }
     } catch (error) {
-      console.error("Failed to select folder:", error);
+      logError("Failed to select folder:", error);
     }
   };
 
@@ -149,7 +151,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     try {
       await invoke("open_data_folder");
     } catch (error) {
-      console.error("Failed to open folder:", error);
+      logError("Failed to open folder:", error);
     }
   };
 
@@ -162,7 +164,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         setMigrationDialogOpen(true);
       }
     } catch (error) {
-      console.error("Failed to reset path:", error);
+      logError("Failed to reset path:", error);
     }
   };
 
@@ -301,6 +303,25 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
                 设为 0 表示无限制
               </p>
             </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">自动清理天数</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.auto_cleanup_days === 0 ? "不自动清理" : `${settings.auto_cleanup_days} 天`}
+                </span>
+              </div>
+              <Slider
+                value={[settings.auto_cleanup_days]}
+                onValueChange={(value) => onSettingsChange({ ...settings, auto_cleanup_days: value[0] })}
+                min={0}
+                max={365}
+                step={5}
+              />
+              <p className="text-xs text-muted-foreground">
+                自动删除超过指定天数的历史记录，设为 0 表示不自动清理
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -362,3 +383,4 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     </>
   );
 }
+
