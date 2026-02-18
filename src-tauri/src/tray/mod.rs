@@ -83,7 +83,13 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
         }
         "restart" => {
             info!("Restarting application from tray");
-            app.restart();
+            // Use the same UAC-aware restart logic as the restart_app command
+            // (app.restart() bypasses admin_launch and won't elevate properly)
+            if crate::admin_launch::restart_app() {
+                app.exit(0);
+            } else {
+                app.restart();
+            }
         }
         "quit" => {
             info!("Quitting application from tray");
