@@ -98,7 +98,7 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
             // Find byte_end by advancing keyword_lower.chars().count() more chars
             let kw_char_len = keyword_lower.chars().count();
             let be = ci
-                .nth(kw_char_len.saturating_sub(2))
+                .nth(kw_char_len.saturating_sub(1))
                 .map(|(b, _)| b)
                 .unwrap_or(text.len());
             // Cheap verification: the slice at this char position should lowercase-match

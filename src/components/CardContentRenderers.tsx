@@ -597,6 +597,7 @@ export const FileContent = memo(function FileContent({
       <CardFooter
         metaItems={metaItems}
         index={index}
+        showBadge={showBadge}
         isDragOverlay={isDragOverlay}
         sourceAppName={sourceAppName}
         sourceAppIcon={sourceAppIcon}

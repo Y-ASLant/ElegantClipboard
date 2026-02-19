@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   ChevronDown16Regular,
   ChevronUp16Regular,
@@ -31,6 +31,25 @@ type ShortcutEditTarget =
 const QUICK_PASTE_SLOT_COUNT = 9;
 const QUICK_PASTE_EMPTY_LABEL = "点击设置快捷键";
 
+/** Maps KeyboardEvent.code to shortcut key name (extracted to avoid per-keydown allocation) */
+const KEY_CODE_MAP: Record<string, string> = {
+  Space: "Space",
+  Tab: "Tab",
+  Enter: "Enter",
+  Backspace: "Backspace",
+  Delete: "Delete",
+  Escape: "Esc",
+  Home: "Home",
+  End: "End",
+  PageUp: "PageUp",
+  PageDown: "PageDown",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  Backquote: "`",
+};
+
 interface ShortcutsTabProps {
   settings: ShortcutSettings;
   onSettingsChange: (settings: ShortcutSettings) => void;
@@ -58,8 +77,6 @@ export function ShortcutsTab({
   const [loadingSlot, setLoadingSlot] = useState<number | null>(null);
   const [slotErrors, setSlotErrors] = useState<Record<number, string>>({});
   const [quickPasteExpanded, setQuickPasteExpanded] = useState(false);
-  const [confirmDisableSlot, setConfirmDisableSlot] = useState<number | null>(null);
-  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Handle keyboard event for shortcut recording
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -83,24 +100,7 @@ export function ShortcutsTab({
     } else if (e.code.startsWith("F") && !isNaN(Number(e.code.slice(1)))) {
       key = e.code; // F1-F12
     } else {
-      const keyMap: Record<string, string> = {
-        Space: "Space",
-        Tab: "Tab",
-        Enter: "Enter",
-        Backspace: "Backspace",
-        Delete: "Delete",
-        Escape: "Esc",
-        Home: "Home",
-        End: "End",
-        PageUp: "PageUp",
-        PageDown: "PageDown",
-        ArrowUp: "Up",
-        ArrowDown: "Down",
-        ArrowLeft: "Left",
-        ArrowRight: "Right",
-        Backquote: "`",
-      };
-      key = keyMap[e.code] || "";
+      key = KEY_CODE_MAP[e.code] || "";
     }
 
     if (key && parts.length > 0) {
@@ -150,12 +150,6 @@ export function ShortcutsTab({
     };
   }, []);
 
-  // Auto-reset confirm disable state after 3s
-  useEffect(() => {
-    return () => {
-      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-    };
-  }, []);
 
   const startRecording = () => {
     setRecordingShortcut(true);
@@ -260,16 +254,6 @@ export function ShortcutsTab({
   };
 
   const handleDisableSlot = (idx: number) => {
-    // Two-click confirmation pattern
-    if (confirmDisableSlot !== idx) {
-      setConfirmDisableSlot(idx);
-      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-      confirmTimerRef.current = setTimeout(() => setConfirmDisableSlot(null), 3000);
-      return;
-    }
-    // Second click: execute
-    setConfirmDisableSlot(null);
-    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
     applySlotShortcut(idx, "").catch((error) => {
       setSlotErrors((prev) => ({ ...prev, [idx]: String(error) }));
     }).finally(() => setLoadingSlot(null));
@@ -482,16 +466,11 @@ export function ShortcutsTab({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className={cn(
-                          "h-8",
-                          confirmDisableSlot === idx
-                            ? "text-destructive hover:text-destructive"
-                            : "text-muted-foreground",
-                        )}
+                        className="h-8 text-muted-foreground"
                         disabled={loadingSlot === idx || !shortcut}
                         onClick={() => handleDisableSlot(idx)}
                       >
-                        {confirmDisableSlot === idx ? "确定？" : "禁用"}
+                        禁用
                       </Button>
                     </div>
                     {slotErrors[idx] && (
@@ -591,8 +570,7 @@ export function ShortcutsTab({
             )}
 
             <p className="text-xs text-muted-foreground">
-              快捷键必须包含至少一个修饰键 (Ctrl / Alt / Shift / Win)
-              加一个普通按键
+              快捷键必须包含至少一个修饰键 (Ctrl / Alt / Win) 加一个普通按键，Shift 可配合使用
             </p>
           </div>
 

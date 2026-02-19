@@ -369,24 +369,48 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 /// This uses registry to disable system Win+V and Tauri's global_shortcut for our Win+V
 #[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
+    // Remember the current shortcut so we can restore it on failure
+    let saved_shortcut_str = get_current_shortcut();
+    let saved_shortcut = parse_shortcut(&saved_shortcut_str);
+
     // Unregister current custom shortcut
-    if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
+    if let Some(shortcut) = saved_shortcut {
         let _ = app.global_shortcut().unregister(shortcut);
     }
 
     // Disable system Win+V via registry (restart explorer to apply)
-    win_v_registry::disable_win_v_hotkey(true)?;
+    if let Err(e) = win_v_registry::disable_win_v_hotkey(true) {
+        // Re-register custom shortcut before returning error
+        if let Some(sc) = saved_shortcut {
+            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_window_visibility(app);
+                }
+            });
+        }
+        return Err(e);
+    }
 
     // Now register Win+V using Tauri's global_shortcut (system Win+V is disabled)
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
-    app.global_shortcut()
+    if let Err(e) = app.global_shortcut()
         .on_shortcut(winv_shortcut, |app, _shortcut, event| {
-            // Only trigger on Pressed, not Released (like QuickClipboard)
             if event.state == ShortcutState::Pressed {
                 toggle_window_visibility(app);
             }
         })
-        .map_err(|e| format!("Failed to register Win+V shortcut: {}", e))?;
+    {
+        // Restore: re-enable system Win+V and re-register custom shortcut
+        let _ = win_v_registry::enable_win_v_hotkey(true);
+        if let Some(sc) = saved_shortcut {
+            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_window_visibility(app);
+                }
+            });
+        }
+        return Err(format!("Failed to register Win+V shortcut: {}", e));
+    }
 
     // Save setting
     let state = app.state::<Arc<AppState>>();
@@ -501,16 +525,15 @@ fn set_quick_paste_shortcut(
 
     let normalized = normalize_shortcut_value(&shortcut);
     if !normalized.is_empty() {
-        if parse_shortcut(&normalized).is_none() {
-            return Err(format!("Invalid shortcut: {}", normalized));
-        }
+        let parsed = parse_shortcut(&normalized)
+            .ok_or_else(|| format!("Invalid shortcut: {}", normalized))?;
         if !shortcut_has_modifier(&normalized) {
             return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
         }
         // Prevent conflict with the main toggle shortcut
         let main_sc = get_current_shortcut();
-        if let (Some(a), Some(b)) = (parse_shortcut(&normalized), parse_shortcut(&main_sc)) {
-            if a == b {
+        if let Some(main_parsed) = parse_shortcut(&main_sc) {
+            if parsed == main_parsed {
                 return Err(format!("与呼出快捷键 {} 冲突", main_sc));
             }
         }
