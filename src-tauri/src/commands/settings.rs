@@ -2,7 +2,6 @@ use crate::database::SettingsRepository;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::State;
-use tracing::info;
 
 use super::AppState;
 
@@ -75,7 +74,6 @@ pub struct MonitorStatus {
 #[tauri::command]
 pub async fn optimize_database(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.db.optimize().map_err(|e| e.to_string())?;
-    info!("Database optimized");
     Ok(())
 }
 
@@ -83,7 +81,6 @@ pub async fn optimize_database(state: State<'_, Arc<AppState>>) -> Result<(), St
 #[tauri::command]
 pub async fn vacuum_database(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.db.vacuum().map_err(|e| e.to_string())?;
-    info!("Database vacuumed");
     Ok(())
 }
 

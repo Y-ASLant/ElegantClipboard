@@ -23,7 +23,9 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Global state for current shortcut (parking_lot::RwLock: no poison, consistent with codebase)
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
@@ -168,19 +170,72 @@ fn apply_quick_paste_shortcuts(
     failures
 }
 
-/// Initialize logging system
-fn init_logging() {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+/// Keep the non-blocking writer guard alive for the entire process.
+/// Dropping it would flush and stop the background writer thread.
+static FILE_LOG_GUARD: parking_lot::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> =
+    parking_lot::Mutex::new(None);
+
+/// Rotate the log file if it exceeds the size limit.
+/// Renames `app.log` → `app.log.old` (overwriting any previous backup).
+fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
+    if let Ok(meta) = std::fs::metadata(log_path) {
+        if meta.len() > max_size {
+            let backup = log_path.with_extension("log.old");
+            let _ = std::fs::rename(log_path, backup);
+        }
+    }
+}
+
+/// Initialize logging system.
+/// When `config.log_to_file` is true, an additional file layer writes to `app.log`
+/// in the data directory.  The file is rotated when it exceeds 10 MB.
+fn init_logging(config: &AppConfig) {
+    let stdout_layer = fmt::layer()
         .with_target(false)
         .with_thread_ids(false)
         .with_file(true)
-        .with_line_number(true)
-        .finish();
+        .with_line_number(true);
 
-    if let Err(err) = tracing::subscriber::set_global_default(subscriber) {
-        eprintln!("Failed to set tracing subscriber: {err}");
-    }
+    let file_layer = if config.is_log_to_file() {
+        let log_path = config.get_log_path();
+        // Ensure the parent directory exists
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        rotate_log_if_needed(&log_path, config::DEFAULT_LOG_MAX_SIZE);
+
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(file) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file);
+                *FILE_LOG_GUARD.lock() = Some(guard);
+                Some(
+                    fmt::layer()
+                        .with_target(false)
+                        .with_thread_ids(false)
+                        .with_file(true)
+                        .with_line_number(true)
+                        .with_ansi(false)
+                        .with_writer(non_blocking),
+                )
+            }
+            Err(e) => {
+                eprintln!("Failed to open log file {}: {e}", log_path.display());
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::filter::LevelFilter::from_level(Level::INFO))
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
 }
 
 /// Tauri command: Get app version
@@ -756,9 +811,32 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     tray::open_settings_window(&app)
 }
 
+// ============ Log Settings Commands ============
+
+/// Tauri command: Check if file logging is enabled
+#[tauri::command]
+fn is_log_to_file_enabled() -> bool {
+    AppConfig::load().is_log_to_file()
+}
+
+/// Tauri command: Enable or disable file logging (requires restart)
+#[tauri::command]
+fn set_log_to_file(enabled: bool) -> Result<(), String> {
+    let mut config = AppConfig::load();
+    config.log_to_file = Some(enabled);
+    config.save()
+}
+
+/// Tauri command: Get the log file path
+#[tauri::command]
+fn get_log_file_path() -> String {
+    AppConfig::load().get_log_path().to_string_lossy().to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    init_logging();
+    let config = AppConfig::load();
+    init_logging(&config);
 
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -858,8 +936,14 @@ pub fn run() {
                     && task_scheduler::is_autostart_task_exists()
                 {
                     if app.autolaunch().enable().is_ok() {
-                        let _ = task_scheduler::delete_autostart_task();
-                        tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
+                        match task_scheduler::delete_autostart_task() {
+                            Ok(_) => {
+                                tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
+                            }
+                            Err(e) => {
+                                tracing::warn!("自启动迁移: 已切换到注册表 Run，但旧的计划任务删除失败（需要管理员权限）: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -914,6 +998,10 @@ pub fn run() {
             enable_admin_launch,
             disable_admin_launch,
             is_running_as_admin,
+            // Log commands
+            is_log_to_file_enabled,
+            set_log_to_file,
+            get_log_file_path,
             // Shortcut commands
             enable_winv_replacement,
             disable_winv_replacement,

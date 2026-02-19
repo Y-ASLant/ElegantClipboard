@@ -83,6 +83,8 @@ export function Settings() {
     follow_cursor: true,
     shortcut: "Alt+C",
     winv_replacement: false,
+    log_to_file: false,
+    log_file_path: "",
   });
   const settingsLoadedRef = useRef(false);
   const [themeReady, setThemeReady] = useState(false);
@@ -155,6 +157,8 @@ export function Settings() {
         isRunningAsAdmin,
         winvReplacement,
         currentShortcut,
+        logToFile,
+        logFilePath,
       ] = await Promise.all([
         invoke<string>("get_default_data_path"),
         invoke<string>("get_setting", { key: "max_history_count" }),
@@ -166,6 +170,8 @@ export function Settings() {
         invoke<boolean>("is_running_as_admin"),
         invoke<boolean>("is_winv_replacement_enabled"),
         invoke<string>("get_current_shortcut"),
+        invoke<boolean>("is_log_to_file_enabled"),
+        invoke<string>("get_log_file_path"),
       ]);
 
       setSettings({
@@ -179,6 +185,8 @@ export function Settings() {
         follow_cursor: followCursor !== "false",
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
+        log_to_file: logToFile,
+        log_file_path: logFilePath || "",
       });
       settingsLoadedRef.current = true;
     } catch (error) {

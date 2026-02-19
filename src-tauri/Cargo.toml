@@ -45,6 +45,7 @@ tokio = { version = "1", features = ["rt", "time"] }
 # Logging
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tracing-appender = "0.2"
 
 # Hashing (fast)
 blake3 = "1"

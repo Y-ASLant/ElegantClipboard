@@ -48,14 +48,27 @@ pub fn create_autostart_task() -> Result<(), String> {
     Err("仅限 Windows".into())
 }
 
-/// 删除自启动计划任务（任务不存在时静默忽略）
+/// 删除自启动计划任务
+/// 成功或任务不存在时返回 Ok，删除失败（如权限不足）时返回 Err
 #[cfg(target_os = "windows")]
 pub fn delete_autostart_task() -> Result<(), String> {
-    let _ = Command::new("schtasks")
+    let output = Command::new("schtasks")
         .args(["/Delete", "/TN", TASK_NAME, "/F"])
         .creation_flags(CREATE_NO_WINDOW)
-        .output();
-    Ok(())
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // "ERROR: The system cannot find the file specified" = task doesn't exist, that's fine
+        if stderr.contains("cannot find") || stderr.contains("找不到") {
+            Ok(())
+        } else {
+            Err(format!("删除计划任务失败: {}", stderr.trim()))
+        }
+    }
 }
 
 #[cfg(not(target_os = "windows"))]

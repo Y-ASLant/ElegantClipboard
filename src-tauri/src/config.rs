@@ -6,7 +6,10 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
+
+/// Default max log file size: 10 MB
+pub const DEFAULT_LOG_MAX_SIZE: u64 = 10 * 1024 * 1024;
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -15,6 +18,10 @@ pub struct AppConfig {
     /// If None, use the default path
     #[serde(default)]
     pub data_path: Option<String>,
+
+    /// Whether to save logs to file (default: false)
+    #[serde(default)]
+    pub log_to_file: Option<bool>,
 }
 
 impl AppConfig {
@@ -26,7 +33,7 @@ impl AppConfig {
             match fs::read_to_string(&config_path) {
                 Ok(content) => match serde_json::from_str(&content) {
                     Ok(config) => {
-                        info!("Configuration loaded from {:?}", config_path);
+                        debug!("Configuration loaded from {:?}", config_path);
                         return config;
                     }
                     Err(e) => {
@@ -39,7 +46,7 @@ impl AppConfig {
             }
         }
 
-        info!("Using default configuration");
+        debug!("Using default configuration");
         Self::default()
     }
 
@@ -78,6 +85,16 @@ impl AppConfig {
             }
         }
         crate::database::get_default_images_path()
+    }
+
+    /// Get the log file path (app.log in data directory)
+    pub fn get_log_path(&self) -> PathBuf {
+        self.get_data_dir().join("app.log")
+    }
+
+    /// Whether file logging is enabled
+    pub fn is_log_to_file(&self) -> bool {
+        self.log_to_file.unwrap_or(false)
     }
 
     /// Get the data directory path
