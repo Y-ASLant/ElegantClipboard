@@ -16,7 +16,9 @@ use clipboard::ClipboardMonitor;
 use commands::AppState;
 use config::AppConfig;
 use database::Database;
+use database::SettingsRepository;
 use shortcut::parse_shortcut;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -25,6 +27,146 @@ use tracing_subscriber::FmtSubscriber;
 
 /// Global state for current shortcut (parking_lot::RwLock: no poison, consistent with codebase)
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
+/// In-memory cache for quick paste shortcuts (slot 1-9)
+static CURRENT_QUICK_PASTE_SHORTCUTS: parking_lot::RwLock<Vec<String>> =
+    parking_lot::RwLock::new(Vec::new());
+/// Serialise quick-paste operations so concurrent shortcut events
+/// don't race on the system clipboard.
+static QUICK_PASTE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Track which quick-paste slots are "active" (key held down).
+/// First press → full pipeline; repeat press → simulate_paste only.
+static ACTIVE_QUICK_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<u8>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
+
+fn default_quick_paste_shortcuts() -> Vec<String> {
+    (1..=9).map(|slot| format!("Alt+{}", slot)).collect()
+}
+
+fn quick_paste_setting_key(slot: u8) -> String {
+    format!("quick_paste_shortcut_{}", slot)
+}
+
+fn normalize_shortcut_value(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn shortcut_has_modifier(shortcut: &str) -> bool {
+    // Shift alone is not a valid modifier for global shortcuts (e.g. Shift+1 just types '!')
+    shortcut
+        .split('+')
+        .map(|part| part.trim().to_uppercase())
+        .any(|part| matches!(part.as_str(), "CTRL" | "CONTROL" | "ALT" | "WIN" | "SUPER" | "META" | "CMD"))
+}
+
+fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
+    let mut shortcuts = default_quick_paste_shortcuts();
+    for slot in 1..=9 {
+        let key = quick_paste_setting_key(slot);
+        if let Ok(Some(value)) = repo.get(&key) {
+            shortcuts[(slot - 1) as usize] = normalize_shortcut_value(&value);
+        }
+    }
+    shortcuts
+}
+
+fn apply_quick_paste_shortcuts(
+    app: &tauri::AppHandle,
+    shortcuts: &[String],
+) -> HashMap<u8, String> {
+    // Unregister previously active quick paste shortcuts first
+    // (values are already normalized when stored)
+    for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
+        if s.is_empty() {
+            continue;
+        }
+        if let Some(shortcut) = parse_shortcut(s) {
+            let _ = app.global_shortcut().unregister(shortcut);
+        }
+    }
+
+    let mut failures = HashMap::new();
+    let mut applied = vec![String::new(); 9];
+
+    for slot in 1..=9 {
+        let idx = (slot - 1) as usize;
+        let shortcut_str = shortcuts.get(idx).cloned().unwrap_or_default();
+        let normalized = normalize_shortcut_value(&shortcut_str);
+        applied[idx] = normalized.clone();
+
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let parsed = match parse_shortcut(&normalized) {
+            Some(v) => v,
+            None => {
+                failures.insert(slot, format!("槽位 {} 快捷键格式无效: {}", slot, normalized));
+                continue;
+            }
+        };
+
+        let reg_result = app
+            .global_shortcut()
+            .on_shortcut(parsed, move |app, _shortcut, event| match event.state {
+                ShortcutState::Pressed => {
+                    // Skip when one of our own windows (settings, editor, …)
+                    // has focus — otherwise simulate_paste sends Ctrl+V into
+                    // our own UI.
+                    let any_focused = app
+                        .webview_windows()
+                        .values()
+                        .any(|w| w.is_focused().unwrap_or(false));
+                    if any_focused {
+                        return;
+                    }
+
+                    // Distinguish first press vs repeat press (key held).
+                    let is_first = {
+                        let mut active = ACTIVE_QUICK_PASTE_SLOTS.lock();
+                        active.insert(slot) // true = newly inserted
+                    };
+
+                    let state = app.state::<Arc<AppState>>().inner().clone();
+                    let app_handle = app.clone();
+                    std::thread::spawn(move || {
+                        // Serialise so concurrent events don't race on the
+                        // system clipboard.
+                        let _guard = QUICK_PASTE_LOCK.lock();
+
+                        if is_first {
+                            // Full pipeline: read DB → clipboard → paste.
+                            if let Err(err) = commands::clipboard::quick_paste_by_slot(
+                                &state, &app_handle, slot,
+                            ) {
+                                tracing::warn!("Quick paste slot {} failed: {}", slot, err);
+                                ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
+                            }
+                        } else {
+                            // Repeat press: content is already in the clipboard,
+                            // just simulate Ctrl+V again.
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            if let Err(err) = commands::clipboard::simulate_paste() {
+                                tracing::warn!("Quick paste repeat slot {} failed: {}", slot, err);
+                            }
+                        }
+                    });
+                }
+                ShortcutState::Released => {
+                    ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
+                }
+            });
+
+        if let Err(err) = reg_result {
+            failures.insert(
+                slot,
+                format!("槽位 {} 注册失败（{}）: {}", slot, normalized, err),
+            );
+        }
+    }
+
+    *CURRENT_QUICK_PASTE_SHORTCUTS.write() = applied;
+    failures
+}
 
 /// Initialize logging system
 fn init_logging() {
@@ -296,6 +438,10 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
     let new_sc = parse_shortcut(&new_shortcut)
         .ok_or_else(|| format!("Invalid shortcut: {}", new_shortcut))?;
 
+    if !shortcut_has_modifier(&new_shortcut) {
+        return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
+    }
+
     // Unregister current shortcut
     if let Some(current_sc) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut().unregister(current_sc);
@@ -323,6 +469,80 @@ fn get_current_shortcut() -> String {
         .read()
         .clone()
         .unwrap_or_else(|| "Alt+C".to_string())
+}
+
+fn reload_quick_paste_shortcuts_from_settings(app: &tauri::AppHandle) -> HashMap<u8, String> {
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = SettingsRepository::new(&state.db);
+    let shortcuts = load_quick_paste_shortcuts(&settings_repo);
+    apply_quick_paste_shortcuts(app, &shortcuts)
+}
+
+/// Tauri command: Get quick paste shortcuts for slot 1-9
+#[tauri::command]
+fn get_quick_paste_shortcuts() -> Vec<String> {
+    let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
+    if current.len() == 9 {
+        return current.clone();
+    }
+    default_quick_paste_shortcuts()
+}
+
+/// Tauri command: Update quick paste shortcut for one slot (1-9)
+#[tauri::command]
+fn set_quick_paste_shortcut(
+    app: tauri::AppHandle,
+    slot: u8,
+    shortcut: String,
+) -> Result<(), String> {
+    if !(1..=9).contains(&slot) {
+        return Err("slot must be between 1 and 9".to_string());
+    }
+
+    let normalized = normalize_shortcut_value(&shortcut);
+    if !normalized.is_empty() {
+        if parse_shortcut(&normalized).is_none() {
+            return Err(format!("Invalid shortcut: {}", normalized));
+        }
+        if !shortcut_has_modifier(&normalized) {
+            return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
+        }
+        // Prevent conflict with the main toggle shortcut
+        let main_sc = get_current_shortcut();
+        if let (Some(a), Some(b)) = (parse_shortcut(&normalized), parse_shortcut(&main_sc)) {
+            if a == b {
+                return Err(format!("与呼出快捷键 {} 冲突", main_sc));
+            }
+        }
+    }
+
+    let mut next_shortcuts = {
+        let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
+        if current.len() == 9 {
+            current.clone()
+        } else {
+            default_quick_paste_shortcuts()
+        }
+    };
+    let idx = (slot - 1) as usize;
+    let previous = next_shortcuts[idx].clone();
+    next_shortcuts[idx] = normalized.clone();
+
+    let failures = apply_quick_paste_shortcuts(&app, &next_shortcuts);
+    if let Some(err) = failures.get(&slot) {
+        // Roll back only when the updated slot itself failed to register.
+        next_shortcuts[idx] = previous;
+        let _ = apply_quick_paste_shortcuts(&app, &next_shortcuts);
+        return Err(err.clone());
+    }
+
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = SettingsRepository::new(&state.db);
+    settings_repo
+        .set(&quick_paste_setting_key(slot), &normalized)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Tauri command: Set window pinned state
@@ -583,6 +803,12 @@ pub fn run() {
                     }
                 });
 
+            // Register quick paste shortcuts (slot 1-9)
+            let quick_paste_failures = reload_quick_paste_shortcuts_from_settings(app.handle());
+            for (slot, err) in quick_paste_failures {
+                tracing::warn!("Quick paste shortcut registration failed (slot {}): {}", slot, err);
+            }
+
             // Set main window as non-focusable to prevent stealing focus from other apps
             // This allows hotkeys to work even when Start Menu or other system UI is open
             if let Some(window) = app.get_webview_window("main") {
@@ -671,6 +897,8 @@ pub fn run() {
             is_winv_replacement_enabled,
             update_shortcut,
             get_current_shortcut,
+            get_quick_paste_shortcuts,
+            set_quick_paste_shortcut,
             // Update commands
             check_for_update,
             download_update,

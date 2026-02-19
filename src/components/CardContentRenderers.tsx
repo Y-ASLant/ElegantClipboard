@@ -21,6 +21,7 @@ import { useUISettings } from "@/stores/ui-settings";
 interface CardFooterProps {
   metaItems: string[];
   index?: number;
+  showBadge?: boolean;
   isDragOverlay?: boolean;
   sourceAppName?: string | null;
   sourceAppIcon?: string | null;
@@ -29,6 +30,7 @@ interface CardFooterProps {
 export const CardFooter = ({
   metaItems,
   index,
+  showBadge = true,
   isDragOverlay,
   sourceAppName,
   sourceAppIcon,
@@ -54,8 +56,13 @@ export const CardFooter = ({
       {sourceAppName && (
         <span className="truncate max-w-[128px]">{sourceAppName}</span>
       )}
-      {index !== undefined && index >= 0 && !isDragOverlay && (
-        <span className="min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary">
+      {index !== undefined && index >= 0 && index < 9 && !isDragOverlay && (
+        <span
+          className={cn(
+            "min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary transition-opacity duration-150",
+            showBadge ? "opacity-100" : "opacity-0",
+          )}
+        >
           {index + 1}
         </span>
       )}
@@ -342,6 +349,7 @@ interface ImageCardProps {
   image_path: string;
   metaItems: string[];
   index?: number;
+  showBadge?: boolean;
   isDragOverlay?: boolean;
   sourceAppName?: string | null;
   sourceAppIcon?: string | null;
@@ -351,6 +359,7 @@ export const ImageCard = memo(function ImageCard({
   image_path,
   metaItems,
   index,
+  showBadge,
   isDragOverlay,
   sourceAppName,
   sourceAppIcon,
@@ -377,6 +386,7 @@ export const ImageCard = memo(function ImageCard({
       <CardFooter
         metaItems={metaItems}
         index={index}
+        showBadge={showBadge}
         isDragOverlay={isDragOverlay}
         sourceAppName={sourceAppName}
         sourceAppIcon={sourceAppIcon}
@@ -391,6 +401,7 @@ const FileImagePreview = memo(function FileImagePreview({
   filePath,
   metaItems,
   index,
+  showBadge,
   isDragOverlay,
   sourceAppName,
   sourceAppIcon,
@@ -398,6 +409,7 @@ const FileImagePreview = memo(function FileImagePreview({
   filePath: string;
   metaItems: string[];
   index?: number;
+  showBadge?: boolean;
   isDragOverlay?: boolean;
   sourceAppName?: string | null;
   sourceAppIcon?: string | null;
@@ -424,6 +436,7 @@ const FileImagePreview = memo(function FileImagePreview({
         <CardFooter
           metaItems={metaItems}
           index={index}
+          showBadge={showBadge}
           isDragOverlay={isDragOverlay}
           sourceAppName={sourceAppName}
           sourceAppIcon={sourceAppIcon}
@@ -448,6 +461,7 @@ const FileImagePreview = memo(function FileImagePreview({
       <CardFooter
         metaItems={metaItems}
         index={index}
+        showBadge={showBadge}
         isDragOverlay={isDragOverlay}
         sourceAppName={sourceAppName}
         sourceAppIcon={sourceAppIcon}
@@ -464,6 +478,7 @@ interface FileContentProps {
   preview: string | null;
   metaItems: string[];
   index?: number;
+  showBadge?: boolean;
   isDragOverlay?: boolean;
   sourceAppName?: string | null;
   sourceAppIcon?: string | null;
@@ -475,6 +490,7 @@ export const FileContent = memo(function FileContent({
   preview,
   metaItems,
   index,
+  showBadge,
   isDragOverlay,
   sourceAppName,
   sourceAppIcon,
@@ -492,6 +508,7 @@ export const FileContent = memo(function FileContent({
         filePath={filePaths[0]}
         metaItems={metaItems}
         index={index}
+        showBadge={showBadge}
         isDragOverlay={isDragOverlay}
         sourceAppName={sourceAppName}
         sourceAppIcon={sourceAppIcon}

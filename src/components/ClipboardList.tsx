@@ -46,6 +46,7 @@ export function ClipboardList() {
     items,
     isLoading,
     searchQuery,
+    selectedType,
     fetchItems,
     setupListener,
     moveItem,
@@ -78,30 +79,22 @@ export function ClipboardList() {
     [items],
   );
 
-  const pinnedItemsWithSortId = useMemo(
-    () => itemsWithSortId.filter((item) => item.is_pinned),
+  // 后端已按 is_pinned DESC 排序，直接计算置顶数即可
+  const pinnedCount = useMemo(
+    () => itemsWithSortId.filter((item) => item.is_pinned).length,
     [itemsWithSortId],
   );
 
-  const regularItemsWithSortId = useMemo(
-    () => itemsWithSortId.filter((item) => !item.is_pinned),
-    [itemsWithSortId],
-  );
-
-  // 合并所有卡片：置顶在前，非置顶在后
-  const allItemsWithSortId = useMemo(
-    () => [...pinnedItemsWithSortId, ...regularItemsWithSortId],
-    [pinnedItemsWithSortId, regularItemsWithSortId],
-  );
+  // 搜索/筛选时隐藏快捷粘贴序号（过滤后的顺序与快捷粘贴的全局顺序不一致）
+  const showSlotBadges = !searchQuery && !selectedType;
 
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
       if (oldIndex === newIndex) return;
-      const fromItem = allItemsWithSortId[oldIndex];
-      const toItem = allItemsWithSortId[newIndex];
+      const fromItem = itemsWithSortId[oldIndex];
+      const toItem = itemsWithSortId[newIndex];
       if (!fromItem || !toItem) return;
 
-      const pinnedCount = pinnedItemsWithSortId.length;
       const fromIsPinned = oldIndex < pinnedCount;
       const toIsPinned = newIndex < pinnedCount;
 
@@ -114,7 +107,7 @@ export function ClipboardList() {
         await moveItem(fromItem.id, toItem.id);
       }
     },
-    [allItemsWithSortId, pinnedItemsWithSortId.length, moveItem, togglePin],
+    [itemsWithSortId, pinnedCount, moveItem, togglePin],
   );
 
   const {
@@ -132,7 +125,7 @@ export function ClipboardList() {
     collisionDetection,
     measuring,
   } = useSortableList({
-    items: allItemsWithSortId,
+    items: itemsWithSortId,
     onDragEnd: handleDragEnd,
   });
 
@@ -204,16 +197,14 @@ export function ClipboardList() {
     [cardMaxLines],
   );
 
-  const pinnedCount = pinnedItemsWithSortId.length;
-
   const sortableIds = useMemo(
-    () => allItemsWithSortId.map((i) => i._sortId),
-    [allItemsWithSortId],
+    () => itemsWithSortId.map((i) => i._sortId),
+    [itemsWithSortId],
   );
 
   const itemContent = useCallback(
     (index: number) => {
-      const item = allItemsWithSortId[index];
+      const item = itemsWithSortId[index];
       if (!item) return null;
 
       const showSeparator = index === pinnedCount && pinnedCount > 0;
@@ -221,16 +212,16 @@ export function ClipboardList() {
       return (
         <div className="px-2 pb-2">
           {showSeparator && <Separator className="mb-2" />}
-          <ClipboardItemCard item={item} index={index} sortId={item._sortId} />
+          <ClipboardItemCard item={item} index={index} showBadge={showSlotBadges} sortId={item._sortId} />
         </div>
       );
     },
-    [allItemsWithSortId, pinnedCount],
+    [itemsWithSortId, pinnedCount, showSlotBadges],
   );
 
   const computeItemKey = useCallback(
-    (index: number) => allItemsWithSortId[index]?._sortId || `item-${index}`,
-    [allItemsWithSortId],
+    (index: number) => itemsWithSortId[index]?._sortId || `item-${index}`,
+    [itemsWithSortId],
   );
 
   if (isLoading && items.length === 0) {
@@ -245,7 +236,7 @@ export function ClipboardList() {
   }
 
   // 搜索无结果：在 Virtuoso 外层条件渲染（react-virtuoso 没有内置 empty placeholder）
-  if (allItemsWithSortId.length === 0 && searchQuery) {
+  if (items.length === 0 && searchQuery) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">
@@ -323,7 +314,7 @@ export function ClipboardList() {
             {customScrollParent && (
               <Virtuoso
                 ref={virtuosoRef}
-                totalCount={allItemsWithSortId.length}
+                totalCount={itemsWithSortId.length}
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
                 defaultItemHeight={defaultItemHeight}

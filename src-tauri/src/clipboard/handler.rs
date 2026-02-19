@@ -167,20 +167,12 @@ impl ClipboardHandler {
         if max_history_count > 0 {
             match self.repository.enforce_max_count(max_history_count) {
                 Ok((deleted, image_paths)) => {
-                    for path in image_paths {
-                        if let Err(e) = std::fs::remove_file(&path) {
-                            debug!("Failed to delete old image file {}: {}", path, e);
-                        } else {
-                            debug!("Deleted old image file: {}", path);
-                        }
-                    }
+                    super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
                         debug!("Enforced max count: removed {} old items", deleted);
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to enforce max history count: {}", e);
-                }
+                Err(e) => warn!("Failed to enforce max history count: {}", e),
             }
         }
 
@@ -189,20 +181,12 @@ impl ClipboardHandler {
         if auto_cleanup_days > 0 {
             match self.repository.delete_older_than(auto_cleanup_days) {
                 Ok((deleted, image_paths)) => {
-                    for path in image_paths {
-                        if let Err(e) = std::fs::remove_file(&path) {
-                            debug!("Failed to delete old image file {}: {}", path, e);
-                        } else {
-                            debug!("Deleted old image file: {}", path);
-                        }
-                    }
+                    super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
                         info!("Auto-cleanup: removed {} items older than {} days", deleted, auto_cleanup_days);
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to auto-cleanup old items: {}", e);
-                }
+                Err(e) => warn!("Failed to auto-cleanup old items: {}", e),
             }
         }
 

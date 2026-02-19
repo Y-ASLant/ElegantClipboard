@@ -208,36 +208,83 @@ fn fill_files_valid(items: &mut [ClipboardItem]) {
     });
 }
 
-/// Simulate Ctrl+V paste keystroke
+/// Simulate Ctrl+V paste keystroke using the Windows `SendInput` API.
+///
+/// If the user is still holding Alt (e.g. from an Alt+1 quick-paste shortcut)
+/// we release Alt before sending Ctrl+V and **re-press Alt afterwards** so the
+/// OS still considers it held.  This allows the user to keep Alt down and tap
+/// a number key repeatedly to paste multiple items.
 #[cfg(target_os = "windows")]
 pub fn simulate_paste() -> Result<(), String> {
-    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT,
+        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_MENU, VK_SHIFT, VK_CONTROL, VK_V,
+    };
 
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
-    enigo
-        .key(Key::Control, Direction::Press)
-        .map_err(|e| format!("Failed to press Ctrl: {}", e))?;
-
-    let click_result = enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Failed to press V: {}", e));
-
-    let release_result = enigo
-        .key(Key::Control, Direction::Release)
-        .map_err(|e| format!("Failed to release Ctrl: {}", e));
-
-    if let Err(click_error) = click_result {
-        if let Err(release_error) = release_result {
-            return Err(format!(
-                "{}; additionally failed to release Ctrl: {}",
-                click_error, release_error
-            ));
-        }
-        return Err(click_error);
+    fn is_key_pressed(vk: u16) -> bool {
+        unsafe { GetAsyncKeyState(vk as i32) < 0 }
     }
 
-    release_result?;
+    fn send_key(vk: u16, up: bool) {
+        let input = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
+                    wScan: 0,
+                    dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32); }
+    }
+
+    /// Release a modifier key if the user is currently holding it.
+    /// Retries up to 20 times with 5ms delay to ensure the OS processes the release.
+    fn release_if_held(vk: u16) -> bool {
+        if !is_key_pressed(vk) {
+            return false;
+        }
+        for _ in 0..20 {
+            if !is_key_pressed(vk) {
+                break;
+            }
+            send_key(vk, true); // key-up
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        true
+    }
+
+    // --- 1. Release modifiers the user may still be holding ---------------
+    //     Alt and Shift must be released before Ctrl+V, otherwise the
+    //     target app receives Ctrl+Shift+V or Ctrl+Alt+V.
+    let user_alt = release_if_held(VK_MENU.0);
+    let user_shift = release_if_held(VK_SHIFT.0);
+
+    // --- 2. Send Ctrl+V --------------------------------------------------
+    let user_ctrl = is_key_pressed(VK_CONTROL.0);
+    if !user_ctrl {
+        send_key(VK_CONTROL.0, false); // Ctrl down
+    }
+    send_key(VK_V.0, false); // V down
+    std::thread::sleep(std::time::Duration::from_millis(8));
+    send_key(VK_V.0, true);  // V up
+    if !user_ctrl {
+        send_key(VK_CONTROL.0, true); // Ctrl up
+    }
+
+    // --- 3. Re-press modifiers so continuous shortcut presses still work --
+    if user_shift {
+        send_key(VK_SHIFT.0, false); // Shift down
+    }
+    if user_alt {
+        send_key(VK_MENU.0, false); // Alt down
+        // Brief Ctrl tap to reset internal modifier state
+        send_key(VK_CONTROL.0, false);
+        send_key(VK_CONTROL.0, true);
+    }
 
     Ok(())
 }
@@ -248,6 +295,11 @@ pub fn simulate_paste() -> Result<(), String> {
 
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
+
+    // Release modifier keys the user might still be holding.
+    for m in [Key::Alt, Key::Shift, Key::Meta, Key::Control] {
+        let _ = enigo.key(m, Direction::Release);
+    }
 
     #[cfg(target_os = "macos")]
     let modifier = Key::Meta;
@@ -401,12 +453,8 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
 
     if let Ok(Some(item)) = repo.get_by_id(id) {
         repo.delete(id).map_err(|e| e.to_string())?;
-        if let Some(image_path) = item.image_path {
-            if let Err(e) = std::fs::remove_file(&image_path) {
-                debug!("Failed to delete image file {}: {}", image_path, e);
-            } else {
-                debug!("Deleted image file: {}", image_path);
-            }
+        if let Some(ref image_path) = item.image_path {
+            crate::clipboard::cleanup_image_files(&[image_path.clone()]);
         }
     } else {
         repo.delete(id).map_err(|e| e.to_string())?;
@@ -423,15 +471,7 @@ pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, Strin
     let repo = ClipboardRepository::new(&state.db);
     let image_paths = repo.get_clearable_image_paths().unwrap_or_default();
     let deleted = repo.clear_history().map_err(|e| e.to_string())?;
-
-    let mut deleted_files = 0;
-    for path in image_paths {
-        if let Err(e) = std::fs::remove_file(&path) {
-            debug!("Failed to delete image file {}: {}", path, e);
-        } else {
-            deleted_files += 1;
-        }
-    }
+    let deleted_files = crate::clipboard::cleanup_image_files(&image_paths);
 
     info!(
         "Cleared {} clipboard items and {} image files",
@@ -497,17 +537,55 @@ pub async fn paste_content(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Item not found".to_string())?;
 
-    with_paused_monitor(&state, || {
+    paste_item_to_active_window(&state, &app, &item)?;
+    debug!("Pasted item {} to active window", id);
+    Ok(())
+}
+
+/// Paste the item at quick slot position (1-9) to active window.
+/// Slot ordering follows the default list order:
+/// pinned first, then by sort_order desc, then created_at desc.
+///
+/// Uses `get_by_position` (SELECT *) instead of `list()` which returns
+/// NULL text_content for IPC efficiency — we need the actual content here.
+pub fn quick_paste_by_slot(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    slot: u8,
+) -> Result<(), String> {
+    if !(1..=9).contains(&slot) {
+        return Err("Quick paste slot must be between 1 and 9".to_string());
+    }
+
+    let repo = ClipboardRepository::new(&state.db);
+    let item = repo
+        .get_by_position((slot - 1) as usize)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("No clipboard item available for slot {}", slot))?;
+
+    paste_item_to_active_window(state, app, &item)?;
+    debug!("Quick pasted slot {} with item {}", slot, item.id);
+    Ok(())
+}
+
+/// Shared paste execution:
+/// 1) write content to system clipboard
+/// 2) hide app window (if not pinned)
+/// 3) simulate Ctrl+V to active app
+fn paste_item_to_active_window(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    item: &ClipboardItem,
+) -> Result<(), String> {
+    with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
-        set_clipboard_content(&item, &mut clipboard)?;
+        set_clipboard_content(item, &mut clipboard)?;
 
-        hide_main_window_if_not_pinned(&app);
+        hide_main_window_if_not_pinned(app);
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
-
-        debug!("Pasted item {} to active window", id);
         Ok(())
     })
 }

@@ -183,6 +183,26 @@ impl ClipboardRepository {
         }
     }
 
+    /// Get a full item (including text content) by its position in the default
+    /// sort order.  Used by quick-paste so it retrieves actual content rather
+    /// than the NULL placeholders used by the lightweight `list()` query.
+    pub fn get_by_position(&self, index: usize) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let result = conn.query_row(
+            "SELECT * FROM clipboard_items \
+             ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
+             LIMIT 1 OFFSET ?1",
+            params![index as i64],
+            Self::row_to_item,
+        );
+
+        match result {
+            Ok(item) => Ok(Some(item)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// 列表查询列（排除大文本字段以减少 IPC 传输）
     const LIST_COLUMNS: &'static str =
         "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \

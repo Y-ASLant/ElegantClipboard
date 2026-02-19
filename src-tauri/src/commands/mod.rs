@@ -42,7 +42,8 @@ pub(crate) fn hide_image_preview_window(app: &tauri::AppHandle) {
 }
 
 /// Execute a closure with the clipboard monitor paused, then resume after a delay.
-/// The monitor is paused immediately, and resumed 500ms later on a background task.
+/// The monitor is paused immediately, and resumed 500ms later on a background thread.
+/// Uses std::thread so it works from any context (Tokio runtime or plain thread).
 pub(crate) fn with_paused_monitor<F, R>(state: &Arc<AppState>, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -51,8 +52,8 @@ where
     let result = f();
 
     let monitor = state.monitor.clone();
-    tokio::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
         monitor.resume();
     });
 
