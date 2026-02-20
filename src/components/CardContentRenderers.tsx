@@ -56,7 +56,7 @@ export const CardFooter = ({
       {sourceAppName && (
         <span className="truncate max-w-[128px]">{sourceAppName}</span>
       )}
-      {index !== undefined && index >= 0 && index < 9 && !isDragOverlay && (
+      {index !== undefined && index >= 0 && !isDragOverlay && (
         <span
           className={cn(
             "min-w-5 h-5 px-1.5 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-semibold text-primary transition-opacity duration-150",

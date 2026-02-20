@@ -368,23 +368,17 @@ fn restart_app(app: tauri::AppHandle) {
     }
 }
 
-/// Toggle window visibility (like QuickClipboard's toggle_main_window_visibility)
+/// 切换主窗口显示/隐藏
 fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let current_state = keyboard_hook::get_window_state();
-
-        if current_state == keyboard_hook::WindowState::Visible {
-            // Hide window
+        if keyboard_hook::get_window_state() == keyboard_hook::WindowState::Visible {
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
-            // Disable mouse monitoring when window is hidden
             input_monitor::disable_mouse_monitoring();
-            // Hide image preview window (onMouseLeave won't fire when main window disappears)
             commands::hide_image_preview_window(app);
-            // Emit event to frontend so it can reset state while hidden
             let _ = window.emit("window-hidden", ());
         } else {
-            // Check if follow_cursor is enabled
+            // 跟随光标定位
             let follow_cursor = app
                 .try_state::<std::sync::Arc<commands::AppState>>()
                 .map(|state| {
@@ -394,27 +388,20 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                         .ok()
                         .flatten()
                         .map(|v| v != "false")
-                        .unwrap_or(true) // Default to true
+                        .unwrap_or(true)
                 })
                 .unwrap_or(true);
-
-            // Position window at cursor before showing (if enabled)
             if follow_cursor {
                 if let Err(e) = positioning::position_at_cursor(&window) {
-                    tracing::warn!("Failed to position window at cursor: {}", e);
+                    tracing::warn!("定位窗口失败: {}", e);
                 }
             }
 
-            // Show window with always-on-top trick (like QuickClipboard)
-            // NOTE: Do NOT call set_focus() - window is set to focusable=false
+            // 显示并置顶（不抢焦点）
             let _ = window.show();
-            let _ = window.set_always_on_top(false);
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            let _ = window.set_always_on_top(true);
+            positioning::force_topmost(&window);
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
-            // Enable mouse monitoring to detect clicks outside window
             input_monitor::enable_mouse_monitoring();
-            // Emit event to frontend for cache invalidation
             let _ = window.emit("window-shown", ());
         }
     }
