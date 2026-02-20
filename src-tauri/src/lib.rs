@@ -16,29 +16,226 @@ use clipboard::ClipboardMonitor;
 use commands::AppState;
 use config::AppConfig;
 use database::Database;
+use database::SettingsRepository;
 use shortcut::parse_shortcut;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Global state for current shortcut (parking_lot::RwLock: no poison, consistent with codebase)
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
+/// In-memory cache for quick paste shortcuts (slot 1-9)
+static CURRENT_QUICK_PASTE_SHORTCUTS: parking_lot::RwLock<Vec<String>> =
+    parking_lot::RwLock::new(Vec::new());
+/// Serialise quick-paste operations so concurrent shortcut events
+/// don't race on the system clipboard.
+static QUICK_PASTE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+/// Track which quick-paste slots are "active" (key held down).
+/// First press → full pipeline; repeat press → simulate_paste only.
+static ACTIVE_QUICK_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<u8>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
 
-/// Initialize logging system
-fn init_logging() {
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+fn default_quick_paste_shortcuts() -> Vec<String> {
+    (1..=9).map(|slot| format!("Alt+{}", slot)).collect()
+}
+
+fn quick_paste_setting_key(slot: u8) -> String {
+    format!("quick_paste_shortcut_{}", slot)
+}
+
+fn normalize_shortcut_value(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn shortcut_has_modifier(shortcut: &str) -> bool {
+    // Shift alone is not a valid modifier for global shortcuts (e.g. Shift+1 just types '!')
+    shortcut
+        .split('+')
+        .map(|part| part.trim().to_uppercase())
+        .any(|part| matches!(part.as_str(), "CTRL" | "CONTROL" | "ALT" | "WIN" | "SUPER" | "META" | "CMD"))
+}
+
+fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
+    let mut shortcuts = default_quick_paste_shortcuts();
+    for slot in 1..=9 {
+        let key = quick_paste_setting_key(slot);
+        if let Ok(Some(value)) = repo.get(&key) {
+            shortcuts[(slot - 1) as usize] = normalize_shortcut_value(&value);
+        }
+    }
+    shortcuts
+}
+
+fn apply_quick_paste_shortcuts(
+    app: &tauri::AppHandle,
+    shortcuts: &[String],
+) -> HashMap<u8, String> {
+    // Unregister previously active quick paste shortcuts first
+    // (values are already normalized when stored)
+    for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
+        if s.is_empty() {
+            continue;
+        }
+        if let Some(shortcut) = parse_shortcut(s) {
+            let _ = app.global_shortcut().unregister(shortcut);
+        }
+    }
+
+    let mut failures = HashMap::new();
+    let mut applied = vec![String::new(); 9];
+
+    for slot in 1..=9 {
+        let idx = (slot - 1) as usize;
+        let shortcut_str = shortcuts.get(idx).cloned().unwrap_or_default();
+        let normalized = normalize_shortcut_value(&shortcut_str);
+        applied[idx] = normalized.clone();
+
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let parsed = match parse_shortcut(&normalized) {
+            Some(v) => v,
+            None => {
+                failures.insert(slot, format!("槽位 {} 快捷键格式无效: {}", slot, normalized));
+                continue;
+            }
+        };
+
+        let reg_result = app
+            .global_shortcut()
+            .on_shortcut(parsed, move |app, _shortcut, event| match event.state {
+                ShortcutState::Pressed => {
+                    // Skip when one of our own windows (settings, editor, …)
+                    // has focus — otherwise simulate_paste sends Ctrl+V into
+                    // our own UI.
+                    let any_focused = app
+                        .webview_windows()
+                        .values()
+                        .any(|w| w.is_focused().unwrap_or(false));
+                    if any_focused {
+                        return;
+                    }
+
+                    // Distinguish first press vs repeat press (key held).
+                    let is_first = {
+                        let mut active = ACTIVE_QUICK_PASTE_SLOTS.lock();
+                        active.insert(slot) // true = newly inserted
+                    };
+
+                    let state = app.state::<Arc<AppState>>().inner().clone();
+                    let app_handle = app.clone();
+                    std::thread::spawn(move || {
+                        // Serialise so concurrent events don't race on the
+                        // system clipboard.
+                        let _guard = QUICK_PASTE_LOCK.lock();
+
+                        if is_first {
+                            // Full pipeline: read DB → clipboard → paste.
+                            if let Err(err) = commands::clipboard::quick_paste_by_slot(
+                                &state, &app_handle, slot,
+                            ) {
+                                tracing::warn!("Quick paste slot {} failed: {}", slot, err);
+                                ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
+                            }
+                        } else {
+                            // Repeat press: content is already in the clipboard,
+                            // just simulate Ctrl+V again.
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            if let Err(err) = commands::clipboard::simulate_paste() {
+                                tracing::warn!("Quick paste repeat slot {} failed: {}", slot, err);
+                            }
+                        }
+                    });
+                }
+                ShortcutState::Released => {
+                    ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
+                }
+            });
+
+        if let Err(err) = reg_result {
+            failures.insert(
+                slot,
+                format!("槽位 {} 注册失败（{}）: {}", slot, normalized, err),
+            );
+        }
+    }
+
+    *CURRENT_QUICK_PASTE_SHORTCUTS.write() = applied;
+    failures
+}
+
+/// Keep the non-blocking writer guard alive for the entire process.
+/// Dropping it would flush and stop the background writer thread.
+static FILE_LOG_GUARD: parking_lot::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> =
+    parking_lot::Mutex::new(None);
+
+/// Rotate the log file if it exceeds the size limit.
+/// Renames `app.log` → `app.log.old` (overwriting any previous backup).
+fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
+    if let Ok(meta) = std::fs::metadata(log_path) {
+        if meta.len() > max_size {
+            let backup = log_path.with_extension("log.old");
+            let _ = std::fs::rename(log_path, backup);
+        }
+    }
+}
+
+/// Initialize logging system.
+/// When `config.log_to_file` is true, an additional file layer writes to `app.log`
+/// in the data directory.  The file is rotated when it exceeds 10 MB.
+fn init_logging(config: &AppConfig) {
+    let stdout_layer = fmt::layer()
         .with_target(false)
         .with_thread_ids(false)
         .with_file(true)
-        .with_line_number(true)
-        .finish();
+        .with_line_number(true);
 
-    if let Err(err) = tracing::subscriber::set_global_default(subscriber) {
-        eprintln!("Failed to set tracing subscriber: {err}");
-    }
+    let file_layer = if config.is_log_to_file() {
+        let log_path = config.get_log_path();
+        // Ensure the parent directory exists
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        rotate_log_if_needed(&log_path, config::DEFAULT_LOG_MAX_SIZE);
+
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(file) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file);
+                *FILE_LOG_GUARD.lock() = Some(guard);
+                Some(
+                    fmt::layer()
+                        .with_target(false)
+                        .with_thread_ids(false)
+                        .with_file(true)
+                        .with_line_number(true)
+                        .with_ansi(false)
+                        .with_writer(non_blocking),
+                )
+            }
+            Err(e) => {
+                eprintln!("Failed to open log file {}: {e}", log_path.display());
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::filter::LevelFilter::from_level(Level::INFO))
+        .with(stdout_layer)
+        .with(file_layer)
+        .init();
 }
 
 /// Tauri command: Get app version
@@ -171,23 +368,17 @@ fn restart_app(app: tauri::AppHandle) {
     }
 }
 
-/// Toggle window visibility (like QuickClipboard's toggle_main_window_visibility)
+/// 切换主窗口显示/隐藏
 fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let current_state = keyboard_hook::get_window_state();
-
-        if current_state == keyboard_hook::WindowState::Visible {
-            // Hide window
+        if keyboard_hook::get_window_state() == keyboard_hook::WindowState::Visible {
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
-            // Disable mouse monitoring when window is hidden
             input_monitor::disable_mouse_monitoring();
-            // Hide image preview window (onMouseLeave won't fire when main window disappears)
             commands::hide_image_preview_window(app);
-            // Emit event to frontend so it can reset state while hidden
             let _ = window.emit("window-hidden", ());
         } else {
-            // Check if follow_cursor is enabled
+            // 跟随光标定位
             let follow_cursor = app
                 .try_state::<std::sync::Arc<commands::AppState>>()
                 .map(|state| {
@@ -197,27 +388,20 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                         .ok()
                         .flatten()
                         .map(|v| v != "false")
-                        .unwrap_or(true) // Default to true
+                        .unwrap_or(true)
                 })
                 .unwrap_or(true);
-
-            // Position window at cursor before showing (if enabled)
             if follow_cursor {
                 if let Err(e) = positioning::position_at_cursor(&window) {
-                    tracing::warn!("Failed to position window at cursor: {}", e);
+                    tracing::warn!("定位窗口失败: {}", e);
                 }
             }
 
-            // Show window with always-on-top trick (like QuickClipboard)
-            // NOTE: Do NOT call set_focus() - window is set to focusable=false
+            // 显示并置顶（不抢焦点）
             let _ = window.show();
-            let _ = window.set_always_on_top(false);
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            let _ = window.set_always_on_top(true);
+            positioning::force_topmost(&window);
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
-            // Enable mouse monitoring to detect clicks outside window
             input_monitor::enable_mouse_monitoring();
-            // Emit event to frontend for cache invalidation
             let _ = window.emit("window-shown", ());
         }
     }
@@ -227,24 +411,48 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 /// This uses registry to disable system Win+V and Tauri's global_shortcut for our Win+V
 #[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
+    // Remember the current shortcut so we can restore it on failure
+    let saved_shortcut_str = get_current_shortcut();
+    let saved_shortcut = parse_shortcut(&saved_shortcut_str);
+
     // Unregister current custom shortcut
-    if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
+    if let Some(shortcut) = saved_shortcut {
         let _ = app.global_shortcut().unregister(shortcut);
     }
 
     // Disable system Win+V via registry (restart explorer to apply)
-    win_v_registry::disable_win_v_hotkey(true)?;
+    if let Err(e) = win_v_registry::disable_win_v_hotkey(true) {
+        // Re-register custom shortcut before returning error
+        if let Some(sc) = saved_shortcut {
+            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_window_visibility(app);
+                }
+            });
+        }
+        return Err(e);
+    }
 
     // Now register Win+V using Tauri's global_shortcut (system Win+V is disabled)
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
-    app.global_shortcut()
+    if let Err(e) = app.global_shortcut()
         .on_shortcut(winv_shortcut, |app, _shortcut, event| {
-            // Only trigger on Pressed, not Released (like QuickClipboard)
             if event.state == ShortcutState::Pressed {
                 toggle_window_visibility(app);
             }
         })
-        .map_err(|e| format!("Failed to register Win+V shortcut: {}", e))?;
+    {
+        // Restore: re-enable system Win+V and re-register custom shortcut
+        let _ = win_v_registry::enable_win_v_hotkey(true);
+        if let Some(sc) = saved_shortcut {
+            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    toggle_window_visibility(app);
+                }
+            });
+        }
+        return Err(format!("Failed to register Win+V shortcut: {}", e));
+    }
 
     // Save setting
     let state = app.state::<Arc<AppState>>();
@@ -296,6 +504,10 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
     let new_sc = parse_shortcut(&new_shortcut)
         .ok_or_else(|| format!("Invalid shortcut: {}", new_shortcut))?;
 
+    if !shortcut_has_modifier(&new_shortcut) {
+        return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
+    }
+
     // Unregister current shortcut
     if let Some(current_sc) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut().unregister(current_sc);
@@ -323,6 +535,79 @@ fn get_current_shortcut() -> String {
         .read()
         .clone()
         .unwrap_or_else(|| "Alt+C".to_string())
+}
+
+fn reload_quick_paste_shortcuts_from_settings(app: &tauri::AppHandle) -> HashMap<u8, String> {
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = SettingsRepository::new(&state.db);
+    let shortcuts = load_quick_paste_shortcuts(&settings_repo);
+    apply_quick_paste_shortcuts(app, &shortcuts)
+}
+
+/// Tauri command: Get quick paste shortcuts for slot 1-9
+#[tauri::command]
+fn get_quick_paste_shortcuts() -> Vec<String> {
+    let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
+    if current.len() == 9 {
+        return current.clone();
+    }
+    default_quick_paste_shortcuts()
+}
+
+/// Tauri command: Update quick paste shortcut for one slot (1-9)
+#[tauri::command]
+fn set_quick_paste_shortcut(
+    app: tauri::AppHandle,
+    slot: u8,
+    shortcut: String,
+) -> Result<(), String> {
+    if !(1..=9).contains(&slot) {
+        return Err("slot must be between 1 and 9".to_string());
+    }
+
+    let normalized = normalize_shortcut_value(&shortcut);
+    if !normalized.is_empty() {
+        let parsed = parse_shortcut(&normalized)
+            .ok_or_else(|| format!("Invalid shortcut: {}", normalized))?;
+        if !shortcut_has_modifier(&normalized) {
+            return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
+        }
+        // Prevent conflict with the main toggle shortcut
+        let main_sc = get_current_shortcut();
+        if let Some(main_parsed) = parse_shortcut(&main_sc) {
+            if parsed == main_parsed {
+                return Err(format!("与呼出快捷键 {} 冲突", main_sc));
+            }
+        }
+    }
+
+    let mut next_shortcuts = {
+        let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
+        if current.len() == 9 {
+            current.clone()
+        } else {
+            default_quick_paste_shortcuts()
+        }
+    };
+    let idx = (slot - 1) as usize;
+    let previous = next_shortcuts[idx].clone();
+    next_shortcuts[idx] = normalized.clone();
+
+    let failures = apply_quick_paste_shortcuts(&app, &next_shortcuts);
+    if let Some(err) = failures.get(&slot) {
+        // Roll back only when the updated slot itself failed to register.
+        next_shortcuts[idx] = previous;
+        let _ = apply_quick_paste_shortcuts(&app, &next_shortcuts);
+        return Err(err.clone());
+    }
+
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = SettingsRepository::new(&state.db);
+    settings_repo
+        .set(&quick_paste_setting_key(slot), &normalized)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Tauri command: Set window pinned state
@@ -513,9 +798,32 @@ async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     tray::open_settings_window(&app)
 }
 
+// ============ Log Settings Commands ============
+
+/// Tauri command: Check if file logging is enabled
+#[tauri::command]
+fn is_log_to_file_enabled() -> bool {
+    AppConfig::load().is_log_to_file()
+}
+
+/// Tauri command: Enable or disable file logging (requires restart)
+#[tauri::command]
+fn set_log_to_file(enabled: bool) -> Result<(), String> {
+    let mut config = AppConfig::load();
+    config.log_to_file = Some(enabled);
+    config.save()
+}
+
+/// Tauri command: Get the log file path
+#[tauri::command]
+fn get_log_file_path() -> String {
+    AppConfig::load().get_log_path().to_string_lossy().to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    init_logging();
+    let config = AppConfig::load();
+    init_logging(&config);
 
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -583,6 +891,12 @@ pub fn run() {
                     }
                 });
 
+            // Register quick paste shortcuts (slot 1-9)
+            let quick_paste_failures = reload_quick_paste_shortcuts_from_settings(app.handle());
+            for (slot, err) in quick_paste_failures {
+                tracing::warn!("Quick paste shortcut registration failed (slot {}): {}", slot, err);
+            }
+
             // Set main window as non-focusable to prevent stealing focus from other apps
             // This allows hotkeys to work even when Start Menu or other system UI is open
             if let Some(window) = app.get_webview_window("main") {
@@ -609,8 +923,14 @@ pub fn run() {
                     && task_scheduler::is_autostart_task_exists()
                 {
                     if app.autolaunch().enable().is_ok() {
-                        let _ = task_scheduler::delete_autostart_task();
-                        tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
+                        match task_scheduler::delete_autostart_task() {
+                            Ok(_) => {
+                                tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
+                            }
+                            Err(e) => {
+                                tracing::warn!("自启动迁移: 已切换到注册表 Run，但旧的计划任务删除失败（需要管理员权限）: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -665,12 +985,18 @@ pub fn run() {
             enable_admin_launch,
             disable_admin_launch,
             is_running_as_admin,
+            // Log commands
+            is_log_to_file_enabled,
+            set_log_to_file,
+            get_log_file_path,
             // Shortcut commands
             enable_winv_replacement,
             disable_winv_replacement,
             is_winv_replacement_enabled,
             update_shortcut,
             get_current_shortcut,
+            get_quick_paste_shortcuts,
+            set_quick_paste_shortcut,
             // Update commands
             check_for_update,
             download_update,

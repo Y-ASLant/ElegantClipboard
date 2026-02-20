@@ -4,3 +4,21 @@ pub mod source_app;
 
 pub use handler::*;
 pub use monitor::*;
+
+/// Delete image files from disk, logging any failures.
+/// Returns the number of successfully deleted files.
+pub fn cleanup_image_files(paths: &[String]) -> usize {
+    let mut deleted = 0;
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => {
+                tracing::debug!("Deleted image file: {}", path);
+                deleted += 1;
+            }
+            Err(e) => {
+                tracing::debug!("Failed to delete image file {}: {}", path, e);
+            }
+        }
+    }
+    deleted
+}

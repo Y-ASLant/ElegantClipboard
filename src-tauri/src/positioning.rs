@@ -1,7 +1,4 @@
-//! Window positioning utilities
-//!
-//! Provides functions to position the window at the cursor location
-//! with smart boundary detection to keep the window within screen bounds.
+//! 窗口定位：跟随光标 + 屏幕边界检测 + 置顶
 
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 use tracing::debug;
@@ -11,7 +8,7 @@ use windows::Win32::Foundation::POINT;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-/// Get current cursor position
+/// 获取当前光标位置
 #[cfg(target_os = "windows")]
 pub fn get_cursor_position() -> (i32, i32) {
     let mut point = POINT { x: 0, y: 0 };
@@ -20,7 +17,6 @@ pub fn get_cursor_position() -> (i32, i32) {
             return (point.x, point.y);
         }
     }
-    // Fallback to input_monitor's cached position
     let (x, y) = crate::input_monitor::get_cursor_position();
     (x as i32, y as i32)
 }
@@ -31,26 +27,43 @@ pub fn get_cursor_position() -> (i32, i32) {
     (x as i32, y as i32)
 }
 
-/// Position window at cursor with smart boundary detection
+/// 将窗口定位到光标附近，自动避开屏幕边界
 pub fn position_at_cursor(window: &WebviewWindow) -> Result<(), String> {
-    let (cursor_x, cursor_y) = get_cursor_position();
-
-    // Get window size
-    let window_size = window.outer_size().map_err(|e| e.to_string())?;
-
-    // Get monitor at cursor position
-    let monitor = get_monitor_at_cursor(window, cursor_x, cursor_y)?;
-
-    // Calculate best position
-    let position = calculate_best_position(cursor_x, cursor_y, window_size, &monitor);
-
-    window.set_position(position).map_err(|e| e.to_string())?;
-    debug!("Window positioned at ({}, {})", position.x, position.y);
-
+    let (cx, cy) = get_cursor_position();
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let monitor = get_monitor_at_cursor(window, cx, cy)?;
+    let pos = calculate_position(cx, cy, size, &monitor);
+    window.set_position(pos).map_err(|e| e.to_string())?;
+    debug!("Window positioned at ({}, {})", pos.x, pos.y);
     Ok(())
 }
 
-/// Monitor info for positioning calculations
+/// 强制置顶窗口（覆盖任务栏）
+///
+/// tao 的 set_always_on_top 不带 SWP_NOACTIVATE，
+/// 对非焦点窗口（focusable=false）无法可靠置顶。
+#[cfg(target_os = "windows")]
+pub fn force_topmost(window: &WebviewWindow) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, HWND_TOPMOST,
+    };
+
+    if let Ok(hwnd) = window.hwnd() {
+        unsafe {
+            let _ = SetWindowPos(
+                HWND(hwnd.0 as *mut _),
+                Some(HWND_TOPMOST),
+                0, 0, 0, 0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn force_topmost(_window: &WebviewWindow) {}
+
 struct MonitorInfo {
     x: i32,
     y: i32,
@@ -58,83 +71,52 @@ struct MonitorInfo {
     height: i32,
 }
 
-/// Get monitor containing the cursor position
+/// 查找光标所在的显示器
 fn get_monitor_at_cursor(
     window: &WebviewWindow,
-    cursor_x: i32,
-    cursor_y: i32,
+    cx: i32,
+    cy: i32,
 ) -> Result<MonitorInfo, String> {
-    // Try to get all monitors
     if let Ok(monitors) = window.available_monitors() {
         for m in monitors {
             let pos = m.position();
             let size = m.size();
-            let mx = pos.x;
-            let my = pos.y;
-            let mw = size.width as i32;
-            let mh = size.height as i32;
-
-            if cursor_x >= mx && cursor_x < mx + mw && cursor_y >= my && cursor_y < my + mh {
-                return Ok(MonitorInfo {
-                    x: mx,
-                    y: my,
-                    width: mw,
-                    height: mh,
-                });
+            let (mx, my) = (pos.x, pos.y);
+            let (mw, mh) = (size.width as i32, size.height as i32);
+            if cx >= mx && cx < mx + mw && cy >= my && cy < my + mh {
+                return Ok(MonitorInfo { x: mx, y: my, width: mw, height: mh });
             }
         }
     }
-
-    // Fallback to primary monitor
-    if let Ok(Some(monitor)) = window.primary_monitor() {
-        let pos = monitor.position();
-        let size = monitor.size();
+    if let Ok(Some(m)) = window.primary_monitor() {
         return Ok(MonitorInfo {
-            x: pos.x,
-            y: pos.y,
-            width: size.width as i32,
-            height: size.height as i32,
+            x: m.position().x,
+            y: m.position().y,
+            width: m.size().width as i32,
+            height: m.size().height as i32,
         });
     }
-
-    // Ultimate fallback
-    Ok(MonitorInfo {
-        x: 0,
-        y: 0,
-        width: 1920,
-        height: 1080,
-    })
+    Ok(MonitorInfo { x: 0, y: 0, width: 1920, height: 1080 })
 }
 
-/// Calculate optimal window position near cursor
-fn calculate_best_position(
-    cursor_x: i32,
-    cursor_y: i32,
+/// 计算窗口最佳位置：优先光标右下方，超出边界则翻转
+fn calculate_position(
+    cx: i32,
+    cy: i32,
     window_size: PhysicalSize<u32>,
-    monitor: &MonitorInfo,
+    m: &MonitorInfo,
 ) -> PhysicalPosition<i32> {
-    const MARGIN: i32 = 12; // Gap between cursor and window
+    const GAP: i32 = 12;
+    let (w, h) = (window_size.width as i32, window_size.height as i32);
 
-    let w = window_size.width as i32;
-    let h = window_size.height as i32;
+    let mut x = cx + GAP;
+    let mut y = cy + GAP;
 
-    // Default position: bottom-right of cursor
-    let mut x = cursor_x + MARGIN;
-    let mut y = cursor_y + MARGIN;
+    if x + w > m.x + m.width { x = cx - w - GAP; }
+    if y + h > m.y + m.height { y = cy - h - GAP; }
 
-    // If window exceeds right boundary, move to left of cursor
-    if x + w > monitor.x + monitor.width {
-        x = cursor_x - w - MARGIN;
-    }
-
-    // If window exceeds bottom boundary, move above cursor
-    if y + h > monitor.y + monitor.height {
-        y = cursor_y - h - MARGIN;
-    }
-
-    // Ensure window stays within monitor bounds
-    x = x.max(monitor.x).min(monitor.x + monitor.width - w);
-    y = y.max(monitor.y).min(monitor.y + monitor.height - h);
+    x = x.max(m.x).min(m.x + m.width - w);
+    y = y.max(m.y).min(m.y + m.height - h);
 
     PhysicalPosition::new(x, y)
 }

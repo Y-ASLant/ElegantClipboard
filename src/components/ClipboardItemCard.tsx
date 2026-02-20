@@ -78,6 +78,7 @@ interface ContextMenuItemConfig {
 interface ClipboardItemCardProps {
   item: ClipboardItem;
   index?: number;
+  showBadge?: boolean;
   sortId?: string;
   isDragOverlay?: boolean;
 }
@@ -249,6 +250,7 @@ const arePropsEqual = (
   nextProps: ClipboardItemCardProps,
 ) => {
   if (prevProps.index !== nextProps.index) return false;
+  if (prevProps.showBadge !== nextProps.showBadge) return false;
   if (prevProps.sortId !== nextProps.sortId) return false;
   if (prevProps.isDragOverlay !== nextProps.isDragOverlay) return false;
 
@@ -273,6 +275,7 @@ const arePropsEqual = (
 export const ClipboardItemCard = memo(function ClipboardItemCard({
   item,
   index,
+  showBadge,
   sortId,
   isDragOverlay = false,
 }: ClipboardItemCardProps) {
@@ -443,6 +446,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               image_path={item.image_path}
               metaItems={metaItems}
               index={index}
+              showBadge={showBadge}
               isDragOverlay={isDragOverlay}
               sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
               sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
@@ -454,6 +458,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               preview={item.preview}
               metaItems={metaItems}
               index={index}
+              showBadge={showBadge}
               isDragOverlay={isDragOverlay}
               sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
               sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
@@ -474,6 +479,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               <CardFooter
                 metaItems={metaItems}
                 index={index}
+                showBadge={showBadge}
                 isDragOverlay={isDragOverlay}
                 sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
                 sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}

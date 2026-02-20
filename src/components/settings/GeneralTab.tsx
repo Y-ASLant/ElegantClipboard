@@ -18,6 +18,8 @@ export interface GeneralSettings {
   admin_launch: boolean;
   is_running_as_admin: boolean;
   follow_cursor: boolean;
+  log_to_file: boolean;
+  log_file_path: string;
 }
 
 interface GeneralTabProps {
@@ -30,6 +32,8 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const setAutoResetState = useUISettings((s) => s.setAutoResetState);
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
+  const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
+  const [pendingLogToFile, setPendingLogToFile] = useState<boolean | null>(null);
 
   return (
     <>
@@ -105,6 +109,33 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             </div>
           </div>
         </div>
+        {/* Log Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">日志</h3>
+          <p className="text-xs text-muted-foreground mb-4">调试与故障排查</p>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">保存日志到文件</Label>
+                <p className="text-xs text-muted-foreground">
+                  日志文件上限 10MB，超出自动轮转
+                </p>
+              </div>
+              <Switch
+                checked={settings.log_to_file}
+                onCheckedChange={(checked) => {
+                  setPendingLogToFile(checked);
+                  setLogRestartDialogOpen(true);
+                }}
+              />
+            </div>
+            {settings.log_to_file && settings.log_file_path && (
+              <p className="text-xs text-muted-foreground break-all">
+                路径：{settings.log_file_path}
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Admin Launch Restart Dialog */}
@@ -167,6 +198,64 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                     alert(`操作失败: ${error}`);
                     setAdminRestartDialogOpen(false);
                     setPendingAdminLaunch(null);
+                  }
+                }
+              }}
+            >
+              立即重启
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Log Restart Dialog */}
+      <Dialog open={logRestartDialogOpen} onOpenChange={setLogRestartDialogOpen}>
+        <DialogContent className="max-w-sm" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>
+              {pendingLogToFile ? "启用日志保存" : "关闭日志保存"}
+            </DialogTitle>
+            <DialogDescription>
+              此设置需要重启应用后才能生效
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLogRestartDialogOpen(false);
+                setPendingLogToFile(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                if (pendingLogToFile !== null) {
+                  try {
+                    await invoke("set_log_to_file", { enabled: pendingLogToFile });
+                    onSettingsChange({ ...settings, log_to_file: pendingLogToFile });
+                  } catch (error) {
+                    alert(`操作失败: ${error}`);
+                  }
+                }
+                setLogRestartDialogOpen(false);
+                setPendingLogToFile(null);
+              }}
+            >
+              稍后重启
+            </Button>
+            <Button
+              onClick={async () => {
+                if (pendingLogToFile !== null) {
+                  try {
+                    await invoke("set_log_to_file", { enabled: pendingLogToFile });
+                    onSettingsChange({ ...settings, log_to_file: pendingLogToFile });
+                    await invoke("restart_app");
+                  } catch (error) {
+                    alert(`操作失败: ${error}`);
+                    setLogRestartDialogOpen(false);
+                    setPendingLogToFile(null);
                   }
                 }
               }}
