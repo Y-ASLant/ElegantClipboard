@@ -217,20 +217,10 @@ impl ClipboardRepository {
          is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon";
 
-    pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-
-        let is_searching = options
-            .search
-            .as_ref()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false);
-        let columns = if is_searching {
-            Self::SEARCH_COLUMNS
-        } else {
-            Self::LIST_COLUMNS
-        };
-        let mut sql = format!("SELECT {} FROM clipboard_items", columns);
+    /// 构建通用的 WHERE 条件（content_type / pinned_only / favorite_only / search）
+    fn build_filter_conditions(
+        options: &QueryOptions,
+    ) -> (Vec<String>, Vec<Box<dyn rusqlite::ToSql>>) {
         let mut conditions = Vec::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -253,9 +243,19 @@ impl ClipboardRepository {
             }
         }
 
+        // 支持逗号分隔的多类型筛选（如 "text,html,rtf"）
         if let Some(ref content_type) = options.content_type {
-            conditions.push("content_type = ?".to_string());
-            params_vec.push(Box::new(content_type.clone()));
+            let types: Vec<&str> = content_type.split(',').map(|s| s.trim()).collect();
+            if types.len() == 1 {
+                conditions.push("content_type = ?".to_string());
+                params_vec.push(Box::new(content_type.clone()));
+            } else {
+                let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
+                conditions.push(format!("content_type IN ({})", placeholders.join(",")));
+                for t in &types {
+                    params_vec.push(Box::new(t.to_string()));
+                }
+            }
         }
 
         if options.pinned_only {
@@ -266,10 +266,34 @@ impl ClipboardRepository {
             conditions.push("is_favorite = 1".to_string());
         }
 
+        (conditions, params_vec)
+    }
+
+    /// 将条件拼接到 SQL 语句
+    fn append_where(sql: &mut String, conditions: &[String]) {
         if !conditions.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&conditions.join(" AND "));
         }
+    }
+
+    pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+
+        let is_searching = options
+            .search
+            .as_ref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let columns = if is_searching {
+            Self::SEARCH_COLUMNS
+        } else {
+            Self::LIST_COLUMNS
+        };
+
+        let mut sql = format!("SELECT {} FROM clipboard_items", columns);
+        let (conditions, mut params_vec) = Self::build_filter_conditions(&options);
+        Self::append_where(&mut sql, &conditions);
 
         // 排序: 置顶优先 → sort_order 降序 → 时间降序
         sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
@@ -295,26 +319,8 @@ impl ClipboardRepository {
         let conn = self.read_conn.lock();
 
         let mut sql = String::from("SELECT COUNT(*) FROM clipboard_items");
-        let mut conditions = Vec::new();
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-        if let Some(ref content_type) = options.content_type {
-            conditions.push("content_type = ?".to_string());
-            params_vec.push(Box::new(content_type.clone()));
-        }
-
-        if options.pinned_only {
-            conditions.push("is_pinned = 1".to_string());
-        }
-
-        if options.favorite_only {
-            conditions.push("is_favorite = 1".to_string());
-        }
-
-        if !conditions.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&conditions.join(" AND "));
-        }
+        let (conditions, params_vec) = Self::build_filter_conditions(&options);
+        Self::append_where(&mut sql, &conditions);
 
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(|p| p.as_ref()).collect();

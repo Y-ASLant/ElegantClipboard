@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import {
   ClipboardMultiple16Regular,
+  Filter16Regular,
   Search16Regular,
   ArrowUp16Regular,
 } from "@fluentui/react-icons";
@@ -46,7 +47,7 @@ export function ClipboardList() {
     items,
     isLoading,
     searchQuery,
-    selectedType,
+    selectedGroup,
     fetchItems,
     setupListener,
     moveItem,
@@ -86,7 +87,7 @@ export function ClipboardList() {
   );
 
   // 搜索/筛选时隐藏快捷粘贴序号（过滤后的顺序与快捷粘贴的全局顺序不一致）
-  const showSlotBadges = !searchQuery && !selectedType;
+  const showSlotBadges = !searchQuery && !selectedGroup;
 
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
@@ -235,17 +236,24 @@ export function ClipboardList() {
     );
   }
 
-  // 搜索无结果：在 Virtuoso 外层条件渲染（react-virtuoso 没有内置 empty placeholder）
-  if (items.length === 0 && searchQuery) {
+  // 搜索/筛选无结果
+  if (items.length === 0 && (searchQuery || selectedGroup)) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">
           <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto">
-            <Search16Regular className="w-8 h-8 text-muted-foreground" />
+            {searchQuery
+              ? <Search16Regular className="w-8 h-8 text-muted-foreground" />
+              : <Filter16Regular className="w-8 h-8 text-muted-foreground" />
+            }
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium">未找到匹配的内容</p>
-            <p className="text-sm text-muted-foreground">试试其他关键词</p>
+            <p className="text-sm font-medium">
+              {searchQuery ? "未找到匹配的内容" : "暂无此类型的内容"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {searchQuery ? "试试其他关键词" : "试试其他分类"}
+            </p>
           </div>
         </div>
       </div>

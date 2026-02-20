@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
 import {
   Search16Regular,
   Delete16Regular,
@@ -28,8 +28,17 @@ import {
 } from "@/components/ui/tooltip";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
+import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
+
+const GROUPS = [
+  { label: "全部", value: null },
+  { label: "收藏", value: "__favorites__" },
+  { label: "文本", value: "text,html,rtf" },
+  { label: "图片", value: "image" },
+  { label: "文件", value: "files" },
+] as const;
 
 // Initialize theme once for this window (runs before component mounts)
 initTheme();
@@ -49,9 +58,20 @@ function dismissOverlays(): boolean {
 function App() {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const { searchQuery, setSearchQuery, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
+  const { searchQuery, selectedGroup, setSearchQuery, setSelectedGroup, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
   const autoResetState = useUISettings((s) => s.autoResetState);
   const inputRef = useRef<HTMLInputElement>(null);
+  const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
+
+  // 更新滑动指示器位置
+  useLayoutEffect(() => {
+    const idx = GROUPS.findIndex((g) => g.value === selectedGroup);
+    const el = segmentRefs.current[idx];
+    if (el) {
+      setSegmentIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+    }
+  }, [selectedGroup]);
 
   // Load pinned state on mount
   useEffect(() => {
@@ -203,7 +223,7 @@ function App() {
         className="flex items-center gap-2 p-2 shrink-0 select-none"
         data-tauri-drag-region
       >
-        {/* Search Bar Card */}
+        {/* Search Bar */}
         <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
           <Input
@@ -268,6 +288,36 @@ function App() {
       {/* Clipboard List */}
       <div className="flex-1 overflow-hidden">
         <ClipboardList />
+      </div>
+
+      {/* Bottom Segment */}
+      <div className="shrink-0 px-2 pb-2 pt-1 select-none">
+        <div className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
+          {/* 滑动指示器 */}
+          <div
+            className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
+            style={{
+              transform: `translateX(${segmentIndicator.left}px)`,
+              width: segmentIndicator.width,
+              opacity: segmentIndicator.width > 0 ? 1 : 0,
+            }}
+          />
+          {GROUPS.map((g, i) => (
+            <button
+              key={g.label}
+              ref={(el) => { segmentRefs.current[i] = el; }}
+              onClick={() => setSelectedGroup(g.value)}
+              className={cn(
+                "relative z-[1] flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
+                selectedGroup === g.value
+                  ? "text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Clear History Dialog */}
