@@ -66,6 +66,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               onCheckedChange={setAutoResetState}
             />
           </div>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">键盘导航</Label>
+              <p className="text-xs text-muted-foreground">
+                方向键选择、回车粘贴、Delete 删除
+              </p>
+            </div>
+            <Switch
+              checked={useUISettings((s) => s.keyboardNavigation)}
+              onCheckedChange={useUISettings((s) => s.setKeyboardNavigation)}
+            />
+          </div>
         </div>
 
         {/* Startup Card */}

@@ -397,9 +397,10 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                 }
             }
 
-            // 显示并置顶（不抢焦点）
+            // 显示并置顶，取得焦点以支持键盘导航
             let _ = window.show();
             positioning::force_topmost(&window);
+            let _ = window.set_focus();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
             input_monitor::enable_mouse_monitoring();
             let _ = window.emit("window-shown", ());
@@ -1012,6 +1013,8 @@ pub fn run() {
             commands::clipboard::clear_history,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::paste_content,
+            commands::clipboard::paste_content_as_plain,
+            commands::clipboard::paste_text_direct,
             commands::clipboard::update_text_content,
             // Settings, monitor, database, folder, autostart commands
             commands::settings::get_setting,

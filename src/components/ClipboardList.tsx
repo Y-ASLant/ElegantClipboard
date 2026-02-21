@@ -7,6 +7,7 @@ import {
 } from "@fluentui/react-icons";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
+import { useShallow } from "zustand/react/shallow";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
@@ -52,9 +53,29 @@ export function ClipboardList() {
     setupListener,
     moveItem,
     togglePin,
+    setActiveIndex,
+    pasteContent,
+    pasteAsPlainText,
+    deleteItem,
     _resetToken,
-  } = useClipboardStore();
-  const { cardMaxLines } = useUISettings();
+  } = useClipboardStore(
+    useShallow((s) => ({
+      items: s.items,
+      isLoading: s.isLoading,
+      searchQuery: s.searchQuery,
+      selectedGroup: s.selectedGroup,
+      fetchItems: s.fetchItems,
+      setupListener: s.setupListener,
+      moveItem: s.moveItem,
+      togglePin: s.togglePin,
+      setActiveIndex: s.setActiveIndex,
+      pasteContent: s.pasteContent,
+      pasteAsPlainText: s.pasteAsPlainText,
+      deleteItem: s.deleteItem,
+      _resetToken: s._resetToken,
+    })),
+  );
+  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
 
   useEffect(() => {
     // Fetch items (files_valid is computed by backend, no extra IPC needed)
@@ -185,6 +206,68 @@ export function ClipboardList() {
       scrollToTop();
     }
   }, [_resetToken, scrollToTop]);
+
+  // 键盘导航：前端 keydown 事件（只在本窗口聚焦时触发，不影响其它软件）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!useUISettings.getState().keyboardNavigation) return;
+      const count = useClipboardStore.getState().items.length;
+      if (count === 0) return;
+
+      switch (e.key) {
+        case "ArrowUp": {
+          e.preventDefault();
+          const cur = useClipboardStore.getState().activeIndex;
+          let next = cur;
+          if (cur > 0) next = cur - 1;
+          else if (cur === -1) next = 0;
+          if (next !== cur) {
+            setActiveIndex(next);
+            virtuosoRef.current?.scrollToIndex({ index: next, align: "center", behavior: "auto" });
+          }
+          break;
+        }
+        case "ArrowDown": {
+          e.preventDefault();
+          const cur = useClipboardStore.getState().activeIndex;
+          if (cur < count - 1) {
+            const next = cur + 1;
+            setActiveIndex(next);
+            virtuosoRef.current?.scrollToIndex({ index: next, align: "center", behavior: "auto" });
+          }
+          break;
+        }
+        case "Enter": {
+          const { activeIndex: idx, items: list } = useClipboardStore.getState();
+          if (idx < 0 || idx >= list.length) return;
+          e.preventDefault();
+          const item = list[idx];
+          if (e.shiftKey) {
+            pasteAsPlainText(item.id);
+          } else {
+            pasteContent(item.id);
+          }
+          break;
+        }
+        case "Delete": {
+          // 在输入框内不拦截 Delete
+          const target = e.target as HTMLElement;
+          if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+          const { activeIndex: idx, items: list } = useClipboardStore.getState();
+          if (idx < 0 || idx >= list.length) return;
+          e.preventDefault();
+          deleteItem(list[idx].id);
+          if (idx >= list.length - 1) {
+            setActiveIndex(Math.max(0, list.length - 2));
+          }
+          break;
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [setActiveIndex, pasteContent, pasteAsPlainText, deleteItem]);
 
   // 拖拽时添加全局光标样式
   useEffect(() => {

@@ -542,6 +542,43 @@ pub async fn paste_content(
     Ok(())
 }
 
+/// Paste item content as plain text (strips formatting for html/rtf items)
+/// This will: 1. Get text_content, 2. Write as plain text to clipboard, 3. Hide window, 4. Simulate Ctrl+V
+#[tauri::command]
+pub async fn paste_content_as_plain(
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+    id: i64,
+) -> Result<(), String> {
+    let repo = ClipboardRepository::new(&state.db);
+    let item = repo
+        .get_by_id(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Item not found".to_string())?;
+
+    let text = item
+        .text_content
+        .as_deref()
+        .ok_or_else(|| "Item has no text content".to_string())?;
+
+    paste_plain_text_to_active_window(&state, &app, text)?;
+    debug!("Pasted item {} as plain text", id);
+    Ok(())
+}
+
+/// Paste arbitrary text directly to active window
+/// Used by features like emoji picker, snippets, etc.
+#[tauri::command]
+pub async fn paste_text_direct(
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+    text: String,
+) -> Result<(), String> {
+    paste_plain_text_to_active_window(&state, &app, &text)?;
+    debug!("Pasted direct text ({} chars)", text.len());
+    Ok(())
+}
+
 /// Paste the item at quick slot position (1-9) to active window.
 /// Slot ordering follows the default list order:
 /// pinned first, then by sort_order desc, then created_at desc.
@@ -581,6 +618,27 @@ fn paste_item_to_active_window(
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
         set_clipboard_content(item, &mut clipboard)?;
+
+        hide_main_window_if_not_pinned(app);
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        simulate_paste()?;
+        Ok(())
+    })
+}
+
+/// Shared plain-text paste: write text to clipboard, hide window, simulate Ctrl+V
+fn paste_plain_text_to_active_window(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    text: &str,
+) -> Result<(), String> {
+    with_paused_monitor(state, || {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+        clipboard
+            .set_text(text)
+            .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
 
         hide_main_window_if_not_pinned(app);
 
