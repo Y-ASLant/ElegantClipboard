@@ -1,7 +1,6 @@
-//! Windows Registry management for disabling/enabling system Win+V hotkey
+//! 通过注册表禁用/启用系统 Win+V 热键
 //!
-//! This approach completely disables the Windows built-in clipboard history
-//! by modifying the registry, which is more reliable than keyboard hooks.
+//! 修改注册表彼底禁用 Windows 内置剪贴板历史，比键盘钉更可靠。
 
 #[cfg(windows)]
 use winreg::enums::*;
@@ -13,7 +12,7 @@ const EXPLORER_ADVANCED_PATH: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion
 #[cfg(windows)]
 const DISABLED_HOTKEYS_VALUE: &str = "DisabledHotkeys";
 
-/// Disable system Win+V hotkey by adding 'V' to DisabledHotkeys registry
+/// 将 'V' 加入 DisabledHotkeys 注册表値，禁用系统 Win+V 热键
 #[cfg(windows)]
 pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -25,7 +24,7 @@ pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
         .get_value(DISABLED_HOTKEYS_VALUE)
         .unwrap_or_default();
 
-    // Add 'V' if not already present
+    // 若不存在则追加 'V'
     if !current_value.contains('V') {
         let new_value = format!("{}V", current_value);
         reg_key
@@ -40,24 +39,24 @@ pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Enable system Win+V hotkey by removing 'V' from DisabledHotkeys registry
+/// 从 DisabledHotkeys 注册表値移除 'V'，恢复系统 Win+V 热键
 #[cfg(windows)]
 pub fn enable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let reg_key = match hkcu.open_subkey_with_flags(EXPLORER_ADVANCED_PATH, KEY_READ | KEY_WRITE) {
         Ok(k) => k,
-        Err(_) => return Ok(()), // Key doesn't exist, nothing to do
+        Err(_) => return Ok(()), // 注册表项不存在，无需处理
     };
 
     let current_value: String = reg_key
         .get_value(DISABLED_HOTKEYS_VALUE)
         .unwrap_or_default();
 
-    // Remove 'V' from the value
+    // 从値中移除 'V'
     let new_value = current_value.replace('V', "");
 
     if new_value.is_empty() {
-        // If empty, delete the value entirely
+        // 如果为空则整体删除该属性値
         let _ = reg_key.delete_value(DISABLED_HOTKEYS_VALUE);
     } else if new_value != current_value {
         reg_key
@@ -72,20 +71,20 @@ pub fn enable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Restart Windows Explorer to apply registry changes
+/// 重启 Explorer 以使注册表修改生效
 #[cfg(windows)]
 fn restart_explorer_process() -> Result<(), String> {
     use std::process::Command;
 
-    // Kill explorer
+    // 关闭 Explorer
     let _ = Command::new("taskkill")
         .args(["/F", "/IM", "explorer.exe"])
         .output();
 
-    // Wait a moment
+    // 等待片刻
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
-    // Start explorer
+    // 启动 Explorer
     if Command::new("cmd")
         .args(["/C", "start", "explorer.exe"])
         .spawn()
@@ -96,13 +95,13 @@ fn restart_explorer_process() -> Result<(), String> {
             .map_err(|e| format!("无法启动Explorer进程: {}", e))?;
     }
 
-    // Wait for explorer to start
+    // 等待 Explorer 启动
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     Ok(())
 }
 
-/// Check if system Win+V hotkey is disabled
+/// 检查系统 Win+V 热键是否已被禁用
 #[cfg(windows)]
 pub fn is_win_v_hotkey_disabled() -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -118,7 +117,7 @@ pub fn is_win_v_hotkey_disabled() -> bool {
     current_value.contains('V')
 }
 
-// Non-Windows stubs
+// 非 Windows 平台占位实现
 #[cfg(not(windows))]
 pub fn disable_win_v_hotkey(_restart_explorer: bool) -> Result<(), String> {
     Err("Win+V registry modification is only available on Windows".to_string())

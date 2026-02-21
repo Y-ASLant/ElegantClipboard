@@ -279,12 +279,19 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   sortId,
   isDragOverlay = false,
 }: ClipboardItemCardProps) {
+  // 每张卡片自行订阅 activeIndex，只有选中态变化的卡片才重渲染
+  const isActiveIndex = useClipboardStore(
+    (s) => index !== undefined && index >= 0 && s.activeIndex === index,
+  );
+  const keyboardNavEnabled = useUISettings((s) => s.keyboardNavigation);
+  const isActive = isActiveIndex && keyboardNavEnabled;
   const {
     togglePin,
     toggleFavorite,
     deleteItem,
     copyToClipboard,
     pasteContent,
+    pasteAsPlainText,
   } = clipboardActions();
   const cardMaxLines = useUISettings((s) => s.cardMaxLines);
   const showTime = useUISettings((s) => s.showTime);
@@ -434,9 +441,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <Card
         className={cn(
-          "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30",
+        "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30",
           isDragOverlay && "shadow-lg border-primary cursor-grabbing",
           justDropped && "animate-scale-bounce",
+          isActive && "bg-accent shadow-sm",
         )}
         onClick={handlePaste}
       >
@@ -526,6 +534,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     if (item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf") {
       return [
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: handlePaste },
+        { icon: TextDescription16Regular, label: "粘贴为纯文本", onClick: () => pasteAsPlainText(item.id) },
         { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
         { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
         { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },

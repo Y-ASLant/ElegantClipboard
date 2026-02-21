@@ -1,8 +1,8 @@
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 
-/// Parse a single key string to Code
+/// 将按键字符串解析为 Code
 fn parse_key_code(key: &str) -> Option<Code> {
-    // Letters A-Z
+    // 字母 A-Z
     const LETTERS: [Code; 26] = [
         Code::KeyA,
         Code::KeyB,
@@ -31,7 +31,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
         Code::KeyY,
         Code::KeyZ,
     ];
-    // Digits 0-9
+    // 数字 0-9
     const DIGITS: [Code; 10] = [
         Code::Digit0,
         Code::Digit1,
@@ -44,7 +44,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
         Code::Digit8,
         Code::Digit9,
     ];
-    // Function keys F1-F12
+    // 功能键 F1-F12
     const F_KEYS: [Code; 12] = [
         Code::F1,
         Code::F2,
@@ -60,7 +60,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
         Code::F12,
     ];
 
-    // Single letter
+    // 单个字母
     if key.len() == 1 {
         let c = key.chars().next()?;
         if c.is_ascii_uppercase() {
@@ -71,7 +71,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
         }
     }
 
-    // Function keys F1-F12
+    // 功能键 F1-F12
     if key.starts_with('F') && key.len() <= 3 {
         if let Ok(n) = key[1..].parse::<usize>() {
             if n >= 1 && n <= 12 {
@@ -80,7 +80,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
         }
     }
 
-    // Special keys
+    // 特殊键
     match key {
         "SPACE" => Some(Code::Space),
         "TAB" => Some(Code::Tab),
@@ -101,7 +101,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
     }
 }
 
-/// Parse shortcut string like "CTRL+SHIFT+V" to Shortcut object
+/// 将 "CTRL+SHIFT+V" 格式字符串解析为 Shortcut 对象
 pub fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
     let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
     if parts.is_empty() {

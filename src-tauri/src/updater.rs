@@ -1,11 +1,7 @@
-//! GitHub-based update checker and downloader
+//! 基于 GitHub Release 的更新检查与下载模块
 //!
-//! Uses GitHub Releases API to check for new versions, download installers with
-//! progress reporting, and launch the NSIS setup executable.
-//!
-//! An optional API token can be embedded at build time to increase rate limits
-//! (60 → 5000 requests/hour). Set the `UPDATER_GITHUB_TOKEN` environment variable
-//! during `cargo build`.
+//! 检查最新版本、下载 NSIS 安装包并汇报进度。
+//! 编译时可通过 `UPDATER_GITHUB_TOKEN` 环境变量嵌入 API Token 以提高速率上限。
 
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -15,10 +11,10 @@ use tracing::info;
 const GITHUB_API_URL: &str =
     "https://api.github.com/repos/Y-ASLant/ElegantClipboard/releases/latest";
 
-/// Optional GitHub API token, embedded at compile time.
+/// 编译时嵌入的可选 GitHub API Token
 const GITHUB_TOKEN: Option<&str> = option_env!("UPDATER_GITHUB_TOKEN");
 
-// ── GitHub API response types ──────────────────────────────────────────
+// ── GitHub API 响应类型 ────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
@@ -35,7 +31,7 @@ struct GitHubAsset {
     size: u64,
 }
 
-// ── Public types ───────────────────────────────────────────────────────
+// ── 公共类型 ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UpdateInfo {
@@ -49,9 +45,9 @@ pub struct UpdateInfo {
     pub published_at: String,
 }
 
-// ── Public API ─────────────────────────────────────────────────────────
+// ── 公共 API ─────────────────────────────────────────────────────────────────────
 
-/// Check GitHub for the latest release and compare with current version.
+/// 检查 GitHub 最新版本并与当前版本比较。
 pub fn check_update() -> Result<UpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION");
     info!("Checking for updates (current: v{})", current_version);
@@ -82,7 +78,7 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let has_update = is_newer(&latest_version, current_version);
 
-    // Find NSIS setup executable matching current architecture
+    // 查找与当前架构匹配的 NSIS 安装包
     let arch_suffix = match std::env::consts::ARCH {
         "aarch64" => "arm64-setup.exe",
         _ => "x64-setup.exe",
@@ -115,9 +111,8 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     })
 }
 
-/// Download an update installer from GitHub with progress reporting.
-/// Progress events (`update-download-progress`) are emitted to the frontend.
-/// Returns the local path to the downloaded file.
+/// 从 GitHub 下载更新安装包，并向前端发射下载进度事件。
+/// 返回下载文件的本地路径。
 pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<String, String> {
     info!("Downloading update: {}", file_name);
 
@@ -146,7 +141,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     let mut file = std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {}", e))?;
     let mut body = response.into_body();
     let mut reader = body.as_reader();
-    let mut buf = vec![0u8; 65536]; // 64 KB chunks
+    let mut buf = vec![0u8; 65536]; // 64 KB 读取缓冲
     let mut downloaded = 0u64;
     let mut last_emit = std::time::Instant::now();
 
@@ -161,7 +156,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
             .map_err(|e| format!("写入文件失败: {}", e))?;
         downloaded += n as u64;
 
-        // Throttle progress events to ~10/sec
+        // 限流：约 10 次/秒发射进度事件
         if last_emit.elapsed() >= std::time::Duration::from_millis(100) || downloaded >= total {
             let _ = app.emit(
                 "update-download-progress",
@@ -178,7 +173,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     Ok(file_path.to_string_lossy().to_string())
 }
 
-/// Launch the downloaded NSIS installer executable.
+/// 启动已下载的 NSIS 安装程序。
 pub fn install(installer_path: &str) -> Result<(), String> {
     info!("Launching installer: {}", installer_path);
 
@@ -189,9 +184,9 @@ pub fn install(installer_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
+// ── 辅助函数 ────────────────────────────────────────────────────────────────
 
-/// Compare semver strings: returns `true` if `latest` is strictly newer than `current`.
+/// 比较语义版本：若 latest 严格大于 current 则返回 true。
 fn is_newer(latest: &str, current: &str) -> bool {
     let parse = |v: &str| -> Vec<u32> {
         v.trim_start_matches('v')

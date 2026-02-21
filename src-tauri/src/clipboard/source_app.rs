@@ -1,5 +1,6 @@
 //! 剪贴板来源应用检测
-//! 策略: GetForegroundWindow(主) + GetClipboardOwner(补充)
+//! 策略: GetClipboardOwner(主) + GetForegroundWindow(补充)
+//! 剪贴板所有者是实际写入剪贴板的应用，对截图工具等后台写入场景更准确
 
 use std::path::Path;
 use tracing::{debug, warn};
@@ -44,19 +45,19 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
     }
 
     unsafe {
-        // 主策略: 前台窗口（用户复制时所在的应用）
-        let fg = GetForegroundWindow();
-        if let Some(info) = try_resolve(fg, self_pid) {
-            debug!("来源(前台): {} ({})", info.app_name, info.exe_path);
-            return Some(info);
-        }
-
-        // 补充策略: 剪贴板所有者（后台写入剪贴板的应用，如截图工具）
+        // 主策略: 剪贴板所有者（实际写入剪贴板的应用，对截图工具等更准确）
         if let Ok(owner) = GetClipboardOwner() {
             if let Some(info) = try_resolve(owner, self_pid) {
                 debug!("来源(所有者): {} ({})", info.app_name, info.exe_path);
                 return Some(info);
             }
+        }
+
+        // 补充策略: 前台窗口（部分应用不设置剪贴板所有者时的兜底）
+        let fg = GetForegroundWindow();
+        if let Some(info) = try_resolve(fg, self_pid) {
+            debug!("来源(前台): {} ({})", info.app_name, info.exe_path);
+            return Some(info);
         }
 
         debug!("无法识别剪贴板来源");

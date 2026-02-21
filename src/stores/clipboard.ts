@@ -32,10 +32,11 @@ export interface ClipboardItem {
 
 interface ClipboardState {
   items: ClipboardItem[];
-  totalCount: number;
   isLoading: boolean;
   searchQuery: string;
-  selectedType: string | null;
+  selectedGroup: string | null;
+  /** Currently keyboard-highlighted item index (-1 = none) */
+  activeIndex: number;
   /** Monotonic counter to discard stale fetch results */
   _fetchId: number;
   /** Incremented when the view should reset (scroll to top, etc.) */
@@ -48,15 +49,16 @@ interface ClipboardState {
     limit?: number;
     offset?: number;
   }) => Promise<void>;
-  fetchCount: () => Promise<void>;
   setSearchQuery: (query: string) => void;
-  setSelectedType: (type: string | null) => void;
+  setSelectedGroup: (group: string | null) => void;
+  setActiveIndex: (index: number) => void;
   togglePin: (id: number) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
   moveItem: (fromId: number, toId: number) => Promise<void>;
   deleteItem: (id: number) => Promise<void>;
   copyToClipboard: (id: number) => Promise<void>;
   pasteContent: (id: number) => Promise<void>;
+  pasteAsPlainText: (id: number) => Promise<void>;
   clearHistory: () => Promise<void>;
   refresh: () => Promise<void>;
   /** Reset view state: clear search, clear type filter, scroll to top, refresh */
@@ -66,10 +68,10 @@ interface ClipboardState {
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
   items: [],
-  totalCount: 0,
   isLoading: false,
   searchQuery: "",
-  selectedType: null,
+  selectedGroup: null,
+  activeIndex: -1,
   _fetchId: 0,
   _resetToken: 0,
 
@@ -78,17 +80,18 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     const fetchId = state._fetchId + 1;
     set({ isLoading: true, _fetchId: fetchId });
     try {
+      const group = options.content_type ?? state.selectedGroup;
+      const isFavoritesView = group === "__favorites__";
       const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
         search: options.search ?? (state.searchQuery || null),
-        contentType: options.content_type ?? state.selectedType,
+        contentType: isFavoritesView ? null : group,
         pinnedOnly: false,
-        favoriteOnly: false,
+        favoriteOnly: isFavoritesView,
         limit: options.limit ?? null,
         offset: options.offset ?? 0,
       });
-      // Only apply result if no newer fetch has started
       if (get()._fetchId === fetchId) {
-        set({ items, isLoading: false });
+        set({ items, isLoading: false, activeIndex: -1 });
       }
     } catch (error) {
       if (get()._fetchId === fetchId) {
@@ -98,24 +101,19 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
-  fetchCount: async () => {
-    try {
-      const count = await invoke<number>("get_clipboard_count", {});
-      set({ totalCount: count });
-    } catch (error) {
-      logError("Failed to fetch count:", error);
-    }
-  },
-
   setSearchQuery: (query: string) => {
     set({ searchQuery: query });
     // Note: Debouncing is handled in App.tsx with useMemo + debounce
     // This just updates the query state
   },
 
-  setSelectedType: (type: string | null) => {
-    set({ selectedType: type });
+  setSelectedGroup: (group: string | null) => {
+    set({ selectedGroup: group });
     get().fetchItems();
+  },
+
+  setActiveIndex: (index: number) => {
+    set({ activeIndex: index });
   },
 
   togglePin: async (id: number) => {
@@ -160,7 +158,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       await invoke("delete_clipboard_item", { id });
       set((state) => ({
         items: state.items.filter((item) => item.id !== id),
-        totalCount: state.totalCount - 1,
       }));
     } catch (error) {
       logError("Failed to delete item:", error);
@@ -183,6 +180,14 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
+  pasteAsPlainText: async (id: number) => {
+    try {
+      await invoke("paste_content_as_plain", { id });
+    } catch (error) {
+      logError("Failed to paste as plain text:", error);
+    }
+  },
+
   clearHistory: async () => {
     try {
       await invoke<number>("clear_history");
@@ -199,7 +204,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   resetView: async () => {
     set((state) => ({
       searchQuery: "",
-      selectedType: null,
+      selectedGroup: null,
       _resetToken: state._resetToken + 1,
     }));
     await get().fetchItems({ search: "" });

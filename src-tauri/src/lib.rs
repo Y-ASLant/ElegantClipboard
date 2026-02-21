@@ -26,17 +26,14 @@ use tracing::Level;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-
-/// Global state for current shortcut (parking_lot::RwLock: no poison, consistent with codebase)
+/// 当前全局快捷键（使用 parking_lot::RwLock）
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
-/// In-memory cache for quick paste shortcuts (slot 1-9)
+/// 快速粘贴快捷键缓存（槽位 1-9）
 static CURRENT_QUICK_PASTE_SHORTCUTS: parking_lot::RwLock<Vec<String>> =
     parking_lot::RwLock::new(Vec::new());
-/// Serialise quick-paste operations so concurrent shortcut events
-/// don't race on the system clipboard.
+/// 快速粘贴操作互斥锁，防止并发事件竞争系统剪贴板
 static QUICK_PASTE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
-/// Track which quick-paste slots are "active" (key held down).
-/// First press → full pipeline; repeat press → simulate_paste only.
+/// 记录当前处于“按住”状态的快速粘贴槽位。首次按下执行完整流程，重复按下仅模拟粘贴。
 static ACTIVE_QUICK_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<u8>>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
 
@@ -53,7 +50,7 @@ fn normalize_shortcut_value(value: &str) -> String {
 }
 
 fn shortcut_has_modifier(shortcut: &str) -> bool {
-    // Shift alone is not a valid modifier for global shortcuts (e.g. Shift+1 just types '!')
+    // Shift 单独不构成有效修饰键（如 Shift+1 输入 '!'）
     shortcut
         .split('+')
         .map(|part| part.trim().to_uppercase())
@@ -75,8 +72,7 @@ fn apply_quick_paste_shortcuts(
     app: &tauri::AppHandle,
     shortcuts: &[String],
 ) -> HashMap<u8, String> {
-    // Unregister previously active quick paste shortcuts first
-    // (values are already normalized when stored)
+    // 先注销之前激活的快速粘贴快捷键
     for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
         if s.is_empty() {
             continue;
@@ -111,9 +107,7 @@ fn apply_quick_paste_shortcuts(
             .global_shortcut()
             .on_shortcut(parsed, move |app, _shortcut, event| match event.state {
                 ShortcutState::Pressed => {
-                    // Skip when one of our own windows (settings, editor, …)
-                    // has focus — otherwise simulate_paste sends Ctrl+V into
-                    // our own UI.
+                    // 若本应用窗口获得焦点则跳过，避免将 Ctrl+V 发送到自身 UI
                     let any_focused = app
                         .webview_windows()
                         .values()
@@ -122,7 +116,7 @@ fn apply_quick_paste_shortcuts(
                         return;
                     }
 
-                    // Distinguish first press vs repeat press (key held).
+                    // 区分首次按下与按住重复
                     let is_first = {
                         let mut active = ACTIVE_QUICK_PASTE_SLOTS.lock();
                         active.insert(slot) // true = newly inserted
@@ -131,12 +125,11 @@ fn apply_quick_paste_shortcuts(
                     let state = app.state::<Arc<AppState>>().inner().clone();
                     let app_handle = app.clone();
                     std::thread::spawn(move || {
-                        // Serialise so concurrent events don't race on the
-                        // system clipboard.
+                        // 串行化执行，防止并发事件竞争系统剪贴板
                         let _guard = QUICK_PASTE_LOCK.lock();
 
                         if is_first {
-                            // Full pipeline: read DB → clipboard → paste.
+                            // 完整流程：读 DB → 写剪贴板 → 粘贴
                             if let Err(err) = commands::clipboard::quick_paste_by_slot(
                                 &state, &app_handle, slot,
                             ) {
@@ -144,8 +137,7 @@ fn apply_quick_paste_shortcuts(
                                 ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
                             }
                         } else {
-                            // Repeat press: content is already in the clipboard,
-                            // just simulate Ctrl+V again.
+                            // 重复按下：内容已在剪贴板，仅模拟 Ctrl+V
                             std::thread::sleep(std::time::Duration::from_millis(50));
                             if let Err(err) = commands::clipboard::simulate_paste() {
                                 tracing::warn!("Quick paste repeat slot {} failed: {}", slot, err);
@@ -170,13 +162,11 @@ fn apply_quick_paste_shortcuts(
     failures
 }
 
-/// Keep the non-blocking writer guard alive for the entire process.
-/// Dropping it would flush and stop the background writer thread.
+/// 非阻塞写入 guard，需在整个进程生命周期内保持存活。
 static FILE_LOG_GUARD: parking_lot::Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> =
     parking_lot::Mutex::new(None);
 
-/// Rotate the log file if it exceeds the size limit.
-/// Renames `app.log` → `app.log.old` (overwriting any previous backup).
+/// 若日志文件超过大小上限则轮转（重命名为 app.log.old）。
 fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
     if let Ok(meta) = std::fs::metadata(log_path) {
         if meta.len() > max_size {
@@ -186,9 +176,7 @@ fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
     }
 }
 
-/// Initialize logging system.
-/// When `config.log_to_file` is true, an additional file layer writes to `app.log`
-/// in the data directory.  The file is rotated when it exceeds 10 MB.
+/// 初始化日志系统。log_to_file 启用时写入文件（超过 10MB 自动轮转）。
 fn init_logging(config: &AppConfig) {
     let stdout_layer = fmt::layer()
         .with_target(false)
@@ -198,7 +186,7 @@ fn init_logging(config: &AppConfig) {
 
     let file_layer = if config.is_log_to_file() {
         let log_path = config.get_log_path();
-        // Ensure the parent directory exists
+        // 确保父目录存在
         if let Some(parent) = log_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -238,34 +226,34 @@ fn init_logging(config: &AppConfig) {
         .init();
 }
 
-/// Tauri command: Get app version
+/// Tauri 命令：获取应用版本
 #[tauri::command]
 fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Tauri command: Show main window
+/// Tauri 命令：显示主窗口
 #[tauri::command]
 async fn show_window(window: tauri::WebviewWindow) {
     let _ = window.show();
     let _ = window.set_focus();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
-    // Emit event to frontend for cache invalidation
+    // 向前端发射事件以刷新缓存
     let _ = window.emit("window-shown", ());
 }
 
-/// Tauri command: Hide main window
+/// Tauri 命令：隐藏主窗口
 #[tauri::command]
 async fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
-    // Hide image preview window
+    // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
-    // Emit event to frontend so it can reset state while hidden
+    // 向前端发射事件以重置隐藏状态
     let _ = window.emit("window-hidden", ());
 }
 
-/// Tauri command: Set window visibility state (for sync with backend)
+/// Tauri 命令：设置窗口可见状态（与后端同步）
 #[tauri::command]
 fn set_window_visibility(visible: bool) {
     keyboard_hook::set_window_state(if visible {
@@ -273,7 +261,7 @@ fn set_window_visibility(visible: bool) {
     } else {
         keyboard_hook::WindowState::Hidden
     });
-    // Also enable/disable mouse monitoring for click-outside detection
+    // 同步启用/禁用鼠标监控（点击外部检测）
     if visible {
         input_monitor::enable_mouse_monitoring();
     } else {
@@ -281,13 +269,13 @@ fn set_window_visibility(visible: bool) {
     }
 }
 
-/// Tauri command: Minimize window
+/// Tauri 命令：最小化窗口
 #[tauri::command]
 async fn minimize_window(window: tauri::WebviewWindow) {
     let _ = window.minimize();
 }
 
-/// Tauri command: Toggle maximize window
+/// Tauri 命令：切换最大化
 #[tauri::command]
 async fn toggle_maximize(window: tauri::WebviewWindow) {
     if window.is_maximized().unwrap_or(false) {
@@ -297,22 +285,22 @@ async fn toggle_maximize(window: tauri::WebviewWindow) {
     }
 }
 
-/// Tauri command: Close window (hide to tray)
+/// Tauri 命令：关闭窗口（隐藏到托盘）
 #[tauri::command]
 async fn close_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
-    // Hide image preview window
+    // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
 }
 
-/// Tauri command: Get default data path (returns current configured path)
+/// Tauri 命令：获取当前配置的数据路径
 #[tauri::command]
 fn get_default_data_path() -> String {
     let config = AppConfig::load();
     config.get_data_dir().to_string_lossy().to_string()
 }
 
-/// Tauri command: Get the original default data path (not from config)
+/// Tauri 命令：获取原始默认数据路径（不依赖配置）
 #[tauri::command]
 fn get_original_default_path() -> String {
     database::get_default_db_path()
@@ -321,7 +309,7 @@ fn get_original_default_path() -> String {
         .unwrap_or_default()
 }
 
-/// Tauri command: Set data path and save to config
+/// Tauri 命令：设置数据路径并保存配置
 #[tauri::command]
 fn set_data_path(path: String) -> Result<(), String> {
     let mut config = AppConfig::load();
@@ -329,22 +317,22 @@ fn set_data_path(path: String) -> Result<(), String> {
     config.save()
 }
 
-/// Tauri command: Migrate data to new path
+/// Tauri 命令：将数据迁移到新路径
 #[tauri::command]
 fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, String> {
     let config = AppConfig::load();
     let old_path = config.get_data_dir();
     let new_path = std::path::PathBuf::from(&new_path);
 
-    // Don't migrate if paths are the same
+    // 路径相同时不进行迁移
     if old_path == new_path {
         return Err("Source and destination paths are the same".to_string());
     }
 
-    // Perform migration
+    // 执行迁移
     let result = config::migrate_data(&old_path, &new_path)?;
 
-    // If migration successful, update config
+    // 迁移成功后更新配置
     if result.success() {
         let mut new_config = AppConfig::load();
         new_config.data_path = Some(new_path.to_string_lossy().to_string());
@@ -354,16 +342,15 @@ fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, Str
     Ok(result)
 }
 
-/// Tauri command: Restart application
-/// Uses ShellExecuteW to properly handle UAC elevation when admin launch is enabled
+/// Tauri 命令：重启应用（支持 UAC 提权）
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
-    // Use our custom restart that works with UAC elevation
+    // 使用支持 UAC 的自定义重启
     if admin_launch::restart_app() {
-        // Exit current process after new instance is started
+        // 新实例已启动，退出当前进程
         app.exit(0);
     } else {
-        // Fallback to Tauri's restart
+        // 回退到 Tauri 默认重启
         tauri::process::restart(&app.env());
     }
 }
@@ -397,9 +384,10 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                 }
             }
 
-            // 显示并置顶（不抢焦点）
+            // 显示并置顶，取得焦点以支持键盘导航
             let _ = window.show();
             positioning::force_topmost(&window);
+            let _ = window.set_focus();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
             input_monitor::enable_mouse_monitoring();
             let _ = window.emit("window-shown", ());
@@ -407,22 +395,21 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
     }
 }
 
-/// Tauri command: Enable Win+V replacement
-/// This uses registry to disable system Win+V and Tauri's global_shortcut for our Win+V
+/// Tauri 命令：启用 Win+V 替换（注册表禁用系统 Win+V，接管为应用快捷键）
 #[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
-    // Remember the current shortcut so we can restore it on failure
+    // 记住当前快捷键以便失败时还原
     let saved_shortcut_str = get_current_shortcut();
     let saved_shortcut = parse_shortcut(&saved_shortcut_str);
 
-    // Unregister current custom shortcut
+    // 注销当前自定义快捷键
     if let Some(shortcut) = saved_shortcut {
         let _ = app.global_shortcut().unregister(shortcut);
     }
 
-    // Disable system Win+V via registry (restart explorer to apply)
+    // 通过注册表禁用系统 Win+V（重启 Explorer 生效）
     if let Err(e) = win_v_registry::disable_win_v_hotkey(true) {
-        // Re-register custom shortcut before returning error
+        // 失败时重新注册自定义快捷键
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
@@ -432,8 +419,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         }
         return Err(e);
     }
-
-    // Now register Win+V using Tauri's global_shortcut (system Win+V is disabled)
+    // 接管 Win+V：系统已禁用，通过 global_shortcut 注册
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
     if let Err(e) = app.global_shortcut()
         .on_shortcut(winv_shortcut, |app, _shortcut, event| {
@@ -442,7 +428,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
             }
         })
     {
-        // Restore: re-enable system Win+V and re-register custom shortcut
+        // 还原：重新启用系统 Win+V 并注册自定义快捷键
         let _ = win_v_registry::enable_win_v_hotkey(true);
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
@@ -454,25 +440,24 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         return Err(format!("Failed to register Win+V shortcut: {}", e));
     }
 
-    // Save setting
+    // 保存设置
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
     let _ = settings_repo.set("winv_replacement", "true");
     Ok(())
 }
 
-/// Tauri command: Disable Win+V replacement
-/// This will re-enable system Win+V and our custom shortcut
+/// Tauri 命令：禁用 Win+V 替换（恢复系统 Win+V 与自定义快捷键）
 #[tauri::command]
 async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
-    // Unregister Win+V shortcut
+    // 注销 Win+V 快捷键
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
     let _ = app.global_shortcut().unregister(winv_shortcut);
 
-    // Re-enable system Win+V via registry (restart explorer to apply)
+    // 通过注册表重新启用系统 Win+V（重启 Explorer 生效）
     win_v_registry::enable_win_v_hotkey(true)?;
 
-    // Re-register custom shortcut with toggle handler
+    // 重新注册自定义快捷键
     if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
         let _ = app
             .global_shortcut()
@@ -483,24 +468,24 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
             });
     }
 
-    // Save setting
+    // 保存设置
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
     let _ = settings_repo.set("winv_replacement", "false");
     Ok(())
 }
 
-/// Tauri command: Check if Win+V replacement is enabled
+/// Tauri 命令：检查 Win+V 替换是否已启用
 #[tauri::command]
 async fn is_winv_replacement_enabled(_app: tauri::AppHandle) -> bool {
-    // Check registry status
+    // 检查注册表状态
     win_v_registry::is_win_v_hotkey_disabled()
 }
 
-/// Tauri command: Update main shortcut
+/// Tauri 命令：更新主快捷键
 #[tauri::command]
 async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<String, String> {
-    // Parse new shortcut
+    // 解析新快捷键
     let new_sc = parse_shortcut(&new_shortcut)
         .ok_or_else(|| format!("Invalid shortcut: {}", new_shortcut))?;
 
@@ -508,12 +493,12 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
         return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
     }
 
-    // Unregister current shortcut
+    // 注销当前快捷键
     if let Some(current_sc) = parse_shortcut(&get_current_shortcut()) {
         let _ = app.global_shortcut().unregister(current_sc);
     }
 
-    // Register new shortcut with toggle handler
+    // 注册新快捷键（绑定窗口切换）
     app.global_shortcut()
         .on_shortcut(new_sc, |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
@@ -522,13 +507,13 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
         })
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
 
-    // Update global state
+    // 更新全局状态
     *CURRENT_SHORTCUT.write() = Some(new_shortcut.clone());
 
     Ok(new_shortcut)
 }
 
-/// Tauri command: Get current shortcut
+/// Tauri 命令：获取当前快捷键
 #[tauri::command]
 fn get_current_shortcut() -> String {
     CURRENT_SHORTCUT
@@ -544,7 +529,7 @@ fn reload_quick_paste_shortcuts_from_settings(app: &tauri::AppHandle) -> HashMap
     apply_quick_paste_shortcuts(app, &shortcuts)
 }
 
-/// Tauri command: Get quick paste shortcuts for slot 1-9
+/// Tauri 命令：获取快速粘贴快捷键（槽位 1-9）
 #[tauri::command]
 fn get_quick_paste_shortcuts() -> Vec<String> {
     let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
@@ -554,7 +539,7 @@ fn get_quick_paste_shortcuts() -> Vec<String> {
     default_quick_paste_shortcuts()
 }
 
-/// Tauri command: Update quick paste shortcut for one slot (1-9)
+/// Tauri 命令：更新指定槽位（1-9）的快速粘贴快捷键
 #[tauri::command]
 fn set_quick_paste_shortcut(
     app: tauri::AppHandle,
@@ -572,8 +557,8 @@ fn set_quick_paste_shortcut(
         if !shortcut_has_modifier(&normalized) {
             return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
         }
-        // Prevent conflict with the main toggle shortcut
-        let main_sc = get_current_shortcut();
+    // 检查与主快捷键是否冲突
+    let main_sc = get_current_shortcut();
         if let Some(main_parsed) = parse_shortcut(&main_sc) {
             if parsed == main_parsed {
                 return Err(format!("与呼出快捷键 {} 冲突", main_sc));
@@ -595,7 +580,7 @@ fn set_quick_paste_shortcut(
 
     let failures = apply_quick_paste_shortcuts(&app, &next_shortcuts);
     if let Some(err) = failures.get(&slot) {
-        // Roll back only when the updated slot itself failed to register.
+        // 仅在该槽位注册失败时回滚
         next_shortcuts[idx] = previous;
         let _ = apply_quick_paste_shortcuts(&app, &next_shortcuts);
         return Err(err.clone());
@@ -610,45 +595,45 @@ fn set_quick_paste_shortcut(
     Ok(())
 }
 
-/// Tauri command: Set window pinned state
+/// Tauri 命令：设置窗口固定状态
 #[tauri::command]
 fn set_window_pinned(pinned: bool) {
     input_monitor::set_window_pinned(pinned);
 }
 
-/// Tauri command: Get window pinned state
+/// Tauri 命令：获取窗口固定状态
 #[tauri::command]
 fn is_window_pinned() -> bool {
     input_monitor::is_window_pinned()
 }
 
-/// Tauri command: Check if admin launch is enabled
+/// Tauri 命令：检查是否启用管理员启动
 #[tauri::command]
 fn is_admin_launch_enabled() -> bool {
     admin_launch::is_admin_launch_enabled()
 }
 
-/// Tauri command: Enable admin launch
+/// Tauri 命令：启用管理员启动
 #[tauri::command]
 fn enable_admin_launch() -> Result<(), String> {
     admin_launch::enable_admin_launch()
 }
 
-/// Tauri command: Disable admin launch
+/// Tauri 命令：禁用管理员启动
 #[tauri::command]
 fn disable_admin_launch() -> Result<(), String> {
     admin_launch::disable_admin_launch()
 }
 
-/// Tauri command: Check if currently running as admin
+/// Tauri 命令：检查当前是否以管理员身份运行
 #[tauri::command]
 fn is_running_as_admin() -> bool {
     admin_launch::is_running_as_admin()
 }
 
-// ============ Update Commands ============
+// ============ 更新命令 ============
 
-/// Tauri command: Check GitHub for updates
+/// Tauri 命令：检查 GitHub 更新
 #[tauri::command]
 async fn check_for_update() -> Result<updater::UpdateInfo, String> {
     tokio::task::spawn_blocking(updater::check_update)
@@ -656,7 +641,7 @@ async fn check_for_update() -> Result<updater::UpdateInfo, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// Tauri command: Download update installer with progress events
+/// Tauri 命令：下载更新安装包（带进度事件）
 #[tauri::command]
 async fn download_update(
     app: tauri::AppHandle,
@@ -668,21 +653,19 @@ async fn download_update(
         .map_err(|e| e.to_string())?
 }
 
-/// Tauri command: Launch installer and exit application
+/// Tauri 命令：启动安装程序并退出应用
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
     updater::install(&installer_path)?;
-    // Brief delay to let the installer process start before exiting
+    // 等待安装程序启动后再退出
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     app.exit(0);
     Ok(())
 }
 
-// ============ Image Preview Window ============
+// ============ 图片预览窗口 ============
 
-/// Tauri command: Show image preview in a fixed-size transparent window
-/// The window fills the available space to the left (or right) of the main window.
-/// Image sizing is handled by CSS inside the webview — no window resize during zoom.
+/// Tauri 命令：在固定尺寸透明窗口中显示图片预览，图片缩放由 webview CSS 处理。
 #[tauri::command]
 async fn show_image_preview(
     app: tauri::AppHandle,
@@ -714,10 +697,10 @@ async fn show_image_preview(
         .focused(false)
         .visible(false)
         .build()
-        .map_err(|e| format!("Failed to create preview window: {}", e))?
+        .map_err(|e| format!("创建预览窗口失败: {}", e))?
     };
 
-    // Always set position/size in physical pixels to avoid mixed-DPI conversion errors
+    // 始终使用物理像素设置位置/尺寸，避免混合 DPI 换算误差
     let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: win_width as u32,
         height: win_height as u32,
@@ -728,14 +711,14 @@ async fn show_image_preview(
     }));
 
     if newly_created {
-        // First creation: wait for HTML to load before emitting events
+        // 首次创建：等待 HTML 加载后再发送事件
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 
-    // Ensure always_on_top is active (in case main window focus state affected window hierarchy)
+    // 确保置顶生效（主窗口焦点状态可能影响窗口层级）
     let _ = window.set_always_on_top(true);
 
-    // Send image path + initial CSS size to the preview window
+    // 发送图片路径和初始 CSS 尺寸到预览窗口
     let _ = window.emit(
         "image-preview-update",
         serde_json::json!({
@@ -749,22 +732,22 @@ async fn show_image_preview(
     Ok(())
 }
 
-/// Tauri command: Hide image preview window and clear its content
+/// 隐藏图片预览窗口并清除内容
 #[tauri::command]
 async fn hide_image_preview(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("image-preview") {
         let _ = window.hide();
-        // Clear the image so next show doesn't flash the old content
+        // 清除图片，避免下次显示时闪烁旧内容
         let _ = window.emit("image-preview-clear", ());
     }
 }
 
-/// Tauri command: Open text editor window
+/// 打开文本编辑器窗口
 #[tauri::command]
 async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     let label = format!("text-editor-{}", id);
 
-    // If editor for this item already exists, focus it
+    // 若该条目的编辑器已存在则聚焦
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -785,28 +768,28 @@ async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), S
     .resizable(true)
     .center()
     .build()
-    .map_err(|e| format!("Failed to create editor window: {}", e))?;
+    .map_err(|e| format!("创建编辑器窗口失败: {}", e))?;
 
-    // Window will be shown by frontend after content is loaded
+    // 窗口将在前端内容加载完成后显示
     let _ = window;
     Ok(())
 }
 
-/// Tauri command: Open settings window
+/// 打开设置窗口
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     tray::open_settings_window(&app)
 }
 
-// ============ Log Settings Commands ============
+// ============ 日志设置命令 ============
 
-/// Tauri command: Check if file logging is enabled
+/// 检查文件日志是否启用
 #[tauri::command]
 fn is_log_to_file_enabled() -> bool {
     AppConfig::load().is_log_to_file()
 }
 
-/// Tauri command: Enable or disable file logging (requires restart)
+/// 启用或禁用文件日志（需重启生效）
 #[tauri::command]
 fn set_log_to_file(enabled: bool) -> Result<(), String> {
     let mut config = AppConfig::load();
@@ -814,7 +797,7 @@ fn set_log_to_file(enabled: bool) -> Result<(), String> {
     config.save()
 }
 
-/// Tauri command: Get the log file path
+/// 获取日志文件路径
 #[tauri::command]
 fn get_log_file_path() -> String {
     AppConfig::load().get_log_path().to_string_lossy().to_string()
@@ -824,6 +807,28 @@ fn get_log_file_path() -> String {
 pub fn run() {
     let config = AppConfig::load();
     init_logging(&config);
+
+    // ── 管理员自提权（在 Tauri Builder 之前） ─────────────────────────────
+    // 若启用了 run_as_admin 但当前未提权，则启动新的提权实例并退出当前进程。
+    // 提权优先使用预创建的计划任务（免 UAC），失败则回退到 UAC 弹窗。
+    #[cfg(target_os = "windows")]
+    {
+        if config.run_as_admin.unwrap_or(false) {
+            if admin_launch::is_running_as_admin() {
+                // 已提权 → 确保计划任务存在，后续重启可免 UAC
+                let _ = task_scheduler::create_elevation_task();
+            } else if admin_launch::self_elevate() {
+                // 新提权实例已启动 → 退出当前进程
+                std::process::exit(0);
+            }
+            // 提权失败则继续以非管理员运行
+        }
+
+        // 迁移清理：删除旧版 ONLOGON 计划任务和 AppCompatFlags 注册表项
+        // （幂等操作，不存在时安全跳过）
+        task_scheduler::delete_legacy_autostart_task();
+        admin_launch::cleanup_compat_flags();
+    }
 
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -844,20 +849,19 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            // Load configuration and initialize database
+            // 加载配置并初始化数据库
             let config = AppConfig::load();
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
-            // Initialize clipboard monitor with configured images path
+            // 初始化剪贴板监控
             let monitor = ClipboardMonitor::new();
             monitor.init(&db, images_path);
 
-            // Create app state
             let state = Arc::new(AppState { db, monitor });
 
-            // Load saved shortcut from settings
+            // 从数据库加载已保存的快捷键
             let settings_repo = database::SettingsRepository::new(&state.db);
             let saved_shortcut = settings_repo
                 .get("global_shortcut")
@@ -865,17 +869,15 @@ pub fn run() {
                 .flatten()
                 .unwrap_or_else(|| "Alt+C".to_string());
 
-            // Start clipboard monitoring
+            // 启动剪贴板监控
             state.monitor.start(app.handle().clone());
             app.manage(state);
 
-            // Setup system tray
+            // 初始化系统托盘
             let _ = tray::setup_tray(app.handle());
 
-            // Initialize global shortcut state
+            // 注册全局快捷键（根据 Win+V 替换设置选择快捷键）
             *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
-
-            // Register shortcut based on Win+V replacement setting
             let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {
                 Shortcut::new(Some(Modifiers::SUPER), Code::KeyV)
             } else {
@@ -891,55 +893,28 @@ pub fn run() {
                     }
                 });
 
-            // Register quick paste shortcuts (slot 1-9)
+            // 注册快速粘贴快捷键（槽位 1-9）
             let quick_paste_failures = reload_quick_paste_shortcuts_from_settings(app.handle());
             for (slot, err) in quick_paste_failures {
-                tracing::warn!("Quick paste shortcut registration failed (slot {}): {}", slot, err);
+                tracing::warn!("快速粘贴快捷键注册失败（槽位 {}）: {}", slot, err);
             }
 
-            // Set main window as non-focusable to prevent stealing focus from other apps
-            // This allows hotkeys to work even when Start Menu or other system UI is open
+            // 设置主窗口为不可聚焦，避免抢占其他应用焦点
+            // 同时使快捷键在开始菜单等系统 UI 打开时仍可用
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focusable(false);
 
-                // Initialize and start input monitor for click-outside detection
-                // This is necessary because non-focusable windows don't trigger onFocusChanged
+                // 初始化全局鼠标监控（用于点击外部隐藏窗口）
+                // 不可聚焦窗口无法触发 onFocusChanged，因此需要此机制
                 input_monitor::init(window);
                 input_monitor::start_monitoring();
             }
 
-            // 自启动机制迁移：管理员模式用任务计划程序，普通模式用注册表 Run
-            {
-                use tauri_plugin_autostart::ManagerExt;
-                let is_admin =
-                    admin_launch::is_admin_launch_enabled() && admin_launch::is_running_as_admin();
-
-                if is_admin && app.autolaunch().is_enabled().unwrap_or(false) {
-                    if task_scheduler::create_autostart_task().is_ok() {
-                        let _ = app.autolaunch().disable();
-                        tracing::info!("自启动迁移: 注册表 Run → 任务计划程序");
-                    }
-                } else if !admin_launch::is_admin_launch_enabled()
-                    && task_scheduler::is_autostart_task_exists()
-                {
-                    if app.autolaunch().enable().is_ok() {
-                        match task_scheduler::delete_autostart_task() {
-                            Ok(_) => {
-                                tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
-                            }
-                            Err(e) => {
-                                tracing::warn!("自启动迁移: 已切换到注册表 Run，但旧的计划任务删除失败（需要管理员权限）: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Start system accent color watcher for live theme updates
+            // 启动系统强调色监听（实时主题更新）
             #[cfg(target_os = "windows")]
             commands::settings::start_accent_color_watcher(app.handle().clone());
 
-            // Send startup notification so user knows the app is running in tray
+            // 发送启动通知
             {
                 use tauri_plugin_notification::NotificationExt;
                 let shortcut_display = if win_v_registry::is_win_v_hotkey_disabled() {
@@ -961,7 +936,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Window commands
+            // 窗口命令
             get_app_version,
             get_default_data_path,
             get_original_default_path,
@@ -980,16 +955,16 @@ pub fn run() {
             open_text_editor_window,
             set_window_pinned,
             is_window_pinned,
-            // Admin launch commands
+            // 管理员启动命令
             is_admin_launch_enabled,
             enable_admin_launch,
             disable_admin_launch,
             is_running_as_admin,
-            // Log commands
+            // 日志命令
             is_log_to_file_enabled,
             set_log_to_file,
             get_log_file_path,
-            // Shortcut commands
+            // 快捷键命令
             enable_winv_replacement,
             disable_winv_replacement,
             is_winv_replacement_enabled,
@@ -997,11 +972,11 @@ pub fn run() {
             get_current_shortcut,
             get_quick_paste_shortcuts,
             set_quick_paste_shortcut,
-            // Update commands
+            // 更新命令
             check_for_update,
             download_update,
             install_update,
-            // Clipboard commands
+            // 剪贴板命令
             commands::clipboard::get_clipboard_items,
             commands::clipboard::get_clipboard_item,
             commands::clipboard::get_clipboard_count,
@@ -1012,8 +987,10 @@ pub fn run() {
             commands::clipboard::clear_history,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::paste_content,
+            commands::clipboard::paste_content_as_plain,
+            commands::clipboard::paste_text_direct,
             commands::clipboard::update_text_content,
-            // Settings, monitor, database, folder, autostart commands
+            // 设置、监控、数据库、文件夹、自启动命令
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_all_settings,
@@ -1028,7 +1005,7 @@ pub fn run() {
             commands::settings::enable_autostart,
             commands::settings::disable_autostart,
             commands::settings::get_system_accent_color,
-            // File operation commands
+            // 文件操作命令
             commands::file_ops::check_files_exist,
             commands::file_ops::show_in_explorer,
             commands::file_ops::paste_as_path,
