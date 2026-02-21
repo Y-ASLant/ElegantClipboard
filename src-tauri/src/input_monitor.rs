@@ -1,189 +1,279 @@
-//! Global input monitoring for click-outside detection
+//! 全局输入监控（点击外部隐藏窗口）
 //!
-//! This module uses rdev to monitor global mouse events.
-//! When a click is detected outside the main window, the window is hidden.
-//! This is necessary because the window is set to non-focusable (to not steal focus),
-//! which means Tauri's onFocusChanged event never fires.
+//! - WH_MOUSE_LL：始终保持，用于检测窗口外点击。
+//! - WH_KEYBOARD_LL：**仅窗口可见时安装**，用于 ESC 键检测。
+//!
+//! # 为何不用 rdev？
+//! `rdev::listen` 会在整个 App 生命周期内同时安装 WH_MOUSE_LL 和
+//! WH_KEYBOARD_LL。WH_KEYBOARD_LL 使 Windows 在每次按键送达前台应用前
+//! 先经过本进程回调，Firefox/Gecko 内核（如 Zen Browser）对此极其敏感，
+//! 哪怕微小延迟也会触发漏斗光标。
+//!
+//! 将 WH_KEYBOARD_LL 改为仅在窗口可见时安装，用户在其他应用打字时
+//! 完全不受影响。
 
 use parking_lot::Mutex;
-use rdev::{listen, Event, EventType};
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
+use std::thread;
 use tauri::{Emitter, Manager, WebviewWindow};
 use tracing::{error, info, warn};
 
-/// Main window reference for click detection
+#[cfg(windows)]
+use std::cell::RefCell;
+#[cfg(windows)]
+use windows::Win32::Foundation::*;
+#[cfg(windows)]
+use windows::Win32::System::Threading::GetCurrentThreadId;
+#[cfg(windows)]
+use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+// 自定义线程消息，用于跨线程控制键盘钩子生命周期（WM_USER = 0x0400）
+#[cfg(windows)]
+const MSG_INSTALL_KB_HOOK: u32 = 0x0401;
+#[cfg(windows)]
+const MSG_UNINSTALL_KB_HOOK: u32 = 0x0402;
+
+/// 主窗口引用，用于点击检测
 static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
 
-/// Whether mouse monitoring is currently active
+/// 窗口是否可见（监控是否激活）
 static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// Whether the window is pinned (won't hide on click outside)
+/// 窗口是否固定（固定时不因外部点击隐藏）
 static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 
-/// Whether the monitor thread is running
+/// 监控线程是否正在运行
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Current cursor position (stored as i64 to use atomics, multiply by 100 for precision)
-/// This avoids lock contention on high-frequency mouse move events
+/// 缓存的光标坐标（由鼠标钩子更新）
 static CURSOR_X: AtomicI64 = AtomicI64::new(0);
 static CURSOR_Y: AtomicI64 = AtomicI64::new(0);
 
-/// Thread handle for cleanup
-static THREAD_HANDLE: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+/// 钩子线程 ID，用于 PostThreadMessage
+#[cfg(windows)]
+static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
-/// Initialize input monitor with main window reference
+// 低级钩子（LL hook）必须由安装它的线程负责卸载，使用 thread_local 存储句柄
+#[cfg(windows)]
+thread_local! {
+    static TL_MOUSE_HOOK: RefCell<Option<HHOOK>> = RefCell::new(None);
+    static TL_KEYBOARD_HOOK: RefCell<Option<HHOOK>> = RefCell::new(None);
+}
+
+/// 初始化，传入主窗口引用
 pub fn init(window: WebviewWindow) {
     *MAIN_WINDOW.lock() = Some(window);
 }
 
-/// Start the global input monitoring thread with crash recovery.
-/// Uses catch_unwind + exponential backoff to automatically restart on panic.
+/// 启动全局输入监控线程
 pub fn start_monitoring() {
-    // Prevent multiple starts
     if MONITOR_RUNNING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        warn!("Input monitor already running");
+        warn!("输入监控已在运行");
         return;
     }
 
-    let handle = thread::spawn(|| {
-        let mut retry_count: u32 = 0;
-        const MAX_BACKOFF_SECS: u64 = 30;
-        const STABLE_THRESHOLD_SECS: u64 = 60;
+    thread::spawn(|| {
+        #[cfg(windows)]
+        run_hook_thread();
 
-        loop {
-            let start = Instant::now();
-
-            let result = catch_unwind(AssertUnwindSafe(|| {
-                if let Err(e) = listen(move |event| {
-                    handle_input_event(event);
-                }) {
-                    error!("Input monitor listen error: {:?}", e);
-                }
-            }));
-
-            // If we should stop, break out
-            if !MONITOR_RUNNING.load(Ordering::SeqCst) {
-                break;
-            }
-
-            // Log what happened
-            match result {
-                Ok(_) => warn!("Input monitor exited unexpectedly, restarting..."),
-                Err(panic_info) => error!(
-                    "Input monitor panicked: {:?}, restarting...",
-                    panic_info
-                        .downcast_ref::<&str>()
-                        .copied()
-                        .or_else(|| panic_info.downcast_ref::<String>().map(|s| s.as_str()))
-                        .unwrap_or("unknown panic")
-                ),
-            }
-
-            // Reset backoff if listener ran stably for a while
-            if start.elapsed().as_secs() > STABLE_THRESHOLD_SECS {
-                retry_count = 0;
-            }
-
-            // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
-            let backoff_secs = MAX_BACKOFF_SECS.min(1u64 << retry_count);
-            info!(
-                "Restarting input monitor in {}s (attempt {})",
-                backoff_secs,
-                retry_count + 1
-            );
-            thread::sleep(Duration::from_secs(backoff_secs));
-            retry_count = retry_count.saturating_add(1);
-        }
+        #[cfg(not(windows))]
+        warn!("当前平台不支持输入监控");
 
         MONITOR_RUNNING.store(false, Ordering::SeqCst);
+        #[cfg(windows)]
+        HOOK_THREAD_ID.store(0, Ordering::SeqCst);
     });
 
-    *THREAD_HANDLE.lock() = Some(handle);
-    info!("Input monitor started");
+    info!("输入监控已启动");
 }
 
-/// Stop the input monitor (note: rdev::listen cannot be gracefully stopped)
+/// 停止输入监控（向钩子线程发送 WM_QUIT）
 #[allow(dead_code)]
 pub fn stop_monitoring() {
     MONITOR_RUNNING.store(false, Ordering::SeqCst);
-    // Note: rdev::listen runs in a blocking loop and cannot be interrupted gracefully
-    // The thread will only stop when the application exits
+    #[cfg(windows)]
+    {
+        let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
+        if tid != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
 }
 
-/// Enable mouse click monitoring (call when window becomes visible)
+/// 启用监控并安装键盘钩子（窗口显示时调用）
 pub fn enable_mouse_monitoring() {
     MOUSE_MONITORING_ENABLED.store(true, Ordering::Relaxed);
+    #[cfg(windows)]
+    {
+        let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
+        if tid != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(tid, MSG_INSTALL_KB_HOOK, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
 }
 
-/// Disable mouse click monitoring (call when window is hidden)
+/// 禁用监控并卸载键盘钩子（窗口隐藏时调用）
 pub fn disable_mouse_monitoring() {
     MOUSE_MONITORING_ENABLED.store(false, Ordering::Relaxed);
+    #[cfg(windows)]
+    {
+        let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
+        if tid != 0 {
+            unsafe {
+                let _ = PostThreadMessageW(tid, MSG_UNINSTALL_KB_HOOK, WPARAM(0), LPARAM(0));
+            }
+        }
+    }
 }
 
-/// Check if mouse monitoring is enabled
 #[allow(dead_code)]
 pub fn is_mouse_monitoring_enabled() -> bool {
     MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
 }
 
-/// Set window pinned state (when pinned, window won't hide on click outside)
+/// 设置窗口固定状态（固定时不因外部点击隐藏）
 pub fn set_window_pinned(pinned: bool) {
     WINDOW_PINNED.store(pinned, Ordering::Relaxed);
 }
 
-/// Check if window is pinned
 pub fn is_window_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
-/// Get current cursor position (used by positioning module)
+/// 获取当前光标坐标（供定位模块使用）
 pub fn get_cursor_position() -> (f64, f64) {
     let x = CURSOR_X.load(Ordering::Relaxed) as f64;
     let y = CURSOR_Y.load(Ordering::Relaxed) as f64;
     (x, y)
 }
 
-/// Handle input events with throttling for mouse moves
-fn handle_input_event(event: Event) {
-    match event.event_type {
-        EventType::MouseMove { x, y } => {
-            // Only track mouse position when monitoring is enabled
-            // This significantly reduces CPU usage when window is hidden
-            if MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
-                // Use atomic store - no lock needed
-                CURSOR_X.store(x as i64, Ordering::Relaxed);
-                CURSOR_Y.store(y as i64, Ordering::Relaxed);
-            }
+// ─── Windows 钩子实现 ─────────────────────────────────────────────────────────
+
+/// 钩子线程主函数：安装 WH_MOUSE_LL，运行消息循环，
+/// 并通过自定义消息动态管理 WH_KEYBOARD_LL 生命周期。
+#[cfg(windows)]
+fn run_hook_thread() {
+    // 安装鼠标钩子（始终保持，用于点击外部检测）
+    let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) };
+    match mouse_hook {
+        Ok(hook) => {
+            TL_MOUSE_HOOK.with(|h| *h.borrow_mut() = Some(hook));
+            info!("WH_MOUSE_LL 钩子已安装");
         }
-        EventType::ButtonPress(button) => {
-            // Only handle left and right clicks
-            if matches!(button, rdev::Button::Left | rdev::Button::Right) {
+        Err(e) => {
+            error!("WH_MOUSE_LL 钩子安装失败: {:?}", e);
+            return;
+        }
+    }
+
+    HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+
+    // 消息循环：GetMessageW 阻塞等待消息，收到 WM_QUIT 时退出
+    let mut msg = MSG::default();
+    loop {
+        let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
+        // ret == 0 → WM_QUIT，ret.0 < 0 → 错误
+        if ret.0 <= 0 {
+            break;
+        }
+
+        match msg.message {
+            MSG_INSTALL_KB_HOOK => {
+                // 仅在尚未安装时安装键盘钩子
+                let already = TL_KEYBOARD_HOOK.with(|h| h.borrow().is_some());
+                if !already {
+                    let kb_hook = unsafe {
+                        SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0)
+                    };
+                    match kb_hook {
+                        Ok(hook) => TL_KEYBOARD_HOOK.with(|h| *h.borrow_mut() = Some(hook)),
+                        Err(e) => error!("WH_KEYBOARD_LL 钩子安装失败: {:?}", e),
+                    }
+                }
+            }
+            MSG_UNINSTALL_KB_HOOK => {
+                // 窗口已隐藏，卸载键盘钩子
+                TL_KEYBOARD_HOOK.with(|h| {
+                    if let Some(hook) = h.borrow_mut().take() {
+                        unsafe { let _ = UnhookWindowsHookEx(hook); }
+                    }
+                });
+            }
+            _ => unsafe {
+                let _ = TranslateMessage(&msg);
+                let _ = DispatchMessageW(&msg);
+            },
+        }
+    }
+
+    // 退出时清理所有钩子
+    for cleanup in [&TL_MOUSE_HOOK, &TL_KEYBOARD_HOOK] {
+        cleanup.with(|h| {
+            if let Some(hook) = h.borrow_mut().take() {
+                unsafe { let _ = UnhookWindowsHookEx(hook); }
+            }
+        });
+    }
+
+    info!("输入监控线程已退出");
+}
+
+/// WH_MOUSE_LL 回调：追踪光标位置，检测窗口外点击
+#[cfg(windows)]
+unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code >= 0 {
+        match wparam.0 as u32 {
+            v if v == WM_MOUSEMOVE => {
+                if MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
+                    if let Some(info) = (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() {
+                        CURSOR_X.store(info.pt.x as i64, Ordering::Relaxed);
+                        CURSOR_Y.store(info.pt.y as i64, Ordering::Relaxed);
+                    }
+                }
+            }
+            v if v == WM_LBUTTONDOWN || v == WM_RBUTTONDOWN => {
                 handle_click_outside();
             }
+            _ => {}
         }
-        EventType::KeyPress(key) => {
-            // Handle ESC key to hide window (global, works even when window is not focused)
-            if matches!(key, rdev::Key::Escape) {
+    }
+    CallNextHookEx(None, code, wparam, lparam)
+}
+
+/// WH_KEYBOARD_LL 回调：检测 ESC 键以隐藏窗口。
+/// 此钩子仅在窗口可见时安装。
+#[cfg(windows)]
+unsafe extern "system" fn keyboard_hook_proc(
+    code: i32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if code >= 0 && wparam.0 as u32 == WM_KEYDOWN {
+        if let Some(info) = (lparam.0 as *const KBDLLHOOKSTRUCT).as_ref() {
+            if info.vkCode == u32::from(VK_ESCAPE.0) {
                 handle_escape_key();
             }
         }
-        _ => {}
     }
+    CallNextHookEx(None, code, wparam, lparam)
 }
 
-/// Check if cursor is outside the window bounds
+// ─── 事件处理 ─────────────────────────────────────────────────────────────────
+
+/// 检查光标是否在窗口边界外
 fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
-    // Get cursor position from atomics - no lock needed
     let cursor_x = CURSOR_X.load(Ordering::Relaxed) as f64;
     let cursor_y = CURSOR_Y.load(Ordering::Relaxed) as f64;
 
-    // Get window position and size
     let position = match window.outer_position() {
         Ok(pos) => pos,
         Err(_) => return false,
@@ -205,50 +295,36 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
         || cursor_y > win_y + win_height
 }
 
-/// Handle ESC key press - emit event to frontend so it can decide
-/// whether to close a dialog or hide the window
+/// 检查监控是否处于可响应状态（未禁用且未固定）
+fn is_monitoring_active() -> bool {
+    MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) && !WINDOW_PINNED.load(Ordering::Relaxed)
+}
+
+/// 处理 ESC 按键：向前端发送事件，由前端决定关闭弹窗或隐藏窗口
 fn handle_escape_key() {
-    // Only process if window is visible
-    if !MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
+    if !is_monitoring_active() {
         return;
     }
-
-    // Don't hide if window is pinned
-    if WINDOW_PINNED.load(Ordering::Relaxed) {
-        return;
-    }
-
     if let Some(window) = MAIN_WINDOW.lock().as_ref() {
         if window.is_visible().unwrap_or(false) {
-            // Emit to frontend — let it close dialogs first or hide window
             let _ = window.emit("escape-pressed", ());
         }
     }
 }
 
-/// Handle click outside event - hide window if click is outside
+/// 处理外部点击：若点击在窗口边界外则隐藏窗口
 fn handle_click_outside() {
-    // Only process if monitoring is enabled
-    if !MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
+    if !is_monitoring_active() {
         return;
     }
-
-    // Don't hide if window is pinned
-    if WINDOW_PINNED.load(Ordering::Relaxed) {
-        return;
-    }
-
     if let Some(window) = MAIN_WINDOW.lock().as_ref() {
-        // Check if window is visible and click is outside
         if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
             let _ = window.hide();
-            // Update window state
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-            // Disable monitoring since window is now hidden
+            // disable_mouse_monitoring 会向本线程投递 MSG_UNINSTALL_KB_HOOK，
+            // 该消息将在当前钩子回调返回后的下一次消息循环中处理
             disable_mouse_monitoring();
-            // Hide image preview window (onMouseLeave won't fire when main window disappears)
             crate::commands::hide_image_preview_window(window.app_handle());
-            // Emit event to frontend so it can reset state while hidden
             let _ = window.emit("window-hidden", ());
         }
     }

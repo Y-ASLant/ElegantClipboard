@@ -73,9 +73,6 @@ clipboard-rs = "0.2"
 # Keyboard simulation for paste
 enigo = "0.6"
 
-# Global input monitoring (for click outside detection)
-rdev = "0.5"
-
 # Windows API for low-level keyboard hook and admin check
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
