@@ -715,10 +715,10 @@ async fn show_image_preview(
         .focused(false)
         .visible(false)
         .build()
-        .map_err(|e| format!("Failed to create preview window: {}", e))?
+        .map_err(|e| format!("创建预览窗口失败: {}", e))?
     };
 
-    // Always set position/size in physical pixels to avoid mixed-DPI conversion errors
+    // 始终使用物理像素设置位置/尺寸，避免混合 DPI 换算误差
     let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: win_width as u32,
         height: win_height as u32,
@@ -729,14 +729,14 @@ async fn show_image_preview(
     }));
 
     if newly_created {
-        // First creation: wait for HTML to load before emitting events
+        // 首次创建：等待 HTML 加载后再发送事件
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
 
-    // Ensure always_on_top is active (in case main window focus state affected window hierarchy)
+    // 确保置顶生效（主窗口焦点状态可能影响窗口层级）
     let _ = window.set_always_on_top(true);
 
-    // Send image path + initial CSS size to the preview window
+    // 发送图片路径和初始 CSS 尺寸到预览窗口
     let _ = window.emit(
         "image-preview-update",
         serde_json::json!({
@@ -750,22 +750,22 @@ async fn show_image_preview(
     Ok(())
 }
 
-/// Tauri command: Hide image preview window and clear its content
+/// 隐藏图片预览窗口并清除内容
 #[tauri::command]
 async fn hide_image_preview(app: tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("image-preview") {
         let _ = window.hide();
-        // Clear the image so next show doesn't flash the old content
+        // 清除图片，避免下次显示时闪烁旧内容
         let _ = window.emit("image-preview-clear", ());
     }
 }
 
-/// Tauri command: Open text editor window
+/// 打开文本编辑器窗口
 #[tauri::command]
 async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     let label = format!("text-editor-{}", id);
 
-    // If editor for this item already exists, focus it
+    // 若该条目的编辑器已存在则聚焦
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
         let _ = window.show();
@@ -786,28 +786,28 @@ async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), S
     .resizable(true)
     .center()
     .build()
-    .map_err(|e| format!("Failed to create editor window: {}", e))?;
+    .map_err(|e| format!("创建编辑器窗口失败: {}", e))?;
 
-    // Window will be shown by frontend after content is loaded
+    // 窗口将在前端内容加载完成后显示
     let _ = window;
     Ok(())
 }
 
-/// Tauri command: Open settings window
+/// 打开设置窗口
 #[tauri::command]
 async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     tray::open_settings_window(&app)
 }
 
-// ============ Log Settings Commands ============
+// ============ 日志设置命令 ============
 
-/// Tauri command: Check if file logging is enabled
+/// 检查文件日志是否启用
 #[tauri::command]
 fn is_log_to_file_enabled() -> bool {
     AppConfig::load().is_log_to_file()
 }
 
-/// Tauri command: Enable or disable file logging (requires restart)
+/// 启用或禁用文件日志（需重启生效）
 #[tauri::command]
 fn set_log_to_file(enabled: bool) -> Result<(), String> {
     let mut config = AppConfig::load();
@@ -815,7 +815,7 @@ fn set_log_to_file(enabled: bool) -> Result<(), String> {
     config.save()
 }
 
-/// Tauri command: Get the log file path
+/// 获取日志文件路径
 #[tauri::command]
 fn get_log_file_path() -> String {
     AppConfig::load().get_log_path().to_string_lossy().to_string()
@@ -825,6 +825,28 @@ fn get_log_file_path() -> String {
 pub fn run() {
     let config = AppConfig::load();
     init_logging(&config);
+
+    // ── 管理员自提权（在 Tauri Builder 之前） ─────────────────────────────
+    // 若启用了 run_as_admin 但当前未提权，则启动新的提权实例并退出当前进程。
+    // 提权优先使用预创建的计划任务（免 UAC），失败则回退到 UAC 弹窗。
+    #[cfg(target_os = "windows")]
+    {
+        if config.run_as_admin.unwrap_or(false) {
+            if admin_launch::is_running_as_admin() {
+                // 已提权 → 确保计划任务存在，后续重启可免 UAC
+                let _ = task_scheduler::create_elevation_task();
+            } else if admin_launch::self_elevate() {
+                // 新提权实例已启动 → 退出当前进程
+                std::process::exit(0);
+            }
+            // 提权失败则继续以非管理员运行
+        }
+
+        // 迁移清理：删除旧版 ONLOGON 计划任务和 AppCompatFlags 注册表项
+        // （幂等操作，不存在时安全跳过）
+        task_scheduler::delete_legacy_autostart_task();
+        admin_launch::cleanup_compat_flags();
+    }
 
     let run_result = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -845,20 +867,19 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            // Load configuration and initialize database
+            // 加载配置并初始化数据库
             let config = AppConfig::load();
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
-            // Initialize clipboard monitor with configured images path
+            // 初始化剪贴板监控
             let monitor = ClipboardMonitor::new();
             monitor.init(&db, images_path);
 
-            // Create app state
             let state = Arc::new(AppState { db, monitor });
 
-            // Load saved shortcut from settings
+            // 从数据库加载已保存的快捷键
             let settings_repo = database::SettingsRepository::new(&state.db);
             let saved_shortcut = settings_repo
                 .get("global_shortcut")
@@ -866,17 +887,15 @@ pub fn run() {
                 .flatten()
                 .unwrap_or_else(|| "Alt+C".to_string());
 
-            // Start clipboard monitoring
+            // 启动剪贴板监控
             state.monitor.start(app.handle().clone());
             app.manage(state);
 
-            // Setup system tray
+            // 初始化系统托盘
             let _ = tray::setup_tray(app.handle());
 
-            // Initialize global shortcut state
+            // 注册全局快捷键（根据 Win+V 替换设置选择快捷键）
             *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
-
-            // Register shortcut based on Win+V replacement setting
             let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {
                 Shortcut::new(Some(Modifiers::SUPER), Code::KeyV)
             } else {
@@ -892,55 +911,28 @@ pub fn run() {
                     }
                 });
 
-            // Register quick paste shortcuts (slot 1-9)
+            // 注册快速粘贴快捷键（槽位 1-9）
             let quick_paste_failures = reload_quick_paste_shortcuts_from_settings(app.handle());
             for (slot, err) in quick_paste_failures {
-                tracing::warn!("Quick paste shortcut registration failed (slot {}): {}", slot, err);
+                tracing::warn!("快速粘贴快捷键注册失败（槽位 {}）: {}", slot, err);
             }
 
-            // Set main window as non-focusable to prevent stealing focus from other apps
-            // This allows hotkeys to work even when Start Menu or other system UI is open
+            // 设置主窗口为不可聚焦，避免抢占其他应用焦点
+            // 同时使快捷键在开始菜单等系统 UI 打开时仍可用
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focusable(false);
 
-                // Initialize and start input monitor for click-outside detection
-                // This is necessary because non-focusable windows don't trigger onFocusChanged
+                // 初始化全局鼠标监控（用于点击外部隐藏窗口）
+                // 不可聚焦窗口无法触发 onFocusChanged，因此需要此机制
                 input_monitor::init(window);
                 input_monitor::start_monitoring();
             }
 
-            // 自启动机制迁移：管理员模式用任务计划程序，普通模式用注册表 Run
-            {
-                use tauri_plugin_autostart::ManagerExt;
-                let is_admin =
-                    admin_launch::is_admin_launch_enabled() && admin_launch::is_running_as_admin();
-
-                if is_admin && app.autolaunch().is_enabled().unwrap_or(false) {
-                    if task_scheduler::create_autostart_task().is_ok() {
-                        let _ = app.autolaunch().disable();
-                        tracing::info!("自启动迁移: 注册表 Run → 任务计划程序");
-                    }
-                } else if !admin_launch::is_admin_launch_enabled()
-                    && task_scheduler::is_autostart_task_exists()
-                {
-                    if app.autolaunch().enable().is_ok() {
-                        match task_scheduler::delete_autostart_task() {
-                            Ok(_) => {
-                                tracing::info!("自启动迁移: 任务计划程序 → 注册表 Run");
-                            }
-                            Err(e) => {
-                                tracing::warn!("自启动迁移: 已切换到注册表 Run，但旧的计划任务删除失败（需要管理员权限）: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Start system accent color watcher for live theme updates
+            // 启动系统强调色监听（实时主题更新）
             #[cfg(target_os = "windows")]
             commands::settings::start_accent_color_watcher(app.handle().clone());
 
-            // Send startup notification so user knows the app is running in tray
+            // 发送启动通知
             {
                 use tauri_plugin_notification::NotificationExt;
                 let shortcut_display = if win_v_registry::is_win_v_hotkey_disabled() {
@@ -962,7 +954,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Window commands
+            // 窗口命令
             get_app_version,
             get_default_data_path,
             get_original_default_path,
@@ -981,16 +973,16 @@ pub fn run() {
             open_text_editor_window,
             set_window_pinned,
             is_window_pinned,
-            // Admin launch commands
+            // 管理员启动命令
             is_admin_launch_enabled,
             enable_admin_launch,
             disable_admin_launch,
             is_running_as_admin,
-            // Log commands
+            // 日志命令
             is_log_to_file_enabled,
             set_log_to_file,
             get_log_file_path,
-            // Shortcut commands
+            // 快捷键命令
             enable_winv_replacement,
             disable_winv_replacement,
             is_winv_replacement_enabled,
@@ -998,11 +990,11 @@ pub fn run() {
             get_current_shortcut,
             get_quick_paste_shortcuts,
             set_quick_paste_shortcut,
-            // Update commands
+            // 更新命令
             check_for_update,
             download_update,
             install_update,
-            // Clipboard commands
+            // 剪贴板命令
             commands::clipboard::get_clipboard_items,
             commands::clipboard::get_clipboard_item,
             commands::clipboard::get_clipboard_count,
@@ -1016,7 +1008,7 @@ pub fn run() {
             commands::clipboard::paste_content_as_plain,
             commands::clipboard::paste_text_direct,
             commands::clipboard::update_text_content,
-            // Settings, monitor, database, folder, autostart commands
+            // 设置、监控、数据库、文件夹、自启动命令
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_all_settings,
@@ -1031,7 +1023,7 @@ pub fn run() {
             commands::settings::enable_autostart,
             commands::settings::disable_autostart,
             commands::settings::get_system_accent_color,
-            // File operation commands
+            // 文件操作命令
             commands::file_ops::check_files_exist,
             commands::file_ops::show_in_explorer,
             commands::file_ops::paste_as_path,

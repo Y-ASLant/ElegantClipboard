@@ -1,31 +1,35 @@
-//! Application configuration management
+//! 应用配置管理
 //!
-//! This module handles configuration that needs to be read before the database is initialized,
-//! such as the database path itself. Configuration is stored in a JSON file.
+//! 处理数据库初始化之前需要读取的配置（如数据库路径）。
+//! 配置以 JSON 文件存储在 `%LOCALAPPDATA%\ElegantClipboard\config.json`。
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, error, info, warn};
 
-/// Default max log file size: 10 MB
+/// 日志文件大小上限：10 MB
 pub const DEFAULT_LOG_MAX_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Application configuration
+/// 应用配置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
-    /// Custom data path (directory containing the database and images)
-    /// If None, use the default path
+    /// 自定义数据目录（包含数据库和图片），为 None 时使用默认路径
     #[serde(default)]
     pub data_path: Option<String>,
 
-    /// Whether to save logs to file (default: false)
+    /// 是否将日志写入文件（默认 false）
     #[serde(default)]
     pub log_to_file: Option<bool>,
+
+    /// 是否以管理员权限运行（默认 false）
+    /// 启用后应用在启动时通过计划任务或 UAC 弹窗自行提权
+    #[serde(default)]
+    pub run_as_admin: Option<bool>,
 }
 
 impl AppConfig {
-    /// Load configuration from file
+    /// 从配置文件加载
     pub fn load() -> Self {
         let config_path = get_config_path();
 
@@ -50,11 +54,11 @@ impl AppConfig {
         Self::default()
     }
 
-    /// Save configuration to file
+    /// 保存配置到文件
     pub fn save(&self) -> Result<(), String> {
         let config_path = get_config_path();
 
-        // Ensure parent directory exists
+        // 确保父目录存在
         if let Some(parent) = config_path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -67,7 +71,7 @@ impl AppConfig {
         Ok(())
     }
 
-    /// Get the database path based on configuration
+    /// 获取数据库路径
     pub fn get_db_path(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path {
             if !custom_path.is_empty() {
@@ -77,7 +81,7 @@ impl AppConfig {
         crate::database::get_default_db_path()
     }
 
-    /// Get the images path based on configuration
+    /// 获取图片存储路径
     pub fn get_images_path(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path {
             if !custom_path.is_empty() {
@@ -87,17 +91,17 @@ impl AppConfig {
         crate::database::get_default_images_path()
     }
 
-    /// Get the log file path (app.log in data directory)
+    /// 获取日志文件路径
     pub fn get_log_path(&self) -> PathBuf {
         self.get_data_dir().join("app.log")
     }
 
-    /// Whether file logging is enabled
+    /// 是否启用文件日志
     pub fn is_log_to_file(&self) -> bool {
         self.log_to_file.unwrap_or(false)
     }
 
-    /// Get the data directory path
+    /// 获取数据目录路径
     pub fn get_data_dir(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path {
             if !custom_path.is_empty() {
@@ -111,26 +115,26 @@ impl AppConfig {
     }
 }
 
-/// Get the configuration file path (always in the default location)
+/// 获取配置文件路径（固定在默认位置）
 fn get_config_path() -> PathBuf {
     let app_data = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     app_data.join("ElegantClipboard").join("config.json")
 }
 
-/// Migrate data from old path to new path
+/// 将数据从旧路径迁移到新路径
 pub fn migrate_data(old_path: &PathBuf, new_path: &PathBuf) -> Result<MigrationResult, String> {
-    info!("Migrating data from {:?} to {:?}", old_path, new_path);
+    info!("正在迁移数据: {:?} -> {:?}", old_path, new_path);
 
-    // Ensure new directory exists
-    fs::create_dir_all(new_path).map_err(|e| format!("Failed to create new directory: {}", e))?;
+    // 确保新目录存在
+    fs::create_dir_all(new_path).map_err(|e| format!("创建新目录失败: {}", e))?;
 
     let mut result = MigrationResult::default();
 
-    // Migrate database file
+    // 迁移数据库文件
     let old_db = old_path.join("clipboard.db");
     let new_db = new_path.join("clipboard.db");
     if old_db.exists() {
-        // Copy database files (db, db-wal, db-shm)
+        // 复制数据库相关文件（db, db-wal, db-shm）
         for ext in &["", "-wal", "-shm"] {
             let old_file = old_path.join(format!("clipboard.db{}", ext));
             let new_file = new_path.join(format!("clipboard.db{}", ext));
@@ -153,7 +157,7 @@ pub fn migrate_data(old_path: &PathBuf, new_path: &PathBuf) -> Result<MigrationR
         result.db_migrated = new_db.exists();
     }
 
-    // Migrate images folder
+    // 迁移图片目录
     let old_images = old_path.join("images");
     let new_images = new_path.join("images");
     if old_images.exists() && old_images.is_dir() {
@@ -189,7 +193,7 @@ pub fn migrate_data(old_path: &PathBuf, new_path: &PathBuf) -> Result<MigrationR
     Ok(result)
 }
 
-/// Result of data migration
+/// 数据迁移结果
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MigrationResult {
     pub db_migrated: bool,
