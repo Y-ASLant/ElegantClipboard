@@ -32,13 +32,7 @@ import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 
-const GROUPS = [
-  { label: "全部", value: null },
-  { label: "收藏", value: "__favorites__" },
-  { label: "文本", value: "text,html,rtf" },
-  { label: "图片", value: "image" },
-  { label: "文件", value: "files" },
-] as const;
+import { GROUPS } from "@/lib/constants";
 
 // Initialize theme once for this window (runs before component mounts)
 initTheme();

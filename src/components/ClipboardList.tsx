@@ -10,6 +10,7 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useShallow } from "zustand/react/shallow";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
+import { GROUPS } from "@/lib/constants";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
@@ -211,13 +212,26 @@ export function ClipboardList() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!useUISettings.getState().keyboardNavigation) return;
-      const count = useClipboardStore.getState().items.length;
-      if (count === 0) return;
 
       switch (e.key) {
-        case "ArrowUp": {
+        case "ArrowLeft": {
           e.preventDefault();
-          const cur = useClipboardStore.getState().activeIndex;
+          const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
+          const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
+          if (curIdx > 0) setSelectedGroup(GROUPS[curIdx - 1].value);
+          break;
+        }
+        case "ArrowRight": {
+          e.preventDefault();
+          const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
+          const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
+          if (curIdx < GROUPS.length - 1) setSelectedGroup(GROUPS[curIdx + 1].value);
+          break;
+        }
+        case "ArrowUp": {
+          const { items: upItems, activeIndex: cur } = useClipboardStore.getState();
+          if (upItems.length === 0) return;
+          e.preventDefault();
           let next = cur;
           if (cur > 0) next = cur - 1;
           else if (cur === -1) next = 0;
@@ -228,9 +242,10 @@ export function ClipboardList() {
           break;
         }
         case "ArrowDown": {
+          const { items: downItems, activeIndex: cur } = useClipboardStore.getState();
+          if (downItems.length === 0) return;
           e.preventDefault();
-          const cur = useClipboardStore.getState().activeIndex;
-          if (cur < count - 1) {
+          if (cur < downItems.length - 1) {
             const next = cur + 1;
             setActiveIndex(next);
             virtuosoRef.current?.scrollToIndex({ index: next, align: "center", behavior: "auto" });
