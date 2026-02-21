@@ -8,17 +8,16 @@ use super::{
     clipboard::simulate_paste, hide_main_window_if_not_pinned, with_paused_monitor, AppState,
 };
 
-// ============ File Validation Commands ============
+// ============ 文件校验命令 ============
 
-/// File check result with existence and directory info
+/// 文件检查结果（存在性与是否为目录）
 #[derive(serde::Serialize)]
 pub struct FileCheckResult {
     pub exists: bool,
     pub is_dir: bool,
 }
 
-/// Check if files exist on disk (parallel for better performance)
-/// Returns a map of file path -> FileCheckResult
+/// 并行检查文件是否存在，返回路径→结果映射。
 #[tauri::command]
 pub async fn check_files_exist(
     paths: Vec<String>,
@@ -39,16 +38,16 @@ pub async fn check_files_exist(
     Ok(result)
 }
 
-// ============ File Operation Commands ============
+// ============ 文件操作命令 ============
 
-/// Show file/folder in system file explorer, highlighting the file
+/// 在系统文件管理器中定位并高亮显示文件
 #[tauri::command]
 pub async fn show_in_explorer(path: String) -> Result<(), String> {
     use std::path::Path;
 
     let path = Path::new(&path);
 
-    // show_in_explorer uses /select to highlight the file (different from open_path_in_explorer)
+    // 使用 /select 参数高亮文件（与 open_path_in_explorer 不同）
     #[cfg(target_os = "windows")]
     {
         let path_str = path.to_string_lossy();
@@ -82,7 +81,7 @@ pub async fn show_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Copy file path as text to clipboard and paste
+/// 将文件路径作为文本写入剪贴板并粘贴
 #[tauri::command]
 pub async fn paste_as_path(
     state: State<'_, Arc<AppState>>,
@@ -124,7 +123,7 @@ pub async fn paste_as_path(
     })
 }
 
-/// Save a file to user-chosen location via system save dialog
+/// 通过系统另存为对话框保存文件
 #[tauri::command]
 pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<bool, String> {
     use std::path::Path;
@@ -153,11 +152,11 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
             std::fs::copy(&source_path, &dest_str).map_err(|e| format!("保存失败: {}", e))?;
             Ok(true)
         }
-        None => Ok(false), // User cancelled
+        None => Ok(false), // 用户取消
     }
 }
 
-/// Get data directory size breakdown (database + images)
+/// 获取数据目录大小明细（数据库+图片）
 #[tauri::command]
 pub async fn get_data_size() -> Result<DataSizeInfo, String> {
     let config = crate::config::AppConfig::load();
@@ -205,7 +204,7 @@ pub struct DataSizeInfo {
     pub total_size: u64,
 }
 
-/// Get file details for display
+/// 获取文件详情
 #[tauri::command]
 pub async fn get_file_details(path: String) -> Result<FileDetails, String> {
     use std::fs;

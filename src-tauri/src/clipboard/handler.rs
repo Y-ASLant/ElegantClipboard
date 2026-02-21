@@ -341,9 +341,7 @@ impl ClipboardHandler {
         })
     }
 
-    /// Process image content
-    /// Saves image to disk and extracts metadata (width, height)
-    /// Uses background thread for file I/O to avoid blocking the monitor
+    /// 处理图片内容：保存到磁盘并提取宽高元数据
     fn process_image(&self, data: Vec<u8>, hash: String) -> Result<NewClipboardItem, String> {
         let byte_size = data.len() as i64;
 
@@ -353,8 +351,7 @@ impl ClipboardHandler {
 
         let (image_width, image_height) = self.extract_image_dimensions(&data)?;
 
-        // Save image file synchronously to ensure it exists before DB insert
-        // (async write caused race: frontend could query the item before file was written)
+        // 同步写入文件，确保插入数据库前文件已就绪（异步写入会引发竞态）
         if let Err(e) = std::fs::write(&image_path, &data) {
             return Err(format!("Failed to save image: {}", e));
         }
@@ -391,8 +388,7 @@ impl ClipboardHandler {
     fn process_files(&self, files: Vec<String>, hash: String) -> Result<NewClipboardItem, String> {
         use std::path::Path;
 
-        // Calculate file sizes (only for regular files, skip directories)
-        // Directory size calculation is expensive and low value
+        // 仅计算普通文件大小（目录开销大且意义有限）
         let byte_size: i64 = files
             .iter()
             .filter_map(|f| {

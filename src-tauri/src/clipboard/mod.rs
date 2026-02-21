@@ -5,8 +5,7 @@ pub mod source_app;
 pub use handler::*;
 pub use monitor::*;
 
-/// Delete image files from disk, logging any failures.
-/// Returns the number of successfully deleted files.
+/// 从磁盘删除图片文件，失败时记录日志，返回成功删除数。
 pub fn cleanup_image_files(paths: &[String]) -> usize {
     let mut deleted = 0;
     for path in paths {

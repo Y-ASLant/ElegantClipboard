@@ -183,9 +183,7 @@ impl ClipboardRepository {
         }
     }
 
-    /// Get a full item (including text content) by its position in the default
-    /// sort order.  Used by quick-paste so it retrieves actual content rather
-    /// than the NULL placeholders used by the lightweight `list()` query.
+    /// 按默认排序位置获取完整条目（含文本内容），供快速粘贴使用。
     pub fn get_by_position(&self, index: usize) -> Result<Option<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let result = conn.query_row(
@@ -395,7 +393,7 @@ impl ClipboardRepository {
     pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
 
-        // Collect image paths before deleting
+        // 先收集图片路径再执行删除
         let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items 
              WHERE is_pinned = 0 AND is_favorite = 0 
@@ -474,8 +472,7 @@ impl ClipboardRepository {
         hasher.update(new_text.as_bytes());
         let content_hash = hasher.finalize().to_hex().to_string();
 
-        // Clear html/rtf content and downgrade to text type — formatted content
-        // is no longer valid after plain-text editing.
+        // 清除 html/rtf 内容并降级为 text 类型（纯文本编辑后格式内容失效）
         conn.execute(
             "UPDATE clipboard_items SET text_content = ?1, preview = ?2, content_hash = ?3, \
              byte_size = ?4, char_count = ?5, content_type = 'text', \

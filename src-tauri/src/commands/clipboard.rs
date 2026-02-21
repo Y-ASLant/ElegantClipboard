@@ -5,12 +5,9 @@ use tracing::debug;
 
 use super::{hide_main_window_if_not_pinned, with_paused_monitor, AppState};
 
-// ============ Helper Functions ============
+// ============ 辅助函数 ============
 
-/// Set clipboard content from a ClipboardItem (shared logic for copy and paste)
-///
-/// Uses clipboard-rs for image/file operations (like EcoPaste's tauri-plugin-clipboard-x)
-/// to avoid the expensive image::open() → to_rgba8() → arboard decode chain.
+/// 将 ClipboardItem 内容写入系统剪贴板（复制与粘贴的公共逻辑）
 pub(super) fn set_clipboard_content(
     item: &ClipboardItem,
     clipboard: &mut arboard::Clipboard,
@@ -42,11 +39,7 @@ pub(super) fn set_clipboard_content(
     Ok(())
 }
 
-/// Set image to clipboard using clipboard-rs RustImageData::from_path
-/// (same approach as EcoPaste's tauri-plugin-clipboard-x write_image)
-///
-/// This avoids the expensive path of: image::open() → to_rgba8() → arboard::ImageData
-/// Instead, clipboard-rs handles the decode and platform conversion internally.
+/// 使用 clipboard-rs 将图片写入剪贴板（内部处理解码与平台转换）
 fn set_clipboard_image(path: &str) -> Result<(), String> {
     use clipboard_rs::common::RustImage;
     use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
@@ -63,7 +56,7 @@ fn set_clipboard_image(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Set files to clipboard using clipboard-rs (for proper file format)
+/// 使用 clipboard-rs 将文件列表写入剪贴板
 fn set_clipboard_files(paths: &[String]) -> Result<(), String> {
     use clipboard_rs::{Clipboard, ClipboardContext};
 
@@ -76,32 +69,27 @@ fn set_clipboard_files(paths: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Extract a context snippet centered around the first occurrence of `keyword` in `text`.
-/// Returns `...prefix KEYWORD suffix...` with the keyword in the middle.
-///
-/// Fast path (O(n)): lowercase entire text once, find byte offset, convert to char index.
-/// This works for CJK/ASCII where to_lowercase() preserves byte offsets.
-/// Fallback (O(n*k)): sliding-window per-char comparison for rare Unicode edge cases
-/// (e.g. Turkish İ where lowercasing changes byte length).
+/// 提取以 keyword 首次出现为中心的上下文片段（`...前缀 关键词 后缀...`）。
+/// 快速路径 O(n)：整体小写后字节级搜索转字符索引（CJK/ASCII 通用）。
+/// 回退路径 O(n*k)：逐字符滑动窗口（处理小写化会改变字节长度的稀有 Unicode）。
 fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String {
     let keyword_lower = keyword.to_lowercase();
 
-    // Fast path: lowercase entire text, find with byte-level search
+    // 快速路径：全文小写后字节级搜索
     let text_lower = text.to_lowercase();
     let keyword_char_pos = if let Some(byte_pos) = text_lower.find(&keyword_lower) {
-        // Convert byte position in text_lower to char index
+        // 将字节位置转为字符索引
         let char_idx_in_lower = text_lower[..byte_pos].chars().count();
-        // Verify: check that the same char index in `text` actually matches.
-        // For CJK/ASCII this is always true; only fails for rare Unicode case mappings.
+        // 验证：CJK/ASCII 始终成立，稀有 Unicode 大小写映射时可能失败
         let mut ci = text.char_indices().skip(char_idx_in_lower);
         let valid = if let Some((bs, _)) = ci.next() {
-            // Find byte_end by advancing keyword_lower.chars().count() more chars
+            // 向前推进 keyword 字符数以获得末尾字节偏移
             let kw_char_len = keyword_lower.chars().count();
             let be = ci
                 .nth(kw_char_len.saturating_sub(1))
                 .map(|(b, _)| b)
                 .unwrap_or(text.len());
-            // Cheap verification: the slice at this char position should lowercase-match
+            // 低成本验证：该位置切片小写化应与关键词一致
             text.get(bs..be)
                 .map(|s| s.to_lowercase() == keyword_lower)
                 .unwrap_or(false)
@@ -111,7 +99,7 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
         if valid {
             Some(char_idx_in_lower)
         } else {
-            // Fallback: sliding window (rare path)
+            // 回退：滑动窗口（稀少路径）
             find_keyword_char_pos_slow(text, &keyword_lower)
         }
     } else {
@@ -122,7 +110,7 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
     let keyword_char_pos = match keyword_char_pos {
         Some(pos) => pos,
         None => {
-            // Keyword not in text_content (matched via file_paths); return original preview truncation
+            // 关键词不在文本中（由文件路径匹配），返回原始预览截断
             return text.chars().take(max_len).collect();
         }
     };
@@ -130,8 +118,7 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
     build_context_snippet(text, keyword_char_pos, keyword_char_len, max_len)
 }
 
-/// Slow fallback: O(n*k) sliding window to find keyword char position.
-/// Only called for rare Unicode where to_lowercase() shifts byte positions.
+/// 慢速回退：O(n*k) 滑动窗口定位关键词字符位置（仅用于稀有 Unicode 场景）。
 fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> {
     let keyword_char_len = keyword_lower.chars().count();
     let char_indices: Vec<(usize, char)> = text.char_indices().collect();
@@ -153,7 +140,7 @@ fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> 
     None
 }
 
-/// Build the `...context...` snippet given char-level position info.
+/// 根据字符级位置信息构建上下文片段。
 fn build_context_snippet(
     text: &str,
     keyword_char_pos: usize,
@@ -191,7 +178,7 @@ fn build_context_snippet(
     result
 }
 
-/// Check file existence and fill files_valid field for file-type items
+/// 并行检查文件类型条目的文件是否存在，填充 files_valid 字段
 fn fill_files_valid(items: &mut [ClipboardItem]) {
     use rayon::prelude::*;
     use std::path::Path;
@@ -208,12 +195,9 @@ fn fill_files_valid(items: &mut [ClipboardItem]) {
     });
 }
 
-/// Simulate Ctrl+V paste keystroke using the Windows `SendInput` API.
-///
-/// If the user is still holding Alt (e.g. from an Alt+1 quick-paste shortcut)
-/// we release Alt before sending Ctrl+V and **re-press Alt afterwards** so the
-/// OS still considers it held.  This allows the user to keep Alt down and tap
-/// a number key repeatedly to paste multiple items.
+/// 使用 Windows SendInput API 模拟 Ctrl+V 粘贴。
+/// 若用户仍按住 Alt（如 Alt+1 快速粘贴），则先释放再发送 Ctrl+V，
+/// 完成后重新按下 Alt，支持连续按数字键多次粘贴。
 #[cfg(target_os = "windows")]
 pub fn simulate_paste() -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -241,8 +225,7 @@ pub fn simulate_paste() -> Result<(), String> {
         unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32); }
     }
 
-    /// Release a modifier key if the user is currently holding it.
-    /// Retries up to 20 times with 5ms delay to ensure the OS processes the release.
+    /// 若用户正按住修饰键则释放，最多重试 20 次（间隔 5ms）。
     fn release_if_held(vk: u16) -> bool {
         if !is_key_pressed(vk) {
             return false;
@@ -257,13 +240,11 @@ pub fn simulate_paste() -> Result<(), String> {
         true
     }
 
-    // --- 1. Release modifiers the user may still be holding ---------------
-    //     Alt and Shift must be released before Ctrl+V, otherwise the
-    //     target app receives Ctrl+Shift+V or Ctrl+Alt+V.
+    // --- 1. 释放用户可能仍按住的修饰键（Alt/Shift 须在 Ctrl+V 前释放）
     let user_alt = release_if_held(VK_MENU.0);
     let user_shift = release_if_held(VK_SHIFT.0);
 
-    // --- 2. Send Ctrl+V --------------------------------------------------
+    // --- 2. 发送 Ctrl+V
     let user_ctrl = is_key_pressed(VK_CONTROL.0);
     if !user_ctrl {
         send_key(VK_CONTROL.0, false); // Ctrl down
@@ -275,13 +256,13 @@ pub fn simulate_paste() -> Result<(), String> {
         send_key(VK_CONTROL.0, true); // Ctrl up
     }
 
-    // --- 3. Re-press modifiers so continuous shortcut presses still work --
+    // --- 3. 重新按下修饰键，支持连续快捷键操作
     if user_shift {
         send_key(VK_SHIFT.0, false); // Shift down
     }
     if user_alt {
         send_key(VK_MENU.0, false); // Alt down
-        // Brief Ctrl tap to reset internal modifier state
+        // 短按 Ctrl 以重置内部修饰键状态
         send_key(VK_CONTROL.0, false);
         send_key(VK_CONTROL.0, true);
     }
@@ -296,7 +277,7 @@ pub fn simulate_paste() -> Result<(), String> {
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
 
-    // Release modifier keys the user might still be holding.
+    // 释放用户可能仍按住的修饰键
     for m in [Key::Alt, Key::Shift, Key::Meta, Key::Control] {
         let _ = enigo.key(m, Direction::Release);
     }
@@ -333,9 +314,9 @@ pub fn simulate_paste() -> Result<(), String> {
     Ok(())
 }
 
-// ============ Clipboard CRUD Commands ============
+// ============ 剪贴板 CRUD 命令 ============
 
-/// Get clipboard items with optional filtering
+/// 获取剪贴板条目（支持可选过滤）
 #[tauri::command]
 pub async fn get_clipboard_items(
     state: State<'_, Arc<AppState>>,
@@ -360,13 +341,12 @@ pub async fn get_clipboard_items(
         offset,
     };
     let mut items = repo.list(options).map_err(|e| e.to_string())?;
-    // When searching: replace preview with keyword-centered context snippet,
-    // then strip text_content to avoid heavy IPC transfer.
+    // 搜索时：用关键词上下文片段替换 preview，并清除 text_content 以减少 IPC 传输
     if let Some(ref keyword) = search_keyword {
         let keyword_lower = keyword.to_lowercase();
         for item in &mut items {
             if let Some(ref text) = item.text_content {
-                // Only replace preview if keyword is NOT in the original preview
+                // 仅当原始预览中不含关键词时才替换
                 let preview_has_match = item
                     .preview
                     .as_ref()
@@ -376,19 +356,18 @@ pub async fn get_clipboard_items(
                     item.preview = Some(extract_keyword_context(text, keyword, 200));
                 }
             }
-            // Strip heavy field after context extraction
+            // 提取上下文后清除大字段
             item.text_content = None;
         }
     }
-    // Skip expensive file-existence checks during search (disk I/O per file item);
-    // only needed for non-search browsing where user might paste files.
+    // 搜索时跳过耗时的文件存在性检查（仅在非搜索浏览时需要）
     if !is_searching {
         fill_files_valid(&mut items);
     }
     Ok(items)
 }
 
-/// Get clipboard item by ID
+/// 按 ID 获取剪贴板条目
 #[tauri::command]
 pub async fn get_clipboard_item(
     state: State<'_, Arc<AppState>>,
@@ -398,7 +377,7 @@ pub async fn get_clipboard_item(
     repo.get_by_id(id).map_err(|e| e.to_string())
 }
 
-/// Get total item count
+/// 获取条目总数
 #[tauri::command]
 pub async fn get_clipboard_count(
     state: State<'_, Arc<AppState>>,
@@ -418,21 +397,21 @@ pub async fn get_clipboard_count(
     repo.count(options).map_err(|e| e.to_string())
 }
 
-/// Toggle pin status
+/// 切换固定状态
 #[tauri::command]
 pub async fn toggle_pin(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
     let repo = ClipboardRepository::new(&state.db);
     repo.toggle_pin(id).map_err(|e| e.to_string())
 }
 
-/// Toggle favorite status
+/// 切换收藏状态
 #[tauri::command]
 pub async fn toggle_favorite(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
     let repo = ClipboardRepository::new(&state.db);
     repo.toggle_favorite(id).map_err(|e| e.to_string())
 }
 
-/// Move clipboard item by swapping sort order with target
+/// 与目标条目交换排序位置
 #[tauri::command]
 pub async fn move_clipboard_item(
     state: State<'_, Arc<AppState>>,
@@ -446,7 +425,7 @@ pub async fn move_clipboard_item(
     Ok(())
 }
 
-/// Delete clipboard item (also deletes associated image file)
+/// 删除剪贴板条目（同时删除关联图片文件）
 #[tauri::command]
 pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
@@ -463,7 +442,7 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
     Ok(())
 }
 
-/// Clear all non-pinned history (also deletes associated image files)
+/// 清空所有非固定/非收藏历史（同时删除图片文件）
 #[tauri::command]
 pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, String> {
     use tracing::info;
@@ -480,10 +459,9 @@ pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, Strin
     Ok(deleted)
 }
 
-// ============ Edit Commands ============
+// ============ 编辑命令 ============
 
-/// Update text content of a clipboard item (edit feature)
-/// Returns true if the item was deleted (empty content), false if updated.
+/// 更新剪贴板条目的文本内容，内容为空时删除并返回 true
 #[tauri::command]
 pub async fn update_text_content(
     state: State<'_, Arc<AppState>>,
@@ -503,9 +481,9 @@ pub async fn update_text_content(
     }
 }
 
-// ============ Copy & Paste Commands ============
+// ============ 复制与粘贴命令 ============
 
-/// Copy item to system clipboard
+/// 将条目复制到系统剪贴板
 #[tauri::command]
 pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
@@ -523,8 +501,7 @@ pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Resu
     })
 }
 
-/// Paste clipboard item content directly
-/// This will: 1. Copy content to clipboard, 2. Hide window, 3. Simulate Ctrl+V
+/// 直接粘贴剪贴板条目（写入系统剪贴板 → 隐藏窗口 → 模拟 Ctrl+V）
 #[tauri::command]
 pub async fn paste_content(
     state: State<'_, Arc<AppState>>,
@@ -542,8 +519,7 @@ pub async fn paste_content(
     Ok(())
 }
 
-/// Paste item content as plain text (strips formatting for html/rtf items)
-/// This will: 1. Get text_content, 2. Write as plain text to clipboard, 3. Hide window, 4. Simulate Ctrl+V
+/// 以纯文本粘贴条目内容（去除 html/rtf 格式）
 #[tauri::command]
 pub async fn paste_content_as_plain(
     state: State<'_, Arc<AppState>>,
@@ -566,8 +542,7 @@ pub async fn paste_content_as_plain(
     Ok(())
 }
 
-/// Paste arbitrary text directly to active window
-/// Used by features like emoji picker, snippets, etc.
+/// 将任意文本直接粘贴到当前活动窗口（用于表情、片段等功能）
 #[tauri::command]
 pub async fn paste_text_direct(
     state: State<'_, Arc<AppState>>,
@@ -579,12 +554,9 @@ pub async fn paste_text_direct(
     Ok(())
 }
 
-/// Paste the item at quick slot position (1-9) to active window.
-/// Slot ordering follows the default list order:
-/// pinned first, then by sort_order desc, then created_at desc.
-///
-/// Uses `get_by_position` (SELECT *) instead of `list()` which returns
-/// NULL text_content for IPC efficiency — we need the actual content here.
+/// 粘贴快速槽位（1-9）对应条目到活动窗口。
+/// 排序与默认列表一致（置顶优先 → sort_order 降序 → 时间降序）。
+/// 使用 get_by_position 获取完整内容（list() 会将 text_content 置 NULL）。
 pub fn quick_paste_by_slot(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
@@ -605,10 +577,7 @@ pub fn quick_paste_by_slot(
     Ok(())
 }
 
-/// Shared paste execution:
-/// 1) write content to system clipboard
-/// 2) hide app window (if not pinned)
-/// 3) simulate Ctrl+V to active app
+/// 公共粘贴执行：写入系统剪贴板 → 隐藏窗口（非固定）→ 模拟 Ctrl+V
 fn paste_item_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
@@ -627,7 +596,7 @@ fn paste_item_to_active_window(
     })
 }
 
-/// Shared plain-text paste: write text to clipboard, hide window, simulate Ctrl+V
+/// 公共纯文本粘贴：写入剪贴板 → 隐藏窗口 → 模拟 Ctrl+V
 fn paste_plain_text_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,

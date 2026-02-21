@@ -6,16 +6,15 @@ use crate::clipboard::ClipboardMonitor;
 use crate::database::Database;
 use std::sync::Arc;
 
-/// App state containing database and clipboard monitor
+/// 应用状态：包含数据库与剪贴板监控器
 pub struct AppState {
     pub db: Database,
     pub monitor: ClipboardMonitor,
 }
 
-// ============ Shared Helpers ============
+// ============ 公用辅助函数 ============
 
-/// Hide the main window if it's not pinned, updating the window state accordingly.
-/// Also hides the image preview window to prevent it from lingering.
+/// 非固定状态下隐藏主窗口并更新状态，同时隐藏图片预览窗口。
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
     use tauri::Manager;
 
@@ -24,14 +23,13 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
         }
-        // Hide image preview window (it won't receive onMouseLeave when main window disappears)
+        // 隐藏图片预览窗口（主窗口消失时无法触发 onMouseLeave）
         hide_image_preview_window(app);
     }
 }
 
-/// Hide the image preview window if it exists.
-/// Called when the main window is hidden to prevent the preview from lingering,
-/// since onMouseLeave won't fire when the main window disappears.
+/// 隐藏图片预览窗口（若存在）。
+/// 主窗口隐藏时调用，防止预览残留（onMouseLeave 不会触发）。
 pub(crate) fn hide_image_preview_window(app: &tauri::AppHandle) {
     use tauri::{Emitter, Manager};
 
@@ -41,9 +39,7 @@ pub(crate) fn hide_image_preview_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Execute a closure with the clipboard monitor paused, then resume after a delay.
-/// The monitor is paused immediately, and resumed 500ms later on a background thread.
-/// Uses std::thread so it works from any context (Tokio runtime or plain thread).
+/// 暂停剪贴板监控并执行闭包，500ms 后在后台线程恢复监控。
 pub(crate) fn with_paused_monitor<F, R>(state: &Arc<AppState>, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -60,7 +56,7 @@ where
     result
 }
 
-/// Open a path in the platform's native file explorer.
+/// 用系统文件管理器打开指定路径。
 pub(crate) fn open_path_in_explorer(path: &std::path::Path) -> Result<(), String> {
     use std::process::Command;
 

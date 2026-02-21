@@ -12,8 +12,7 @@ use tracing::{debug, error, info, warn};
 #[derive(Clone)]
 pub struct ClipboardMonitor {
     running: Arc<AtomicBool>,
-    /// Pause counter: when > 0, clipboard changes are ignored
-    /// This prevents race conditions when multiple copy operations overlap
+    /// 暂停计数器：> 0 时忽略剪贴板变化，防止并发复制操作竞态
     pause_count: Arc<AtomicU32>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -29,7 +28,7 @@ impl ClipboardMonitor {
         }
     }
 
-    /// Initialize the monitor with database and images path
+    /// 初始化监控器（数据库与图片路径）
     pub fn init(&self, db: &Database, images_path: std::path::PathBuf) {
         let handler = ClipboardHandler::new(db, images_path);
         *self.handler.lock() = Some(handler);
@@ -38,7 +37,7 @@ impl ClipboardMonitor {
 
     /// 启动剪贴板监听
     pub fn start(&self, app_handle: AppHandle) {
-        // Use compare_exchange to avoid race condition
+        // 用 compare_exchange 避免竞态
         if self
             .running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -62,7 +61,7 @@ impl ClipboardMonitor {
                 app_handle,
             };
 
-            // Start the clipboard master
+            // 启动剪贴板监听
             match Master::new(clipboard_handler) {
                 Ok(mut master) => {
                     if let Err(e) = master.run() {
@@ -78,35 +77,31 @@ impl ClipboardMonitor {
             info!("Clipboard monitor thread stopped");
         });
 
-        // Store thread handle for cleanup
+        // 保存线程句柄以便清理
         *self.thread_handle.lock() = Some(handle);
     }
 
-    /// Stop monitoring and wait for thread to finish
+    /// 停止监控并等待线程退出
     #[allow(dead_code)]
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
         info!("Clipboard monitor stopping");
 
-        // Wait for thread to finish (with timeout)
+        // 等待线程退出（运行标志已置 false，线程应自行停止）
         if let Some(handle) = self.thread_handle.lock().take() {
-            // Don't block indefinitely - the thread should stop on its own
-            // when running flag is set to false
             let _ = handle.join();
         }
     }
 
-    /// Pause monitoring (increments pause counter)
-    /// Multiple concurrent pauses are supported - monitoring resumes only when all are released
+    /// 暂停监控（递增暂停计数，支持多个并发暂停）
     pub fn pause(&self) {
         let count = self.pause_count.fetch_add(1, Ordering::SeqCst);
         debug!("Clipboard monitor paused (count: {})", count + 1);
     }
 
-    /// Resume monitoring (decrements pause counter)
-    /// Monitoring only actually resumes when counter reaches 0
+    /// 恢复监控（递减暂停计数，归零时真正恢复）
     pub fn resume(&self) {
-        // Use fetch_update to atomically decrement only if > 0, avoiding u32 underflow
+        // 原子递减，仅当 > 0 时执行，避免 u32 下溢
         match self
             .pause_count
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
@@ -121,12 +116,12 @@ impl ClipboardMonitor {
         }
     }
 
-    /// Check if paused (pause count > 0)
+    /// 是否已暂停（计数 > 0）
     pub fn is_paused(&self) -> bool {
         self.pause_count.load(Ordering::SeqCst) > 0
     }
 
-    /// Check if running
+    /// 是否运行中
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
@@ -138,7 +133,7 @@ impl Default for ClipboardMonitor {
     }
 }
 
-/// Handler for clipboard-master
+/// clipboard-master 事件处理器
 struct MonitorHandler {
     running: Arc<AtomicBool>,
     pause_count: Arc<AtomicU32>,
@@ -148,12 +143,12 @@ struct MonitorHandler {
 
 impl CMHandler for MonitorHandler {
     fn on_clipboard_change(&mut self) -> CallbackResult {
-        // Check if we should stop
+        // 检查是否应停止
         if !self.running.load(Ordering::SeqCst) {
             return CallbackResult::Stop;
         }
 
-        // Check if paused (pause_count > 0)
+        // 检查是否已暂停
         if self.pause_count.load(Ordering::SeqCst) > 0 {
             debug!("Clipboard change ignored (paused)");
             return CallbackResult::Next;
@@ -162,13 +157,13 @@ impl CMHandler for MonitorHandler {
         // 先获取来源应用（在读取内容之前）
         let source = super::source_app::get_clipboard_source_app();
 
-        // Read clipboard content using arboard
+        // 读取剪贴板内容
         let content = match read_clipboard_content() {
             Some(c) => c,
             None => return CallbackResult::Next,
         };
 
-        // Process the content
+        // 处理内容
         if let Some(ref handler) = *self.handler.lock() {
             match handler.process(content, source) {
                 Ok(Some(id)) => {
@@ -219,7 +214,7 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
         let (width, height) = img.get_size();
         debug!("Got image from clipboard: {}x{}", width, height);
 
-        // Get PNG bytes directly from clipboard-rs
+        // 直接从 clipboard-rs 获取 PNG 字节
         if let Ok(png_buffer) = img.to_png() {
             let bytes: Vec<u8> = png_buffer.get_bytes().to_vec();
             debug!("Got PNG image: {} bytes", bytes.len());
