@@ -441,15 +441,17 @@ export function ClipboardList() {
           </SortableContext>
         </OverlayScrollbarsComponent>
         {/* 回到顶部悬浮按钮 */}
-        {showScrollTop && (
-          <button
-            onClick={() => scrollToTop(true)}
-            className="absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors z-10"
-            title="回到顶部"
-          >
-            <ArrowUp16Regular className="w-4 h-4" />
-          </button>
-        )}
+        <button
+          onClick={() => scrollToTop(true)}
+          className={`absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-200 z-10 ${
+            showScrollTop
+              ? "opacity-100 scale-100 pointer-events-auto"
+              : "opacity-0 scale-75 pointer-events-none"
+          }`}
+          title="回到顶部"
+        >
+          <ArrowUp16Regular className="w-4 h-4" />
+        </button>
       </div>
 
       <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>

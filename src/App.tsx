@@ -54,6 +54,8 @@ function App() {
   const [isPinned, setIsPinned] = useState(false);
   const { searchQuery, selectedGroup, setSearchQuery, setSelectedGroup, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
   const autoResetState = useUISettings((s) => s.autoResetState);
+  const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
+  const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const inputRef = useRef<HTMLInputElement>(null);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
@@ -80,7 +82,15 @@ function App() {
   // Refresh data when window is shown (files_valid is computed by backend)
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
-      refresh();
+      if (searchAutoClear) {
+        setSearchQuery("");
+        fetchItems({ search: "" });
+      } else {
+        refresh();
+      }
+      if (searchAutoFocus) {
+        inputRef.current?.focus();
+      }
       setSuppressTooltips(true);
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
       suppressTimerRef.current = setTimeout(() => setSuppressTooltips(false), 400);
@@ -89,7 +99,7 @@ function App() {
       unlisten.then((fn) => fn());
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
     };
-  }, [refresh]);
+  }, [refresh, fetchItems, setSearchQuery, searchAutoFocus, searchAutoClear]);
 
   // Dismiss overlays & optionally reset view state when window is hidden
   useEffect(() => {

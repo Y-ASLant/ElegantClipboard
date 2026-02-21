@@ -441,7 +441,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <Card
         className={cn(
-        "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30",
+        "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30 ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.06]",
           isDragOverlay && "shadow-lg border-primary cursor-grabbing",
           justDropped && "animate-scale-bounce",
           isActive && "bg-accent shadow-sm",

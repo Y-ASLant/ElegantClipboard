@@ -20,6 +20,8 @@ interface UISettings {
   sharpCorners: boolean;
   autoResetState: boolean;
   keyboardNavigation: boolean;
+  searchAutoFocus: boolean;
+  searchAutoClear: boolean;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -35,6 +37,8 @@ interface UISettings {
   setSharpCorners: (enabled: boolean) => void;
   setAutoResetState: (enabled: boolean) => void;
   setKeyboardNavigation: (enabled: boolean) => void;
+  setSearchAutoFocus: (enabled: boolean) => void;
+  setSearchAutoClear: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -63,6 +67,8 @@ export const useUISettings = create<UISettings>()(
       sharpCorners: false,
       autoResetState: true,
       keyboardNavigation: true,
+      searchAutoFocus: true,
+      searchAutoClear: true,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -122,6 +128,14 @@ export const useUISettings = create<UISettings>()(
       setKeyboardNavigation: (enabled) => {
         set({ keyboardNavigation: enabled });
         broadcastChange({ keyboardNavigation: enabled });
+      },
+      setSearchAutoFocus: (enabled) => {
+        set({ searchAutoFocus: enabled });
+        broadcastChange({ searchAutoFocus: enabled });
+      },
+      setSearchAutoClear: (enabled) => {
+        set({ searchAutoClear: enabled });
+        broadcastChange({ searchAutoClear: enabled });
       },
     }),
     {

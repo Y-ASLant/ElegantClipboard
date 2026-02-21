@@ -30,6 +30,10 @@ interface GeneralTabProps {
 export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const autoResetState = useUISettings((s) => s.autoResetState);
   const setAutoResetState = useUISettings((s) => s.setAutoResetState);
+  const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
+  const setSearchAutoFocus = useUISettings((s) => s.setSearchAutoFocus);
+  const searchAutoClear = useUISettings((s) => s.searchAutoClear);
+  const setSearchAutoClear = useUISettings((s) => s.setSearchAutoClear);
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
@@ -77,6 +81,38 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               checked={useUISettings((s) => s.keyboardNavigation)}
               onCheckedChange={useUISettings((s) => s.setKeyboardNavigation)}
             />
+          </div>
+        </div>
+
+        {/* Search Bar Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">搜索栏</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置激活窗口时的搜索栏行为</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">默认聚焦</Label>
+                <p className="text-xs text-muted-foreground">
+                  激活窗口时，默认聚焦搜索框
+                </p>
+              </div>
+              <Switch
+                checked={searchAutoFocus}
+                onCheckedChange={setSearchAutoFocus}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">自动清除</Label>
+                <p className="text-xs text-muted-foreground">
+                  激活窗口时，清除搜索框内容
+                </p>
+              </div>
+              <Switch
+                checked={searchAutoClear}
+                onCheckedChange={setSearchAutoClear}
+              />
+            </div>
           </div>
         </div>
 
