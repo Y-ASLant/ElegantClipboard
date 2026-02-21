@@ -269,6 +269,7 @@ function mdToHtml(md: string): string {
     .replace(/^[*-] (.+)$/gm, '<li class="text-xs text-muted-foreground ml-3">$1</li>')
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-primary hover:underline">$1</a>')
+    .replace(/(?<!href=")(https?:\/\/[^\s<>"']+)/g, '<a href="$1" class="text-primary hover:underline">$1</a>')
     .replace(/@([\w-]+)/g, '<a href="https://github.com/$1" class="text-primary hover:underline">@$1</a>')
     .replace(/\n{2,}/g, "<br/>")
     .replace(/\n/g, "");
