@@ -107,14 +107,23 @@ impl ClipboardHandler {
     ) -> Result<Option<i64>, String> {
         let max_content_size = self.get_max_content_size();
 
+        // max_content_size 仅限制文本类内容，图片和文件不受此限制
         if max_content_size > 0 {
-            let content_size = self.get_content_size(&content);
-            if content_size > max_content_size {
-                warn!(
-                    "Content size {} bytes exceeds max {} bytes, skipping",
-                    content_size, max_content_size
-                );
-                return Ok(None);
+            let is_text_content = matches!(
+                content,
+                ClipboardContent::Text(_)
+                    | ClipboardContent::Html { .. }
+                    | ClipboardContent::Rtf { .. }
+            );
+            if is_text_content {
+                let content_size = self.get_content_size(&content);
+                if content_size > max_content_size {
+                    warn!(
+                        "Content size {} bytes exceeds max {} bytes, skipping",
+                        content_size, max_content_size
+                    );
+                    return Ok(None);
+                }
             }
         }
 

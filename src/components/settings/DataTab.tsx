@@ -282,7 +282,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-xs">单条内容最大大小</Label>
+                <Label className="text-xs">单条文本最大大小</Label>
                 <span className="text-xs font-medium tabular-nums">
                   {settings.max_content_size_kb === 0 
                     ? "无限制"
@@ -300,7 +300,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
                 step={64}
               />
               <p className="text-xs text-muted-foreground">
-                设为 0 表示无限制
+                仅限制文本/HTML/RTF，图片和文件不受此限制，设为 0 表示无限制
               </p>
             </div>
 
