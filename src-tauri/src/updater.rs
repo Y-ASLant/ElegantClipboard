@@ -86,8 +86,7 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     let setup_asset = release
         .assets
         .iter()
-        .find(|a| a.name.ends_with(arch_suffix))
-        .or_else(|| release.assets.iter().find(|a| a.name.ends_with("-setup.exe")));
+        .find(|a| a.name.ends_with(arch_suffix));
 
     let (download_url, file_name, file_size) = match setup_asset {
         Some(a) => (a.browser_download_url.clone(), a.name.clone(), a.size),
