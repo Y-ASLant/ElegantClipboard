@@ -245,6 +245,7 @@ async fn show_window(window: tauri::WebviewWindow) {
 /// Tauri 命令：隐藏主窗口
 #[tauri::command]
 async fn hide_window(window: tauri::WebviewWindow) {
+    save_window_size_if_enabled(window.app_handle(), &window);
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
     // 隐藏图片预览窗口
@@ -288,6 +289,7 @@ async fn toggle_maximize(window: tauri::WebviewWindow) {
 /// Tauri 命令：关闭窗口（隐藏到托盘）
 #[tauri::command]
 async fn close_window(window: tauri::WebviewWindow) {
+    save_window_size_if_enabled(window.app_handle(), &window);
     let _ = window.hide();
     // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
@@ -679,29 +681,72 @@ fn restart_app(app: tauri::AppHandle) {
     }
 }
 
+/// 若「记住窗口大小」开关启用，将当前窗口逻辑尺寸保存到 settings 表。
+/// 所有隐藏主窗口的路径都应在 hide 前调用此函数。
+pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(app: &tauri::AppHandle<R>, window: &tauri::WebviewWindow<R>) {
+    if let Some(state) = app.try_state::<std::sync::Arc<commands::AppState>>() {
+        let settings_repo = database::SettingsRepository::new(&state.db);
+        let persist = settings_repo.get("persist_window_size").ok().flatten()
+            .map(|v| v == "true").unwrap_or(false);
+        if persist {
+            if let Ok(size) = window.outer_size() {
+                if let Ok(scale) = window.scale_factor() {
+                    let w = (size.width as f64 / scale).round() as u32;
+                    let h = (size.height as f64 / scale).round() as u32;
+                    let _ = settings_repo.set("window_width", &w.to_string());
+                    let _ = settings_repo.set("window_height", &h.to_string());
+                }
+            }
+        }
+    }
+}
+
 /// 切换主窗口显示/隐藏
 fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if keyboard_hook::get_window_state() == keyboard_hook::WindowState::Visible {
+            save_window_size_if_enabled(app, &window);
+
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
             input_monitor::disable_mouse_monitoring();
             commands::hide_image_preview_window(app);
             let _ = window.emit("window-hidden", ());
         } else {
-            // 跟随光标定位
-            let follow_cursor = app
+            // 读取设置
+            let (follow_cursor, persist_size) = app
                 .try_state::<std::sync::Arc<commands::AppState>>()
                 .map(|state| {
                     let settings_repo = database::SettingsRepository::new(&state.db);
-                    settings_repo
+                    let fc = settings_repo
                         .get("follow_cursor")
                         .ok()
                         .flatten()
                         .map(|v| v != "false")
-                        .unwrap_or(true)
+                        .unwrap_or(true);
+                    let ps = settings_repo.get("persist_window_size").ok().flatten()
+                        .map(|v| v == "true").unwrap_or(false);
+                    (fc, ps)
                 })
-                .unwrap_or(true);
+                .unwrap_or((true, false));
+
+            // 恢复持久化的窗口尺寸
+            if persist_size {
+                if let Some(state) = app.try_state::<std::sync::Arc<commands::AppState>>() {
+                    let settings_repo = database::SettingsRepository::new(&state.db);
+                    let w = settings_repo.get("window_width").ok().flatten()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    let h = settings_repo.get("window_height").ok().flatten()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    if let (Some(w), Some(h)) = (w, h) {
+                        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                            width: w,
+                            height: h,
+                        }));
+                    }
+                }
+            }
+
             if follow_cursor {
                 if let Err(e) = positioning::position_at_cursor(&window) {
                     tracing::warn!("定位窗口失败: {}", e);
@@ -1239,16 +1284,20 @@ pub fn run() {
             // 设置主窗口为不可聚焦，避免抢占其他应用焦点
             // 同时使快捷键在开始菜单等系统 UI 打开时仍可用
             if let Some(window) = app.get_webview_window("main") {
-                // 从数据库读取自定义窗口尺寸
-                let custom_width = settings_repo.get("window_width").ok().flatten()
-                    .and_then(|v| v.parse::<f64>().ok());
-                let custom_height = settings_repo.get("window_height").ok().flatten()
-                    .and_then(|v| v.parse::<f64>().ok());
-                if let (Some(w), Some(h)) = (custom_width, custom_height) {
-                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                        width: w,
-                        height: h,
-                    }));
+                // 恢复持久化的窗口尺寸（仅在启用时）
+                let persist = settings_repo.get("persist_window_size").ok().flatten()
+                    .map(|v| v == "true").unwrap_or(false);
+                if persist {
+                    let custom_width = settings_repo.get("window_width").ok().flatten()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    let custom_height = settings_repo.get("window_height").ok().flatten()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    if let (Some(w), Some(h)) = (custom_width, custom_height) {
+                        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                            width: w,
+                            height: h,
+                        }));
+                    }
                 }
 
                 let _ = window.set_focusable(false);

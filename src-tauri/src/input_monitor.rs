@@ -347,6 +347,7 @@ fn handle_click_outside() {
     }
     if let Some(window) = MAIN_WINDOW.lock().as_ref() {
         if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
+            crate::save_window_size_if_enabled(window.app_handle(), window);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             // disable_mouse_monitoring 会向本线程投递 MSG_UNINSTALL_KB_HOOK，

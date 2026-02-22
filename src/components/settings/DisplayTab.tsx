@@ -33,73 +33,40 @@ const timeFormatOptions: { value: TimeFormat; label: string }[] = [
   { value: "relative", label: "相对时间" },
 ];
 
-const DEFAULT_WIDTH = 380;
-const DEFAULT_HEIGHT = 648;
-
 function WindowSizeCard() {
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [persist, setPersist] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      invoke<string | null>("get_setting", { key: "window_width" }),
-      invoke<string | null>("get_setting", { key: "window_height" }),
-    ]).then(([w, h]) => {
-      if (w) setWidth(Number(w) || DEFAULT_WIDTH);
-      if (h) setHeight(Number(h) || DEFAULT_HEIGHT);
-    }).catch(() => {});
+    invoke<string | null>("get_setting", { key: "persist_window_size" })
+      .then((v) => setPersist(v === "true"))
+      .catch(() => {});
   }, []);
 
-  const saveWidth = async (value: number) => {
-    setWidth(value);
+  const toggle = async (enabled: boolean) => {
+    setPersist(enabled);
     try {
-      await invoke("set_setting", { key: "window_width", value: String(value) });
+      await invoke("set_setting", { key: "persist_window_size", value: String(enabled) });
+      // 关闭时清除已保存的尺寸
+      if (!enabled) {
+        await invoke("set_setting", { key: "window_width", value: "" });
+        await invoke("set_setting", { key: "window_height", value: "" });
+      }
     } catch (error) {
-      logError("Failed to save window_width:", error);
-    }
-  };
-
-  const saveHeight = async (value: number) => {
-    setHeight(value);
-    try {
-      await invoke("set_setting", { key: "window_height", value: String(value) });
-    } catch (error) {
-      logError("Failed to save window_height:", error);
+      logError("Failed to save persist_window_size:", error);
     }
   };
 
   return (
     <div className="rounded-lg border bg-card p-4">
       <h3 className="text-sm font-medium mb-3">窗口尺寸</h3>
-      <p className="text-xs text-muted-foreground mb-4">配置主窗口的初始宽度与高度，重启后生效</p>
-
-      <div className="space-y-4">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">窗口宽度</Label>
-            <span className="text-xs font-medium tabular-nums">{width} px</span>
-          </div>
-          <Slider
-            value={[width]}
-            onValueChange={(v) => saveWidth(v[0])}
-            min={300}
-            max={600}
-            step={10}
-          />
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label className="text-xs">记住窗口大小</Label>
+          <p className="text-xs text-muted-foreground">
+            启用后，手动拖拽调整的窗口大小将被保留
+          </p>
         </div>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="text-xs">窗口高度</Label>
-            <span className="text-xs font-medium tabular-nums">{height} px</span>
-          </div>
-          <Slider
-            value={[height]}
-            onValueChange={(v) => saveHeight(v[0])}
-            min={400}
-            max={900}
-            step={10}
-          />
-        </div>
+        <Switch checked={persist} onCheckedChange={toggle} />
       </div>
     </div>
   );

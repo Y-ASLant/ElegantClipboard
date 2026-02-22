@@ -42,6 +42,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                 // 左键点击：切换窗口可见性
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
                     if window.is_visible().unwrap_or(false) {
+                        crate::save_window_size_if_enabled(tray.app_handle(), &window);
                         let _ = window.hide();
                         crate::input_monitor::disable_mouse_monitoring();
                         crate::keyboard_hook::set_window_state(

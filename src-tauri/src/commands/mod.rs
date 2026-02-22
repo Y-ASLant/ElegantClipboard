@@ -22,6 +22,7 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
 
     if !crate::input_monitor::is_window_pinned() {
         if let Some(window) = app.get_webview_window("main") {
+            crate::save_window_size_if_enabled(app, &window);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
         }
