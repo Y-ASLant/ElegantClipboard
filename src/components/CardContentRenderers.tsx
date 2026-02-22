@@ -323,7 +323,7 @@ const ImagePreview = memo(function ImagePreview({
   return (
     <div
       ref={containerRef}
-      className="relative w-full rounded overflow-hidden bg-muted/30 flex items-center justify-center"
+      className="relative w-full rounded-sm overflow-hidden bg-muted/30 flex items-center justify-center"
       style={containerStyle}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={hidePreview}
@@ -369,7 +369,7 @@ export const ImageCard = memo(function ImageCard({
   return (
     <div className="flex-1 min-w-0 px-3 py-2.5">
       {error ? (
-        <div className="relative w-full h-32 rounded overflow-hidden bg-muted/30 flex items-center justify-center">
+        <div className="relative w-full h-32 rounded-sm overflow-hidden bg-muted/30 flex items-center justify-center">
           <div className="text-center">
             <Warning16Regular className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
             <p className="text-xs text-muted-foreground/60">图片加载失败</p>

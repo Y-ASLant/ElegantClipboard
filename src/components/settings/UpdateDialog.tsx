@@ -116,18 +116,24 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       setInstallerPath(path);
       setStatus("downloaded");
     } catch (e) {
+      // 取消后 status 已被 cancelDownload 立即设为 update-available，
+      // 此处仅处理非取消的真实错误（且仅当仍为 downloading 时才更新）
       const msg = String(e);
-      if (msg.includes("取消")) {
-        setStatus("update-available");
-      } else {
-        setErrorMsg(msg);
-        setStatus("error");
+      if (!msg.includes("取消")) {
+        setStatus((prev) => {
+          if (prev === "downloading") {
+            setErrorMsg(msg);
+            return "error";
+          }
+          return prev;
+        });
       }
     }
   };
 
-  const cancelDownload = async () => {
-    await invoke("cancel_update_download");
+  const cancelDownload = () => {
+    setStatus("update-available");
+    invoke("cancel_update_download");
   };
 
   const installUpdate = async () => {

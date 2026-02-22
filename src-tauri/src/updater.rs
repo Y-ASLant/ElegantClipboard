@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use tauri::Emitter;
 use tracing::info;
 
@@ -67,6 +68,10 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     info!("Checking for updates (current: v{})", current_version);
 
     let mut req = ureq::get(GITHUB_API_URL)
+        .config()
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(15)))
+        .build()
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "ElegantClipboard");
 
@@ -171,6 +176,10 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     reset_cancel();
 
     let response = match ureq::get(url)
+        .config()
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .build()
         .header("User-Agent", "ElegantClipboard")
         .call()
     {
