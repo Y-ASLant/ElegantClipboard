@@ -62,7 +62,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <div className="space-y-0.5">
               <Label className="text-xs">自动重置状态</Label>
               <p className="text-xs text-muted-foreground">
-                关闭窗口时自动清空搜索并回到顶部
+                关闭窗口时重置搜索、分组筛选和滚动位置
               </p>
             </div>
             <Switch
@@ -74,7 +74,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <div className="space-y-0.5">
               <Label className="text-xs">键盘导航</Label>
               <p className="text-xs text-muted-foreground">
-                方向键选择、回车粘贴、Delete 删除
+                方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除、ESC 隐藏窗口
               </p>
             </div>
             <Switch
@@ -105,7 +105,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <div className="space-y-0.5">
                 <Label className="text-xs">自动清除</Label>
                 <p className="text-xs text-muted-foreground">
-                  激活窗口时，清除搜索框内容
+                  激活窗口时，仅清空搜索框文字
                 </p>
               </div>
               <Switch
