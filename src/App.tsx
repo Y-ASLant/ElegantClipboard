@@ -58,14 +58,21 @@ function App() {
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const inputRef = useRef<HTMLInputElement>(null);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const segmentContainerRef = useRef<HTMLDivElement>(null);
   const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
 
-  // 更新滑动指示器位置
+  // 更新滑动指示器位置 - 使用 getBoundingClientRect 获取高DPI精确值
   useLayoutEffect(() => {
     const idx = GROUPS.findIndex((g) => g.value === selectedGroup);
     const el = segmentRefs.current[idx];
-    if (el) {
-      setSegmentIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+    const container = segmentContainerRef.current;
+    if (el && container) {
+      const elRect = el.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      // 计算相对于容器的精确位置
+      const left = elRect.left - containerRect.left;
+      const width = elRect.width;
+      setSegmentIndicator({ left, width });
     }
   }, [selectedGroup]);
 
@@ -296,7 +303,7 @@ function App() {
 
       {/* Bottom Segment */}
       <div className="shrink-0 px-2 pb-2 pt-1 select-none">
-        <div className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
+        <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
           {/* 滑动指示器 */}
           <div
             className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
