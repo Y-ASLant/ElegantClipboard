@@ -433,7 +433,7 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
     if let Ok(Some(item)) = repo.get_by_id(id) {
         repo.delete(id).map_err(|e| e.to_string())?;
         if let Some(ref image_path) = item.image_path {
-            crate::clipboard::cleanup_image_files(&[image_path.clone()]);
+            crate::clipboard::cleanup_image_files(std::slice::from_ref(image_path));
         }
     } else {
         repo.delete(id).map_err(|e| e.to_string())?;

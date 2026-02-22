@@ -74,7 +74,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
     // 功能键 F1-F12
     if key.starts_with('F') && key.len() <= 3 {
         if let Ok(n) = key[1..].parse::<usize>() {
-            if n >= 1 && n <= 12 {
+            if (1..=12).contains(&n) {
                 return Some(F_KEYS[n - 1]);
             }
         }

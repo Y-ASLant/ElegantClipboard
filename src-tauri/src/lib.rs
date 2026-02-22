@@ -387,7 +387,7 @@ async fn export_data(
     state: tauri::State<'_, std::sync::Arc<commands::AppState>>,
 ) -> Result<String, String> {
     use std::fs::{self, File};
-    use std::io::{Read, Write};
+    use std::io::Write;
     use tauri_plugin_dialog::DialogExt;
     use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
@@ -400,8 +400,7 @@ async fn export_data(
     {
         let src_conn = state.db.write_connection();
         let src_conn = src_conn.lock();
-        // 先清理可能残留的旧导出文件
-        let _ = std::fs::remove_file(&export_db);
+        let _ = fs::remove_file(&export_db);
         let mut dst_conn = rusqlite::Connection::open(&export_db)
             .map_err(|e| format!("创建备份文件失败: {}", e))?;
         let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
@@ -409,10 +408,6 @@ async fn export_data(
         backup
             .run_to_completion(100, std::time::Duration::from_millis(0), None)
             .map_err(|e| format!("执行备份失败: {}", e))?;
-        drop(backup);
-        drop(dst_conn);
-        let export_size = std::fs::metadata(&export_db).map(|m| m.len()).unwrap_or(0);
-        tracing::info!("Database backup created: {} bytes", export_size);
     }
 
     // 弹出保存对话框
@@ -439,15 +434,9 @@ async fn export_data(
     let options = SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
-    // 打包 backup API 生成的完整数据库副本
-    {
-        zip.start_file("clipboard.db", options).map_err(|e| e.to_string())?;
-        let mut buf = Vec::new();
-        File::open(&export_db)
-            .and_then(|mut f| f.read_to_end(&mut buf))
-            .map_err(|e| format!("读取数据库副本失败: {}", e))?;
-        zip.write_all(&buf).map_err(|e| e.to_string())?;
-    }
+    zip.start_file("clipboard.db", options).map_err(|e| e.to_string())?;
+    zip.write_all(&fs::read(&export_db).map_err(|e| format!("读取数据库副本失败: {}", e))?)
+        .map_err(|e| e.to_string())?;
     let _ = fs::remove_file(&export_db);
 
     // 打包 images 目录
@@ -515,12 +504,10 @@ async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
             continue;
         }
 
-        // 跳过 SQLite WAL 模式临时文件（被当前进程锁定，重启后会自动重建）
+        // 跳过 WAL 临时文件；clipboard.db 写为 staging 文件，启动时替换
         if name.ends_with("-wal") || name.ends_with("-shm") {
             continue;
         }
-
-        // clipboard.db 写为 staging 文件，启动时再替换（避免被当前进程的 WAL 覆盖）
         let out_path = if name == "clipboard.db" {
             data_dir.join("clipboard.db.import")
         } else {
@@ -544,6 +531,53 @@ async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
     Ok(format!("导入成功，共恢复 {} 个文件，应用即将重启", files_extracted))
 }
 
+/// 检测并应用待导入的 staging 数据库文件
+///
+/// import_data 将数据库写为 `clipboard.db.import`（而非直接覆盖正在使用的数据库），
+/// 启动时在打开数据库前调用此函数，删除旧 db/wal/shm 并将 staging 文件重命名为正式数据库。
+fn apply_pending_import(db_path: &std::path::Path) {
+    use std::fs;
+
+    let staging = db_path.with_extension("db.import");
+    if !staging.exists() {
+        return;
+    }
+
+    tracing::info!("Detected pending import: {:?}", staging);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let db_dir = match db_path.parent() {
+        Some(d) => d,
+        None => return,
+    };
+
+    for attempt in 1..=10 {
+        // 删除旧数据库及 WAL/SHM
+        let deleted = ["", "-wal", "-shm"].iter().all(|ext| {
+            let f = db_dir.join(format!("clipboard.db{ext}"));
+            !f.exists() || fs::remove_file(&f).is_ok()
+        });
+
+        if deleted && fs::rename(&staging, db_path).is_ok() {
+            tracing::info!("Import staging applied (attempt {attempt})");
+            return;
+        }
+
+        if attempt < 10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
+    // 最后手段：复制替代重命名
+    tracing::error!("Rename failed after 10 attempts, trying copy fallback");
+    if fs::copy(&staging, db_path).is_ok() {
+        let _ = fs::remove_file(&staging);
+        tracing::info!("Import applied via copy fallback");
+    } else {
+        tracing::error!("Import staging completely failed");
+    }
+}
+
 /// 将目录下所有文件添加到 ZIP
 fn add_dir_to_zip(
     zip: &mut zip::ZipWriter<std::fs::File>,
@@ -551,22 +585,18 @@ fn add_dir_to_zip(
     prefix: &str,
     options: zip::write::SimpleFileOptions,
 ) -> Result<(), String> {
-    use std::fs::File;
-    use std::io::{Read, Write};
+    use std::io::Write;
 
     if !dir.exists() || !dir.is_dir() {
         return Ok(());
     }
 
-    let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
         let path = entry.path();
         if path.is_file() {
             let name = format!("{}/{}", prefix, entry.file_name().to_string_lossy());
             zip.start_file(&name, options).map_err(|e| e.to_string())?;
-            let mut buf = Vec::new();
-            File::open(&path)
-                .and_then(|mut f| f.read_to_end(&mut buf))
+            let buf = std::fs::read(&path)
                 .map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
             zip.write_all(&buf).map_err(|e| e.to_string())?;
         }
@@ -623,7 +653,7 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 fn format_size(bytes: u64) -> String {
@@ -678,6 +708,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                 }
             }
 
+            // 记住当前前台窗口，锁定粘贴时需要还原焦点
+            input_monitor::save_foreground_window();
             // 显示并置顶，取得焦点以支持键盘导航
             let _ = window.show();
             positioning::force_topmost(&window);
@@ -967,6 +999,7 @@ async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result
 
 /// Tauri 命令：在固定尺寸透明窗口中显示图片预览，图片缩放由 webview CSS 处理。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn show_image_preview(
     app: tauri::AppHandle,
     image_path: String,
@@ -1154,72 +1187,10 @@ pub fn run() {
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
 
-            // 检测待导入的 staging 文件（由 import_data 写入）
-            let import_staging = db_path.with_extension("db.import");
-            if import_staging.exists() {
-                use std::fs;
-                tracing::info!("Detected pending import: {:?}", import_staging);
-
-                // 等待旧进程完全释放文件句柄
-                std::thread::sleep(std::time::Duration::from_millis(500));
-
-                let mut success = false;
-                for attempt in 1..=10 {
-                    // 删除旧数据库及 WAL/SHM
-                    let mut all_ok = true;
-                    for ext in &["", "-wal", "-shm"] {
-                        let f = db_path.parent().unwrap().join(format!(
-                            "clipboard.db{}", ext
-                        ));
-                        if f.exists() {
-                            if let Err(e) = fs::remove_file(&f) {
-                                tracing::warn!("Attempt {}: delete {:?} failed: {}", attempt, f, e);
-                                all_ok = false;
-                            }
-                        }
-                    }
-
-                    if all_ok {
-                        match fs::rename(&import_staging, &db_path) {
-                            Ok(_) => {
-                                tracing::info!("Import staging applied (attempt {})", attempt);
-                                success = true;
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::warn!("Attempt {}: rename failed: {}", attempt, e);
-                            }
-                        }
-                    }
-
-                    if attempt < 10 {
-                        std::thread::sleep(std::time::Duration::from_millis(500));
-                    }
-                }
-
-                if !success {
-                    tracing::error!("Failed to apply import after 10 attempts, trying copy...");
-                    // 最后手段：复制替代重命名
-                    if fs::copy(&import_staging, &db_path).is_ok() {
-                        let _ = fs::remove_file(&import_staging);
-                        tracing::info!("Import applied via copy fallback");
-                    } else {
-                        tracing::error!("Import staging completely failed");
-                    }
-                }
-            }
+            // 检测并应用待导入的 staging 文件（由 import_data 写入）
+            apply_pending_import(&db_path);
 
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
-
-            // 诊断日志：输出数据库中的剪贴板条目数
-            {
-                let conn = db.read_connection();
-                let conn = conn.lock();
-                let count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM clipboard_items", [], |row| row.get(0)
-                ).unwrap_or(-1);
-                tracing::info!("Clipboard items count after open: {}", count);
-            }
 
             // 初始化剪贴板监控
             let monitor = ClipboardMonitor::new();

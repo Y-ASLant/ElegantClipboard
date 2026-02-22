@@ -13,7 +13,7 @@
 //! 完全不受影响。
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicIsize, AtomicU32, Ordering};
 use std::thread;
 use tauri::{Emitter, Manager, WebviewWindow};
 use tracing::{error, info, warn};
@@ -44,6 +44,9 @@ static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 /// 窗口是否固定（固定时不因外部点击隐藏）
 static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 
+/// 显示主窗口前的前台窗口句柄（用于锁定时粘贴回目标应用）
+static PREV_FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
+
 /// 监控线程是否正在运行
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -58,8 +61,8 @@ static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 // 低级钩子（LL hook）必须由安装它的线程负责卸载，使用 thread_local 存储句柄
 #[cfg(windows)]
 thread_local! {
-    static TL_MOUSE_HOOK: RefCell<Option<HHOOK>> = RefCell::new(None);
-    static TL_KEYBOARD_HOOK: RefCell<Option<HHOOK>> = RefCell::new(None);
+    static TL_MOUSE_HOOK: RefCell<Option<HHOOK>> = const { RefCell::new(None) };
+    static TL_KEYBOARD_HOOK: RefCell<Option<HHOOK>> = const { RefCell::new(None) };
 }
 
 /// 初始化，传入主窗口引用
@@ -148,6 +151,31 @@ pub fn set_window_pinned(pinned: bool) {
 pub fn is_window_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
+
+/// 保存当前前台窗口句柄（在显示主窗口前调用）
+#[cfg(windows)]
+pub fn save_foreground_window() {
+    let hwnd = unsafe { GetForegroundWindow() };
+    PREV_FOREGROUND_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+}
+
+#[cfg(not(windows))]
+pub fn save_foreground_window() {}
+
+/// 将焦点还给之前的前台窗口（锁定时粘贴前调用）
+#[cfg(windows)]
+pub fn restore_foreground_window() {
+    let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
+    if raw != 0 {
+        let hwnd = HWND(raw as *mut _);
+        unsafe {
+            let _ = SetForegroundWindow(hwnd);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn restore_foreground_window() {}
 
 /// 获取当前光标坐标（供定位模块使用）
 pub fn get_cursor_position() -> (f64, f64) {
