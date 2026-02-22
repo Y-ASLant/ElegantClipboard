@@ -166,9 +166,18 @@ function App() {
   }, []);
 
   // Handle ESC key (emitted by backend global keyboard hook, works without focus)
+  // Priority: dismiss overlays → blur focused input → hide window
   useEffect(() => {
     const unlisten = listen("escape-pressed", async () => {
       if (dismissOverlays()) return;
+      // 若搜索框等输入元素聚焦，先 blur 而非直接隐藏窗口
+      if (
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement !== document.body
+      ) {
+        document.activeElement.blur();
+        return;
+      }
       try {
         await invoke("hide_window");
       } catch (error) {

@@ -216,6 +216,7 @@ export function ClipboardList() {
       switch (e.key) {
         case "ArrowLeft": {
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
           if (curIdx > 0) setSelectedGroup(GROUPS[curIdx - 1].value);
@@ -223,6 +224,7 @@ export function ClipboardList() {
         }
         case "ArrowRight": {
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
           if (curIdx < GROUPS.length - 1) setSelectedGroup(GROUPS[curIdx + 1].value);
@@ -232,6 +234,7 @@ export function ClipboardList() {
           const { items: upItems, activeIndex: cur } = useClipboardStore.getState();
           if (upItems.length === 0) return;
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           let next = cur;
           if (cur > 0) next = cur - 1;
           else if (cur === -1) next = 0;
@@ -245,6 +248,7 @@ export function ClipboardList() {
           const { items: downItems, activeIndex: cur } = useClipboardStore.getState();
           if (downItems.length === 0) return;
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           if (cur < downItems.length - 1) {
             const next = cur + 1;
             setActiveIndex(next);
