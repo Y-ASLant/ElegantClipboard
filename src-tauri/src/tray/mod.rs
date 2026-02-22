@@ -48,8 +48,11 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         crate::keyboard_hook::set_window_state(
                             crate::keyboard_hook::WindowState::Hidden,
                         );
+                        crate::commands::hide_image_preview_window(tray.app_handle());
                         let _ = window.emit("window-hidden", ());
-                    } else {
+                    } else if !crate::keyboard_hook::was_recently_hidden(300) {
+                        // 若窗口刚被 handle_click_outside 隐藏（<300ms），
+                        // 说明本次托盘点击的意图是隐藏，不应再显示
                         let _ = window.show();
                         let _ = window.set_focus();
                         crate::input_monitor::enable_mouse_monitoring();
