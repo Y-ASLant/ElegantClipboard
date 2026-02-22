@@ -64,20 +64,31 @@ function App() {
   const segmentContainerRef = useRef<HTMLDivElement>(null);
   const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
 
-  // 更新滑动指示器位置 - 使用 getBoundingClientRect 获取高DPI精确值
-  useLayoutEffect(() => {
+  // 更新滑动指示器位置
+  const updateIndicator = useCallback(() => {
     const idx = GROUPS.findIndex((g) => g.value === selectedGroup);
     const el = segmentRefs.current[idx];
     const container = segmentContainerRef.current;
     if (el && container) {
       const elRect = el.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
-      // 计算相对于容器的精确位置
       const left = elRect.left - containerRect.left;
       const width = elRect.width;
       setSegmentIndicator({ left, width });
     }
   }, [selectedGroup]);
+
+  // 选中项变化时立即更新
+  useLayoutEffect(updateIndicator, [updateIndicator]);
+
+  // 窗口大小变化时重新计算指示器位置
+  useEffect(() => {
+    const container = segmentContainerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(updateIndicator);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [updateIndicator]);
 
   // 应用卡片密度到根元素
   useEffect(() => {

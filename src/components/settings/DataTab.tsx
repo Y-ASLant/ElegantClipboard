@@ -147,7 +147,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     if (!dataSize) {
       refreshDataSize();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [refreshDataSize]);
 
   const selectFolder = async () => {
     try {
