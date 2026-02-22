@@ -3,16 +3,31 @@
 
 import { useUISettings } from "@/stores/ui-settings";
 
+// 立即创建并预热 AudioContext（WebView2 无 autoplay 限制）
 let _ctx: AudioContext | null = null;
-function ctx(): AudioContext {
-  if (!_ctx) _ctx = new AudioContext();
-  if (_ctx.state === "suspended") _ctx.resume();
+
+function getCtx(): AudioContext {
+  if (!_ctx) {
+    _ctx = new AudioContext();
+    // 预热：播放静音音调，激活音频管线
+    if (_ctx.state === "suspended") _ctx.resume().catch(() => {});
+    const osc = _ctx.createOscillator();
+    const gain = _ctx.createGain();
+    gain.gain.value = 0;
+    osc.connect(gain);
+    gain.connect(_ctx.destination);
+    osc.start();
+    osc.stop(_ctx.currentTime + 0.01);
+  }
   return _ctx;
 }
 
+// 模块加载时立即初始化
+if (typeof window !== "undefined") getCtx();
+
 function playTone(freq: number, duration: number, volume = 0.15) {
   try {
-    const ac = ctx();
+    const ac = getCtx();
     const osc = ac.createOscillator();
     const gain = ac.createGain();
     osc.type = "sine";
