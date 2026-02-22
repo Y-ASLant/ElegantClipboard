@@ -131,11 +131,16 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   toggleFavorite: async (id: number) => {
     try {
       const newState = await invoke<boolean>("toggle_favorite", { id });
-      set((state) => ({
-        items: state.items.map((item) =>
-          item.id === id ? { ...item, is_favorite: newState } : item
-        ),
-      }));
+      // 在收藏视图中取消收藏时，需要刷新列表以移除该条目
+      if (!newState && get().selectedGroup === "__favorites__") {
+        await get().refresh();
+      } else {
+        set((state) => ({
+          items: state.items.map((item) =>
+            item.id === id ? { ...item, is_favorite: newState } : item
+          ),
+        }));
+      }
     } catch (error) {
       logError("Failed to toggle favorite:", error);
     }

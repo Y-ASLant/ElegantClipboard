@@ -713,39 +713,30 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             commands::hide_image_preview_window(app);
             let _ = window.emit("window-hidden", ());
         } else {
-            // 读取设置
-            let (follow_cursor, persist_size) = app
+            // 读取设置并恢复窗口尺寸
+            let follow_cursor = app
                 .try_state::<std::sync::Arc<commands::AppState>>()
                 .map(|state| {
-                    let settings_repo = database::SettingsRepository::new(&state.db);
-                    let fc = settings_repo
-                        .get("follow_cursor")
-                        .ok()
-                        .flatten()
-                        .map(|v| v != "false")
-                        .unwrap_or(true);
-                    let ps = settings_repo.get("persist_window_size").ok().flatten()
+                    let repo = database::SettingsRepository::new(&state.db);
+                    // 恢复持久化的窗口尺寸
+                    let persist = repo.get("persist_window_size").ok().flatten()
                         .map(|v| v == "true").unwrap_or(false);
-                    (fc, ps)
-                })
-                .unwrap_or((true, false));
-
-            // 恢复持久化的窗口尺寸
-            if persist_size {
-                if let Some(state) = app.try_state::<std::sync::Arc<commands::AppState>>() {
-                    let settings_repo = database::SettingsRepository::new(&state.db);
-                    let w = settings_repo.get("window_width").ok().flatten()
-                        .and_then(|v| v.parse::<f64>().ok());
-                    let h = settings_repo.get("window_height").ok().flatten()
-                        .and_then(|v| v.parse::<f64>().ok());
-                    if let (Some(w), Some(h)) = (w, h) {
-                        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                            width: w,
-                            height: h,
-                        }));
+                    if persist {
+                        let w = repo.get("window_width").ok().flatten()
+                            .and_then(|v| v.parse::<f64>().ok());
+                        let h = repo.get("window_height").ok().flatten()
+                            .and_then(|v| v.parse::<f64>().ok());
+                        if let (Some(w), Some(h)) = (w, h) {
+                            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                                width: w,
+                                height: h,
+                            }));
+                        }
                     }
-                }
-            }
+                    repo.get("follow_cursor").ok().flatten()
+                        .map(|v| v != "false").unwrap_or(true)
+                })
+                .unwrap_or(true);
 
             if follow_cursor {
                 if let Err(e) = positioning::position_at_cursor(&window) {
