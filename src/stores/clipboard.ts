@@ -120,13 +120,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   togglePin: async (id: number) => {
     try {
-      const newState = await invoke<boolean>("toggle_pin", { id });
-      // Update local state
-      set((state) => ({
-        items: state.items.map((item) =>
-          item.id === id ? { ...item, is_pinned: newState } : item
-        ),
-      }));
+      await invoke<boolean>("toggle_pin", { id });
+      // Refresh to get correct sort order (pinned items first)
+      await get().refresh();
     } catch (error) {
       logError("Failed to toggle pin:", error);
     }
