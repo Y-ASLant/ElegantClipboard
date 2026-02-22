@@ -248,6 +248,7 @@ async fn hide_window(window: tauri::WebviewWindow) {
     save_window_size_if_enabled(window.app_handle(), &window);
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
+    input_monitor::disable_mouse_monitoring();
     // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
     // 向前端发射事件以重置隐藏状态
@@ -291,8 +292,11 @@ async fn toggle_maximize(window: tauri::WebviewWindow) {
 async fn close_window(window: tauri::WebviewWindow) {
     save_window_size_if_enabled(window.app_handle(), &window);
     let _ = window.hide();
+    keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
+    input_monitor::disable_mouse_monitoring();
     // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
+    let _ = window.emit("window-hidden", ());
 }
 
 /// Tauri 命令：获取当前配置的数据路径
