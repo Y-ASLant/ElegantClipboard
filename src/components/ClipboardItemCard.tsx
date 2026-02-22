@@ -265,10 +265,12 @@ const arePropsEqual = (
     item.content_type === nextItem.content_type &&
     item.created_at === nextItem.created_at &&
     item.byte_size === nextItem.byte_size &&
+    item.char_count === nextItem.char_count &&
     item.image_path === nextItem.image_path &&
     item.files_valid === nextItem.files_valid &&
-    item.preview === nextItem.preview
-    // Note: We don't compare text_content, file_paths, etc. as they're derived from preview/content_type
+    item.preview === nextItem.preview &&
+    item.source_app_name === nextItem.source_app_name &&
+    item.source_app_icon === nextItem.source_app_icon
   );
 };
 
@@ -349,11 +351,14 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
 
-  const metaItems: string[] = [];
-  if (showTime) metaItems.push(formatTime(item.created_at));
-  if (showCharCount && item.char_count)
-    metaItems.push(formatCharCount(item.char_count));
-  if (showByteSize) metaItems.push(formatSize(item.byte_size));
+  const metaItems = useMemo(() => {
+    const items: string[] = [];
+    if (showTime) items.push(formatTime(item.created_at));
+    if (showCharCount && item.char_count)
+      items.push(formatCharCount(item.char_count));
+    if (showByteSize) items.push(formatSize(item.byte_size));
+    return items;
+  }, [showTime, showCharCount, showByteSize, item.created_at, item.char_count, item.byte_size]);
 
   // ---- Event handlers ----
 

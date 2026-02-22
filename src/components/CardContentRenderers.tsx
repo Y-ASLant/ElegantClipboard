@@ -260,22 +260,24 @@ const ImagePreview = memo(function ImagePreview({
         Math.min(MAX_SCALE, ps.current.scale + delta),
       );
 
-      getPreviewWindowRect(previewPosition).then((rect) => {
-        const { width, height } = calcImageSize(
-          ps.current.imgNatural.w,
-          ps.current.imgNatural.h,
-          ps.current.scale,
-          rect.w / rect.scale,
-          rect.h / rect.scale,
-        );
-        const percent = Math.round(ps.current.scale * 100);
-        emit("image-preview-zoom", {
-          width,
-          height,
-          percent,
-          active: true,
-        }).catch((e) => logError("Failed to emit zoom:", e));
-      });
+      getPreviewWindowRect(previewPosition)
+        .then((rect) => {
+          const { width, height } = calcImageSize(
+            ps.current.imgNatural.w,
+            ps.current.imgNatural.h,
+            ps.current.scale,
+            rect.w / rect.scale,
+            rect.h / rect.scale,
+          );
+          const percent = Math.round(ps.current.scale * 100);
+          return emit("image-preview-zoom", {
+            width,
+            height,
+            percent,
+            active: true,
+          });
+        })
+        .catch((e) => logError("Failed to update zoom:", e));
     },
     [previewZoomStep, previewPosition],
   );
@@ -366,6 +368,9 @@ export const ImageCard = memo(function ImageCard({
 }: ImageCardProps) {
   const [error, setError] = useState(false);
 
+  // 虚拟列表复用组件时，image_path 变化需重置错误状态
+  useEffect(() => setError(false), [image_path]);
+
   return (
     <div className="flex-1 min-w-0 px-3 py-2.5">
       {error ? (
@@ -416,6 +421,9 @@ const FileImagePreview = memo(function FileImagePreview({
 }) {
   const [imgError, setImgError] = useState(false);
   const fileName = getFileNameFromPath(filePath);
+
+  // 虚拟列表复用组件时，filePath 变化需重置错误状态
+  useEffect(() => setImgError(false), [filePath]);
 
   if (imgError) {
     return (
