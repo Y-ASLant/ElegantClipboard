@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Folder16Regular, Open16Regular, ArrowSync16Regular } from "@fluentui/react-icons";
+import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,6 +73,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     } catch { return null; }
   });
   const [dataSizeLoading, setDataSizeLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exportImportMsg, setExportImportMsg] = useState<string | null>(null);
 
   const refreshDataSize = useCallback(async () => {
     setDataSizeLoading(true);
@@ -151,6 +154,40 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       await invoke("restart_app");
     } catch (error) {
       setMigrationError(`设置失败: ${error}`);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportImportMsg(null);
+    try {
+      const msg = await invoke<string>("export_data");
+      setExportImportMsg(msg);
+    } catch (error) {
+      const errStr = `${error}`;
+      if (!errStr.includes("取消")) {
+        setExportImportMsg(`导出失败: ${error}`);
+      }
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    setExportImportMsg(null);
+    try {
+      const msg = await invoke<string>("import_data");
+      setExportImportMsg(msg);
+      // 导入成功后重启应用
+      await invoke("restart_app");
+    } catch (error) {
+      const errStr = `${error}`;
+      if (!errStr.includes("取消")) {
+        setExportImportMsg(`导入失败: ${error}`);
+      }
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -260,6 +297,39 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Export / Import Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">数据备份</h3>
+          <p className="text-xs text-muted-foreground mb-4">导出或导入剪贴板数据（ZIP 格式）</p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={exporting || importing}
+              className="flex-1"
+            >
+              <ArrowUpload16Regular className="w-4 h-4 mr-1.5" />
+              {exporting ? "导出中..." : "导出数据"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImport}
+              disabled={exporting || importing}
+              className="flex-1"
+            >
+              <ArrowDownload16Regular className="w-4 h-4 mr-1.5" />
+              {importing ? "导入中..." : "导入数据"}
+            </Button>
+          </div>
+          {exportImportMsg && (
+            <p className={`text-xs mt-2 ${exportImportMsg.includes("失败") ? "text-destructive" : "text-muted-foreground"}`}>
+              {exportImportMsg}
+            </p>
+          )}
         </div>
 
         {/* History Limit Card */}

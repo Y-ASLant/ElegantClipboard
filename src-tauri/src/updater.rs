@@ -5,8 +5,21 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
 use tracing::info;
+
+/// 下载取消标志
+static DOWNLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// 取消正在进行的下载
+pub fn cancel_download() {
+    DOWNLOAD_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+fn reset_cancel() {
+    DOWNLOAD_CANCELLED.store(false, Ordering::SeqCst);
+}
 
 const GITHUB_API_URL: &str =
     "https://api.github.com/repos/Y-ASLant/ElegantClipboard/releases?per_page=30";
@@ -155,6 +168,7 @@ pub fn check_update() -> Result<UpdateInfo, String> {
 /// 返回下载文件的本地路径。
 pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<String, String> {
     info!("Downloading update: {}", file_name);
+    reset_cancel();
 
     let response = match ureq::get(url)
         .header("User-Agent", "ElegantClipboard")
@@ -191,6 +205,11 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
             .map_err(|e| format!("读取数据失败: {}", e))?;
         if n == 0 {
             break;
+        }
+        if DOWNLOAD_CANCELLED.load(Ordering::SeqCst) {
+            drop(file);
+            let _ = std::fs::remove_file(&file_path);
+            return Err("下载已取消".into());
         }
         file.write_all(&buf[..n])
             .map_err(|e| format!("写入文件失败: {}", e))?;

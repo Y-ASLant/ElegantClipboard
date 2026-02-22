@@ -37,7 +37,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Database
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled", "backup"] }
 
 # Async runtime (only the features Tauri commands actually need)
 tokio = { version = "1", features = ["rt", "time"] }
@@ -61,6 +61,9 @@ ureq = { version = "3", features = ["json"] }
 
 # Image handling (PNG-only for clipboard screenshots)
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# ZIP archive for data export/import
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 
 # Cross-platform clipboard

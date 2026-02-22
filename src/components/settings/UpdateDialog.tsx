@@ -116,9 +116,18 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       setInstallerPath(path);
       setStatus("downloaded");
     } catch (e) {
-      setErrorMsg(String(e));
-      setStatus("error");
+      const msg = String(e);
+      if (msg.includes("取消")) {
+        setStatus("update-available");
+      } else {
+        setErrorMsg(msg);
+        setStatus("error");
+      }
     }
+  };
+
+  const cancelDownload = async () => {
+    await invoke("cancel_update_download");
   };
 
   const installUpdate = async () => {
@@ -146,7 +155,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" showCloseButton={status !== "downloading" && status !== "installing"}>
         <DialogHeader>
           <DialogTitle>检查更新</DialogTitle>
           {status === "update-available" && updateInfo && (
@@ -212,6 +221,11 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                 {formatSize(progress.total)}
               </span>
               <span>{progressPercent}%</span>
+            </div>
+            <div className="flex justify-center pt-1">
+              <Button variant="outline" size="sm" onClick={cancelDownload}>
+                取消更新
+              </Button>
             </div>
           </div>
         )}

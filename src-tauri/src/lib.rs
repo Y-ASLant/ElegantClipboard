@@ -380,6 +380,262 @@ fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, Str
     Ok(result)
 }
 
+/// Tauri 命令：导出数据为 ZIP 文件
+#[tauri::command]
+async fn export_data(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<commands::AppState>>,
+) -> Result<String, String> {
+    use std::fs::{self, File};
+    use std::io::{Read, Write};
+    use tauri_plugin_dialog::DialogExt;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    let config = AppConfig::load();
+    let data_dir = config.get_data_dir();
+
+    // 使用 SQLite backup API 创建数据库的完整副本（包含所有 WAL 数据）
+    let export_db = data_dir.join("clipboard.db.export");
+    {
+        let src_conn = state.db.write_connection();
+        let src_conn = src_conn.lock();
+        // 先清理可能残留的旧导出文件
+        let _ = std::fs::remove_file(&export_db);
+        let mut dst_conn = rusqlite::Connection::open(&export_db)
+            .map_err(|e| format!("创建备份文件失败: {}", e))?;
+        let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
+            .map_err(|e| format!("初始化备份失败: {}", e))?;
+        backup
+            .run_to_completion(100, std::time::Duration::from_millis(0), None)
+            .map_err(|e| format!("执行备份失败: {}", e))?;
+        drop(backup);
+        drop(dst_conn);
+        let export_size = std::fs::metadata(&export_db).map(|m| m.len()).unwrap_or(0);
+        tracing::info!("Database backup created: {} bytes", export_size);
+    }
+
+    // 弹出保存对话框
+    let timestamp = chrono_timestamp();
+    let default_name = format!("ElegantClipboard_backup_{}.zip", timestamp);
+    let dest = app
+        .dialog()
+        .file()
+        .set_title("导出数据")
+        .set_file_name(&default_name)
+        .add_filter("ZIP 压缩文件", &["zip"])
+        .blocking_save_file();
+
+    let dest_path = match dest {
+        Some(p) => p.to_string(),
+        None => {
+            let _ = fs::remove_file(&export_db);
+            return Err("用户取消了导出".to_string());
+        }
+    };
+
+    let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {}", e))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // 打包 backup API 生成的完整数据库副本
+    {
+        zip.start_file("clipboard.db", options).map_err(|e| e.to_string())?;
+        let mut buf = Vec::new();
+        File::open(&export_db)
+            .and_then(|mut f| f.read_to_end(&mut buf))
+            .map_err(|e| format!("读取数据库副本失败: {}", e))?;
+        zip.write_all(&buf).map_err(|e| e.to_string())?;
+    }
+    let _ = fs::remove_file(&export_db);
+
+    // 打包 images 目录
+    add_dir_to_zip(&mut zip, &data_dir.join("images"), "images", options)?;
+
+    // 打包 icons 目录
+    add_dir_to_zip(&mut zip, &data_dir.join("icons"), "icons", options)?;
+
+    zip.finish().map_err(|e| e.to_string())?;
+
+    let size = fs::metadata(&dest_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    Ok(format!("导出成功 ({})", format_size(size)))
+}
+
+/// Tauri 命令：从 ZIP 文件导入数据
+#[tauri::command]
+async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
+    use std::fs::{self, File};
+    use std::io::Read;
+    use tauri_plugin_dialog::DialogExt;
+
+    let config = AppConfig::load();
+    let data_dir = config.get_data_dir();
+
+    // 弹出打开对话框
+    let src = app
+        .dialog()
+        .file()
+        .set_title("导入数据")
+        .add_filter("ZIP 压缩文件", &["zip"])
+        .blocking_pick_file();
+
+    let src_path = match src {
+        Some(p) => p.to_string(),
+        None => return Err("用户取消了导入".to_string()),
+    };
+
+    let file = File::open(&src_path).map_err(|e| format!("打开文件失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效的 ZIP 文件: {}", e))?;
+
+    // 校验 ZIP 内容：必须包含 clipboard.db
+    let has_db = (0..archive.len()).any(|i| {
+        archive
+            .by_index(i)
+            .map(|f| f.name() == "clipboard.db")
+            .unwrap_or(false)
+    });
+    if !has_db {
+        return Err("ZIP 文件中未找到 clipboard.db，不是有效的备份文件".to_string());
+    }
+
+    // 确保数据目录存在
+    fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+
+    let mut files_extracted = 0u32;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+
+        // 安全检查：防止路径穿越
+        if name.contains("..") {
+            continue;
+        }
+
+        // 跳过 SQLite WAL 模式临时文件（被当前进程锁定，重启后会自动重建）
+        if name.ends_with("-wal") || name.ends_with("-shm") {
+            continue;
+        }
+
+        // clipboard.db 写为 staging 文件，启动时再替换（避免被当前进程的 WAL 覆盖）
+        let out_path = if name == "clipboard.db" {
+            data_dir.join("clipboard.db.import")
+        } else {
+            data_dir.join(&name)
+        };
+
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+            fs::write(&out_path, &buf)
+                .map_err(|e| format!("写入 {} 失败: {}", name, e))?;
+            files_extracted += 1;
+        }
+    }
+
+    Ok(format!("导入成功，共恢复 {} 个文件，应用即将重启", files_extracted))
+}
+
+/// 将目录下所有文件添加到 ZIP
+fn add_dir_to_zip(
+    zip: &mut zip::ZipWriter<std::fs::File>,
+    dir: &std::path::Path,
+    prefix: &str,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::{Read, Write};
+
+    if !dir.exists() || !dir.is_dir() {
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let name = format!("{}/{}", prefix, entry.file_name().to_string_lossy());
+            zip.start_file(&name, options).map_err(|e| e.to_string())?;
+            let mut buf = Vec::new();
+            File::open(&path)
+                .and_then(|mut f| f.read_to_end(&mut buf))
+                .map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
+            zip.write_all(&buf).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// 生成时间戳字符串 (yyyyMMdd_HHmmss)
+fn chrono_timestamp() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // 简单转换为本地时间格式
+    let secs = now + 8 * 3600; // UTC+8 粗略偏移
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+    let s = time_of_day % 60;
+
+    // 从 Unix 天数计算年月日
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, mo, d, h, m, s)
+}
+
+fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    // 基于 Unix 纪元的简单日历计算
+    let mut y = 1970;
+    loop {
+        let yd = if is_leap(y) { 366 } else { 365 };
+        if days < yd {
+            break;
+        }
+        days -= yd;
+        y += 1;
+    }
+    let leap = is_leap(y);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut mo = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if days < md {
+            mo = i as u64 + 1;
+            break;
+        }
+        days -= md;
+    }
+    (y, mo, days + 1)
+}
+
+fn is_leap(y: u64) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 /// Tauri 命令：重启应用（支持 UAC 提权）
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
@@ -691,6 +947,12 @@ async fn download_update(
         .map_err(|e| e.to_string())?
 }
 
+/// Tauri 命令：取消正在进行的下载
+#[tauri::command]
+fn cancel_update_download() {
+    updater::cancel_download();
+}
+
 /// Tauri 命令：启动安装程序并退出应用
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
@@ -891,7 +1153,73 @@ pub fn run() {
             let config = AppConfig::load();
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
+
+            // 检测待导入的 staging 文件（由 import_data 写入）
+            let import_staging = db_path.with_extension("db.import");
+            if import_staging.exists() {
+                use std::fs;
+                tracing::info!("Detected pending import: {:?}", import_staging);
+
+                // 等待旧进程完全释放文件句柄
+                std::thread::sleep(std::time::Duration::from_millis(500));
+
+                let mut success = false;
+                for attempt in 1..=10 {
+                    // 删除旧数据库及 WAL/SHM
+                    let mut all_ok = true;
+                    for ext in &["", "-wal", "-shm"] {
+                        let f = db_path.parent().unwrap().join(format!(
+                            "clipboard.db{}", ext
+                        ));
+                        if f.exists() {
+                            if let Err(e) = fs::remove_file(&f) {
+                                tracing::warn!("Attempt {}: delete {:?} failed: {}", attempt, f, e);
+                                all_ok = false;
+                            }
+                        }
+                    }
+
+                    if all_ok {
+                        match fs::rename(&import_staging, &db_path) {
+                            Ok(_) => {
+                                tracing::info!("Import staging applied (attempt {})", attempt);
+                                success = true;
+                                break;
+                            }
+                            Err(e) => {
+                                tracing::warn!("Attempt {}: rename failed: {}", attempt, e);
+                            }
+                        }
+                    }
+
+                    if attempt < 10 {
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                }
+
+                if !success {
+                    tracing::error!("Failed to apply import after 10 attempts, trying copy...");
+                    // 最后手段：复制替代重命名
+                    if fs::copy(&import_staging, &db_path).is_ok() {
+                        let _ = fs::remove_file(&import_staging);
+                        tracing::info!("Import applied via copy fallback");
+                    } else {
+                        tracing::error!("Import staging completely failed");
+                    }
+                }
+            }
+
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
+
+            // 诊断日志：输出数据库中的剪贴板条目数
+            {
+                let conn = db.read_connection();
+                let conn = conn.lock();
+                let count: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM clipboard_items", [], |row| row.get(0)
+                ).unwrap_or(-1);
+                tracing::info!("Clipboard items count after open: {}", count);
+            }
 
             // 初始化剪贴板监控
             let monitor = ClipboardMonitor::new();
@@ -982,6 +1310,8 @@ pub fn run() {
             cleanup_data_at_path,
             set_data_path,
             migrate_data_to_path,
+            export_data,
+            import_data,
             restart_app,
             show_window,
             hide_window,
@@ -1015,6 +1345,7 @@ pub fn run() {
             // 更新命令
             check_for_update,
             download_update,
+            cancel_update_download,
             install_update,
             // 剪贴板命令
             commands::clipboard::get_clipboard_items,
