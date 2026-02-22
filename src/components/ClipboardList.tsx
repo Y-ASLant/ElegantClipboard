@@ -77,6 +77,7 @@ export function ClipboardList() {
     })),
   );
   const cardMaxLines = useUISettings((s) => s.cardMaxLines);
+  const cardDensity = useUISettings((s) => s.cardDensity);
 
   useEffect(() => {
     // Fetch items (files_valid is computed by backend, no extra IPC needed)
@@ -312,14 +313,15 @@ export function ClipboardList() {
 
       const showSeparator = index === pinnedCount && pinnedCount > 0;
 
+      const densityPb = cardDensity === "compact" ? "pb-1" : cardDensity === "spacious" ? "pb-3" : "pb-2";
       return (
-        <div className="px-2 pb-2">
+        <div className={`px-2 ${densityPb}`}>
           {showSeparator && <Separator className="mb-2" />}
           <ClipboardItemCard item={item} index={index} showBadge={showSlotBadges} sortId={item._sortId} />
         </div>
       );
     },
-    [itemsWithSortId, pinnedCount, showSlotBadges],
+    [itemsWithSortId, pinnedCount, showSlotBadges, cardDensity],
   );
 
   const computeItemKey = useCallback(

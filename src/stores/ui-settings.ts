@@ -3,6 +3,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type ColorTheme = "default" | "emerald" | "cyan" | "system";
+export type DarkMode = "light" | "dark" | "auto";
+export type CardDensity = "compact" | "standard" | "spacious";
+export type TimeFormat = "relative" | "absolute";
 
 interface UISettings {
   cardMaxLines: number;
@@ -22,6 +25,14 @@ interface UISettings {
   keyboardNavigation: boolean;
   searchAutoFocus: boolean;
   searchAutoClear: boolean;
+  // New settings
+  darkMode: DarkMode;
+  cardDensity: CardDensity;
+  timeFormat: TimeFormat;
+  hoverPreviewDelay: number;
+  copySound: boolean;
+  pasteSound: boolean;
+  pasteCloseWindow: boolean;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -39,6 +50,13 @@ interface UISettings {
   setKeyboardNavigation: (enabled: boolean) => void;
   setSearchAutoFocus: (enabled: boolean) => void;
   setSearchAutoClear: (enabled: boolean) => void;
+  setDarkMode: (mode: DarkMode) => void;
+  setCardDensity: (density: CardDensity) => void;
+  setTimeFormat: (format: TimeFormat) => void;
+  setHoverPreviewDelay: (delay: number) => void;
+  setCopySound: (enabled: boolean) => void;
+  setPasteSound: (enabled: boolean) => void;
+  setPasteCloseWindow: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -69,6 +87,13 @@ export const useUISettings = create<UISettings>()(
       keyboardNavigation: true,
       searchAutoFocus: true,
       searchAutoClear: true,
+      darkMode: "auto" as DarkMode,
+      cardDensity: "standard" as CardDensity,
+      timeFormat: "absolute" as TimeFormat,
+      hoverPreviewDelay: 300,
+      copySound: false,
+      pasteSound: false,
+      pasteCloseWindow: true,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -136,6 +161,34 @@ export const useUISettings = create<UISettings>()(
       setSearchAutoClear: (enabled) => {
         set({ searchAutoClear: enabled });
         broadcastChange({ searchAutoClear: enabled });
+      },
+      setDarkMode: (mode) => {
+        set({ darkMode: mode });
+        broadcastChange({ darkMode: mode });
+      },
+      setCardDensity: (density) => {
+        set({ cardDensity: density });
+        broadcastChange({ cardDensity: density });
+      },
+      setTimeFormat: (format) => {
+        set({ timeFormat: format });
+        broadcastChange({ timeFormat: format });
+      },
+      setHoverPreviewDelay: (delay) => {
+        set({ hoverPreviewDelay: delay });
+        broadcastChange({ hoverPreviewDelay: delay });
+      },
+      setCopySound: (enabled) => {
+        set({ copySound: enabled });
+        broadcastChange({ copySound: enabled });
+      },
+      setPasteSound: (enabled) => {
+        set({ pasteSound: enabled });
+        broadcastChange({ pasteSound: enabled });
+      },
+      setPasteCloseWindow: (enabled) => {
+        set({ pasteCloseWindow: enabled });
+        broadcastChange({ pasteCloseWindow: enabled });
       },
     }),
     {

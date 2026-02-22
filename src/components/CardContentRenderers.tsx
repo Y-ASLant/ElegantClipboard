@@ -72,7 +72,6 @@ export const CardFooter = ({
 
 // ============ Shared Image Preview with Hover Enlarge (Native Window) ============
 
-const HOVER_DELAY_MS = 300;
 const PREVIEW_GAP = 12;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 5.0;
@@ -239,12 +238,14 @@ const ImagePreview = memo(function ImagePreview({
     }
   }, [previewPosition]);
 
+  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
+
   const handleMouseEnter = useCallback(() => {
     if (!imagePath || !imagePreviewEnabled) return;
     ps.current.currentPath = imagePath;
     clearTimer();
-    timerRef.current = setTimeout(showPreview, HOVER_DELAY_MS);
-  }, [imagePath, imagePreviewEnabled, clearTimer, showPreview]);
+    timerRef.current = setTimeout(showPreview, hoverPreviewDelay);
+  }, [imagePath, imagePreviewEnabled, clearTimer, showPreview, hoverPreviewDelay]);
 
   // Ctrl+Scroll: emit CSS size change (smooth transition in webview, no window resize)
   const handleWheel = useCallback(

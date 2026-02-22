@@ -218,7 +218,7 @@ body {
         "Helvetica Neue",
         Arial,
         sans-serif;
-    font-size: 14px;
+    font-size: var(--app-font-size, 14px);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

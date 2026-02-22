@@ -56,6 +56,7 @@ function App() {
   const autoResetState = useUISettings((s) => s.autoResetState);
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
+  const cardDensity = useUISettings((s) => s.cardDensity);
   const inputRef = useRef<HTMLInputElement>(null);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const segmentContainerRef = useRef<HTMLDivElement>(null);
@@ -76,6 +77,11 @@ function App() {
     }
   }, [selectedGroup]);
 
+  // Apply card density to root element
+  useEffect(() => {
+    document.documentElement.dataset.density = cardDensity;
+  }, [cardDensity]);
+
   // Load pinned state on mount
   useEffect(() => {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
@@ -89,6 +95,8 @@ function App() {
   // Refresh data when window is shown (files_valid is computed by backend)
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
+      // Re-read persisted settings (may have been changed in the settings window)
+      useUISettings.persist.rehydrate();
       if (searchAutoClear) {
         setSearchQuery("");
         fetchItems({ search: "" });

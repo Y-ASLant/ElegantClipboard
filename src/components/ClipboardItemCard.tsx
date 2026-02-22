@@ -351,14 +351,16 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
 
+  const timeFormat = useUISettings((s) => s.timeFormat);
+
   const metaItems = useMemo(() => {
     const items: string[] = [];
-    if (showTime) items.push(formatTime(item.created_at));
+    if (showTime) items.push(formatTime(item.created_at, timeFormat));
     if (showCharCount && item.char_count)
       items.push(formatCharCount(item.char_count));
     if (showByteSize) items.push(formatSize(item.byte_size));
     return items;
-  }, [showTime, showCharCount, showByteSize, item.created_at, item.char_count, item.byte_size]);
+  }, [showTime, showCharCount, showByteSize, timeFormat, item.created_at, item.char_count, item.byte_size]);
 
   // ---- Event handlers ----
 

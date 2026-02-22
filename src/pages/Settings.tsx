@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  Settings16Filled,
-  Options16Filled,
-  Eye16Filled,
-  Keyboard16Filled,
-  Info16Filled,
-  Database16Filled,
-  PaintBrush16Filled,
+  Settings16Regular,
+  Options16Regular,
+  Database16Regular,
+  LayoutColumnTwo16Regular,
+  Speaker116Regular,
+  Color16Regular,
+  Keyboard16Regular,
+  Info16Regular,
   ArrowSync16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
+import { BehaviorTab } from "@/components/settings/BehaviorTab";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
@@ -27,51 +29,28 @@ import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
-import { useUISettings } from "@/stores/ui-settings";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
-type TabType = "general" | "data" | "display" | "theme" | "shortcuts" | "about";
+type TabType = "general" | "data" | "display" | "behavior" | "theme" | "shortcuts" | "about";
 
 const navItems: {
   id: TabType;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { id: "general", label: "常规设置", icon: Options16Filled },
-  { id: "data", label: "数据管理", icon: Database16Filled },
-  { id: "display", label: "显示设置", icon: Eye16Filled },
-  { id: "theme", label: "外观主题", icon: PaintBrush16Filled },
-  { id: "shortcuts", label: "快捷按键", icon: Keyboard16Filled },
-  { id: "about", label: "关于", icon: Info16Filled },
+  { id: "general", label: "常规设置", icon: Options16Regular },
+  { id: "data", label: "数据管理", icon: Database16Regular },
+  { id: "display", label: "显示设置", icon: LayoutColumnTwo16Regular },
+  { id: "behavior", label: "操作反馈", icon: Speaker116Regular },
+  { id: "theme", label: "外观主题", icon: Color16Regular },
+  { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
+  { id: "about", label: "关于", icon: Info16Regular },
 ];
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>("general");
-  const {
-    cardMaxLines,
-    setCardMaxLines,
-    showTime,
-    setShowTime,
-    showCharCount,
-    setShowCharCount,
-    showByteSize,
-    setShowByteSize,
-    showSourceApp,
-    setShowSourceApp,
-    sourceAppDisplay,
-    setSourceAppDisplay,
-    imagePreviewEnabled,
-    setImagePreviewEnabled,
-    previewZoomStep,
-    setPreviewZoomStep,
-    previewPosition,
-    setPreviewPosition,
-    imageAutoHeight,
-    setImageAutoHeight,
-    imageMaxHeight,
-    setImageMaxHeight,
-  } = useUISettings();
+  
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
     max_history_count: 1000,
@@ -239,7 +218,7 @@ export function Settings() {
       )}
     >
       <WindowTitleBar
-        icon={<Settings16Filled className="w-5 h-5 text-muted-foreground" />}
+        icon={<Settings16Regular className="w-5 h-5 text-muted-foreground" />}
         title="设置"
       />
 
@@ -321,32 +300,9 @@ export function Settings() {
                 />
               )}
 
-              {activeTab === "display" && (
-                <DisplayTab
-                  cardMaxLines={cardMaxLines}
-                  setCardMaxLines={setCardMaxLines}
-                  showTime={showTime}
-                  setShowTime={setShowTime}
-                  showCharCount={showCharCount}
-                  setShowCharCount={setShowCharCount}
-                  showByteSize={showByteSize}
-                  setShowByteSize={setShowByteSize}
-                  showSourceApp={showSourceApp}
-                  setShowSourceApp={setShowSourceApp}
-                  sourceAppDisplay={sourceAppDisplay}
-                  setSourceAppDisplay={setSourceAppDisplay}
-                  imagePreviewEnabled={imagePreviewEnabled}
-                  setImagePreviewEnabled={setImagePreviewEnabled}
-                  previewZoomStep={previewZoomStep}
-                  setPreviewZoomStep={setPreviewZoomStep}
-                  previewPosition={previewPosition}
-                  setPreviewPosition={setPreviewPosition}
-                  imageAutoHeight={imageAutoHeight}
-                  setImageAutoHeight={setImageAutoHeight}
-                  imageMaxHeight={imageMaxHeight}
-                  setImageMaxHeight={setImageMaxHeight}
-                />
-              )}
+              {activeTab === "display" && <DisplayTab />}
+
+              {activeTab === "behavior" && <BehaviorTab />}
 
               {activeTab === "theme" && <ThemeTab />}
 

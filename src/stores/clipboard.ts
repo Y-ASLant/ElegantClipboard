@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { logError } from "@/lib/logger";
+import { playCopySound, playPasteSound } from "@/lib/sounds";
+import { useUISettings } from "@/stores/ui-settings";
 
 export interface ClipboardItem {
   id: number;
@@ -174,7 +176,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteContent: async (id: number) => {
     try {
-      await invoke("paste_content", { id });
+      playPasteSound();
+      const closeWindow = useUISettings.getState().pasteCloseWindow;
+      await invoke("paste_content", { id, closeWindow });
     } catch (error) {
       logError("Failed to paste content:", error);
     }
@@ -182,7 +186,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteAsPlainText: async (id: number) => {
     try {
-      await invoke("paste_content_as_plain", { id });
+      playPasteSound();
+      const closeWindow = useUISettings.getState().pasteCloseWindow;
+      await invoke("paste_content_as_plain", { id, closeWindow });
     } catch (error) {
       logError("Failed to paste as plain text:", error);
     }
@@ -212,6 +218,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   setupListener: async () => {
     const unlisten = await listen<number>("clipboard-updated", () => {
+      playCopySound();
       get().refresh();
     });
     return unlisten;

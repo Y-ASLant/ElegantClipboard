@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,59 @@ function formatDataSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+type DedupStrategy = "move_to_top" | "ignore" | "always_new";
+
+const dedupOptions: { value: DedupStrategy; label: string; desc: string }[] = [
+  { value: "move_to_top", label: "置顶已有", desc: "相同内容移到最前" },
+  { value: "ignore", label: "忽略", desc: "不记录重复内容" },
+  { value: "always_new", label: "总是新建", desc: "每次都创建新条目" },
+];
+
+function DedupStrategyCard() {
+  const [strategy, setStrategy] = useState<DedupStrategy>("move_to_top");
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "dedup_strategy" }).then((val) => {
+      if (val === "ignore" || val === "always_new") setStrategy(val);
+    }).catch(() => {});
+  }, []);
+
+  const handleChange = async (value: DedupStrategy) => {
+    setStrategy(value);
+    try {
+      await invoke("set_setting", { key: "dedup_strategy", value });
+    } catch (error) {
+      logError("Failed to save dedup strategy:", error);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">重复内容处理</h3>
+      <p className="text-xs text-muted-foreground mb-4">复制相同内容时的处理方式</p>
+      <div className="flex gap-1">
+        {dedupOptions.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleChange(opt.value)}
+            className={`flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors ${
+              strategy === opt.value
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-foreground border-input hover:bg-accent"
+            }`}
+            title={opt.desc}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground mt-2">
+        {dedupOptions.find((o) => o.value === strategy)?.desc}
+      </p>
+    </div>
+  );
 }
 
 export function DataTab({ settings, onSettingsChange }: DataTabProps) {
@@ -331,6 +384,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
             </p>
           )}
         </div>
+
+        {/* Dedup Strategy Card */}
+        <DedupStrategyCard />
 
         {/* History Limit Card */}
         <div className="rounded-lg border bg-card p-4">
