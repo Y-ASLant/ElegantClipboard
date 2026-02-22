@@ -691,7 +691,7 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(app: &tauri::AppHan
     if let Some(state) = app.try_state::<std::sync::Arc<commands::AppState>>() {
         let settings_repo = database::SettingsRepository::new(&state.db);
         let persist = settings_repo.get("persist_window_size").ok().flatten()
-            .map(|v| v == "true").unwrap_or(false);
+            .map(|v| v != "false").unwrap_or(true);
         if persist {
             if let Ok(size) = window.outer_size() {
                 if let Ok(scale) = window.scale_factor() {
@@ -724,7 +724,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                     let repo = database::SettingsRepository::new(&state.db);
                     // 恢复持久化的窗口尺寸
                     let persist = repo.get("persist_window_size").ok().flatten()
-                        .map(|v| v == "true").unwrap_or(false);
+                        .map(|v| v != "false").unwrap_or(true);
                     if persist {
                         let w = repo.get("window_width").ok().flatten()
                             .and_then(|v| v.parse::<f64>().ok());
@@ -1281,7 +1281,7 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 // 恢复持久化的窗口尺寸（仅在启用时）
                 let persist = settings_repo.get("persist_window_size").ok().flatten()
-                    .map(|v| v == "true").unwrap_or(false);
+                    .map(|v| v != "false").unwrap_or(true);
                 if persist {
                     let custom_width = settings_repo.get("window_width").ok().flatten()
                         .and_then(|v| v.parse::<f64>().ok());

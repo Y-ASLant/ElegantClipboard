@@ -34,11 +34,11 @@ const timeFormatOptions: { value: TimeFormat; label: string }[] = [
 ];
 
 function WindowSizeCard() {
-  const [persist, setPersist] = useState(false);
+  const [persist, setPersist] = useState(true);
 
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "persist_window_size" })
-      .then((v) => setPersist(v === "true"))
+      .then((v) => setPersist(v !== "false"))
       .catch(() => {});
   }, []);
 

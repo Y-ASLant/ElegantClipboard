@@ -142,6 +142,13 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     setDataSizeLoading(false);
   }, []);
 
+  // 进入页面时自动加载数据统计（无缓存时）
+  useEffect(() => {
+    if (!dataSize) {
+      refreshDataSize();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectFolder = async () => {
     try {
       const path = await invoke<string | null>("select_folder_for_settings");
