@@ -1239,6 +1239,18 @@ pub fn run() {
             // 设置主窗口为不可聚焦，避免抢占其他应用焦点
             // 同时使快捷键在开始菜单等系统 UI 打开时仍可用
             if let Some(window) = app.get_webview_window("main") {
+                // 从数据库读取自定义窗口尺寸
+                let custom_width = settings_repo.get("window_width").ok().flatten()
+                    .and_then(|v| v.parse::<f64>().ok());
+                let custom_height = settings_repo.get("window_height").ok().flatten()
+                    .and_then(|v| v.parse::<f64>().ok());
+                if let (Some(w), Some(h)) = (custom_width, custom_height) {
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                        width: w,
+                        height: h,
+                    }));
+                }
+
                 let _ = window.set_focusable(false);
 
                 // 初始化全局鼠标监控（用于点击外部隐藏窗口）

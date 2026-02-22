@@ -1,6 +1,9 @@
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { logError } from "@/lib/logger";
 import {
   useUISettings,
   type CardDensity,
@@ -30,6 +33,78 @@ const timeFormatOptions: { value: TimeFormat; label: string }[] = [
   { value: "relative", label: "相对时间" },
 ];
 
+const DEFAULT_WIDTH = 380;
+const DEFAULT_HEIGHT = 648;
+
+function WindowSizeCard() {
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+
+  useEffect(() => {
+    Promise.all([
+      invoke<string | null>("get_setting", { key: "window_width" }),
+      invoke<string | null>("get_setting", { key: "window_height" }),
+    ]).then(([w, h]) => {
+      if (w) setWidth(Number(w) || DEFAULT_WIDTH);
+      if (h) setHeight(Number(h) || DEFAULT_HEIGHT);
+    }).catch(() => {});
+  }, []);
+
+  const saveWidth = async (value: number) => {
+    setWidth(value);
+    try {
+      await invoke("set_setting", { key: "window_width", value: String(value) });
+    } catch (error) {
+      logError("Failed to save window_width:", error);
+    }
+  };
+
+  const saveHeight = async (value: number) => {
+    setHeight(value);
+    try {
+      await invoke("set_setting", { key: "window_height", value: String(value) });
+    } catch (error) {
+      logError("Failed to save window_height:", error);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">窗口尺寸</h3>
+      <p className="text-xs text-muted-foreground mb-4">配置主窗口的初始宽度与高度，重启后生效</p>
+
+      <div className="space-y-4">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">窗口宽度</Label>
+            <span className="text-xs font-medium tabular-nums">{width} px</span>
+          </div>
+          <Slider
+            value={[width]}
+            onValueChange={(v) => saveWidth(v[0])}
+            min={300}
+            max={600}
+            step={10}
+          />
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs">窗口高度</Label>
+            <span className="text-xs font-medium tabular-nums">{height} px</span>
+          </div>
+          <Slider
+            value={[height]}
+            onValueChange={(v) => saveHeight(v[0])}
+            min={400}
+            max={900}
+            step={10}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DisplayTab() {
   const {
     cardMaxLines, setCardMaxLines,
@@ -50,6 +125,9 @@ export function DisplayTab() {
 
   return (
     <div className="space-y-4">
+      {/* Window Size Card */}
+      <WindowSizeCard />
+
       {/* Content Preview Card */}
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-medium mb-3">内容预览</h3>
