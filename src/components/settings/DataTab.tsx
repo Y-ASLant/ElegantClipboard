@@ -57,6 +57,7 @@ function formatDataSize(bytes: number): string {
 export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [destHasData, setDestHasData] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [dataSize, setDataSize] = useState<DataSizeInfo | null>(() => {
@@ -92,7 +93,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         // Check if there's existing data to migrate
         const currentPath = await invoke<string>("get_default_data_path");
         if (currentPath && currentPath !== path) {
+          const hasData = await invoke<boolean>("check_path_has_data", { path });
           setPendingPath(path);
+          setDestHasData(hasData);
           setMigrationError(null);
           setMigrationDialogOpen(true);
         } else {
@@ -136,7 +139,11 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     if (!pendingPath) return;
     
     try {
-      // Just set the new path without migrating
+      // 如果目标已有数据（选择保留新位置数据），清理旧位置的数据
+      if (destHasData) {
+        await invoke("cleanup_data_at_path", { path: settings.data_path });
+      }
+      // Set the new path without migrating
       await invoke("set_data_path", { path: pendingPath });
       onSettingsChange({ ...settings, data_path: pendingPath });
       setMigrationDialogOpen(false);
@@ -330,9 +337,11 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       <Dialog open={migrationDialogOpen} onOpenChange={setMigrationDialogOpen}>
         <DialogContent className="max-w-md" showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>迁移数据</DialogTitle>
+            <DialogTitle>{destHasData ? "目标位置已有数据" : "迁移数据"}</DialogTitle>
             <DialogDescription>
-              是否将现有数据迁移到新位置？
+              {destHasData
+                ? "新位置已存在剪贴板数据，请选择保留哪一份数据。"
+                : "是否将现有数据迁移到新位置？"}
             </DialogDescription>
           </DialogHeader>
           
@@ -363,20 +372,41 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
             >
               取消
             </Button>
-            <Button
-              variant="ghost"
-              onClick={handleSkipMigration}
-              disabled={migrating}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-            >
-              删除数据
-            </Button>
-            <Button
-              onClick={handleMigrate}
-              disabled={migrating}
-            >
-              {migrating ? "迁移中..." : "保留数据"}
-            </Button>
+            {destHasData ? (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  {migrating ? "覆盖中..." : "保留旧位置数据"}
+                </Button>
+                <Button
+                  onClick={handleSkipMigration}
+                  disabled={migrating}
+                >
+                  保留新位置数据
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={handleSkipMigration}
+                  disabled={migrating}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  不迁移
+                </Button>
+                <Button
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                >
+                  {migrating ? "迁移中..." : "迁移数据"}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

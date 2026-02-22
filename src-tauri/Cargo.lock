@@ -980,7 +980,6 @@ dependencies = [
  "blake3",
  "clipboard-master",
  "clipboard-rs",
- "dirs 6.0.0",
  "enigo",
  "image",
  "parking_lot",

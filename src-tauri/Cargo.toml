@@ -62,8 +62,6 @@ ureq = { version = "3", features = ["json"] }
 # Image handling (PNG-only for clipboard screenshots)
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# Directories
-dirs = "6"
 
 # Cross-platform clipboard
 arboard = "3"

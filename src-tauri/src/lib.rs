@@ -309,6 +309,44 @@ fn get_original_default_path() -> String {
         .unwrap_or_default()
 }
 
+/// Tauri 命令：检测目标路径是否已有数据
+#[tauri::command]
+fn check_path_has_data(path: String) -> bool {
+    let p = std::path::PathBuf::from(&path);
+    p.join("clipboard.db").exists()
+}
+
+/// Tauri 命令：清理指定路径的数据文件（数据库、图片）
+#[tauri::command]
+fn cleanup_data_at_path(path: String) -> Result<(), String> {
+    use std::fs;
+    let p = std::path::PathBuf::from(&path);
+
+    // 删除数据库相关文件
+    for ext in &["", "-wal", "-shm"] {
+        let db_file = p.join(format!("clipboard.db{}", ext));
+        if db_file.exists() {
+            fs::remove_file(&db_file).map_err(|e| format!("删除 {:?} 失败: {}", db_file, e))?;
+        }
+    }
+
+    // 删除图片目录
+    let images_dir = p.join("images");
+    if images_dir.exists() {
+        fs::remove_dir_all(&images_dir)
+            .map_err(|e| format!("删除图片目录失败: {}", e))?;
+    }
+
+    // 删除图标缓存目录
+    let icons_dir = p.join("icons");
+    if icons_dir.exists() {
+        fs::remove_dir_all(&icons_dir)
+            .map_err(|e| format!("删除图标目录失败: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// Tauri 命令：设置数据路径并保存配置
 #[tauri::command]
 fn set_data_path(path: String) -> Result<(), String> {
@@ -940,6 +978,8 @@ pub fn run() {
             get_app_version,
             get_default_data_path,
             get_original_default_path,
+            check_path_has_data,
+            cleanup_data_at_path,
             set_data_path,
             migrate_data_to_path,
             restart_app,
