@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
 import {
   Search16Regular,
   Delete16Regular,
@@ -34,10 +34,10 @@ import { useClipboardStore } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 
 
-// Initialize theme once for this window (runs before component mounts)
+// 初始化主题
 initTheme();
 
-/** Dismiss any open Radix overlay (context menu, dialog, etc.) via synthetic ESC */
+/** 关闭已打开的弹出层 */
 function dismissOverlays(): boolean {
   const overlay = document.querySelector(
     '[role="dialog"], [data-radix-popper-content-wrapper]'
@@ -54,33 +54,80 @@ function App() {
   const [isPinned, setIsPinned] = useState(false);
   const { searchQuery, selectedGroup, setSearchQuery, setSelectedGroup, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
   const autoResetState = useUISettings((s) => s.autoResetState);
+  const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
+  const searchAutoClear = useUISettings((s) => s.searchAutoClear);
+  const cardDensity = useUISettings((s) => s.cardDensity);
   const inputRef = useRef<HTMLInputElement>(null);
+  // 追踪窗口隐藏期间是否有剪贴板变化
+  const clipboardDirtyRef = useRef(false);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const segmentContainerRef = useRef<HTMLDivElement>(null);
   const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
 
   // 更新滑动指示器位置
-  useLayoutEffect(() => {
+  const updateIndicator = useCallback(() => {
     const idx = GROUPS.findIndex((g) => g.value === selectedGroup);
     const el = segmentRefs.current[idx];
-    if (el) {
-      setSegmentIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+    const container = segmentContainerRef.current;
+    if (el && container) {
+      const elRect = el.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const left = elRect.left - containerRect.left;
+      const width = elRect.width;
+      setSegmentIndicator({ left, width });
     }
   }, [selectedGroup]);
 
-  // Load pinned state on mount
+  // 选中项变化时立即更新
+  useLayoutEffect(updateIndicator, [updateIndicator]);
+
+  // 窗口大小变化时重新计算指示器位置
+  useEffect(() => {
+    const container = segmentContainerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(updateIndicator);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [updateIndicator]);
+
+  // 应用卡片密度到根元素
+  useEffect(() => {
+    document.documentElement.dataset.density = cardDensity;
+  }, [cardDensity]);
+
+  // 加载锁定状态
   useEffect(() => {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
   }, []);
 
-  // Suppress toolbar tooltips briefly when window appears (prevents tooltip flash
-  // when cursor happens to be over a toolbar button, e.g. opening via tray click)
+  // 窗口出现时短暂抑制工具栏提示，防止闪烁
   const [suppressTooltips, setSuppressTooltips] = useState(false);
   const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Refresh data when window is shown (files_valid is computed by backend)
+  // 监听剪贴板变化，标记脏数据
+  useEffect(() => {
+    const unlisten = listen("clipboard-updated", () => {
+      clipboardDirtyRef.current = true;
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
+  // 窗口显示时按需刷新数据
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
-      refresh();
+      // 重新读取设置（可能在设置窗口中更改）
+      useUISettings.persist.rehydrate();
+      if (searchAutoClear) {
+        setSearchQuery("");
+        fetchItems({ search: "" });
+      } else if (clipboardDirtyRef.current) {
+        // 有变化时重新获取以更新 files_valid
+        refresh();
+      }
+      clipboardDirtyRef.current = false;
+      if (searchAutoFocus) {
+        inputRef.current?.focus();
+      }
       setSuppressTooltips(true);
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
       suppressTimerRef.current = setTimeout(() => setSuppressTooltips(false), 400);
@@ -89,9 +136,9 @@ function App() {
       unlisten.then((fn) => fn());
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
     };
-  }, [refresh]);
+  }, [refresh, fetchItems, setSearchQuery, searchAutoFocus, searchAutoClear]);
 
-  // Dismiss overlays & optionally reset view state when window is hidden
+  // 窗口隐藏时关闭弹出层并可选重置状态
   useEffect(() => {
     const unlisten = listen("window-hidden", () => {
       dismissOverlays();
@@ -104,31 +151,24 @@ function App() {
     };
   }, [resetView, autoResetState]);
 
-  // Window starts hidden (visible: false in tauri.conf.json, backend defaults to Hidden).
-  // It will be shown only via hotkey (toggle_window_visibility) or tray click.
-  // No need to show on startup — clipboard managers should start minimized to tray.
-
-  // Handle window focusable state based on input focus
+  // 根据输入框焦点切换窗口可聚焦状态
   useEffect(() => {
     const appWindow = getCurrentWindow();
     let blurTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const handleFocus = async () => {
-      // Cancel pending blur if user re-focuses quickly (e.g., clicked scrollbar then back)
+      // 取消待处理的失焦，防止快速切换闪烁
       if (blurTimeoutId) {
         clearTimeout(blurTimeoutId);
         blurTimeoutId = null;
       }
-      // Make window focusable when input is focused
       await appWindow.setFocusable(true);
       await appWindow.setFocus();
     };
 
     const handleBlur = async () => {
-      // Delay setFocusable(false) to allow in-window interactions (scrollbar, cards, etc.)
-      // If user clicks scrollbar, we don't want to immediately disable focusable
+      // 延迟处理，允许窗口内交互（滚动条、卡片等）
       blurTimeoutId = setTimeout(async () => {
-        // Check if focus moved outside the window (not just to scrollbar/card)
         if (document.activeElement === document.body || !document.hasFocus()) {
           await appWindow.setFocusable(false);
         }
@@ -148,25 +188,35 @@ function App() {
     }
   }, []);
 
-  // Handle ESC key (emitted by backend global keyboard hook, works without focus)
-  useEffect(() => {
-    const unlisten = listen("escape-pressed", async () => {
-      if (dismissOverlays()) return;
-      try {
-        await invoke("hide_window");
-      } catch (error) {
-        logError("Failed to hide window:", error);
-      }
-    });
-    return () => { unlisten.then((fn) => fn()); };
+  // ESC 键处理：后端钩子 + DOM 监听双通道
+  const handleEscape = useCallback(async () => {
+    if (dismissOverlays()) return;
+    try {
+      await invoke("hide_window");
+    } catch (error) {
+      logError("Failed to hide window:", error);
+    }
   }, []);
 
-  // NOTE: Click-outside detection is handled by the backend input_monitor module
-  // because the window is set to non-focusable (focus: false), which means
-  // onFocusChanged events never fire. The backend uses rdev to monitor global
-  // mouse clicks and hides the window when a click is detected outside its bounds.
+  // 通道1：后端键盘钩子
+  useEffect(() => {
+    const unlisten = listen("escape-pressed", handleEscape);
+    return () => { unlisten.then((fn) => fn()); };
+  }, [handleEscape]);
 
-  // Debounced search — delegates to store's fetchItems which has its own _fetchId guard
+  // 通道2：DOM 键盘事件
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && e.isTrusted) {
+        e.preventDefault();
+        handleEscape();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [handleEscape]);
+
+  // 防抖搜索
   const debouncedSearch = useMemo(
     () => debounce(() => {
       fetchItems();
@@ -174,7 +224,7 @@ function App() {
     [fetchItems]
   );
 
-  // Cleanup debounce on unmount
+  // 卸载时取消防抖
   useEffect(() => {
     return () => {
       debouncedSearch.cancel();
@@ -212,12 +262,12 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
-      {/* Header: Search + Actions */}
+      {/* 顶栏：搜索 + 操作 */}
       <div
         className="flex items-center gap-2 p-2 shrink-0 select-none"
         data-tauri-drag-region
       >
-        {/* Search Bar */}
+        {/* 搜索栏 */}
         <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
           <Input
@@ -230,7 +280,7 @@ function App() {
           />
         </div>
 
-        {/* Action Buttons Card */}
+        {/* 操作按钮 */}
         <div 
           className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
           style={{ WebkitAppRegion: 'no-drag', pointerEvents: suppressTooltips ? 'none' : undefined } as React.CSSProperties}
@@ -279,14 +329,14 @@ function App() {
         </div>
       </div>
 
-      {/* Clipboard List */}
+      {/* 剪贴板列表 */}
       <div className="flex-1 overflow-hidden">
         <ClipboardList />
       </div>
 
-      {/* Bottom Segment */}
+      {/* 底部分组选择 */}
       <div className="shrink-0 px-2 pb-2 pt-1 select-none">
-        <div className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
+        <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
           {/* 滑动指示器 */}
           <div
             className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
@@ -314,7 +364,7 @@ function App() {
         </div>
       </div>
 
-      {/* Clear History Dialog */}
+      {/* 清空历史确认对话框 */}
       <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader className="text-left">

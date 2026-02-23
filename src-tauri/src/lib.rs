@@ -245,8 +245,10 @@ async fn show_window(window: tauri::WebviewWindow) {
 /// Tauri 命令：隐藏主窗口
 #[tauri::command]
 async fn hide_window(window: tauri::WebviewWindow) {
+    save_window_size_if_enabled(window.app_handle(), &window);
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
+    input_monitor::disable_mouse_monitoring();
     // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
     // 向前端发射事件以重置隐藏状态
@@ -288,9 +290,13 @@ async fn toggle_maximize(window: tauri::WebviewWindow) {
 /// Tauri 命令：关闭窗口（隐藏到托盘）
 #[tauri::command]
 async fn close_window(window: tauri::WebviewWindow) {
+    save_window_size_if_enabled(window.app_handle(), &window);
     let _ = window.hide();
+    keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
+    input_monitor::disable_mouse_monitoring();
     // 隐藏图片预览窗口
     commands::hide_image_preview_window(window.app_handle());
+    let _ = window.emit("window-hidden", ());
 }
 
 /// Tauri 命令：获取当前配置的数据路径
@@ -307,6 +313,44 @@ fn get_original_default_path() -> String {
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default()
+}
+
+/// Tauri 命令：检测目标路径是否已有数据
+#[tauri::command]
+fn check_path_has_data(path: String) -> bool {
+    let p = std::path::PathBuf::from(&path);
+    p.join("clipboard.db").exists()
+}
+
+/// Tauri 命令：清理指定路径的数据文件（数据库、图片）
+#[tauri::command]
+fn cleanup_data_at_path(path: String) -> Result<(), String> {
+    use std::fs;
+    let p = std::path::PathBuf::from(&path);
+
+    // 删除数据库相关文件
+    for ext in &["", "-wal", "-shm"] {
+        let db_file = p.join(format!("clipboard.db{}", ext));
+        if db_file.exists() {
+            fs::remove_file(&db_file).map_err(|e| format!("删除 {:?} 失败: {}", db_file, e))?;
+        }
+    }
+
+    // 删除图片目录
+    let images_dir = p.join("images");
+    if images_dir.exists() {
+        fs::remove_dir_all(&images_dir)
+            .map_err(|e| format!("删除图片目录失败: {}", e))?;
+    }
+
+    // 删除图标缓存目录
+    let icons_dir = p.join("icons");
+    if icons_dir.exists() {
+        fs::remove_dir_all(&icons_dir)
+            .map_err(|e| format!("删除图标目录失败: {}", e))?;
+    }
+
+    Ok(())
 }
 
 /// Tauri 命令：设置数据路径并保存配置
@@ -342,6 +386,292 @@ fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, Str
     Ok(result)
 }
 
+/// Tauri 命令：导出数据为 ZIP 文件
+#[tauri::command]
+async fn export_data(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<commands::AppState>>,
+) -> Result<String, String> {
+    use std::fs::{self, File};
+    use std::io::Write;
+    use tauri_plugin_dialog::DialogExt;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+
+    let config = AppConfig::load();
+    let data_dir = config.get_data_dir();
+
+    // 使用 SQLite backup API 创建数据库的完整副本（包含所有 WAL 数据）
+    let export_db = data_dir.join("clipboard.db.export");
+    {
+        let src_conn = state.db.write_connection();
+        let src_conn = src_conn.lock();
+        let _ = fs::remove_file(&export_db);
+        let mut dst_conn = rusqlite::Connection::open(&export_db)
+            .map_err(|e| format!("创建备份文件失败: {}", e))?;
+        let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
+            .map_err(|e| format!("初始化备份失败: {}", e))?;
+        backup
+            .run_to_completion(100, std::time::Duration::from_millis(0), None)
+            .map_err(|e| format!("执行备份失败: {}", e))?;
+    }
+
+    // 弹出保存对话框
+    let timestamp = chrono_timestamp();
+    let default_name = format!("ElegantClipboard_backup_{}.zip", timestamp);
+    let dest = app
+        .dialog()
+        .file()
+        .set_title("导出数据")
+        .set_file_name(&default_name)
+        .add_filter("ZIP 压缩文件", &["zip"])
+        .blocking_save_file();
+
+    let dest_path = match dest {
+        Some(p) => p.to_string(),
+        None => {
+            let _ = fs::remove_file(&export_db);
+            return Err("用户取消了导出".to_string());
+        }
+    };
+
+    let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {}", e))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("clipboard.db", options).map_err(|e| e.to_string())?;
+    zip.write_all(&fs::read(&export_db).map_err(|e| format!("读取数据库副本失败: {}", e))?)
+        .map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(&export_db);
+
+    // 打包 images 目录
+    add_dir_to_zip(&mut zip, &data_dir.join("images"), "images", options)?;
+
+    // 打包 icons 目录
+    add_dir_to_zip(&mut zip, &data_dir.join("icons"), "icons", options)?;
+
+    zip.finish().map_err(|e| e.to_string())?;
+
+    let size = fs::metadata(&dest_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    Ok(format!("导出成功 ({})", format_size(size)))
+}
+
+/// Tauri 命令：从 ZIP 文件导入数据
+#[tauri::command]
+async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
+    use std::fs::{self, File};
+    use std::io::Read;
+    use tauri_plugin_dialog::DialogExt;
+
+    let config = AppConfig::load();
+    let data_dir = config.get_data_dir();
+
+    // 弹出打开对话框
+    let src = app
+        .dialog()
+        .file()
+        .set_title("导入数据")
+        .add_filter("ZIP 压缩文件", &["zip"])
+        .blocking_pick_file();
+
+    let src_path = match src {
+        Some(p) => p.to_string(),
+        None => return Err("用户取消了导入".to_string()),
+    };
+
+    let file = File::open(&src_path).map_err(|e| format!("打开文件失败: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效的 ZIP 文件: {}", e))?;
+
+    // 校验 ZIP 内容：必须包含 clipboard.db
+    let has_db = (0..archive.len()).any(|i| {
+        archive
+            .by_index(i)
+            .map(|f| f.name() == "clipboard.db")
+            .unwrap_or(false)
+    });
+    if !has_db {
+        return Err("ZIP 文件中未找到 clipboard.db，不是有效的备份文件".to_string());
+    }
+
+    // 确保数据目录存在
+    fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+
+    let mut files_extracted = 0u32;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+
+        // 安全检查：防止路径穿越
+        if name.contains("..") {
+            continue;
+        }
+
+        // 跳过 WAL 临时文件；clipboard.db 写为 staging 文件，启动时替换
+        if name.ends_with("-wal") || name.ends_with("-shm") {
+            continue;
+        }
+        let out_path = if name == "clipboard.db" {
+            data_dir.join("clipboard.db.import")
+        } else {
+            data_dir.join(&name)
+        };
+
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
+            fs::write(&out_path, &buf)
+                .map_err(|e| format!("写入 {} 失败: {}", name, e))?;
+            files_extracted += 1;
+        }
+    }
+
+    Ok(format!("导入成功，共恢复 {} 个文件，应用即将重启", files_extracted))
+}
+
+/// 检测并应用待导入的 staging 数据库文件
+///
+/// import_data 将数据库写为 `clipboard.db.import`（而非直接覆盖正在使用的数据库），
+/// 启动时在打开数据库前调用此函数，删除旧 db/wal/shm 并将 staging 文件重命名为正式数据库。
+fn apply_pending_import(db_path: &std::path::Path) {
+    use std::fs;
+
+    let staging = db_path.with_extension("db.import");
+    if !staging.exists() {
+        return;
+    }
+
+    tracing::info!("Detected pending import: {:?}", staging);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
+    let db_dir = match db_path.parent() {
+        Some(d) => d,
+        None => return,
+    };
+
+    for attempt in 1..=10 {
+        // 删除旧数据库及 WAL/SHM
+        let deleted = ["", "-wal", "-shm"].iter().all(|ext| {
+            let f = db_dir.join(format!("clipboard.db{ext}"));
+            !f.exists() || fs::remove_file(&f).is_ok()
+        });
+
+        if deleted && fs::rename(&staging, db_path).is_ok() {
+            tracing::info!("Import staging applied (attempt {attempt})");
+            return;
+        }
+
+        if attempt < 10 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    }
+
+    // 最后手段：复制替代重命名
+    tracing::error!("Rename failed after 10 attempts, trying copy fallback");
+    if fs::copy(&staging, db_path).is_ok() {
+        let _ = fs::remove_file(&staging);
+        tracing::info!("Import applied via copy fallback");
+    } else {
+        tracing::error!("Import staging completely failed");
+    }
+}
+
+/// 将目录下所有文件添加到 ZIP
+fn add_dir_to_zip(
+    zip: &mut zip::ZipWriter<std::fs::File>,
+    dir: &std::path::Path,
+    prefix: &str,
+    options: zip::write::SimpleFileOptions,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    if !dir.exists() || !dir.is_dir() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let name = format!("{}/{}", prefix, entry.file_name().to_string_lossy());
+            zip.start_file(&name, options).map_err(|e| e.to_string())?;
+            let buf = std::fs::read(&path)
+                .map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
+            zip.write_all(&buf).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// 生成时间戳字符串 (yyyyMMdd_HHmmss)
+fn chrono_timestamp() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // 简单转换为本地时间格式
+    let secs = now + 8 * 3600; // UTC+8 粗略偏移
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+    let s = time_of_day % 60;
+
+    // 从 Unix 天数计算年月日
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, mo, d, h, m, s)
+}
+
+fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    // 基于 Unix 纪元的简单日历计算
+    let mut y = 1970;
+    loop {
+        let yd = if is_leap(y) { 366 } else { 365 };
+        if days < yd {
+            break;
+        }
+        days -= yd;
+        y += 1;
+    }
+    let leap = is_leap(y);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut mo = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if days < md {
+            mo = i as u64 + 1;
+            break;
+        }
+        days -= md;
+    }
+    (y, mo, days + 1)
+}
+
+fn is_leap(y: u64) -> bool {
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 /// Tauri 命令：重启应用（支持 UAC 提权）
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
@@ -355,35 +685,71 @@ fn restart_app(app: tauri::AppHandle) {
     }
 }
 
+/// 若「记住窗口大小」开关启用，将当前窗口逻辑尺寸保存到 settings 表。
+/// 所有隐藏主窗口的路径都应在 hide 前调用此函数。
+pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(app: &tauri::AppHandle<R>, window: &tauri::WebviewWindow<R>) {
+    if let Some(state) = app.try_state::<std::sync::Arc<commands::AppState>>() {
+        let settings_repo = database::SettingsRepository::new(&state.db);
+        let persist = settings_repo.get("persist_window_size").ok().flatten()
+            .map(|v| v != "false").unwrap_or(true);
+        if persist {
+            if let Ok(size) = window.inner_size() {
+                if let Ok(scale) = window.scale_factor() {
+                    let w = (size.width as f64 / scale).round() as u32;
+                    let h = (size.height as f64 / scale).round() as u32;
+                    let _ = settings_repo.set("window_width", &w.to_string());
+                    let _ = settings_repo.set("window_height", &h.to_string());
+                }
+            }
+        }
+    }
+}
+
 /// 切换主窗口显示/隐藏
 fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if keyboard_hook::get_window_state() == keyboard_hook::WindowState::Visible {
+            save_window_size_if_enabled(app, &window);
+
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
             input_monitor::disable_mouse_monitoring();
             commands::hide_image_preview_window(app);
             let _ = window.emit("window-hidden", ());
         } else {
-            // 跟随光标定位
+            // 读取设置并恢复窗口尺寸
             let follow_cursor = app
                 .try_state::<std::sync::Arc<commands::AppState>>()
                 .map(|state| {
-                    let settings_repo = database::SettingsRepository::new(&state.db);
-                    settings_repo
-                        .get("follow_cursor")
-                        .ok()
-                        .flatten()
-                        .map(|v| v != "false")
-                        .unwrap_or(true)
+                    let repo = database::SettingsRepository::new(&state.db);
+                    // 恢复持久化的窗口尺寸
+                    let persist = repo.get("persist_window_size").ok().flatten()
+                        .map(|v| v != "false").unwrap_or(true);
+                    if persist {
+                        let w = repo.get("window_width").ok().flatten()
+                            .and_then(|v| v.parse::<f64>().ok());
+                        let h = repo.get("window_height").ok().flatten()
+                            .and_then(|v| v.parse::<f64>().ok());
+                        if let (Some(w), Some(h)) = (w, h) {
+                            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                                width: w,
+                                height: h,
+                            }));
+                        }
+                    }
+                    repo.get("follow_cursor").ok().flatten()
+                        .map(|v| v != "false").unwrap_or(true)
                 })
                 .unwrap_or(true);
+
             if follow_cursor {
                 if let Err(e) = positioning::position_at_cursor(&window) {
                     tracing::warn!("定位窗口失败: {}", e);
                 }
             }
 
+            // 记住当前前台窗口，锁定粘贴时需要还原焦点
+            input_monitor::save_foreground_window();
             // 显示并置顶，取得焦点以支持键盘导航
             let _ = window.show();
             positioning::force_topmost(&window);
@@ -653,6 +1019,12 @@ async fn download_update(
         .map_err(|e| e.to_string())?
 }
 
+/// Tauri 命令：取消正在进行的下载
+#[tauri::command]
+fn cancel_update_download() {
+    updater::cancel_download();
+}
+
 /// Tauri 命令：启动安装程序并退出应用
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
@@ -667,6 +1039,7 @@ async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result
 
 /// Tauri 命令：在固定尺寸透明窗口中显示图片预览，图片缩放由 webview CSS 处理。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn show_image_preview(
     app: tauri::AppHandle,
     image_path: String,
@@ -853,6 +1226,10 @@ pub fn run() {
             let config = AppConfig::load();
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
+
+            // 检测并应用待导入的 staging 文件（由 import_data 写入）
+            apply_pending_import(&db_path);
+
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
             // 初始化剪贴板监控
@@ -902,6 +1279,22 @@ pub fn run() {
             // 设置主窗口为不可聚焦，避免抢占其他应用焦点
             // 同时使快捷键在开始菜单等系统 UI 打开时仍可用
             if let Some(window) = app.get_webview_window("main") {
+                // 恢复持久化的窗口尺寸（仅在启用时）
+                let persist = settings_repo.get("persist_window_size").ok().flatten()
+                    .map(|v| v != "false").unwrap_or(true);
+                if persist {
+                    let custom_width = settings_repo.get("window_width").ok().flatten()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    let custom_height = settings_repo.get("window_height").ok().flatten()
+                        .and_then(|v| v.parse::<f64>().ok());
+                    if let (Some(w), Some(h)) = (custom_width, custom_height) {
+                        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                            width: w,
+                            height: h,
+                        }));
+                    }
+                }
+
                 let _ = window.set_focusable(false);
 
                 // 初始化全局鼠标监控（用于点击外部隐藏窗口）
@@ -940,8 +1333,12 @@ pub fn run() {
             get_app_version,
             get_default_data_path,
             get_original_default_path,
+            check_path_has_data,
+            cleanup_data_at_path,
             set_data_path,
             migrate_data_to_path,
+            export_data,
+            import_data,
             restart_app,
             show_window,
             hide_window,
@@ -975,6 +1372,7 @@ pub fn run() {
             // 更新命令
             check_for_update,
             download_update,
+            cancel_update_download,
             install_update,
             // 剪贴板命令
             commands::clipboard::get_clipboard_items,

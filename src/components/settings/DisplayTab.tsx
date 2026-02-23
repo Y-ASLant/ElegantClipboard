@@ -1,31 +1,14 @@
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-
-interface DisplayTabProps {
-  cardMaxLines: number;
-  setCardMaxLines: (value: number) => void;
-  showTime: boolean;
-  setShowTime: (value: boolean) => void;
-  showCharCount: boolean;
-  setShowCharCount: (value: boolean) => void;
-  showByteSize: boolean;
-  setShowByteSize: (value: boolean) => void;
-  showSourceApp: boolean;
-  setShowSourceApp: (value: boolean) => void;
-  sourceAppDisplay: "both" | "name" | "icon";
-  setSourceAppDisplay: (value: "both" | "name" | "icon") => void;
-  imagePreviewEnabled: boolean;
-  setImagePreviewEnabled: (value: boolean) => void;
-  previewZoomStep: number;
-  setPreviewZoomStep: (value: number) => void;
-  previewPosition: "auto" | "left" | "right";
-  setPreviewPosition: (value: "auto" | "left" | "right") => void;
-  imageAutoHeight: boolean;
-  setImageAutoHeight: (value: boolean) => void;
-  imageMaxHeight: number;
-  setImageMaxHeight: (value: number) => void;
-}
+import { logError } from "@/lib/logger";
+import {
+  useUISettings,
+  type CardDensity,
+  type TimeFormat,
+} from "@/stores/ui-settings";
 
 const positionOptions: { value: "auto" | "left" | "right"; label: string }[] = [
   { value: "auto", label: "自动" },
@@ -39,32 +22,79 @@ const sourceDisplayOptions: { value: "both" | "name" | "icon"; label: string }[]
   { value: "icon", label: "仅图标" },
 ];
 
-export function DisplayTab({
-  cardMaxLines,
-  setCardMaxLines,
-  showTime,
-  setShowTime,
-  showCharCount,
-  setShowCharCount,
-  showByteSize,
-  setShowByteSize,
-  showSourceApp,
-  setShowSourceApp,
-  sourceAppDisplay,
-  setSourceAppDisplay,
-  imagePreviewEnabled,
-  setImagePreviewEnabled,
-  previewZoomStep,
-  setPreviewZoomStep,
-  previewPosition,
-  setPreviewPosition,
-  imageAutoHeight,
-  setImageAutoHeight,
-  imageMaxHeight,
-  setImageMaxHeight,
-}: DisplayTabProps) {
+const densityOptions: { value: CardDensity; label: string }[] = [
+  { value: "compact", label: "紧凑" },
+  { value: "standard", label: "标准" },
+  { value: "spacious", label: "宽松" },
+];
+
+const timeFormatOptions: { value: TimeFormat; label: string }[] = [
+  { value: "absolute", label: "绝对时间" },
+  { value: "relative", label: "相对时间" },
+];
+
+function WindowSizeCard() {
+  const [persist, setPersist] = useState(true);
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "persist_window_size" })
+      .then((v) => setPersist(v !== "false"))
+      .catch(() => {});
+  }, []);
+
+  const toggle = async (enabled: boolean) => {
+    setPersist(enabled);
+    try {
+      await invoke("set_setting", { key: "persist_window_size", value: String(enabled) });
+      // 关闭时清除已保存的尺寸
+      if (!enabled) {
+        await invoke("set_setting", { key: "window_width", value: "" });
+        await invoke("set_setting", { key: "window_height", value: "" });
+      }
+    } catch (error) {
+      logError("Failed to save persist_window_size:", error);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">窗口尺寸</h3>
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label className="text-xs">记住窗口大小</Label>
+          <p className="text-xs text-muted-foreground">
+            启用后，手动拖拽调整的窗口大小将被保留
+          </p>
+        </div>
+        <Switch checked={persist} onCheckedChange={toggle} />
+      </div>
+    </div>
+  );
+}
+
+export function DisplayTab() {
+  const {
+    cardMaxLines, setCardMaxLines,
+    imageAutoHeight, setImageAutoHeight,
+    imageMaxHeight, setImageMaxHeight,
+    imagePreviewEnabled, setImagePreviewEnabled,
+    previewZoomStep, setPreviewZoomStep,
+    previewPosition, setPreviewPosition,
+    hoverPreviewDelay, setHoverPreviewDelay,
+    showTime, setShowTime,
+    showCharCount, setShowCharCount,
+    showByteSize, setShowByteSize,
+    showSourceApp, setShowSourceApp,
+    sourceAppDisplay, setSourceAppDisplay,
+    cardDensity, setCardDensity,
+    timeFormat, setTimeFormat,
+  } = useUISettings();
+
   return (
     <div className="space-y-4">
+      {/* Window Size Card */}
+      <WindowSizeCard />
+
       {/* Content Preview Card */}
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-medium mb-3">内容预览</h3>
@@ -88,6 +118,28 @@ export function DisplayTab({
             <p className="text-xs text-muted-foreground">
               超过此行数的内容将被截断显示，内容不足时按实际高度显示
             </p>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">卡片间距</Label>
+              <p className="text-xs text-muted-foreground">调整卡片之间的间距大小</p>
+            </div>
+            <div className="flex gap-1">
+              {densityOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setCardDensity(opt.value)}
+                  className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                    cardDensity === opt.value
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background text-foreground border-input hover:bg-accent"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="flex items-center justify-between">
@@ -132,7 +184,7 @@ export function DisplayTab({
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">启用图片悬浮预览</Label>
-              <p className="text-xs text-muted-foreground">悬停 300ms 后弹出预览窗口，Ctrl+滚轮缩放</p>
+              <p className="text-xs text-muted-foreground">悬停后弹出预览窗口，Ctrl+滚轮缩放</p>
             </div>
             <Switch checked={imagePreviewEnabled} onCheckedChange={setImagePreviewEnabled} />
           </div>
@@ -159,6 +211,25 @@ export function DisplayTab({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">悬浮延迟</Label>
+                  <span className="text-xs font-medium tabular-nums">
+                    {hoverPreviewDelay} ms
+                  </span>
+                </div>
+                <Slider
+                  value={[hoverPreviewDelay]}
+                  onValueChange={(value) => setHoverPreviewDelay(value[0])}
+                  min={100}
+                  max={1000}
+                  step={50}
+                />
+                <p className="text-xs text-muted-foreground">
+                  鼠标悬停多久后弹出预览窗口
+                </p>
               </div>
 
               <div className="space-y-3">
@@ -197,6 +268,30 @@ export function DisplayTab({
             </div>
             <Switch checked={showTime} onCheckedChange={setShowTime} />
           </div>
+
+          {showTime && (
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">时间格式</Label>
+                <p className="text-xs text-muted-foreground">选择时间的显示方式</p>
+              </div>
+              <div className="flex gap-1">
+                {timeFormatOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setTimeFormat(opt.value)}
+                    className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                      timeFormat === opt.value
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-foreground border-input hover:bg-accent"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
@@ -247,6 +342,7 @@ export function DisplayTab({
           )}
         </div>
       </div>
+
     </div>
   );
 }

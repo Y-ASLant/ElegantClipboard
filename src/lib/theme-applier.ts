@@ -61,17 +61,26 @@ export function initTheme(): Promise<void> {
   if (_initialized) return _readyPromise;
   _initialized = true;
 
-  // --- Dark mode (sync, immediate) ---
+  // --- Dark mode ---
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  document.documentElement.classList.toggle("dark", mq.matches);
-  mq.addEventListener("change", (e) => {
-    document.documentElement.classList.toggle("dark", e.matches);
-  });
 
-  // --- React-free store subscription: re-apply on theme/corners change ---
+  function applyDarkMode() {
+    const { darkMode } = useUISettings.getState();
+    const isDark =
+      darkMode === "dark" ? true : darkMode === "light" ? false : mq.matches;
+    document.documentElement.classList.toggle("dark", isDark);
+  }
+
+  applyDarkMode();
+  mq.addEventListener("change", () => applyDarkMode());
+
+  // --- React-free store subscription: re-apply on theme/corners/darkMode change ---
   useUISettings.subscribe((state, prev) => {
     if (state.sharpCorners !== prev.sharpCorners) {
       applySharpCorners();
+    }
+    if (state.darkMode !== prev.darkMode) {
+      applyDarkMode();
     }
     if (state.colorTheme !== prev.colorTheme) {
       if (state.colorTheme === "system" && !_accentColor) {

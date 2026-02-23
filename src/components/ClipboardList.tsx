@@ -77,6 +77,7 @@ export function ClipboardList() {
     })),
   );
   const cardMaxLines = useUISettings((s) => s.cardMaxLines);
+  const cardDensity = useUISettings((s) => s.cardDensity);
 
   useEffect(() => {
     // Fetch items (files_valid is computed by backend, no extra IPC needed)
@@ -216,6 +217,7 @@ export function ClipboardList() {
       switch (e.key) {
         case "ArrowLeft": {
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
           if (curIdx > 0) setSelectedGroup(GROUPS[curIdx - 1].value);
@@ -223,6 +225,7 @@ export function ClipboardList() {
         }
         case "ArrowRight": {
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
           if (curIdx < GROUPS.length - 1) setSelectedGroup(GROUPS[curIdx + 1].value);
@@ -232,6 +235,7 @@ export function ClipboardList() {
           const { items: upItems, activeIndex: cur } = useClipboardStore.getState();
           if (upItems.length === 0) return;
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           let next = cur;
           if (cur > 0) next = cur - 1;
           else if (cur === -1) next = 0;
@@ -245,6 +249,7 @@ export function ClipboardList() {
           const { items: downItems, activeIndex: cur } = useClipboardStore.getState();
           if (downItems.length === 0) return;
           e.preventDefault();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           if (cur < downItems.length - 1) {
             const next = cur + 1;
             setActiveIndex(next);
@@ -308,14 +313,15 @@ export function ClipboardList() {
 
       const showSeparator = index === pinnedCount && pinnedCount > 0;
 
+      const densityPb = cardDensity === "compact" ? "pb-1" : cardDensity === "spacious" ? "pb-3" : "pb-2";
       return (
-        <div className="px-2 pb-2">
+        <div className={`px-2 ${densityPb}`}>
           {showSeparator && <Separator className="mb-2" />}
           <ClipboardItemCard item={item} index={index} showBadge={showSlotBadges} sortId={item._sortId} />
         </div>
       );
     },
-    [itemsWithSortId, pinnedCount, showSlotBadges],
+    [itemsWithSortId, pinnedCount, showSlotBadges, cardDensity],
   );
 
   const computeItemKey = useCallback(
@@ -441,15 +447,17 @@ export function ClipboardList() {
           </SortableContext>
         </OverlayScrollbarsComponent>
         {/* 回到顶部悬浮按钮 */}
-        {showScrollTop && (
-          <button
-            onClick={() => scrollToTop(true)}
-            className="absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors z-10"
-            title="回到顶部"
-          >
-            <ArrowUp16Regular className="w-4 h-4" />
-          </button>
-        )}
+        <button
+          onClick={() => scrollToTop(true)}
+          className={`absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-200 z-10 ${
+            showScrollTop
+              ? "opacity-100 scale-100 pointer-events-auto"
+              : "opacity-0 scale-75 pointer-events-none"
+          }`}
+          title="回到顶部"
+        >
+          <ArrowUp16Regular className="w-4 h-4" />
+        </button>
       </div>
 
       <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>

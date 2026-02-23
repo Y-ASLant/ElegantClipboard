@@ -6,10 +6,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
-import { useUISettings, ColorTheme } from "@/stores/ui-settings";
+import { useUISettings, ColorTheme, DarkMode } from "@/stores/ui-settings";
 
 export function ThemeTab() {
-  const { colorTheme, setColorTheme, sharpCorners, setSharpCorners } = useUISettings();
+  const { colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode } = useUISettings();
   const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
 
   // Re-render when accent color changes
@@ -118,6 +118,31 @@ export function ThemeTab() {
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Dark Mode */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">深色模式</h3>
+        <p className="text-xs text-muted-foreground mb-4">控制应用的明暗外观</p>
+        <div className="flex gap-1">
+          {([
+            { value: "auto" as DarkMode, label: "跟随系统" },
+            { value: "light" as DarkMode, label: "浅色" },
+            { value: "dark" as DarkMode, label: "深色" },
+          ]).map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setDarkMode(opt.value)}
+              className={`flex-1 px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
+                darkMode === opt.value
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background text-foreground border-input hover:bg-accent"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
 

@@ -265,10 +265,12 @@ const arePropsEqual = (
     item.content_type === nextItem.content_type &&
     item.created_at === nextItem.created_at &&
     item.byte_size === nextItem.byte_size &&
+    item.char_count === nextItem.char_count &&
     item.image_path === nextItem.image_path &&
     item.files_valid === nextItem.files_valid &&
-    item.preview === nextItem.preview
-    // Note: We don't compare text_content, file_paths, etc. as they're derived from preview/content_type
+    item.preview === nextItem.preview &&
+    item.source_app_name === nextItem.source_app_name &&
+    item.source_app_icon === nextItem.source_app_icon
   );
 };
 
@@ -349,11 +351,16 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
 
-  const metaItems: string[] = [];
-  if (showTime) metaItems.push(formatTime(item.created_at));
-  if (showCharCount && item.char_count)
-    metaItems.push(formatCharCount(item.char_count));
-  if (showByteSize) metaItems.push(formatSize(item.byte_size));
+  const timeFormat = useUISettings((s) => s.timeFormat);
+
+  const metaItems = useMemo(() => {
+    const items: string[] = [];
+    if (showTime) items.push(formatTime(item.created_at, timeFormat));
+    if (showCharCount && item.char_count)
+      items.push(formatCharCount(item.char_count));
+    if (showByteSize) items.push(formatSize(item.byte_size));
+    return items;
+  }, [showTime, showCharCount, showByteSize, timeFormat, item.created_at, item.char_count, item.byte_size]);
 
   // ---- Event handlers ----
 
@@ -441,7 +448,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <Card
         className={cn(
-        "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30",
+        "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30 ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.06]",
           isDragOverlay && "shadow-lg border-primary cursor-grabbing",
           justDropped && "animate-scale-bounce",
           isActive && "bg-accent shadow-sm",

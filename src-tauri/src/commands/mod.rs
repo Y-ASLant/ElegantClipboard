@@ -14,23 +14,31 @@ pub struct AppState {
 
 // ============ 公用辅助函数 ============
 
-/// 非固定状态下隐藏主窗口并更新状态，同时隐藏图片预览窗口。
+/// 隐藏主窗口或还原目标窗口焦点（用于粘贴前确保目标应用在前台）。
+/// - 非固定：隐藏主窗口，系统自动还原焦点给目标应用。
+/// - 固定（锁定）：窗口保持可见，但将焦点还给之前的前台窗口。
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
-    use tauri::Manager;
+    use tauri::{Emitter, Manager};
 
     if !crate::input_monitor::is_window_pinned() {
         if let Some(window) = app.get_webview_window("main") {
+            crate::save_window_size_if_enabled(app, &window);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+            crate::input_monitor::disable_mouse_monitoring();
+            let _ = window.emit("window-hidden", ());
         }
         // 隐藏图片预览窗口（主窗口消失时无法触发 onMouseLeave）
         hide_image_preview_window(app);
+    } else {
+        // 锁定模式：还原焦点给目标应用，使 simulate_paste 的 Ctrl+V 发到正确窗口
+        crate::input_monitor::restore_foreground_window();
     }
 }
 
 /// 隐藏图片预览窗口（若存在）。
 /// 主窗口隐藏时调用，防止预览残留（onMouseLeave 不会触发）。
-pub(crate) fn hide_image_preview_window(app: &tauri::AppHandle) {
+pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::{Emitter, Manager};
 
     if let Some(preview) = app.get_webview_window("image-preview") {

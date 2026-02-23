@@ -499,15 +499,20 @@ impl ClipboardRepository {
             |row| row.get(0),
         )?;
 
-        conn.execute(
+        // 使用事务保护两条 UPDATE 的原子性，防止中途失败导致 sort_order 数据损坏
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
             "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2",
             params![to_sort_order, from_id],
         )?;
 
-        conn.execute(
+        tx.execute(
             "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2",
             params![from_sort_order, to_id],
         )?;
+
+        tx.commit()?;
 
         debug!(
             "Moved item {} (sort_order: {} -> {}) with item {} (sort_order: {} -> {})",

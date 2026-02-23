@@ -99,6 +99,22 @@ impl ClipboardHandler {
             .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS)
     }
 
+    fn get_dedup_strategy(&self) -> &str {
+        // 缓存策略值避免每次查库（handler 生命周期与 monitor 相同）
+        // 但 settings 可能被用户修改，所以每次都读
+        match self
+            .settings_repo
+            .get("dedup_strategy")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("ignore") => "ignore",
+            Some("always_new") => "always_new",
+            _ => "move_to_top", // 默认行为
+        }
+    }
+
     /// 处理剪贴板内容，去重后存入数据库
     pub fn process(
         &self,
@@ -128,17 +144,28 @@ impl ClipboardHandler {
         }
 
         let hash = self.calculate_hash(&content);
+        let dedup = self.get_dedup_strategy();
 
-        if self
-            .repository
-            .exists_by_hash(&hash)
-            .map_err(|e| e.to_string())?
-        {
-            debug!("Content already exists, updating access time");
-            return self
+        if dedup != "always_new"
+            && self
                 .repository
-                .touch_by_hash(&hash)
-                .map_err(|e| e.to_string());
+                .exists_by_hash(&hash)
+                .map_err(|e| e.to_string())?
+        {
+            match dedup {
+                "ignore" => {
+                    debug!("Content already exists, ignoring (dedup=ignore)");
+                    return Ok(None);
+                }
+                _ => {
+                    // move_to_top: 更新访问时间并置顶
+                    debug!("Content already exists, updating access time (dedup=move_to_top)");
+                    return self
+                        .repository
+                        .touch_by_hash(&hash)
+                        .map_err(|e| e.to_string());
+                }
+            }
         }
 
         let (source_app_name, source_app_icon) = match source {

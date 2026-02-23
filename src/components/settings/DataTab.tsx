@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { Folder16Regular, Open16Regular, ArrowSync16Regular } from "@fluentui/react-icons";
+import { useState, useEffect, useCallback } from "react";
+import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,9 +54,63 @@ function formatDataSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+type DedupStrategy = "move_to_top" | "ignore" | "always_new";
+
+const dedupOptions: { value: DedupStrategy; label: string; desc: string }[] = [
+  { value: "move_to_top", label: "置顶已有", desc: "相同内容移到最前" },
+  { value: "ignore", label: "忽略", desc: "不记录重复内容" },
+  { value: "always_new", label: "总是新建", desc: "每次都创建新条目" },
+];
+
+function DedupStrategyCard() {
+  const [strategy, setStrategy] = useState<DedupStrategy>("move_to_top");
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "dedup_strategy" }).then((val) => {
+      if (val === "ignore" || val === "always_new") setStrategy(val);
+    }).catch(() => {});
+  }, []);
+
+  const handleChange = async (value: DedupStrategy) => {
+    setStrategy(value);
+    try {
+      await invoke("set_setting", { key: "dedup_strategy", value });
+    } catch (error) {
+      logError("Failed to save dedup strategy:", error);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">重复内容处理</h3>
+      <p className="text-xs text-muted-foreground mb-4">复制相同内容时的处理方式</p>
+      <div className="flex gap-1">
+        {dedupOptions.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleChange(opt.value)}
+            className={`flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors ${
+              strategy === opt.value
+                ? "bg-primary text-primary-foreground border-primary"
+                : "bg-background text-foreground border-input hover:bg-accent"
+            }`}
+            title={opt.desc}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground mt-2">
+        {dedupOptions.find((o) => o.value === strategy)?.desc}
+      </p>
+    </div>
+  );
+}
+
 export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [destHasData, setDestHasData] = useState(false);
   const [migrating, setMigrating] = useState(false);
   const [migrationError, setMigrationError] = useState<string | null>(null);
   const [dataSize, setDataSize] = useState<DataSizeInfo | null>(() => {
@@ -72,6 +126,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     } catch { return null; }
   });
   const [dataSizeLoading, setDataSizeLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exportImportMsg, setExportImportMsg] = useState<string | null>(null);
 
   const refreshDataSize = useCallback(async () => {
     setDataSizeLoading(true);
@@ -85,6 +142,13 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     setDataSizeLoading(false);
   }, []);
 
+  // 进入页面时自动加载数据统计（无缓存时）
+  useEffect(() => {
+    if (!dataSize) {
+      refreshDataSize();
+    }
+  }, [refreshDataSize]);
+
   const selectFolder = async () => {
     try {
       const path = await invoke<string | null>("select_folder_for_settings");
@@ -92,7 +156,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         // Check if there's existing data to migrate
         const currentPath = await invoke<string>("get_default_data_path");
         if (currentPath && currentPath !== path) {
+          const hasData = await invoke<boolean>("check_path_has_data", { path });
           setPendingPath(path);
+          setDestHasData(hasData);
           setMigrationError(null);
           setMigrationDialogOpen(true);
         } else {
@@ -136,7 +202,11 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     if (!pendingPath) return;
     
     try {
-      // Just set the new path without migrating
+      // 如果目标已有数据（选择保留新位置数据），清理旧位置的数据
+      if (destHasData) {
+        await invoke("cleanup_data_at_path", { path: settings.data_path });
+      }
+      // Set the new path without migrating
       await invoke("set_data_path", { path: pendingPath });
       onSettingsChange({ ...settings, data_path: pendingPath });
       setMigrationDialogOpen(false);
@@ -144,6 +214,40 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       await invoke("restart_app");
     } catch (error) {
       setMigrationError(`设置失败: ${error}`);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportImportMsg(null);
+    try {
+      const msg = await invoke<string>("export_data");
+      setExportImportMsg(msg);
+    } catch (error) {
+      const errStr = `${error}`;
+      if (!errStr.includes("取消")) {
+        setExportImportMsg(`导出失败: ${error}`);
+      }
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    setExportImportMsg(null);
+    try {
+      const msg = await invoke<string>("import_data");
+      setExportImportMsg(msg);
+      // 导入成功后重启应用
+      await invoke("restart_app");
+    } catch (error) {
+      const errStr = `${error}`;
+      if (!errStr.includes("取消")) {
+        setExportImportMsg(`导入失败: ${error}`);
+      }
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -255,6 +359,42 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
           </div>
         </div>
 
+        {/* Export / Import Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">数据备份</h3>
+          <p className="text-xs text-muted-foreground mb-4">导出或导入剪贴板数据（ZIP 格式）</p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={exporting || importing}
+              className="flex-1"
+            >
+              <ArrowUpload16Regular className="w-4 h-4 mr-1.5" />
+              {exporting ? "导出中..." : "导出数据"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImport}
+              disabled={exporting || importing}
+              className="flex-1"
+            >
+              <ArrowDownload16Regular className="w-4 h-4 mr-1.5" />
+              {importing ? "导入中..." : "导入数据"}
+            </Button>
+          </div>
+          {exportImportMsg && (
+            <p className={`text-xs mt-2 ${exportImportMsg.includes("失败") ? "text-destructive" : "text-muted-foreground"}`}>
+              {exportImportMsg}
+            </p>
+          )}
+        </div>
+
+        {/* Dedup Strategy Card */}
+        <DedupStrategyCard />
+
         {/* History Limit Card */}
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium mb-3">历史记录</h3>
@@ -330,9 +470,11 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       <Dialog open={migrationDialogOpen} onOpenChange={setMigrationDialogOpen}>
         <DialogContent className="max-w-md" showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>迁移数据</DialogTitle>
+            <DialogTitle>{destHasData ? "目标位置已有数据" : "迁移数据"}</DialogTitle>
             <DialogDescription>
-              是否将现有数据迁移到新位置？
+              {destHasData
+                ? "新位置已存在剪贴板数据，请选择保留哪一份数据。"
+                : "是否将现有数据迁移到新位置？"}
             </DialogDescription>
           </DialogHeader>
           
@@ -363,20 +505,41 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
             >
               取消
             </Button>
-            <Button
-              variant="ghost"
-              onClick={handleSkipMigration}
-              disabled={migrating}
-              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-            >
-              删除数据
-            </Button>
-            <Button
-              onClick={handleMigrate}
-              disabled={migrating}
-            >
-              {migrating ? "迁移中..." : "保留数据"}
-            </Button>
+            {destHasData ? (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  {migrating ? "覆盖中..." : "保留旧位置数据"}
+                </Button>
+                <Button
+                  onClick={handleSkipMigration}
+                  disabled={migrating}
+                >
+                  保留新位置数据
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={handleSkipMigration}
+                  disabled={migrating}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  不迁移
+                </Button>
+                <Button
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                >
+                  {migrating ? "迁移中..." : "迁移数据"}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

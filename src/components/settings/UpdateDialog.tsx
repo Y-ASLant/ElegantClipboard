@@ -116,9 +116,24 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       setInstallerPath(path);
       setStatus("downloaded");
     } catch (e) {
-      setErrorMsg(String(e));
-      setStatus("error");
+      // 取消后 status 已被 cancelDownload 立即设为 update-available，
+      // 此处仅处理非取消的真实错误（且仅当仍为 downloading 时才更新）
+      const msg = String(e);
+      if (!msg.includes("取消")) {
+        setStatus((prev) => {
+          if (prev === "downloading") {
+            setErrorMsg(msg);
+            return "error";
+          }
+          return prev;
+        });
+      }
     }
+  };
+
+  const cancelDownload = () => {
+    setStatus("update-available");
+    invoke("cancel_update_download");
   };
 
   const installUpdate = async () => {
@@ -146,7 +161,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg" showCloseButton={status !== "downloading" && status !== "installing"}>
         <DialogHeader>
           <DialogTitle>检查更新</DialogTitle>
           {status === "update-available" && updateInfo && (
@@ -213,6 +228,11 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
               </span>
               <span>{progressPercent}%</span>
             </div>
+            <div className="flex justify-center pt-1">
+              <Button variant="outline" size="sm" onClick={cancelDownload}>
+                取消更新
+              </Button>
+            </div>
           </div>
         )}
 
@@ -269,6 +289,7 @@ function mdToHtml(md: string): string {
     .replace(/^[*-] (.+)$/gm, '<li class="text-xs text-muted-foreground ml-3">$1</li>')
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-primary hover:underline">$1</a>')
+    .replace(/(?<!href=")(https?:\/\/[^\s<>"']+)/g, '<a href="$1" class="text-primary hover:underline">$1</a>')
     .replace(/@([\w-]+)/g, '<a href="https://github.com/$1" class="text-primary hover:underline">@$1</a>')
     .replace(/\n{2,}/g, "<br/>")
     .replace(/\n/g, "");

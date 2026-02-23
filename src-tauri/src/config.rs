@@ -1,7 +1,7 @@
 //! 应用配置管理
 //!
 //! 处理数据库初始化之前需要读取的配置（如数据库路径）。
-//! 配置以 JSON 文件存储在 `%LOCALAPPDATA%\ElegantClipboard\config.json`。
+//! 配置以 JSON 文件存储在应用安装目录下的 `config.json`。
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -115,10 +115,9 @@ impl AppConfig {
     }
 }
 
-/// 获取配置文件路径（固定在默认位置）
+/// 获取配置文件路径（固定在安装目录）
 fn get_config_path() -> PathBuf {
-    let app_data = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    app_data.join("ElegantClipboard").join("config.json")
+    crate::database::get_app_dir().join("config.json")
 }
 
 /// 将数据从旧路径迁移到新路径

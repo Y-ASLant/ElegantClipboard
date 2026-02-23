@@ -433,7 +433,7 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
     if let Ok(Some(item)) = repo.get_by_id(id) {
         repo.delete(id).map_err(|e| e.to_string())?;
         if let Some(ref image_path) = item.image_path {
-            crate::clipboard::cleanup_image_files(&[image_path.clone()]);
+            crate::clipboard::cleanup_image_files(std::slice::from_ref(image_path));
         }
     } else {
         repo.delete(id).map_err(|e| e.to_string())?;
@@ -507,6 +507,7 @@ pub async fn paste_content(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     id: i64,
+    close_window: Option<bool>,
 ) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
     let item = repo
@@ -514,7 +515,7 @@ pub async fn paste_content(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Item not found".to_string())?;
 
-    paste_item_to_active_window(&state, &app, &item)?;
+    paste_item_to_active_window(&state, &app, &item, close_window.unwrap_or(true))?;
     debug!("Pasted item {} to active window", id);
     Ok(())
 }
@@ -525,6 +526,7 @@ pub async fn paste_content_as_plain(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     id: i64,
+    close_window: Option<bool>,
 ) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
     let item = repo
@@ -537,7 +539,7 @@ pub async fn paste_content_as_plain(
         .as_deref()
         .ok_or_else(|| "Item has no text content".to_string())?;
 
-    paste_plain_text_to_active_window(&state, &app, text)?;
+    paste_plain_text_to_active_window(&state, &app, text, close_window.unwrap_or(true))?;
     debug!("Pasted item {} as plain text", id);
     Ok(())
 }
@@ -549,7 +551,7 @@ pub async fn paste_text_direct(
     app: tauri::AppHandle,
     text: String,
 ) -> Result<(), String> {
-    paste_plain_text_to_active_window(&state, &app, &text)?;
+    paste_plain_text_to_active_window(&state, &app, &text, true)?;
     debug!("Pasted direct text ({} chars)", text.len());
     Ok(())
 }
@@ -572,7 +574,7 @@ pub fn quick_paste_by_slot(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("No clipboard item available for slot {}", slot))?;
 
-    paste_item_to_active_window(state, app, &item)?;
+    paste_item_to_active_window(state, app, &item, true)?;
     debug!("Quick pasted slot {} with item {}", slot, item.id);
     Ok(())
 }
@@ -582,13 +584,19 @@ fn paste_item_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     item: &ClipboardItem,
+    close_window: bool,
 ) -> Result<(), String> {
     with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
         set_clipboard_content(item, &mut clipboard)?;
 
-        hide_main_window_if_not_pinned(app);
+        if close_window {
+            hide_main_window_if_not_pinned(app);
+        } else {
+            // 不关闭窗口时仍需还原焦点，否则 Ctrl+V 发到自己的 webview
+            crate::input_monitor::restore_foreground_window();
+        }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
@@ -601,6 +609,7 @@ fn paste_plain_text_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     text: &str,
+    close_window: bool,
 ) -> Result<(), String> {
     with_paused_monitor(state, || {
         let mut clipboard =
@@ -609,7 +618,11 @@ fn paste_plain_text_to_active_window(
             .set_text(text)
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
 
-        hide_main_window_if_not_pinned(app);
+        if close_window {
+            hide_main_window_if_not_pinned(app);
+        } else {
+            crate::input_monitor::restore_foreground_window();
+        }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;

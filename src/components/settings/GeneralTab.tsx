@@ -30,6 +30,10 @@ interface GeneralTabProps {
 export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const autoResetState = useUISettings((s) => s.autoResetState);
   const setAutoResetState = useUISettings((s) => s.setAutoResetState);
+  const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
+  const setSearchAutoFocus = useUISettings((s) => s.setSearchAutoFocus);
+  const searchAutoClear = useUISettings((s) => s.searchAutoClear);
+  const setSearchAutoClear = useUISettings((s) => s.setSearchAutoClear);
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
@@ -58,7 +62,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <div className="space-y-0.5">
               <Label className="text-xs">自动重置状态</Label>
               <p className="text-xs text-muted-foreground">
-                关闭窗口时自动清空搜索并回到顶部
+                关闭窗口时重置搜索、分组筛选和滚动位置
               </p>
             </div>
             <Switch
@@ -70,13 +74,45 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <div className="space-y-0.5">
               <Label className="text-xs">键盘导航</Label>
               <p className="text-xs text-muted-foreground">
-                方向键选择、回车粘贴、Delete 删除
+                方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除、ESC 隐藏窗口
               </p>
             </div>
             <Switch
               checked={useUISettings((s) => s.keyboardNavigation)}
               onCheckedChange={useUISettings((s) => s.setKeyboardNavigation)}
             />
+          </div>
+        </div>
+
+        {/* Search Bar Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">搜索栏</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置激活窗口时的搜索栏行为</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">默认聚焦</Label>
+                <p className="text-xs text-muted-foreground">
+                  激活窗口时，默认聚焦搜索框
+                </p>
+              </div>
+              <Switch
+                checked={searchAutoFocus}
+                onCheckedChange={setSearchAutoFocus}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">自动清除</Label>
+                <p className="text-xs text-muted-foreground">
+                  激活窗口时，仅清空搜索框文字
+                </p>
+              </div>
+              <Switch
+                checked={searchAutoClear}
+                onCheckedChange={setSearchAutoClear}
+              />
+            </div>
           </div>
         </div>
 

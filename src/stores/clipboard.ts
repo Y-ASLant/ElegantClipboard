@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { logError } from "@/lib/logger";
+import { playCopySound, playPasteSound } from "@/lib/sounds";
+import { useUISettings } from "@/stores/ui-settings";
 
 export interface ClipboardItem {
   id: number;
@@ -118,13 +120,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   togglePin: async (id: number) => {
     try {
-      const newState = await invoke<boolean>("toggle_pin", { id });
-      // Update local state
-      set((state) => ({
-        items: state.items.map((item) =>
-          item.id === id ? { ...item, is_pinned: newState } : item
-        ),
-      }));
+      await invoke<boolean>("toggle_pin", { id });
+      // Refresh to get correct sort order (pinned items first)
+      await get().refresh();
     } catch (error) {
       logError("Failed to toggle pin:", error);
     }
@@ -133,11 +131,16 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   toggleFavorite: async (id: number) => {
     try {
       const newState = await invoke<boolean>("toggle_favorite", { id });
-      set((state) => ({
-        items: state.items.map((item) =>
-          item.id === id ? { ...item, is_favorite: newState } : item
-        ),
-      }));
+      // 在收藏视图中取消收藏时，需要刷新列表以移除该条目
+      if (!newState && get().selectedGroup === "__favorites__") {
+        await get().refresh();
+      } else {
+        set((state) => ({
+          items: state.items.map((item) =>
+            item.id === id ? { ...item, is_favorite: newState } : item
+          ),
+        }));
+      }
     } catch (error) {
       logError("Failed to toggle favorite:", error);
     }
@@ -174,7 +177,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteContent: async (id: number) => {
     try {
-      await invoke("paste_content", { id });
+      playPasteSound();
+      const closeWindow = useUISettings.getState().pasteCloseWindow;
+      await invoke("paste_content", { id, closeWindow });
     } catch (error) {
       logError("Failed to paste content:", error);
     }
@@ -182,7 +187,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteAsPlainText: async (id: number) => {
     try {
-      await invoke("paste_content_as_plain", { id });
+      playPasteSound();
+      const closeWindow = useUISettings.getState().pasteCloseWindow;
+      await invoke("paste_content_as_plain", { id, closeWindow });
     } catch (error) {
       logError("Failed to paste as plain text:", error);
     }
@@ -212,6 +219,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   setupListener: async () => {
     const unlisten = await listen<number>("clipboard-updated", () => {
+      playCopySound();
       get().refresh();
     });
     return unlisten;

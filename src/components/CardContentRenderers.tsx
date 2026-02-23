@@ -72,7 +72,6 @@ export const CardFooter = ({
 
 // ============ Shared Image Preview with Hover Enlarge (Native Window) ============
 
-const HOVER_DELAY_MS = 300;
 const PREVIEW_GAP = 12;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 5.0;
@@ -239,12 +238,14 @@ const ImagePreview = memo(function ImagePreview({
     }
   }, [previewPosition]);
 
+  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
+
   const handleMouseEnter = useCallback(() => {
     if (!imagePath || !imagePreviewEnabled) return;
     ps.current.currentPath = imagePath;
     clearTimer();
-    timerRef.current = setTimeout(showPreview, HOVER_DELAY_MS);
-  }, [imagePath, imagePreviewEnabled, clearTimer, showPreview]);
+    timerRef.current = setTimeout(showPreview, hoverPreviewDelay);
+  }, [imagePath, imagePreviewEnabled, clearTimer, showPreview, hoverPreviewDelay]);
 
   // Ctrl+Scroll: emit CSS size change (smooth transition in webview, no window resize)
   const handleWheel = useCallback(
@@ -260,22 +261,24 @@ const ImagePreview = memo(function ImagePreview({
         Math.min(MAX_SCALE, ps.current.scale + delta),
       );
 
-      getPreviewWindowRect(previewPosition).then((rect) => {
-        const { width, height } = calcImageSize(
-          ps.current.imgNatural.w,
-          ps.current.imgNatural.h,
-          ps.current.scale,
-          rect.w / rect.scale,
-          rect.h / rect.scale,
-        );
-        const percent = Math.round(ps.current.scale * 100);
-        emit("image-preview-zoom", {
-          width,
-          height,
-          percent,
-          active: true,
-        }).catch((e) => logError("Failed to emit zoom:", e));
-      });
+      getPreviewWindowRect(previewPosition)
+        .then((rect) => {
+          const { width, height } = calcImageSize(
+            ps.current.imgNatural.w,
+            ps.current.imgNatural.h,
+            ps.current.scale,
+            rect.w / rect.scale,
+            rect.h / rect.scale,
+          );
+          const percent = Math.round(ps.current.scale * 100);
+          return emit("image-preview-zoom", {
+            width,
+            height,
+            percent,
+            active: true,
+          });
+        })
+        .catch((e) => logError("Failed to update zoom:", e));
     },
     [previewZoomStep, previewPosition],
   );
@@ -323,7 +326,7 @@ const ImagePreview = memo(function ImagePreview({
   return (
     <div
       ref={containerRef}
-      className="relative w-full rounded overflow-hidden bg-muted/30 flex items-center justify-center"
+      className="relative w-full rounded-sm overflow-hidden bg-muted/30 flex items-center justify-center"
       style={containerStyle}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={hidePreview}
@@ -366,10 +369,13 @@ export const ImageCard = memo(function ImageCard({
 }: ImageCardProps) {
   const [error, setError] = useState(false);
 
+  // 虚拟列表复用组件时，image_path 变化需重置错误状态
+  useEffect(() => setError(false), [image_path]);
+
   return (
     <div className="flex-1 min-w-0 px-3 py-2.5">
       {error ? (
-        <div className="relative w-full h-32 rounded overflow-hidden bg-muted/30 flex items-center justify-center">
+        <div className="relative w-full h-32 rounded-sm overflow-hidden bg-muted/30 flex items-center justify-center">
           <div className="text-center">
             <Warning16Regular className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
             <p className="text-xs text-muted-foreground/60">图片加载失败</p>
@@ -416,6 +422,9 @@ const FileImagePreview = memo(function FileImagePreview({
 }) {
   const [imgError, setImgError] = useState(false);
   const fileName = getFileNameFromPath(filePath);
+
+  // 虚拟列表复用组件时，filePath 变化需重置错误状态
+  useEffect(() => setImgError(false), [filePath]);
 
   if (imgError) {
     return (
