@@ -25,6 +25,8 @@ use windows::Win32::Foundation::*;
 #[cfg(windows)]
 use windows::Win32::System::Threading::GetCurrentThreadId;
 #[cfg(windows)]
+use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
+#[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -37,6 +39,9 @@ const MSG_UNINSTALL_KB_HOOK: u32 = 0x0402;
 
 /// 主窗口引用，用于点击检测
 static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
+
+/// 主窗口自身的 HWND（Windows 下初始化时填入，用于 WinEventHook 回调中过滤本窗口）
+static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
 
 /// 窗口是否可见（监控是否激活）
 static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -67,6 +72,10 @@ thread_local! {
 
 /// 初始化，传入主窗口引用
 pub fn init(window: WebviewWindow) {
+    #[cfg(windows)]
+    if let Ok(hwnd) = window.hwnd() {
+        MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+    }
     *MAIN_WINDOW.lock() = Some(window);
 }
 
@@ -162,7 +171,9 @@ pub fn save_foreground_window() {
 #[cfg(not(windows))]
 pub fn save_foreground_window() {}
 
-/// 将焦点还给之前的前台窗口（锁定时粘贴前调用）
+/// 将焦点还给之前的前台窗口（锁定时粘贴前调用）。
+/// PREV_FOREGROUND_HWND 由 WinEventHook 持续更新为最近一次非本窗口的前台 HWND，
+/// 因此无论用户最后点击了哪个控件，Ctrl+V 都会发往正确位置。
 #[cfg(windows)]
 pub fn restore_foreground_window() {
     let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
@@ -186,7 +197,7 @@ pub fn get_cursor_position() -> (f64, f64) {
 
 // ─── Windows 钩子实现 ─────────────────────────────────────────────────────────
 
-/// 钩子线程主函数：安装 WH_MOUSE_LL，运行消息循环，
+/// 钩子线程主函数：安装 WH_MOUSE_LL 和 WinEventHook(FOREGROUND)，运行消息循环，
 /// 并通过自定义消息动态管理 WH_KEYBOARD_LL 生命周期。
 #[cfg(windows)]
 fn run_hook_thread() {
@@ -201,6 +212,25 @@ fn run_hook_thread() {
             error!("WH_MOUSE_LL 钩子安装失败: {:?}", e);
             return;
         }
+    }
+
+    // 安装前台窗口变化钩子，持续追踪最近活跃的非本窗口 HWND
+    // WINEVENT_OUTOFCONTEXT(0) = 进程外钩子，无需注入 DLL，回调在本线程消息循环中触发
+    let focus_hook = unsafe {
+        SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            None,
+            Some(win_event_proc),
+            0, // 监听所有进程
+            0, // 监听所有线程
+            WINEVENT_OUTOFCONTEXT,
+        )
+    };
+    if focus_hook.0.is_null() {
+        warn!("WinEventHook(FOREGROUND) 安装失败，固定模式焦点还原可能不准确");
+    } else {
+        info!("WinEventHook(FOREGROUND) 已安装");
     }
 
     HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
@@ -251,6 +281,9 @@ fn run_hook_thread() {
             }
         });
     }
+    if !focus_hook.0.is_null() {
+        unsafe { let _ = UnhookWinEvent(focus_hook); }
+    }
 
     info!("输入监控线程已退出");
 }
@@ -293,6 +326,31 @@ unsafe extern "system" fn keyboard_hook_proc(
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
+}
+
+/// WinEvent 回调：捕获前台窗口变化，更新 PREV_FOREGROUND_HWND。
+/// 本窗口自身成为前台时忽略（避免覆盖已保存的目标窗口）。
+/// 对于 EVENT_SYSTEM_FOREGROUND，hwnd 参数即为新前台窗口，无需再调 GetForegroundWindow()。
+#[cfg(windows)]
+unsafe extern "system" fn win_event_proc(
+    _hook: HWINEVENTHOOK,
+    _event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _id_event_thread: u32,
+    _dwms_event_time: u32,
+) {
+    if hwnd.0.is_null() {
+        return;
+    }
+    let fg_val = hwnd.0 as isize;
+    // 过滤本窗口，保留用户真正要粘贴到的目标
+    let main_raw = MAIN_HWND.load(Ordering::Relaxed);
+    if main_raw != 0 && fg_val == main_raw {
+        return;
+    }
+    PREV_FOREGROUND_HWND.store(fg_val, Ordering::Relaxed);
 }
 
 // ─── 事件处理 ─────────────────────────────────────────────────────────────────
