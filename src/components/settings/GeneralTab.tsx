@@ -34,6 +34,8 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const setSearchAutoFocus = useUISettings((s) => s.setSearchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const setSearchAutoClear = useUISettings((s) => s.setSearchAutoClear);
+  const keyboardNavigation = useUISettings((s) => s.keyboardNavigation);
+  const setKeyboardNavigation = useUISettings((s) => s.setKeyboardNavigation);
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
@@ -78,8 +80,8 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               </p>
             </div>
             <Switch
-              checked={useUISettings((s) => s.keyboardNavigation)}
-              onCheckedChange={useUISettings((s) => s.setKeyboardNavigation)}
+              checked={keyboardNavigation}
+              onCheckedChange={setKeyboardNavigation}
             />
           </div>
         </div>
