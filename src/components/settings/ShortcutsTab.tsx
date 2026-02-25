@@ -317,9 +317,9 @@ export function ShortcutsTab({
   return (
     <>
       <div className="space-y-4">
-        {/* Custom Shortcut Card */}
+        {/* Shortcut Card */}
         <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">自定义快捷键</h3>
+          <h3 className="text-sm font-medium mb-3">呼出快捷键</h3>
           <p className="text-xs text-muted-foreground mb-4">
             自定义呼出剪贴板的快捷键
           </p>
@@ -329,7 +329,7 @@ export function ShortcutsTab({
               settings.winv_replacement && "opacity-50",
             )}
           >
-            <Label className="text-xs">呼出快捷键</Label>
+            <Label className="text-xs">自定义快捷键</Label>
             <div className="flex gap-2">
               <Input
                 value={settings.shortcut}
@@ -352,18 +352,13 @@ export function ShortcutsTab({
                 : "点击修改按钮自定义快捷键"}
             </p>
           </div>
-        </div>
 
-        {/* Win+V Card */}
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">使用 Win+V</h3>
-          <p className="text-xs text-muted-foreground mb-4">
-            用 Win+V 替代系统剪贴板
-          </p>
+          <div className="border-t my-4" />
+
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="text-xs">启用 Win+V</Label>
+                <Label className="text-xs">使用 Win+V</Label>
                 <p className="text-xs text-muted-foreground">
                   替代系统剪贴板（将禁用自定义快捷键）
                 </p>
@@ -372,7 +367,6 @@ export function ShortcutsTab({
                 checked={settings.winv_replacement}
                 disabled={winvLoading}
                 onCheckedChange={(checked) => {
-                  // Open confirmation dialog
                   setWinvPendingAction(checked ? "enable" : "disable");
                   setWinvConfirmDialogOpen(true);
                 }}
