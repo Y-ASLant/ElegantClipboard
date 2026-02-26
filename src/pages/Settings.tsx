@@ -4,7 +4,6 @@ import {
   Options16Regular,
   Database16Regular,
   LayoutColumnTwo16Regular,
-  Speaker116Regular,
   Color16Regular,
   Keyboard16Regular,
   Info16Regular,
@@ -13,7 +12,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
-import { BehaviorTab } from "@/components/settings/BehaviorTab";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
@@ -32,7 +30,7 @@ import { cn } from "@/lib/utils";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
-type TabType = "general" | "data" | "display" | "behavior" | "theme" | "shortcuts" | "about";
+type TabType = "general" | "display" | "theme" | "data" | "shortcuts" | "about";
 
 const navItems: {
   id: TabType;
@@ -40,12 +38,11 @@ const navItems: {
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
   { id: "general", label: "常规设置", icon: Options16Regular },
-  { id: "data", label: "数据管理", icon: Database16Regular },
   { id: "display", label: "显示设置", icon: LayoutColumnTwo16Regular },
-  { id: "behavior", label: "操作反馈", icon: Speaker116Regular },
   { id: "theme", label: "外观主题", icon: Color16Regular },
+  { id: "data", label: "数据管理", icon: Database16Regular },
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
-  { id: "about", label: "关于", icon: Info16Regular },
+  { id: "about", label: "关于软件", icon: Info16Regular },
 ];
 
 export function Settings() {
@@ -302,8 +299,6 @@ export function Settings() {
               )}
 
               {activeTab === "display" && <DisplayTab />}
-
-              {activeTab === "behavior" && <BehaviorTab />}
 
               {activeTab === "theme" && <ThemeTab />}
 

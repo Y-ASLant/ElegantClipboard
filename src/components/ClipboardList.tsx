@@ -296,14 +296,17 @@ export function ClipboardList() {
   }, [handleNavKey]);
 
   // 路径 2：Tauri 事件（低级键盘钩子转发，窗口无需聚焦）
+  // 窗口聚焦时 DOM keydown 已处理，跳过钩子事件避免重复触发
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     listen<{ key: string; shift: boolean }>("keyboard-nav", (event) => {
+      if (document.hasFocus()) return;
       handleNavKey(event.payload.key, event.payload.shift);
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn(); else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [handleNavKey]);
 
   // 拖拽时添加全局光标样式
