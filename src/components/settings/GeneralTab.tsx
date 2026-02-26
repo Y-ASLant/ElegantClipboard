@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { logError } from "@/lib/logger";
 import { useUISettings } from "@/stores/ui-settings";
 
 export interface GeneralSettings {
@@ -34,93 +35,49 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const setSearchAutoFocus = useUISettings((s) => s.setSearchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const setSearchAutoClear = useUISettings((s) => s.setSearchAutoClear);
+  const keyboardNavigation = useUISettings((s) => s.keyboardNavigation);
+  const setKeyboardNavigation = useUISettings((s) => s.setKeyboardNavigation);
+  const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
+  const setShowCategoryFilter = useUISettings((s) => s.setShowCategoryFilter);
+  const {
+    copySound, setCopySound,
+    pasteSound, setPasteSound,
+    pasteCloseWindow, setPasteCloseWindow,
+  } = useUISettings();
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
   const [pendingLogToFile, setPendingLogToFile] = useState<boolean | null>(null);
+  const [persistWindowSize, setPersistWindowSize] = useState(true);
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "persist_window_size" })
+      .then((v) => setPersistWindowSize(v !== "false"))
+      .catch(() => {});
+  }, []);
+
+  const togglePersistWindowSize = async (enabled: boolean) => {
+    setPersistWindowSize(enabled);
+    try {
+      await invoke("set_setting", { key: "persist_window_size", value: String(enabled) });
+      // 关闭时清除已保存的尺寸
+      if (!enabled) {
+        await invoke("set_setting", { key: "window_width", value: "" });
+        await invoke("set_setting", { key: "window_height", value: "" });
+      }
+    } catch (error) {
+      logError("Failed to save persist_window_size:", error);
+    }
+  };
 
   return (
     <>
       <div className="space-y-4">
-        {/* Window Card */}
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">窗口</h3>
-          <p className="text-xs text-muted-foreground mb-4">配置窗口显示行为</p>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">跟随鼠标</Label>
-              <p className="text-xs text-muted-foreground">
-                窗口显示在鼠标位置附近
-              </p>
-            </div>
-            <Switch
-              checked={settings.follow_cursor}
-              onCheckedChange={(checked) => onSettingsChange({ ...settings, follow_cursor: checked })}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">自动重置状态</Label>
-              <p className="text-xs text-muted-foreground">
-                关闭窗口时重置搜索、分组筛选和滚动位置
-              </p>
-            </div>
-            <Switch
-              checked={autoResetState}
-              onCheckedChange={setAutoResetState}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">键盘导航</Label>
-              <p className="text-xs text-muted-foreground">
-                方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除、ESC 隐藏窗口
-              </p>
-            </div>
-            <Switch
-              checked={useUISettings((s) => s.keyboardNavigation)}
-              onCheckedChange={useUISettings((s) => s.setKeyboardNavigation)}
-            />
-          </div>
-        </div>
-
-        {/* Search Bar Card */}
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">搜索栏</h3>
-          <p className="text-xs text-muted-foreground mb-4">配置激活窗口时的搜索栏行为</p>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-xs">默认聚焦</Label>
-                <p className="text-xs text-muted-foreground">
-                  激活窗口时，默认聚焦搜索框
-                </p>
-              </div>
-              <Switch
-                checked={searchAutoFocus}
-                onCheckedChange={setSearchAutoFocus}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-xs">自动清除</Label>
-                <p className="text-xs text-muted-foreground">
-                  激活窗口时，仅清空搜索框文字
-                </p>
-              </div>
-              <Switch
-                checked={searchAutoClear}
-                onCheckedChange={setSearchAutoClear}
-              />
-            </div>
-          </div>
-        </div>
-
         {/* Startup Card */}
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium mb-3">启动</h3>
           <p className="text-xs text-muted-foreground mb-4">配置应用启动行为</p>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label className="text-xs">开机自启动</Label>
@@ -157,11 +114,152 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             </div>
           </div>
         </div>
+
+        {/* Window Behavior Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">窗口</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置窗口显示行为</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">跟随鼠标</Label>
+                <p className="text-xs text-muted-foreground">
+                  窗口显示在鼠标位置附近
+                </p>
+              </div>
+              <Switch
+                checked={settings.follow_cursor}
+                onCheckedChange={(checked) => onSettingsChange({ ...settings, follow_cursor: checked })}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">记住窗口大小</Label>
+                <p className="text-xs text-muted-foreground">
+                  启用后，手动拖拽调整的窗口大小将被保留
+                </p>
+              </div>
+              <Switch checked={persistWindowSize} onCheckedChange={togglePersistWindowSize} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">自动重置状态</Label>
+                <p className="text-xs text-muted-foreground">
+                  关闭窗口时重置搜索、分组筛选和滚动位置
+                </p>
+              </div>
+              <Switch
+                checked={autoResetState}
+                onCheckedChange={setAutoResetState}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">底部分类栏</Label>
+                <p className="text-xs text-muted-foreground">
+                  显示底部内容类型分类筛选栏
+                </p>
+              </div>
+              <Switch
+                checked={showCategoryFilter}
+                onCheckedChange={setShowCategoryFilter}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Search Bar Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">搜索栏</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置激活窗口时的搜索栏行为</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">默认聚焦</Label>
+                <p className="text-xs text-muted-foreground">
+                  激活窗口时，默认聚焦搜索框
+                </p>
+              </div>
+              <Switch
+                checked={searchAutoFocus}
+                onCheckedChange={setSearchAutoFocus}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">自动清除</Label>
+                <p className="text-xs text-muted-foreground">
+                  激活窗口时，仅清空搜索框文字
+                </p>
+              </div>
+              <Switch
+                checked={searchAutoClear}
+                onCheckedChange={setSearchAutoClear}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Operation Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">操作</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置交互与操作行为</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">键盘导航</Label>
+                <p className="text-xs text-muted-foreground">
+                  方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除
+                </p>
+              </div>
+              <Switch
+                checked={keyboardNavigation}
+                onCheckedChange={setKeyboardNavigation}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">粘贴后关闭窗口</Label>
+                <p className="text-xs text-muted-foreground">
+                  非锁定模式下，粘贴后自动关闭窗口
+                </p>
+              </div>
+              <Switch checked={pasteCloseWindow} onCheckedChange={setPasteCloseWindow} />
+            </div>
+          </div>
+        </div>
+
+        {/* Sound Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">提示音</h3>
+          <p className="text-xs text-muted-foreground mb-4">操作时播放简短的反馈音效</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">复制提示音</Label>
+                <p className="text-xs text-muted-foreground">
+                  监听到新内容复制时播放提示音
+                </p>
+              </div>
+              <Switch checked={copySound} onCheckedChange={setCopySound} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">粘贴提示音</Label>
+                <p className="text-xs text-muted-foreground">
+                  点击卡片粘贴时播放提示音
+                </p>
+              </div>
+              <Switch checked={pasteSound} onCheckedChange={setPasteSound} />
+            </div>
+          </div>
+        </div>
+
         {/* Log Card */}
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium mb-3">日志</h3>
           <p className="text-xs text-muted-foreground mb-4">调试与故障排查</p>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label className="text-xs">保存日志到文件</Label>

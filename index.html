@@ -16,8 +16,9 @@
         if (t && t !== 'default' && t !== 'system') {
           document.documentElement.classList.add('theme-' + t);
         }
-        // Dark mode
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        // Dark mode: respect user's explicit setting (dark/light/auto)
+        var dm = s && s.state && s.state.darkMode;
+        if (dm === 'dark' || (dm !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }
       } catch (e) {}

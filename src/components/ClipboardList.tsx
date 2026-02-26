@@ -5,6 +5,7 @@ import {
   Search16Regular,
   ArrowUp16Regular,
 } from "@fluentui/react-icons";
+import { listen } from "@tauri-apps/api/event";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useShallow } from "zustand/react/shallow";
@@ -209,14 +210,14 @@ export function ClipboardList() {
     }
   }, [_resetToken, scrollToTop]);
 
-  // 键盘导航：前端 keydown 事件（只在本窗口聚焦时触发，不影响其它软件）
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+  // 键盘导航：共用处理函数（DOM keydown 与 Tauri 低级钩子事件均调用此函数）
+  const handleNavKey = useCallback(
+    (key: string, shift: boolean) => {
       if (!useUISettings.getState().keyboardNavigation) return;
 
-      switch (e.key) {
+      switch (key) {
         case "ArrowLeft": {
-          e.preventDefault();
+          if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
@@ -224,7 +225,7 @@ export function ClipboardList() {
           break;
         }
         case "ArrowRight": {
-          e.preventDefault();
+          if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
@@ -234,7 +235,6 @@ export function ClipboardList() {
         case "ArrowUp": {
           const { items: upItems, activeIndex: cur } = useClipboardStore.getState();
           if (upItems.length === 0) return;
-          e.preventDefault();
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           let next = cur;
           if (cur > 0) next = cur - 1;
@@ -248,7 +248,6 @@ export function ClipboardList() {
         case "ArrowDown": {
           const { items: downItems, activeIndex: cur } = useClipboardStore.getState();
           if (downItems.length === 0) return;
-          e.preventDefault();
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           if (cur < downItems.length - 1) {
             const next = cur + 1;
@@ -260,9 +259,8 @@ export function ClipboardList() {
         case "Enter": {
           const { activeIndex: idx, items: list } = useClipboardStore.getState();
           if (idx < 0 || idx >= list.length) return;
-          e.preventDefault();
           const item = list[idx];
-          if (e.shiftKey) {
+          if (shift) {
             pasteAsPlainText(item.id);
           } else {
             pasteContent(item.id);
@@ -270,12 +268,8 @@ export function ClipboardList() {
           break;
         }
         case "Delete": {
-          // 在输入框内不拦截 Delete
-          const target = e.target as HTMLElement;
-          if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
           const { activeIndex: idx, items: list } = useClipboardStore.getState();
           if (idx < 0 || idx >= list.length) return;
-          e.preventDefault();
           deleteItem(list[idx].id);
           if (idx >= list.length - 1) {
             setActiveIndex(Math.max(0, list.length - 2));
@@ -283,11 +277,37 @@ export function ClipboardList() {
           break;
         }
       }
-    };
+    },
+    [setActiveIndex, pasteContent, pasteAsPlainText, deleteItem],
+  );
 
+  // 路径 1：DOM keydown（窗口自身聚焦时，如搜索框）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (e.key === "Delete" && (tag === "INPUT" || tag === "TEXTAREA")) return;
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", "Delete"].includes(e.key)) {
+        e.preventDefault();
+        handleNavKey(e.key, e.shiftKey);
+      }
+    };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [setActiveIndex, pasteContent, pasteAsPlainText, deleteItem]);
+  }, [handleNavKey]);
+
+  // 路径 2：Tauri 事件（低级键盘钩子转发，窗口无需聚焦）
+  // 窗口聚焦时 DOM keydown 已处理，跳过钩子事件避免重复触发
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    listen<{ key: string; shift: boolean }>("keyboard-nav", (event) => {
+      if (document.hasFocus()) return;
+      handleNavKey(event.payload.key, event.payload.shift);
+    }).then((fn) => {
+      if (disposed) fn(); else unlisten = fn;
+    });
+    return () => { disposed = true; unlisten?.(); };
+  }, [handleNavKey]);
 
   // 拖拽时添加全局光标样式
   useEffect(() => {

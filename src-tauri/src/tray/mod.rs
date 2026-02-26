@@ -54,7 +54,6 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         // 若窗口刚被 handle_click_outside 隐藏（<300ms），
                         // 说明本次托盘点击的意图是隐藏，不应再显示
                         let _ = window.show();
-                        let _ = window.set_focus();
                         crate::input_monitor::enable_mouse_monitoring();
                         crate::keyboard_hook::set_window_state(
                             crate::keyboard_hook::WindowState::Visible,

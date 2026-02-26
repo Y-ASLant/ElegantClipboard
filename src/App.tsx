@@ -8,7 +8,6 @@ import {
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import debounce from "lodash.debounce";
 import { ClipboardList } from "@/components/ClipboardList";
 import { Button } from "@/components/ui/button";
@@ -26,6 +25,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useInputFocus, focusWindowImmediately } from "@/hooks/useInputFocus";
 import { GROUPS } from "@/lib/constants";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
@@ -57,7 +57,8 @@ function App() {
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const cardDensity = useUISettings((s) => s.cardDensity);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
+  const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -90,14 +91,23 @@ function App() {
     return () => ro.disconnect();
   }, [updateIndicator]);
 
+  // 隐藏分类栏时重置分组筛选，避免被隐藏的控件继续过滤内容
+  useEffect(() => {
+    if (!showCategoryFilter && selectedGroup) {
+      setSelectedGroup(null);
+    }
+  }, [showCategoryFilter]);
+
   // 应用卡片密度到根元素
   useEffect(() => {
     document.documentElement.dataset.density = cardDensity;
   }, [cardDensity]);
 
-  // 加载锁定状态
+  // 加载锁定状态 & 同步键盘导航设置到后端
   useEffect(() => {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
+    const kbNav = useUISettings.getState().keyboardNavigation;
+    invoke("set_keyboard_nav_enabled", { enabled: kbNav }).catch(() => {});
   }, []);
 
   // 窗口出现时短暂抑制工具栏提示，防止闪烁
@@ -126,7 +136,9 @@ function App() {
       }
       clipboardDirtyRef.current = false;
       if (searchAutoFocus) {
-        inputRef.current?.focus();
+        focusWindowImmediately().then(() => {
+          inputRef.current?.focus();
+        });
       }
       setSuppressTooltips(true);
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
@@ -150,43 +162,6 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, [resetView, autoResetState]);
-
-  // 根据输入框焦点切换窗口可聚焦状态
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    let blurTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const handleFocus = async () => {
-      // 取消待处理的失焦，防止快速切换闪烁
-      if (blurTimeoutId) {
-        clearTimeout(blurTimeoutId);
-        blurTimeoutId = null;
-      }
-      await appWindow.setFocusable(true);
-      await appWindow.setFocus();
-    };
-
-    const handleBlur = async () => {
-      // 延迟处理，允许窗口内交互（滚动条、卡片等）
-      blurTimeoutId = setTimeout(async () => {
-        if (document.activeElement === document.body || !document.hasFocus()) {
-          await appWindow.setFocusable(false);
-        }
-        blurTimeoutId = null;
-      }, 100);
-    };
-
-    const input = inputRef.current;
-    if (input) {
-      input.addEventListener("focus", handleFocus);
-      input.addEventListener("blur", handleBlur);
-      return () => {
-        input.removeEventListener("focus", handleFocus);
-        input.removeEventListener("blur", handleBlur);
-        if (blurTimeoutId) clearTimeout(blurTimeoutId);
-      };
-    }
-  }, []);
 
   // ESC 键处理：后端钩子 + DOM 监听双通道
   const handleEscape = useCallback(async () => {
@@ -335,34 +310,36 @@ function App() {
       </div>
 
       {/* 底部分组选择 */}
-      <div className="shrink-0 px-2 pb-2 pt-1 select-none">
-        <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
-          {/* 滑动指示器 */}
-          <div
-            className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
-            style={{
-              transform: `translateX(${segmentIndicator.left}px)`,
-              width: segmentIndicator.width,
-              opacity: segmentIndicator.width > 0 ? 1 : 0,
-            }}
-          />
-          {GROUPS.map((g, i) => (
-            <button
-              key={g.label}
-              ref={(el) => { segmentRefs.current[i] = el; }}
-              onClick={() => setSelectedGroup(g.value)}
-              className={cn(
-                "relative z-[1] flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
-                selectedGroup === g.value
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {g.label}
-            </button>
-          ))}
+      {showCategoryFilter && (
+        <div className="shrink-0 px-2 pb-2 pt-1 select-none">
+          <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
+            {/* 滑动指示器 */}
+            <div
+              className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
+              style={{
+                transform: `translateX(${segmentIndicator.left}px)`,
+                width: segmentIndicator.width,
+                opacity: segmentIndicator.width > 0 ? 1 : 0,
+              }}
+            />
+            {GROUPS.map((g, i) => (
+              <button
+                key={g.label}
+                ref={(el) => { segmentRefs.current[i] = el; }}
+                onClick={() => setSelectedGroup(g.value)}
+                className={cn(
+                  "relative z-[1] flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
+                  selectedGroup === g.value
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 清空历史确认对话框 */}
       <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>

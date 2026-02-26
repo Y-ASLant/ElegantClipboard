@@ -12,32 +12,53 @@ pub struct AppState {
     pub monitor: ClipboardMonitor,
 }
 
-// ============ 公用辅助函数 ============
-
 /// 隐藏主窗口或还原目标窗口焦点（用于粘贴前确保目标应用在前台）。
-/// - 非固定：隐藏主窗口，系统自动还原焦点给目标应用。
-/// - 固定（锁定）：窗口保持可见，但将焦点还给之前的前台窗口。
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
     use tauri::{Emitter, Manager};
 
     if !crate::input_monitor::is_window_pinned() {
         if let Some(window) = app.get_webview_window("main") {
+            // 窗口已隐藏时无需操作（快捷粘贴 Alt+N 不经过 UI，窗口本就不可见）
+            if !window.is_visible().unwrap_or(false) {
+                return;
+            }
             crate::save_window_size_if_enabled(app, &window);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             crate::input_monitor::disable_mouse_monitoring();
             let _ = window.emit("window-hidden", ());
         }
-        // 隐藏图片预览窗口（主窗口消失时无法触发 onMouseLeave）
         hide_image_preview_window(app);
-    } else {
-        // 锁定模式：还原焦点给目标应用，使 simulate_paste 的 Ctrl+V 发到正确窗口
-        crate::input_monitor::restore_foreground_window();
+
+        // 多屏/高 DPI 下隐藏窗口后系统可能不自动还原前台窗口，导致 Ctrl+V 无接收者。
+        // 仅在目标窗口不是当前前台窗口时才调用 SetForegroundWindow，
+        // 避免冗余 WM_ACTIVATE 导致某些应用重置内部焦点/光标位置。
+        #[cfg(target_os = "windows")]
+        {
+            let prev = crate::input_monitor::get_prev_foreground_hwnd();
+            if prev != 0 {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    GetForegroundWindow, SetForegroundWindow, IsWindow,
+                };
+                use windows::Win32::Foundation::HWND;
+                let hwnd = HWND(prev as *mut _);
+                let current_fg = unsafe { GetForegroundWindow() };
+                if current_fg.0 as isize == prev {
+                    tracing::info!("hide: 目标窗口已是前台，跳过 SetForegroundWindow");
+                } else if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+                    let _ = unsafe { SetForegroundWindow(hwnd) };
+                    tracing::info!("hide: 已恢复前台窗口 hwnd={:#x}", prev);
+                } else {
+                    tracing::warn!("hide: prev_hwnd={:#x} 已无效", prev);
+                }
+            } else {
+                tracing::warn!("hide: PREV_FOREGROUND_HWND 为 0，无法恢复前台窗口");
+            }
+        }
     }
 }
 
 /// 隐藏图片预览窗口（若存在）。
-/// 主窗口隐藏时调用，防止预览残留（onMouseLeave 不会触发）。
 pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::{Emitter, Manager};
 

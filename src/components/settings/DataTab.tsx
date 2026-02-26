@@ -202,11 +202,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     if (!pendingPath) return;
     
     try {
-      // 如果目标已有数据（选择保留新位置数据），清理旧位置的数据
-      if (destHasData) {
-        await invoke("cleanup_data_at_path", { path: settings.data_path });
-      }
-      // Set the new path without migrating
+      // 不删除旧位置数据：当前数据库连接未关闭，强制删除会触发 OS error 32。
+      // 旧数据留在磁盘上无害，用户可手动清理。
       await invoke("set_data_path", { path: pendingPath });
       onSettingsChange({ ...settings, data_path: pendingPath });
       setMigrationDialogOpen(false);

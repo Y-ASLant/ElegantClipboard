@@ -46,6 +46,7 @@ tokio = { version = "1", features = ["rt", "time"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-appender = "0.2"
+chrono = "0.4"
 
 # Hashing (fast)
 blake3 = "1"
@@ -73,6 +74,8 @@ clipboard-rs = "0.2"
 
 # Keyboard simulation for paste
 enigo = "0.6"
+# WebView2 version detection
+wry = "0.54"
 
 # Windows API for low-level keyboard hook and admin check
 [target.'cfg(windows)'.dependencies]
@@ -80,6 +83,7 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Accessibility",
     "Win32_Security",
     "Win32_System_Threading",
     "Win32_UI_Shell",
@@ -87,6 +91,7 @@ windows = { version = "0.61", features = [
     "Win32_System_DataExchange",
     "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
+    "Win32_UI_HiDpi",
 ] }
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"

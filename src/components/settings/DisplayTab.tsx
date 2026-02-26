@@ -1,9 +1,6 @@
-import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { logError } from "@/lib/logger";
 import {
   useUISettings,
   type CardDensity,
@@ -33,45 +30,6 @@ const timeFormatOptions: { value: TimeFormat; label: string }[] = [
   { value: "relative", label: "相对时间" },
 ];
 
-function WindowSizeCard() {
-  const [persist, setPersist] = useState(true);
-
-  useEffect(() => {
-    invoke<string | null>("get_setting", { key: "persist_window_size" })
-      .then((v) => setPersist(v !== "false"))
-      .catch(() => {});
-  }, []);
-
-  const toggle = async (enabled: boolean) => {
-    setPersist(enabled);
-    try {
-      await invoke("set_setting", { key: "persist_window_size", value: String(enabled) });
-      // 关闭时清除已保存的尺寸
-      if (!enabled) {
-        await invoke("set_setting", { key: "window_width", value: "" });
-        await invoke("set_setting", { key: "window_height", value: "" });
-      }
-    } catch (error) {
-      logError("Failed to save persist_window_size:", error);
-    }
-  };
-
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <h3 className="text-sm font-medium mb-3">窗口尺寸</h3>
-      <div className="flex items-center justify-between">
-        <div className="space-y-0.5">
-          <Label className="text-xs">记住窗口大小</Label>
-          <p className="text-xs text-muted-foreground">
-            启用后，手动拖拽调整的窗口大小将被保留
-          </p>
-        </div>
-        <Switch checked={persist} onCheckedChange={toggle} />
-      </div>
-    </div>
-  );
-}
-
 export function DisplayTab() {
   const {
     cardMaxLines, setCardMaxLines,
@@ -92,9 +50,6 @@ export function DisplayTab() {
 
   return (
     <div className="space-y-4">
-      {/* Window Size Card */}
-      <WindowSizeCard />
-
       {/* Content Preview Card */}
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-medium mb-3">内容预览</h3>

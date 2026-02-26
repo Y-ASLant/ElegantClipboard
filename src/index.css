@@ -46,9 +46,9 @@
 .dark {
     --color-background: hsl(222.2 84% 4.9%);
     --color-foreground: hsl(210 40% 98%);
-    --color-card: hsl(222.2 84% 4.9%);
+    --color-card: hsl(224 71% 8%);
     --color-card-foreground: hsl(210 40% 98%);
-    --color-popover: hsl(222.2 84% 4.9%);
+    --color-popover: hsl(224 71% 8%);
     --color-popover-foreground: hsl(210 40% 98%);
     --color-primary: hsl(210 40% 98%);
     --color-primary-foreground: hsl(222.2 47.4% 11.2%);

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -33,6 +34,7 @@ interface UISettings {
   copySound: boolean;
   pasteSound: boolean;
   pasteCloseWindow: boolean;
+  showCategoryFilter: boolean;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -57,6 +59,7 @@ interface UISettings {
   setCopySound: (enabled: boolean) => void;
   setPasteSound: (enabled: boolean) => void;
   setPasteCloseWindow: (enabled: boolean) => void;
+  setShowCategoryFilter: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -84,7 +87,7 @@ export const useUISettings = create<UISettings>()(
       colorTheme: "system" as ColorTheme,
       sharpCorners: false,
       autoResetState: true,
-      keyboardNavigation: true,
+      keyboardNavigation: false,
       searchAutoFocus: true,
       searchAutoClear: true,
       darkMode: "auto" as DarkMode,
@@ -94,6 +97,7 @@ export const useUISettings = create<UISettings>()(
       copySound: false,
       pasteSound: false,
       pasteCloseWindow: true,
+      showCategoryFilter: true,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -153,6 +157,7 @@ export const useUISettings = create<UISettings>()(
       setKeyboardNavigation: (enabled) => {
         set({ keyboardNavigation: enabled });
         broadcastChange({ keyboardNavigation: enabled });
+        invoke("set_keyboard_nav_enabled", { enabled }).catch(() => {});
       },
       setSearchAutoFocus: (enabled) => {
         set({ searchAutoFocus: enabled });
@@ -189,6 +194,10 @@ export const useUISettings = create<UISettings>()(
       setPasteCloseWindow: (enabled) => {
         set({ pasteCloseWindow: enabled });
         broadcastChange({ pasteCloseWindow: enabled });
+      },
+      setShowCategoryFilter: (enabled) => {
+        set({ showCategoryFilter: enabled });
+        broadcastChange({ showCategoryFilter: enabled });
       },
     }),
     {

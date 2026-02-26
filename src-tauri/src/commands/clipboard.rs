@@ -1,13 +1,11 @@
 use crate::database::{ClipboardItem, ClipboardRepository};
 use std::sync::Arc;
 use tauri::State;
-use tracing::debug;
+use tracing::{debug, info};
 
 use super::{hide_main_window_if_not_pinned, with_paused_monitor, AppState};
 
-// ============ 辅助函数 ============
-
-/// 将 ClipboardItem 内容写入系统剪贴板（复制与粘贴的公共逻辑）
+/// 将 ClipboardItem 内容写入系统剪贴板
 pub(super) fn set_clipboard_content(
     item: &ClipboardItem,
     clipboard: &mut arboard::Clipboard,
@@ -75,21 +73,16 @@ fn set_clipboard_files(paths: &[String]) -> Result<(), String> {
 fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String {
     let keyword_lower = keyword.to_lowercase();
 
-    // 快速路径：全文小写后字节级搜索
     let text_lower = text.to_lowercase();
     let keyword_char_pos = if let Some(byte_pos) = text_lower.find(&keyword_lower) {
-        // 将字节位置转为字符索引
         let char_idx_in_lower = text_lower[..byte_pos].chars().count();
-        // 验证：CJK/ASCII 始终成立，稀有 Unicode 大小写映射时可能失败
         let mut ci = text.char_indices().skip(char_idx_in_lower);
         let valid = if let Some((bs, _)) = ci.next() {
-            // 向前推进 keyword 字符数以获得末尾字节偏移
             let kw_char_len = keyword_lower.chars().count();
             let be = ci
                 .nth(kw_char_len.saturating_sub(1))
                 .map(|(b, _)| b)
                 .unwrap_or(text.len());
-            // 低成本验证：该位置切片小写化应与关键词一致
             text.get(bs..be)
                 .map(|s| s.to_lowercase() == keyword_lower)
                 .unwrap_or(false)
@@ -99,7 +92,6 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
         if valid {
             Some(char_idx_in_lower)
         } else {
-            // 回退：滑动窗口（稀少路径）
             find_keyword_char_pos_slow(text, &keyword_lower)
         }
     } else {
@@ -110,7 +102,6 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
     let keyword_char_pos = match keyword_char_pos {
         Some(pos) => pos,
         None => {
-            // 关键词不在文本中（由文件路径匹配），返回原始预览截断
             return text.chars().take(max_len).collect();
         }
     };
@@ -196,13 +187,12 @@ fn fill_files_valid(items: &mut [ClipboardItem]) {
 }
 
 /// 使用 Windows SendInput API 模拟 Ctrl+V 粘贴。
-/// 若用户仍按住 Alt（如 Alt+1 快速粘贴），则先释放再发送 Ctrl+V，
-/// 完成后重新按下 Alt，支持连续按数字键多次粘贴。
+/// 先释放用户可能按住的所有修饰键（Alt/Shift/Win），再发送纯净的 Ctrl+V。
 #[cfg(target_os = "windows")]
 pub fn simulate_paste() -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT,
-        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_MENU, VK_SHIFT, VK_CONTROL, VK_V,
+        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
     };
 
     fn is_key_pressed(vk: u16) -> bool {
@@ -226,44 +216,38 @@ pub fn simulate_paste() -> Result<(), String> {
     }
 
     /// 若用户正按住修饰键则释放，最多重试 20 次（间隔 5ms）。
-    fn release_if_held(vk: u16) -> bool {
-        if !is_key_pressed(vk) {
-            return false;
-        }
+    fn release_if_held(vk: u16) {
         for _ in 0..20 {
             if !is_key_pressed(vk) {
-                break;
+                return;
             }
-            send_key(vk, true); // key-up
+            send_key(vk, true);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        true
     }
 
-    // --- 1. 释放用户可能仍按住的修饰键（Alt/Shift 须在 Ctrl+V 前释放）
-    let user_alt = release_if_held(VK_MENU.0);
-    let user_shift = release_if_held(VK_SHIFT.0);
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+        let fg = unsafe { GetForegroundWindow() };
+        let mut buf = [0u16; 256];
+        let len = unsafe { GetWindowTextW(fg, &mut buf) } as usize;
+        let title = String::from_utf16_lossy(&buf[..len]);
+        info!("simulate_paste: foreground hwnd={:?} title=\"{}\"", fg.0, title);
+    }
 
-    // --- 2. 发送 Ctrl+V
+    release_if_held(VK_MENU.0);
+    release_if_held(VK_SHIFT.0);
+    release_if_held(VK_LWIN.0);
+    release_if_held(VK_RWIN.0);
+
     let user_ctrl = is_key_pressed(VK_CONTROL.0);
     if !user_ctrl {
-        send_key(VK_CONTROL.0, false); // Ctrl down
-    }
-    send_key(VK_V.0, false); // V down
-    std::thread::sleep(std::time::Duration::from_millis(8));
-    send_key(VK_V.0, true);  // V up
-    if !user_ctrl {
-        send_key(VK_CONTROL.0, true); // Ctrl up
-    }
-
-    // --- 3. 重新按下修饰键，支持连续快捷键操作
-    if user_shift {
-        send_key(VK_SHIFT.0, false); // Shift down
-    }
-    if user_alt {
-        send_key(VK_MENU.0, false); // Alt down
-        // 短按 Ctrl 以重置内部修饰键状态
         send_key(VK_CONTROL.0, false);
+    }
+    send_key(VK_V.0, false);
+    std::thread::sleep(std::time::Duration::from_millis(8));
+    send_key(VK_V.0, true);
+    if !user_ctrl {
         send_key(VK_CONTROL.0, true);
     }
 
@@ -277,7 +261,6 @@ pub fn simulate_paste() -> Result<(), String> {
     let mut enigo = Enigo::new(&Settings::default())
         .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
 
-    // 释放用户可能仍按住的修饰键
     for m in [Key::Alt, Key::Shift, Key::Meta, Key::Control] {
         let _ = enigo.key(m, Direction::Release);
     }
@@ -314,8 +297,6 @@ pub fn simulate_paste() -> Result<(), String> {
     Ok(())
 }
 
-// ============ 剪贴板 CRUD 命令 ============
-
 /// 获取剪贴板条目（支持可选过滤）
 #[tauri::command]
 pub async fn get_clipboard_items(
@@ -341,12 +322,10 @@ pub async fn get_clipboard_items(
         offset,
     };
     let mut items = repo.list(options).map_err(|e| e.to_string())?;
-    // 搜索时：用关键词上下文片段替换 preview，并清除 text_content 以减少 IPC 传输
     if let Some(ref keyword) = search_keyword {
         let keyword_lower = keyword.to_lowercase();
         for item in &mut items {
             if let Some(ref text) = item.text_content {
-                // 仅当原始预览中不含关键词时才替换
                 let preview_has_match = item
                     .preview
                     .as_ref()
@@ -356,11 +335,9 @@ pub async fn get_clipboard_items(
                     item.preview = Some(extract_keyword_context(text, keyword, 200));
                 }
             }
-            // 提取上下文后清除大字段
             item.text_content = None;
         }
     }
-    // 搜索时跳过耗时的文件存在性检查（仅在非搜索浏览时需要）
     if !is_searching {
         fill_files_valid(&mut items);
     }
@@ -459,8 +436,6 @@ pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, Strin
     Ok(deleted)
 }
 
-// ============ 编辑命令 ============
-
 /// 更新剪贴板条目的文本内容，内容为空时删除并返回 true
 #[tauri::command]
 pub async fn update_text_content(
@@ -480,8 +455,6 @@ pub async fn update_text_content(
         Ok(false)
     }
 }
-
-// ============ 复制与粘贴命令 ============
 
 /// 将条目复制到系统剪贴板
 #[tauri::command]
@@ -557,8 +530,6 @@ pub async fn paste_text_direct(
 }
 
 /// 粘贴快速槽位（1-9）对应条目到活动窗口。
-/// 排序与默认列表一致（置顶优先 → sort_order 降序 → 时间降序）。
-/// 使用 get_by_position 获取完整内容（list() 会将 text_content 置 NULL）。
 pub fn quick_paste_by_slot(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
@@ -579,53 +550,54 @@ pub fn quick_paste_by_slot(
     Ok(())
 }
 
-/// 公共粘贴执行：写入系统剪贴板 → 隐藏窗口（非固定）→ 模拟 Ctrl+V
+/// 公共粘贴执行：写剪贴板 → 隐藏窗口 → 模拟 Ctrl+V
 fn paste_item_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     item: &ClipboardItem,
     close_window: bool,
 ) -> Result<(), String> {
+    info!("paste_item: id={}, close_window={}", item.id, close_window);
     with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
         set_clipboard_content(item, &mut clipboard)?;
+        debug!("paste_item: clipboard set ok");
 
         if close_window {
             hide_main_window_if_not_pinned(app);
-        } else {
-            // 不关闭窗口时仍需还原焦点，否则 Ctrl+V 发到自己的 webview
-            crate::input_monitor::restore_foreground_window();
         }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
+        debug!("paste_item: simulate_paste ok");
         Ok(())
     })
 }
 
-/// 公共纯文本粘贴：写入剪贴板 → 隐藏窗口 → 模拟 Ctrl+V
+/// 纯文本粘贴：写剪贴板 → 隐藏窗口 → 模拟 Ctrl+V
 fn paste_plain_text_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     text: &str,
     close_window: bool,
 ) -> Result<(), String> {
+    info!("paste_plain_text: len={}, close_window={}", text.len(), close_window);
     with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
         clipboard
             .set_text(text)
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+        debug!("paste_plain_text: clipboard set ok");
 
         if close_window {
             hide_main_window_if_not_pinned(app);
-        } else {
-            crate::input_monitor::restore_foreground_window();
         }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
+        debug!("paste_plain_text: simulate_paste ok");
         Ok(())
     })
 }
