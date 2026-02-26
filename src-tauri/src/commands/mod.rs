@@ -30,10 +30,8 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
         }
         // 隐藏图片预览窗口（主窗口消失时无法触发 onMouseLeave）
         hide_image_preview_window(app);
-    } else {
-        // 锁定模式：还原焦点给目标应用，使 simulate_paste 的 Ctrl+V 发到正确窗口
-        crate::input_monitor::restore_foreground_window();
     }
+    // 非聚焦窗口不会抢夺焦点，目标应用始终保持前台，无需额外还原
 }
 
 /// 隐藏图片预览窗口（若存在）。

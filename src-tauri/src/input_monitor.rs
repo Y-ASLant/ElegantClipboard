@@ -49,7 +49,7 @@ static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 /// 窗口是否固定（固定时不因外部点击隐藏）
 static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 
-/// 显示主窗口前的前台窗口句柄（用于锁定时粘贴回目标应用）
+/// 搜索框聚焦前保存的前台窗口句柄（用于搜索框失焦后还原）
 static PREV_FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
 
 /// 监控线程是否正在运行
@@ -161,21 +161,35 @@ pub fn is_window_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
-/// 保存当前前台窗口句柄（在显示主窗口前调用）
+/// 保存当前前台窗口句柄（搜索框聚焦前 / 窗口显示前调用）
 #[cfg(windows)]
-pub fn save_foreground_window() {
+pub fn save_current_focus() {
     let hwnd = unsafe { GetForegroundWindow() };
-    PREV_FOREGROUND_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+    let val = hwnd.0 as isize;
+    // 过滤本窗口
+    let main_raw = MAIN_HWND.load(Ordering::Relaxed);
+    if main_raw != 0 && val == main_raw {
+        return;
+    }
+    PREV_FOREGROUND_HWND.store(val, Ordering::Relaxed);
 }
 
 #[cfg(not(windows))]
-pub fn save_foreground_window() {}
+pub fn save_current_focus() {}
 
-/// 将焦点还给之前的前台窗口（锁定时粘贴前调用）。
-/// PREV_FOREGROUND_HWND 由 WinEventHook 持续更新为最近一次非本窗口的前台 HWND，
-/// 因此无论用户最后点击了哪个控件，Ctrl+V 都会发往正确位置。
+/// 临时启用窗口焦点（供搜索框输入使用）。
+/// 先保存当前前台窗口，再 set_focusable(true) + set_focus()。
+pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
+    save_current_focus();
+    let _ = window.set_focusable(true);
+    let _ = window.set_focus();
+}
+
+/// 恢复非聚焦模式并还原之前的前台窗口。
+/// 搜索框 blur 时调用，让目标应用重新获得焦点。
 #[cfg(windows)]
-pub fn restore_foreground_window() {
+pub fn restore_last_focus(window: &tauri::WebviewWindow) {
+    let _ = window.set_focusable(false);
     let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
     if raw != 0 {
         let hwnd = HWND(raw as *mut _);
@@ -186,7 +200,9 @@ pub fn restore_foreground_window() {
 }
 
 #[cfg(not(windows))]
-pub fn restore_foreground_window() {}
+pub fn restore_last_focus(window: &tauri::WebviewWindow) {
+    let _ = window.set_focusable(false);
+}
 
 /// 获取当前光标坐标（供定位模块使用）
 pub fn get_cursor_position() -> (f64, f64) {
@@ -328,29 +344,17 @@ unsafe extern "system" fn keyboard_hook_proc(
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-/// WinEvent 回调：捕获前台窗口变化，更新 PREV_FOREGROUND_HWND。
-/// 本窗口自身成为前台时忽略（避免覆盖已保存的目标窗口）。
-/// 对于 EVENT_SYSTEM_FOREGROUND，hwnd 参数即为新前台窗口，无需再调 GetForegroundWindow()。
+/// WinEvent 回调：前台窗口变化通知（保留 hook 以备后续扩展）。
 #[cfg(windows)]
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
     _event: u32,
-    hwnd: HWND,
+    _hwnd: HWND,
     _id_object: i32,
     _id_child: i32,
     _id_event_thread: u32,
     _dwms_event_time: u32,
 ) {
-    if hwnd.0.is_null() {
-        return;
-    }
-    let fg_val = hwnd.0 as isize;
-    // 过滤本窗口，保留用户真正要粘贴到的目标
-    let main_raw = MAIN_HWND.load(Ordering::Relaxed);
-    if main_raw != 0 && fg_val == main_raw {
-        return;
-    }
-    PREV_FOREGROUND_HWND.store(fg_val, Ordering::Relaxed);
 }
 
 // ─── 事件处理 ─────────────────────────────────────────────────────────────────

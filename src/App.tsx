@@ -8,7 +8,6 @@ import {
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import debounce from "lodash.debounce";
 import { ClipboardList } from "@/components/ClipboardList";
 import { Button } from "@/components/ui/button";
@@ -26,6 +25,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useInputFocus, focusWindowImmediately } from "@/hooks/useInputFocus";
 import { GROUPS } from "@/lib/constants";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
@@ -57,7 +57,7 @@ function App() {
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const cardDensity = useUISettings((s) => s.cardDensity);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -126,7 +126,9 @@ function App() {
       }
       clipboardDirtyRef.current = false;
       if (searchAutoFocus) {
-        inputRef.current?.focus();
+        focusWindowImmediately().then(() => {
+          inputRef.current?.focus();
+        });
       }
       setSuppressTooltips(true);
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
@@ -150,43 +152,6 @@ function App() {
       unlisten.then((fn) => fn());
     };
   }, [resetView, autoResetState]);
-
-  // 根据输入框焦点切换窗口可聚焦状态
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    let blurTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const handleFocus = async () => {
-      // 取消待处理的失焦，防止快速切换闪烁
-      if (blurTimeoutId) {
-        clearTimeout(blurTimeoutId);
-        blurTimeoutId = null;
-      }
-      await appWindow.setFocusable(true);
-      await appWindow.setFocus();
-    };
-
-    const handleBlur = async () => {
-      // 延迟处理，允许窗口内交互（滚动条、卡片等）
-      blurTimeoutId = setTimeout(async () => {
-        if (document.activeElement === document.body || !document.hasFocus()) {
-          await appWindow.setFocusable(false);
-        }
-        blurTimeoutId = null;
-      }, 100);
-    };
-
-    const input = inputRef.current;
-    if (input) {
-      input.addEventListener("focus", handleFocus);
-      input.addEventListener("blur", handleBlur);
-      return () => {
-        input.removeEventListener("focus", handleFocus);
-        input.removeEventListener("blur", handleBlur);
-        if (blurTimeoutId) clearTimeout(blurTimeoutId);
-      };
-    }
-  }, []);
 
   // ESC 键处理：后端钩子 + DOM 监听双通道
   const handleEscape = useCallback(async () => {

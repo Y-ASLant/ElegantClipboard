@@ -593,9 +593,6 @@ fn paste_item_to_active_window(
 
         if close_window {
             hide_main_window_if_not_pinned(app);
-        } else {
-            // 不关闭窗口时仍需还原焦点，否则 Ctrl+V 发到自己的 webview
-            crate::input_monitor::restore_foreground_window();
         }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -620,8 +617,6 @@ fn paste_plain_text_to_active_window(
 
         if close_window {
             hide_main_window_if_not_pinned(app);
-        } else {
-            crate::input_monitor::restore_foreground_window();
         }
 
         std::thread::sleep(std::time::Duration::from_millis(50));

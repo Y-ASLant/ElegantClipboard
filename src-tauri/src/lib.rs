@@ -236,7 +236,6 @@ fn get_app_version() -> String {
 #[tauri::command]
 async fn show_window(window: tauri::WebviewWindow) {
     let _ = window.show();
-    let _ = window.set_focus();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
     // 向前端发射事件以刷新缓存
     let _ = window.emit("window-shown", ());
@@ -748,12 +747,10 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
                 }
             }
 
-            // 记住当前前台窗口，锁定粘贴时需要还原焦点
-            input_monitor::save_foreground_window();
-            // 显示并置顶，取得焦点以支持键盘导航
+            // 保存当前前台窗口，搜索框聚焦后需要还原
+            input_monitor::save_current_focus();
             let _ = window.show();
             positioning::force_topmost(&window);
-            let _ = window.set_focus();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
             input_monitor::enable_mouse_monitoring();
             let _ = window.emit("window-shown", ());
@@ -971,6 +968,24 @@ fn set_window_pinned(pinned: bool) {
 #[tauri::command]
 fn is_window_pinned() -> bool {
     input_monitor::is_window_pinned()
+}
+
+/// Tauri 命令：临时启用窗口焦点（搜索框聚焦时调用）
+#[tauri::command]
+async fn focus_clipboard_window(window: tauri::WebviewWindow) {
+    input_monitor::focus_clipboard_window(&window);
+}
+
+/// Tauri 命令：恢复非聚焦模式并还原目标窗口焦点（搜索框失焦时调用）
+#[tauri::command]
+async fn restore_last_focus(window: tauri::WebviewWindow) {
+    input_monitor::restore_last_focus(&window);
+}
+
+/// Tauri 命令：仅保存当前前台窗口句柄（窗口显示时调用）
+#[tauri::command]
+fn save_current_focus() {
+    input_monitor::save_current_focus();
 }
 
 /// Tauri 命令：检查是否启用管理员启动
@@ -1352,6 +1367,9 @@ pub fn run() {
             open_text_editor_window,
             set_window_pinned,
             is_window_pinned,
+            focus_clipboard_window,
+            restore_last_focus,
+            save_current_focus,
             // 管理员启动命令
             is_admin_launch_enabled,
             enable_admin_launch,
