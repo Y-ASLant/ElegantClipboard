@@ -706,14 +706,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             }
 
             input_monitor::save_current_focus();
-            if input_monitor::is_keyboard_nav_enabled() && !input_monitor::is_window_pinned() {
-                let _ = window.set_focusable(true);
-            }
             let _ = window.show();
             positioning::force_topmost(&window);
-            if input_monitor::is_keyboard_nav_enabled() && !input_monitor::is_window_pinned() {
-                let _ = window.set_focus();
-            }
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
             input_monitor::enable_mouse_monitoring();
             let _ = window.emit("window-shown", ());
@@ -915,10 +909,6 @@ async fn set_window_pinned(window: tauri::WebviewWindow, pinned: bool) {
                 }
             }
         }
-    } else if input_monitor::is_keyboard_nav_enabled() {
-        input_monitor::save_current_focus();
-        let _ = window.set_focusable(true);
-        let _ = window.set_focus();
     }
 }
 
@@ -945,12 +935,10 @@ fn save_current_focus() {
 #[tauri::command]
 async fn set_keyboard_nav_enabled(window: tauri::WebviewWindow, enabled: bool) {
     input_monitor::set_keyboard_nav_enabled(enabled);
-    if window.is_visible().unwrap_or(false) && !input_monitor::is_window_pinned() {
-        if enabled {
-            input_monitor::save_current_focus();
-            let _ = window.set_focusable(true);
-            let _ = window.set_focus();
-        } else {
+    // 不再因键盘导航切换而抢焦点，导航键通过低级钩子转发
+    if !enabled && window.is_visible().unwrap_or(false) && !input_monitor::is_window_pinned() {
+        // 关闭时若窗口仍聚焦则恢复
+        if window.is_focused().unwrap_or(false) {
             input_monitor::restore_last_focus(&window);
         }
     }

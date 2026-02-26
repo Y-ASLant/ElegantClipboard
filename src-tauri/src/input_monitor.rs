@@ -27,7 +27,10 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 #[cfg(windows)]
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 #[cfg(windows)]
-use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_DELETE, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_SHIFT,
+    VK_UP,
+};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -152,16 +155,13 @@ pub fn set_keyboard_nav_enabled(enabled: bool) {
     KEYBOARD_NAV_ENABLED.store(enabled, Ordering::Relaxed);
 }
 
+#[allow(dead_code)]
 pub fn is_keyboard_nav_enabled() -> bool {
     KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed)
 }
 
 pub fn get_prev_foreground_hwnd() -> isize {
     PREV_FOREGROUND_HWND.load(Ordering::Relaxed)
-}
-
-fn should_stay_focusable() -> bool {
-    KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed) && !WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
 #[cfg(windows)]
@@ -180,9 +180,6 @@ pub fn save_current_focus() {}
 
 /// 临时启用窗口焦点（供搜索框输入使用）。
 pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
-    if should_stay_focusable() {
-        return;
-    }
     save_current_focus();
     let _ = window.set_focusable(true);
     let _ = window.set_focus();
@@ -191,9 +188,6 @@ pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
 /// 恢复非聚焦模式并还原之前的前台窗口（搜索框 blur 时调用）。
 #[cfg(windows)]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
-    if should_stay_focusable() {
-        return;
-    }
     let _ = window.set_focusable(false);
     let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
     if raw != 0 {
@@ -206,9 +200,6 @@ pub fn restore_last_focus(window: &tauri::WebviewWindow) {
 
 #[cfg(not(windows))]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
-    if should_stay_focusable() {
-        return;
-    }
     let _ = window.set_focusable(false);
 }
 
@@ -340,14 +331,56 @@ unsafe extern "system" fn keyboard_hook_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if code >= 0 && wparam.0 as u32 == WM_KEYDOWN {
+    if code >= 0 {
+        let msg = wparam.0 as u32;
+        let is_keydown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+        let is_keyup = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
         if let Some(info) = (lparam.0 as *const KBDLLHOOKSTRUCT).as_ref() {
-            if info.vkCode == u32::from(VK_ESCAPE.0) {
+            if is_keydown && info.vkCode == u32::from(VK_ESCAPE.0) {
                 handle_escape_key();
+            }
+
+            // 键盘导航：捕获方向键/Enter/Delete，通过 Tauri 事件转发给前端，
+            // 避免窗口抢焦点导致目标应用弹窗/下拉消失。
+            if KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed) && (is_keydown || is_keyup) {
+                // 若本窗口已是前台（如搜索框聚焦），让按键正常走 DOM 路径
+                let main_raw = MAIN_HWND.load(Ordering::Relaxed);
+                let fg = GetForegroundWindow();
+                if main_raw != 0 && fg.0 as isize != main_raw {
+                    let nav_key = match info.vkCode {
+                        v if v == VK_UP.0 as u32 => Some("ArrowUp"),
+                        v if v == VK_DOWN.0 as u32 => Some("ArrowDown"),
+                        v if v == VK_LEFT.0 as u32 => Some("ArrowLeft"),
+                        v if v == VK_RIGHT.0 as u32 => Some("ArrowRight"),
+                        v if v == VK_RETURN.0 as u32 => Some("Enter"),
+                        v if v == VK_DELETE.0 as u32 => Some("Delete"),
+                        _ => None,
+                    };
+                    if let Some(key) = nav_key {
+                        if is_keydown {
+                            handle_nav_key(key);
+                        }
+                        return LRESULT(1);
+                    }
+                }
             }
         }
     }
     CallNextHookEx(None, code, wparam, lparam)
+}
+
+#[cfg(windows)]
+fn handle_nav_key(key: &str) {
+    if let Some(window) = MAIN_WINDOW.lock().as_ref() {
+        if window.is_visible().unwrap_or(false) {
+            let shift = unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) < 0 };
+            let _ = window.emit("keyboard-nav", serde_json::json!({
+                "key": key,
+                "shift": shift,
+            }));
+        }
+    }
 }
 
 #[cfg(windows)]

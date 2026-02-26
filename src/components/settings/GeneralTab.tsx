@@ -76,7 +76,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             <div className="space-y-0.5">
               <Label className="text-xs">键盘导航</Label>
               <p className="text-xs text-muted-foreground">
-                方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除、ESC 隐藏窗口
+                方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除
               </p>
             </div>
             <Switch

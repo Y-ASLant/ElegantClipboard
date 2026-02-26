@@ -30,15 +30,22 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
         }
         hide_image_preview_window(app);
 
-        // 多屏/高 DPI 下隐藏窗口后系统可能不自动还原前台窗口，导致 Ctrl+V 无接收者
+        // 多屏/高 DPI 下隐藏窗口后系统可能不自动还原前台窗口，导致 Ctrl+V 无接收者。
+        // 仅在目标窗口不是当前前台窗口时才调用 SetForegroundWindow，
+        // 避免冗余 WM_ACTIVATE 导致某些应用重置内部焦点/光标位置。
         #[cfg(target_os = "windows")]
         {
             let prev = crate::input_monitor::get_prev_foreground_hwnd();
             if prev != 0 {
-                use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, IsWindow};
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    GetForegroundWindow, SetForegroundWindow, IsWindow,
+                };
                 use windows::Win32::Foundation::HWND;
                 let hwnd = HWND(prev as *mut _);
-                if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+                let current_fg = unsafe { GetForegroundWindow() };
+                if current_fg.0 as isize == prev {
+                    tracing::info!("hide: 目标窗口已是前台，跳过 SetForegroundWindow");
+                } else if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
                     let _ = unsafe { SetForegroundWindow(hwnd) };
                     tracing::info!("hide: 已恢复前台窗口 hwnd={:#x}", prev);
                 } else {
