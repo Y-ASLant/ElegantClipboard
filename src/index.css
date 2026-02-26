@@ -373,6 +373,20 @@ textarea,
     animation: scale-bounce 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* Paste feedback flash */
+@keyframes paste-flash {
+    0% {
+        background-color: hsl(from var(--color-primary) h s l / 0.15);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.animate-paste-flash {
+    animation: paste-flash 0.3s ease-out;
+}
+
 /* Dragging cursor - from QuickClipboard optimization */
 body.dragging-cursor,
 body.dragging-cursor * {
