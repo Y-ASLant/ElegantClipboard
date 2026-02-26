@@ -88,7 +88,7 @@ export const useUISettings = create<UISettings>()(
       sharpCorners: false,
       autoResetState: true,
       keyboardNavigation: false,
-      searchAutoFocus: true,
+      searchAutoFocus: false,
       searchAutoClear: true,
       darkMode: "auto" as DarkMode,
       cardDensity: "standard" as CardDensity,
