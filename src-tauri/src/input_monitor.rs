@@ -16,7 +16,7 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicIsize, AtomicU32, Ordering};
 use std::thread;
 use tauri::{Emitter, Manager, WebviewWindow};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 #[cfg(windows)]
 use std::cell::RefCell;
@@ -31,38 +31,28 @@ use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-// 自定义线程消息，用于跨线程控制键盘钩子生命周期（WM_USER = 0x0400）
 #[cfg(windows)]
 const MSG_INSTALL_KB_HOOK: u32 = 0x0401;
 #[cfg(windows)]
 const MSG_UNINSTALL_KB_HOOK: u32 = 0x0402;
 
-/// 主窗口引用，用于点击检测
 static MAIN_WINDOW: Mutex<Option<WebviewWindow>> = Mutex::new(None);
 
-/// 主窗口自身的 HWND（Windows 下初始化时填入，用于 WinEventHook 回调中过滤本窗口）
 static MAIN_HWND: AtomicIsize = AtomicIsize::new(0);
 
-/// 窗口是否可见（监控是否激活）
 static MOUSE_MONITORING_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// 窗口是否固定（固定时不因外部点击隐藏）
 static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 
-/// 搜索框聚焦前保存的前台窗口句柄（用于搜索框失焦后还原）
 static PREV_FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
 
-/// 键盘导航是否启用（启用时窗口在非固定模式下保持可聚焦）
 static KEYBOARD_NAV_ENABLED: AtomicBool = AtomicBool::new(false);
 
-/// 监控线程是否正在运行
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// 缓存的光标坐标（由鼠标钩子更新）
 static CURSOR_X: AtomicI64 = AtomicI64::new(0);
 static CURSOR_Y: AtomicI64 = AtomicI64::new(0);
 
-/// 钩子线程 ID，用于 PostThreadMessage
 #[cfg(windows)]
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
@@ -73,7 +63,6 @@ thread_local! {
     static TL_KEYBOARD_HOOK: RefCell<Option<HHOOK>> = const { RefCell::new(None) };
 }
 
-/// 初始化，传入主窗口引用
 pub fn init(window: WebviewWindow) {
     #[cfg(windows)]
     if let Ok(hwnd) = window.hwnd() {
@@ -82,7 +71,6 @@ pub fn init(window: WebviewWindow) {
     *MAIN_WINDOW.lock() = Some(window);
 }
 
-/// 启动全局输入监控线程
 pub fn start_monitoring() {
     if MONITOR_RUNNING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -107,7 +95,6 @@ pub fn start_monitoring() {
     info!("输入监控已启动");
 }
 
-/// 停止输入监控（向钩子线程发送 WM_QUIT）
 #[allow(dead_code)]
 pub fn stop_monitoring() {
     MONITOR_RUNNING.store(false, Ordering::SeqCst);
@@ -122,7 +109,6 @@ pub fn stop_monitoring() {
     }
 }
 
-/// 启用监控并安装键盘钩子（窗口显示时调用）
 pub fn enable_mouse_monitoring() {
     MOUSE_MONITORING_ENABLED.store(true, Ordering::Relaxed);
     #[cfg(windows)]
@@ -136,7 +122,6 @@ pub fn enable_mouse_monitoring() {
     }
 }
 
-/// 禁用监控并卸载键盘钩子（窗口隐藏时调用）
 pub fn disable_mouse_monitoring() {
     MOUSE_MONITORING_ENABLED.store(false, Ordering::Relaxed);
     #[cfg(windows)]
@@ -155,7 +140,6 @@ pub fn is_mouse_monitoring_enabled() -> bool {
     MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
 }
 
-/// 设置窗口固定状态（固定时不因外部点击隐藏）
 pub fn set_window_pinned(pinned: bool) {
     WINDOW_PINNED.store(pinned, Ordering::Relaxed);
 }
@@ -164,7 +148,6 @@ pub fn is_window_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
-/// 设置键盘导航状态
 pub fn set_keyboard_nav_enabled(enabled: bool) {
     KEYBOARD_NAV_ENABLED.store(enabled, Ordering::Relaxed);
 }
@@ -173,22 +156,18 @@ pub fn is_keyboard_nav_enabled() -> bool {
     KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed)
 }
 
-/// 获取保存的前台窗口句柄
 pub fn get_prev_foreground_hwnd() -> isize {
     PREV_FOREGROUND_HWND.load(Ordering::Relaxed)
 }
 
-/// 判断窗口当前是否应该保持可聚焦（键盘导航开启 且 未固定）
 fn should_stay_focusable() -> bool {
     KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed) && !WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
-/// 保存当前前台窗口句柄（搜索框聚焦前 / 窗口显示前调用）
 #[cfg(windows)]
 pub fn save_current_focus() {
     let hwnd = unsafe { GetForegroundWindow() };
     let val = hwnd.0 as isize;
-    // 过滤本窗口
     let main_raw = MAIN_HWND.load(Ordering::Relaxed);
     if main_raw != 0 && val == main_raw {
         return;
@@ -200,7 +179,6 @@ pub fn save_current_focus() {
 pub fn save_current_focus() {}
 
 /// 临时启用窗口焦点（供搜索框输入使用）。
-/// 键盘导航模式下窗口已可聚焦，跳过。
 pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
     if should_stay_focusable() {
         return;
@@ -210,9 +188,7 @@ pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
-/// 恢复非聚焦模式并还原之前的前台窗口。
-/// 搜索框 blur 时调用，让目标应用重新获得焦点。
-/// 键盘导航模式下窗口需保持可聚焦，跳过。
+/// 恢复非聚焦模式并还原之前的前台窗口（搜索框 blur 时调用）。
 #[cfg(windows)]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
     if should_stay_focusable() {
@@ -236,21 +212,14 @@ pub fn restore_last_focus(window: &tauri::WebviewWindow) {
     let _ = window.set_focusable(false);
 }
 
-/// 获取当前光标坐标（供定位模块使用）
 pub fn get_cursor_position() -> (f64, f64) {
     let x = CURSOR_X.load(Ordering::Relaxed) as f64;
     let y = CURSOR_Y.load(Ordering::Relaxed) as f64;
     (x, y)
 }
 
-// ─── Windows 钩子实现 ─────────────────────────────────────────────────────────
-
-/// 钩子线程主函数：安装 WH_MOUSE_LL 和 WinEventHook(FOREGROUND)，运行消息循环，
-/// 并通过自定义消息动态管理 WH_KEYBOARD_LL 生命周期。
 #[cfg(windows)]
 fn run_hook_thread() {
-    // 确保 hook 线程使用 Per-Monitor DPI Aware V2 上下文，
-    // 使 MSLLHOOKSTRUCT.pt 和 GetWindowRect 在多屏不同缩放下均返回物理像素坐标。
     unsafe {
         let _ = windows::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(
             windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -260,7 +229,6 @@ fn run_hook_thread() {
         info!("Hook thread DPI awareness: {:?}", aw);
     }
 
-    // 安装鼠标钩子（始终保持，用于点击外部检测）
     let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) };
     match mouse_hook {
         Ok(hook) => {
@@ -273,16 +241,14 @@ fn run_hook_thread() {
         }
     }
 
-    // 安装前台窗口变化钩子，持续追踪最近活跃的非本窗口 HWND
-    // WINEVENT_OUTOFCONTEXT(0) = 进程外钩子，无需注入 DLL，回调在本线程消息循环中触发
     let focus_hook = unsafe {
         SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
             EVENT_SYSTEM_FOREGROUND,
             None,
             Some(win_event_proc),
-            0, // 监听所有进程
-            0, // 监听所有线程
+            0,
+            0,
             WINEVENT_OUTOFCONTEXT,
         )
     };
@@ -294,18 +260,15 @@ fn run_hook_thread() {
 
     HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
 
-    // 消息循环：GetMessageW 阻塞等待消息，收到 WM_QUIT 时退出
     let mut msg = MSG::default();
     loop {
         let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
-        // ret == 0 → WM_QUIT，ret.0 < 0 → 错误
         if ret.0 <= 0 {
             break;
         }
 
         match msg.message {
             MSG_INSTALL_KB_HOOK => {
-                // 仅在尚未安装时安装键盘钩子
                 let already = TL_KEYBOARD_HOOK.with(|h| h.borrow().is_some());
                 if !already {
                     let kb_hook = unsafe {
@@ -318,7 +281,6 @@ fn run_hook_thread() {
                 }
             }
             MSG_UNINSTALL_KB_HOOK => {
-                // 窗口已隐藏，卸载键盘钩子
                 TL_KEYBOARD_HOOK.with(|h| {
                     if let Some(hook) = h.borrow_mut().take() {
                         unsafe { let _ = UnhookWindowsHookEx(hook); }
@@ -332,7 +294,6 @@ fn run_hook_thread() {
         }
     }
 
-    // 退出时清理所有钩子
     for cleanup in [&TL_MOUSE_HOOK, &TL_KEYBOARD_HOOK] {
         cleanup.with(|h| {
             if let Some(hook) = h.borrow_mut().take() {
@@ -347,7 +308,6 @@ fn run_hook_thread() {
     info!("输入监控线程已退出");
 }
 
-/// WH_MOUSE_LL 回调：追踪光标位置，检测窗口外点击
 #[cfg(windows)]
 unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
@@ -374,8 +334,6 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-/// WH_KEYBOARD_LL 回调：检测 ESC 键以隐藏窗口。
-/// 此钩子仅在窗口可见时安装。
 #[cfg(windows)]
 unsafe extern "system" fn keyboard_hook_proc(
     code: i32,
@@ -392,7 +350,6 @@ unsafe extern "system" fn keyboard_hook_proc(
     CallNextHookEx(None, code, wparam, lparam)
 }
 
-/// WinEvent 回调：前台窗口变化通知（保留 hook 以备后续扩展）。
 #[cfg(windows)]
 unsafe extern "system" fn win_event_proc(
     _hook: HWINEVENTHOOK,
@@ -405,13 +362,6 @@ unsafe extern "system" fn win_event_proc(
 ) {
 }
 
-// ─── 事件处理 ─────────────────────────────────────────────────────────────────
-
-/// 检查光标是否在窗口边界外
-///
-/// 使用 Win32 GetWindowRect 直接获取窗口物理像素边界，
-/// 与 MSLLHOOKSTRUCT.pt（同为物理屏幕坐标）保持坐标系一致，
-/// 避免 Tauri outer_position/outer_size 在高 DPI 下的换算偏差。
 #[cfg(windows)]
 fn is_mouse_outside_window(_window: &WebviewWindow) -> bool {
     let cx = CURSOR_X.load(Ordering::Relaxed) as i32;
@@ -429,7 +379,7 @@ fn is_mouse_outside_window(_window: &WebviewWindow) -> bool {
     }
 
     let outside = cx < rect.left || cx > rect.right || cy < rect.top || cy > rect.bottom;
-    warn!(
+    debug!(
         "点击检测: cursor=({},{}) rect=({},{},{},{}) → {}",
         cx, cy, rect.left, rect.top, rect.right, rect.bottom,
         if outside { "outside" } else { "inside" }
@@ -459,12 +409,10 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
         || cursor_y > win_y + size.height as f64
 }
 
-/// 检查监控是否处于可响应状态（未禁用且未固定）
 fn is_monitoring_active() -> bool {
     MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) && !WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
-/// 处理 ESC 按键：向前端发送事件，由前端决定关闭弹窗或隐藏窗口
 fn handle_escape_key() {
     if !is_monitoring_active() {
         return;
@@ -476,12 +424,11 @@ fn handle_escape_key() {
     }
 }
 
-/// 处理外部点击：若点击在窗口边界外则隐藏窗口
 fn handle_click_outside() {
     let mouse_enabled = MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed);
     let pinned = WINDOW_PINNED.load(Ordering::Relaxed);
     if !mouse_enabled || pinned {
-        warn!(
+        trace!(
             "handle_click_outside: 跳过 (mouse_enabled={}, pinned={})",
             mouse_enabled, pinned
         );
@@ -489,7 +436,7 @@ fn handle_click_outside() {
     }
     if let Some(window) = MAIN_WINDOW.lock().as_ref() {
         if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
-            warn!("handle_click_outside: 窗口可见且点击在外部，执行隐藏");
+            info!("handle_click_outside: 窗口可见且点击在外部，执行隐藏");
             crate::save_window_size_if_enabled(window.app_handle(), window);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);

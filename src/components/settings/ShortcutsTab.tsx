@@ -107,7 +107,12 @@ export function ShortcutsTab({
       // Shift alone is not a valid modifier for global shortcuts
       const hasNonShiftModifier = e.ctrlKey || e.altKey || e.metaKey;
       if (!hasNonShiftModifier) {
-        setShortcutError("Shift 不能单独作为修饰键，请配合 Ctrl/Alt/Win 使用");
+        setShortcutError("Shift 不能单独作为修饰键，请配合 Ctrl/Alt 使用");
+        return;
+      }
+      // 快速粘贴禁止使用 Win 键（Win+数字 是系统任务栏快捷键）
+      if (e.metaKey && editTarget?.type === "quick-paste") {
+        setShortcutError("快速粘贴不支持 Win 修饰键（Win+数字 是系统任务栏快捷键）");
         return;
       }
       parts.push(key);
@@ -117,7 +122,7 @@ export function ShortcutsTab({
       // Only modifiers pressed, show hint
       setTempShortcut(parts.join("+") + "+...");
     } else if (key && parts.length === 0) {
-      setShortcutError("请至少使用一个修饰键 (Ctrl/Alt/Win)");
+      setShortcutError("请至少使用一个修饰键 (Ctrl/Alt)");
     }
   }, []);
 
