@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
 import {
   Search16Regular,
+  Dismiss16Regular,
   Delete16Regular,
   Settings16Regular,
   LockClosed16Regular,
@@ -251,8 +252,16 @@ function App() {
             placeholder="搜索剪贴板..."
             value={searchQuery}
             onChange={handleSearchChange}
-            className="pl-9 h-9 text-sm bg-background border shadow-sm"
+            className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-8")}
           />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(""); fetchItems({ search: "" }); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-sm transition-colors z-10"
+            >
+              <Dismiss16Regular className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* 操作按钮 */}
