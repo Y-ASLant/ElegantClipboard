@@ -34,6 +34,7 @@ interface UISettings {
   copySound: boolean;
   pasteSound: boolean;
   pasteCloseWindow: boolean;
+  showCategoryFilter: boolean;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -58,6 +59,7 @@ interface UISettings {
   setCopySound: (enabled: boolean) => void;
   setPasteSound: (enabled: boolean) => void;
   setPasteCloseWindow: (enabled: boolean) => void;
+  setShowCategoryFilter: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -95,6 +97,7 @@ export const useUISettings = create<UISettings>()(
       copySound: false,
       pasteSound: false,
       pasteCloseWindow: true,
+      showCategoryFilter: true,
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -191,6 +194,10 @@ export const useUISettings = create<UISettings>()(
       setPasteCloseWindow: (enabled) => {
         set({ pasteCloseWindow: enabled });
         broadcastChange({ pasteCloseWindow: enabled });
+      },
+      setShowCategoryFilter: (enabled) => {
+        set({ showCategoryFilter: enabled });
+        broadcastChange({ showCategoryFilter: enabled });
       },
     }),
     {

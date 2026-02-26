@@ -83,6 +83,7 @@ export function Settings() {
       await new Promise((r) =>
         requestAnimationFrame(() => requestAnimationFrame(r)),
       );
+      await new Promise((r) => setTimeout(r, 30));
       win.show();
       win.setFocus();
       await new Promise((r) => requestAnimationFrame(r));

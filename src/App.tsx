@@ -57,6 +57,7 @@ function App() {
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const cardDensity = useUISettings((s) => s.cardDensity);
+  const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
   const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
@@ -89,6 +90,13 @@ function App() {
     ro.observe(container);
     return () => ro.disconnect();
   }, [updateIndicator]);
+
+  // 隐藏分类栏时重置分组筛选，避免被隐藏的控件继续过滤内容
+  useEffect(() => {
+    if (!showCategoryFilter && selectedGroup) {
+      setSelectedGroup(null);
+    }
+  }, [showCategoryFilter]);
 
   // 应用卡片密度到根元素
   useEffect(() => {
@@ -302,34 +310,36 @@ function App() {
       </div>
 
       {/* 底部分组选择 */}
-      <div className="shrink-0 px-2 pb-2 pt-1 select-none">
-        <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
-          {/* 滑动指示器 */}
-          <div
-            className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
-            style={{
-              transform: `translateX(${segmentIndicator.left}px)`,
-              width: segmentIndicator.width,
-              opacity: segmentIndicator.width > 0 ? 1 : 0,
-            }}
-          />
-          {GROUPS.map((g, i) => (
-            <button
-              key={g.label}
-              ref={(el) => { segmentRefs.current[i] = el; }}
-              onClick={() => setSelectedGroup(g.value)}
-              className={cn(
-                "relative z-[1] flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
-                selectedGroup === g.value
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {g.label}
-            </button>
-          ))}
+      {showCategoryFilter && (
+        <div className="shrink-0 px-2 pb-2 pt-1 select-none">
+          <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
+            {/* 滑动指示器 */}
+            <div
+              className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
+              style={{
+                transform: `translateX(${segmentIndicator.left}px)`,
+                width: segmentIndicator.width,
+                opacity: segmentIndicator.width > 0 ? 1 : 0,
+              }}
+            />
+            {GROUPS.map((g, i) => (
+              <button
+                key={g.label}
+                ref={(el) => { segmentRefs.current[i] = el; }}
+                onClick={() => setSelectedGroup(g.value)}
+                className={cn(
+                  "relative z-[1] flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
+                  selectedGroup === g.value
+                    ? "text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 清空历史确认对话框 */}
       <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>

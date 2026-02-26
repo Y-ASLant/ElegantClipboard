@@ -217,6 +217,7 @@ export function ClipboardList() {
 
       switch (key) {
         case "ArrowLeft": {
+          if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
@@ -224,6 +225,7 @@ export function ClipboardList() {
           break;
         }
         case "ArrowRight": {
+          if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
           const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
