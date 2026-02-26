@@ -96,7 +96,7 @@ pub fn init(window: WebviewWindow) {
         // 子类化主窗口：拦截 WM_MOUSEACTIVATE 防止鼠标点击时激活窗口
         let raw_hwnd = HWND(hwnd.0 as *mut _);
         let original = unsafe {
-            SetWindowLongPtrW(raw_hwnd, GWLP_WNDPROC, wndproc_subclass as usize as isize)
+            SetWindowLongPtrW(raw_hwnd, GWLP_WNDPROC, wndproc_subclass as *const () as usize as isize)
         };
         ORIGINAL_WNDPROC.store(original, Ordering::Relaxed);
     }
