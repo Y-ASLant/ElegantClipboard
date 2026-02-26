@@ -30,8 +30,28 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
         }
         // 隐藏图片预览窗口（主窗口消失时无法触发 onMouseLeave）
         hide_image_preview_window(app);
+
+        // 主动恢复之前的前台窗口焦点。
+        // 部分多屏/高 DPI 配置下，隐藏非聚焦窗口后系统不会自动还原前台窗口，
+        // 导致 GetForegroundWindow 返回 NULL，simulate_paste 的 Ctrl+V 无接收者。
+        #[cfg(target_os = "windows")]
+        {
+            let prev = crate::input_monitor::get_prev_foreground_hwnd();
+            if prev != 0 {
+                use windows::Win32::UI::WindowsAndMessaging::{SetForegroundWindow, IsWindow};
+                use windows::Win32::Foundation::HWND;
+                let hwnd = HWND(prev as *mut _);
+                if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+                    let _ = unsafe { SetForegroundWindow(hwnd) };
+                    tracing::warn!("hide: 已恢复前台窗口 hwnd={:#x}", prev);
+                } else {
+                    tracing::warn!("hide: prev_hwnd={:#x} 已无效", prev);
+                }
+            } else {
+                tracing::warn!("hide: PREV_FOREGROUND_HWND 为 0，无法恢复前台窗口");
+            }
+        }
     }
-    // 非聚焦窗口不会抢夺焦点，目标应用始终保持前台，无需额外还原
 }
 
 /// 隐藏图片预览窗口（若存在）。

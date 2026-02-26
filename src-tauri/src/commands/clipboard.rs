@@ -1,7 +1,7 @@
 use crate::database::{ClipboardItem, ClipboardRepository};
 use std::sync::Arc;
 use tauri::State;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::{hide_main_window_if_not_pinned, with_paused_monitor, AppState};
 
@@ -238,6 +238,16 @@ pub fn simulate_paste() -> Result<(), String> {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         true
+    }
+
+    // 记录当前前台窗口信息，便于诊断粘贴目标是否正确
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW};
+        let fg = unsafe { GetForegroundWindow() };
+        let mut buf = [0u16; 256];
+        let len = unsafe { GetWindowTextW(fg, &mut buf) } as usize;
+        let title = String::from_utf16_lossy(&buf[..len]);
+        warn!("simulate_paste: foreground hwnd={:?} title=\"{}\"", fg.0, title);
     }
 
     // --- 1. 释放用户可能仍按住的修饰键（Alt/Shift 须在 Ctrl+V 前释放）
@@ -586,10 +596,12 @@ fn paste_item_to_active_window(
     item: &ClipboardItem,
     close_window: bool,
 ) -> Result<(), String> {
+    warn!("paste_item: id={}, close_window={}", item.id, close_window);
     with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
         set_clipboard_content(item, &mut clipboard)?;
+        warn!("paste_item: clipboard set ok");
 
         if close_window {
             hide_main_window_if_not_pinned(app);
@@ -597,6 +609,7 @@ fn paste_item_to_active_window(
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
+        warn!("paste_item: simulate_paste ok");
         Ok(())
     })
 }
@@ -608,12 +621,14 @@ fn paste_plain_text_to_active_window(
     text: &str,
     close_window: bool,
 ) -> Result<(), String> {
+    warn!("paste_plain_text: len={}, close_window={}", text.len(), close_window);
     with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
         clipboard
             .set_text(text)
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+        warn!("paste_plain_text: clipboard set ok");
 
         if close_window {
             hide_main_window_if_not_pinned(app);
@@ -621,6 +636,7 @@ fn paste_plain_text_to_active_window(
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
+        warn!("paste_plain_text: simulate_paste ok");
         Ok(())
     })
 }

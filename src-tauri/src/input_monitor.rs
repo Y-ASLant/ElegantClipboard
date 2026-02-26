@@ -52,6 +52,9 @@ static WINDOW_PINNED: AtomicBool = AtomicBool::new(false);
 /// 搜索框聚焦前保存的前台窗口句柄（用于搜索框失焦后还原）
 static PREV_FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
 
+/// 键盘导航是否启用（启用时窗口在非固定模式下保持可聚焦）
+static KEYBOARD_NAV_ENABLED: AtomicBool = AtomicBool::new(false);
+
 /// 监控线程是否正在运行
 static MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -161,6 +164,25 @@ pub fn is_window_pinned() -> bool {
     WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
+/// 设置键盘导航状态
+pub fn set_keyboard_nav_enabled(enabled: bool) {
+    KEYBOARD_NAV_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn is_keyboard_nav_enabled() -> bool {
+    KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed)
+}
+
+/// 获取保存的前台窗口句柄
+pub fn get_prev_foreground_hwnd() -> isize {
+    PREV_FOREGROUND_HWND.load(Ordering::Relaxed)
+}
+
+/// 判断窗口当前是否应该保持可聚焦（键盘导航开启 且 未固定）
+fn should_stay_focusable() -> bool {
+    KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed) && !WINDOW_PINNED.load(Ordering::Relaxed)
+}
+
 /// 保存当前前台窗口句柄（搜索框聚焦前 / 窗口显示前调用）
 #[cfg(windows)]
 pub fn save_current_focus() {
@@ -178,8 +200,11 @@ pub fn save_current_focus() {
 pub fn save_current_focus() {}
 
 /// 临时启用窗口焦点（供搜索框输入使用）。
-/// 先保存当前前台窗口，再 set_focusable(true) + set_focus()。
+/// 键盘导航模式下窗口已可聚焦，跳过。
 pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
+    if should_stay_focusable() {
+        return;
+    }
     save_current_focus();
     let _ = window.set_focusable(true);
     let _ = window.set_focus();
@@ -187,8 +212,12 @@ pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
 
 /// 恢复非聚焦模式并还原之前的前台窗口。
 /// 搜索框 blur 时调用，让目标应用重新获得焦点。
+/// 键盘导航模式下窗口需保持可聚焦，跳过。
 #[cfg(windows)]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
+    if should_stay_focusable() {
+        return;
+    }
     let _ = window.set_focusable(false);
     let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
     if raw != 0 {
@@ -201,6 +230,9 @@ pub fn restore_last_focus(window: &tauri::WebviewWindow) {
 
 #[cfg(not(windows))]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
+    if should_stay_focusable() {
+        return;
+    }
     let _ = window.set_focusable(false);
 }
 
@@ -217,6 +249,17 @@ pub fn get_cursor_position() -> (f64, f64) {
 /// 并通过自定义消息动态管理 WH_KEYBOARD_LL 生命周期。
 #[cfg(windows)]
 fn run_hook_thread() {
+    // 确保 hook 线程使用 Per-Monitor DPI Aware V2 上下文，
+    // 使 MSLLHOOKSTRUCT.pt 和 GetWindowRect 在多屏不同缩放下均返回物理像素坐标。
+    unsafe {
+        let _ = windows::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(
+            windows::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        );
+        let ctx = windows::Win32::UI::HiDpi::GetThreadDpiAwarenessContext();
+        let aw = windows::Win32::UI::HiDpi::GetAwarenessFromDpiAwarenessContext(ctx);
+        info!("Hook thread DPI awareness: {:?}", aw);
+    }
+
     // 安装鼠标钩子（始终保持，用于点击外部检测）
     let mouse_hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) };
     match mouse_hook {
@@ -318,6 +361,11 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
                 }
             }
             v if v == WM_LBUTTONDOWN || v == WM_RBUTTONDOWN => {
+                // 用点击事件自身的坐标更新光标位置，确保 bounds check 精确
+                if let Some(info) = (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() {
+                    CURSOR_X.store(info.pt.x as i64, Ordering::Relaxed);
+                    CURSOR_Y.store(info.pt.y as i64, Ordering::Relaxed);
+                }
                 handle_click_outside();
             }
             _ => {}
@@ -360,6 +408,36 @@ unsafe extern "system" fn win_event_proc(
 // ─── 事件处理 ─────────────────────────────────────────────────────────────────
 
 /// 检查光标是否在窗口边界外
+///
+/// 使用 Win32 GetWindowRect 直接获取窗口物理像素边界，
+/// 与 MSLLHOOKSTRUCT.pt（同为物理屏幕坐标）保持坐标系一致，
+/// 避免 Tauri outer_position/outer_size 在高 DPI 下的换算偏差。
+#[cfg(windows)]
+fn is_mouse_outside_window(_window: &WebviewWindow) -> bool {
+    let cx = CURSOR_X.load(Ordering::Relaxed) as i32;
+    let cy = CURSOR_Y.load(Ordering::Relaxed) as i32;
+
+    let raw = MAIN_HWND.load(Ordering::Relaxed);
+    if raw == 0 {
+        return false;
+    }
+
+    let hwnd = HWND(raw as *mut _);
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+        return false;
+    }
+
+    let outside = cx < rect.left || cx > rect.right || cy < rect.top || cy > rect.bottom;
+    warn!(
+        "点击检测: cursor=({},{}) rect=({},{},{},{}) → {}",
+        cx, cy, rect.left, rect.top, rect.right, rect.bottom,
+        if outside { "outside" } else { "inside" }
+    );
+    outside
+}
+
+#[cfg(not(windows))]
 fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
     let cursor_x = CURSOR_X.load(Ordering::Relaxed) as f64;
     let cursor_y = CURSOR_Y.load(Ordering::Relaxed) as f64;
@@ -368,7 +446,6 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
         Ok(pos) => pos,
         Err(_) => return false,
     };
-
     let size = match window.outer_size() {
         Ok(s) => s,
         Err(_) => return false,
@@ -376,13 +453,10 @@ fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
 
     let win_x = position.x as f64;
     let win_y = position.y as f64;
-    let win_width = size.width as f64;
-    let win_height = size.height as f64;
-
     cursor_x < win_x
-        || cursor_x > win_x + win_width
+        || cursor_x > win_x + size.width as f64
         || cursor_y < win_y
-        || cursor_y > win_y + win_height
+        || cursor_y > win_y + size.height as f64
 }
 
 /// 检查监控是否处于可响应状态（未禁用且未固定）
@@ -404,11 +478,18 @@ fn handle_escape_key() {
 
 /// 处理外部点击：若点击在窗口边界外则隐藏窗口
 fn handle_click_outside() {
-    if !is_monitoring_active() {
+    let mouse_enabled = MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed);
+    let pinned = WINDOW_PINNED.load(Ordering::Relaxed);
+    if !mouse_enabled || pinned {
+        warn!(
+            "handle_click_outside: 跳过 (mouse_enabled={}, pinned={})",
+            mouse_enabled, pinned
+        );
         return;
     }
     if let Some(window) = MAIN_WINDOW.lock().as_ref() {
         if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
+            warn!("handle_click_outside: 窗口可见且点击在外部，执行隐藏");
             crate::save_window_size_if_enabled(window.app_handle(), window);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);

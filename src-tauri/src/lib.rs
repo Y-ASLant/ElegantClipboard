@@ -26,6 +26,14 @@ use tracing::Level;
 use tracing_subscriber::fmt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+
+/// 本地时间格式化器，替代默认的 UTC 时间
+struct LocalTimer;
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"))
+    }
+}
 /// 当前全局快捷键（使用 parking_lot::RwLock）
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
 /// 快速粘贴快捷键缓存（槽位 1-9）
@@ -179,6 +187,7 @@ fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
 /// 初始化日志系统。log_to_file 启用时写入文件（超过 10MB 自动轮转）。
 fn init_logging(config: &AppConfig) {
     let stdout_layer = fmt::layer()
+        .with_timer(LocalTimer)
         .with_target(false)
         .with_thread_ids(false)
         .with_file(true)
@@ -202,6 +211,7 @@ fn init_logging(config: &AppConfig) {
                 *FILE_LOG_GUARD.lock() = Some(guard);
                 Some(
                     fmt::layer()
+                        .with_timer(LocalTimer)
                         .with_target(false)
                         .with_thread_ids(false)
                         .with_file(true)
@@ -245,6 +255,7 @@ async fn show_window(window: tauri::WebviewWindow) {
 #[tauri::command]
 async fn hide_window(window: tauri::WebviewWindow) {
     save_window_size_if_enabled(window.app_handle(), &window);
+    let _ = window.set_focusable(false);
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
     input_monitor::disable_mouse_monitoring();
@@ -290,6 +301,7 @@ async fn toggle_maximize(window: tauri::WebviewWindow) {
 #[tauri::command]
 async fn close_window(window: tauri::WebviewWindow) {
     save_window_size_if_enabled(window.app_handle(), &window);
+    let _ = window.set_focusable(false);
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
     input_monitor::disable_mouse_monitoring();
@@ -710,6 +722,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
         if keyboard_hook::get_window_state() == keyboard_hook::WindowState::Visible {
             save_window_size_if_enabled(app, &window);
 
+            let _ = window.set_focusable(false);
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
             input_monitor::disable_mouse_monitoring();
@@ -749,8 +762,16 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 
             // 保存当前前台窗口，搜索框聚焦后需要还原
             input_monitor::save_current_focus();
+            // 键盘导航开启且未固定时，窗口显示时直接可聚焦
+            if input_monitor::is_keyboard_nav_enabled() && !input_monitor::is_window_pinned() {
+                let _ = window.set_focusable(true);
+            }
             let _ = window.show();
             positioning::force_topmost(&window);
+            // 可聚焦模式下设置窗口焦点
+            if input_monitor::is_keyboard_nav_enabled() && !input_monitor::is_window_pinned() {
+                let _ = window.set_focus();
+            }
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
             input_monitor::enable_mouse_monitoring();
             let _ = window.emit("window-shown", ());
@@ -959,9 +980,29 @@ fn set_quick_paste_shortcut(
 }
 
 /// Tauri 命令：设置窗口固定状态
+/// 固定时切换为不可聚焦（点哪儿粘哪儿），取消固定时根据键盘导航设置恢复
 #[tauri::command]
-fn set_window_pinned(pinned: bool) {
+async fn set_window_pinned(window: tauri::WebviewWindow, pinned: bool) {
     input_monitor::set_window_pinned(pinned);
+    if pinned {
+        // 固定模式：不可聚焦，还原目标窗口焦点
+        let _ = window.set_focusable(false);
+        #[cfg(windows)]
+        {
+            let prev = input_monitor::get_prev_foreground_hwnd();
+            if prev != 0 {
+                unsafe {
+                    let hwnd = windows::Win32::Foundation::HWND(prev as *mut _);
+                    let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+                }
+            }
+        }
+    } else if input_monitor::is_keyboard_nav_enabled() {
+        // 取消固定 + 键盘导航开启：恢复可聚焦
+        input_monitor::save_current_focus();
+        let _ = window.set_focusable(true);
+        let _ = window.set_focus();
+    }
 }
 
 /// Tauri 命令：获取窗口固定状态
@@ -986,6 +1027,22 @@ async fn restore_last_focus(window: tauri::WebviewWindow) {
 #[tauri::command]
 fn save_current_focus() {
     input_monitor::save_current_focus();
+}
+
+/// Tauri 命令：设置键盘导航状态
+#[tauri::command]
+async fn set_keyboard_nav_enabled(window: tauri::WebviewWindow, enabled: bool) {
+    input_monitor::set_keyboard_nav_enabled(enabled);
+    // 如果窗口可见且未固定，立即更新可聚焦状态
+    if window.is_visible().unwrap_or(false) && !input_monitor::is_window_pinned() {
+        if enabled {
+            input_monitor::save_current_focus();
+            let _ = window.set_focusable(true);
+            let _ = window.set_focus();
+        } else {
+            input_monitor::restore_last_focus(&window);
+        }
+    }
 }
 
 /// Tauri 命令：检查是否启用管理员启动
@@ -1196,6 +1253,12 @@ pub fn run() {
     let config = AppConfig::load();
     init_logging(&config);
 
+    // 记录 WebView2 运行时版本（通过 wry API 查询，不依赖注册表路径）
+    match wry::webview_version() {
+        Ok(ver) => tracing::info!("WebView2 runtime version: {}", ver),
+        Err(e) => tracing::warn!("WebView2 version query failed: {}", e),
+    }
+
     // ── 管理员自提权（在 Tauri Builder 之前） ─────────────────────────────
     // 若启用了 run_as_admin 但当前未提权，则启动新的提权实例并退出当前进程。
     // 提权优先使用预创建的计划任务（免 UAC），失败则回退到 UAC 弹窗。
@@ -1312,6 +1375,21 @@ pub fn run() {
 
                 let _ = window.set_focusable(false);
 
+                // 记录 DPI 感知状态（Tauri 初始化后才有意义）
+                #[cfg(target_os = "windows")]
+                {
+                    let dpi_ctx = unsafe {
+                        windows::Win32::UI::HiDpi::GetThreadDpiAwarenessContext()
+                    };
+                    let awareness = unsafe {
+                        windows::Win32::UI::HiDpi::GetAwarenessFromDpiAwarenessContext(dpi_ctx)
+                    };
+                    tracing::info!("Main thread DPI awareness: {:?}", awareness);
+                    if let Ok(dpi) = window.scale_factor() {
+                        tracing::info!("Window scale factor: {}", dpi);
+                    }
+                }
+
                 // 初始化全局鼠标监控（用于点击外部隐藏窗口）
                 // 不可聚焦窗口无法触发 onFocusChanged，因此需要此机制
                 input_monitor::init(window);
@@ -1370,6 +1448,7 @@ pub fn run() {
             focus_clipboard_window,
             restore_last_focus,
             save_current_focus,
+            set_keyboard_nav_enabled,
             // 管理员启动命令
             is_admin_launch_enabled,
             enable_admin_launch,

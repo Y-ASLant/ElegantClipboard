@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -84,7 +85,7 @@ export const useUISettings = create<UISettings>()(
       colorTheme: "system" as ColorTheme,
       sharpCorners: false,
       autoResetState: true,
-      keyboardNavigation: true,
+      keyboardNavigation: false,
       searchAutoFocus: true,
       searchAutoClear: true,
       darkMode: "auto" as DarkMode,
@@ -153,6 +154,7 @@ export const useUISettings = create<UISettings>()(
       setKeyboardNavigation: (enabled) => {
         set({ keyboardNavigation: enabled });
         broadcastChange({ keyboardNavigation: enabled });
+        invoke("set_keyboard_nav_enabled", { enabled }).catch(() => {});
       },
       setSearchAutoFocus: (enabled) => {
         set({ searchAutoFocus: enabled });

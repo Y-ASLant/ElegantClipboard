@@ -95,9 +95,11 @@ function App() {
     document.documentElement.dataset.density = cardDensity;
   }, [cardDensity]);
 
-  // 加载锁定状态
+  // 加载锁定状态 & 同步键盘导航设置到后端
   useEffect(() => {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
+    const kbNav = useUISettings.getState().keyboardNavigation;
+    invoke("set_keyboard_nav_enabled", { enabled: kbNav }).catch(() => {});
   }, []);
 
   // 窗口出现时短暂抑制工具栏提示，防止闪烁
