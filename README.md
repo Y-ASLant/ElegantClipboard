@@ -182,6 +182,19 @@
 
 从 [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) 页面下载最新版本的安装包。
 
+### winget
+
+```powershell
+winget install Y-ASLant.ElegantClipboard
+```
+
+### Scoop
+
+```powershell
+scoop bucket add elegantclipboard https://github.com/Y-ASLant/ElegantClipboard
+scoop install elegantclipboard
+```
+
 ### 从源码构建
 
 #### 环境要求
