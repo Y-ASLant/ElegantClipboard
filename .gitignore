@@ -42,3 +42,6 @@ coverage/
 # Tauri
 src-tauri/target/
 src-tauri/gen/schemas/
+
+# wingetcreate generated manifests
+manifests/
