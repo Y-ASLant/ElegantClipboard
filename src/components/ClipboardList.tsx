@@ -1,11 +1,11 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import {
   ClipboardMultiple16Regular,
   Filter16Regular,
   Search16Regular,
   ArrowUp16Regular,
 } from "@fluentui/react-icons";
+import { listen } from "@tauri-apps/api/event";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useShallow } from "zustand/react/shallow";

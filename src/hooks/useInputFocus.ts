@@ -7,6 +7,17 @@ let currentFocusState: "normal" | "focused" = "normal";
 let focusDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let blurDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+function clearAllTimers() {
+  if (blurDebounceTimer) {
+    clearTimeout(blurDebounceTimer);
+    blurDebounceTimer = null;
+  }
+  if (focusDebounceTimer) {
+    clearTimeout(focusDebounceTimer);
+    focusDebounceTimer = null;
+  }
+}
+
 // 窗口失焦时重置状态
 if (typeof window !== "undefined") {
   window.addEventListener("blur", () => {
@@ -115,16 +126,15 @@ export function useInputFocus<T extends HTMLElement>() {
   return inputRef;
 }
 
+/** 取消待执行的焦点恢复（粘贴操作前调用，避免恢复焦点与粘贴流程冲突） */
+export function cancelPendingFocusRestore() {
+  clearAllTimers();
+  currentFocusState = "normal";
+}
+
 /** 立即启用窗口焦点（跳过防抖） */
 export async function focusWindowImmediately() {
-  if (blurDebounceTimer) {
-    clearTimeout(blurDebounceTimer);
-    blurDebounceTimer = null;
-  }
-  if (focusDebounceTimer) {
-    clearTimeout(focusDebounceTimer);
-    focusDebounceTimer = null;
-  }
+  clearAllTimers();
 
   try {
     await invoke("focus_clipboard_window");

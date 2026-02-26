@@ -59,6 +59,9 @@ static CURSOR_Y: AtomicI64 = AtomicI64::new(0);
 #[cfg(windows)]
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
+#[cfg(windows)]
+static ORIGINAL_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+
 // 低级钩子（LL hook）必须由安装它的线程负责卸载，使用 thread_local 存储句柄
 #[cfg(windows)]
 thread_local! {
@@ -66,10 +69,36 @@ thread_local! {
     static TL_KEYBOARD_HOOK: RefCell<Option<HHOOK>> = const { RefCell::new(None) };
 }
 
+/// 窗口子类过程：当 WS_EX_NOACTIVATE 已设置时拦截 WM_MOUSEACTIVATE 返回 MA_NOACTIVATE，
+/// 防止鼠标点击激活窗口导致目标应用瞬态 UI（搜索栏、下拉等）因失焦而关闭。
+#[cfg(windows)]
+unsafe extern "system" fn wndproc_subclass(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if msg == WM_MOUSEACTIVATE {
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        if ex_style & WS_EX_NOACTIVATE.0 != 0 {
+            return LRESULT(3); // MA_NOACTIVATE
+        }
+    }
+
+    let original = ORIGINAL_WNDPROC.load(Ordering::Relaxed);
+    CallWindowProcW(std::mem::transmute(original), hwnd, msg, wparam, lparam)
+}
+
 pub fn init(window: WebviewWindow) {
     #[cfg(windows)]
     if let Ok(hwnd) = window.hwnd() {
         MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+        // 子类化主窗口：拦截 WM_MOUSEACTIVATE 防止鼠标点击时激活窗口
+        let raw_hwnd = HWND(hwnd.0 as *mut _);
+        let original = unsafe {
+            SetWindowLongPtrW(raw_hwnd, GWLP_WNDPROC, wndproc_subclass as usize as isize)
+        };
+        ORIGINAL_WNDPROC.store(original, Ordering::Relaxed);
     }
     *MAIN_WINDOW.lock() = Some(window);
 }
