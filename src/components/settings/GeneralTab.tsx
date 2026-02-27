@@ -37,8 +37,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const setSearchAutoClear = useUISettings((s) => s.setSearchAutoClear);
   const keyboardNavigation = useUISettings((s) => s.keyboardNavigation);
   const setKeyboardNavigation = useUISettings((s) => s.setKeyboardNavigation);
-  const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
-  const setShowCategoryFilter = useUISettings((s) => s.setShowCategoryFilter);
   const {
     copySound, setCopySound,
     pasteSound, setPasteSound,
@@ -151,18 +149,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <Switch
                 checked={autoResetState}
                 onCheckedChange={setAutoResetState}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-xs">底部分类栏</Label>
-                <p className="text-xs text-muted-foreground">
-                  显示底部内容类型分类筛选栏
-                </p>
-              </div>
-              <Switch
-                checked={showCategoryFilter}
-                onCheckedChange={setShowCategoryFilter}
               />
             </div>
           </div>

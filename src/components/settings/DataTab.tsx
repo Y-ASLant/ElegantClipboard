@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular } from "@fluentui/react-icons";
+import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular, Delete16Regular, ArrowCounterclockwise16Regular, ArrowClockwise16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -129,6 +129,67 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [exportImportMsg, setExportImportMsg] = useState<string | null>(null);
+
+  // 数据清理
+  type CleanAction = "clear_history" | "reset_settings" | "reset_all";
+  const [cleanDialogAction, setCleanDialogAction] = useState<CleanAction | null>(null);
+  const [cleanLoading, setCleanLoading] = useState(false);
+  const [cleanMsg, setCleanMsg] = useState<string | null>(null);
+
+  const cleanActionConfig: Record<CleanAction, {
+    title: string;
+    description: string;
+    warning: string;
+    buttonText: string;
+    command: string;
+    needsRestart: boolean;
+  }> = {
+    clear_history: {
+      title: "清空剩贴板历史",
+      description: "删除所有剩贴板历史记录",
+      warning: "此操作将删除包括置顶和收藏在内的所有剩贴板记录，且不可恢复。",
+      buttonText: "确认清空",
+      command: "clear_all_history",
+      needsRestart: false,
+    },
+    reset_settings: {
+      title: "恢复默认配置",
+      description: "重置所有设置为默认值，保留数据内容",
+      warning: "此操作将清除所有应用设置并恢复为默认值，剩贴板数据不受影响，应用将重启。",
+      buttonText: "确认恢复",
+      command: "reset_settings",
+      needsRestart: true,
+    },
+    reset_all: {
+      title: "重置所有数据",
+      description: "删除所有数据并恢复默认设置",
+      warning: "此操作将删除所有剩贴板数据、图片文件及所有设置，恢复应用至初始状态，且不可恢复。",
+      buttonText: "确认重置",
+      command: "reset_all_data",
+      needsRestart: true,
+    },
+  };
+
+  const handleCleanAction = async () => {
+    if (!cleanDialogAction) return;
+    const config = cleanActionConfig[cleanDialogAction];
+    setCleanLoading(true);
+    setCleanMsg(null);
+    try {
+      await invoke(config.command);
+      setCleanDialogAction(null);
+      if (config.needsRestart) {
+        await invoke("restart_app");
+      } else {
+        setCleanMsg("操作成功。");
+        await refreshDataSize();
+      }
+    } catch (error) {
+      setCleanMsg(`操作失败: ${error}`);
+    } finally {
+      setCleanLoading(false);
+    }
+  };
 
   const refreshDataSize = useCallback(async () => {
     setDataSizeLoading(true);
@@ -389,6 +450,66 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
           )}
         </div>
 
+        {/* Data Cleanup Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-1">数据清理</h3>
+          <p className="text-xs text-muted-foreground mb-4">清理和重置应用数据</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm">清空剩贴板历史</p>
+                <p className="text-xs text-muted-foreground">删除所有剩贴板历史记录</p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setCleanMsg(null); setCleanDialogAction("clear_history"); }}
+              >
+                <Delete16Regular className="w-4 h-4 mr-1.5" />
+                清空历史
+              </Button>
+            </div>
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm">恢复默认配置</p>
+                <p className="text-xs text-muted-foreground">重置所有设置为默认值，保留数据内容</p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setCleanMsg(null); setCleanDialogAction("reset_settings"); }}
+              >
+                <ArrowCounterclockwise16Regular className="w-4 h-4 mr-1.5" />
+                恢复默认
+              </Button>
+            </div>
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm">重置所有数据</p>
+                <p className="text-xs text-muted-foreground">删除所有数据并恢复默认设置</p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setCleanMsg(null); setCleanDialogAction("reset_all"); }}
+              >
+                <ArrowClockwise16Regular className="w-4 h-4 mr-1.5" />
+                重置应用
+              </Button>
+            </div>
+          </div>
+          {cleanMsg && (
+            <p className={`text-xs mt-3 ${cleanMsg.includes("失败") ? "text-destructive" : "text-muted-foreground"}`}>
+              {cleanMsg}
+            </p>
+          )}
+        </div>
+
         {/* Dedup Strategy Card */}
         <DedupStrategyCard />
 
@@ -462,6 +583,41 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
           </div>
         </div>
       </div>
+
+      {/* Data Cleanup Confirmation Dialog */}
+      <Dialog open={cleanDialogAction !== null} onOpenChange={(open) => { if (!open && !cleanLoading) setCleanDialogAction(null); }}>
+        <DialogContent className="max-w-md" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>
+              {cleanDialogAction ? cleanActionConfig[cleanDialogAction].title : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {cleanDialogAction ? cleanActionConfig[cleanDialogAction].warning : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {cleanMsg && (
+            <p className="text-sm text-destructive">{cleanMsg}</p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCleanDialogAction(null)}
+              disabled={cleanLoading}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCleanAction}
+              disabled={cleanLoading}
+            >
+              {cleanLoading
+                ? "处理中..."
+                : (cleanDialogAction ? cleanActionConfig[cleanDialogAction].buttonText : "")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Migration Confirmation Dialog */}
       <Dialog open={migrationDialogOpen} onOpenChange={setMigrationDialogOpen}>

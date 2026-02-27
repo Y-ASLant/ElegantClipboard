@@ -36,6 +36,12 @@ function applySharpCorners() {
   document.documentElement.classList.toggle("sharp-corners", sharpCorners);
 }
 
+function applyWindowEffect() {
+  const { windowEffect } = useUISettings.getState();
+  document.documentElement.setAttribute("data-window-effect", windowEffect);
+  invoke("set_window_effect", { effect: windowEffect }).catch(() => {});
+}
+
 function apply() {
   const { colorTheme } = useUISettings.getState();
   const root = document.documentElement;
@@ -79,6 +85,9 @@ export function initTheme(): Promise<void> {
     if (state.sharpCorners !== prev.sharpCorners) {
       applySharpCorners();
     }
+    if (state.windowEffect !== prev.windowEffect) {
+      applyWindowEffect();
+    }
     if (state.darkMode !== prev.darkMode) {
       applyDarkMode();
     }
@@ -104,6 +113,7 @@ export function initTheme(): Promise<void> {
 
   // --- Initial apply ---
   applySharpCorners();
+  applyWindowEffect();
   // Always fetch accent color for ThemeTab preview, regardless of current theme
   invoke<string | null>("get_system_accent_color")
     .then((color) => {

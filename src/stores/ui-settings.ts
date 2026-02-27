@@ -7,6 +7,11 @@ export type ColorTheme = "default" | "emerald" | "cyan" | "system";
 export type DarkMode = "light" | "dark" | "auto";
 export type CardDensity = "compact" | "standard" | "spacious";
 export type TimeFormat = "relative" | "absolute";
+export type WindowEffect = "none" | "mica" | "acrylic" | "tabbed";
+export type ToolbarButton = "clear" | "pin" | "settings";
+
+export const DEFAULT_TOOLBAR_BUTTONS: ToolbarButton[] = ["clear", "pin", "settings"];
+export const MAX_TOOLBAR_BUTTONS = 5;
 
 interface UISettings {
   cardMaxLines: number;
@@ -35,6 +40,8 @@ interface UISettings {
   pasteSound: boolean;
   pasteCloseWindow: boolean;
   showCategoryFilter: boolean;
+  windowEffect: WindowEffect;
+  toolbarButtons: ToolbarButton[];
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -60,6 +67,8 @@ interface UISettings {
   setPasteSound: (enabled: boolean) => void;
   setPasteCloseWindow: (enabled: boolean) => void;
   setShowCategoryFilter: (enabled: boolean) => void;
+  setWindowEffect: (effect: WindowEffect) => void;
+  setToolbarButtons: (buttons: ToolbarButton[]) => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -98,6 +107,8 @@ export const useUISettings = create<UISettings>()(
       pasteSound: false,
       pasteCloseWindow: true,
       showCategoryFilter: true,
+      windowEffect: "none" as WindowEffect,
+      toolbarButtons: ["clear", "pin", "settings"] as ToolbarButton[],
       setCardMaxLines: (lines) => {
         set({ cardMaxLines: lines });
         broadcastChange({ cardMaxLines: lines });
@@ -198,6 +209,16 @@ export const useUISettings = create<UISettings>()(
       setShowCategoryFilter: (enabled) => {
         set({ showCategoryFilter: enabled });
         broadcastChange({ showCategoryFilter: enabled });
+      },
+      setWindowEffect: (effect) => {
+        set({ windowEffect: effect });
+        broadcastChange({ windowEffect: effect });
+        document.documentElement.setAttribute("data-window-effect", effect);
+        invoke("set_window_effect", { effect }).catch(() => {});
+      },
+      setToolbarButtons: (buttons) => {
+        set({ toolbarButtons: buttons });
+        broadcastChange({ toolbarButtons: buttons });
       },
     }),
     {

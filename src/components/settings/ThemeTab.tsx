@@ -6,10 +6,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
-import { useUISettings, ColorTheme, DarkMode } from "@/stores/ui-settings";
+import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
 
 export function ThemeTab() {
-  const { colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode } = useUISettings();
+  const { colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode, windowEffect, setWindowEffect } = useUISettings();
   const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
 
   // Re-render when accent color changes
@@ -160,6 +160,42 @@ export function ThemeTab() {
             checked={sharpCorners}
             onCheckedChange={setSharpCorners}
           />
+        </div>
+      </div>
+
+      {/* Window Effect */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">窗口特效</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          毛玻璃背景效果（需要 Windows 11）
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            { value: "none" as WindowEffect, label: "无", desc: "默认不透明背景" },
+            { value: "mica" as WindowEffect, label: "Mica", desc: "柔和半透明材质" },
+            { value: "acrylic" as WindowEffect, label: "Acrylic", desc: "模糊透明毛玻璃" },
+            { value: "tabbed" as WindowEffect, label: "Tabbed", desc: "Mica 变体，更深色调" },
+          ]).map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setWindowEffect(opt.value)}
+              className={`flex flex-col items-start p-3 rounded-md border transition-all duration-200 text-left ${
+                windowEffect === opt.value
+                  ? "border-primary bg-primary/5"
+                  : "border-transparent hover:bg-accent"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">{opt.label}</span>
+                {windowEffect === opt.value && (
+                  <Checkmark16Filled className="w-3.5 h-3.5 text-primary" />
+                )}
+              </div>
+              <span className="text-[11px] text-muted-foreground mt-0.5">
+                {opt.desc}
+              </span>
+            </button>
+          ))}
         </div>
       </div>
     </div>

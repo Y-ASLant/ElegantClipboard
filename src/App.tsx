@@ -32,6 +32,7 @@ import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
+import type { ToolbarButton } from "@/stores/ui-settings";
 import { useUISettings } from "@/stores/ui-settings";
 
 
@@ -59,6 +60,7 @@ function App() {
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const cardDensity = useUISettings((s) => s.cardDensity);
   const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
+  const toolbarButtons = useUISettings((s) => s.toolbarButtons);
   const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
@@ -236,6 +238,63 @@ function App() {
     }
   };
 
+  const renderToolbarButton = useCallback((id: ToolbarButton) => {
+    switch (id) {
+      case "clear":
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setClearDialogOpen(true)}
+                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
+              >
+                <Delete16Regular className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>清空历史</TooltipContent>
+          </Tooltip>
+        );
+      case "pin":
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={togglePinned}
+                className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+                  isPinned
+                    ? "text-primary bg-primary/10"
+                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                }`}
+              >
+                {isPinned ? (
+                  <LockClosed16Filled className="w-4 h-4" />
+                ) : (
+                  <LockClosed16Regular className="w-4 h-4" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{isPinned ? "解除锁定" : "锁定窗口"}</TooltipContent>
+          </Tooltip>
+        );
+      case "settings":
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <button
+                onClick={openSettings}
+                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
+              >
+                <Settings16Regular className="w-4 h-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>设置</TooltipContent>
+          </Tooltip>
+        );
+      default:
+        return null;
+    }
+  }, [isPinned, openSettings, togglePinned]);
+
   return (
     <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
       {/* 顶栏：搜索 + 操作 */}
@@ -265,52 +324,14 @@ function App() {
         </div>
 
         {/* 操作按钮 */}
-        <div 
-          className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
-          style={{ WebkitAppRegion: 'no-drag', pointerEvents: suppressTooltips ? 'none' : undefined } as React.CSSProperties}
-        >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => setClearDialogOpen(true)}
-                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
-              >
-                <Delete16Regular className="w-4 h-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>清空历史</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={togglePinned}
-                className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
-                  isPinned
-                    ? "text-primary bg-primary/10"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                }`}
-              >
-                {isPinned ? (
-                  <LockClosed16Filled className="w-4 h-4" />
-                ) : (
-                  <LockClosed16Regular className="w-4 h-4" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>{isPinned ? "解除锁定" : "锁定窗口"}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={openSettings}
-                className="w-7 h-7 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground rounded transition-colors"
-              >
-                <Settings16Regular className="w-4 h-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>设置</TooltipContent>
-          </Tooltip>
-        </div>
+        {toolbarButtons.length > 0 && (
+          <div 
+            className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
+            style={{ WebkitAppRegion: 'no-drag', pointerEvents: suppressTooltips ? 'none' : undefined } as React.CSSProperties}
+          >
+            {toolbarButtons.map((btn) => renderToolbarButton(btn))}
+          </div>
+        )}
       </div>
 
       {/* 剪贴板列表 */}

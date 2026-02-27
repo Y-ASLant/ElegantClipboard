@@ -918,6 +918,65 @@ fn is_window_pinned() -> bool {
 }
 
 #[tauri::command]
+fn set_window_effect(window: tauri::WebviewWindow, effect: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, WS_EX_LAYERED,
+            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        };
+
+        let raw_hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        let hwnd = HWND(raw_hwnd.0 as *mut _);
+
+        let is_effect = effect != "none";
+
+        unsafe {
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+            let has_layered = (ex_style as u32) & WS_EX_LAYERED.0 != 0;
+
+            if is_effect && has_layered {
+                SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) & !WS_EX_LAYERED.0) as i32);
+                let _ = SetWindowPos(
+                    hwnd, None, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            } else if !is_effect && !has_layered {
+                SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) | WS_EX_LAYERED.0) as i32);
+                let _ = SetWindowPos(
+                    hwnd, None, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+        }
+
+        let _ = window_vibrancy::clear_mica(&window);
+        let _ = window_vibrancy::clear_acrylic(&window);
+        let _ = window_vibrancy::clear_tabbed(&window);
+
+        match effect.as_str() {
+            "mica" => {
+                window_vibrancy::apply_mica(&window, None)
+                    .map_err(|e| format!("Failed to apply mica: {}", e))?;
+            }
+            "acrylic" => {
+                window_vibrancy::apply_acrylic(&window, Some((0, 0, 0, 0)))
+                    .map_err(|e| format!("Failed to apply acrylic: {}", e))?;
+            }
+            "tabbed" => {
+                window_vibrancy::apply_tabbed(&window, None)
+                    .map_err(|e| format!("Failed to apply tabbed: {}", e))?;
+            }
+            _ => {}
+        }
+
+        tracing::info!("Window effect set to: {}", effect);
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn focus_clipboard_window(window: tauri::WebviewWindow) {
     input_monitor::focus_clipboard_window(&window);
 }
@@ -1289,6 +1348,7 @@ pub fn run() {
             open_text_editor_window,
             set_window_pinned,
             is_window_pinned,
+            set_window_effect,
             focus_clipboard_window,
             restore_last_focus,
             save_current_focus,
@@ -1319,6 +1379,7 @@ pub fn run() {
             commands::clipboard::move_clipboard_item,
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::clear_history,
+            commands::clipboard::clear_all_history,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::paste_content,
             commands::clipboard::paste_content_as_plain,
@@ -1332,6 +1393,8 @@ pub fn run() {
             commands::settings::get_monitor_status,
             commands::settings::optimize_database,
             commands::settings::vacuum_database,
+            commands::settings::reset_settings,
+            commands::settings::reset_all_data,
             commands::settings::select_folder_for_settings,
             commands::settings::open_data_folder,
             commands::settings::is_autostart_enabled,

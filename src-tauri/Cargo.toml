@@ -76,6 +76,8 @@ clipboard-rs = "0.2"
 enigo = "0.6"
 # WebView2 version detection
 wry = "0.54"
+# Window backdrop effects (Mica/Acrylic)
+window-vibrancy = "0.5"
 
 # Windows API for low-level keyboard hook and admin check
 [target.'cfg(windows)'.dependencies]

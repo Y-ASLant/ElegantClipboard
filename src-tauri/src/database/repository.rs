@@ -389,6 +389,26 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
+    /// 获取所有条目的图片路径（含置顶和收藏）
+    pub fn get_all_image_paths(&self) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_path FROM clipboard_items WHERE image_path IS NOT NULL",
+        )?;
+        let paths = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(paths)
+    }
+
+    /// 清空所有历史（包括置顶和收藏）
+    pub fn clear_all(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let deleted = conn.execute("DELETE FROM clipboard_items", [])?;
+        Ok(deleted as i64)
+    }
+
     /// 删除 N 天前的非置顶/非收藏条目，返回 (删除数, 关联图片路径)
     pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
@@ -599,5 +619,12 @@ impl SettingsRepository {
             .filter_map(|r| r.ok())
             .collect();
         Ok(settings)
+    }
+
+    /// 清空所有设置
+    pub fn clear_all(&self) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute("DELETE FROM settings", [])?;
+        Ok(())
     }
 }
