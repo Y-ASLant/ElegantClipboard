@@ -43,6 +43,7 @@ pub async fn get_all_settings(
 #[tauri::command]
 pub async fn pause_monitor(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.monitor.pause();
+    tracing::info!("Clipboard monitor paused by user");
     Ok(())
 }
 
@@ -50,6 +51,7 @@ pub async fn pause_monitor(state: State<'_, Arc<AppState>>) -> Result<(), String
 #[tauri::command]
 pub async fn resume_monitor(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.monitor.resume();
+    tracing::info!("Clipboard monitor resumed by user");
     Ok(())
 }
 
@@ -74,6 +76,7 @@ pub struct MonitorStatus {
 #[tauri::command]
 pub async fn optimize_database(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.db.optimize().map_err(|e| e.to_string())?;
+    tracing::info!("Database optimized");
     Ok(())
 }
 
@@ -81,6 +84,7 @@ pub async fn optimize_database(state: State<'_, Arc<AppState>>) -> Result<(), St
 #[tauri::command]
 pub async fn vacuum_database(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.db.vacuum().map_err(|e| e.to_string())?;
+    tracing::info!("Database vacuumed");
     Ok(())
 }
 
@@ -114,7 +118,9 @@ pub async fn open_data_folder() -> Result<(), String> {
 #[tauri::command]
 pub async fn reset_settings(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let repo = SettingsRepository::new(&state.db);
-    repo.clear_all().map_err(|e| e.to_string())
+    repo.clear_all().map_err(|e| e.to_string())?;
+    tracing::info!("All settings reset to defaults");
+    Ok(())
 }
 
 /// 重置所有数据（删除剪贴板条目 + 设置 + 图片文件）

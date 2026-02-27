@@ -378,14 +378,18 @@ pub async fn get_clipboard_count(
 #[tauri::command]
 pub async fn toggle_pin(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
     let repo = ClipboardRepository::new(&state.db);
-    repo.toggle_pin(id).map_err(|e| e.to_string())
+    let new_state = repo.toggle_pin(id).map_err(|e| e.to_string())?;
+    debug!("Toggle pin: id={}, pinned={}", id, new_state);
+    Ok(new_state)
 }
 
 /// 切换收藏状态
 #[tauri::command]
 pub async fn toggle_favorite(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
     let repo = ClipboardRepository::new(&state.db);
-    repo.toggle_favorite(id).map_err(|e| e.to_string())
+    let new_state = repo.toggle_favorite(id).map_err(|e| e.to_string())?;
+    debug!("Toggle favorite: id={}, favorite={}", id, new_state);
+    Ok(new_state)
 }
 
 /// 与目标条目交换排序位置
@@ -412,8 +416,10 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
         if let Some(ref image_path) = item.image_path {
             crate::clipboard::cleanup_image_files(std::slice::from_ref(image_path));
         }
+        debug!("Deleted clipboard item: id={}, type={}", id, item.content_type);
     } else {
         repo.delete(id).map_err(|e| e.to_string())?;
+        debug!("Deleted clipboard item: id={}", id);
     }
 
     Ok(())

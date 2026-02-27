@@ -2,7 +2,7 @@ use crate::database::ClipboardRepository;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::State;
-use tracing::debug;
+use tracing::{debug, info};
 
 use super::{
     clipboard::simulate_paste, hide_main_window_if_not_pinned, with_paused_monitor, AppState,
@@ -51,6 +51,7 @@ pub async fn show_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let path_str = path.to_string_lossy();
+        debug!("show_in_explorer: {}", path_str);
         std::process::Command::new("explorer.exe")
             .args(["/select,", &path_str])
             .spawn()
@@ -150,9 +151,13 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
         Some(dest_path) => {
             let dest_str = dest_path.to_string();
             std::fs::copy(&source_path, &dest_str).map_err(|e| format!("保存失败: {}", e))?;
+            info!("File saved: {} -> {}", source_path, dest_str);
             Ok(true)
         }
-        None => Ok(false), // 用户取消
+        None => {
+            debug!("save_file_as: user cancelled");
+            Ok(false)
+        }
     }
 }
 

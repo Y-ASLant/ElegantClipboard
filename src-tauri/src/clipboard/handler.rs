@@ -195,8 +195,15 @@ impl ClipboardHandler {
         item.source_app_name = source_app_name;
         item.source_app_icon = source_app_icon;
 
+        let log_type = format!("{:?}", item.content_type);
+        let log_size = item.byte_size;
+        let log_source = item.source_app_name.clone().unwrap_or_else(|| "unknown".to_string());
+
         let id = self.repository.insert(item).map_err(|e| e.to_string())?;
-        info!("Stored new clipboard item with id: {}", id);
+        info!(
+            "Stored clipboard item: id={}, type={}, size={} bytes, source={}",
+            id, log_type, log_size, log_source
+        );
 
         // 执行最大历史数限制，清理旧图片
         let max_history_count = self.get_max_history_count();
@@ -377,6 +384,7 @@ impl ClipboardHandler {
         let image_path_str = image_path.to_string_lossy().to_string();
 
         let (image_width, image_height) = self.extract_image_dimensions(&data)?;
+        debug!("Processing image: {}x{}, {} bytes, hash={}", image_width, image_height, byte_size, &hash[..16]);
 
         // 同步写入文件，确保插入数据库前文件已就绪（异步写入会引发竞态）
         if let Err(e) = std::fs::write(&image_path, &data) {
@@ -414,6 +422,7 @@ impl ClipboardHandler {
 
     fn process_files(&self, files: Vec<String>, hash: String) -> Result<NewClipboardItem, String> {
         use std::path::Path;
+        debug!("Processing {} file(s)", files.len());
 
         // 仅计算普通文件大小（目录开销大且意义有限）
         let byte_size: i64 = files
