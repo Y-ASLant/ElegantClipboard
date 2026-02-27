@@ -1,6 +1,20 @@
 import {
-  ArrowUp16Regular,
-  ArrowDown16Regular,
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  ReOrderDotsVertical16Regular,
   Delete16Regular,
   LockClosed16Regular,
   Settings16Regular,
@@ -25,6 +39,68 @@ const TOOLBAR_BUTTON_ICONS: Record<ToolbarButton, React.ComponentType<{ classNam
 };
 
 const ALL_TOOLBAR_BUTTONS: ToolbarButton[] = Object.keys(TOOLBAR_BUTTON_REGISTRY) as ToolbarButton[];
+
+function SortableToolbarItem({
+  id,
+  icon: Icon,
+  label,
+  description,
+  active,
+  onToggle,
+}: {
+  id: ToolbarButton;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  description: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled: !active });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
+        active ? "bg-accent/50" : "opacity-50"
+      }`}
+    >
+      {active ? (
+        <button
+          {...attributes}
+          {...listeners}
+          className="w-4 h-4 flex items-center justify-center text-muted-foreground cursor-grab active:cursor-grabbing shrink-0 touch-none"
+        >
+          <ReOrderDotsVertical16Regular className="w-4 h-4" />
+        </button>
+      ) : (
+        <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-medium">{label}</div>
+        <div className="text-[11px] text-muted-foreground truncate">{description}</div>
+      </div>
+      <Switch
+        checked={active}
+        onCheckedChange={onToggle}
+        className="shrink-0"
+      />
+    </div>
+  );
+}
 
 const positionOptions: { value: "auto" | "left" | "right"; label: string }[] = [
   { value: "auto", label: "自动" },
@@ -69,6 +145,10 @@ export function DisplayTab() {
     showCategoryFilter, setShowCategoryFilter,
   } = useUISettings();
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 3 } })
+  );
+
   const isButtonActive = (id: ToolbarButton) => toolbarButtons.includes(id);
 
   const toggleButton = (id: ToolbarButton) => {
@@ -79,15 +159,23 @@ export function DisplayTab() {
     }
   };
 
-  const moveButton = (id: ToolbarButton, direction: -1 | 1) => {
-    const idx = toolbarButtons.indexOf(id);
-    if (idx < 0) return;
-    const newIdx = idx + direction;
-    if (newIdx < 0 || newIdx >= toolbarButtons.length) return;
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = toolbarButtons.indexOf(active.id as ToolbarButton);
+    const newIdx = toolbarButtons.indexOf(over.id as ToolbarButton);
+    if (oldIdx < 0 || newIdx < 0) return;
     const next = [...toolbarButtons];
-    [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
+    next.splice(oldIdx, 1);
+    next.splice(newIdx, 0, active.id as ToolbarButton);
     setToolbarButtons(next);
   };
+
+  // Ordered list: active buttons first (in their order), then inactive ones
+  const orderedButtons: ToolbarButton[] = [
+    ...toolbarButtons,
+    ...ALL_TOOLBAR_BUTTONS.filter((b) => !toolbarButtons.includes(b)),
+  ];
 
   return (
     <div className="space-y-4">
@@ -105,58 +193,40 @@ export function DisplayTab() {
         <p className="text-xs text-muted-foreground mb-4">
           自定义工具栏显示的按钮及顺序（最多 {MAX_TOOLBAR_BUTTONS} 个）
         </p>
-        <div className="space-y-1">
-          {ALL_TOOLBAR_BUTTONS.map((id) => {
-            const active = isButtonActive(id);
-            const idx = toolbarButtons.indexOf(id);
-            const meta = TOOLBAR_BUTTON_REGISTRY[id];
-            const Icon = TOOLBAR_BUTTON_ICONS[id];
-            return (
-              <div
-                key={id}
-                className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
-                  active ? "bg-accent/50" : "opacity-50"
-                }`}
-              >
-                <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{meta.label}</div>
-                  <div className="text-[11px] text-muted-foreground truncate">{meta.description}</div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={toolbarButtons} strategy={verticalListSortingStrategy}>
+            <div className="space-y-1">
+              {orderedButtons.map((id) => {
+                const active = isButtonActive(id);
+                const meta = TOOLBAR_BUTTON_REGISTRY[id];
+                const Icon = TOOLBAR_BUTTON_ICONS[id];
+                return (
+                  <SortableToolbarItem
+                    key={id}
+                    id={id}
+                    icon={Icon}
+                    label={meta.label}
+                    description={meta.description}
+                    active={active}
+                    onToggle={() => toggleButton(id)}
+                  />
+                );
+              })}
+              <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                <div className="space-y-0.5">
+                  <Label className="text-xs">底部分类栏</Label>
+                  <p className="text-xs text-muted-foreground">显示底部内容类型分类筛选栏</p>
                 </div>
-                {active && (
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <button
-                      onClick={() => moveButton(id, -1)}
-                      disabled={idx === 0}
-                      className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:bg-background disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <ArrowUp16Regular className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => moveButton(id, 1)}
-                      disabled={idx === toolbarButtons.length - 1}
-                      className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:bg-background disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <ArrowDown16Regular className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-                <Switch
-                  checked={active}
-                  onCheckedChange={() => toggleButton(id)}
-                  className="shrink-0"
-                />
+                <Switch checked={showCategoryFilter} onCheckedChange={setShowCategoryFilter} />
               </div>
-            );
-          })}
-          <div className="flex items-center justify-between mt-3 pt-3 border-t">
-            <div className="space-y-0.5">
-              <Label className="text-xs">底部分类栏</Label>
-              <p className="text-xs text-muted-foreground">显示底部内容类型分类筛选栏</p>
             </div>
-            <Switch checked={showCategoryFilter} onCheckedChange={setShowCategoryFilter} />
-          </div>
-        </div>
+          </SortableContext>
+        </DndContext>
       </div>
 
       {/* Content Preview Card */}
