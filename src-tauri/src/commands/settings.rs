@@ -110,21 +110,21 @@ pub async fn open_data_folder() -> Result<(), String> {
 
 // ============ 数据清理命令 ============
 
-/// 重置所有设置为默认值（保留剧贴板数据）
+/// 重置所有设置为默认值（保留剪贴板数据）
 #[tauri::command]
 pub async fn reset_settings(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     let repo = SettingsRepository::new(&state.db);
     repo.clear_all().map_err(|e| e.to_string())
 }
 
-/// 重置所有数据（删除剩贴板条目 + 设置 + 图片文件）
+/// 重置所有数据（删除剪贴板条目 + 设置 + 图片文件）
 #[tauri::command]
 pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     use crate::database::ClipboardRepository;
     use std::fs;
     use tracing::info;
 
-    // 清空剩贴板数据
+    // 清空剪贴板数据
     let clipboard_repo = ClipboardRepository::new(&state.db);
     let image_paths = clipboard_repo.get_all_image_paths().unwrap_or_default();
     clipboard_repo.clear_all().map_err(|e| e.to_string())?;
@@ -134,7 +134,7 @@ pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), Strin
     let settings_repo = SettingsRepository::new(&state.db);
     settings_repo.clear_all().map_err(|e| e.to_string())?;
 
-    // 删除图片/图标目录（清理剩留文件）
+    // 删除图片/图标目录（清理残留文件）
     let config = crate::config::AppConfig::load();
     let data_dir = config.get_data_dir();
     for dir_name in &["images", "icons"] {
@@ -143,6 +143,8 @@ pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), Strin
             let _ = fs::remove_dir_all(&dir);
         }
     }
+
+    state.db.vacuum().ok();
 
     info!("Reset all data completed");
     Ok(())

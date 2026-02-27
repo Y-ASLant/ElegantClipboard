@@ -42,8 +42,9 @@ function applyWindowEffect() {
   invoke("set_window_effect", { effect: windowEffect }).catch(() => {
     // Effect not supported on this OS (e.g. Mica/Tabbed on Windows 10) —
     // revert the CSS attribute and the stored setting so the window stays opaque.
+    // Use setState directly to avoid re-triggering the setter's invoke call.
     document.documentElement.setAttribute("data-window-effect", "none");
-    useUISettings.getState().setWindowEffect("none");
+    useUISettings.setState({ windowEffect: "none" });
   });
 }
 

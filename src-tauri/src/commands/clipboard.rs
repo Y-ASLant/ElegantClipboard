@@ -428,6 +428,7 @@ pub async fn clear_all_history(state: State<'_, Arc<AppState>>) -> Result<i64, S
     let image_paths = repo.get_all_image_paths().unwrap_or_default();
     let deleted = repo.clear_all().map_err(|e| e.to_string())?;
     let deleted_files = crate::clipboard::cleanup_image_files(&image_paths);
+    state.db.vacuum().ok();
 
     info!(
         "Cleared all {} clipboard items and {} image files",

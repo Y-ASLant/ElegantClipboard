@@ -1300,6 +1300,36 @@ pub fn run() {
 
                 #[cfg(target_os = "windows")]
                 {
+                    // Ensure WS_EX_LAYERED is set at startup so the window is
+                    // opaque before initTheme() runs. This prevents a transparent
+                    // flash on Windows 10 where DWM effects are not supported.
+                    {
+                        use windows::Win32::Foundation::HWND;
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            GetWindowLongW, SetWindowLongW, SetWindowPos,
+                            GWL_EXSTYLE, WS_EX_LAYERED,
+                            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+                            SWP_NOSIZE, SWP_NOZORDER,
+                        };
+                        if let Ok(raw_hwnd) = window.hwnd() {
+                            let hwnd = HWND(raw_hwnd.0 as *mut _);
+                            unsafe {
+                                let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                                if (ex_style as u32) & WS_EX_LAYERED.0 == 0 {
+                                    SetWindowLongW(
+                                        hwnd, GWL_EXSTYLE,
+                                        ((ex_style as u32) | WS_EX_LAYERED.0) as i32,
+                                    );
+                                    let _ = SetWindowPos(
+                                        hwnd, None, 0, 0, 0, 0,
+                                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
+                                            | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                                    );
+                                }
+                            }
+                        }
+                    }
+
                     let dpi_ctx = unsafe {
                         windows::Win32::UI::HiDpi::GetThreadDpiAwarenessContext()
                     };

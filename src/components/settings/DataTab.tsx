@@ -145,9 +145,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     needsRestart: boolean;
   }> = {
     clear_history: {
-      title: "清空剩贴板历史",
-      description: "删除所有剩贴板历史记录",
-      warning: "此操作将删除包括置顶和收藏在内的所有剩贴板记录，且不可恢复。",
+      title: "清空剪贴板历史",
+      description: "删除所有剪贴板历史记录",
+      warning: "此操作将删除包括置顶和收藏在内的所有剪贴板记录，且不可恢复。",
       buttonText: "确认清空",
       command: "clear_all_history",
       needsRestart: false,
@@ -155,7 +155,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     reset_settings: {
       title: "恢复默认配置",
       description: "重置所有设置为默认值，保留数据内容",
-      warning: "此操作将清除所有应用设置并恢复为默认值，剩贴板数据不受影响，应用将重启。",
+      warning: "此操作将清除所有应用设置并恢复为默认值，剪贴板数据不受影响，应用将重启。",
       buttonText: "确认恢复",
       command: "reset_settings",
       needsRestart: true,
@@ -163,7 +163,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     reset_all: {
       title: "重置所有数据",
       description: "删除所有数据并恢复默认设置",
-      warning: "此操作将删除所有剩贴板数据、图片文件及所有设置，恢复应用至初始状态，且不可恢复。",
+      warning: "此操作将删除所有剪贴板数据、图片文件及所有设置，恢复应用至初始状态，且不可恢复。",
       buttonText: "确认重置",
       command: "reset_all_data",
       needsRestart: true,
@@ -179,6 +179,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       await invoke(config.command);
       setCleanDialogAction(null);
       if (config.needsRestart) {
+        // Clear frontend persisted UI settings so they don't survive the restart
+        localStorage.removeItem("clipboard-ui-settings");
+        sessionStorage.removeItem("data-size-cache");
         await invoke("restart_app");
       } else {
         setCleanMsg("操作成功。");
@@ -457,8 +460,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-sm">清空剩贴板历史</p>
-                <p className="text-xs text-muted-foreground">删除所有剩贴板历史记录</p>
+                <p className="text-sm">清空剪贴板历史</p>
+                <p className="text-xs text-muted-foreground">删除所有剪贴板历史记录</p>
               </div>
               <Button
                 variant="destructive"
