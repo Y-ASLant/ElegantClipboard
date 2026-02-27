@@ -1,16 +1,16 @@
 {
-  "version": "0.7.35",
+  "version": "0.7.36",
   "description": "An elegant Windows clipboard manager built with Tauri",
   "homepage": "https://github.com/Y-ASLant/ElegantClipboard",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/Y-ASLant/ElegantClipboard/releases/download/v0.7.35/ElegantClipboard_0.7.35_x64-setup.exe#/dl.7z",
-      "hash": "178c07016d85bba53f9fd29c13e0a3fd1793ee29c53b86a84741cc09fb221d4b"
+      "url": "https://github.com/Y-ASLant/ElegantClipboard/releases/download/v0.7.36/ElegantClipboard_0.7.36_x64-setup.exe#/dl.7z",
+      "hash": "2c7e614809b6219aff1ab423d8ae9be24afeb4ddd2b40990b0a3fa08192d4103"
     },
     "arm64": {
-      "url": "https://github.com/Y-ASLant/ElegantClipboard/releases/download/v0.7.35/ElegantClipboard_0.7.35_arm64-setup.exe#/dl.7z",
-      "hash": "5c9dfcb8bed19caebdcb232227821de883be3aa284fe73b2a04df2bb279509fa"
+      "url": "https://github.com/Y-ASLant/ElegantClipboard/releases/download/v0.7.36/ElegantClipboard_0.7.36_arm64-setup.exe#/dl.7z",
+      "hash": "f81c95297f178eea75846b26f2d637c7c0f60ca5965bf889a46e89a44aaa37a7"
     }
   },
   "pre_install": "Remove-Item \"$dir\\`$*\", \"$dir\\uninst*\" -Force -Recurse",
