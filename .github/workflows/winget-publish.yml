@@ -1,0 +1,43 @@
+name: Publish to WinGet
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.7.35)"
+        required: true
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+
+      - name: Submit to winget-pkgs
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $base = "https://github.com/Y-ASLant/ElegantClipboard/releases/download/v${version}"
+          $x64  = "${base}/ElegantClipboard_${version}_x64-setup.exe"
+          $arm64 = "${base}/ElegantClipboard_${version}_arm64-setup.exe"
+
+          .\wingetcreate.exe update Y-ASLant.ElegantClipboard `
+            --version $version `
+            --urls $x64 $arm64 `
+            --submit `
+            --token ${{ secrets.UPDATER_TOKEN }}
