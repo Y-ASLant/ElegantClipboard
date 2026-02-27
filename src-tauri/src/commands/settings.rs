@@ -43,6 +43,7 @@ pub async fn get_all_settings(
 #[tauri::command]
 pub async fn pause_monitor(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.monitor.pause();
+    tracing::info!("Clipboard monitor paused by user");
     Ok(())
 }
 
@@ -50,6 +51,7 @@ pub async fn pause_monitor(state: State<'_, Arc<AppState>>) -> Result<(), String
 #[tauri::command]
 pub async fn resume_monitor(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.monitor.resume();
+    tracing::info!("Clipboard monitor resumed by user");
     Ok(())
 }
 
@@ -74,6 +76,7 @@ pub struct MonitorStatus {
 #[tauri::command]
 pub async fn optimize_database(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.db.optimize().map_err(|e| e.to_string())?;
+    tracing::info!("Database optimized");
     Ok(())
 }
 
@@ -81,6 +84,7 @@ pub async fn optimize_database(state: State<'_, Arc<AppState>>) -> Result<(), St
 #[tauri::command]
 pub async fn vacuum_database(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.db.vacuum().map_err(|e| e.to_string())?;
+    tracing::info!("Database vacuumed");
     Ok(())
 }
 
@@ -106,6 +110,50 @@ pub async fn open_data_folder() -> Result<(), String> {
     let config = crate::config::AppConfig::load();
     let data_dir = config.get_data_dir();
     super::open_path_in_explorer(&data_dir)
+}
+
+// ============ 数据清理命令 ============
+
+/// 重置所有设置为默认值（保留剪贴板数据）
+#[tauri::command]
+pub async fn reset_settings(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let repo = SettingsRepository::new(&state.db);
+    repo.clear_all().map_err(|e| e.to_string())?;
+    tracing::info!("All settings reset to defaults");
+    Ok(())
+}
+
+/// 重置所有数据（删除剪贴板条目 + 设置 + 图片文件）
+#[tauri::command]
+pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    use crate::database::ClipboardRepository;
+    use std::fs;
+    use tracing::info;
+
+    // 清空剪贴板数据
+    let clipboard_repo = ClipboardRepository::new(&state.db);
+    let image_paths = clipboard_repo.get_all_image_paths().unwrap_or_default();
+    clipboard_repo.clear_all().map_err(|e| e.to_string())?;
+    crate::clipboard::cleanup_image_files(&image_paths);
+
+    // 清空设置
+    let settings_repo = SettingsRepository::new(&state.db);
+    settings_repo.clear_all().map_err(|e| e.to_string())?;
+
+    // 删除图片/图标目录（清理残留文件）
+    let config = crate::config::AppConfig::load();
+    let data_dir = config.get_data_dir();
+    for dir_name in &["images", "icons"] {
+        let dir = data_dir.join(dir_name);
+        if dir.exists() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    state.db.vacuum().ok();
+
+    info!("Reset all data completed");
+    Ok(())
 }
 
 // ============ 自启动命令 ============

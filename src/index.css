@@ -184,6 +184,51 @@
     );
 }
 
+/* ========== Window Effect (Glass/Mica/Acrylic) ========== */
+
+/* Light mode glass backgrounds — only override surface colors that need
+   transparency for the DWM backdrop to show through.  Do NOT override
+   muted/secondary/accent so the active color-theme is preserved. */
+[data-window-effect="mica"],
+[data-window-effect="acrylic"],
+[data-window-effect="tabbed"] {
+    --color-background: hsl(0 0% 100% / 0.75);
+    --color-card: hsl(0 0% 100% / 0.6);
+    --color-popover: hsl(0 0% 100% / 0.85);
+    --color-border: hsl(0 0% 80% / 0.5);
+}
+
+/* Acrylic is more transparent */
+[data-window-effect="acrylic"] {
+    --color-background: hsl(0 0% 100% / 0.65);
+    --color-card: hsl(0 0% 100% / 0.45);
+}
+
+/* Dark mode glass backgrounds */
+.dark[data-window-effect="mica"],
+.dark[data-window-effect="acrylic"],
+.dark[data-window-effect="tabbed"] {
+    --color-background: hsl(222.2 84% 4.9% / 0.7);
+    --color-card: hsl(224 71% 8% / 0.55);
+    --color-popover: hsl(224 71% 8% / 0.85);
+    --color-border: hsl(220 20% 30% / 0.5);
+}
+
+.dark[data-window-effect="acrylic"] {
+    --color-background: hsl(222.2 84% 4.9% / 0.55);
+    --color-card: hsl(224 71% 8% / 0.4);
+}
+
+/* Glass html and body must be transparent for DWM backdrop to show through */
+[data-window-effect="mica"],
+[data-window-effect="acrylic"],
+[data-window-effect="tabbed"],
+[data-window-effect="mica"] body,
+[data-window-effect="acrylic"] body,
+[data-window-effect="tabbed"] body {
+    background-color: transparent;
+}
+
 /* Sharp corners mode (Windows 10 style) */
 .sharp-corners,
 .sharp-corners * {
@@ -225,7 +270,17 @@ body {
 }
 
 /* Base layout */
-html,
+html {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    /* overflow:hidden on <html> breaks the CSS canvas-background propagation rule,
+       so body's background-color won't reach the compositing canvas.
+       With transparent:true in WebView2 the canvas would be fully transparent
+       unless <html> declares its own background-color. */
+    background-color: var(--color-background);
+}
 body,
 #root {
     height: 100%;
@@ -371,6 +426,20 @@ textarea,
 
 .animate-scale-bounce {
     animation: scale-bounce 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Paste feedback flash */
+@keyframes paste-flash {
+    0% {
+        background-color: hsl(from var(--color-primary) h s l / 0.15);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.animate-paste-flash {
+    animation: paste-flash 0.3s ease-out;
 }
 
 /* Dragging cursor - from QuickClipboard optimization */

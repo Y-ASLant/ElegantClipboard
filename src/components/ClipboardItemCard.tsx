@@ -303,6 +303,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const sourceAppDisplay = useUISettings((s) => s.sourceAppDisplay);
 
   const [justDropped, setJustDropped] = useState(false);
+  const [justPasted, setJustPasted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -365,7 +366,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   // ---- Event handlers ----
 
   const handlePaste = () => {
-    if (!isDragging && !isDragOverlay) pasteContent(item.id);
+    if (!isDragging && !isDragOverlay) {
+      pasteContent(item.id);
+      setJustPasted(true);
+      setTimeout(() => setJustPasted(false), 300);
+    }
   };
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -448,9 +453,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
       <Card
         className={cn(
-        "group relative cursor-pointer overflow-hidden hover:shadow-md hover:border-primary/30 ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.06]",
+        "group relative cursor-pointer overflow-hidden shadow-none hover:shadow-sm hover:border-primary/30 ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.06]",
           isDragOverlay && "shadow-lg border-primary cursor-grabbing",
           justDropped && "animate-scale-bounce",
+          justPasted && "animate-paste-flash",
           isActive && "bg-accent shadow-sm",
         )}
         onClick={handlePaste}

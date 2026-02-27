@@ -157,8 +157,8 @@ impl CMHandler for MonitorHandler {
         // 先获取来源应用（在读取内容之前）
         let source = super::source_app::get_clipboard_source_app();
 
-        // 读取剪贴板内容
-        let content = match read_clipboard_content() {
+        // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
+        let content = match read_clipboard_content_with_retry() {
             Some(c) => c,
             None => return CallbackResult::Next,
         };
@@ -188,7 +188,33 @@ impl CMHandler for MonitorHandler {
     }
 }
 
-/// 读取当前剪贴板内容
+/// 带重试的剪贴板读取，应对剪贴板锁竞争（如截图工具延迟渲染）
+fn read_clipboard_content_with_retry() -> Option<ClipboardContent> {
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_DELAY_MS: u64 = 50;
+
+    for attempt in 0..MAX_RETRIES {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64));
+            debug!("Clipboard read retry {}/{}", attempt + 1, MAX_RETRIES);
+        }
+
+        match read_clipboard_content() {
+            Some(content) => return Some(content),
+            None if attempt + 1 < MAX_RETRIES => {
+                debug!("Clipboard read returned nothing, will retry");
+                continue;
+            }
+            None => {
+                warn!("Clipboard read failed after {} attempts", MAX_RETRIES);
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// 读取当前剪贴板内容（单次尝试）
 fn read_clipboard_content() -> Option<ClipboardContent> {
     use clipboard_rs::common::RustImage;
     use clipboard_rs::{Clipboard, ClipboardContext};
@@ -196,42 +222,51 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
     let ctx = match ClipboardContext::new() {
         Ok(c) => c,
         Err(e) => {
-            warn!("Failed to create clipboard context: {}", e);
+            warn!("Failed to create clipboard context: {} (clipboard may be locked by another app)", e);
             return None;
         }
     };
 
     // 优先尝试获取文件
-    if let Ok(files) = ctx.get_files() {
-        if !files.is_empty() {
+    match ctx.get_files() {
+        Ok(files) if !files.is_empty() => {
             debug!("Got {} files from clipboard", files.len());
             return Some(ClipboardContent::Files(files));
         }
+        Ok(_) => {} // 空文件列表，继续尝试其他格式
+        Err(e) => debug!("Clipboard get_files failed: {}", e),
     }
 
     // 尝试获取图片
-    if let Ok(img) = ctx.get_image() {
-        let (width, height) = img.get_size();
-        debug!("Got image from clipboard: {}x{}", width, height);
+    match ctx.get_image() {
+        Ok(img) => {
+            let (width, height) = img.get_size();
+            debug!("Got image from clipboard: {}x{}", width, height);
 
-        // 直接从 clipboard-rs 获取 PNG 字节
-        if let Ok(png_buffer) = img.to_png() {
-            let bytes: Vec<u8> = png_buffer.get_bytes().to_vec();
-            debug!("Got PNG image: {} bytes", bytes.len());
-            return Some(ClipboardContent::Image(bytes));
+            match img.to_png() {
+                Ok(png_buffer) => {
+                    let bytes: Vec<u8> = png_buffer.get_bytes().to_vec();
+                    debug!("Got PNG image: {} bytes", bytes.len());
+                    return Some(ClipboardContent::Image(bytes));
+                }
+                Err(e) => warn!("Failed to convert clipboard image to PNG: {}", e),
+            }
         }
-
-        warn!("Failed to convert image to PNG");
+        Err(e) => debug!("Clipboard get_image failed: {} (may not contain image data or format unsupported)", e),
     }
 
     // 尝试获取文本
-    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-        if let Ok(text) = clipboard.get_text() {
-            if !text.is_empty() {
+    match arboard::Clipboard::new() {
+        Ok(mut clipboard) => match clipboard.get_text() {
+            Ok(text) if !text.is_empty() => {
                 return Some(ClipboardContent::Text(text));
             }
-        }
+            Ok(_) => debug!("Clipboard text is empty"),
+            Err(e) => debug!("Clipboard get_text failed: {}", e),
+        },
+        Err(e) => warn!("Failed to create arboard clipboard: {}", e),
     }
 
+    debug!("No recognizable content in clipboard");
     None
 }

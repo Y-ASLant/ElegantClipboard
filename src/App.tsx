@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from "react";
 import {
   Search16Regular,
+  Dismiss16Regular,
   Delete16Regular,
   Settings16Regular,
   LockClosed16Regular,
@@ -31,6 +32,7 @@ import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
+import type { ToolbarButton } from "@/stores/ui-settings";
 import { useUISettings } from "@/stores/ui-settings";
 
 
@@ -58,6 +60,7 @@ function App() {
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const cardDensity = useUISettings((s) => s.cardDensity);
   const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
+  const toolbarButtons = useUISettings((s) => s.toolbarButtons);
   const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
@@ -235,32 +238,11 @@ function App() {
     }
   };
 
-  return (
-    <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
-      {/* 顶栏：搜索 + 操作 */}
-      <div
-        className="flex items-center gap-2 p-2 shrink-0 select-none"
-        data-tauri-drag-region
-      >
-        {/* 搜索栏 */}
-        <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
-          <Input
-            ref={inputRef}
-            type="text"
-            placeholder="搜索剪贴板..."
-            value={searchQuery}
-            onChange={handleSearchChange}
-            className="pl-9 h-9 text-sm bg-background border shadow-sm"
-          />
-        </div>
-
-        {/* 操作按钮 */}
-        <div 
-          className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
-          style={{ WebkitAppRegion: 'no-drag', pointerEvents: suppressTooltips ? 'none' : undefined } as React.CSSProperties}
-        >
-          <Tooltip>
+  const renderToolbarButton = useCallback((id: ToolbarButton) => {
+    switch (id) {
+      case "clear":
+        return (
+          <Tooltip key={id}>
             <TooltipTrigger asChild>
               <button
                 onClick={() => setClearDialogOpen(true)}
@@ -271,7 +253,10 @@ function App() {
             </TooltipTrigger>
             <TooltipContent>清空历史</TooltipContent>
           </Tooltip>
-          <Tooltip>
+        );
+      case "pin":
+        return (
+          <Tooltip key={id}>
             <TooltipTrigger asChild>
               <button
                 onClick={togglePinned}
@@ -290,7 +275,10 @@ function App() {
             </TooltipTrigger>
             <TooltipContent>{isPinned ? "解除锁定" : "锁定窗口"}</TooltipContent>
           </Tooltip>
-          <Tooltip>
+        );
+      case "settings":
+        return (
+          <Tooltip key={id}>
             <TooltipTrigger asChild>
               <button
                 onClick={openSettings}
@@ -301,7 +289,49 @@ function App() {
             </TooltipTrigger>
             <TooltipContent>设置</TooltipContent>
           </Tooltip>
+        );
+      default:
+        return null;
+    }
+  }, [isPinned, openSettings, togglePinned]);
+
+  return (
+    <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
+      {/* 顶栏：搜索 + 操作 */}
+      <div
+        className="flex items-center gap-2 p-2 shrink-0 select-none"
+        data-tauri-drag-region
+      >
+        {/* 搜索栏 */}
+        <div className="relative flex-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <Search16Regular className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground z-10" />
+          <Input
+            ref={inputRef}
+            type="text"
+            placeholder="搜索剪贴板..."
+            value={searchQuery}
+            onChange={handleSearchChange}
+            className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-8")}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => { setSearchQuery(""); fetchItems({ search: "" }); }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-sm transition-colors z-10"
+            >
+              <Dismiss16Regular className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
+
+        {/* 操作按钮 */}
+        {toolbarButtons.length > 0 && (
+          <div 
+            className="flex items-center gap-0.5 h-9 px-1 bg-background border rounded-md shadow-sm" 
+            style={{ WebkitAppRegion: 'no-drag', pointerEvents: suppressTooltips ? 'none' : undefined } as React.CSSProperties}
+          >
+            {toolbarButtons.map((btn) => renderToolbarButton(btn))}
+          </div>
+        )}
       </div>
 
       {/* 剪贴板列表 */}

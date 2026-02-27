@@ -36,6 +36,9 @@ cd src-tauri && cargo test
 ### 最近更新
 
 **v0.x 新功能**：
+- **窗口毛玻璃特效**：支持 Mica / Acrylic / Tabbed 三种 Windows 11 DWM 背景特效，Win10 自动回退
+- **工具栏自定义**：可配置工具栏按钮的显示、隐藏和排序
+- **数据清理**：三级数据清理操作（清空历史 / 恢复默认配置 / 重置所有数据）
 - **图片预览窗口**：独立悬浮窗口显示图片，支持缩放和左右定位
 - **动态主题系统**：支持 default/emerald/cyan/system 四种主题，system 主题跟随 Windows 系统强调色
 - **搜索高亮**：搜索结果自动提取关键词上下文，提升搜索体验
@@ -56,9 +59,13 @@ src/                    # React 前端
 │   ├── ClipboardItemCard.tsx    # 卡片组件
 │   ├── CardContentRenderers.tsx # 内容渲染器（图片/文件预览）
 │   ├── settings/                # 设置页面组件
-│   └── ui/                      # shadcn/ui 基础组件
+│   └── ui/                      # shadcn/ui 基础组件（Radix 封装）
 ├── hooks/
 │   └── useSortableList.ts       # 拖拽排序 Hook
+├── lib/
+│   ├── constants.ts             # 常量（工具栏按钮注册表等）
+│   ├── theme-applier.ts         # 主题/窗口特效应用器
+│   └── utils.ts                 # 工具函数
 ├── stores/            # Zustand 状态管理
 └── main.tsx           # 入口点（简单路由）
 
@@ -88,12 +95,12 @@ src-tauri/              # Rust 后端
 **后端（Rust）**：命令按功能模块化组织，在 `lib.rs` 通过 `invoke_handler` 注册。
 
 **命令模块**（`src-tauri/src/commands/`）：
-- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`get_clipboard_item`、`get_clipboard_count`、`toggle_pin`、`toggle_favorite`、`move_clipboard_item`、`delete_clipboard_item`、`clear_history`、`copy_to_clipboard`、`paste_content`
-- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`select_folder_for_settings`、`open_data_folder`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`
+- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`get_clipboard_item`、`get_clipboard_count`、`toggle_pin`、`toggle_favorite`、`move_clipboard_item`、`delete_clipboard_item`、`clear_history`、`clear_all_history`、`copy_to_clipboard`、`paste_content`
+- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`reset_settings`、`reset_all_data`、`select_folder_for_settings`、`open_data_folder`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`
 - `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`、`get_file_details`、`save_file_as`
 
 **窗口/系统命令**（`lib.rs`）：
-- 窗口管理：`show_window`、`hide_window`、`set_window_pinned`、`open_settings_window`
+- 窗口管理：`show_window`、`hide_window`、`set_window_pinned`、`set_window_effect`、`open_settings_window`
 - 管理员启动：`is_admin_launch_enabled`、`enable_admin_launch`、`is_running_as_admin`
 - 快捷键：`update_shortcut`、`enable_winv_replacement`
 
@@ -133,6 +140,8 @@ const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
     - `previewPosition` - 预览位置（auto/left/right）
     - `imageAutoHeight/imageMaxHeight` - 图片高度设置
     - `colorTheme` - 颜色主题（default/emerald/cyan/system）
+    - `windowEffect` - 窗口特效（none/mica/acrylic/tabbed）
+    - `toolbarButtons` - 工具栏按钮配置
     - `autoResetState` - 关闭时重置状态
 - **后端**：`AppState` 通过 Tauri State 共享
   ```rust
@@ -278,6 +287,8 @@ Windows 的注册表 `Run` 键会静默跳过需要 UAC 提权的程序，因此
 - `clipboard-master` - 剪贴板监控
 - `clipboard-rs` / `arboard` - 剪贴板操作
 - `enigo` - 键盘模拟粘贴
+- `window-vibrancy` - 窗口背景特效（Mica/Acrylic/Tabbed）
+- `wry` - WebView2 版本检测
 - `rdev` - 全局鼠标/键盘监控
 - `parking_lot` - 高性能锁
 - `blake3` - 内容哈希去重
@@ -293,7 +304,7 @@ Windows 的注册表 `Run` 键会静默跳过需要 UAC 提权的程序，因此
 - @dnd-kit - 拖拽排序
 - OverlayScrollbars - 自定义滚动条
 - Fluent UI Icons - 图标库
-- Radix UI - 无障碍组件基础（Dialog、Tooltip、Context Menu 等）
+- Radix UI - 无障碍组件基础（Dialog、Tooltip、Context Menu、Switch 等）
 
 ## 性能优化
 
@@ -389,10 +400,18 @@ std::thread::spawn(move || {
 - 零 React 开销：模块级初始化，直接 DOM 操作
 
 **主题应用流程**：
-1. `initTheme()` 在窗口加载时调用（`App.tsx:34`）
+1. `initTheme()` 在窗口加载时调用（`App.tsx`）
 2. 读取 zustand store 的 `colorTheme`
 3. 若为 `system`，获取并应用系统强调色
 4. 监听 store 变化和系统主题变化事件
+
+**窗口特效**：
+- 支持 `none` / `mica` / `acrylic` / `tabbed` 四种模式
+- 后端通过 `window-vibrancy` crate 调用 DWM API
+- 切换特效时操作 `WS_EX_LAYERED` 扩展窗口样式
+- CSS 使用 `data-window-effect` 属性选择器覆盖背景色为半透明
+- Windows 10 不支持 Mica/Tabbed 时自动回退到 `none`，前端 catch 后恢复 CSS 属性和 store 状态
+- 启动时在 setup 中立即设置 `WS_EX_LAYERED` 防止透明闪烁
 
 ## 命名约定
 
@@ -427,10 +446,10 @@ Rust 编译缓存目录配置在 `src-tauri/.cargo/config.toml`：
 
 ## ESLint 配置
 
-位置：项目根目录 `eslint.config.mjs`
+位置：项目根目录 `eslint.config.js`
 
-- 使用 `@eslint/js` 基础配置
-- TypeScript ESLint 解析器和插件
-- Import 插件用于导入排序
+- ESLint 9 flat config 格式
+- `@typescript-eslint/parser` 解析 TypeScript
+- `eslint-plugin-import` + `eslint-import-resolver-typescript` 管理导入排序
 - 运行 `npm run lint` 检查代码规范
 - 运行 `npm run lint:fix` 自动修复问题
