@@ -955,21 +955,35 @@ fn set_window_effect(window: tauri::WebviewWindow, effect: String) -> Result<(),
         let _ = window_vibrancy::clear_acrylic(&window);
         let _ = window_vibrancy::clear_tabbed(&window);
 
-        match effect.as_str() {
-            "mica" => {
-                window_vibrancy::apply_mica(&window, None)
-                    .map_err(|e| format!("Failed to apply mica: {}", e))?;
+        let apply_result: Result<(), String> = match effect.as_str() {
+            "mica" => window_vibrancy::apply_mica(&window, None)
+                .map_err(|e| format!("Failed to apply mica: {}", e)),
+            "acrylic" => window_vibrancy::apply_acrylic(&window, Some((0, 0, 0, 0)))
+                .map_err(|e| format!("Failed to apply acrylic: {}", e)),
+            "tabbed" => window_vibrancy::apply_tabbed(&window, None)
+                .map_err(|e| format!("Failed to apply tabbed: {}", e)),
+            _ => Ok(()),
+        };
+
+        if let Err(ref e) = apply_result {
+            tracing::warn!("Window effect '{}' not supported on this OS: {}", effect, e);
+            // Restore WS_EX_LAYERED — we may have removed it before the failed attempt
+            unsafe {
+                let cur_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+                if (cur_style as u32) & WS_EX_LAYERED.0 == 0 {
+                    SetWindowLongW(
+                        hwnd, GWL_EXSTYLE,
+                        ((cur_style as u32) | WS_EX_LAYERED.0) as i32,
+                    );
+                    let _ = SetWindowPos(
+                        hwnd, None, 0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    );
+                }
             }
-            "acrylic" => {
-                window_vibrancy::apply_acrylic(&window, Some((0, 0, 0, 0)))
-                    .map_err(|e| format!("Failed to apply acrylic: {}", e))?;
-            }
-            "tabbed" => {
-                window_vibrancy::apply_tabbed(&window, None)
-                    .map_err(|e| format!("Failed to apply tabbed: {}", e))?;
-            }
-            _ => {}
         }
+
+        apply_result?;
 
         tracing::info!("Window effect set to: {}", effect);
     }
