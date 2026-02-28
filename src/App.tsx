@@ -299,7 +299,7 @@ function App() {
     <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
       {/* 顶栏：搜索 + 操作 */}
       <div
-        className="flex items-center gap-2 p-2 shrink-0 select-none"
+        className="flex items-center gap-2 px-2 pt-2 pb-0.5 shrink-0 select-none"
         data-tauri-drag-region
       >
         {/* 搜索栏 */}

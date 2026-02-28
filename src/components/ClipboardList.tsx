@@ -335,7 +335,7 @@ export function ClipboardList() {
 
       const densityPb = cardDensity === "compact" ? "pb-1" : cardDensity === "spacious" ? "pb-3" : "pb-2";
       return (
-        <div className={`px-2 ${densityPb}`}>
+        <div className={`px-2 ${densityPb}${index === 0 ? ' pt-1.5' : ''}`}>
           {showSeparator && <Separator className="mb-2" />}
           <ClipboardItemCard item={item} index={index} showBadge={showSlotBadges} sortId={item._sortId} />
         </div>
@@ -414,7 +414,7 @@ export function ClipboardList() {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full relative">
+      <div className="h-full relative" style={{ maskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)' }}>
         <OverlayScrollbarsComponent
           element="div"
           options={{

@@ -42,27 +42,28 @@
     --radius-sm: calc(0.5rem - 4px);
 }
 
-/* Dark mode */
+/* Dark mode — neutral gray tones (low saturation) to avoid blue tint;
+   lightness lifted from ~5% to ~10% to reduce eye strain. */
 .dark {
-    --color-background: hsl(222.2 84% 4.9%);
-    --color-foreground: hsl(210 40% 98%);
-    --color-card: hsl(224 71% 8%);
-    --color-card-foreground: hsl(210 40% 98%);
-    --color-popover: hsl(224 71% 8%);
-    --color-popover-foreground: hsl(210 40% 98%);
-    --color-primary: hsl(210 40% 98%);
-    --color-primary-foreground: hsl(222.2 47.4% 11.2%);
-    --color-secondary: hsl(217.2 32.6% 17.5%);
-    --color-secondary-foreground: hsl(210 40% 98%);
-    --color-muted: hsl(217.2 32.6% 17.5%);
-    --color-muted-foreground: hsl(215 20.2% 65.1%);
-    --color-accent: hsl(217.2 32.6% 17.5%);
-    --color-accent-foreground: hsl(210 40% 98%);
+    --color-background: hsl(220 6% 11%);
+    --color-foreground: hsl(210 15% 95%);
+    --color-card: hsl(220 6% 18%);
+    --color-card-foreground: hsl(210 15% 95%);
+    --color-popover: hsl(220 6% 18%);
+    --color-popover-foreground: hsl(210 15% 95%);
+    --color-primary: hsl(210 15% 95%);
+    --color-primary-foreground: hsl(220 8% 16%);
+    --color-secondary: hsl(220 5% 23%);
+    --color-secondary-foreground: hsl(210 15% 95%);
+    --color-muted: hsl(220 5% 23%);
+    --color-muted-foreground: hsl(220 8% 62%);
+    --color-accent: hsl(220 5% 23%);
+    --color-accent-foreground: hsl(210 15% 95%);
     --color-destructive: hsl(0 62.8% 30.6%);
-    --color-destructive-foreground: hsl(210 40% 98%);
-    --color-border: hsl(217.2 32.6% 17.5%);
-    --color-input: hsl(217.2 32.6% 17.5%);
-    --color-ring: hsl(212.7 26.8% 83.9%);
+    --color-destructive-foreground: hsl(210 15% 95%);
+    --color-border: hsl(220 5% 26%);
+    --color-input: hsl(220 5% 26%);
+    --color-ring: hsl(220 8% 80%);
 }
 
 /* ========== Theme Color Variants ========== */
@@ -99,32 +100,32 @@
 
 /* Emerald Theme - Dark */
 .dark.theme-emerald {
-    --color-primary: hsl(158 70% 45%);
+    --color-primary: hsl(158 64% 32%);
     --color-primary-foreground: hsl(0 0% 100%);
     --color-secondary: hsl(158 25% 20%);
-    --color-secondary-foreground: hsl(158 70% 45%);
+    --color-secondary-foreground: hsl(158 64% 32%);
     --color-accent: hsl(158 25% 20%);
-    --color-accent-foreground: hsl(158 70% 45%);
+    --color-accent-foreground: hsl(158 64% 32%);
     --color-muted: hsl(158 20% 18%);
-    --color-muted-foreground: hsl(158 30% 70%);
+    --color-muted-foreground: hsl(158 25% 60%);
     --color-border: hsl(158 20% 20%);
     --color-input: hsl(158 20% 20%);
-    --color-ring: hsl(158 70% 45%);
+    --color-ring: hsl(158 64% 32%);
 }
 
 /* Cyan Theme - Dark */
 .dark.theme-cyan {
-    --color-primary: hsl(188 80% 50%);
+    --color-primary: hsl(188 70% 35%);
     --color-primary-foreground: hsl(0 0% 100%);
     --color-secondary: hsl(188 25% 20%);
-    --color-secondary-foreground: hsl(188 80% 50%);
+    --color-secondary-foreground: hsl(188 70% 35%);
     --color-accent: hsl(188 25% 20%);
-    --color-accent-foreground: hsl(188 80% 50%);
+    --color-accent-foreground: hsl(188 70% 35%);
     --color-muted: hsl(188 20% 18%);
-    --color-muted-foreground: hsl(188 30% 70%);
+    --color-muted-foreground: hsl(188 25% 60%);
     --color-border: hsl(188 20% 20%);
     --color-input: hsl(188 20% 20%);
-    --color-ring: hsl(188 80% 50%);
+    --color-ring: hsl(188 70% 35%);
 }
 
 /* ========== System Theme (Dynamic Accent Color) ========== */
@@ -189,34 +190,40 @@
 /* Light mode glass backgrounds — only override surface colors that need
    transparency for the DWM backdrop to show through.  Do NOT override
    muted/secondary/accent so the active color-theme is preserved. */
-[data-window-effect="mica"],
-[data-window-effect="acrylic"],
-[data-window-effect="tabbed"] {
+:not(.dark)[data-window-effect="mica"],
+:not(.dark)[data-window-effect="acrylic"],
+:not(.dark)[data-window-effect="tabbed"] {
     --color-background: hsl(0 0% 100% / 0.75);
     --color-card: hsl(0 0% 100% / 0.6);
     --color-popover: hsl(0 0% 100% / 0.85);
+    --color-muted: hsl(210 40% 96.1% / 0.55);
+    --color-input: hsl(214.3 31.8% 91.4% / 0.5);
     --color-border: hsl(0 0% 80% / 0.5);
 }
 
 /* Acrylic is more transparent */
-[data-window-effect="acrylic"] {
+:not(.dark)[data-window-effect="acrylic"] {
     --color-background: hsl(0 0% 100% / 0.65);
     --color-card: hsl(0 0% 100% / 0.45);
+    --color-muted: hsl(210 40% 96.1% / 0.4);
 }
 
 /* Dark mode glass backgrounds */
-.dark[data-window-effect="mica"],
-.dark[data-window-effect="acrylic"],
-.dark[data-window-effect="tabbed"] {
-    --color-background: hsl(222.2 84% 4.9% / 0.7);
-    --color-card: hsl(224 71% 8% / 0.55);
-    --color-popover: hsl(224 71% 8% / 0.85);
-    --color-border: hsl(220 20% 30% / 0.5);
+html.dark[data-window-effect="mica"],
+html.dark[data-window-effect="acrylic"],
+html.dark[data-window-effect="tabbed"] {
+    --color-background: hsl(220 6% 11% / 0.7);
+    --color-card: hsl(220 6% 18% / 0.55);
+    --color-popover: hsl(220 6% 18% / 0.85);
+    --color-muted: hsl(220 5% 23% / 0.45);
+    --color-input: hsl(220 5% 26% / 0.4);
+    --color-border: hsl(220 5% 30% / 0.5);
 }
 
-.dark[data-window-effect="acrylic"] {
-    --color-background: hsl(222.2 84% 4.9% / 0.55);
-    --color-card: hsl(224 71% 8% / 0.4);
+html.dark[data-window-effect="acrylic"] {
+    --color-background: hsl(220 6% 11% / 0.55);
+    --color-card: hsl(220 6% 18% / 0.4);
+    --color-muted: hsl(220 5% 23% / 0.35);
 }
 
 /* Glass html and body must be transparent for DWM backdrop to show through */
