@@ -110,6 +110,8 @@ pub(crate) fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(),
     .inner_size(800.0, 560.0)
     .min_inner_size(580.0, 480.0)
     .decorations(false)
+    .transparent(true)
+    .shadow(true)
     .visible(false)
     .resizable(true);
 

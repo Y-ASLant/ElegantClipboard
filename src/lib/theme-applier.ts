@@ -36,16 +36,33 @@ function applySharpCorners() {
   document.documentElement.classList.toggle("sharp-corners", sharpCorners);
 }
 
+function getIsDark(): boolean {
+  const { darkMode } = useUISettings.getState();
+  if (darkMode === "dark") return true;
+  if (darkMode === "light") return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
 function applyWindowEffect() {
   const { windowEffect } = useUISettings.getState();
-  document.documentElement.setAttribute("data-window-effect", windowEffect);
-  invoke("set_window_effect", { effect: windowEffect }).catch(() => {
-    // Effect not supported on this OS (e.g. Mica/Tabbed on Windows 10) —
-    // revert the CSS attribute and the stored setting so the window stays opaque.
-    // Use setState directly to avoid re-triggering the setter's invoke call.
+  if (windowEffect === "none") {
+    // Removing effect: clear CSS transparency immediately
     document.documentElement.setAttribute("data-window-effect", "none");
-    useUISettings.setState({ windowEffect: "none" });
-  });
+    invoke("set_window_effect", { effect: "none", dark: null }).catch(() => {});
+  } else {
+    // Applying effect: set DWM backdrop FIRST, then activate CSS transparency
+    const dark = getIsDark();
+    invoke("set_window_effect", { effect: windowEffect, dark })
+      .then(() => {
+        document.documentElement.setAttribute("data-window-effect", windowEffect);
+      })
+      .catch(() => {
+        // Effect not supported on this OS (e.g. Mica/Tabbed on Windows 10) —
+        // revert the CSS attribute and the stored setting so the window stays opaque.
+        document.documentElement.setAttribute("data-window-effect", "none");
+        useUISettings.setState({ windowEffect: "none" });
+      });
+  }
 }
 
 function apply() {
@@ -96,6 +113,10 @@ export function initTheme(): Promise<void> {
     }
     if (state.darkMode !== prev.darkMode) {
       applyDarkMode();
+      // Re-apply window effect so the DWM backdrop matches the new dark mode state
+      if (state.windowEffect !== "none") {
+        applyWindowEffect();
+      }
     }
     if (state.colorTheme !== prev.colorTheme) {
       if (state.colorTheme === "system" && !_accentColor) {

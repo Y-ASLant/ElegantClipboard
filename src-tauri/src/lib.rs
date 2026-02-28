@@ -918,7 +918,7 @@ fn is_window_pinned() -> bool {
 }
 
 #[tauri::command]
-fn set_window_effect(window: tauri::WebviewWindow, effect: String) -> Result<(), String> {
+fn set_window_effect(window: tauri::WebviewWindow, effect: String, dark: Option<bool>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::HWND;
@@ -956,11 +956,11 @@ fn set_window_effect(window: tauri::WebviewWindow, effect: String) -> Result<(),
         let _ = window_vibrancy::clear_tabbed(&window);
 
         let apply_result: Result<(), String> = match effect.as_str() {
-            "mica" => window_vibrancy::apply_mica(&window, None)
+            "mica" => window_vibrancy::apply_mica(&window, dark)
                 .map_err(|e| format!("Failed to apply mica: {}", e)),
             "acrylic" => window_vibrancy::apply_acrylic(&window, Some((0, 0, 0, 0)))
                 .map_err(|e| format!("Failed to apply acrylic: {}", e)),
-            "tabbed" => window_vibrancy::apply_tabbed(&window, None)
+            "tabbed" => window_vibrancy::apply_tabbed(&window, dark)
                 .map_err(|e| format!("Failed to apply tabbed: {}", e)),
             _ => Ok(()),
         };
