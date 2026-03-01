@@ -50,11 +50,11 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count 
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
 
 -- Insert default settings
-INSERT OR IGNORE INTO settings (key, value) VALUES 
+INSERT OR IGNORE INTO settings (key, value) VALUES
     ('hotkey', 'Ctrl+Shift+V'),
     ('max_history_count', '10000'),
     ('max_content_size_kb', '1024'),
-    ('auto_start', 'true'),
+    ('auto_start', 'false'),
     ('theme', 'system'),
     ('language', 'zh-CN'),
     ('save_images', 'true'),

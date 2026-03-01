@@ -77,6 +77,15 @@ async function debouncedRestoreFocus() {
       return;
     }
 
+    // 检查焦点是否仍在窗口内（点击应用内部元素）
+    // 如果是，则不还原焦点，保持窗口激活状态
+    if (document.hasFocus()) {
+      // 焦点仍在窗口内，只更新状态，不调用后端
+      currentFocusState = "normal";
+      blurDebounceTimer = null;
+      return;
+    }
+
     try {
       await invoke("restore_last_focus");
       currentFocusState = "normal";
