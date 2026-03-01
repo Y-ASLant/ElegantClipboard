@@ -503,6 +503,32 @@ impl ClipboardRepository {
         Ok(())
     }
 
+    /// 将条目移到非置顶区最顶部（粘贴后置顶功能）。
+    /// 将 sort_order 设为全表最大值 + 1，由于排序规则是
+    /// `is_pinned DESC, sort_order DESC`，置顶条目始终在前，
+    /// 本条目将出现在所有非置顶条目的最前面。
+    /// 已置顶的条目不作处理，避免打乱用户手动排列的置顶顺序。
+    pub fn bump_to_top(&self, id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let max_sort: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        let affected = conn.execute(
+            "UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2 AND is_pinned = 0",
+            params![max_sort + 1, id],
+        )?;
+        if affected > 0 {
+            debug!("Bumped item {} to top (sort_order: {})", id, max_sort + 1);
+        } else {
+            debug!("Skipped bump for item {} (pinned or not found)", id);
+        }
+        Ok(())
+    }
+
     /// 交换两个条目的排序位置
     pub fn move_item_by_id(&self, from_id: i64, to_id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();

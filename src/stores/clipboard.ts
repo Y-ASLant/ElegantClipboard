@@ -180,8 +180,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       cancelPendingFocusRestore();
       playPasteSound();
-      const closeWindow = useUISettings.getState().pasteCloseWindow;
-      await invoke("paste_content", { id, closeWindow });
+      const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
+      await invoke("paste_content", { id, closeWindow: pasteCloseWindow });
+      if (pasteMoveToTop) {
+        invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
+      }
     } catch (error) {
       logError("Failed to paste content:", error);
     }
@@ -191,8 +194,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       cancelPendingFocusRestore();
       playPasteSound();
-      const closeWindow = useUISettings.getState().pasteCloseWindow;
-      await invoke("paste_content_as_plain", { id, closeWindow });
+      const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
+      await invoke("paste_content_as_plain", { id, closeWindow: pasteCloseWindow });
+      if (pasteMoveToTop) {
+        invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
+      }
     } catch (error) {
       logError("Failed to paste as plain text:", error);
     }

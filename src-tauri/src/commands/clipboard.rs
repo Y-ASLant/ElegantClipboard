@@ -406,6 +406,18 @@ pub async fn move_clipboard_item(
     Ok(())
 }
 
+/// 粘贴后置顶：将条目移到非置顶区最前面（sort_order 设为全表最大值 + 1）
+#[tauri::command]
+pub async fn bump_item_to_top(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<(), String> {
+    let repo = ClipboardRepository::new(&state.db);
+    repo.bump_to_top(id).map_err(|e| e.to_string())?;
+    debug!("Bumped clipboard item {} to top", id);
+    Ok(())
+}
+
 /// 删除剪贴板条目（同时删除关联图片文件）
 #[tauri::command]
 pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {

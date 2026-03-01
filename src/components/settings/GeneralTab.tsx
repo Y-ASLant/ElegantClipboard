@@ -41,6 +41,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
     copySound, setCopySound,
     pasteSound, setPasteSound,
     pasteCloseWindow, setPasteCloseWindow,
+    pasteMoveToTop, setPasteMoveToTop,
   } = useUISettings();
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
@@ -211,6 +212,15 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                 </p>
               </div>
               <Switch checked={pasteCloseWindow} onCheckedChange={setPasteCloseWindow} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">粘贴后置顶</Label>
+                <p className="text-xs text-muted-foreground">
+                  粘贴后自动移到列表首位（固定置顶下方）
+                </p>
+              </div>
+              <Switch checked={pasteMoveToTop} onCheckedChange={setPasteMoveToTop} />
             </div>
           </div>
         </div>
