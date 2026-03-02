@@ -1,5 +1,16 @@
 pub const SCHEMA_SQL: &str = r#"
+-- Custom groups table (must be created before clipboard_items due to FK)
+CREATE TABLE IF NOT EXISTS groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Clipboard items table
+-- group_id IS NULL  => default group (ungrouped)
+-- group_id = <id>  => belongs to that custom group
 CREATE TABLE IF NOT EXISTS clipboard_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content_type TEXT NOT NULL CHECK(content_type IN ('text', 'image', 'html', 'rtf', 'files')),
@@ -8,7 +19,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     rtf_content TEXT,
     image_path TEXT,
     file_paths TEXT,
-    content_hash TEXT NOT NULL UNIQUE,
+    content_hash TEXT NOT NULL,
     preview TEXT,
     byte_size INTEGER DEFAULT 0,
     image_width INTEGER,
@@ -22,7 +33,8 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     last_accessed_at TEXT,
     char_count INTEGER,
     source_app_name TEXT,
-    source_app_icon TEXT
+    source_app_icon TEXT,
+    group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
 );
 
 -- Settings table
@@ -45,9 +57,12 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_a
 CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite) WHERE is_favorite = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
-CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_items(content_hash);
+-- Per-group unique hash: default group (NULL) and custom groups handled separately
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES

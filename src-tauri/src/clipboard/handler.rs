@@ -120,6 +120,7 @@ impl ClipboardHandler {
         &self,
         content: ClipboardContent,
         source: Option<SourceAppInfo>,
+        group_id: Option<i64>,
     ) -> Result<Option<i64>, String> {
         let max_content_size = self.get_max_content_size();
 
@@ -149,7 +150,7 @@ impl ClipboardHandler {
         if dedup != "always_new"
             && self
                 .repository
-                .exists_by_hash(&hash)
+                .exists_by_hash(&hash, group_id)
                 .map_err(|e| e.to_string())?
         {
             match dedup {
@@ -162,7 +163,7 @@ impl ClipboardHandler {
                     debug!("Content already exists, updating access time (dedup=move_to_top)");
                     return self
                         .repository
-                        .touch_by_hash(&hash)
+                        .touch_by_hash(&hash, group_id)
                         .map_err(|e| e.to_string());
                 }
             }
@@ -194,6 +195,7 @@ impl ClipboardHandler {
 
         item.source_app_name = source_app_name;
         item.source_app_icon = source_app_icon;
+        item.group_id = group_id;
 
         let log_type = format!("{:?}", item.content_type);
         let log_size = item.byte_size;
@@ -208,7 +210,7 @@ impl ClipboardHandler {
         // 执行最大历史数限制，清理旧图片
         let max_history_count = self.get_max_history_count();
         if max_history_count > 0 {
-            match self.repository.enforce_max_count(max_history_count) {
+            match self.repository.enforce_max_count(max_history_count, group_id) {
                 Ok((deleted, image_paths)) => {
                     super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
@@ -222,7 +224,7 @@ impl ClipboardHandler {
         // 自动清理超过指定天数的旧记录
         let auto_cleanup_days = self.get_auto_cleanup_days();
         if auto_cleanup_days > 0 {
-            match self.repository.delete_older_than(auto_cleanup_days) {
+            match self.repository.delete_older_than(auto_cleanup_days, group_id) {
                 Ok((deleted, image_paths)) => {
                     super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
@@ -292,18 +294,11 @@ impl ClipboardHandler {
         Ok(NewClipboardItem {
             content_type: ContentType::Text,
             text_content: Some(text_content),
-            html_content: None,
-            rtf_content: None,
-            image_path: None,
-            file_paths: None,
             content_hash: hash,
             preview: Some(preview),
             byte_size,
-            image_width: None,
-            image_height: None,
             char_count,
-            source_app_name: None,
-            source_app_icon: None,
+            ..Default::default()
         })
     }
 
@@ -327,17 +322,11 @@ impl ClipboardHandler {
             content_type: ContentType::Html,
             text_content: text,
             html_content: Some(html_content),
-            rtf_content: None,
-            image_path: None,
-            file_paths: None,
             content_hash: hash,
             preview: Some(preview),
             byte_size,
-            image_width: None,
-            image_height: None,
             char_count,
-            source_app_name: None,
-            source_app_icon: None,
+            ..Default::default()
         })
     }
 
@@ -360,18 +349,12 @@ impl ClipboardHandler {
         Ok(NewClipboardItem {
             content_type: ContentType::Rtf,
             text_content: text,
-            html_content: None,
             rtf_content: Some(rtf_content),
-            image_path: None,
-            file_paths: None,
             content_hash: hash,
             preview: Some(preview),
             byte_size,
-            image_width: None,
-            image_height: None,
             char_count,
-            source_app_name: None,
-            source_app_icon: None,
+            ..Default::default()
         })
     }
 
@@ -394,19 +377,13 @@ impl ClipboardHandler {
 
         Ok(NewClipboardItem {
             content_type: ContentType::Image,
-            text_content: None,
-            html_content: None,
-            rtf_content: None,
             image_path: Some(image_path_str),
-            file_paths: None,
             content_hash: hash,
             preview: Some("[图片]".to_string()),
             byte_size,
             image_width: Some(image_width),
             image_height: Some(image_height),
-            char_count: None,
-            source_app_name: None,
-            source_app_icon: None,
+            ..Default::default()
         })
     }
 
@@ -445,19 +422,11 @@ impl ClipboardHandler {
 
         Ok(NewClipboardItem {
             content_type: ContentType::Files,
-            text_content: None,
-            html_content: None,
-            rtf_content: None,
-            image_path: None,
             file_paths: Some(files),
             content_hash: hash,
             preview: Some(preview),
             byte_size,
-            image_width: None,
-            image_height: None,
-            char_count: None,
-            source_app_name: None,
-            source_app_icon: None,
+            ..Default::default()
         })
     }
 

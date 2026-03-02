@@ -30,6 +30,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
@@ -55,6 +58,7 @@ import {
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
+import { useGroupStore } from "@/stores/groups";
 import { useUISettings } from "@/stores/ui-settings";
 
 // ============ Types ============
@@ -308,6 +312,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDraggedRef = useRef(false);
+  const { groups, moveItemToGroup } = useGroupStore();
 
   const filesInvalid =
     item.content_type === "files" && item.files_valid === false;
@@ -594,6 +599,28 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                 </ContextMenuItem>
               </Fragment>
             ))}
+            {/* 分组子菜单（只在有自定义分组时显示）*/}
+            {groups.length > 0 && (
+              <>
+                <ContextMenuSeparator />
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger>移动到分组</ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-40">
+                    <ContextMenuItem onClick={() => moveItemToGroup(item.id, null)}>
+                      默认分组
+                    </ContextMenuItem>
+                    {groups.map((g) => (
+                      <ContextMenuItem
+                        key={g.id}
+                        onClick={() => moveItemToGroup(item.id, g.id)}
+                      >
+                        {g.name}
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+              </>
+            )}
           </ContextMenuContent>
         </ContextMenu>
         {item.content_type === "files" && (

@@ -171,6 +171,124 @@ impl Database {
             info!("Migration complete: source_app columns added");
         }
 
+        // 迁移 6: 添加 group_id 并将 content_hash 唯一性改为分组内唯一（重建表）
+        let has_group_id: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'group_id'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_group_id {
+            info!("Migrating database: adding group_id column (table rebuild)");
+
+            // 确认 item_groups 表是否存在（用于迁移旧分组关联数据）
+            let has_item_groups: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='item_groups'",
+                [],
+                |row| row.get(0),
+            ).unwrap_or(false);
+
+            let tx = conn.unchecked_transaction()?;
+
+            // 先确保 groups 表存在（schema 顺序已调整，但旧库可能没有）
+            tx.execute_batch(
+                "CREATE TABLE IF NOT EXISTS groups (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    color TEXT,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );"
+            )?;
+
+            // 建新表（含 group_id）
+            tx.execute_batch(
+                "CREATE TABLE clipboard_items_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content_type TEXT NOT NULL CHECK(content_type IN ('text', 'image', 'html', 'rtf', 'files')),
+                    text_content TEXT,
+                    html_content TEXT,
+                    rtf_content TEXT,
+                    image_path TEXT,
+                    file_paths TEXT,
+                    content_hash TEXT NOT NULL,
+                    preview TEXT,
+                    byte_size INTEGER DEFAULT 0,
+                    image_width INTEGER,
+                    image_height INTEGER,
+                    is_pinned INTEGER DEFAULT 0,
+                    is_favorite INTEGER DEFAULT 0,
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    access_count INTEGER DEFAULT 0,
+                    last_accessed_at TEXT,
+                    char_count INTEGER,
+                    source_app_name TEXT,
+                    source_app_icon TEXT,
+                    group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
+                );"
+            )?;
+
+            // 复制数据：若 item_groups 存在则从中取 MIN(group_id)，否则全部设为 NULL（默认分组）
+            if has_item_groups {
+                tx.execute_batch(
+                    "INSERT INTO clipboard_items_new 
+                     SELECT id, content_type, text_content, html_content, rtf_content,
+                            image_path, file_paths, content_hash, preview, byte_size,
+                            image_width, image_height, is_pinned, is_favorite, sort_order,
+                            created_at, updated_at, access_count, last_accessed_at, char_count,
+                            source_app_name, source_app_icon,
+                            (SELECT MIN(ig.group_id) FROM item_groups ig WHERE ig.item_id = clipboard_items.id)
+                     FROM clipboard_items;"
+                )?;
+            } else {
+                tx.execute_batch(
+                    "INSERT INTO clipboard_items_new 
+                     SELECT id, content_type, text_content, html_content, rtf_content,
+                            image_path, file_paths, content_hash, preview, byte_size,
+                            image_width, image_height, is_pinned, is_favorite, sort_order,
+                            created_at, updated_at, access_count, last_accessed_at, char_count,
+                            source_app_name, source_app_icon, NULL
+                     FROM clipboard_items;"
+                )?;
+            }
+
+            // 处理重复 hash（同一分组内可能有多条相同 hash 的记录，保留最新一条）
+            tx.execute_batch(
+                "DELETE FROM clipboard_items_new WHERE id NOT IN (
+                    SELECT MAX(id) FROM clipboard_items_new
+                    GROUP BY COALESCE(CAST(group_id AS TEXT), 'NULL'), content_hash
+                );"
+            )?;
+
+            // 删除旧表并重命名
+            tx.execute_batch(
+                "DROP TABLE clipboard_items;
+                 ALTER TABLE clipboard_items_new RENAME TO clipboard_items;
+                 DROP TABLE IF EXISTS item_groups;
+                 -- 重建索引
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite) WHERE is_favorite = 1;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
+                 CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
+                 -- 重建触发器
+                 CREATE TRIGGER IF NOT EXISTS clipboard_items_update_timestamp
+                 AFTER UPDATE ON clipboard_items
+                 BEGIN
+                     UPDATE clipboard_items SET updated_at = datetime('now', 'localtime') WHERE id = new.id;
+                 END;"
+            )?;
+
+            tx.commit()?;
+            info!("Migration complete: group_id column added, table rebuilt");
+        }
+
         Ok(())
     }
 

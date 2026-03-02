@@ -1245,7 +1245,8 @@ pub fn run() {
             let monitor = ClipboardMonitor::new();
             monitor.init(&db, images_path);
 
-            let state = Arc::new(AppState { db, monitor });
+            let active_group_id = monitor.active_group_id();
+            let state = Arc::new(AppState { db, monitor, active_group_id });
 
             let settings_repo = database::SettingsRepository::new(&state.db);
             let saved_shortcut = settings_repo
@@ -1452,6 +1453,13 @@ pub fn run() {
             commands::file_ops::get_file_details,
             commands::file_ops::save_file_as,
             commands::file_ops::get_data_size,
+            commands::clipboard::set_active_group,
+            commands::groups::get_groups,
+            commands::groups::create_group,
+            commands::groups::rename_group,
+            commands::groups::update_group_color,
+            commands::groups::delete_group,
+            commands::groups::move_item_to_group,
         ])
         .run(tauri::generate_context!());
 

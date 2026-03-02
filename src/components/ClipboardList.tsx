@@ -51,6 +51,7 @@ export function ClipboardList() {
     isLoading,
     searchQuery,
     selectedGroup,
+    selectedGroupId,
     fetchItems,
     setupListener,
     moveItem,
@@ -66,6 +67,7 @@ export function ClipboardList() {
       isLoading: s.isLoading,
       searchQuery: s.searchQuery,
       selectedGroup: s.selectedGroup,
+      selectedGroupId: s.selectedGroupId,
       fetchItems: s.fetchItems,
       setupListener: s.setupListener,
       moveItem: s.moveItem,
@@ -111,7 +113,7 @@ export function ClipboardList() {
   );
 
   // 搜索/筛选时隐藏快捷粘贴序号（过滤后的顺序与快捷粘贴的全局顺序不一致）
-  const showSlotBadges = !searchQuery && !selectedGroup;
+  const showSlotBadges = !searchQuery && !selectedGroup && selectedGroupId === null;
 
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
@@ -284,8 +286,9 @@ export function ClipboardList() {
   // 路径 1：DOM keydown（窗口自身聚焦时，如搜索框）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 焦点在输入框/文本域时，不拦截任何导航键
       const tag = (e.target as HTMLElement).tagName;
-      if (e.key === "Delete" && (tag === "INPUT" || tag === "TEXTAREA")) return;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", "Delete"].includes(e.key)) {
         e.preventDefault();
         handleNavKey(e.key, e.shiftKey);
@@ -361,7 +364,7 @@ export function ClipboardList() {
   }
 
   // 搜索/筛选无结果
-  if (items.length === 0 && (searchQuery || selectedGroup)) {
+  if (items.length === 0 && (searchQuery || selectedGroup || selectedGroupId !== null)) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">

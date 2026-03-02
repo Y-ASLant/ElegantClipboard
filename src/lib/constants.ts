@@ -15,8 +15,7 @@ export const GROUPS = [
   { label: "全部", value: null },
   { label: "收藏", value: "__favorites__" },
   { label: "文本", value: "text,html,rtf" },
-  { label: "图片", value: "image" },
-  { label: "文件", value: "files" },
+  { label: "其它", value: "image,files" },
 ] as const;
 
 export type GroupValue = (typeof GROUPS)[number]["value"];

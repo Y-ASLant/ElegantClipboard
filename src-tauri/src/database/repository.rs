@@ -50,6 +50,30 @@ pub struct NewClipboardItem {
     pub char_count: Option<i64>,
     pub source_app_name: Option<String>,
     pub source_app_icon: Option<String>,
+    /// None = 默认分组，Some(id) = 自定义分组
+    pub group_id: Option<i64>,
+}
+
+impl Default for NewClipboardItem {
+    fn default() -> Self {
+        Self {
+            content_type: ContentType::Text,
+            text_content: None,
+            html_content: None,
+            rtf_content: None,
+            image_path: None,
+            file_paths: None,
+            content_hash: String::new(),
+            preview: None,
+            byte_size: 0,
+            image_width: None,
+            image_height: None,
+            char_count: None,
+            source_app_name: None,
+            source_app_icon: None,
+            group_id: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -58,8 +82,19 @@ pub struct QueryOptions {
     pub content_type: Option<String>,
     pub pinned_only: bool,
     pub favorite_only: bool,
+    pub group_id: Option<i64>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Group {
+    pub id: i64,
+    pub name: String,
+    pub color: Option<String>,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub item_count: i64,
 }
 
 /// 剪贴板条目仓库（读写分离）
@@ -93,8 +128,11 @@ impl ClipboardRepository {
         let new_sort_order = max_sort_order + 1;
 
         conn.execute(
-            "INSERT INTO clipboard_items (content_type, text_content, html_content, rtf_content, image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, sort_order, char_count, source_app_name, source_app_icon)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            "INSERT INTO clipboard_items 
+             (content_type, text_content, html_content, rtf_content, image_path, file_paths, 
+              content_hash, preview, byte_size, image_width, image_height, sort_order, 
+              char_count, source_app_name, source_app_icon, group_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 item.content_type.as_str(),
                 item.text_content,
@@ -111,29 +149,37 @@ impl ClipboardRepository {
                 item.char_count,
                 item.source_app_name,
                 item.source_app_icon,
+                item.group_id,
             ],
         )?;
 
         let id = conn.last_insert_rowid();
         debug!(
-            "Inserted clipboard item with id: {}, sort_order: {}",
-            id, new_sort_order
+            "Inserted clipboard item with id: {}, sort_order: {}, group_id: {:?}",
+            id, new_sort_order, item.group_id
         );
         Ok(id)
     }
 
-    pub fn exists_by_hash(&self, hash: &str) -> Result<bool, rusqlite::Error> {
+    pub fn exists_by_hash(&self, hash: &str, group_id: Option<i64>) -> Result<bool, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1",
-            params![hash],
-            |row| row.get(0),
-        )?;
+        let count: i64 = match group_id {
+            Some(gid) => conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1 AND group_id = ?2",
+                params![hash, gid],
+                |row| row.get(0),
+            )?,
+            None => conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1 AND group_id IS NULL",
+                params![hash],
+                |row| row.get(0),
+            )?,
+        };
         Ok(count > 0)
     }
 
     /// 更新已有条目的访问时间并置顶
-    pub fn touch_by_hash(&self, hash: &str) -> Result<Option<i64>, rusqlite::Error> {
+    pub fn touch_by_hash(&self, hash: &str, group_id: Option<i64>) -> Result<Option<i64>, rusqlite::Error> {
         let conn = self.write_conn.lock();
 
         let max_sort_order: i64 = conn
@@ -143,23 +189,35 @@ impl ClipboardRepository {
                 |row| row.get(0),
             )
             .unwrap_or(0);
+        let new_sort = max_sort_order + 1;
 
-        conn.execute(
-            "UPDATE clipboard_items 
-             SET access_count = access_count + 1, 
-                 last_accessed_at = datetime('now', 'localtime'),
-                 updated_at = datetime('now', 'localtime'),
-                 created_at = datetime('now', 'localtime'),
-                 sort_order = ?2
-             WHERE content_hash = ?1",
-            params![hash, max_sort_order + 1],
-        )?;
-
-        let result: Result<i64, _> = conn.query_row(
-            "SELECT id FROM clipboard_items WHERE content_hash = ?1",
-            params![hash],
-            |row| row.get(0),
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        let update_sql = format!(
+            "UPDATE clipboard_items \
+             SET access_count = access_count + 1, \
+                 last_accessed_at = datetime('now', 'localtime'), \
+                 updated_at = datetime('now', 'localtime'), \
+                 created_at = datetime('now', 'localtime'), \
+                 sort_order = ? \
+             WHERE content_hash = ? AND {}",
+            group_cond
         );
+        let select_sql = format!(
+            "SELECT id FROM clipboard_items WHERE content_hash = ? AND {}",
+            group_cond
+        );
+
+        if let Some(gid) = group_param {
+            conn.execute(&update_sql, params![new_sort, hash, gid])?;
+        } else {
+            conn.execute(&update_sql, params![new_sort, hash])?;
+        }
+
+        let result: Result<i64, _> = if let Some(gid) = group_param {
+            conn.query_row(&select_sql, params![hash, gid], |row| row.get(0))
+        } else {
+            conn.query_row(&select_sql, params![hash], |row| row.get(0))
+        };
 
         match result {
             Ok(id) => Ok(Some(id)),
@@ -184,15 +242,21 @@ impl ClipboardRepository {
     }
 
     /// 按默认排序位置获取完整条目（含文本内容），供快速粘贴使用。
-    pub fn get_by_position(&self, index: usize) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+    pub fn get_by_position(&self, index: usize, group_id: Option<i64>) -> Result<Option<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let result = conn.query_row(
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        let sql = format!(
             "SELECT * FROM clipboard_items \
+             WHERE {} \
              ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
-             LIMIT 1 OFFSET ?1",
-            params![index as i64],
-            Self::row_to_item,
+             LIMIT 1 OFFSET ?",
+            group_cond
         );
+        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
+            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
+        } else {
+            conn.query_row(&sql, params![index as i64], Self::row_to_item)
+        };
 
         match result {
             Ok(item) => Ok(Some(item)),
@@ -264,7 +328,22 @@ impl ClipboardRepository {
             conditions.push("is_favorite = 1".to_string());
         }
 
+        // 分组过滤：None = 默认分组（group_id IS NULL），Some(id) = 自定义分组
+        let (group_cond, group_param) = Self::group_condition(options.group_id);
+        conditions.push(group_cond.to_string());
+        if let Some(gid) = group_param {
+            params_vec.push(Box::new(gid));
+        }
+
         (conditions, params_vec)
+    }
+
+    /// 将 group_id 转换为 SQL 条件片段和可选参数
+    fn group_condition(group_id: Option<i64>) -> (&'static str, Option<i64>) {
+        match group_id {
+            Some(gid) => ("group_id = ?", Some(gid)),
+            None      => ("group_id IS NULL", None),
+        }
     }
 
     /// 将条件拼接到 SQL 语句
@@ -316,7 +395,7 @@ impl ClipboardRepository {
     pub fn count(&self, options: QueryOptions) -> Result<i64, rusqlite::Error> {
         let conn = self.read_conn.lock();
 
-        let mut sql = String::from("SELECT COUNT(*) FROM clipboard_items");
+        let mut sql = "SELECT COUNT(*) FROM clipboard_items".to_string();
         let (conditions, params_vec) = Self::build_filter_conditions(&options);
         Self::append_where(&mut sql, &conditions);
 
@@ -365,27 +444,42 @@ impl ClipboardRepository {
         Ok(())
     }
 
-    /// 获取可清除条目的图片路径
-    pub fn get_clearable_image_paths(&self) -> Result<Vec<String>, rusqlite::Error> {
+    /// 获取可清除条目的图片路径（按分组过滤）
+    pub fn get_clearable_image_paths(&self, group_id: Option<i64>) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT image_path FROM clipboard_items 
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL",
-        )?;
-        let paths = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        let sql = format!(
+            "SELECT image_path FROM clipboard_items \
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL AND {}",
+            group_cond
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param {
+            params_vec.push(Box::new(gid));
+        }
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let paths: Vec<String> = stmt
+            .query_map(params_refs.as_slice(), |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
         Ok(paths)
     }
 
-    /// 清空历史（保留置顶和收藏）
-    pub fn clear_history(&self) -> Result<i64, rusqlite::Error> {
+    /// 清空历史（保留置顶和收藏），按分组过滤
+    pub fn clear_history(&self, group_id: Option<i64>) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
-            [],
-        )?;
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        let sql = format!(
+            "DELETE FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {}",
+            group_cond
+        );
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param {
+            params_vec.push(Box::new(gid));
+        }
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let deleted = conn.execute(&sql, params_refs.as_slice())?;
         Ok(deleted as i64)
     }
 
@@ -409,46 +503,63 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
-    /// 删除 N 天前的非置顶/非收藏条目，返回 (删除数, 关联图片路径)
-    pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
+    /// 删除 N 天前的非置顶/非收藏条目（按分组），返回 (删除数, 关联图片路径)
+    pub fn delete_older_than(&self, days: i64, group_id: Option<i64>) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
+        let (group_cond, group_param) = Self::group_condition(group_id);
 
-        // 先收集图片路径再执行删除
-        let mut stmt = conn.prepare(
-            "SELECT image_path FROM clipboard_items 
-             WHERE is_pinned = 0 AND is_favorite = 0 
-             AND image_path IS NOT NULL
-             AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')",
-        )?;
+        let select_sql = format!(
+            "SELECT image_path FROM clipboard_items \
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL \
+             AND {} \
+             AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
+            group_cond
+        );
+        let delete_sql = format!(
+            "DELETE FROM clipboard_items \
+             WHERE is_pinned = 0 AND is_favorite = 0 \
+             AND {} \
+             AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
+            group_cond
+        );
+
+        let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param { select_params.push(Box::new(gid)); }
+        select_params.push(Box::new(days));
+        let select_refs: Vec<&dyn rusqlite::ToSql> = select_params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&select_sql)?;
         let image_paths: Vec<String> = stmt
-            .query_map(params![days], |row| row.get::<_, String>(0))?
+            .query_map(select_refs.as_slice(), |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
 
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_items 
-             WHERE is_pinned = 0 AND is_favorite = 0 
-             AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')",
-            params![days],
-        )?;
+        let mut delete_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param { delete_params.push(Box::new(gid)); }
+        delete_params.push(Box::new(days));
+        let delete_refs: Vec<&dyn rusqlite::ToSql> = delete_params.iter().map(|p| p.as_ref()).collect();
+        let deleted = conn.execute(&delete_sql, delete_refs.as_slice())?;
 
-        debug!("Auto-cleanup: deleted {} items older than {} days", deleted, days);
+        debug!("Auto-cleanup: deleted {} items older than {} days (group: {:?})", deleted, days, group_id);
         Ok((deleted as i64, image_paths))
     }
 
-    /// 执行最大数量限制，返回 (删除数, 图片路径)
-    pub fn enforce_max_count(&self, max_count: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
+    /// 执行最大数量限制（按分组），返回 (删除数, 图片路径)
+    pub fn enforce_max_count(&self, max_count: i64, group_id: Option<i64>) -> Result<(i64, Vec<String>), rusqlite::Error> {
         if max_count <= 0 {
             return Ok((0, vec![]));
         }
 
         let conn = self.write_conn.lock();
+        let (group_cond, group_param) = Self::group_condition(group_id);
 
-        let current_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
-            [],
-            |row| row.get(0),
-        )?;
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {}",
+            group_cond
+        );
+        let mut count_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param { count_params.push(Box::new(gid)); }
+        let count_refs: Vec<&dyn rusqlite::ToSql> = count_params.iter().map(|p| p.as_ref()).collect();
+        let current_count: i64 = conn.query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))?;
 
         if current_count <= max_count {
             return Ok((0, vec![]));
@@ -456,28 +567,38 @@ impl ClipboardRepository {
 
         let to_delete = current_count - max_count;
 
-        let mut stmt = conn.prepare(
-            "SELECT image_path FROM clipboard_items 
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL
-             ORDER BY created_at ASC 
-             LIMIT ?1",
-        )?;
+        let select_sql = format!(
+            "SELECT image_path FROM clipboard_items \
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL AND {} \
+             ORDER BY created_at ASC LIMIT ?",
+            group_cond
+        );
+        let delete_sql = format!(
+            "DELETE FROM clipboard_items WHERE id IN (\
+                SELECT id FROM clipboard_items \
+                WHERE is_pinned = 0 AND is_favorite = 0 AND {} \
+                ORDER BY created_at ASC LIMIT ?\
+             )",
+            group_cond
+        );
+
+        let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param { select_params.push(Box::new(gid)); }
+        select_params.push(Box::new(to_delete));
+        let select_refs: Vec<&dyn rusqlite::ToSql> = select_params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn.prepare(&select_sql)?;
         let image_paths: Vec<String> = stmt
-            .query_map(params![to_delete], |row| row.get::<_, String>(0))?
+            .query_map(select_refs.as_slice(), |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
 
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_items WHERE id IN (
-                SELECT id FROM clipboard_items 
-                WHERE is_pinned = 0 AND is_favorite = 0 
-                ORDER BY created_at ASC 
-                LIMIT ?1
-            )",
-            params![to_delete],
-        )?;
+        let mut delete_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        if let Some(gid) = group_param { delete_params.push(Box::new(gid)); }
+        delete_params.push(Box::new(to_delete));
+        let delete_refs: Vec<&dyn rusqlite::ToSql> = delete_params.iter().map(|p| p.as_ref()).collect();
+        let deleted = conn.execute(&delete_sql, delete_refs.as_slice())?;
 
-        debug!("Enforced max count: deleted {} oldest items", deleted);
+        debug!("Enforced max count: deleted {} oldest items (group: {:?})", deleted, group_id);
         Ok((deleted as i64, image_paths))
     }
 
@@ -651,6 +772,120 @@ impl SettingsRepository {
     pub fn clear_all(&self) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
         conn.execute("DELETE FROM settings", [])?;
+        Ok(())
+    }
+}
+
+/// 自定义分组仓库
+pub struct GroupRepository {
+    write_conn: Arc<Mutex<Connection>>,
+    read_conn: Arc<Mutex<Connection>>,
+}
+
+impl GroupRepository {
+    pub fn new(db: &Database) -> Self {
+        Self {
+            write_conn: db.write_connection(),
+            read_conn: db.read_connection(),
+        }
+    }
+
+    /// 列出所有分组（含每个分组的条目数）
+    pub fn list_with_count(&self) -> Result<Vec<Group>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT g.id, g.name, g.color, g.sort_order, g.created_at, \
+             COUNT(ci.id) AS item_count \
+             FROM groups g \
+             LEFT JOIN clipboard_items ci ON ci.group_id = g.id \
+             GROUP BY g.id \
+             ORDER BY g.sort_order ASC, g.created_at ASC",
+        )?;
+        let groups = stmt
+            .query_map([], |row| {
+                Ok(Group {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    sort_order: row.get(3)?,
+                    created_at: row.get(4)?,
+                    item_count: row.get(5)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(groups)
+    }
+
+    /// 创建新分组，返回完整分组对象
+    pub fn create(&self, name: &str, color: Option<&str>) -> Result<Group, rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let max_sort: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM groups",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1);
+        conn.execute(
+            "INSERT INTO groups (name, color, sort_order) VALUES (?1, ?2, ?3)",
+            params![name, color, max_sort + 1],
+        )?;
+        let id = conn.last_insert_rowid();
+        let group = conn.query_row(
+            "SELECT g.id, g.name, g.color, g.sort_order, g.created_at, 0 AS item_count FROM groups g WHERE g.id = ?1",
+            params![id],
+            |row| Ok(Group {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                item_count: row.get(5)?,
+            }),
+        )?;
+        debug!("Created group: id={}, name={}", id, name);
+        Ok(group)
+    }
+
+    /// 重命名分组
+    pub fn rename(&self, id: i64, name: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute(
+            "UPDATE groups SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )?;
+        debug!("Renamed group {} to {}", id, name);
+        Ok(())
+    }
+
+    /// 更新分组颜色
+    pub fn update_color(&self, id: i64, color: Option<&str>) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute(
+            "UPDATE groups SET color = ?1 WHERE id = ?2",
+            params![color, id],
+        )?;
+        debug!("Updated color of group {} to {:?}", id, color);
+        Ok(())
+    }
+
+    /// 删除分组（ON DELETE CASCADE 自动删除该分组的所有 clipboard_items）
+    pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute("DELETE FROM groups WHERE id = ?1", params![id])?;
+        debug!("Deleted group {}", id);
+        Ok(())
+    }
+
+    /// 将条目移动到指定分组（None = 移回默认分组）
+    pub fn move_item_to_group(&self, item_id: i64, group_id: Option<i64>) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute(
+            "UPDATE clipboard_items SET group_id = ?1 WHERE id = ?2",
+            params![group_id, item_id],
+        )?;
+        debug!("Moved item {} to group {:?}", item_id, group_id);
         Ok(())
     }
 }

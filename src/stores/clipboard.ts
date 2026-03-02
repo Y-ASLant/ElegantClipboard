@@ -38,6 +38,8 @@ interface ClipboardState {
   isLoading: boolean;
   searchQuery: string;
   selectedGroup: string | null;
+  /** 当前选中的自定义分组 id（与 selectedGroup 互斥） */
+  selectedGroupId: number | null;
   /** Currently keyboard-highlighted item index (-1 = none) */
   activeIndex: number;
   /** Monotonic counter to discard stale fetch results */
@@ -54,6 +56,7 @@ interface ClipboardState {
   }) => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSelectedGroup: (group: string | null) => void;
+  setSelectedGroupId: (groupId: number | null) => void;
   setActiveIndex: (index: number) => void;
   togglePin: (id: number) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
@@ -74,6 +77,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   isLoading: false,
   searchQuery: "",
   selectedGroup: null,
+  selectedGroupId: null,
   activeIndex: -1,
   _fetchId: 0,
   _resetToken: 0,
@@ -90,6 +94,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         contentType: isFavoritesView ? null : group,
         pinnedOnly: false,
         favoriteOnly: isFavoritesView,
+        groupId: state.selectedGroupId,
         limit: options.limit ?? null,
         offset: options.offset ?? 0,
       });
@@ -112,6 +117,12 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   setSelectedGroup: (group: string | null) => {
     set({ selectedGroup: group });
+    get().fetchItems();
+  },
+
+  setSelectedGroupId: (groupId: number | null) => {
+    set({ selectedGroupId: groupId });
+    invoke("set_active_group", { groupId }).catch(() => {});
     get().fetchItems();
   },
 
@@ -206,7 +217,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   clearHistory: async () => {
     try {
-      await invoke<number>("clear_history");
+      await invoke<number>("clear_history", { groupId: get().selectedGroupId });
       await get().refresh();
     } catch (error) {
       logError("Failed to clear history:", error);
@@ -221,6 +232,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     set((state) => ({
       searchQuery: "",
       selectedGroup: null,
+      selectedGroupId: null,
       _resetToken: state._resetToken + 1,
     }));
     await get().fetchItems({ search: "" });
