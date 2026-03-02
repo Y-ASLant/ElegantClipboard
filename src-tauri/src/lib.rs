@@ -1159,6 +1159,8 @@ async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), S
     .inner_size(600.0, 460.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
+    .transparent(true)
+    .shadow(true)
     .visible(false)
     .resizable(true)
     .center()
@@ -1245,7 +1247,8 @@ pub fn run() {
             let monitor = ClipboardMonitor::new();
             monitor.init(&db, images_path);
 
-            let state = Arc::new(AppState { db, monitor });
+            let active_group_id = monitor.active_group_id();
+            let state = Arc::new(AppState { db, monitor, active_group_id });
 
             let settings_repo = database::SettingsRepository::new(&state.db);
             let saved_shortcut = settings_repo
@@ -1421,6 +1424,7 @@ pub fn run() {
             commands::clipboard::toggle_pin,
             commands::clipboard::toggle_favorite,
             commands::clipboard::move_clipboard_item,
+            commands::clipboard::bump_item_to_top,
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::clear_history,
             commands::clipboard::clear_all_history,
@@ -1451,6 +1455,13 @@ pub fn run() {
             commands::file_ops::get_file_details,
             commands::file_ops::save_file_as,
             commands::file_ops::get_data_size,
+            commands::clipboard::set_active_group,
+            commands::groups::get_groups,
+            commands::groups::create_group,
+            commands::groups::rename_group,
+            commands::groups::update_group_color,
+            commands::groups::delete_group,
+            commands::groups::move_item_to_group,
         ])
         .run(tauri::generate_context!());
 

@@ -15,6 +15,7 @@ import {
   ClipboardPaste16Regular,
   ArrowDownload16Regular,
   Edit16Regular,
+  ChevronDown16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -55,6 +56,7 @@ import {
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
+import { useGroupStore } from "@/stores/groups";
 import { useUISettings } from "@/stores/ui-settings";
 
 // ============ Types ============
@@ -157,6 +159,55 @@ const FileDetailsDialog = ({
     </DialogContent>
   </Dialog>
 );
+
+// ============ Move to Group (inline collapsible) ============
+
+function MoveToGroupSection({
+  itemId,
+  groups,
+  selectedGroupId,
+  moveItemToGroup,
+}: {
+  itemId: number;
+  groups: { id: number; name: string }[];
+  selectedGroupId: number | null;
+  moveItemToGroup: (itemId: number, groupId: number | null) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  // 当前在默认分组：显示所有自定义分组；当前在自定义分组：显示默认 + 其他自定义分组
+  const otherGroups = groups.filter((g) => g.id !== selectedGroupId);
+  const showDefault = selectedGroupId !== null;
+  if (!showDefault && otherGroups.length === 0) return null;
+  return (
+    <>
+      <ContextMenuSeparator />
+      <div
+        role="menuitem"
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); }}
+        className="flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground"
+      >
+        <span>移动到分组</span>
+        <ChevronDown16Regular
+          className={cn("ml-auto h-4 w-4 transition-transform duration-150", expanded && "rotate-180")}
+        />
+      </div>
+      {expanded && (
+        <>
+          {showDefault && (
+            <ContextMenuItem className="pl-6" onClick={() => moveItemToGroup(itemId, null)}>
+              默认分组
+            </ContextMenuItem>
+          )}
+          {otherGroups.map((g) => (
+            <ContextMenuItem className="pl-6" key={g.id} onClick={() => moveItemToGroup(itemId, g.id)}>
+              {g.name}
+            </ContextMenuItem>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
 
 // ============ Action Toolbar ============
 
@@ -308,6 +359,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDraggedRef = useRef(false);
+  const { groups, moveItemToGroup } = useGroupStore();
+  const selectedGroupId = useClipboardStore((s) => s.selectedGroupId);
 
   const filesInvalid =
     item.content_type === "files" && item.files_valid === false;
@@ -594,6 +647,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                 </ContextMenuItem>
               </Fragment>
             ))}
+            {/* 分组内联折叠（排除当前分组，显示可移动的目标分组）*/}
+            <MoveToGroupSection
+              itemId={item.id}
+              groups={groups}
+              selectedGroupId={selectedGroupId}
+              moveItemToGroup={moveItemToGroup}
+            />
           </ContextMenuContent>
         </ContextMenu>
         {item.content_type === "files" && (

@@ -39,6 +39,7 @@ interface UISettings {
   copySound: boolean;
   pasteSound: boolean;
   pasteCloseWindow: boolean;
+  pasteMoveToTop: boolean;
   showCategoryFilter: boolean;
   windowEffect: WindowEffect;
   toolbarButtons: ToolbarButton[];
@@ -66,6 +67,7 @@ interface UISettings {
   setCopySound: (enabled: boolean) => void;
   setPasteSound: (enabled: boolean) => void;
   setPasteCloseWindow: (enabled: boolean) => void;
+  setPasteMoveToTop: (enabled: boolean) => void;
   setShowCategoryFilter: (enabled: boolean) => void;
   setWindowEffect: (effect: WindowEffect) => void;
   setToolbarButtons: (buttons: ToolbarButton[]) => void;
@@ -106,6 +108,7 @@ export const useUISettings = create<UISettings>()(
       copySound: false,
       pasteSound: false,
       pasteCloseWindow: true,
+      pasteMoveToTop: false,
       showCategoryFilter: true,
       windowEffect: "none" as WindowEffect,
       toolbarButtons: ["clear", "pin", "settings"] as ToolbarButton[],
@@ -205,6 +208,10 @@ export const useUISettings = create<UISettings>()(
       setPasteCloseWindow: (enabled) => {
         set({ pasteCloseWindow: enabled });
         broadcastChange({ pasteCloseWindow: enabled });
+      },
+      setPasteMoveToTop: (enabled) => {
+        set({ pasteMoveToTop: enabled });
+        broadcastChange({ pasteMoveToTop: enabled });
       },
       setShowCategoryFilter: (enabled) => {
         set({ showCategoryFilter: enabled });

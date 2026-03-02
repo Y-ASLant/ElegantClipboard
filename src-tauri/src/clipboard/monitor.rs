@@ -16,6 +16,8 @@ pub struct ClipboardMonitor {
     pause_count: Arc<AtomicU32>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// 当前活动分组（None = 默认分组），与 AppState 共享
+    active_group_id: Arc<Mutex<Option<i64>>>,
 }
 
 impl ClipboardMonitor {
@@ -25,7 +27,13 @@ impl ClipboardMonitor {
             pause_count: Arc::new(AtomicU32::new(0)),
             handler: Arc::new(Mutex::new(None)),
             thread_handle: Arc::new(Mutex::new(None)),
+            active_group_id: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// 返回活动分组 Arc，供 AppState 共享
+    pub fn active_group_id(&self) -> Arc<Mutex<Option<i64>>> {
+        self.active_group_id.clone()
     }
 
     /// 初始化监控器（数据库与图片路径）
@@ -50,6 +58,7 @@ impl ClipboardMonitor {
         let running = self.running.clone();
         let pause_count = self.pause_count.clone();
         let handler = self.handler.clone();
+        let active_group_id = self.active_group_id.clone();
 
         let handle = std::thread::spawn(move || {
             info!("Clipboard monitor thread started");
@@ -59,6 +68,7 @@ impl ClipboardMonitor {
                 pause_count,
                 handler,
                 app_handle,
+                active_group_id,
             };
 
             // 启动剪贴板监听
@@ -139,6 +149,7 @@ struct MonitorHandler {
     pause_count: Arc<AtomicU32>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     app_handle: AppHandle,
+    active_group_id: Arc<Mutex<Option<i64>>>,
 }
 
 impl CMHandler for MonitorHandler {
@@ -163,9 +174,12 @@ impl CMHandler for MonitorHandler {
             None => return CallbackResult::Next,
         };
 
+        // 读取当前活动分组
+        let group_id = *self.active_group_id.lock();
+
         // 处理内容
         if let Some(ref handler) = *self.handler.lock() {
-            match handler.process(content, source) {
+            match handler.process(content, source, group_id) {
                 Ok(Some(id)) => {
                     debug!("Processed clipboard item: {}", id);
                     let _ = self.app_handle.emit("clipboard-updated", id);

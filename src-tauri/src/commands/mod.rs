@@ -1,15 +1,19 @@
 pub mod clipboard;
 pub mod file_ops;
+pub mod groups;
 pub mod settings;
 
 use crate::clipboard::ClipboardMonitor;
 use crate::database::Database;
+use parking_lot::Mutex;
 use std::sync::Arc;
 
 /// 应用状态：包含数据库与剪贴板监控器
 pub struct AppState {
     pub db: Database,
     pub monitor: ClipboardMonitor,
+    /// 当前活动分组 ID（None = 默认分组）
+    pub active_group_id: Arc<Mutex<Option<i64>>>,
 }
 
 /// 隐藏主窗口或还原目标窗口焦点（用于粘贴前确保目标应用在前台）。

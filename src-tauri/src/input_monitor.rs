@@ -216,8 +216,9 @@ pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
 
 /// 恢复非聚焦模式并还原之前的前台窗口（搜索框 blur 时调用）。
 #[cfg(windows)]
-pub fn restore_last_focus(window: &tauri::WebviewWindow) {
-    let _ = window.set_focusable(false);
+pub fn restore_last_focus(_window: &tauri::WebviewWindow) {
+    // 不调用 set_focusable(false)，保持窗口激活状态以维持 DWM 特效
+    // 只还原之前的前台窗口，让键盘输入回到原来的应用
     let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
     if raw != 0 {
         let hwnd = HWND(raw as *mut _);
@@ -229,6 +230,7 @@ pub fn restore_last_focus(window: &tauri::WebviewWindow) {
 
 #[cfg(not(windows))]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
+    // 非 Windows 平台保持原逻辑
     let _ = window.set_focusable(false);
 }
 

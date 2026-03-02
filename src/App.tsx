@@ -3,9 +3,12 @@ import {
   Search16Regular,
   Dismiss16Regular,
   Delete16Regular,
+  Edit16Regular,
   Settings16Regular,
   LockClosed16Regular,
   LockClosed16Filled,
+  Add16Regular,
+  ChevronDown16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -32,6 +35,8 @@ import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
+import { useGroupStore } from "@/stores/groups";
+import type { Group } from "@/stores/groups";
 import type { ToolbarButton } from "@/stores/ui-settings";
 import { useUISettings } from "@/stores/ui-settings";
 
@@ -54,7 +59,17 @@ function dismissOverlays(): boolean {
 function App() {
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
-  const { searchQuery, selectedGroup, setSearchQuery, setSelectedGroup, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
+  // 分组对话框状态
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Group | null>(null);
+  const [renameName, setRenameName] = useState("");
+  const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<Group | null>(null);
+
+  const { searchQuery, selectedGroup, selectedGroupId, setSearchQuery, setSelectedGroup, setSelectedGroupId, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
+  const { groups, fetchGroups, createGroup, renameGroup, deleteGroup } = useGroupStore();
   const autoResetState = useUISettings((s) => s.autoResetState);
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
@@ -67,18 +82,66 @@ function App() {
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const segmentContainerRef = useRef<HTMLDivElement>(null);
   const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
+  // 分组下拉状态
+  const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
+  const groupDropdownRef = useRef<HTMLDivElement>(null);
+  // 分组对话框输入框 ref（autoFocus 在 Tauri WebView portal 内不稳定，用 ref 代替）
+  const createInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // 更新滑动指示器位置
+  // 初次加载时获取自定义分组
+  useEffect(() => {
+    fetchGroups();
+  }, []);
+
+  // 对话框打开后主动恢复 Tauri 窗口键盘焦点并聚焦输入框
+  // （直接点击分组按钮会触发 debouncedRestoreFocus 释放键盘焦点，需在此重新获取）
+  useEffect(() => {
+    if (!createDialogOpen) return;
+    const t = setTimeout(async () => {
+      await focusWindowImmediately();
+      createInputRef.current?.focus();
+    }, 80);
+    return () => clearTimeout(t);
+  }, [createDialogOpen]);
+
+  useEffect(() => {
+    if (!renameDialogOpen) return;
+    const t = setTimeout(async () => {
+      await focusWindowImmediately();
+      renameInputRef.current?.focus();
+    }, 80);
+    return () => clearTimeout(t);
+  }, [renameDialogOpen]);
+
+  // 点击外部 / Escape 关闭分组下拉
+  useEffect(() => {
+    if (!groupDropdownOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!groupDropdownRef.current?.contains(e.target as Node)) {
+        setGroupDropdownOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setGroupDropdownOpen(false);
+        e.stopImmediatePropagation(); // 仅关闭下拉，不触发窗口隐藏
+      }
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [groupDropdownOpen]);
+
+  // 更新滑动指示器（始终跟踪类型筛选，与分组无关）
   const updateIndicator = useCallback(() => {
     const idx = GROUPS.findIndex((g) => g.value === selectedGroup);
     const el = segmentRefs.current[idx];
-    const container = segmentContainerRef.current;
-    if (el && container) {
-      const elRect = el.getBoundingClientRect();
-      const containerRect = container.getBoundingClientRect();
-      const left = elRect.left - containerRect.left;
-      const width = elRect.width;
-      setSegmentIndicator({ left, width });
+    if (el) {
+      setSegmentIndicator({ left: el.offsetLeft, width: el.offsetWidth });
     }
   }, [selectedGroup]);
 
@@ -94,12 +157,50 @@ function App() {
     return () => ro.disconnect();
   }, [updateIndicator]);
 
-  // 隐藏分类栏时重置分组筛选，避免被隐藏的控件继续过滤内容
+  // 隐藏分类栏时重置全部筛选状态
   useEffect(() => {
-    if (!showCategoryFilter && selectedGroup) {
-      setSelectedGroup(null);
+    if (!showCategoryFilter) {
+      useClipboardStore.setState({ selectedGroup: null, selectedGroupId: null });
+      useClipboardStore.getState().fetchItems();
     }
   }, [showCategoryFilter]);
+
+  // ---- 分组操作 handlers ----
+  const handleCreateGroup = async () => {
+    if (!createName.trim()) return;
+    await createGroup(createName.trim());
+    setCreateDialogOpen(false);
+    setCreateName("");
+  };
+
+  const openRenameDialog = (group: Group) => {
+    setRenameTarget(group);
+    setRenameName(group.name);
+    setRenameDialogOpen(true);
+  };
+
+  const handleRenameGroup = async () => {
+    if (!renameTarget || !renameName.trim()) return;
+    await renameGroup(renameTarget.id, renameName.trim());
+    setRenameDialogOpen(false);
+    setRenameTarget(null);
+  };
+
+  const requestDeleteGroup = (group: Group) => {
+    setDeleteGroupTarget(group);
+    setDeleteGroupDialogOpen(true);
+  };
+
+  const confirmDeleteGroup = async () => {
+    if (!deleteGroupTarget) return;
+    const group = deleteGroupTarget;
+    await deleteGroup(group.id);
+    if (selectedGroupId === group.id) {
+      setSelectedGroupId(null);
+    }
+    setDeleteGroupDialogOpen(false);
+    setDeleteGroupTarget(null);
+  };
 
   // 应用卡片密度到根元素
   useEffect(() => {
@@ -157,6 +258,7 @@ function App() {
   useEffect(() => {
     const unlisten = listen("window-hidden", () => {
       dismissOverlays();
+      setGroupDropdownOpen(false);
       if (autoResetState) {
         resetView();
       }
@@ -342,7 +444,11 @@ function App() {
       {/* 底部分组选择 */}
       {showCategoryFilter && (
         <div className="shrink-0 px-2 pb-2 pt-1 select-none">
-          <div ref={segmentContainerRef} className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg">
+          {/* 整个底标2区共用一个 bg-muted rounded-lg 容器 */}
+          <div
+            ref={segmentContainerRef}
+            className="relative flex items-center h-8 p-0.5 bg-muted rounded-lg"
+          >
             {/* 滑动指示器 */}
             <div
               className="absolute left-0 top-0.5 h-[calc(100%-4px)] rounded-md bg-background shadow-sm will-change-transform transition-[transform,width,opacity] duration-200 ease-out"
@@ -352,6 +458,8 @@ function App() {
                 opacity: segmentIndicator.width > 0 ? 1 : 0,
               }}
             />
+
+            {/* 类型 tabs */}
             {GROUPS.map((g, i) => (
               <button
                 key={g.label}
@@ -367,6 +475,89 @@ function App() {
                 {g.label}
               </button>
             ))}
+
+            {/* 分隔线 */}
+            <div className="relative z-[1] w-px h-4 bg-border/50 mx-0.5 shrink-0" />
+
+            {/* 分组下拉切换器（和 tab 共用同一容器） */}
+            <div ref={groupDropdownRef} className="relative z-[1] shrink-0">
+              <button
+                onClick={() => setGroupDropdownOpen((o) => !o)}
+                className="h-7 flex items-center gap-1 px-2 rounded-md bg-background shadow-sm text-xs font-medium text-foreground transition-all duration-200"
+              >
+                <span className="max-w-[80px] truncate">
+                  {selectedGroupId === null
+                    ? '默认'
+                    : (groups.find((g) => g.id === selectedGroupId)?.name ?? '默认')}
+                </span>
+                <ChevronDown16Regular
+                  className={cn("w-3 h-3 transition-transform duration-150", groupDropdownOpen && "-rotate-180")}
+                />
+              </button>
+
+              {/* 下拉面板 */}
+              {groupDropdownOpen && (
+                <div className="absolute bottom-full right-0 mb-1 z-50 min-w-[160px] rounded-md border bg-popover p-1 shadow-md">
+                  {/* 默认选项 */}
+                  <div
+                    onClick={() => { setSelectedGroupId(null); setGroupDropdownOpen(false); }}
+                    className={cn(
+                      "flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs cursor-default hover:bg-accent hover:text-accent-foreground",
+                      selectedGroupId === null && "bg-accent/50 text-foreground"
+                    )}
+                  >
+                    <span>默认</span>
+                  </div>
+
+                  {/* 自定义分组列表 */}
+                  {groups.length > 0 && (
+                    <>
+                      <div className="-mx-1 my-1 h-px bg-border" />
+                      <div className="max-h-48 overflow-y-auto">
+                        {groups.map((g) => (
+                          <div
+                            key={g.id}
+                            onClick={() => { setSelectedGroupId(g.id); setGroupDropdownOpen(false); }}
+                            className={cn(
+                              "flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs cursor-default hover:bg-accent hover:text-accent-foreground group/row",
+                              selectedGroupId === g.id && "bg-accent/50 text-foreground"
+                            )}
+                          >
+                            <span className="flex-1 min-w-0 truncate">{g.name}</span>
+                            <div
+                              className="flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => { openRenameDialog(g); setGroupDropdownOpen(false); }}
+                                className="w-5 h-5 flex items-center justify-center rounded hover:bg-muted"
+                              >
+                                <Edit16Regular className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => { requestDeleteGroup(g); setGroupDropdownOpen(false); }}
+                                className="w-5 h-5 flex items-center justify-center rounded hover:bg-muted text-destructive"
+                              >
+                                <Delete16Regular className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="-mx-1 my-1 h-px bg-border" />
+                  <div
+                    onClick={() => { setCreateDialogOpen(true); setGroupDropdownOpen(false); }}
+                    className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs cursor-default hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <Add16Regular className="w-3.5 h-3.5" />
+                    新建分组
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -377,7 +568,7 @@ function App() {
           <DialogHeader className="text-left">
             <DialogTitle>清空历史记录</DialogTitle>
             <DialogDescription className="text-left">
-              确定要清空所有非置顶的历史记录吗？此操作不可撤销。
+              确定要清空当前分组内所有非置顶的历史记录吗？此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -386,6 +577,81 @@ function App() {
             </Button>
             <Button variant="destructive" onClick={handleClearHistory}>
               清空
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 新建分组对话框 */}
+      <Dialog open={createDialogOpen} onOpenChange={(open) => {
+        setCreateDialogOpen(open);
+        if (!open) setCreateName("");
+      }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader className="text-left">
+            <DialogTitle>新建分组</DialogTitle>
+          </DialogHeader>
+          <Input
+            ref={createInputRef}
+            placeholder="分组名称"
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleCreateGroup(); }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>取消</Button>
+            <Button onClick={handleCreateGroup} disabled={!createName.trim()}>创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 重命名分组对话框 */}
+      <Dialog open={renameDialogOpen} onOpenChange={(open) => {
+        setRenameDialogOpen(open);
+        if (!open) setRenameTarget(null);
+      }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader className="text-left">
+            <DialogTitle>编辑分组</DialogTitle>
+          </DialogHeader>
+          <Input
+            ref={renameInputRef}
+            placeholder="分组名称"
+            value={renameName}
+            onChange={(e) => setRenameName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameGroup(); }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>取消</Button>
+            <Button onClick={handleRenameGroup} disabled={!renameName.trim()}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 删除分组确认对话框 */}
+      <Dialog open={deleteGroupDialogOpen} onOpenChange={(open) => {
+        setDeleteGroupDialogOpen(open);
+        if (!open) setDeleteGroupTarget(null);
+      }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader className="text-left">
+            <DialogTitle>删除分组</DialogTitle>
+            <DialogDescription className="text-left">
+              确定要删除分组“{deleteGroupTarget?.name ?? ""}”吗？该分组下的所有剪贴板记录将被同时删除（不可撤销）。
+              {typeof deleteGroupTarget?.item_count === "number" && (
+                <>
+                  <br />
+                  当前分组条目数：{deleteGroupTarget.item_count}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteGroupDialogOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteGroup} disabled={!deleteGroupTarget}>
+              删除
             </Button>
           </DialogFooter>
         </DialogContent>

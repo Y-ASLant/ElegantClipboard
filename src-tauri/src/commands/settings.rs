@@ -123,10 +123,10 @@ pub async fn reset_settings(state: State<'_, Arc<AppState>>) -> Result<(), Strin
     Ok(())
 }
 
-/// 重置所有数据（删除剪贴板条目 + 设置 + 图片文件）
+/// 重置所有数据（删除剪贴板条目 + 自定义分组 + 设置 + 图片文件）
 #[tauri::command]
 pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    use crate::database::ClipboardRepository;
+    use crate::database::{ClipboardRepository, GroupRepository};
     use std::fs;
     use tracing::info;
 
@@ -135,6 +135,10 @@ pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), Strin
     let image_paths = clipboard_repo.get_all_image_paths().unwrap_or_default();
     clipboard_repo.clear_all().map_err(|e| e.to_string())?;
     crate::clipboard::cleanup_image_files(&image_paths);
+
+    // 清空自定义分组
+    let group_repo = GroupRepository::new(&state.db);
+    group_repo.delete_all().map_err(|e| e.to_string())?;
 
     // 清空设置
     let settings_repo = SettingsRepository::new(&state.db);

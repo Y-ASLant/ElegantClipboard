@@ -305,6 +305,7 @@ pub async fn get_clipboard_items(
     content_type: Option<String>,
     pinned_only: Option<bool>,
     favorite_only: Option<bool>,
+    group_id: Option<i64>,
     limit: Option<i64>,
     offset: Option<i64>,
 ) -> Result<Vec<ClipboardItem>, String> {
@@ -318,6 +319,7 @@ pub async fn get_clipboard_items(
         content_type,
         pinned_only: pinned_only.unwrap_or(false),
         favorite_only: favorite_only.unwrap_or(false),
+        group_id,
         limit,
         offset,
     };
@@ -361,6 +363,7 @@ pub async fn get_clipboard_count(
     content_type: Option<String>,
     pinned_only: Option<bool>,
     favorite_only: Option<bool>,
+    group_id: Option<i64>,
 ) -> Result<i64, String> {
     use crate::database::QueryOptions;
 
@@ -369,6 +372,7 @@ pub async fn get_clipboard_count(
         content_type,
         pinned_only: pinned_only.unwrap_or(false),
         favorite_only: favorite_only.unwrap_or(false),
+        group_id,
         ..Default::default()
     };
     repo.count(options).map_err(|e| e.to_string())
@@ -403,6 +407,18 @@ pub async fn move_clipboard_item(
     repo.move_item_by_id(from_id, to_id)
         .map_err(|e| e.to_string())?;
     debug!("Moved clipboard item {} to position of {}", from_id, to_id);
+    Ok(())
+}
+
+/// 粘贴后置顶：将条目移到非置顶区最前面（sort_order 设为全表最大值 + 1）
+#[tauri::command]
+pub async fn bump_item_to_top(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<(), String> {
+    let repo = ClipboardRepository::new(&state.db);
+    repo.bump_to_top(id).map_err(|e| e.to_string())?;
+    debug!("Bumped clipboard item {} to top", id);
     Ok(())
 }
 
@@ -443,21 +459,35 @@ pub async fn clear_all_history(state: State<'_, Arc<AppState>>) -> Result<i64, S
     Ok(deleted)
 }
 
-/// 清空所有非固定/非收藏历史（同时删除图片文件）
+/// 清空所有非固定/非收藏历史（同时删除图片文件），按分组
 #[tauri::command]
-pub async fn clear_history(state: State<'_, Arc<AppState>>) -> Result<i64, String> {
+pub async fn clear_history(
+    state: State<'_, Arc<AppState>>,
+    group_id: Option<i64>,
+) -> Result<i64, String> {
     use tracing::info;
 
     let repo = ClipboardRepository::new(&state.db);
-    let image_paths = repo.get_clearable_image_paths().unwrap_or_default();
-    let deleted = repo.clear_history().map_err(|e| e.to_string())?;
+    let image_paths = repo.get_clearable_image_paths(group_id).unwrap_or_default();
+    let deleted = repo.clear_history(group_id).map_err(|e| e.to_string())?;
     let deleted_files = crate::clipboard::cleanup_image_files(&image_paths);
 
     info!(
-        "Cleared {} clipboard items and {} image files",
-        deleted, deleted_files
+        "Cleared {} clipboard items and {} image files (group: {:?})",
+        deleted, deleted_files, group_id
     );
     Ok(deleted)
+}
+
+/// 设置当前活动分组（None = 默认分组）
+#[tauri::command]
+pub async fn set_active_group(
+    state: State<'_, Arc<AppState>>,
+    group_id: Option<i64>,
+) -> Result<(), String> {
+    *state.active_group_id.lock() = group_id;
+    debug!("Active group set to: {:?}", group_id);
+    Ok(())
 }
 
 /// 更新剪贴板条目的文本内容，内容为空时删除并返回 true
@@ -564,8 +594,9 @@ pub fn quick_paste_by_slot(
     }
 
     let repo = ClipboardRepository::new(&state.db);
+    let active_group = *state.active_group_id.lock();
     let item = repo
-        .get_by_position((slot - 1) as usize)
+        .get_by_position((slot - 1) as usize, active_group)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("No clipboard item available for slot {}", slot))?;
 
