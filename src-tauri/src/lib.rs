@@ -577,51 +577,7 @@ fn add_dir_to_zip(
 }
 
 fn chrono_timestamp() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let secs = now + 8 * 3600;
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let h = time_of_day / 3600;
-    let m = (time_of_day % 3600) / 60;
-    let s = time_of_day % 60;
-
-    let (y, mo, d) = days_to_ymd(days);
-    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, mo, d, h, m, s)
-}
-
-fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
-    let mut y = 1970;
-    loop {
-        let yd = if is_leap(y) { 366 } else { 365 };
-        if days < yd {
-            break;
-        }
-        days -= yd;
-        y += 1;
-    }
-    let leap = is_leap(y);
-    let month_days = [
-        31,
-        if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    let mut mo = 0;
-    for (i, &md) in month_days.iter().enumerate() {
-        if days < md {
-            mo = i as u64 + 1;
-            break;
-        }
-        days -= md;
-    }
-    (y, mo, days + 1)
-}
-
-fn is_leap(y: u64) -> bool {
-    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
 }
 
 fn format_size(bytes: u64) -> String {

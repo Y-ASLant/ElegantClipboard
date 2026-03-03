@@ -72,7 +72,23 @@ pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandl
     }
 }
 
-/// 暂停剪贴板监控并执行闭包，500ms 后在后台线程恢复监控。
+/// 延迟恢复监控的发送端（全局单线程处理，避免每次粘贴都 spawn 新线程）
+static RESUME_TX: std::sync::LazyLock<std::sync::mpsc::Sender<crate::clipboard::ClipboardMonitor>> =
+    std::sync::LazyLock::new(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<crate::clipboard::ClipboardMonitor>();
+        std::thread::Builder::new()
+            .name("monitor-resume".into())
+            .spawn(move || {
+                while let Ok(monitor) = rx.recv() {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    monitor.resume();
+                }
+            })
+            .expect("failed to spawn monitor-resume thread");
+        tx
+    });
+
+/// 暂停剪贴板监控并执行闭包，500ms 后恢复监控。
 pub(crate) fn with_paused_monitor<F, R>(state: &Arc<AppState>, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -80,11 +96,7 @@ where
     state.monitor.pause();
     let result = f();
 
-    let monitor = state.monitor.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        monitor.resume();
-    });
+    let _ = RESUME_TX.send(state.monitor.clone());
 
     result
 }
