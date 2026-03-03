@@ -127,20 +127,6 @@ pub fn start_monitoring() {
     info!("输入监控已启动");
 }
 
-#[allow(dead_code)]
-pub fn stop_monitoring() {
-    MONITOR_RUNNING.store(false, Ordering::SeqCst);
-    #[cfg(windows)]
-    {
-        let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
-        if tid != 0 {
-            unsafe {
-                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
-            }
-        }
-    }
-}
-
 pub fn enable_mouse_monitoring() {
     MOUSE_MONITORING_ENABLED.store(true, Ordering::Relaxed);
     #[cfg(windows)]
@@ -167,11 +153,6 @@ pub fn disable_mouse_monitoring() {
     }
 }
 
-#[allow(dead_code)]
-pub fn is_mouse_monitoring_enabled() -> bool {
-    MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
-}
-
 pub fn set_window_pinned(pinned: bool) {
     WINDOW_PINNED.store(pinned, Ordering::Relaxed);
 }
@@ -182,11 +163,6 @@ pub fn is_window_pinned() -> bool {
 
 pub fn set_keyboard_nav_enabled(enabled: bool) {
     KEYBOARD_NAV_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-#[allow(dead_code)]
-pub fn is_keyboard_nav_enabled() -> bool {
-    KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed)
 }
 
 pub fn get_prev_foreground_hwnd() -> isize {

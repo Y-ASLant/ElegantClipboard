@@ -160,12 +160,3 @@ pub(crate) fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(),
 
     Ok(())
 }
-
-/// 更新托盘提示文本
-#[allow(dead_code)]
-pub fn update_tray_tooltip<R: Runtime>(app: &AppHandle<R>, count: i64) {
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        let tooltip = format!("ElegantClipboard - {} 条记录", count);
-        let _ = tray.set_tooltip(Some(&tooltip));
-    }
-}

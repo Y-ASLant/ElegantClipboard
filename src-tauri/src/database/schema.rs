@@ -99,17 +99,6 @@ impl ContentType {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "text" => Some(ContentType::Text),
-            "image" => Some(ContentType::Image),
-            "html" => Some(ContentType::Html),
-            "rtf" => Some(ContentType::Rtf),
-            "files" => Some(ContentType::Files),
-            _ => None,
-        }
-    }
 }
 
 impl std::fmt::Display for ContentType {

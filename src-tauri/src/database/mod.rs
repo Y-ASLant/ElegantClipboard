@@ -300,11 +300,6 @@ impl Database {
         self.read_conn.clone()
     }
 
-    #[allow(dead_code)]
-    pub fn path(&self) -> &PathBuf {
-        &self.db_path
-    }
-
     pub fn optimize(&self) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
         conn.execute_batch("PRAGMA optimize;")?;
