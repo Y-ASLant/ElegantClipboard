@@ -228,7 +228,7 @@ const ActionToolbar = ({
   onDelete,
 }: ActionToolbarProps) => (
   <div
-    className="absolute right-1 top-1 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
+    className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
     data-drag-ignore="true"
   >
     <Tooltip>
@@ -454,6 +454,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   };
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
+  const dragHandleWidth = "clamp(40px, 14%, 72px)";
 
   const timeFormat = useUISettings((s) => s.timeFormat);
 
@@ -565,25 +566,73 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         onClick={handlePaste}
       >
         {!isDragging && !isDragOverlay && (
-          <button
-            ref={setActivatorNodeRef}
-            {...attributes}
-            {...listeners}
-            type="button"
-            data-drag-handle="true"
-            onClick={(e) => e.stopPropagation()}
-            className={cn(
-              "absolute inset-y-0 left-0 z-10 flex items-center justify-center w-[clamp(40px,14%,72px)] rounded-l-lg cursor-grab active:cursor-grabbing",
-              showDragAreaIndicator
-                ? "border-r border-dashed border-border/50 bg-background/20 text-muted-foreground/80 opacity-35 transition-colors hover:bg-background/35 hover:text-foreground"
-                : "border-r border-transparent bg-transparent text-transparent opacity-0",
+          <>
+            <button
+              ref={setActivatorNodeRef}
+              {...attributes}
+              {...listeners}
+              type="button"
+              data-drag-handle="true"
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute inset-y-0 left-0 z-10 flex items-center justify-center rounded-l-lg cursor-grab active:cursor-grabbing",
+                showDragAreaIndicator
+                  ? "border-r border-dashed border-border/50 bg-background/20 text-muted-foreground/85 opacity-0 group-hover:opacity-55 transition-[opacity,colors] duration-150 hover:bg-background/35 hover:text-foreground"
+                  : "border-r border-transparent bg-transparent text-transparent opacity-0",
+              )}
+              style={{ width: dragHandleWidth }}
+              title="左侧拖拽区域"
+              aria-label="左侧拖拽区域"
+              tabIndex={showDragAreaIndicator ? 0 : -1}
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none text-[10px] leading-tight text-center text-muted-foreground"
+              >
+                拖拽区域
+              </span>
+            </button>
+
+            <button
+              {...attributes}
+              {...listeners}
+              type="button"
+              data-drag-handle="true"
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute inset-y-0 right-0 z-10 flex items-center justify-center rounded-r-lg cursor-grab active:cursor-grabbing",
+                showDragAreaIndicator
+                  ? "border-l border-dashed border-border/50 bg-background/20 text-muted-foreground/85 opacity-0 group-hover:opacity-55 transition-[opacity,colors] duration-150 hover:bg-background/35 hover:text-foreground"
+                  : "border-l border-transparent bg-transparent text-transparent opacity-0",
+              )}
+              style={{ width: dragHandleWidth }}
+              title="右侧拖拽区域"
+              aria-label="右侧拖拽区域"
+              tabIndex={showDragAreaIndicator ? 0 : -1}
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none text-[10px] leading-tight text-center text-muted-foreground"
+              >
+                拖拽区域
+              </span>
+            </button>
+
+            {showDragAreaIndicator && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 z-[6] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                style={{ left: dragHandleWidth, right: dragHandleWidth }}
+              >
+                <div className="absolute inset-y-1 left-0 border-l border-dashed border-border/50" />
+                <div className="absolute inset-y-1 right-0 border-r border-dashed border-border/50" />
+                <div className="rounded border border-dashed border-border/60 bg-background/80 px-2 py-1 text-center">
+                  <div className="text-[10px] leading-none text-muted-foreground">中间粘贴区域</div>
+                  <div className="mt-0.5 text-[10px] leading-none text-muted-foreground/90">点击卡片可粘贴</div>
+                </div>
+              </div>
             )}
-            title="拖拽排序"
-            aria-label="拖拽排序"
-            tabIndex={showDragAreaIndicator ? 0 : -1}
-          >
-            <span className="pointer-events-none text-[10px] leading-none tracking-wider">::</span>
-          </button>
+          </>
         )}
         <div className="flex">
           {item.content_type === "image" && item.image_path ? (

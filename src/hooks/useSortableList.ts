@@ -93,7 +93,7 @@ export function useSortableList<T extends SortableItem>({
   const sensors = useSensors(
     useSensor(CustomMouseSensor, {
       activationConstraint: {
-        distance: 6, // Reduce accidental drags while keeping reorder responsive
+        distance: 3, // More responsive drag start while keeping accidental drags manageable
       },
     }),
     useSensor(KeyboardSensor, {

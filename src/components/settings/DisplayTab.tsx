@@ -280,9 +280,9 @@ export function DisplayTab() {
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示拖拽区域</Label>
+              <Label className="text-xs">显示区域提示</Label>
               <p className="text-xs text-muted-foreground">
-                在卡片左侧显示拖拽区域提示，不影响拖拽功能
+                在卡片左右显示可拖拽区域，中间显示粘贴区域提示，不影响拖拽功能
               </p>
             </div>
             <Switch
