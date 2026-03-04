@@ -690,6 +690,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             }
 
             input_monitor::save_current_focus();
+            // 强制保持非激活展示，避免瞬态窗口（如 PowerToys/Wox 的 Alt+Enter 面板）因失焦关闭
+            let _ = window.set_focusable(false);
             let _ = window.show();
             positioning::force_topmost(&window);
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);

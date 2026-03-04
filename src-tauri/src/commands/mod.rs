@@ -27,6 +27,7 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
                 return;
             }
             crate::save_window_size_if_enabled(app, &window);
+            let _ = window.set_focusable(false);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             crate::input_monitor::disable_mouse_monitoring();
