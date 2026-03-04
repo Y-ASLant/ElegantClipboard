@@ -27,12 +27,13 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
                 return;
             }
             crate::save_window_size_if_enabled(app, &window);
+            let _ = window.set_focusable(false);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             crate::input_monitor::disable_mouse_monitoring();
             let _ = window.emit("window-hidden", ());
         }
-        hide_image_preview_window(app);
+        hide_preview_windows(app);
 
         // 多屏/高 DPI 下隐藏窗口后系统可能不自动还原前台窗口，导致 Ctrl+V 无接收者。
         // 仅在目标窗口不是当前前台窗口时才调用 SetForegroundWindow，
@@ -72,7 +73,62 @@ pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandl
     }
 }
 
-/// 暂停剪贴板监控并执行闭包，500ms 后在后台线程恢复监控。
+/// 隐藏文本预览窗口（若存在）。
+pub(crate) fn hide_text_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::{Emitter, Manager};
+
+    if let Some(preview) = app.get_webview_window("text-preview") {
+        let _ = preview.hide();
+        let _ = preview.emit("text-preview-clear", ());
+    }
+}
+
+/// 隐藏所有悬浮预览窗口（图片 / 文本）。
+pub(crate) fn hide_preview_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    hide_image_preview_window(app);
+    hide_text_preview_window(app);
+}
+
+/// 延迟恢复监控的发送端（全局单线程处理，避免每次粘贴都 spawn 新线程）
+static RESUME_TX: std::sync::LazyLock<std::sync::mpsc::Sender<crate::clipboard::ClipboardMonitor>> =
+    std::sync::LazyLock::new(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<crate::clipboard::ClipboardMonitor>();
+        std::thread::Builder::new()
+            .name("monitor-resume".into())
+            .spawn(move || {
+                loop {
+                    let first = match rx.recv() {
+                        Ok(monitor) => monitor,
+                        Err(_) => return,
+                    };
+                    let mut pending = vec![first];
+
+                    // Debounce resume requests: wait for a quiet 500ms window,
+                    // then flush all pending resumes together.
+                    loop {
+                        match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+                            Ok(monitor) => pending.push(monitor),
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                for monitor in pending.drain(..) {
+                                    monitor.resume();
+                                }
+                                break;
+                            }
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                for monitor in pending.drain(..) {
+                                    monitor.resume();
+                                }
+                                return;
+                            }
+                        }
+                    }
+                }
+            })
+            .expect("failed to spawn monitor-resume thread");
+        tx
+    });
+
+/// 暂停剪贴板监控并执行闭包，500ms 后恢复监控。
 pub(crate) fn with_paused_monitor<F, R>(state: &Arc<AppState>, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -80,11 +136,7 @@ where
     state.monitor.pause();
     let result = f();
 
-    let monitor = state.monitor.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        monitor.resume();
-    });
+    let _ = RESUME_TX.send(state.monitor.clone());
 
     result
 }

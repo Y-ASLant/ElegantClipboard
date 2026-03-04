@@ -131,6 +131,8 @@ export function DisplayTab() {
     imageAutoHeight, setImageAutoHeight,
     imageMaxHeight, setImageMaxHeight,
     imagePreviewEnabled, setImagePreviewEnabled,
+    textPreviewEnabled, setTextPreviewEnabled,
+    previewUnboundedMode, setPreviewUnboundedMode,
     previewZoomStep, setPreviewZoomStep,
     previewPosition, setPreviewPosition,
     hoverPreviewDelay, setHoverPreviewDelay,
@@ -143,7 +145,9 @@ export function DisplayTab() {
     timeFormat, setTimeFormat,
     toolbarButtons, setToolbarButtons,
     showCategoryFilter, setShowCategoryFilter,
+    showDragAreaIndicator, setShowDragAreaIndicator,
   } = useUISettings();
+  const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 3 } })
@@ -278,6 +282,19 @@ export function DisplayTab() {
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
+              <Label className="text-xs">显示区域提示</Label>
+              <p className="text-xs text-muted-foreground">
+                在卡片左右显示可拖拽区域，中间显示粘贴区域提示，不影响拖拽功能
+              </p>
+            </div>
+            <Switch
+              checked={showDragAreaIndicator}
+              onCheckedChange={setShowDragAreaIndicator}
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
               <Label className="text-xs">图片自适应高度</Label>
               <p className="text-xs text-muted-foreground">
                 关闭后图片高度跟随预览最大行数
@@ -309,22 +326,40 @@ export function DisplayTab() {
         </div>
       </div>
 
-      {/* Image Preview Card */}
+      {/* Hover Preview Card */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">图片预览</h3>
-        <p className="text-xs text-muted-foreground mb-4">鼠标悬停时在窗口旁显示大图预览</p>
+        <h3 className="text-sm font-medium mb-3">悬浮预览</h3>
+        <p className="text-xs text-muted-foreground mb-4">鼠标悬停时在窗口旁显示内容预览</p>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">启用图片悬浮预览</Label>
-              <p className="text-xs text-muted-foreground">悬停后弹出预览窗口，Ctrl+滚轮缩放</p>
+              <Label className="text-xs">图片悬浮预览</Label>
+              <p className="text-xs text-muted-foreground">悬停后弹出图片预览窗口，支持 Ctrl+滚轮缩放</p>
             </div>
             <Switch checked={imagePreviewEnabled} onCheckedChange={setImagePreviewEnabled} />
           </div>
 
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">文本悬浮预览</Label>
+              <p className="text-xs text-muted-foreground">悬停后弹出文本预览窗口，支持 Ctrl+滚轮滚动预览，默认关闭</p>
+            </div>
+            <Switch checked={textPreviewEnabled} onCheckedChange={setTextPreviewEnabled} />
+          </div>
+
           {imagePreviewEnabled && (
             <>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-xs">无界模式</Label>
+                  <p className="text-xs text-muted-foreground">
+                    允许预览窗口超出屏幕边界，最高缩放至 500%
+                  </p>
+                </div>
+                <Switch checked={previewUnboundedMode} onCheckedChange={setPreviewUnboundedMode} />
+              </div>
+
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <Label className="text-xs">预览位置</Label>
@@ -349,25 +384,6 @@ export function DisplayTab() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">悬浮延迟</Label>
-                  <span className="text-xs font-medium tabular-nums">
-                    {hoverPreviewDelay} ms
-                  </span>
-                </div>
-                <Slider
-                  value={[hoverPreviewDelay]}
-                  onValueChange={(value) => setHoverPreviewDelay(value[0])}
-                  min={100}
-                  max={1000}
-                  step={50}
-                />
-                <p className="text-xs text-muted-foreground">
-                  鼠标悬停多久后弹出预览窗口
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
                   <Label className="text-xs">缩放步进</Label>
                   <span className="text-xs font-medium tabular-nums">
                     {previewZoomStep}%
@@ -385,6 +401,27 @@ export function DisplayTab() {
                 </p>
               </div>
             </>
+          )}
+
+          {anyHoverPreviewEnabled && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">悬浮延迟</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {hoverPreviewDelay} ms
+                </span>
+              </div>
+              <Slider
+                value={[hoverPreviewDelay]}
+                onValueChange={(value) => setHoverPreviewDelay(value[0])}
+                min={100}
+                max={1000}
+                step={50}
+              />
+              <p className="text-xs text-muted-foreground">
+                鼠标悬停多久后弹出预览窗口
+              </p>
+            </div>
           )}
         </div>
       </div>

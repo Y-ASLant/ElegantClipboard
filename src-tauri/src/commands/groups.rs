@@ -1,6 +1,7 @@
-use crate::database::{Group, GroupRepository};
+use crate::database::{ClipboardRepository, Group, GroupRepository};
 use std::sync::Arc;
 use tauri::State;
+use tracing::debug;
 
 use super::AppState;
 
@@ -49,8 +50,20 @@ pub async fn update_group_color(
 /// 删除分组（ON DELETE CASCADE 自动删除该分组的所有 clipboard_items）
 #[tauri::command]
 pub async fn delete_group(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
+    let clipboard_repo = ClipboardRepository::new(&state.db);
+    let image_paths = clipboard_repo
+        .get_image_paths_by_group(id)
+        .map_err(|e| e.to_string())?;
+
     let repo = GroupRepository::new(&state.db);
-    repo.delete(id).map_err(|e| e.to_string())
+    repo.delete(id).map_err(|e| e.to_string())?;
+
+    let deleted_files = crate::clipboard::cleanup_image_files(&image_paths);
+    debug!(
+        "Deleted group {} with {} image files cleaned",
+        id, deleted_files
+    );
+    Ok(())
 }
 
 /// 将条目移动到指定分组（None = 移回默认分组）

@@ -57,9 +57,9 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_a
 CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite) WHERE is_favorite = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
--- Per-group unique hash: default group (NULL) and custom groups handled separately
-CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
+-- Per-group hash index: duplicates are allowed when dedup strategy is "always_new"
+CREATE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
@@ -99,17 +99,6 @@ impl ContentType {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "text" => Some(ContentType::Text),
-            "image" => Some(ContentType::Image),
-            "html" => Some(ContentType::Html),
-            "rtf" => Some(ContentType::Rtf),
-            "files" => Some(ContentType::Files),
-            _ => None,
-        }
-    }
 }
 
 impl std::fmt::Display for ContentType {

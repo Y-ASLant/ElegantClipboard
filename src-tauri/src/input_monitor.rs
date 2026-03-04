@@ -86,7 +86,11 @@ unsafe extern "system" fn wndproc_subclass(
     }
 
     let original = ORIGINAL_WNDPROC.load(Ordering::Relaxed);
-    CallWindowProcW(std::mem::transmute(original), hwnd, msg, wparam, lparam)
+    let original_proc = std::mem::transmute::<
+        isize,
+        Option<unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT>,
+    >(original);
+    CallWindowProcW(original_proc, hwnd, msg, wparam, lparam)
 }
 
 pub fn init(window: WebviewWindow) {
@@ -127,20 +131,6 @@ pub fn start_monitoring() {
     info!("输入监控已启动");
 }
 
-#[allow(dead_code)]
-pub fn stop_monitoring() {
-    MONITOR_RUNNING.store(false, Ordering::SeqCst);
-    #[cfg(windows)]
-    {
-        let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
-        if tid != 0 {
-            unsafe {
-                let _ = PostThreadMessageW(tid, WM_QUIT, WPARAM(0), LPARAM(0));
-            }
-        }
-    }
-}
-
 pub fn enable_mouse_monitoring() {
     MOUSE_MONITORING_ENABLED.store(true, Ordering::Relaxed);
     #[cfg(windows)]
@@ -167,11 +157,6 @@ pub fn disable_mouse_monitoring() {
     }
 }
 
-#[allow(dead_code)]
-pub fn is_mouse_monitoring_enabled() -> bool {
-    MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
-}
-
 pub fn set_window_pinned(pinned: bool) {
     WINDOW_PINNED.store(pinned, Ordering::Relaxed);
 }
@@ -182,11 +167,6 @@ pub fn is_window_pinned() -> bool {
 
 pub fn set_keyboard_nav_enabled(enabled: bool) {
     KEYBOARD_NAV_ENABLED.store(enabled, Ordering::Relaxed);
-}
-
-#[allow(dead_code)]
-pub fn is_keyboard_nav_enabled() -> bool {
-    KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed)
 }
 
 pub fn get_prev_foreground_hwnd() -> isize {
@@ -502,12 +482,13 @@ fn handle_click_outside() {
         if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
             info!("handle_click_outside: 窗口可见且点击在外部，执行隐藏");
             crate::save_window_size_if_enabled(window.app_handle(), window);
+            let _ = window.set_focusable(false);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             // disable_mouse_monitoring 会向本线程投递 MSG_UNINSTALL_KB_HOOK，
             // 该消息将在当前钩子回调返回后的下一次消息循环中处理
             disable_mouse_monitoring();
-            crate::commands::hide_image_preview_window(window.app_handle());
+            crate::commands::hide_preview_windows(window.app_handle());
             let _ = window.emit("window-hidden", ());
         }
     }

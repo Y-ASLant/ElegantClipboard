@@ -192,35 +192,34 @@ impl ClipboardRepository {
         let new_sort = max_sort_order + 1;
 
         let (group_cond, group_param) = Self::group_condition(group_id);
-        let update_sql = format!(
-            "UPDATE clipboard_items \
-             SET access_count = access_count + 1, \
-                 last_accessed_at = datetime('now', 'localtime'), \
-                 updated_at = datetime('now', 'localtime'), \
-                 created_at = datetime('now', 'localtime'), \
-                 sort_order = ? \
-             WHERE content_hash = ? AND {}",
-            group_cond
-        );
         let select_sql = format!(
-            "SELECT id FROM clipboard_items WHERE content_hash = ? AND {}",
+            "SELECT id FROM clipboard_items \
+             WHERE content_hash = ? AND {} \
+             ORDER BY sort_order DESC, created_at DESC, id DESC \
+             LIMIT 1",
             group_cond
         );
 
-        if let Some(gid) = group_param {
-            conn.execute(&update_sql, params![new_sort, hash, gid])?;
-        } else {
-            conn.execute(&update_sql, params![new_sort, hash])?;
-        }
-
-        let result: Result<i64, _> = if let Some(gid) = group_param {
+        let target_id: Result<i64, _> = if let Some(gid) = group_param {
             conn.query_row(&select_sql, params![hash, gid], |row| row.get(0))
         } else {
             conn.query_row(&select_sql, params![hash], |row| row.get(0))
         };
 
-        match result {
-            Ok(id) => Ok(Some(id)),
+        match target_id {
+            Ok(id) => {
+                conn.execute(
+                    "UPDATE clipboard_items \
+                     SET access_count = access_count + 1, \
+                         last_accessed_at = datetime('now', 'localtime'), \
+                         updated_at = datetime('now', 'localtime'), \
+                         created_at = datetime('now', 'localtime'), \
+                         sort_order = ?1 \
+                     WHERE id = ?2",
+                    params![new_sort, id],
+                )?;
+                Ok(Some(id))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
@@ -306,19 +305,11 @@ impl ClipboardRepository {
         }
 
         // 支持逗号分隔的多类型筛选（如 "text,html,rtf"）
-        if let Some(ref content_type) = options.content_type {
-            let types: Vec<&str> = content_type.split(',').map(|s| s.trim()).collect();
-            if types.len() == 1 {
-                conditions.push("content_type = ?".to_string());
-                params_vec.push(Box::new(content_type.clone()));
-            } else {
-                let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
-                conditions.push(format!("content_type IN ({})", placeholders.join(",")));
-                for t in &types {
-                    params_vec.push(Box::new(t.to_string()));
-                }
-            }
-        }
+        Self::append_content_type_condition(
+            options.content_type.as_deref(),
+            &mut conditions,
+            &mut params_vec,
+        );
 
         if options.pinned_only {
             conditions.push("is_pinned = 1".to_string());
@@ -343,6 +334,35 @@ impl ClipboardRepository {
         match group_id {
             Some(gid) => ("group_id = ?", Some(gid)),
             None      => ("group_id IS NULL", None),
+        }
+    }
+
+    /// 将 content_type（支持逗号分隔）转换为 SQL 条件并追加参数。
+    fn append_content_type_condition(
+        content_type: Option<&str>,
+        conditions: &mut Vec<String>,
+        params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+    ) {
+        let Some(raw) = content_type else {
+            return;
+        };
+        let types: Vec<&str> = raw
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if types.is_empty() {
+            return;
+        }
+        if types.len() == 1 {
+            conditions.push("content_type = ?".to_string());
+            params_vec.push(Box::new(types[0].to_string()));
+        } else {
+            let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
+            conditions.push(format!("content_type IN ({})", placeholders.join(",")));
+            for t in &types {
+                params_vec.push(Box::new((*t).to_string()));
+            }
         }
     }
 
@@ -444,19 +464,27 @@ impl ClipboardRepository {
         Ok(())
     }
 
-    /// 获取可清除条目的图片路径（按分组过滤）
-    pub fn get_clearable_image_paths(&self, group_id: Option<i64>) -> Result<Vec<String>, rusqlite::Error> {
+    /// 获取可清除条目的图片路径（按分组/类型过滤）
+    pub fn get_clearable_image_paths(
+        &self,
+        group_id: Option<i64>,
+        content_type: Option<&str>,
+    ) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        let sql = format!(
-            "SELECT image_path FROM clipboard_items \
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL AND {}",
-            group_cond
-        );
+        let mut conditions: Vec<String> = vec![
+            "is_pinned = 0".to_string(),
+            "is_favorite = 0".to_string(),
+            "image_path IS NOT NULL".to_string(),
+        ];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        conditions.push(group_cond.to_string());
         if let Some(gid) = group_param {
             params_vec.push(Box::new(gid));
         }
+        Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
+        let mut sql = "SELECT image_path FROM clipboard_items".to_string();
+        Self::append_where(&mut sql, &conditions);
         let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn.prepare(&sql)?;
         let paths: Vec<String> = stmt
@@ -466,18 +494,26 @@ impl ClipboardRepository {
         Ok(paths)
     }
 
-    /// 清空历史（保留置顶和收藏），按分组过滤
-    pub fn clear_history(&self, group_id: Option<i64>) -> Result<i64, rusqlite::Error> {
+    /// 清空历史（保留置顶和收藏），按分组/类型过滤
+    pub fn clear_history(
+        &self,
+        group_id: Option<i64>,
+        content_type: Option<&str>,
+    ) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        let sql = format!(
-            "DELETE FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {}",
-            group_cond
-        );
+        let mut conditions: Vec<String> = vec![
+            "is_pinned = 0".to_string(),
+            "is_favorite = 0".to_string(),
+        ];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        conditions.push(group_cond.to_string());
         if let Some(gid) = group_param {
             params_vec.push(Box::new(gid));
         }
+        Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
+        let mut sql = "DELETE FROM clipboard_items".to_string();
+        Self::append_where(&mut sql, &conditions);
         let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
         let deleted = conn.execute(&sql, params_refs.as_slice())?;
         Ok(deleted as i64)
@@ -491,6 +527,20 @@ impl ClipboardRepository {
         )?;
         let paths = stmt
             .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(paths)
+    }
+
+    /// »ñÈ¡Ö¸¶¨·Ö×éÄÚËùÓÐÌõÄ¿µÄÍ¼Æ¬Â·¾¶£¨°üÀ¨ÖÃ¶¥ºÍÊÕ²Ø£©
+    pub fn get_image_paths_by_group(&self, group_id: i64) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT image_path FROM clipboard_items \
+             WHERE image_path IS NOT NULL AND group_id = ?1",
+        )?;
+        let paths = stmt
+            .query_map(params![group_id], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
         Ok(paths)

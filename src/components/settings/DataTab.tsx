@@ -64,6 +64,10 @@ const dedupOptions: { value: DedupStrategy; label: string; desc: string }[] = [
 
 function DedupStrategyCard() {
   const [strategy, setStrategy] = useState<DedupStrategy>("move_to_top");
+  const activeDedupIndex = Math.max(
+    0,
+    dedupOptions.findIndex((opt) => opt.value === strategy),
+  );
 
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "dedup_strategy" }).then((val) => {
@@ -84,21 +88,38 @@ function DedupStrategyCard() {
     <div className="rounded-lg border bg-card p-4">
       <h3 className="text-sm font-medium mb-3">重复内容处理</h3>
       <p className="text-xs text-muted-foreground mb-4">复制相同内容时的处理方式</p>
-      <div className="flex gap-1">
-        {dedupOptions.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => handleChange(opt.value)}
-            className={`flex-1 px-2 py-1.5 text-xs rounded-md border transition-colors ${
-              strategy === opt.value
-                ? "bg-primary text-primary-foreground border-primary"
-                : "bg-background text-foreground border-input hover:bg-accent"
-            }`}
-            title={opt.desc}
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div
+        role="radiogroup"
+        aria-label="重复内容处理"
+        className="relative rounded-lg border bg-muted/40 p-1"
+      >
+        <div className="relative grid grid-cols-3">
+          <div
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-1/3 rounded-md bg-primary shadow-sm will-change-transform transition-transform duration-200 ease-out"
+            style={{ transform: `translateX(${activeDedupIndex * 100}%)` }}
+          />
+          {dedupOptions.map((opt) => {
+            const isActive = strategy === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={isActive}
+                onClick={() => handleChange(opt.value)}
+                className={`relative z-[1] rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? "text-primary-foreground"
+                    : "text-foreground/80 hover:text-foreground"
+                }`}
+                title={opt.desc}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       <p className="text-xs text-muted-foreground mt-2">
         {dedupOptions.find((o) => o.value === strategy)?.desc}

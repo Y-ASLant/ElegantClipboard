@@ -157,13 +157,14 @@ function App() {
     return () => ro.disconnect();
   }, [updateIndicator]);
 
-  // 隐藏分类栏时重置全部筛选状态
+  // Reset filters when category bar is hidden.
   useEffect(() => {
     if (!showCategoryFilter) {
-      useClipboardStore.setState({ selectedGroup: null, selectedGroupId: null });
-      useClipboardStore.getState().fetchItems();
+      // Keep frontend/backend active group in sync when filter bar is hidden.
+      useClipboardStore.setState({ selectedGroup: null });
+      setSelectedGroupId(null);
     }
-  }, [showCategoryFilter]);
+  }, [showCategoryFilter, setSelectedGroupId]);
 
   // ---- 分组操作 handlers ----
   const handleCreateGroup = async () => {
@@ -317,8 +318,25 @@ function App() {
     debouncedSearch();
   };
 
-  const handleClearHistory = () => {
-    clearHistory();
+  const clearScopeText = useMemo(() => {
+    if (selectedGroup === "text,html,rtf") {
+      return "确定要清空当前分组内所有文本历史记录吗？此操作不可撤销。";
+    }
+    if (selectedGroup === "image,files") {
+      return "确定要清空当前分组内所有其它历史记录吗？此操作不可撤销。";
+    }
+    if (selectedGroup === "__favorites__") {
+      return "收藏视图下不支持清空操作。收藏项受保护，请在设置中使用“删除所有数据”进行全量删除。";
+    }
+    return "确定要清空当前分组内所有非置顶、非收藏的历史记录吗？此操作不可撤销。";
+  }, [selectedGroup]);
+
+  const handleClearHistory = async () => {
+    if (selectedGroup === "__favorites__") {
+      setClearDialogOpen(false);
+      return;
+    }
+    await clearHistory(selectedGroup);
     setClearDialogOpen(false);
   };
 
@@ -568,14 +586,18 @@ function App() {
           <DialogHeader className="text-left">
             <DialogTitle>清空历史记录</DialogTitle>
             <DialogDescription className="text-left">
-              确定要清空当前分组内所有非置顶的历史记录吗？此操作不可撤销。
+              {clearScopeText}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setClearDialogOpen(false)}>
               取消
             </Button>
-            <Button variant="destructive" onClick={handleClearHistory}>
+            <Button
+              variant="destructive"
+              onClick={handleClearHistory}
+              disabled={selectedGroup === "__favorites__"}
+            >
               清空
             </Button>
           </DialogFooter>

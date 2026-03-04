@@ -74,7 +74,8 @@ export const CardFooter = ({
 
 const PREVIEW_GAP = 12;
 const MIN_SCALE = 0.3;
-const MAX_SCALE = 5.0;
+const MAX_SCALE_BOUNDED = 5.0;
+const MAX_SCALE_UNBOUNDED = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
 
@@ -97,7 +98,7 @@ interface PreviewBounds {
 }
 
 /** Get the available space bounds beside the main window for positioning the preview */
-async function getPreviewBounds(
+export async function getPreviewBounds(
   position: "auto" | "left" | "right",
   cardElement?: HTMLElement | null,
 ): Promise<PreviewBounds> {
@@ -181,13 +182,13 @@ async function getPreviewBounds(
   };
 }
 
-/** Calculate image CSS size at a given scale, fitted into available space */
+/** Calculate image CSS size at a given scale; optional max bounds for bounded mode. */
 function calcImageSize(
   imgW: number,
   imgH: number,
   scale: number,
-  maxW: number,
-  maxH: number,
+  maxW?: number,
+  maxH?: number,
 ) {
   // Fit to base bounds at scale=1
   let baseW = imgW;
@@ -199,8 +200,8 @@ function calcImageSize(
   }
   let w = baseW * scale;
   let h = baseH * scale;
-  // Clamp to available space
-  if (w > maxW || h > maxH) {
+  // Clamp to available space in bounded mode.
+  if (maxW != null && maxH != null && (w > maxW || h > maxH)) {
     const ratio = Math.min(maxW / w, maxH / h);
     w *= ratio;
     h *= ratio;
@@ -215,6 +216,8 @@ interface PreviewState {
   currentPath: string | undefined;
   /** Cached bounds from showPreview so zoom handler stays synchronous */
   bounds: PreviewBounds | null;
+  /** Current preview window size in CSS px */
+  windowCss: { w: number; h: number } | null;
 }
 
 const defaultPreviewState = (): PreviewState => ({
@@ -223,6 +226,7 @@ const defaultPreviewState = (): PreviewState => ({
   imgNatural: { w: BASE_PREVIEW_W, h: BASE_PREVIEW_H },
   currentPath: undefined,
   bounds: null,
+  windowCss: null,
 });
 
 const ImagePreview = memo(function ImagePreview({
@@ -239,6 +243,7 @@ const ImagePreview = memo(function ImagePreview({
   imagePath?: string;
 }) {
   const imagePreviewEnabled = useUISettings((s) => s.imagePreviewEnabled);
+  const previewUnboundedMode = useUISettings((s) => s.previewUnboundedMode);
   const previewZoomStep = useUISettings((s) => s.previewZoomStep);
   const previewPosition = useUISettings((s) => s.previewPosition);
   const imageAutoHeight = useUISettings((s) => s.imageAutoHeight);
@@ -246,6 +251,15 @@ const ImagePreview = memo(function ImagePreview({
   const imageMaxHeight = useUISettings((s) => s.imageMaxHeight);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const zoomEmitRafRef = useRef<number | null>(null);
+  const pendingZoomPayloadRef = useRef<{
+    width: number;
+    height: number;
+    offsetY: number;
+    percent: number;
+    active: boolean;
+    align: "left" | "right";
+  } | null>(null);
   const ps = useRef<PreviewState>(defaultPreviewState());
 
   const clearTimer = useCallback(() => {
@@ -257,6 +271,11 @@ const ImagePreview = memo(function ImagePreview({
 
   const hidePreview = useCallback(() => {
     clearTimer();
+    if (zoomEmitRafRef.current !== null) {
+      cancelAnimationFrame(zoomEmitRafRef.current);
+      zoomEmitRafRef.current = null;
+    }
+    pendingZoomPayloadRef.current = null;
     if (ps.current.visible) {
       ps.current.visible = false;
       invoke("hide_image_preview").catch((e) =>
@@ -264,42 +283,40 @@ const ImagePreview = memo(function ImagePreview({
       );
     }
     ps.current.scale = 1.0;
+    ps.current.windowCss = null;
   }, [clearTimer]);
 
-  // Show preview: window covers full available space (no resize on zoom)
+  // Show preview: bounded mode uses screen work area; unbounded mode uses a fixed large window.
   const showPreview = useCallback(async () => {
     if (!containerRef.current || !ps.current.currentPath) return;
     const bounds = await getPreviewBounds(previewPosition, containerRef.current);
     const { imgNatural } = ps.current;
-    const maxCssW = bounds.maxW / bounds.scale;
-    const maxCssH = bounds.maxH / bounds.scale;
-    const { width, height } = calcImageSize(
-      imgNatural.w,
-      imgNatural.h,
-      1.0,
-      maxCssW,
-      maxCssH,
-    );
+    const boundedMaxCssW = bounds.maxW / bounds.scale;
+    const boundedMaxCssH = bounds.maxH / bounds.scale;
+    const { width, height } = previewUnboundedMode
+      ? calcImageSize(imgNatural.w, imgNatural.h, 1.0)
+      : calcImageSize(imgNatural.w, imgNatural.h, 1.0, boundedMaxCssW, boundedMaxCssH);
 
-    // Window covers full available space (physical px) — set once, never resized
-    const winW = bounds.maxW;
-    const winH = bounds.maxH;
-    const winX = bounds.side === "left"
-      ? bounds.anchorX - winW
-      : bounds.anchorX;
-    const winY = bounds.monY;
+    const maxUnbounded = calcImageSize(imgNatural.w, imgNatural.h, MAX_SCALE_UNBOUNDED);
+    const windowCssW = previewUnboundedMode ? maxUnbounded.width : boundedMaxCssW;
+    const windowCssH = previewUnboundedMode ? maxUnbounded.height : boundedMaxCssH;
+    const winW = Math.max(1, Math.round(windowCssW * bounds.scale));
+    const winH = Math.max(1, Math.round(windowCssH * bounds.scale));
+    const winX = bounds.side === "left" ? bounds.anchorX - winW : bounds.anchorX;
+    const winY = previewUnboundedMode
+      ? Math.round(bounds.cardCenterY - winH / 2)
+      : bounds.monY;
 
-    // Image offset within window (CSS px) — vertically center on card
-    const windowCssH = winH / bounds.scale;
+    // Image vertical offset inside preview window.
     const cardOffsetInWindow = (bounds.cardCenterY - bounds.monY) / bounds.scale;
-    const offsetY = Math.max(0, Math.min(
-      cardOffsetInWindow - height / 2,
-      windowCssH - height,
-    ));
+    const offsetY = previewUnboundedMode
+      ? Math.max(0, (windowCssH - height) / 2)
+      : Math.max(0, Math.min(cardOffsetInWindow - height / 2, windowCssH - height));
 
     ps.current.visible = true;
     ps.current.scale = 1.0;
     ps.current.bounds = bounds;
+    ps.current.windowCss = { w: windowCssW, h: windowCssH };
     const align = bounds.side === "left" ? "right" : "left";
     try {
       await invoke("show_image_preview", {
@@ -316,7 +333,7 @@ const ImagePreview = memo(function ImagePreview({
     } catch {
       ps.current.visible = false;
     }
-  }, [previewPosition]);
+  }, [previewPosition, previewUnboundedMode]);
 
   const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
 
@@ -327,7 +344,7 @@ const ImagePreview = memo(function ImagePreview({
     timerRef.current = setTimeout(showPreview, hoverPreviewDelay);
   }, [imagePath, imagePreviewEnabled, clearTimer, showPreview, hoverPreviewDelay]);
 
-  // Ctrl+Scroll: CSS-only zoom via emit (no native window resize → no flicker)
+  // Ctrl+Scroll zoom. Coalesce cross-window events to one emit per animation frame.
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       if (!e.ctrlKey || !ps.current.visible || !ps.current.bounds) return;
@@ -335,6 +352,8 @@ const ImagePreview = memo(function ImagePreview({
       e.stopPropagation();
 
       const bounds = ps.current.bounds;
+      const windowCss = ps.current.windowCss;
+      if (!windowCss) return;
       const maxCssW = bounds.maxW / bounds.scale;
       const maxCssH = bounds.maxH / bounds.scale;
       const step = previewZoomStep / 100;
@@ -349,42 +368,57 @@ const ImagePreview = memo(function ImagePreview({
         baseW *= r;
         baseH *= r;
       }
-      const maxEffective = Math.min(maxCssW / baseW, maxCssH / baseH, MAX_SCALE);
+      const maxEffective = previewUnboundedMode
+        ? MAX_SCALE_UNBOUNDED
+        : Math.min(maxCssW / baseW, maxCssH / baseH, MAX_SCALE_BOUNDED);
 
       ps.current.scale = Math.max(
         MIN_SCALE,
         Math.min(maxEffective, ps.current.scale + delta),
       );
 
-      const { width, height } = calcImageSize(
-        imgNatural.w,
-        imgNatural.h,
-        ps.current.scale,
-        maxCssW,
-        maxCssH,
-      );
+      const { width, height } = previewUnboundedMode
+        ? calcImageSize(imgNatural.w, imgNatural.h, ps.current.scale)
+        : calcImageSize(imgNatural.w, imgNatural.h, ps.current.scale, maxCssW, maxCssH);
 
-      // Recompute vertical offset for new image size
-      const windowCssH = bounds.maxH / bounds.scale;
-      const cardOffsetInWindow = (bounds.cardCenterY - bounds.monY) / bounds.scale;
-      const offsetY = Math.max(0, Math.min(
-        cardOffsetInWindow - height / 2,
-        windowCssH - height,
-      ));
+      const zoomAlign = bounds.side === "left" ? "right" : "left";
+      let offsetY = 0;
+      if (previewUnboundedMode) {
+        // Keep native window fixed; animate image within it for smooth zoom.
+        offsetY = Math.max(0, (windowCss.h - height) / 2);
+      } else {
+        // Recompute vertical offset for bounded mode.
+        const windowCssH = bounds.maxH / bounds.scale;
+        const cardOffsetInWindow = (bounds.cardCenterY - bounds.monY) / bounds.scale;
+        offsetY = Math.max(0, Math.min(
+          cardOffsetInWindow - height / 2,
+          windowCssH - height,
+        ));
+      }
 
       const percent = Math.round(ps.current.scale * 100);
-      const zoomAlign = bounds.side === "left" ? "right" : "left";
-
-      emitTo("image-preview", "image-preview-zoom", {
+      pendingZoomPayloadRef.current = {
         width,
         height,
         offsetY,
         percent,
         active: true,
         align: zoomAlign,
-      }).catch((err) => logError("Failed to emit zoom:", err));
+      };
+
+      if (zoomEmitRafRef.current === null) {
+        zoomEmitRafRef.current = requestAnimationFrame(() => {
+          zoomEmitRafRef.current = null;
+          const payload = pendingZoomPayloadRef.current;
+          if (!payload) return;
+          pendingZoomPayloadRef.current = null;
+          emitTo("image-preview", "image-preview-zoom", payload).catch((err) =>
+            logError("Failed to emit zoom:", err),
+          );
+        });
+      }
     },
-    [previewZoomStep],
+    [previewZoomStep, previewUnboundedMode],
   );
 
   const handleImgLoad = useCallback(
@@ -400,6 +434,11 @@ const ImagePreview = memo(function ImagePreview({
   useEffect(() => {
     return () => {
       clearTimer();
+      if (zoomEmitRafRef.current !== null) {
+        cancelAnimationFrame(zoomEmitRafRef.current);
+        zoomEmitRafRef.current = null;
+      }
+      pendingZoomPayloadRef.current = null;
       if (ps.current.visible)
         invoke("hide_image_preview").catch((e) =>
           logError("Failed to hide preview:", e),

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   Checkmark16Filled,
   Desktop16Regular,
@@ -7,6 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
+
+const DARK_MODE_OPTIONS: { value: DarkMode; label: string }[] = [
+  { value: "auto", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
 
 export function ThemeTab() {
   const { colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode, windowEffect, setWindowEffect } = useUISettings();
@@ -67,6 +73,11 @@ export function ThemeTab() {
     },
   ];
 
+  const activeDarkModeIndex = Math.max(
+    0,
+    DARK_MODE_OPTIONS.findIndex((opt) => opt.value === darkMode),
+  );
+
   return (
     <div className="space-y-4">
       <div className="rounded-lg border bg-card p-4">
@@ -125,24 +136,37 @@ export function ThemeTab() {
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-medium mb-3">深色模式</h3>
         <p className="text-xs text-muted-foreground mb-4">控制应用的明暗外观</p>
-        <div className="flex gap-1">
-          {([
-            { value: "auto" as DarkMode, label: "跟随系统" },
-            { value: "light" as DarkMode, label: "浅色" },
-            { value: "dark" as DarkMode, label: "深色" },
-          ]).map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setDarkMode(opt.value)}
-              className={`flex-1 px-2.5 py-1.5 text-xs rounded-md border transition-colors ${
-                darkMode === opt.value
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "bg-background text-foreground border-input hover:bg-accent"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
+        <div
+          role="radiogroup"
+          aria-label="深色模式"
+          className="relative rounded-lg border bg-muted/40 p-1"
+        >
+          <div className="relative grid grid-cols-3">
+            <div
+              aria-hidden
+              className="absolute inset-y-0 left-0 w-1/3 rounded-md bg-primary shadow-sm will-change-transform transition-transform duration-200 ease-out"
+              style={{ transform: `translateX(${activeDarkModeIndex * 100}%)` }}
+            />
+            {DARK_MODE_OPTIONS.map((opt) => {
+              const isActive = darkMode === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={isActive}
+                  onClick={() => setDarkMode(opt.value)}
+                  className={`relative z-[1] rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    isActive
+                      ? "text-primary-foreground"
+                      : "text-foreground/80 hover:text-foreground"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

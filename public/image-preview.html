@@ -18,6 +18,7 @@
       left: 0;
       top: 0;
       display: inline-block;
+      will-change: width, height, top;
     }
     body.align-right #wrap {
       left: auto;
@@ -63,6 +64,50 @@
     const img = document.getElementById('preview');
     const badge = document.getElementById('badge');
     let hideTimer = null;
+    let animRaf = null;
+    const currentRect = { width: 0, height: 0, top: 0 };
+    const targetRect = { width: 0, height: 0, top: 0 };
+
+    function applyRect(rect) {
+      wrap.style.width = rect.width + 'px';
+      wrap.style.height = rect.height + 'px';
+      wrap.style.top = rect.top + 'px';
+    }
+
+    function stopRectAnimation() {
+      if (animRaf != null) {
+        cancelAnimationFrame(animRaf);
+        animRaf = null;
+      }
+    }
+
+    function startRectAnimation() {
+      if (animRaf != null) return;
+      const animate = () => {
+        const k = 0.35;
+        currentRect.width += (targetRect.width - currentRect.width) * k;
+        currentRect.height += (targetRect.height - currentRect.height) * k;
+        currentRect.top += (targetRect.top - currentRect.top) * k;
+
+        applyRect(currentRect);
+
+        const done =
+          Math.abs(targetRect.width - currentRect.width) < 0.2 &&
+          Math.abs(targetRect.height - currentRect.height) < 0.2 &&
+          Math.abs(targetRect.top - currentRect.top) < 0.2;
+
+        if (done) {
+          currentRect.width = targetRect.width;
+          currentRect.height = targetRect.height;
+          currentRect.top = targetRect.top;
+          applyRect(currentRect);
+          animRaf = null;
+          return;
+        }
+        animRaf = requestAnimationFrame(animate);
+      };
+      animRaf = requestAnimationFrame(animate);
+    }
 
     function showBadge(text) {
       badge.textContent = text;
@@ -85,20 +130,24 @@
         img.classList.remove('loaded');
         clearBadge();
         document.body.className = align === 'right' ? 'align-right' : '';
-        wrap.style.transition = 'none';
-        wrap.style.width = width + 'px';
-        wrap.style.height = height + 'px';
-        wrap.style.top = (offsetY || 0) + 'px';
+        stopRectAnimation();
+        currentRect.width = width || 0;
+        currentRect.height = height || 0;
+        currentRect.top = offsetY || 0;
+        targetRect.width = currentRect.width;
+        targetRect.height = currentRect.height;
+        targetRect.top = currentRect.top;
+        applyRect(currentRect);
         img.src = convertFileSrc(imagePath);
       });
 
       listen('image-preview-zoom', (event) => {
         const { width, height, offsetY, percent, active, align } = event.payload;
         if (align) document.body.className = align === 'right' ? 'align-right' : '';
-        wrap.style.transition = 'width 0.15s ease-out, height 0.15s ease-out, top 0.15s ease-out';
-        wrap.style.width = width + 'px';
-        wrap.style.height = height + 'px';
-        wrap.style.top = (offsetY || 0) + 'px';
+        targetRect.width = width || 0;
+        targetRect.height = height || 0;
+        targetRect.top = offsetY || 0;
+        startRectAnimation();
         if (active) showBadge(percent + '%');
       });
 
@@ -106,10 +155,14 @@
         img.classList.remove('loaded');
         img.removeAttribute('src');
         clearBadge();
-        wrap.style.transition = 'none';
-        wrap.style.width = '0';
-        wrap.style.height = '0';
-        wrap.style.top = '0';
+        stopRectAnimation();
+        currentRect.width = 0;
+        currentRect.height = 0;
+        currentRect.top = 0;
+        targetRect.width = 0;
+        targetRect.height = 0;
+        targetRect.top = 0;
+        applyRect(currentRect);
       });
 
       img.addEventListener('load', () => img.classList.add('loaded'));

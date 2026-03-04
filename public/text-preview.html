@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      position: relative;
+    }
+    body[data-theme="light"] {
+      --panel-border: rgba(148, 163, 184, 0.24);
+      --panel-bg: rgba(255, 255, 255, 0.88);
+      --panel-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
+      --content-color: rgba(15, 23, 42, 0.92);
+      --scrollbar-thumb: rgba(100, 116, 139, 0.24);
+      --panel-radius: 8px;
+    }
+    body[data-theme="dark"] {
+      --panel-border: rgba(148, 163, 184, 0.26);
+      --panel-bg: rgba(15, 23, 42, 0.78);
+      --panel-shadow: 0 1px 6px rgba(2, 6, 23, 0.24);
+      --content-color: rgba(241, 245, 249, 0.94);
+      --scrollbar-thumb: rgba(148, 163, 184, 0.3);
+      --panel-radius: 8px;
+    }
+    body[data-sharp-corners="true"] {
+      --panel-radius: 0px;
+    }
+    #wrap {
+      position: absolute;
+      inset: 0;
+      padding: 8px;
+      display: flex;
+      align-items: stretch;
+      justify-content: stretch;
+    }
+    #panel {
+      width: 100%;
+      height: 100%;
+      border-radius: var(--panel-radius);
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      backdrop-filter: blur(6px) saturate(110%);
+      -webkit-backdrop-filter: blur(6px) saturate(110%);
+      box-shadow: var(--panel-shadow);
+      overflow: hidden;
+      opacity: 0;
+      transition: opacity 0.12s ease, background-color 0.14s ease, border-color 0.14s ease;
+    }
+    #panel.visible {
+      opacity: 1;
+    }
+    #content {
+      width: 100%;
+      height: 100%;
+      padding: 12px 13px;
+      color: var(--content-color);
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-size: 13px;
+      line-height: 1.56;
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow: auto;
+      scrollbar-gutter: stable;
+      text-overflow: initial;
+    }
+    #content::-webkit-scrollbar {
+      width: 6px;
+    }
+    #content::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: var(--scrollbar-thumb);
+      border: 1px solid transparent;
+      background-clip: padding-box;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="panel">
+      <div id="content"></div>
+    </div>
+  </div>
+  <script>
+    const panel = document.getElementById('panel');
+    const content = document.getElementById('content');
+    function setTheme(theme) {
+      document.body.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+    }
+    function setSharpCorners(enabled) {
+      document.body.dataset.sharpCorners = enabled ? 'true' : 'false';
+    }
+    setTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    setSharpCorners(false);
+
+    function clearPreview() {
+      panel.classList.remove('visible');
+      content.textContent = '';
+      content.style.webkitLineClamp = 'unset';
+    }
+
+    if (window.__TAURI__) {
+      const { listen } = window.__TAURI__.event;
+
+      listen('text-preview-update', (event) => {
+        const { text, align, theme, sharpCorners } = event.payload || {};
+        setTheme(theme);
+        setSharpCorners(Boolean(sharpCorners));
+        document.body.dataset.align = align === 'right' ? 'right' : 'left';
+        content.textContent = typeof text === 'string' ? text : '';
+        panel.classList.add('visible');
+      });
+
+      listen('text-preview-clear', () => {
+        clearPreview();
+      });
+
+      listen('text-preview-scroll', (event) => {
+        const deltaY = Number(event?.payload?.deltaY ?? 0);
+        if (!Number.isFinite(deltaY) || deltaY === 0) return;
+        content.scrollTop += deltaY;
+      });
+
+      listen('text-preview-theme', (event) => {
+        const next = event?.payload?.theme ?? event?.payload;
+        setTheme(next);
+      });
+    }
+  </script>
+</body>
+</html>

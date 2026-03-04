@@ -83,7 +83,7 @@ export function ClipboardList() {
   const cardDensity = useUISettings((s) => s.cardDensity);
 
   useEffect(() => {
-    // Fetch items (files_valid is computed by backend, no extra IPC needed)
+    // Fetch items once on mount.
     fetchItems();
     if (listenerRef.current) return;
     let mounted = true;

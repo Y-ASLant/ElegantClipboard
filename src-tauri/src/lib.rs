@@ -41,6 +41,8 @@ static ACTIVE_QUICK_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
 /// simulate_paste 释放修饰键时可能导致 OS 重新触发快捷键，用此标志拦截假触发
 static PASTE_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Monotonic sequence for text-preview updates; used to cancel stale delayed retries.
+static TEXT_PREVIEW_UPDATE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn default_quick_paste_shortcuts() -> Vec<String> {
     (1..=9).map(|slot| format!("Alt+{}", slot)).collect()
@@ -249,7 +251,7 @@ async fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
     input_monitor::disable_mouse_monitoring();
-    commands::hide_image_preview_window(window.app_handle());
+    commands::hide_preview_windows(window.app_handle());
     let _ = window.emit("window-hidden", ());
 }
 
@@ -288,7 +290,7 @@ async fn close_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
     keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
     input_monitor::disable_mouse_monitoring();
-    commands::hide_image_preview_window(window.app_handle());
+    commands::hide_preview_windows(window.app_handle());
     let _ = window.emit("window-hidden", ());
 }
 
@@ -477,19 +479,22 @@ async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
 
-        // 安全检查：防止路径穿越
-        if name.contains("..") {
-            continue;
-        }
+        let rel_path = match sanitize_zip_relative_path(&name) {
+            Some(path) => path,
+            None => {
+                tracing::warn!("Skipping unsafe zip entry path: {}", name);
+                continue;
+            }
+        };
 
-        // 跳过 WAL 临时文件；clipboard.db 写为 staging 文件，启动时替换
-        if name.ends_with("-wal") || name.ends_with("-shm") {
+        // Skip transient DB files; only import clipboard.db plus asset folders.
+        if rel_path.ends_with("clipboard.db-wal") || rel_path.ends_with("clipboard.db-shm") {
             continue;
         }
-        let out_path = if name == "clipboard.db" {
+        let out_path = if rel_path == std::path::Path::new("clipboard.db") {
             data_dir.join("clipboard.db.import")
         } else {
-            data_dir.join(&name)
+            data_dir.join(&rel_path)
         };
 
         if entry.is_dir() {
@@ -510,6 +515,31 @@ async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// 检测并应用待导入的 staging 数据库文件（clipboard.db.import → clipboard.db）。
+fn sanitize_zip_relative_path(name: &str) -> Option<std::path::PathBuf> {
+    use std::path::{Component, Path, PathBuf};
+
+    let raw = Path::new(name);
+    if raw.is_absolute() {
+        return None;
+    }
+
+    let mut clean = PathBuf::new();
+    for component in raw.components() {
+        match component {
+            Component::Normal(seg) => clean.push(seg),
+            Component::CurDir => {}
+            // Reject root/prefix/parent dir to prevent zip-slip style writes.
+            Component::RootDir | Component::Prefix(_) | Component::ParentDir => return None,
+        }
+    }
+
+    if clean.as_os_str().is_empty() {
+        return None;
+    }
+
+    Some(clean)
+}
+
 fn apply_pending_import(db_path: &std::path::Path) {
     use std::fs;
 
@@ -577,51 +607,7 @@ fn add_dir_to_zip(
 }
 
 fn chrono_timestamp() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let secs = now + 8 * 3600;
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let h = time_of_day / 3600;
-    let m = (time_of_day % 3600) / 60;
-    let s = time_of_day % 60;
-
-    let (y, mo, d) = days_to_ymd(days);
-    format!("{:04}{:02}{:02}_{:02}{:02}{:02}", y, mo, d, h, m, s)
-}
-
-fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
-    let mut y = 1970;
-    loop {
-        let yd = if is_leap(y) { 366 } else { 365 };
-        if days < yd {
-            break;
-        }
-        days -= yd;
-        y += 1;
-    }
-    let leap = is_leap(y);
-    let month_days = [
-        31,
-        if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    let mut mo = 0;
-    for (i, &md) in month_days.iter().enumerate() {
-        if days < md {
-            mo = i as u64 + 1;
-            break;
-        }
-        days -= md;
-    }
-    (y, mo, days + 1)
-}
-
-fn is_leap(y: u64) -> bool {
-    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
 }
 
 fn format_size(bytes: u64) -> String {
@@ -673,7 +659,7 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             let _ = window.hide();
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
             input_monitor::disable_mouse_monitoring();
-            commands::hide_image_preview_window(app);
+            commands::hide_preview_windows(app);
             let _ = window.emit("window-hidden", ());
         } else {
             let follow_cursor = app
@@ -706,6 +692,8 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
             }
 
             input_monitor::save_current_focus();
+            // 强制保持非激活展示，避免瞬态窗口（如 PowerToys/Wox 的 Alt+Enter 面板）因失焦关闭
+            let _ = window.set_focusable(false);
             let _ = window.show();
             positioning::force_topmost(&window);
             keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
@@ -1146,6 +1134,90 @@ async fn hide_image_preview(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn show_text_preview(
+    app: tauri::AppHandle,
+    text: String,
+    win_x: f64,
+    win_y: f64,
+    win_width: f64,
+    win_height: f64,
+    align: Option<String>,
+    theme: Option<String>,
+    sharp_corners: Option<bool>,
+) -> Result<(), String> {
+    let seq = TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+    let mut newly_created = false;
+    let window = if let Some(w) = app.get_webview_window("text-preview") {
+        w
+    } else {
+        newly_created = true;
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "text-preview",
+            tauri::WebviewUrl::App("/text-preview.html".into()),
+        )
+        .title("")
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|e| format!("创建文本预览窗口失败: {}", e))?
+    };
+
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: win_width as u32,
+        height: win_height as u32,
+    }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: win_x as i32,
+        y: win_y as i32,
+    }));
+
+    let _ = window.set_always_on_top(true);
+    // Keep text preview click-through; scrolling is driven from main window with Ctrl+Wheel.
+    let _ = window.set_ignore_cursor_events(true);
+
+    let update_payload = serde_json::json!({
+        "text": text,
+        "align": align.as_deref().unwrap_or("left"),
+        "theme": theme.as_deref().unwrap_or("light"),
+        "sharpCorners": sharp_corners.unwrap_or(false),
+    });
+    let _ = window.emit("text-preview-update", update_payload.clone());
+    let _ = window.show();
+
+    if newly_created {
+        let window_clone = window.clone();
+        tauri::async_runtime::spawn(async move {
+            for delay_ms in [120_u64, 260, 420, 680] {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                if TEXT_PREVIEW_UPDATE_SEQ.load(std::sync::atomic::Ordering::Acquire) != seq {
+                    return;
+                }
+                let _ = window_clone.emit("text-preview-update", update_payload.clone());
+            }
+        });
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn hide_text_preview(app: tauri::AppHandle) {
+    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    if let Some(window) = app.get_webview_window("text-preview") {
+        let _ = window.hide();
+        let _ = window.emit("text-preview-clear", ());
+    }
+}
+
+#[tauri::command]
 async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), String> {
     let label = format!("text-editor-{}", id);
 
@@ -1423,6 +1495,8 @@ pub fn run() {
             open_settings_window,
             show_image_preview,
             hide_image_preview,
+            show_text_preview,
+            hide_text_preview,
             open_text_editor_window,
             set_window_pinned,
             is_window_pinned,

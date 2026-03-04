@@ -21,6 +21,8 @@ interface UISettings {
   showSourceApp: boolean;
   sourceAppDisplay: "both" | "name" | "icon";
   imagePreviewEnabled: boolean;
+  textPreviewEnabled: boolean;
+  previewUnboundedMode: boolean;
   previewZoomStep: number;
   previewPosition: "auto" | "left" | "right";
   imageAutoHeight: boolean;
@@ -41,6 +43,7 @@ interface UISettings {
   pasteCloseWindow: boolean;
   pasteMoveToTop: boolean;
   showCategoryFilter: boolean;
+  showDragAreaIndicator: boolean;
   windowEffect: WindowEffect;
   toolbarButtons: ToolbarButton[];
   setCardMaxLines: (lines: number) => void;
@@ -50,6 +53,8 @@ interface UISettings {
   setShowSourceApp: (show: boolean) => void;
   setSourceAppDisplay: (mode: "both" | "name" | "icon") => void;
   setImagePreviewEnabled: (enabled: boolean) => void;
+  setTextPreviewEnabled: (enabled: boolean) => void;
+  setPreviewUnboundedMode: (enabled: boolean) => void;
   setPreviewZoomStep: (step: number) => void;
   setPreviewPosition: (pos: "auto" | "left" | "right") => void;
   setImageAutoHeight: (auto: boolean) => void;
@@ -69,6 +74,7 @@ interface UISettings {
   setPasteCloseWindow: (enabled: boolean) => void;
   setPasteMoveToTop: (enabled: boolean) => void;
   setShowCategoryFilter: (enabled: boolean) => void;
+  setShowDragAreaIndicator: (enabled: boolean) => void;
   setWindowEffect: (effect: WindowEffect) => void;
   setToolbarButtons: (buttons: ToolbarButton[]) => void;
 }
@@ -91,25 +97,28 @@ export const useUISettings = create<UISettings>()(
       showSourceApp: true,
       sourceAppDisplay: "both" as "both" | "name" | "icon",
       imagePreviewEnabled: false,
+      textPreviewEnabled: false,
+      previewUnboundedMode: false,
       previewZoomStep: 15,
       previewPosition: "auto" as "auto" | "left" | "right",
       imageAutoHeight: true,
       imageMaxHeight: 512,
       colorTheme: "system" as ColorTheme,
       sharpCorners: false,
-      autoResetState: true,
+      autoResetState: false,
       keyboardNavigation: false,
       searchAutoFocus: false,
       searchAutoClear: true,
       darkMode: "auto" as DarkMode,
       cardDensity: "standard" as CardDensity,
       timeFormat: "absolute" as TimeFormat,
-      hoverPreviewDelay: 300,
+      hoverPreviewDelay: 500,
       copySound: false,
       pasteSound: false,
       pasteCloseWindow: true,
       pasteMoveToTop: false,
       showCategoryFilter: true,
+      showDragAreaIndicator: true,
       windowEffect: "none" as WindowEffect,
       toolbarButtons: ["clear", "pin", "settings"] as ToolbarButton[],
       setCardMaxLines: (lines) => {
@@ -139,6 +148,14 @@ export const useUISettings = create<UISettings>()(
       setImagePreviewEnabled: (enabled) => {
         set({ imagePreviewEnabled: enabled });
         broadcastChange({ imagePreviewEnabled: enabled });
+      },
+      setTextPreviewEnabled: (enabled) => {
+        set({ textPreviewEnabled: enabled });
+        broadcastChange({ textPreviewEnabled: enabled });
+      },
+      setPreviewUnboundedMode: (enabled) => {
+        set({ previewUnboundedMode: enabled });
+        broadcastChange({ previewUnboundedMode: enabled });
       },
       setPreviewZoomStep: (step) => {
         set({ previewZoomStep: step });
@@ -216,6 +233,10 @@ export const useUISettings = create<UISettings>()(
       setShowCategoryFilter: (enabled) => {
         set({ showCategoryFilter: enabled });
         broadcastChange({ showCategoryFilter: enabled });
+      },
+      setShowDragAreaIndicator: (enabled) => {
+        set({ showDragAreaIndicator: enabled });
+        broadcastChange({ showDragAreaIndicator: enabled });
       },
       setWindowEffect: (effect) => {
         set({ windowEffect: effect });

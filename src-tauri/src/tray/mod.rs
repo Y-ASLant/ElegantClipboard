@@ -48,7 +48,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
                         crate::keyboard_hook::set_window_state(
                             crate::keyboard_hook::WindowState::Hidden,
                         );
-                        crate::commands::hide_image_preview_window(tray.app_handle());
+                        crate::commands::hide_preview_windows(tray.app_handle());
                         let _ = window.emit("window-hidden", ());
                     } else if !crate::keyboard_hook::was_recently_hidden(300) {
                         // 若窗口刚被 handle_click_outside 隐藏（<300ms），
@@ -159,13 +159,4 @@ pub(crate) fn open_settings_window<R: Runtime>(app: &AppHandle<R>) -> Result<(),
     }
 
     Ok(())
-}
-
-/// 更新托盘提示文本
-#[allow(dead_code)]
-pub fn update_tray_tooltip<R: Runtime>(app: &AppHandle<R>, count: i64) {
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        let tooltip = format!("ElegantClipboard - {} 条记录", count);
-        let _ = tray.set_tooltip(Some(&tooltip));
-    }
 }

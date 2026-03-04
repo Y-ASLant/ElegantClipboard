@@ -12,7 +12,7 @@
  * (important for Settings window to delay show() until ready).
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { useUISettings } from "@/stores/ui-settings";
 
 const THEME_CLASSES = ["theme-emerald", "theme-cyan", "theme-system"];
@@ -20,6 +20,7 @@ const THEME_CLASSES = ["theme-emerald", "theme-cyan", "theme-system"];
 let _initialized = false;
 let _accentColor: string | null = null;
 let _readyResolve: (() => void) | null = null;
+let _lastTextPreviewTheme: "dark" | "light" | null = null;
 const _readyPromise = new Promise<void>((resolve) => {
   _readyResolve = resolve;
 });
@@ -98,6 +99,15 @@ export function initTheme(): Promise<void> {
     const isDark =
       darkMode === "dark" ? true : darkMode === "light" ? false : mq.matches;
     document.documentElement.classList.toggle("dark", isDark);
+    const nextTextPreviewTheme = isDark ? "dark" : "light";
+    if (nextTextPreviewTheme !== _lastTextPreviewTheme) {
+      _lastTextPreviewTheme = nextTextPreviewTheme;
+      if (useUISettings.getState().textPreviewEnabled) {
+        emitTo("text-preview", "text-preview-theme", {
+          theme: nextTextPreviewTheme,
+        }).catch(() => {});
+      }
+    }
   }
 
   applyDarkMode();

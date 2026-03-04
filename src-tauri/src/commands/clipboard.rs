@@ -169,22 +169,6 @@ fn build_context_snippet(
     result
 }
 
-/// 并行检查文件类型条目的文件是否存在，填充 files_valid 字段
-fn fill_files_valid(items: &mut [ClipboardItem]) {
-    use rayon::prelude::*;
-    use std::path::Path;
-
-    items.par_iter_mut().for_each(|item| {
-        if item.content_type == "files" {
-            if let Some(ref paths_json) = item.file_paths {
-                if let Ok(paths) = serde_json::from_str::<Vec<String>>(paths_json) {
-                    let all_exist = paths.iter().all(|p| Path::new(p).exists());
-                    item.files_valid = Some(all_exist);
-                }
-            }
-        }
-    });
-}
 
 /// 使用 Windows SendInput API 模拟 Ctrl+V 粘贴。
 /// 先释放用户可能按住的所有修饰键（Alt/Shift/Win），再发送纯净的 Ctrl+V。
@@ -299,6 +283,7 @@ pub fn simulate_paste() -> Result<(), String> {
 
 /// 获取剪贴板条目（支持可选过滤）
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn get_clipboard_items(
     state: State<'_, Arc<AppState>>,
     search: Option<String>,
@@ -312,7 +297,6 @@ pub async fn get_clipboard_items(
     use crate::database::QueryOptions;
 
     let repo = ClipboardRepository::new(&state.db);
-    let is_searching = search.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
     let search_keyword = search.clone();
     let options = QueryOptions {
         search,
@@ -339,9 +323,6 @@ pub async fn get_clipboard_items(
             }
             item.text_content = None;
         }
-    }
-    if !is_searching {
-        fill_files_valid(&mut items);
     }
     Ok(items)
 }
@@ -464,17 +445,22 @@ pub async fn clear_all_history(state: State<'_, Arc<AppState>>) -> Result<i64, S
 pub async fn clear_history(
     state: State<'_, Arc<AppState>>,
     group_id: Option<i64>,
+    content_type: Option<String>,
 ) -> Result<i64, String> {
     use tracing::info;
 
     let repo = ClipboardRepository::new(&state.db);
-    let image_paths = repo.get_clearable_image_paths(group_id).unwrap_or_default();
-    let deleted = repo.clear_history(group_id).map_err(|e| e.to_string())?;
+    let image_paths = repo
+        .get_clearable_image_paths(group_id, content_type.as_deref())
+        .unwrap_or_default();
+    let deleted = repo
+        .clear_history(group_id, content_type.as_deref())
+        .map_err(|e| e.to_string())?;
     let deleted_files = crate::clipboard::cleanup_image_files(&image_paths);
 
     info!(
-        "Cleared {} clipboard items and {} image files (group: {:?})",
-        deleted, deleted_files, group_id
+        "Cleared {} clipboard items and {} image files (group: {:?}, content_type: {:?})",
+        deleted, deleted_files, group_id, content_type
     );
     Ok(deleted)
 }

@@ -31,10 +31,14 @@ interface UseSortableListOptions<T extends SortableItem> {
   onDragEnd: (oldIndex: number, newIndex: number) => void;
 }
 
-// Check if element or parents have data-drag-ignore, data-no-drag, or is scrollbar
+// Only start drag from explicit drag handle; keep click/paste path deterministic.
 function shouldHandleDrag(element: EventTarget | null): boolean {
   let cur = element as HTMLElement | null;
+  let hasDragHandle = false;
   while (cur) {
+    if (cur.dataset?.dragHandle === "true") {
+      hasDragHandle = true;
+    }
     // Ignore drag on elements with data-drag-ignore or data-no-drag
     if (cur.dataset && (cur.dataset.dragIgnore === "true" || cur.dataset.noDrag === "true")) {
       return false;
@@ -49,15 +53,18 @@ function shouldHandleDrag(element: EventTarget | null): boolean {
     }
     cur = cur.parentElement;
   }
-  return true;
+  return hasDragHandle;
 }
 
-// Custom MouseSensor that ignores buttons and marked elements
+// Custom MouseSensor that only activates on left-button drag handle mousedown.
 class CustomMouseSensor extends MouseSensor {
   static activators = [
     {
       eventName: "onMouseDown" as const,
       handler: ({ nativeEvent: event }: { nativeEvent: MouseEvent }) => {
+        if (event.button !== 0) {
+          return false;
+        }
         return shouldHandleDrag(event.target);
       },
     },
@@ -86,7 +93,7 @@ export function useSortableList<T extends SortableItem>({
   const sensors = useSensors(
     useSensor(CustomMouseSensor, {
       activationConstraint: {
-        distance: 3, // Match QuickClipboard for better responsiveness
+        distance: 3, // More responsive drag start while keeping accidental drags manageable
       },
     }),
     useSensor(KeyboardSensor, {

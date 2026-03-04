@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useState, useRef, useMemo } from "react";
+import { Fragment, memo, useCallback, useEffect, useState, useRef, useMemo } from "react";
 import {
   Pin16Regular,
   Pin16Filled,
@@ -18,10 +18,12 @@ import {
   ChevronDown16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo } from "@tauri-apps/api/event";
 import {
   CardFooter,
-  ImageCard,
   FileContent,
+  getPreviewBounds,
+  ImageCard,
 } from "@/components/CardContentRenderers";
 import { HighlightText } from "@/components/HighlightText";
 import { Button } from "@/components/ui/button";
@@ -86,6 +88,120 @@ interface ClipboardItemCardProps {
 }
 
 const clipboardActions = () => useClipboardStore.getState();
+const fileValidityCache = new Map<string, boolean>();
+const textPreviewContentCache = new Map<number, string>();
+const TEXT_PREVIEW_CACHE_MAX_ITEMS = 180;
+const TEXT_PREVIEW_MIN_W = 360;
+const TEXT_PREVIEW_MAX_W = 900;
+const TEXT_PREVIEW_MIN_H = 130;
+const TEXT_PREVIEW_MAX_H = 560;
+const TEXT_PREVIEW_CHAR_WIDTH = 7.6;
+const TEXT_PREVIEW_HORIZONTAL_PADDING = 44;
+const TEXT_PREVIEW_MIN_CHARS_PER_LINE = 24;
+const TEXT_PREVIEW_SAMPLE_MAX_CHARS = 24_000;
+const TEXT_PREVIEW_SAMPLE_MAX_LINES = 900;
+
+interface ClipboardItemDetail {
+  id: number;
+  text_content: string | null;
+  preview: string | null;
+}
+
+function isWideCodePoint(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x2E80 && codePoint <= 0xA4CF)
+    || (codePoint >= 0xAC00 && codePoint <= 0xD7A3)
+    || (codePoint >= 0xF900 && codePoint <= 0xFAFF)
+    || (codePoint >= 0xFE10 && codePoint <= 0xFE6F)
+    || (codePoint >= 0xFF00 && codePoint <= 0xFFEF)
+  );
+}
+
+interface TextPreviewSample {
+  longestVisualCols: number;
+  lineColumns: number[];
+  processedCodeUnits: number;
+  truncated: boolean;
+}
+
+function sampleTextPreview(text: string): TextPreviewSample {
+  const lineColumns: number[] = [];
+  let longestVisualCols = 1;
+  let currentLineCols = 0;
+  let processedCodeUnits = 0;
+  let lineCount = 1;
+  let truncated = false;
+  let endsWithLineBreak = false;
+
+  const finalizeLine = () => {
+    const cols = Math.max(1, currentLineCols);
+    lineColumns.push(cols);
+    longestVisualCols = Math.max(longestVisualCols, cols);
+    currentLineCols = 0;
+  };
+
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    processedCodeUnits += 1;
+
+    if (code === 0x0D || code === 0x0A) {
+      if (code === 0x0D && i + 1 < text.length && text.charCodeAt(i + 1) === 0x0A) {
+        i += 1;
+        processedCodeUnits += 1;
+      }
+      finalizeLine();
+      lineCount += 1;
+      endsWithLineBreak = true;
+    } else {
+      endsWithLineBreak = false;
+      const codePoint = text.codePointAt(i);
+      if (codePoint !== undefined) {
+        currentLineCols += isWideCodePoint(codePoint) ? 2 : 1;
+        if (codePoint > 0xFFFF) {
+          i += 1;
+          processedCodeUnits += 1;
+        }
+      }
+    }
+
+    if (processedCodeUnits >= TEXT_PREVIEW_SAMPLE_MAX_CHARS || lineCount > TEXT_PREVIEW_SAMPLE_MAX_LINES) {
+      truncated = true;
+      break;
+    }
+  }
+
+  if (currentLineCols > 0 || lineColumns.length === 0 || endsWithLineBreak) {
+    finalizeLine();
+  }
+
+  return {
+    longestVisualCols,
+    lineColumns,
+    processedCodeUnits,
+    truncated,
+  };
+}
+
+function getCachedTextPreviewContent(id: number): string | undefined {
+  const cached = textPreviewContentCache.get(id);
+  if (cached === undefined) {
+    return undefined;
+  }
+  textPreviewContentCache.delete(id);
+  textPreviewContentCache.set(id, cached);
+  return cached;
+}
+
+function setCachedTextPreviewContent(id: number, text: string): void {
+  textPreviewContentCache.set(id, text);
+  if (textPreviewContentCache.size <= TEXT_PREVIEW_CACHE_MAX_ITEMS) {
+    return;
+  }
+  const oldestKey = textPreviewContentCache.keys().next().value;
+  if (oldestKey !== undefined) {
+    textPreviewContentCache.delete(oldestKey);
+  }
+}
 
 // ============ File Details Dialog ============
 
@@ -227,7 +343,7 @@ const ActionToolbar = ({
   onDelete,
 }: ActionToolbarProps) => (
   <div
-    className="absolute right-1 top-1 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
+    className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
     data-drag-ignore="true"
   >
     <Tooltip>
@@ -352,6 +468,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const showByteSize = useUISettings((s) => s.showByteSize);
   const showSourceApp = useUISettings((s) => s.showSourceApp);
   const sourceAppDisplay = useUISettings((s) => s.sourceAppDisplay);
+  const showDragAreaIndicator = useUISettings((s) => s.showDragAreaIndicator);
+  const textPreviewEnabled = useUISettings((s) => s.textPreviewEnabled);
+  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
+  const previewPosition = useUISettings((s) => s.previewPosition);
+  const sharpCorners = useUISettings((s) => s.sharpCorners);
 
   const [justDropped, setJustDropped] = useState(false);
   const [justPasted, setJustPasted] = useState(false);
@@ -361,18 +482,75 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const hasDraggedRef = useRef(false);
   const { groups, moveItemToGroup } = useGroupStore();
   const selectedGroupId = useClipboardStore((s) => s.selectedGroupId);
+  const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const textPreviewVisibleRef = useRef(false);
+  const textPreviewAnchorRef = useRef<HTMLDivElement | null>(null);
+  const textPreviewHoveringRef = useRef(false);
+  const textPreviewReqIdRef = useRef(0);
+  const textScrollEmitRafRef = useRef<number | null>(null);
+  const textScrollPendingDeltaRef = useRef(0);
 
-  const filesInvalid =
-    item.content_type === "files" && item.files_valid === false;
   const filePaths = useMemo(
     () => item.content_type === "files" ? parseFilePaths(item.file_paths) : [],
     [item.content_type, item.file_paths],
   );
+  const [runtimeFilesValid, setRuntimeFilesValid] = useState<
+    boolean | undefined
+  >(undefined);
+
+  useEffect(() => {
+    if (item.content_type !== "files") {
+      setRuntimeFilesValid(undefined);
+      return;
+    }
+
+    if (item.files_valid !== undefined) {
+      setRuntimeFilesValid(item.files_valid);
+      return;
+    }
+
+    if (filePaths.length === 0) {
+      setRuntimeFilesValid(false);
+      return;
+    }
+
+    const cacheKey = item.file_paths ?? filePaths.join("\n");
+    const cached = fileValidityCache.get(cacheKey);
+    if (cached !== undefined) {
+      setRuntimeFilesValid(cached);
+      return;
+    }
+
+    let cancelled = false;
+    invoke<Record<string, { exists: boolean; is_dir: boolean }>>(
+      "check_files_exist",
+      { paths: filePaths },
+    )
+      .then((checkResult) => {
+        const allExist = filePaths.every((path) => checkResult[path]?.exists);
+        fileValidityCache.set(cacheKey, allExist);
+        if (!cancelled) setRuntimeFilesValid(allExist);
+      })
+      .catch(() => {
+        if (!cancelled) setRuntimeFilesValid(undefined);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [item.content_type, item.files_valid, item.file_paths, filePaths]);
+
+  const effectiveFilesValid = item.files_valid ?? runtimeFilesValid;
+  const filesInvalid =
+    item.content_type === "files" && effectiveFilesValid === false;
+  const isTextLikeContent =
+    item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf";
 
   const {
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -404,6 +582,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   };
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
+  const dragHandleWidth = "clamp(40px, 14%, 72px)";
 
   const timeFormat = useUISettings((s) => s.timeFormat);
 
@@ -417,9 +596,163 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   }, [showTime, showCharCount, showByteSize, timeFormat, item.created_at, item.char_count, item.byte_size]);
 
   // ---- Event handlers ----
+  const clearTextPreviewTimer = useCallback(() => {
+    if (textPreviewTimerRef.current) {
+      clearTimeout(textPreviewTimerRef.current);
+      textPreviewTimerRef.current = null;
+    }
+  }, []);
+
+  const hideTextPreview = useCallback(() => {
+    clearTextPreviewTimer();
+    textPreviewHoveringRef.current = false;
+    if (textScrollEmitRafRef.current !== null) {
+      cancelAnimationFrame(textScrollEmitRafRef.current);
+      textScrollEmitRafRef.current = null;
+    }
+    textScrollPendingDeltaRef.current = 0;
+    if (textPreviewVisibleRef.current) {
+      textPreviewVisibleRef.current = false;
+      invoke("hide_text_preview").catch(() => {});
+    }
+  }, [clearTextPreviewTimer]);
+
+  const resolveTextPreviewContent = useCallback(async (): Promise<string> => {
+    const inlineText = item.text_content || item.preview || "";
+    if (!isTextLikeContent) return "";
+    if (item.text_content) return item.text_content;
+    const cached = getCachedTextPreviewContent(item.id);
+    if (cached) return cached;
+    try {
+      const detail = await invoke<ClipboardItemDetail | null>("get_clipboard_item", { id: item.id });
+      const resolved = detail?.text_content || detail?.preview || inlineText;
+      if (resolved) {
+        setCachedTextPreviewContent(item.id, resolved);
+      }
+      return resolved;
+    } catch {
+      return inlineText;
+    }
+  }, [isTextLikeContent, item.id, item.preview, item.text_content]);
+
+  const showTextPreview = useCallback(async () => {
+    if (!textPreviewEnabled || !isTextLikeContent || !textPreviewAnchorRef.current) {
+      return;
+    }
+
+    const reqId = ++textPreviewReqIdRef.current;
+    const textContent = await resolveTextPreviewContent();
+    if (!textContent) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) return;
+
+    const bounds = await getPreviewBounds(previewPosition, textPreviewAnchorRef.current);
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) return;
+    const availableCssW = Math.max(260, Math.floor(bounds.maxW / bounds.scale));
+    const availableCssH = Math.max(140, Math.floor(bounds.maxH / bounds.scale));
+    const sampled = sampleTextPreview(textContent);
+    const desiredWidth = sampled.longestVisualCols * TEXT_PREVIEW_CHAR_WIDTH + TEXT_PREVIEW_HORIZONTAL_PADDING;
+    const windowCssW = Math.min(
+      availableCssW,
+      Math.min(TEXT_PREVIEW_MAX_W, Math.max(TEXT_PREVIEW_MIN_W, desiredWidth)),
+    );
+    const charsPerLine = Math.max(
+      TEXT_PREVIEW_MIN_CHARS_PER_LINE,
+      Math.floor((windowCssW - 30) / TEXT_PREVIEW_CHAR_WIDTH),
+    );
+    const sampledWrappedLines = sampled.lineColumns.reduce((sum, lineCols) => {
+      return sum + Math.max(1, Math.ceil(lineCols / charsPerLine));
+    }, 0);
+    let estimatedLines = sampledWrappedLines;
+    if (sampled.truncated && sampled.processedCodeUnits < textContent.length) {
+      const remaining = textContent.length - sampled.processedCodeUnits;
+      const linesPerCodeUnit = sampledWrappedLines / Math.max(1, sampled.processedCodeUnits);
+      estimatedLines += Math.max(1, Math.ceil(remaining * linesPerCodeUnit));
+    }
+    const estimatedCssH = Math.min(
+      TEXT_PREVIEW_MAX_H,
+      Math.max(TEXT_PREVIEW_MIN_H, estimatedLines * 21 + 40),
+    );
+    const windowCssH = Math.min(availableCssH, estimatedCssH);
+    const winW = Math.max(1, Math.round(windowCssW * bounds.scale));
+    const winH = Math.max(1, Math.round(windowCssH * bounds.scale));
+    const winX = bounds.side === "left" ? bounds.anchorX - winW : bounds.anchorX;
+    const centeredY = Math.round(bounds.cardCenterY - winH / 2);
+    const winY = Math.max(bounds.monY, Math.min(centeredY, bounds.monBottom - winH));
+    const align = bounds.side === "left" ? "right" : "left";
+    const theme =
+      document.documentElement.classList.contains("dark") ? "dark" : "light";
+
+    try {
+      invoke("hide_image_preview").catch(() => {});
+      await invoke("show_text_preview", {
+        text: textContent,
+        winX,
+        winY,
+        winWidth: winW,
+        winHeight: winH,
+        align,
+        theme,
+        sharpCorners,
+      });
+      textPreviewVisibleRef.current = true;
+    } catch (error) {
+      textPreviewVisibleRef.current = false;
+      logError("Failed to show text preview:", error);
+    }
+  }, [textPreviewEnabled, isTextLikeContent, previewPosition, resolveTextPreviewContent, sharpCorners]);
+
+  const handleTextMouseEnter = useCallback(() => {
+    if (!textPreviewEnabled || !isTextLikeContent) return;
+    textPreviewHoveringRef.current = true;
+    clearTextPreviewTimer();
+    textPreviewTimerRef.current = setTimeout(showTextPreview, hoverPreviewDelay);
+  }, [textPreviewEnabled, isTextLikeContent, clearTextPreviewTimer, showTextPreview, hoverPreviewDelay]);
+
+  const handleTextMouseLeave = useCallback(() => {
+    textPreviewHoveringRef.current = false;
+    textPreviewReqIdRef.current += 1;
+    hideTextPreview();
+  }, [hideTextPreview]);
+
+  const handleTextWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+    // Reuse Ctrl+wheel gesture for text preview scrolling to avoid accidental list scrolling.
+    if (!e.ctrlKey || !textPreviewVisibleRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    textScrollPendingDeltaRef.current += e.deltaY;
+
+    if (textScrollEmitRafRef.current === null) {
+      textScrollEmitRafRef.current = requestAnimationFrame(() => {
+        textScrollEmitRafRef.current = null;
+        const deltaY = textScrollPendingDeltaRef.current;
+        textScrollPendingDeltaRef.current = 0;
+        if (deltaY === 0 || !textPreviewVisibleRef.current) return;
+        emitTo("text-preview", "text-preview-scroll", { deltaY }).catch(() => {});
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!textPreviewEnabled || !isTextLikeContent) {
+      hideTextPreview();
+    }
+  }, [textPreviewEnabled, isTextLikeContent, hideTextPreview]);
+
+  useEffect(() => {
+    if (isDragging) {
+      hideTextPreview();
+    }
+  }, [isDragging, hideTextPreview]);
+
+  useEffect(() => {
+    return () => {
+      hideTextPreview();
+    };
+  }, [hideTextPreview]);
 
   const handlePaste = () => {
     if (!isDragging && !isDragOverlay) {
+      hideTextPreview();
       pasteContent(item.id);
       setJustPasted(true);
       setTimeout(() => setJustPasted(false), 300);
@@ -503,7 +836,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   // ---- Card content ----
 
   const cardContent = (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div ref={setNodeRef} style={style}>
       <Card
         className={cn(
         "group relative cursor-pointer overflow-hidden shadow-none dark:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.09),0_2px_8px_-1px_rgba(0,0,0,0.5)] hover:shadow-sm dark:hover:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.12),0_4px_12px_-2px_rgba(0,0,0,0.6)] hover:border-primary/30 ring-1 ring-black/[0.04] dark:ring-white/[0.1]",
@@ -514,6 +847,73 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         )}
         onClick={handlePaste}
       >
+        {!isDragging && !isDragOverlay && (
+          <>
+            <button
+              ref={setActivatorNodeRef}
+              {...attributes}
+              {...listeners}
+              type="button"
+              data-drag-handle="true"
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute inset-y-0 left-0 z-10 flex items-center justify-center rounded-l-lg cursor-grab active:cursor-grabbing",
+                showDragAreaIndicator
+                  ? "border-r border-dashed border-border/50 bg-background/20 text-muted-foreground/85 opacity-0 group-hover:opacity-55 transition-[opacity,colors] duration-150 hover:bg-background/35 hover:text-foreground"
+                  : "border-r border-transparent bg-transparent text-transparent opacity-0",
+              )}
+              style={{ width: dragHandleWidth }}
+              aria-label="拖拽区域"
+              tabIndex={showDragAreaIndicator ? 0 : -1}
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none text-[10px] leading-tight text-center text-muted-foreground"
+              >
+                拖拽区域
+              </span>
+            </button>
+
+            <button
+              {...attributes}
+              {...listeners}
+              type="button"
+              data-drag-handle="true"
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "absolute inset-y-0 right-0 z-10 flex items-center justify-center rounded-r-lg cursor-grab active:cursor-grabbing",
+                showDragAreaIndicator
+                  ? "border-l border-dashed border-border/50 bg-background/20 text-muted-foreground/85 opacity-0 group-hover:opacity-55 transition-[opacity,colors] duration-150 hover:bg-background/35 hover:text-foreground"
+                  : "border-l border-transparent bg-transparent text-transparent opacity-0",
+              )}
+              style={{ width: dragHandleWidth }}
+              aria-label="拖拽区域"
+              tabIndex={showDragAreaIndicator ? 0 : -1}
+            >
+              <span
+                aria-hidden
+                className="pointer-events-none text-[10px] leading-tight text-center text-muted-foreground"
+              >
+                拖拽区域
+              </span>
+            </button>
+
+            {showDragAreaIndicator && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 z-[6] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                style={{ left: dragHandleWidth, right: dragHandleWidth }}
+              >
+                <div className="absolute inset-y-1 left-0 border-l border-dashed border-border/50" />
+                <div className="absolute inset-y-1 right-0 border-r border-dashed border-border/50" />
+                <div className="rounded border border-dashed border-border/60 bg-background/80 px-2 py-1 text-center">
+                  <div className="text-[10px] leading-none text-muted-foreground">粘贴、预览触发区域</div>
+                  <div className="mt-0.5 text-[10px] leading-none text-muted-foreground/90">点击卡片可粘贴</div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
         <div className="flex">
           {item.content_type === "image" && item.image_path ? (
             <ImageCard
@@ -538,7 +938,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
             />
           ) : (
-            <div className="flex-1 min-w-0 px-3 py-2.5">
+            <div
+              ref={textPreviewAnchorRef}
+              className="flex-1 min-w-0 px-3 py-2.5"
+              onMouseEnter={handleTextMouseEnter}
+              onMouseLeave={handleTextMouseLeave}
+              onWheel={handleTextWheel}
+            >
               <pre
                 className="clipboard-content text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-all m-0"
                 style={{

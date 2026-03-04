@@ -65,7 +65,7 @@ interface ClipboardState {
   copyToClipboard: (id: number) => Promise<void>;
   pasteContent: (id: number) => Promise<void>;
   pasteAsPlainText: (id: number) => Promise<void>;
-  clearHistory: () => Promise<void>;
+  clearHistory: (contentType?: string | null) => Promise<void>;
   refresh: () => Promise<void>;
   /** Reset view state: clear search, clear type filter, scroll to top, refresh */
   resetView: () => Promise<void>;
@@ -215,9 +215,12 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
-  clearHistory: async () => {
+  clearHistory: async (contentType = null) => {
     try {
-      await invoke<number>("clear_history", { groupId: get().selectedGroupId });
+      await invoke<number>("clear_history", {
+        groupId: get().selectedGroupId,
+        contentType,
+      });
       await get().refresh();
     } catch (error) {
       logError("Failed to clear history:", error);
