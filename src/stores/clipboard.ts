@@ -72,6 +72,24 @@ interface ClipboardState {
   setupListener: () => Promise<() => void>;
 }
 
+async function doPaste(
+  get: () => ClipboardState,
+  id: number,
+  command: "paste_content" | "paste_content_as_plain",
+) {
+  try {
+    cancelPendingFocusRestore();
+    playPasteSound();
+    const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
+    await invoke(command, { id, closeWindow: pasteCloseWindow });
+    if (pasteMoveToTop) {
+      invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
+    }
+  } catch (error) {
+    logError(`Failed to ${command}:`, error);
+  }
+}
+
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
   items: [],
   isLoading: false,
@@ -188,31 +206,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   pasteContent: async (id: number) => {
-    try {
-      cancelPendingFocusRestore();
-      playPasteSound();
-      const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
-      await invoke("paste_content", { id, closeWindow: pasteCloseWindow });
-      if (pasteMoveToTop) {
-        invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
-      }
-    } catch (error) {
-      logError("Failed to paste content:", error);
-    }
+    await doPaste(get, id, "paste_content");
   },
 
   pasteAsPlainText: async (id: number) => {
-    try {
-      cancelPendingFocusRestore();
-      playPasteSound();
-      const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
-      await invoke("paste_content_as_plain", { id, closeWindow: pasteCloseWindow });
-      if (pasteMoveToTop) {
-        invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
-      }
-    } catch (error) {
-      logError("Failed to paste as plain text:", error);
-    }
+    await doPaste(get, id, "paste_content_as_plain");
   },
 
   clearHistory: async (contentType = null) => {

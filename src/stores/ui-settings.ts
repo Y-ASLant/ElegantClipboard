@@ -89,166 +89,91 @@ const broadcastChange = (state: Partial<UISettings>) => {
 
 export const useUISettings = create<UISettings>()(
   persist(
-    (set) => ({
-      cardMaxLines: 3,
-      showTime: true,
-      showCharCount: true,
-      showByteSize: true,
-      showSourceApp: true,
-      sourceAppDisplay: "both" as "both" | "name" | "icon",
-      imagePreviewEnabled: false,
-      textPreviewEnabled: false,
-      previewUnboundedMode: false,
-      previewZoomStep: 15,
-      previewPosition: "auto" as "auto" | "left" | "right",
-      imageAutoHeight: true,
-      imageMaxHeight: 512,
-      colorTheme: "system" as ColorTheme,
-      sharpCorners: false,
-      autoResetState: false,
-      keyboardNavigation: false,
-      searchAutoFocus: false,
-      searchAutoClear: true,
-      darkMode: "auto" as DarkMode,
-      cardDensity: "standard" as CardDensity,
-      timeFormat: "absolute" as TimeFormat,
-      hoverPreviewDelay: 500,
-      copySound: false,
-      pasteSound: false,
-      pasteCloseWindow: true,
-      pasteMoveToTop: false,
-      showCategoryFilter: true,
-      showDragAreaIndicator: true,
-      windowEffect: "none" as WindowEffect,
-      toolbarButtons: ["clear", "pin", "settings"] as ToolbarButton[],
-      setCardMaxLines: (lines) => {
-        set({ cardMaxLines: lines });
-        broadcastChange({ cardMaxLines: lines });
-      },
-      setShowTime: (show) => {
-        set({ showTime: show });
-        broadcastChange({ showTime: show });
-      },
-      setShowCharCount: (show) => {
-        set({ showCharCount: show });
-        broadcastChange({ showCharCount: show });
-      },
-      setShowByteSize: (show) => {
-        set({ showByteSize: show });
-        broadcastChange({ showByteSize: show });
-      },
-      setShowSourceApp: (show) => {
-        set({ showSourceApp: show });
-        broadcastChange({ showSourceApp: show });
-      },
-      setSourceAppDisplay: (mode) => {
-        set({ sourceAppDisplay: mode });
-        broadcastChange({ sourceAppDisplay: mode });
-      },
-      setImagePreviewEnabled: (enabled) => {
-        set({ imagePreviewEnabled: enabled });
-        broadcastChange({ imagePreviewEnabled: enabled });
-      },
-      setTextPreviewEnabled: (enabled) => {
-        set({ textPreviewEnabled: enabled });
-        broadcastChange({ textPreviewEnabled: enabled });
-      },
-      setPreviewUnboundedMode: (enabled) => {
-        set({ previewUnboundedMode: enabled });
-        broadcastChange({ previewUnboundedMode: enabled });
-      },
-      setPreviewZoomStep: (step) => {
-        set({ previewZoomStep: step });
-        broadcastChange({ previewZoomStep: step });
-      },
-      setPreviewPosition: (pos) => {
-        set({ previewPosition: pos });
-        broadcastChange({ previewPosition: pos });
-      },
-      setImageAutoHeight: (auto) => {
-        set({ imageAutoHeight: auto });
-        broadcastChange({ imageAutoHeight: auto });
-      },
-      setImageMaxHeight: (height) => {
-        set({ imageMaxHeight: height });
-        broadcastChange({ imageMaxHeight: height });
-      },
-      setColorTheme: (theme) => {
-        set({ colorTheme: theme });
-        broadcastChange({ colorTheme: theme });
-      },
-      setSharpCorners: (enabled) => {
-        set({ sharpCorners: enabled });
-        broadcastChange({ sharpCorners: enabled });
-      },
-      setAutoResetState: (enabled) => {
-        set({ autoResetState: enabled });
-        broadcastChange({ autoResetState: enabled });
-      },
-      setKeyboardNavigation: (enabled) => {
-        set({ keyboardNavigation: enabled });
-        broadcastChange({ keyboardNavigation: enabled });
-        invoke("set_keyboard_nav_enabled", { enabled }).catch(() => {});
-      },
-      setSearchAutoFocus: (enabled) => {
-        set({ searchAutoFocus: enabled });
-        broadcastChange({ searchAutoFocus: enabled });
-      },
-      setSearchAutoClear: (enabled) => {
-        set({ searchAutoClear: enabled });
-        broadcastChange({ searchAutoClear: enabled });
-      },
-      setDarkMode: (mode) => {
-        set({ darkMode: mode });
-        broadcastChange({ darkMode: mode });
-      },
-      setCardDensity: (density) => {
-        set({ cardDensity: density });
-        broadcastChange({ cardDensity: density });
-      },
-      setTimeFormat: (format) => {
-        set({ timeFormat: format });
-        broadcastChange({ timeFormat: format });
-      },
-      setHoverPreviewDelay: (delay) => {
-        set({ hoverPreviewDelay: delay });
-        broadcastChange({ hoverPreviewDelay: delay });
-      },
-      setCopySound: (enabled) => {
-        set({ copySound: enabled });
-        broadcastChange({ copySound: enabled });
-      },
-      setPasteSound: (enabled) => {
-        set({ pasteSound: enabled });
-        broadcastChange({ pasteSound: enabled });
-      },
-      setPasteCloseWindow: (enabled) => {
-        set({ pasteCloseWindow: enabled });
-        broadcastChange({ pasteCloseWindow: enabled });
-      },
-      setPasteMoveToTop: (enabled) => {
-        set({ pasteMoveToTop: enabled });
-        broadcastChange({ pasteMoveToTop: enabled });
-      },
-      setShowCategoryFilter: (enabled) => {
-        set({ showCategoryFilter: enabled });
-        broadcastChange({ showCategoryFilter: enabled });
-      },
-      setShowDragAreaIndicator: (enabled) => {
-        set({ showDragAreaIndicator: enabled });
-        broadcastChange({ showDragAreaIndicator: enabled });
-      },
-      setWindowEffect: (effect) => {
-        set({ windowEffect: effect });
-        broadcastChange({ windowEffect: effect });
-        document.documentElement.setAttribute("data-window-effect", effect);
-        invoke("set_window_effect", { effect }).catch(() => {});
-      },
-      setToolbarButtons: (buttons) => {
-        set({ toolbarButtons: buttons });
-        broadcastChange({ toolbarButtons: buttons });
-      },
-    }),
+    (set) => {
+      // Factory: creates a setter that updates state and broadcasts the change
+      const makeSetter = <K extends keyof UISettings>(key: K) =>
+        (value: UISettings[K]) => {
+          set({ [key]: value } as unknown as Partial<UISettings>);
+          broadcastChange({ [key]: value } as unknown as Partial<UISettings>);
+        };
+
+      return {
+        cardMaxLines: 3,
+        showTime: true,
+        showCharCount: true,
+        showByteSize: true,
+        showSourceApp: true,
+        sourceAppDisplay: "both" as "both" | "name" | "icon",
+        imagePreviewEnabled: false,
+        textPreviewEnabled: false,
+        previewUnboundedMode: false,
+        previewZoomStep: 15,
+        previewPosition: "auto" as "auto" | "left" | "right",
+        imageAutoHeight: true,
+        imageMaxHeight: 512,
+        colorTheme: "system" as ColorTheme,
+        sharpCorners: false,
+        autoResetState: false,
+        keyboardNavigation: false,
+        searchAutoFocus: false,
+        searchAutoClear: true,
+        darkMode: "auto" as DarkMode,
+        cardDensity: "standard" as CardDensity,
+        timeFormat: "absolute" as TimeFormat,
+        hoverPreviewDelay: 500,
+        copySound: false,
+        pasteSound: false,
+        pasteCloseWindow: true,
+        pasteMoveToTop: false,
+        showCategoryFilter: true,
+        showDragAreaIndicator: true,
+        windowEffect: "none" as WindowEffect,
+        toolbarButtons: ["clear", "pin", "settings"] as ToolbarButton[],
+
+        setCardMaxLines: makeSetter("cardMaxLines"),
+        setShowTime: makeSetter("showTime"),
+        setShowCharCount: makeSetter("showCharCount"),
+        setShowByteSize: makeSetter("showByteSize"),
+        setShowSourceApp: makeSetter("showSourceApp"),
+        setSourceAppDisplay: makeSetter("sourceAppDisplay"),
+        setImagePreviewEnabled: makeSetter("imagePreviewEnabled"),
+        setTextPreviewEnabled: makeSetter("textPreviewEnabled"),
+        setPreviewUnboundedMode: makeSetter("previewUnboundedMode"),
+        setPreviewZoomStep: makeSetter("previewZoomStep"),
+        setPreviewPosition: makeSetter("previewPosition"),
+        setImageAutoHeight: makeSetter("imageAutoHeight"),
+        setImageMaxHeight: makeSetter("imageMaxHeight"),
+        setColorTheme: makeSetter("colorTheme"),
+        setSharpCorners: makeSetter("sharpCorners"),
+        setAutoResetState: makeSetter("autoResetState"),
+        setSearchAutoFocus: makeSetter("searchAutoFocus"),
+        setSearchAutoClear: makeSetter("searchAutoClear"),
+        setDarkMode: makeSetter("darkMode"),
+        setCardDensity: makeSetter("cardDensity"),
+        setTimeFormat: makeSetter("timeFormat"),
+        setHoverPreviewDelay: makeSetter("hoverPreviewDelay"),
+        setCopySound: makeSetter("copySound"),
+        setPasteSound: makeSetter("pasteSound"),
+        setPasteCloseWindow: makeSetter("pasteCloseWindow"),
+        setPasteMoveToTop: makeSetter("pasteMoveToTop"),
+        setShowCategoryFilter: makeSetter("showCategoryFilter"),
+        setShowDragAreaIndicator: makeSetter("showDragAreaIndicator"),
+        setToolbarButtons: makeSetter("toolbarButtons"),
+
+        // Special setters with extra side effects
+        setKeyboardNavigation: (enabled) => {
+          set({ keyboardNavigation: enabled });
+          broadcastChange({ keyboardNavigation: enabled });
+          invoke("set_keyboard_nav_enabled", { enabled }).catch(() => {});
+        },
+        setWindowEffect: (effect) => {
+          set({ windowEffect: effect });
+          broadcastChange({ windowEffect: effect });
+          document.documentElement.setAttribute("data-window-effect", effect);
+          invoke("set_window_effect", { effect }).catch(() => {});
+        },
+      };
+    },
     {
       name: STORAGE_KEY,
     }

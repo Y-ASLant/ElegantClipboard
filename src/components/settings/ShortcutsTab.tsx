@@ -405,8 +405,8 @@ export function ShortcutsTab({
               </p>
             </div>
             {quickPasteExpanded
-              ? <ChevronUp16Regular className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              : <ChevronDown16Regular className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+              ? <ChevronUp16Regular className="w-4 h-4 text-muted-foreground shrink-0" />
+              : <ChevronDown16Regular className="w-4 h-4 text-muted-foreground shrink-0" />}
           </button>
 
           <div

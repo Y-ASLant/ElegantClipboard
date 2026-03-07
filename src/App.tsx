@@ -484,7 +484,7 @@ function App() {
                 ref={(el) => { segmentRefs.current[i] = el; }}
                 onClick={() => setSelectedGroup(g.value)}
                 className={cn(
-                  "relative z-[1] flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
+                  "relative z-1 flex-1 h-full rounded-md text-xs font-medium transition-colors duration-200",
                   selectedGroup === g.value
                     ? "text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -495,10 +495,10 @@ function App() {
             ))}
 
             {/* 分隔线 */}
-            <div className="relative z-[1] w-px h-4 bg-border/50 mx-0.5 shrink-0" />
+            <div className="relative z-1 w-px h-4 bg-border/50 mx-0.5 shrink-0" />
 
             {/* 分组下拉切换器（和 tab 共用同一容器） */}
-            <div ref={groupDropdownRef} className="relative z-[1] shrink-0">
+            <div ref={groupDropdownRef} className="relative z-1 shrink-0">
               <button
                 onClick={() => setGroupDropdownOpen((o) => !o)}
                 className="h-7 flex items-center gap-1 px-2 rounded-md bg-background shadow-sm text-xs font-medium text-foreground transition-all duration-200"

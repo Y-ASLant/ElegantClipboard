@@ -1,21 +1,14 @@
 import { Fragment, memo, useCallback, useEffect, useState, useRef, useMemo } from "react";
 import {
-  Pin16Regular,
   Pin16Filled,
-  Star16Regular,
-  Star16Filled,
   Delete16Regular,
   Copy16Regular,
-  Document16Regular,
-  Folder16Regular,
-  Warning16Regular,
   FolderOpen16Regular,
   Info16Regular,
   TextDescription16Regular,
   ClipboardPaste16Regular,
   ArrowDownload16Regular,
   Edit16Regular,
-  ChevronDown16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
@@ -25,8 +18,27 @@ import {
   getPreviewBounds,
   ImageCard,
 } from "@/components/CardContentRenderers";
+import {
+  ActionToolbar,
+  FileDetailsDialog,
+  MoveToGroupSection,
+  type FileListItem,
+  type ContextMenuItemConfig,
+} from "@/components/CardSubComponents";
 import { HighlightText } from "@/components/HighlightText";
-import { Button } from "@/components/ui/button";
+import {
+  type ClipboardItemDetail,
+  sampleTextPreview,
+  getCachedTextPreviewContent,
+  setCachedTextPreviewContent,
+  TEXT_PREVIEW_MIN_W,
+  TEXT_PREVIEW_MAX_W,
+  TEXT_PREVIEW_MIN_H,
+  TEXT_PREVIEW_MAX_H,
+  TEXT_PREVIEW_CHAR_WIDTH,
+  TEXT_PREVIEW_HORIZONTAL_PADDING,
+  TEXT_PREVIEW_MIN_CHARS_PER_LINE,
+} from "@/components/text-preview";
 import { Card } from "@/components/ui/card";
 import {
   ContextMenu,
@@ -35,17 +47,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import {
   contentTypeConfig,
@@ -63,22 +64,6 @@ import { useUISettings } from "@/stores/ui-settings";
 
 // ============ Types ============
 
-interface FileListItem {
-  name: string;
-  path: string;
-  isDir: boolean;
-  exists: boolean;
-}
-
-interface ContextMenuItemConfig {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  destructive?: boolean;
-  separator?: boolean;
-}
-
 interface ClipboardItemCardProps {
   item: ClipboardItem;
   index?: number;
@@ -89,325 +74,6 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 const fileValidityCache = new Map<string, boolean>();
-const textPreviewContentCache = new Map<number, string>();
-const TEXT_PREVIEW_CACHE_MAX_ITEMS = 180;
-const TEXT_PREVIEW_MIN_W = 360;
-const TEXT_PREVIEW_MAX_W = 900;
-const TEXT_PREVIEW_MIN_H = 130;
-const TEXT_PREVIEW_MAX_H = 560;
-const TEXT_PREVIEW_CHAR_WIDTH = 7.6;
-const TEXT_PREVIEW_HORIZONTAL_PADDING = 44;
-const TEXT_PREVIEW_MIN_CHARS_PER_LINE = 24;
-const TEXT_PREVIEW_SAMPLE_MAX_CHARS = 24_000;
-const TEXT_PREVIEW_SAMPLE_MAX_LINES = 900;
-
-interface ClipboardItemDetail {
-  id: number;
-  text_content: string | null;
-  preview: string | null;
-}
-
-function isWideCodePoint(codePoint: number): boolean {
-  return (
-    (codePoint >= 0x2E80 && codePoint <= 0xA4CF)
-    || (codePoint >= 0xAC00 && codePoint <= 0xD7A3)
-    || (codePoint >= 0xF900 && codePoint <= 0xFAFF)
-    || (codePoint >= 0xFE10 && codePoint <= 0xFE6F)
-    || (codePoint >= 0xFF00 && codePoint <= 0xFFEF)
-  );
-}
-
-interface TextPreviewSample {
-  longestVisualCols: number;
-  lineColumns: number[];
-  processedCodeUnits: number;
-  truncated: boolean;
-}
-
-function sampleTextPreview(text: string): TextPreviewSample {
-  const lineColumns: number[] = [];
-  let longestVisualCols = 1;
-  let currentLineCols = 0;
-  let processedCodeUnits = 0;
-  let lineCount = 1;
-  let truncated = false;
-  let endsWithLineBreak = false;
-
-  const finalizeLine = () => {
-    const cols = Math.max(1, currentLineCols);
-    lineColumns.push(cols);
-    longestVisualCols = Math.max(longestVisualCols, cols);
-    currentLineCols = 0;
-  };
-
-  for (let i = 0; i < text.length; i += 1) {
-    const code = text.charCodeAt(i);
-    processedCodeUnits += 1;
-
-    if (code === 0x0D || code === 0x0A) {
-      if (code === 0x0D && i + 1 < text.length && text.charCodeAt(i + 1) === 0x0A) {
-        i += 1;
-        processedCodeUnits += 1;
-      }
-      finalizeLine();
-      lineCount += 1;
-      endsWithLineBreak = true;
-    } else {
-      endsWithLineBreak = false;
-      const codePoint = text.codePointAt(i);
-      if (codePoint !== undefined) {
-        currentLineCols += isWideCodePoint(codePoint) ? 2 : 1;
-        if (codePoint > 0xFFFF) {
-          i += 1;
-          processedCodeUnits += 1;
-        }
-      }
-    }
-
-    if (processedCodeUnits >= TEXT_PREVIEW_SAMPLE_MAX_CHARS || lineCount > TEXT_PREVIEW_SAMPLE_MAX_LINES) {
-      truncated = true;
-      break;
-    }
-  }
-
-  if (currentLineCols > 0 || lineColumns.length === 0 || endsWithLineBreak) {
-    finalizeLine();
-  }
-
-  return {
-    longestVisualCols,
-    lineColumns,
-    processedCodeUnits,
-    truncated,
-  };
-}
-
-function getCachedTextPreviewContent(id: number): string | undefined {
-  const cached = textPreviewContentCache.get(id);
-  if (cached === undefined) {
-    return undefined;
-  }
-  textPreviewContentCache.delete(id);
-  textPreviewContentCache.set(id, cached);
-  return cached;
-}
-
-function setCachedTextPreviewContent(id: number, text: string): void {
-  textPreviewContentCache.set(id, text);
-  if (textPreviewContentCache.size <= TEXT_PREVIEW_CACHE_MAX_ITEMS) {
-    return;
-  }
-  const oldestKey = textPreviewContentCache.keys().next().value;
-  if (oldestKey !== undefined) {
-    textPreviewContentCache.delete(oldestKey);
-  }
-}
-
-// ============ File Details Dialog ============
-
-interface FileDetailsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  fileListItems: FileListItem[];
-}
-
-const FileDetailsDialog = ({
-  open,
-  onOpenChange,
-  fileListItems,
-}: FileDetailsDialogProps) => (
-  <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-lg max-h-[70vh]">
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          {fileListItems.length > 1 ? (
-            <Folder16Regular className="h-5 w-5" />
-          ) : (
-            <Document16Regular className="h-5 w-5" />
-          )}
-          已复制的文件 ({fileListItems.length})
-        </DialogTitle>
-      </DialogHeader>
-      <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-2">
-        {fileListItems.map((file, idx) => (
-          <div
-            key={idx}
-            className={cn(
-              "flex items-start gap-3 p-2 rounded-md border",
-              file.exists
-                ? "bg-muted/30"
-                : "bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900",
-            )}
-          >
-            <div className="flex-shrink-0 mt-0.5">
-              {!file.exists ? (
-                <Warning16Regular className="h-4 w-4 text-red-500" />
-              ) : file.isDir ? (
-                <Folder16Regular className="h-4 w-4 text-blue-500" />
-              ) : (
-                <Document16Regular className="h-4 w-4 text-blue-500" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p
-                className={cn(
-                  "text-sm font-medium truncate",
-                  !file.exists && "text-red-500",
-                )}
-              >
-                {file.name}
-                {!file.exists && (
-                  <span className="ml-1 text-xs font-normal">(已失效)</span>
-                )}
-              </p>
-              <p className="text-xs text-muted-foreground truncate mt-0.5">
-                {file.path}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-      {fileListItems.some((f) => !f.exists) && (
-        <p className="text-xs text-red-500 mt-2">
-          部分文件已被移动或删除，无法粘贴
-        </p>
-      )}
-    </DialogContent>
-  </Dialog>
-);
-
-// ============ Move to Group (inline collapsible) ============
-
-function MoveToGroupSection({
-  itemId,
-  groups,
-  selectedGroupId,
-  moveItemToGroup,
-}: {
-  itemId: number;
-  groups: { id: number; name: string }[];
-  selectedGroupId: number | null;
-  moveItemToGroup: (itemId: number, groupId: number | null) => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  // 当前在默认分组：显示所有自定义分组；当前在自定义分组：显示默认 + 其他自定义分组
-  const otherGroups = groups.filter((g) => g.id !== selectedGroupId);
-  const showDefault = selectedGroupId !== null;
-  if (!showDefault && otherGroups.length === 0) return null;
-  return (
-    <>
-      <ContextMenuSeparator />
-      <div
-        role="menuitem"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); }}
-        className="flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground"
-      >
-        <span>移动到分组</span>
-        <ChevronDown16Regular
-          className={cn("ml-auto h-4 w-4 transition-transform duration-150", expanded && "rotate-180")}
-        />
-      </div>
-      {expanded && (
-        <>
-          {showDefault && (
-            <ContextMenuItem className="pl-6" onClick={() => moveItemToGroup(itemId, null)}>
-              默认分组
-            </ContextMenuItem>
-          )}
-          {otherGroups.map((g) => (
-            <ContextMenuItem className="pl-6" key={g.id} onClick={() => moveItemToGroup(itemId, g.id)}>
-              {g.name}
-            </ContextMenuItem>
-          ))}
-        </>
-      )}
-    </>
-  );
-}
-
-// ============ Action Toolbar ============
-
-interface ActionToolbarProps {
-  item: ClipboardItem;
-  onTogglePin: (e: React.MouseEvent) => void;
-  onToggleFavorite: (e: React.MouseEvent) => void;
-  onCopy: (e: React.MouseEvent) => void;
-  onDelete: (e: React.MouseEvent) => void;
-}
-
-const ActionToolbar = ({
-  item,
-  onTogglePin,
-  onToggleFavorite,
-  onCopy,
-  onDelete,
-}: ActionToolbarProps) => (
-  <div
-    className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
-    data-drag-ignore="true"
-  >
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onTogglePin}
-          className="h-6 w-6"
-        >
-          {item.is_pinned ? (
-            <Pin16Filled className="w-3.5 h-3.5 text-primary" />
-          ) : (
-            <Pin16Regular className="w-3.5 h-3.5" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{item.is_pinned ? "取消置顶" : "置顶"}</TooltipContent>
-    </Tooltip>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleFavorite}
-          className="h-6 w-6"
-        >
-          {item.is_favorite ? (
-            <Star16Filled className="w-3.5 h-3.5 text-yellow-500" />
-          ) : (
-            <Star16Regular className="w-3.5 h-3.5" />
-          )}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{item.is_favorite ? "取消收藏" : "收藏"}</TooltipContent>
-    </Tooltip>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onCopy}
-          className="h-6 w-6"
-        >
-          <Copy16Regular className="w-3.5 h-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>复制</TooltipContent>
-    </Tooltip>
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onDelete}
-          className="h-6 w-6 hover:text-destructive"
-        >
-          <Delete16Regular className="w-3.5 h-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>删除</TooltipContent>
-    </Tooltip>
-  </div>
-);
 
 // ============ Main Card Component ============
 
@@ -827,7 +493,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     <div ref={setNodeRef} style={style}>
       <Card
         className={cn(
-        "group relative cursor-pointer overflow-hidden shadow-none dark:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.09),0_2px_8px_-1px_rgba(0,0,0,0.5)] hover:shadow-sm dark:hover:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.12),0_4px_12px_-2px_rgba(0,0,0,0.6)] hover:border-primary/30 ring-1 ring-black/[0.04] dark:ring-white/[0.1]",
+        "group relative cursor-pointer overflow-hidden shadow-none dark:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.09),0_2px_8px_-1px_rgba(0,0,0,0.5)] hover:shadow-sm dark:hover:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.12),0_4px_12px_-2px_rgba(0,0,0,0.6)] hover:border-primary/30 ring-1 ring-black/4 dark:ring-white/10",
           isDragOverlay && "shadow-lg border-primary cursor-grabbing",
           // justDropped animation removed for cleaner drag-drop feel
           justPasted && "animate-paste-flash",
@@ -889,7 +555,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             {showDragAreaIndicator && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-y-0 z-[6] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                className="pointer-events-none absolute inset-y-0 z-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                 style={{ left: dragHandleWidth, right: dragHandleWidth }}
               >
                 <div className="absolute inset-y-1 left-0 border-l border-dashed border-border/50" />

@@ -44,12 +44,12 @@ export const CardFooter = ({
         </span>
       ))}
     </div>
-    <div className="flex items-center gap-1.5 flex-shrink-0">
+    <div className="flex items-center gap-1.5 shrink-0">
       {sourceAppIcon && (
         <img
           src={convertFileSrc(sourceAppIcon)}
           alt=""
-          className="w-3.5 h-3.5 flex-shrink-0"
+          className="w-3.5 h-3.5 shrink-0"
           draggable={false}
         />
       )}
@@ -573,7 +573,7 @@ const FileImagePreview = memo(function FileImagePreview({
     return (
       <div className="flex-1 min-w-0 px-3 py-2.5">
         <div className="flex items-start gap-2.5">
-          <div className="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-blue-50 dark:bg-blue-950">
+          <div className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-blue-50 dark:bg-blue-950">
             <Document16Regular className="w-5 h-5 text-blue-500" />
           </div>
           <div className="flex-1 min-w-0">
@@ -605,7 +605,7 @@ const FileImagePreview = memo(function FileImagePreview({
         onError={() => setImgError(true)}
         imagePath={filePath}
         overlay={
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-2 py-1">
+          <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/50 to-transparent px-2 py-1">
             <p className="text-[11px] text-white truncate">{fileName}</p>
           </div>
         }
@@ -673,7 +673,7 @@ export const FileContent = memo(function FileContent({
       <div className="flex items-start gap-2.5">
         <div
           className={cn(
-            "flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center",
+            "shrink-0 w-10 h-10 rounded-lg flex items-center justify-center",
             filesInvalid
               ? "bg-red-50 dark:bg-red-950"
               : "bg-blue-50 dark:bg-blue-950",
