@@ -35,7 +35,7 @@ export const CardFooter = ({
   sourceAppName,
   sourceAppIcon,
 }: CardFooterProps) => (
-  <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5">
+  <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground mt-1.5 min-h-5">
     <div className="flex items-center gap-1.5 min-w-0">
       {metaItems.map((info, i) => (
         <span key={i} className="flex items-center gap-1.5">

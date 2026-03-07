@@ -474,12 +474,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const previewPosition = useUISettings((s) => s.previewPosition);
   const sharpCorners = useUISettings((s) => s.sharpCorners);
 
-  const [justDropped, setJustDropped] = useState(false);
   const [justPasted, setJustPasted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasDraggedRef = useRef(false);
   const { groups, moveItemToGroup } = useGroupStore();
   const selectedGroupId = useClipboardStore((s) => s.selectedGroupId);
   const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -557,21 +554,12 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   } = useSortable({
     id: sortId || `item-${item.id}`,
     disabled: isDragOverlay,
+    // Keep reorder motion crisp and avoid bounce-like release feel.
+    transition: {
+      duration: 120,
+      easing: "ease-out",
+    },
   });
-
-  // Bounce animation after drag (skip initial mount)
-  useEffect(() => {
-    if (isDragging) {
-      hasDraggedRef.current = true;
-    } else if (hasDraggedRef.current && !isDragOverlay) {
-      setJustDropped(true);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => setJustDropped(false), 300);
-    }
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, [isDragging, isDragOverlay]);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -841,7 +829,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         className={cn(
         "group relative cursor-pointer overflow-hidden shadow-none dark:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.09),0_2px_8px_-1px_rgba(0,0,0,0.5)] hover:shadow-sm dark:hover:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.12),0_4px_12px_-2px_rgba(0,0,0,0.6)] hover:border-primary/30 ring-1 ring-black/[0.04] dark:ring-white/[0.1]",
           isDragOverlay && "shadow-lg border-primary cursor-grabbing",
-          justDropped && "animate-scale-bounce",
+          // justDropped animation removed for cleaner drag-drop feel
           justPasted && "animate-paste-flash",
           isActive && "bg-accent shadow-sm",
         )}

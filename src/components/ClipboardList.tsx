@@ -9,6 +9,7 @@ import { listen } from "@tauri-apps/api/event";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useShallow } from "zustand/react/shallow";
+import { CSS } from "@dnd-kit/utilities";
 import { Separator } from "@/components/ui/separator";
 import { useSortableList } from "@/hooks/useSortableList";
 import { GROUPS } from "@/lib/constants";
@@ -46,6 +47,7 @@ export function ClipboardList() {
   const [customScrollParent, setCustomScrollParent] =
     useState<HTMLElement | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [optimisticItems, setOptimisticItems] = useState<SortableClipboardItem[] | null>(null);
   const {
     items,
     isLoading,
@@ -106,10 +108,17 @@ export function ClipboardList() {
     [items],
   );
 
+  const renderedItems = optimisticItems ?? itemsWithSortId;
+
+  useEffect(() => {
+    // Server-confirmed order arrived; clear optimistic view.
+    setOptimisticItems(null);
+  }, [itemsWithSortId]);
+
   // 后端已按 is_pinned DESC 排序，直接计算置顶数即可
   const pinnedCount = useMemo(
-    () => itemsWithSortId.filter((item) => item.is_pinned).length,
-    [itemsWithSortId],
+    () => renderedItems.filter((item) => item.is_pinned).length,
+    [renderedItems],
   );
 
   // 搜索/类型筛选时隐藏快捷粘贴序号（过滤后的顺序与快捷粘贴槽位顺序不一致）
@@ -119,23 +128,38 @@ export function ClipboardList() {
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
       if (oldIndex === newIndex) return;
-      const fromItem = itemsWithSortId[oldIndex];
-      const toItem = itemsWithSortId[newIndex];
+      const currentItems = renderedItems;
+      const fromItem = currentItems[oldIndex];
+      const toItem = currentItems[newIndex];
       if (!fromItem || !toItem) return;
 
-      const fromIsPinned = oldIndex < pinnedCount;
-      const toIsPinned = newIndex < pinnedCount;
+      const currentPinnedCount = currentItems.filter((item) => item.is_pinned).length;
+      const fromIsPinned = oldIndex < currentPinnedCount;
+      const toIsPinned = newIndex < currentPinnedCount;
 
-      // 跨区域拖拽：自动改变置顶状态，然后移动到目标位置
-      if (fromIsPinned !== toIsPinned) {
-        await togglePin(fromItem.id);
-        await moveItem(fromItem.id, toItem.id);
-      } else {
-        // 同区域拖拽：移动位置
-        await moveItem(fromItem.id, toItem.id);
+      // Reorder in UI first so overlay drops directly to the destination slot.
+      setOptimisticItems(() => {
+        const next = [...currentItems];
+        const [moved] = next.splice(oldIndex, 1);
+        if (!moved) return currentItems;
+        next.splice(newIndex, 0, { ...moved, is_pinned: toIsPinned });
+        return next;
+      });
+
+      try {
+        if (fromIsPinned !== toIsPinned) {
+          await togglePin(fromItem.id);
+          await moveItem(fromItem.id, toItem.id);
+        } else {
+          await moveItem(fromItem.id, toItem.id);
+        }
+      } catch {
+        // Store actions already log errors.
+      } finally {
+        setOptimisticItems(null);
       }
     },
-    [itemsWithSortId, pinnedCount, moveItem, togglePin],
+    [renderedItems, moveItem, togglePin],
   );
 
   const {
@@ -153,7 +177,7 @@ export function ClipboardList() {
     collisionDetection,
     measuring,
   } = useSortableList({
-    items: itemsWithSortId,
+    items: renderedItems,
     onDragEnd: handleDragEnd,
   });
 
@@ -326,13 +350,13 @@ export function ClipboardList() {
   );
 
   const sortableIds = useMemo(
-    () => itemsWithSortId.map((i) => i._sortId),
-    [itemsWithSortId],
+    () => renderedItems.map((i) => i._sortId),
+    [renderedItems],
   );
 
   const itemContent = useCallback(
     (index: number) => {
-      const item = itemsWithSortId[index];
+      const item = renderedItems[index];
       if (!item) return null;
 
       const showSeparator = index === pinnedCount && pinnedCount > 0;
@@ -345,15 +369,15 @@ export function ClipboardList() {
         </div>
       );
     },
-    [itemsWithSortId, pinnedCount, showSlotBadges, cardDensity],
+    [renderedItems, pinnedCount, showSlotBadges, cardDensity],
   );
 
   const computeItemKey = useCallback(
-    (index: number) => itemsWithSortId[index]?._sortId || `item-${index}`,
-    [itemsWithSortId],
+    (index: number) => renderedItems[index]?._sortId || `item-${index}`,
+    [renderedItems],
   );
 
-  if (isLoading && items.length === 0) {
+  if (isLoading && renderedItems.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-3">
@@ -365,7 +389,7 @@ export function ClipboardList() {
   }
 
   // 搜索/筛选无结果
-  if (items.length === 0 && (searchQuery || selectedGroup || selectedGroupId !== null)) {
+  if (renderedItems.length === 0 && (searchQuery || selectedGroup || selectedGroupId !== null)) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">
@@ -388,7 +412,7 @@ export function ClipboardList() {
     );
   }
 
-  if (items.length === 0) {
+  if (renderedItems.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">
@@ -450,7 +474,7 @@ export function ClipboardList() {
             {customScrollParent && (
               <Virtuoso
                 ref={virtuosoRef}
-                totalCount={itemsWithSortId.length}
+                totalCount={renderedItems.length}
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
                 defaultItemHeight={defaultItemHeight}
@@ -484,7 +508,30 @@ export function ClipboardList() {
         </button>
       </div>
 
-      <DragOverlay dropAnimation={null} style={{ cursor: "grabbing" }}>
+      <DragOverlay
+        dropAnimation={{
+          duration: 180,
+          easing: "ease-out",
+          // Keep a constant card size while dropping (translate only, no scale).
+          keyframes: ({ transform }) => [
+            {
+              transform: CSS.Transform.toString({
+                ...transform.initial,
+                scaleX: 1,
+                scaleY: 1,
+              }),
+            },
+            {
+              transform: CSS.Transform.toString({
+                ...transform.final,
+                scaleX: 1,
+                scaleY: 1,
+              }),
+            },
+          ],
+        }}
+        style={{ cursor: "grabbing" }}
+      >
         {activeItemData && (
           <ClipboardItemCard
             item={activeItemData}

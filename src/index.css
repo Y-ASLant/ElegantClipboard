@@ -418,23 +418,6 @@ textarea,
 .animate-settings-in > *:nth-child(4) { animation-delay: 90ms; }
 .animate-settings-in > *:nth-child(5) { animation-delay: 120ms; }
 
-/* Drag drop bounce animation */
-@keyframes scale-bounce {
-    0% {
-        transform: scale(0.95);
-    }
-    50% {
-        transform: scale(1.02);
-    }
-    100% {
-        transform: scale(1);
-    }
-}
-
-.animate-scale-bounce {
-    animation: scale-bounce 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
 /* Paste feedback flash */
 @keyframes paste-flash {
     0% {
