@@ -1,3 +1,5 @@
+use crate::commands::AppState;
+use std::sync::Arc;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -14,6 +16,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
     let (width, height) = rgba.dimensions();
     let icon = Image::new_owned(rgba.into_raw(), width, height);
 
+    let pause_item = MenuItem::with_id(app, "toggle_pause", "暂停监控", true, None::<&str>)?;
     let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let restart_item = MenuItem::with_id(app, "restart", "重启程序", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
@@ -21,7 +24,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
 
     let menu = Menu::with_items(
         app,
-        &[&settings_item, &restart_item, &separator, &quit_item],
+        &[&pause_item, &settings_item, &restart_item, &separator, &quit_item],
     )?;
 
     let _tray = TrayIconBuilder::with_id("main-tray")
@@ -30,7 +33,19 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
         .show_menu_on_left_click(false)
         .tooltip("ElegantClipboard")
         .on_menu_event(move |app, event| {
-            handle_menu_event(app, event.id.as_ref());
+            let id = event.id.as_ref();
+            if id == "toggle_pause" {
+                if let Some(state) = app.try_state::<Arc<AppState>>() {
+                    let paused = state.monitor.toggle_user_pause();
+                    let _ = pause_item.set_text(if paused { "恢复监控" } else { "暂停监控" });
+                    if let Some(tray) = app.tray_by_id("main-tray") {
+                        let tip = if paused { "ElegantClipboard (已暂停)" } else { "ElegantClipboard" };
+                        let _ = tray.set_tooltip(Some(tip));
+                    }
+                }
+            } else {
+                handle_menu_event(app, id);
+            }
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {
