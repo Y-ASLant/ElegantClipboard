@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback, useMemo, useState } from "react";
 import { CSS } from "@dnd-kit/utilities";
 import {
   ClipboardMultiple16Regular,
-  Filter16Regular,
   Search16Regular,
 } from "@fluentui/react-icons";
 import { listen } from "@tauri-apps/api/event";
@@ -53,7 +52,6 @@ export function ClipboardList() {
     isLoading,
     searchQuery,
     selectedGroup,
-    selectedGroupId,
     fetchItems,
     setupListener,
     moveItem,
@@ -388,24 +386,17 @@ export function ClipboardList() {
     );
   }
 
-  // 搜索/筛选无结果
-  if (renderedItems.length === 0 && (searchQuery || selectedGroup || selectedGroupId !== null)) {
+  // 搜索无结果
+  if (renderedItems.length === 0 && searchQuery) {
     return (
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-4">
           <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto">
-            {searchQuery
-              ? <Search16Regular className="w-8 h-8 text-muted-foreground" />
-              : <Filter16Regular className="w-8 h-8 text-muted-foreground" />
-            }
+            <Search16Regular className="w-8 h-8 text-muted-foreground" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium">
-              {searchQuery ? "未找到匹配的内容" : "暂无此类型的内容"}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {searchQuery ? "试试其他关键词" : "试试其他分类"}
-            </p>
+            <p className="text-sm font-medium">未找到匹配的内容</p>
+            <p className="text-sm text-muted-foreground">试试其他关键词</p>
           </div>
           <button
             onClick={() => useClipboardStore.getState().resetView()}

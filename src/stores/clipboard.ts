@@ -79,9 +79,10 @@ async function doPaste(
 ) {
   try {
     cancelPendingFocusRestore();
-    playPasteSound();
+    playPasteSound("immediate");
     const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
     await invoke(command, { id, closeWindow: pasteCloseWindow });
+    playPasteSound("after_success");
     if (pasteMoveToTop) {
       invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
     }
@@ -240,9 +241,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   setupListener: async () => {
-    const unlisten = await listen<number>("clipboard-updated", () => {
-      playCopySound();
-      get().refresh();
+    const unlisten = await listen<number>("clipboard-updated", async () => {
+      playCopySound("immediate");
+      await get().refresh();
+      playCopySound("after_success");
     });
     return unlisten;
   },

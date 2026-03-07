@@ -41,13 +41,15 @@ function playTone(freq: number, duration: number, volume = 0.15) {
   } catch { /* audio not available */ }
 }
 
-export function playCopySound() {
-  if (!useUISettings.getState().copySound) return;
+export function playCopySound(timing: "immediate" | "after_success") {
+  const s = useUISettings.getState();
+  if (!s.copySound || s.copySoundTiming !== timing) return;
   playTone(880, 0.08);
   setTimeout(() => playTone(1100, 0.08), 60);
 }
 
-export function playPasteSound() {
-  if (!useUISettings.getState().pasteSound) return;
+export function playPasteSound(timing: "immediate" | "after_success") {
+  const s = useUISettings.getState();
+  if (!s.pasteSound || s.pasteSoundTiming !== timing) return;
   playTone(660, 0.1);
 }

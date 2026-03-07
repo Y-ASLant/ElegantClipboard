@@ -8,6 +8,7 @@ export type DarkMode = "light" | "dark" | "auto";
 export type CardDensity = "compact" | "standard" | "spacious";
 export type TimeFormat = "relative" | "absolute";
 export type WindowEffect = "none" | "mica" | "acrylic" | "tabbed";
+export type SoundTiming = "immediate" | "after_success";
 export type ToolbarButton = "clear" | "pin" | "settings";
 
 export const DEFAULT_TOOLBAR_BUTTONS: ToolbarButton[] = ["clear", "pin", "settings"];
@@ -39,7 +40,9 @@ interface UISettings {
   timeFormat: TimeFormat;
   hoverPreviewDelay: number;
   copySound: boolean;
+  copySoundTiming: SoundTiming;
   pasteSound: boolean;
+  pasteSoundTiming: SoundTiming;
   pasteCloseWindow: boolean;
   pasteMoveToTop: boolean;
   showCategoryFilter: boolean;
@@ -71,7 +74,9 @@ interface UISettings {
   setTimeFormat: (format: TimeFormat) => void;
   setHoverPreviewDelay: (delay: number) => void;
   setCopySound: (enabled: boolean) => void;
+  setCopySoundTiming: (timing: SoundTiming) => void;
   setPasteSound: (enabled: boolean) => void;
+  setPasteSoundTiming: (timing: SoundTiming) => void;
   setPasteCloseWindow: (enabled: boolean) => void;
   setPasteMoveToTop: (enabled: boolean) => void;
   setShowCategoryFilter: (enabled: boolean) => void;
@@ -124,7 +129,9 @@ export const useUISettings = create<UISettings>()(
         timeFormat: "absolute" as TimeFormat,
         hoverPreviewDelay: 500,
         copySound: false,
+        copySoundTiming: "immediate" as SoundTiming,
         pasteSound: false,
+        pasteSoundTiming: "immediate" as SoundTiming,
         pasteCloseWindow: true,
         pasteMoveToTop: false,
         showCategoryFilter: true,
@@ -156,7 +163,9 @@ export const useUISettings = create<UISettings>()(
         setTimeFormat: makeSetter("timeFormat"),
         setHoverPreviewDelay: makeSetter("hoverPreviewDelay"),
         setCopySound: makeSetter("copySound"),
+        setCopySoundTiming: makeSetter("copySoundTiming"),
         setPasteSound: makeSetter("pasteSound"),
+        setPasteSoundTiming: makeSetter("pasteSoundTiming"),
         setPasteCloseWindow: makeSetter("pasteCloseWindow"),
         setPasteMoveToTop: makeSetter("pasteMoveToTop"),
         setShowCategoryFilter: makeSetter("showCategoryFilter"),
