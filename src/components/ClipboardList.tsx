@@ -4,9 +4,9 @@ import {
   ClipboardMultiple16Regular,
   Filter16Regular,
   Search16Regular,
-  ArrowUp16Regular,
 } from "@fluentui/react-icons";
 import { listen } from "@tauri-apps/api/event";
+import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useShallow } from "zustand/react/shallow";
@@ -494,18 +494,7 @@ export function ClipboardList() {
             )}
           </SortableContext>
         </OverlayScrollbarsComponent>
-        {/* 回到顶部悬浮按钮 */}
-        <button
-          onClick={() => scrollToTop(true)}
-          className={`absolute right-3 bottom-3 w-7 h-7 rounded-md bg-background border shadow-sm flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-200 z-10 ${
-            showScrollTop
-              ? "opacity-100 scale-100 pointer-events-auto"
-              : "opacity-0 scale-75 pointer-events-none"
-          }`}
-          title="回到顶部"
-        >
-          <ArrowUp16Regular className="w-4 h-4" />
-        </button>
+        <ScrollToTopButton visible={showScrollTop} onScrollToTop={() => scrollToTop(true)} />
       </div>
 
       <DragOverlay
