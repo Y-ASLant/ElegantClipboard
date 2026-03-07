@@ -407,6 +407,12 @@ export function ClipboardList() {
               {searchQuery ? "试试其他关键词" : "试试其他分类"}
             </p>
           </div>
+          <button
+            onClick={() => useClipboardStore.getState().resetView()}
+            className="text-xs text-primary hover:text-primary/80 hover:underline transition-colors"
+          >
+            清除筛选
+          </button>
         </div>
       </div>
     );
@@ -522,11 +528,13 @@ export function ClipboardList() {
         style={{ cursor: "grabbing" }}
       >
         {activeItemData && (
-          <ClipboardItemCard
-            item={activeItemData}
-            index={-1}
-            isDragOverlay={true}
-          />
+          <div className="shadow-xl">
+            <ClipboardItemCard
+              item={activeItemData}
+              index={-1}
+              isDragOverlay={true}
+            />
+          </div>
         )}
       </DragOverlay>
     </DndContext>
