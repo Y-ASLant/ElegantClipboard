@@ -422,6 +422,21 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
     Ok(())
 }
 
+/// 批量删除剪贴板条目（同时删除关联图片文件）
+#[tauri::command]
+pub async fn batch_delete_clipboard_items(
+    state: State<'_, Arc<AppState>>,
+    ids: Vec<i64>,
+) -> Result<i64, String> {
+    let repo = ClipboardRepository::new(&state.db);
+    let (deleted, image_paths) = repo.batch_delete(&ids).map_err(|e| e.to_string())?;
+    if !image_paths.is_empty() {
+        crate::clipboard::cleanup_image_files(&image_paths);
+    }
+    debug!("Batch deleted {} clipboard items", deleted);
+    Ok(deleted)
+}
+
 /// 清空所有历史（包括置顶/收藏，同时删除图片文件）
 #[tauri::command]
 pub async fn clear_all_history(state: State<'_, Arc<AppState>>) -> Result<i64, String> {

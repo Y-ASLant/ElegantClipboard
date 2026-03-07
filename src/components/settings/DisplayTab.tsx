@@ -18,6 +18,7 @@ import {
   Delete16Regular,
   LockClosed16Regular,
   Settings16Regular,
+  MultiselectLtr16Regular,
 } from "@fluentui/react-icons";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -35,6 +36,7 @@ import {
 const TOOLBAR_BUTTON_ICONS: Record<ToolbarButton, React.ComponentType<{ className?: string }>> = {
   clear: Delete16Regular,
   pin: LockClosed16Regular,
+  batch: MultiselectLtr16Regular,
   settings: Settings16Regular,
 };
 

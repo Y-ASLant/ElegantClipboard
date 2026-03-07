@@ -7,6 +7,7 @@ export const TOOLBAR_BUTTON_REGISTRY: Record<
 > = {
   clear: { label: "清空历史", description: "清空所有非置顶的历史记录" },
   pin: { label: "锁定窗口", description: "锁定窗口防止自动隐藏" },
+  batch: { label: "批量选择", description: "进入批量选择模式，支持 Ctrl 多选、Shift 连选，批量删除" },
   settings: { label: "设置", description: "打开设置窗口" },
 };
 

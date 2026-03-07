@@ -13,7 +13,6 @@ import {
   MeasuringConfiguration,
   MeasuringStrategy,
 } from "@dnd-kit/core";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import {
   SortableContext,
   sortableKeyboardCoordinates,
@@ -93,7 +92,7 @@ export function useSortableList<T extends SortableItem>({
   const sensors = useSensors(
     useSensor(CustomMouseSensor, {
       activationConstraint: {
-        distance: 3, // More responsive drag start while keeping accidental drags manageable
+        distance: 1, // Minimal distance for immediate drag feedback
       },
     }),
     useSensor(KeyboardSensor, {
@@ -156,7 +155,7 @@ export function useSortableList<T extends SortableItem>({
     activeId,
     activeItem,
     strategy: verticalListSortingStrategy,
-    modifiers: [restrictToVerticalAxis],
+    modifiers: [],
     collisionDetection: customCollisionDetection,
     measuring: measuringConfig,
   };

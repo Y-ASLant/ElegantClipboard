@@ -31,15 +31,13 @@ interface GeneralTabProps {
 export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const autoResetState = useUISettings((s) => s.autoResetState);
   const setAutoResetState = useUISettings((s) => s.setAutoResetState);
+  const windowAnimation = useUISettings((s) => s.windowAnimation);
+  const setWindowAnimation = useUISettings((s) => s.setWindowAnimation);
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const setSearchAutoFocus = useUISettings((s) => s.setSearchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
   const setSearchAutoClear = useUISettings((s) => s.setSearchAutoClear);
-  const keyboardNavigation = useUISettings((s) => s.keyboardNavigation);
-  const setKeyboardNavigation = useUISettings((s) => s.setKeyboardNavigation);
   const {
-    copySound, setCopySound,
-    pasteSound, setPasteSound,
     pasteCloseWindow, setPasteCloseWindow,
     pasteMoveToTop, setPasteMoveToTop,
   } = useUISettings();
@@ -48,10 +46,14 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
   const [pendingLogToFile, setPendingLogToFile] = useState<boolean | null>(null);
   const [persistWindowSize, setPersistWindowSize] = useState(true);
+  const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
 
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "persist_window_size" })
       .then((v) => setPersistWindowSize(v !== "false"))
+      .catch(() => {});
+    invoke<string | null>("get_setting", { key: "auto_check_update" })
+      .then((v) => setAutoCheckUpdate(v !== "false"))
       .catch(() => {});
   }, []);
 
@@ -66,6 +68,15 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       }
     } catch (error) {
       logError("Failed to save persist_window_size:", error);
+    }
+  };
+
+  const toggleAutoCheckUpdate = async (enabled: boolean) => {
+    setAutoCheckUpdate(enabled);
+    try {
+      await invoke("set_setting", { key: "auto_check_update", value: String(enabled) });
+    } catch (error) {
+      logError("Failed to save auto_check_update:", error);
     }
   };
 
@@ -111,6 +122,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                 }}
               />
             </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">自动检查更新</Label>
+                <p className="text-xs text-muted-foreground">
+                  仅在程序启动时自动检查更新
+                </p>
+              </div>
+              <Switch
+                checked={autoCheckUpdate}
+                onCheckedChange={toggleAutoCheckUpdate}
+              />
+            </div>
           </div>
         </div>
 
@@ -150,6 +173,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <Switch
                 checked={autoResetState}
                 onCheckedChange={setAutoResetState}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">入场动画</Label>
+                <p className="text-xs text-muted-foreground">
+                  窗口显示时播放淡入缩放动画
+                </p>
+              </div>
+              <Switch
+                checked={windowAnimation}
+                onCheckedChange={setWindowAnimation}
               />
             </div>
           </div>
@@ -194,18 +229,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="text-xs">键盘导航</Label>
-                <p className="text-xs text-muted-foreground">
-                  方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除
-                </p>
-              </div>
-              <Switch
-                checked={keyboardNavigation}
-                onCheckedChange={setKeyboardNavigation}
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
                 <Label className="text-xs">粘贴后关闭窗口</Label>
                 <p className="text-xs text-muted-foreground">
                   非锁定模式下，粘贴后自动关闭窗口
@@ -221,32 +244,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                 </p>
               </div>
               <Switch checked={pasteMoveToTop} onCheckedChange={setPasteMoveToTop} />
-            </div>
-          </div>
-        </div>
-
-        {/* Sound Card */}
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">提示音</h3>
-          <p className="text-xs text-muted-foreground mb-4">操作时播放简短的反馈音效</p>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-xs">复制提示音</Label>
-                <p className="text-xs text-muted-foreground">
-                  监听到新内容复制时播放提示音
-                </p>
-              </div>
-              <Switch checked={copySound} onCheckedChange={setCopySound} />
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-xs">粘贴提示音</Label>
-                <p className="text-xs text-muted-foreground">
-                  点击卡片粘贴时播放提示音
-                </p>
-              </div>
-              <Switch checked={pasteSound} onCheckedChange={setPasteSound} />
             </div>
           </div>
         </div>

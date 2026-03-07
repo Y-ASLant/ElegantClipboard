@@ -20,7 +20,7 @@ use database::SettingsRepository;
 use shortcut::parse_shortcut;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tracing::Level;
 use tracing_subscriber::fmt;
@@ -41,8 +41,42 @@ static ACTIVE_QUICK_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
 /// simulate_paste 释放修饰键时可能导致 OS 重新触发快捷键，用此标志拦截假触发
 static PASTE_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Monotonic sequence for text-preview updates; used to cancel stale delayed retries.
-static TEXT_PREVIEW_UPDATE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// 快捷键是否已被用户临时禁用（Win+V 除外）
+static SHORTCUTS_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 临时禁用所有快捷键（Win+V 除外），返回切换后的禁用状态
+pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
+    use std::sync::atomic::Ordering;
+    let was = SHORTCUTS_DISABLED.fetch_xor(true, Ordering::SeqCst);
+    let disabled = !was;
+    if disabled {
+        // 注销主快捷键
+        if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
+            let _ = app.global_shortcut().unregister(sc);
+        }
+        // 注销快速粘贴快捷键
+        for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
+            if let Some(sc) = parse_shortcut(s) {
+                let _ = app.global_shortcut().unregister(sc);
+            }
+        }
+        tracing::info!("All shortcuts disabled (except Win+V)");
+    } else {
+        // 恢复主快捷键
+        if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
+            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    commands::window::toggle_window_visibility(app);
+                }
+            });
+        }
+        // 恢复快速粘贴快捷键
+        let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
+        apply_quick_paste_shortcuts(app, &shortcuts);
+        tracing::info!("All shortcuts re-enabled");
+    }
+    disabled
+}
 
 fn default_quick_paste_shortcuts() -> Vec<String> {
     (1..=9).map(|slot| format!("Alt+{}", slot)).collect()
@@ -233,477 +267,6 @@ fn init_logging(config: &AppConfig) {
 }
 
 #[tauri::command]
-fn get_app_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
-#[tauri::command]
-async fn show_window(window: tauri::WebviewWindow) {
-    let _ = window.show();
-    keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
-    let _ = window.emit("window-shown", ());
-}
-
-#[tauri::command]
-async fn hide_window(window: tauri::WebviewWindow) {
-    save_window_size_if_enabled(window.app_handle(), &window);
-    let _ = window.set_focusable(false);
-    let _ = window.hide();
-    keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
-    input_monitor::disable_mouse_monitoring();
-    commands::hide_preview_windows(window.app_handle());
-    let _ = window.emit("window-hidden", ());
-}
-
-#[tauri::command]
-fn set_window_visibility(visible: bool) {
-    keyboard_hook::set_window_state(if visible {
-        keyboard_hook::WindowState::Visible
-    } else {
-        keyboard_hook::WindowState::Hidden
-    });
-    if visible {
-        input_monitor::enable_mouse_monitoring();
-    } else {
-        input_monitor::disable_mouse_monitoring();
-    }
-}
-
-#[tauri::command]
-async fn minimize_window(window: tauri::WebviewWindow) {
-    let _ = window.minimize();
-}
-
-#[tauri::command]
-async fn toggle_maximize(window: tauri::WebviewWindow) {
-    if window.is_maximized().unwrap_or(false) {
-        let _ = window.unmaximize();
-    } else {
-        let _ = window.maximize();
-    }
-}
-
-#[tauri::command]
-async fn close_window(window: tauri::WebviewWindow) {
-    save_window_size_if_enabled(window.app_handle(), &window);
-    let _ = window.set_focusable(false);
-    let _ = window.hide();
-    keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
-    input_monitor::disable_mouse_monitoring();
-    commands::hide_preview_windows(window.app_handle());
-    let _ = window.emit("window-hidden", ());
-}
-
-#[tauri::command]
-fn get_default_data_path() -> String {
-    let config = AppConfig::load();
-    config.get_data_dir().to_string_lossy().to_string()
-}
-
-#[tauri::command]
-fn get_original_default_path() -> String {
-    database::get_default_db_path()
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default()
-}
-
-#[tauri::command]
-fn check_path_has_data(path: String) -> bool {
-    let p = std::path::PathBuf::from(&path);
-    p.join("clipboard.db").exists()
-}
-
-#[tauri::command]
-fn cleanup_data_at_path(path: String) -> Result<(), String> {
-    use std::fs;
-    let p = std::path::PathBuf::from(&path);
-
-    for ext in &["", "-wal", "-shm"] {
-        let db_file = p.join(format!("clipboard.db{}", ext));
-        if db_file.exists() {
-            fs::remove_file(&db_file).map_err(|e| format!("删除 {:?} 失败: {}", db_file, e))?;
-        }
-    }
-
-    let images_dir = p.join("images");
-    if images_dir.exists() {
-        fs::remove_dir_all(&images_dir)
-            .map_err(|e| format!("删除图片目录失败: {}", e))?;
-    }
-
-    let icons_dir = p.join("icons");
-    if icons_dir.exists() {
-        fs::remove_dir_all(&icons_dir)
-            .map_err(|e| format!("删除图标目录失败: {}", e))?;
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-fn set_data_path(path: String) -> Result<(), String> {
-    let mut config = AppConfig::load();
-    config.data_path = if path.is_empty() { None } else { Some(path) };
-    config.save()
-}
-
-#[tauri::command]
-fn migrate_data_to_path(new_path: String) -> Result<config::MigrationResult, String> {
-    let config = AppConfig::load();
-    let old_path = config.get_data_dir();
-    let new_path = std::path::PathBuf::from(&new_path);
-
-    if old_path == new_path {
-        return Err("Source and destination paths are the same".to_string());
-    }
-
-    let result = config::migrate_data(&old_path, &new_path)?;
-
-    if result.success() {
-        let mut new_config = AppConfig::load();
-        new_config.data_path = Some(new_path.to_string_lossy().to_string());
-        new_config.save()?;
-    }
-
-    Ok(result)
-}
-
-#[tauri::command]
-async fn export_data(
-    app: tauri::AppHandle,
-    state: tauri::State<'_, std::sync::Arc<commands::AppState>>,
-) -> Result<String, String> {
-    use std::fs::{self, File};
-    use std::io::Write;
-    use tauri_plugin_dialog::DialogExt;
-    use zip::write::SimpleFileOptions;
-    use zip::ZipWriter;
-
-    let config = AppConfig::load();
-    let data_dir = config.get_data_dir();
-
-    let export_db = data_dir.join("clipboard.db.export");
-    {
-        let src_conn = state.db.write_connection();
-        let src_conn = src_conn.lock();
-        let _ = fs::remove_file(&export_db);
-        let mut dst_conn = rusqlite::Connection::open(&export_db)
-            .map_err(|e| format!("创建备份文件失败: {}", e))?;
-        let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
-            .map_err(|e| format!("初始化备份失败: {}", e))?;
-        backup
-            .run_to_completion(100, std::time::Duration::from_millis(0), None)
-            .map_err(|e| format!("执行备份失败: {}", e))?;
-    }
-
-    let timestamp = chrono_timestamp();
-    let default_name = format!("ElegantClipboard_backup_{}.zip", timestamp);
-    let dest = app
-        .dialog()
-        .file()
-        .set_title("导出数据")
-        .set_file_name(&default_name)
-        .add_filter("ZIP 压缩文件", &["zip"])
-        .blocking_save_file();
-
-    let dest_path = match dest {
-        Some(p) => p.to_string(),
-        None => {
-            let _ = fs::remove_file(&export_db);
-            return Err("用户取消了导出".to_string());
-        }
-    };
-
-    let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {}", e))?;
-    let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-
-    zip.start_file("clipboard.db", options).map_err(|e| e.to_string())?;
-    zip.write_all(&fs::read(&export_db).map_err(|e| format!("读取数据库副本失败: {}", e))?)
-        .map_err(|e| e.to_string())?;
-    let _ = fs::remove_file(&export_db);
-
-    add_dir_to_zip(&mut zip, &data_dir.join("images"), "images", options)?;
-
-    add_dir_to_zip(&mut zip, &data_dir.join("icons"), "icons", options)?;
-
-    zip.finish().map_err(|e| e.to_string())?;
-
-    let size = fs::metadata(&dest_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
-    Ok(format!("导出成功 ({})", format_size(size)))
-}
-
-#[tauri::command]
-async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
-    use std::fs::{self, File};
-    use std::io::Read;
-    use tauri_plugin_dialog::DialogExt;
-
-    let config = AppConfig::load();
-    let data_dir = config.get_data_dir();
-
-    let src = app
-        .dialog()
-        .file()
-        .set_title("导入数据")
-        .add_filter("ZIP 压缩文件", &["zip"])
-        .blocking_pick_file();
-
-    let src_path = match src {
-        Some(p) => p.to_string(),
-        None => return Err("用户取消了导入".to_string()),
-    };
-
-    let file = File::open(&src_path).map_err(|e| format!("打开文件失败: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效的 ZIP 文件: {}", e))?;
-
-    let has_db = (0..archive.len()).any(|i| {
-        archive
-            .by_index(i)
-            .map(|f| f.name() == "clipboard.db")
-            .unwrap_or(false)
-    });
-    if !has_db {
-        return Err("ZIP 文件中未找到 clipboard.db，不是有效的备份文件".to_string());
-    }
-
-    fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-
-    let mut files_extracted = 0u32;
-
-    for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = entry.name().to_string();
-
-        let rel_path = match sanitize_zip_relative_path(&name) {
-            Some(path) => path,
-            None => {
-                tracing::warn!("Skipping unsafe zip entry path: {}", name);
-                continue;
-            }
-        };
-
-        // Skip transient DB files; only import clipboard.db plus asset folders.
-        if rel_path.ends_with("clipboard.db-wal") || rel_path.ends_with("clipboard.db-shm") {
-            continue;
-        }
-        let out_path = if rel_path == std::path::Path::new("clipboard.db") {
-            data_dir.join("clipboard.db.import")
-        } else {
-            data_dir.join(&rel_path)
-        };
-
-        if entry.is_dir() {
-            fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let mut buf = Vec::new();
-            entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-            fs::write(&out_path, &buf)
-                .map_err(|e| format!("写入 {} 失败: {}", name, e))?;
-            files_extracted += 1;
-        }
-    }
-
-    Ok(format!("导入成功，共恢复 {} 个文件，应用即将重启", files_extracted))
-}
-
-/// 检测并应用待导入的 staging 数据库文件（clipboard.db.import → clipboard.db）。
-fn sanitize_zip_relative_path(name: &str) -> Option<std::path::PathBuf> {
-    use std::path::{Component, Path, PathBuf};
-
-    let raw = Path::new(name);
-    if raw.is_absolute() {
-        return None;
-    }
-
-    let mut clean = PathBuf::new();
-    for component in raw.components() {
-        match component {
-            Component::Normal(seg) => clean.push(seg),
-            Component::CurDir => {}
-            // Reject root/prefix/parent dir to prevent zip-slip style writes.
-            Component::RootDir | Component::Prefix(_) | Component::ParentDir => return None,
-        }
-    }
-
-    if clean.as_os_str().is_empty() {
-        return None;
-    }
-
-    Some(clean)
-}
-
-fn apply_pending_import(db_path: &std::path::Path) {
-    use std::fs;
-
-    let staging = db_path.with_extension("db.import");
-    if !staging.exists() {
-        return;
-    }
-
-    tracing::info!("Detected pending import: {:?}", staging);
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    let db_dir = match db_path.parent() {
-        Some(d) => d,
-        None => return,
-    };
-
-    for attempt in 1..=10 {
-        let deleted = ["", "-wal", "-shm"].iter().all(|ext| {
-            let f = db_dir.join(format!("clipboard.db{ext}"));
-            !f.exists() || fs::remove_file(&f).is_ok()
-        });
-
-        if deleted && fs::rename(&staging, db_path).is_ok() {
-            tracing::info!("Import staging applied (attempt {attempt})");
-            return;
-        }
-
-        if attempt < 10 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-        }
-    }
-
-    tracing::error!("Rename failed after 10 attempts, trying copy fallback");
-    if fs::copy(&staging, db_path).is_ok() {
-        let _ = fs::remove_file(&staging);
-        tracing::info!("Import applied via copy fallback");
-    } else {
-        tracing::error!("Import staging completely failed");
-    }
-}
-
-fn add_dir_to_zip(
-    zip: &mut zip::ZipWriter<std::fs::File>,
-    dir: &std::path::Path,
-    prefix: &str,
-    options: zip::write::SimpleFileOptions,
-) -> Result<(), String> {
-    use std::io::Write;
-
-    if !dir.exists() || !dir.is_dir() {
-        return Ok(());
-    }
-
-    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            let name = format!("{}/{}", prefix, entry.file_name().to_string_lossy());
-            zip.start_file(&name, options).map_err(|e| e.to_string())?;
-            let buf = std::fs::read(&path)
-                .map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
-            zip.write_all(&buf).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
-}
-
-fn chrono_timestamp() -> String {
-    chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
-}
-
-fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
-}
-
-#[tauri::command]
-fn restart_app(app: tauri::AppHandle) {
-    if admin_launch::restart_app() {
-        app.exit(0);
-    } else {
-        tauri::process::restart(&app.env());
-    }
-}
-
-/// 若「记住窗口大小」开关启用，将当前窗口逻辑尺寸保存到 settings 表。
-/// 所有隐藏主窗口的路径都应在 hide 前调用此函数。
-pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(app: &tauri::AppHandle<R>, window: &tauri::WebviewWindow<R>) {
-    if let Some(state) = app.try_state::<std::sync::Arc<commands::AppState>>() {
-        let settings_repo = database::SettingsRepository::new(&state.db);
-        let persist = settings_repo.get("persist_window_size").ok().flatten()
-            .map(|v| v != "false").unwrap_or(true);
-        if persist {
-            if let Ok(size) = window.inner_size() {
-                if let Ok(scale) = window.scale_factor() {
-                    let w = (size.width as f64 / scale).round() as u32;
-                    let h = (size.height as f64 / scale).round() as u32;
-                    let _ = settings_repo.set("window_width", &w.to_string());
-                    let _ = settings_repo.set("window_height", &h.to_string());
-                }
-            }
-        }
-    }
-}
-
-/// 切换主窗口显示/隐藏
-fn toggle_window_visibility(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        if keyboard_hook::get_window_state() == keyboard_hook::WindowState::Visible {
-            save_window_size_if_enabled(app, &window);
-
-            let _ = window.set_focusable(false);
-            let _ = window.hide();
-            keyboard_hook::set_window_state(keyboard_hook::WindowState::Hidden);
-            input_monitor::disable_mouse_monitoring();
-            commands::hide_preview_windows(app);
-            let _ = window.emit("window-hidden", ());
-        } else {
-            let follow_cursor = app
-                .try_state::<std::sync::Arc<commands::AppState>>()
-                .map(|state| {
-                    let repo = database::SettingsRepository::new(&state.db);
-                    let persist = repo.get("persist_window_size").ok().flatten()
-                        .map(|v| v != "false").unwrap_or(true);
-                    if persist {
-                        let w = repo.get("window_width").ok().flatten()
-                            .and_then(|v| v.parse::<f64>().ok());
-                        let h = repo.get("window_height").ok().flatten()
-                            .and_then(|v| v.parse::<f64>().ok());
-                        if let (Some(w), Some(h)) = (w, h) {
-                            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                                width: w,
-                                height: h,
-                            }));
-                        }
-                    }
-                    repo.get("follow_cursor").ok().flatten()
-                        .map(|v| v != "false").unwrap_or(true)
-                })
-                .unwrap_or(true);
-
-            if follow_cursor {
-                if let Err(e) = positioning::position_at_cursor(&window) {
-                    tracing::warn!("定位窗口失败: {}", e);
-                }
-            }
-
-            input_monitor::save_current_focus();
-            // 强制保持非激活展示，避免瞬态窗口（如 PowerToys/Wox 的 Alt+Enter 面板）因失焦关闭
-            let _ = window.set_focusable(false);
-            let _ = window.show();
-            positioning::force_topmost(&window);
-            keyboard_hook::set_window_state(keyboard_hook::WindowState::Visible);
-            input_monitor::enable_mouse_monitoring();
-            let _ = window.emit("window-shown", ());
-        }
-    }
-}
-
-#[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     let saved_shortcut_str = get_current_shortcut();
     let saved_shortcut = parse_shortcut(&saved_shortcut_str);
@@ -716,7 +279,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    toggle_window_visibility(app);
+                    commands::window::toggle_window_visibility(app);
                 }
             });
         }
@@ -726,7 +289,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     if let Err(e) = app.global_shortcut()
         .on_shortcut(winv_shortcut, |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
-                toggle_window_visibility(app);
+                commands::window::toggle_window_visibility(app);
             }
         })
     {
@@ -734,7 +297,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    toggle_window_visibility(app);
+                    commands::window::toggle_window_visibility(app);
                 }
             });
         }
@@ -759,7 +322,7 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
             .global_shortcut()
             .on_shortcut(shortcut, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    toggle_window_visibility(app);
+                    commands::window::toggle_window_visibility(app);
                 }
             });
     }
@@ -791,7 +354,7 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
     app.global_shortcut()
         .on_shortcut(new_sc, |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
-                toggle_window_visibility(app);
+                commands::window::toggle_window_visibility(app);
             }
         })
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
@@ -882,395 +445,6 @@ fn set_quick_paste_shortcut(
     Ok(())
 }
 
-#[tauri::command]
-async fn set_window_pinned(window: tauri::WebviewWindow, pinned: bool) {
-    input_monitor::set_window_pinned(pinned);
-    if pinned {
-        let _ = window.set_focusable(false);
-        #[cfg(windows)]
-        {
-            let prev = input_monitor::get_prev_foreground_hwnd();
-            if prev != 0 {
-                unsafe {
-                    let hwnd = windows::Win32::Foundation::HWND(prev as *mut _);
-                    let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
-                }
-            }
-        }
-    }
-}
-
-#[tauri::command]
-fn is_window_pinned() -> bool {
-    input_monitor::is_window_pinned()
-}
-
-#[tauri::command]
-fn set_window_effect(window: tauri::WebviewWindow, effect: String, dark: Option<bool>) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, WS_EX_LAYERED,
-            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-        };
-
-        let raw_hwnd = window.hwnd().map_err(|e| e.to_string())?;
-        let hwnd = HWND(raw_hwnd.0 as *mut _);
-
-        let is_effect = effect != "none";
-
-        unsafe {
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-            let has_layered = (ex_style as u32) & WS_EX_LAYERED.0 != 0;
-
-            if is_effect && has_layered {
-                SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) & !WS_EX_LAYERED.0) as i32);
-                let _ = SetWindowPos(
-                    hwnd, None, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
-            } else if !is_effect && !has_layered {
-                SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) | WS_EX_LAYERED.0) as i32);
-                let _ = SetWindowPos(
-                    hwnd, None, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
-            }
-        }
-
-        let _ = window_vibrancy::clear_mica(&window);
-        let _ = window_vibrancy::clear_acrylic(&window);
-        let _ = window_vibrancy::clear_tabbed(&window);
-
-        let apply_result: Result<(), String> = match effect.as_str() {
-            "mica" => window_vibrancy::apply_mica(&window, dark)
-                .map_err(|e| format!("Failed to apply mica: {}", e)),
-            "acrylic" => window_vibrancy::apply_acrylic(&window, Some((0, 0, 0, 0)))
-                .map_err(|e| format!("Failed to apply acrylic: {}", e)),
-            "tabbed" => window_vibrancy::apply_tabbed(&window, dark)
-                .map_err(|e| format!("Failed to apply tabbed: {}", e)),
-            _ => Ok(()),
-        };
-
-        if let Err(ref e) = apply_result {
-            tracing::warn!("Window effect '{}' not supported on this OS: {}", effect, e);
-            // Restore WS_EX_LAYERED — we may have removed it before the failed attempt
-            unsafe {
-                let cur_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                if (cur_style as u32) & WS_EX_LAYERED.0 == 0 {
-                    SetWindowLongW(
-                        hwnd, GWL_EXSTYLE,
-                        ((cur_style as u32) | WS_EX_LAYERED.0) as i32,
-                    );
-                    let _ = SetWindowPos(
-                        hwnd, None, 0, 0, 0, 0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                    );
-                }
-            }
-        }
-
-        apply_result?;
-
-        tracing::info!("Window effect set to: {}", effect);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn focus_clipboard_window(window: tauri::WebviewWindow) {
-    input_monitor::focus_clipboard_window(&window);
-}
-
-#[tauri::command]
-async fn restore_last_focus(window: tauri::WebviewWindow) {
-    input_monitor::restore_last_focus(&window);
-}
-
-#[tauri::command]
-fn save_current_focus() {
-    input_monitor::save_current_focus();
-}
-
-#[tauri::command]
-async fn set_keyboard_nav_enabled(window: tauri::WebviewWindow, enabled: bool) {
-    input_monitor::set_keyboard_nav_enabled(enabled);
-    // 不再因键盘导航切换而抢焦点，导航键通过低级钩子转发
-    if !enabled && window.is_visible().unwrap_or(false) && !input_monitor::is_window_pinned() {
-        // 关闭时若窗口仍聚焦则恢复
-        if window.is_focused().unwrap_or(false) {
-            input_monitor::restore_last_focus(&window);
-        }
-    }
-}
-
-#[tauri::command]
-fn is_admin_launch_enabled() -> bool {
-    admin_launch::is_admin_launch_enabled()
-}
-
-#[tauri::command]
-fn enable_admin_launch() -> Result<(), String> {
-    admin_launch::enable_admin_launch()
-}
-
-#[tauri::command]
-fn disable_admin_launch() -> Result<(), String> {
-    admin_launch::disable_admin_launch()
-}
-
-#[tauri::command]
-fn is_running_as_admin() -> bool {
-    admin_launch::is_running_as_admin()
-}
-
-#[tauri::command]
-async fn check_for_update() -> Result<updater::UpdateInfo, String> {
-    tokio::task::spawn_blocking(updater::check_update)
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-async fn download_update(
-    app: tauri::AppHandle,
-    download_url: String,
-    file_name: String,
-) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || updater::download(&app, &download_url, &file_name))
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-fn cancel_update_download() {
-    updater::cancel_download();
-}
-
-#[tauri::command]
-async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
-    updater::install(&installer_path)?;
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    app.exit(0);
-    Ok(())
-}
-
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-async fn show_image_preview(
-    app: tauri::AppHandle,
-    image_path: String,
-    img_width: f64,
-    img_height: f64,
-    offset_y: f64,
-    win_x: f64,
-    win_y: f64,
-    win_width: f64,
-    win_height: f64,
-    align: Option<String>,
-) -> Result<(), String> {
-    let mut newly_created = false;
-    let window = if let Some(w) = app.get_webview_window("image-preview") {
-        w
-    } else {
-        newly_created = true;
-        tauri::WebviewWindowBuilder::new(
-            &app,
-            "image-preview",
-            tauri::WebviewUrl::App("/image-preview.html".into()),
-        )
-        .title("")
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(false)
-        .visible(false)
-        .build()
-        .map_err(|e| format!("创建预览窗口失败: {}", e))?
-    };
-
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-        width: win_width as u32,
-        height: win_height as u32,
-    }));
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-        x: win_x as i32,
-        y: win_y as i32,
-    }));
-
-    if newly_created {
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    }
-
-    let _ = window.set_always_on_top(true);
-    // Make transparent areas click-through so screenshot tools won't detect the window
-    let _ = window.set_ignore_cursor_events(true);
-
-    let _ = window.emit(
-        "image-preview-update",
-        serde_json::json!({
-            "imagePath": image_path,
-            "width": img_width,
-            "height": img_height,
-            "offsetY": offset_y,
-            "align": align.as_deref().unwrap_or("left"),
-        }),
-    );
-
-    let _ = window.show();
-    Ok(())
-}
-
-#[tauri::command]
-async fn hide_image_preview(app: tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("image-preview") {
-        let _ = window.hide();
-        let _ = window.emit("image-preview-clear", ());
-    }
-}
-
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-async fn show_text_preview(
-    app: tauri::AppHandle,
-    text: String,
-    win_x: f64,
-    win_y: f64,
-    win_width: f64,
-    win_height: f64,
-    align: Option<String>,
-    theme: Option<String>,
-    sharp_corners: Option<bool>,
-) -> Result<(), String> {
-    let seq = TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
-    let mut newly_created = false;
-    let window = if let Some(w) = app.get_webview_window("text-preview") {
-        w
-    } else {
-        newly_created = true;
-        tauri::WebviewWindowBuilder::new(
-            &app,
-            "text-preview",
-            tauri::WebviewUrl::App("/text-preview.html".into()),
-        )
-        .title("")
-        .decorations(false)
-        .transparent(true)
-        .shadow(false)
-        .resizable(false)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .focused(false)
-        .visible(false)
-        .build()
-        .map_err(|e| format!("创建文本预览窗口失败: {}", e))?
-    };
-
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-        width: win_width as u32,
-        height: win_height as u32,
-    }));
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-        x: win_x as i32,
-        y: win_y as i32,
-    }));
-
-    let _ = window.set_always_on_top(true);
-    // Keep text preview click-through; scrolling is driven from main window with Ctrl+Wheel.
-    let _ = window.set_ignore_cursor_events(true);
-
-    let update_payload = serde_json::json!({
-        "text": text,
-        "align": align.as_deref().unwrap_or("left"),
-        "theme": theme.as_deref().unwrap_or("light"),
-        "sharpCorners": sharp_corners.unwrap_or(false),
-    });
-    let _ = window.emit("text-preview-update", update_payload.clone());
-    let _ = window.show();
-
-    if newly_created {
-        let window_clone = window.clone();
-        tauri::async_runtime::spawn(async move {
-            for delay_ms in [120_u64, 260, 420, 680] {
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-                if TEXT_PREVIEW_UPDATE_SEQ.load(std::sync::atomic::Ordering::Acquire) != seq {
-                    return;
-                }
-                let _ = window_clone.emit("text-preview-update", update_payload.clone());
-            }
-        });
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-async fn hide_text_preview(app: tauri::AppHandle) {
-    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-    if let Some(window) = app.get_webview_window("text-preview") {
-        let _ = window.hide();
-        let _ = window.emit("text-preview-clear", ());
-    }
-}
-
-#[tauri::command]
-async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), String> {
-    let label = format!("text-editor-{}", id);
-
-    if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        return Ok(());
-    }
-
-    let window = tauri::WebviewWindowBuilder::new(
-        &app,
-        &label,
-        tauri::WebviewUrl::App(format!("/editor?id={}", id).into()),
-    )
-    .title("编辑")
-    .inner_size(600.0, 460.0)
-    .min_inner_size(400.0, 300.0)
-    .decorations(false)
-    .transparent(true)
-    .shadow(true)
-    .visible(false)
-    .resizable(true)
-    .center()
-    .build()
-    .map_err(|e| format!("创建编辑器窗口失败: {}", e))?;
-
-    let _ = window;
-    Ok(())
-}
-
-#[tauri::command]
-async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
-    tray::open_settings_window(&app)
-}
-
-#[tauri::command]
-fn is_log_to_file_enabled() -> bool {
-    AppConfig::load().is_log_to_file()
-}
-
-#[tauri::command]
-fn set_log_to_file(enabled: bool) -> Result<(), String> {
-    let mut config = AppConfig::load();
-    config.log_to_file = Some(enabled);
-    config.save()
-}
-
-#[tauri::command]
-fn get_log_file_path() -> String {
-    AppConfig::load().get_log_path().to_string_lossy().to_string()
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let config = AppConfig::load();
@@ -1318,7 +492,7 @@ pub fn run() {
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
 
-            apply_pending_import(&db_path);
+            commands::data_transfer::apply_pending_import(&db_path);
 
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
@@ -1377,7 +551,7 @@ pub fn run() {
                 .global_shortcut()
                 .on_shortcut(shortcut, |app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        toggle_window_visibility(app);
+                        commands::window::toggle_window_visibility(app);
                     }
                 });
 
@@ -1473,45 +647,87 @@ pub fn run() {
                     .show();
             }
 
+            // 启动后 30 秒自动检查更新（可在设置中关闭）
+            {
+                let auto_check = settings_repo
+                    .get("auto_check_update")
+                    .ok()
+                    .flatten()
+                    .map(|v| v != "false")
+                    .unwrap_or(true); // 默认开启
+                if auto_check {
+                    let app_handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        use tauri::Emitter;
+                        use tauri_plugin_notification::NotificationExt;
+                        std::thread::sleep(std::time::Duration::from_secs(30));
+                        match updater::check_update() {
+                            Ok(info) if info.has_update => {
+                                tracing::info!(
+                                    "Auto update check: new version v{} available",
+                                    info.latest_version
+                                );
+                                let _ = app_handle
+                                    .notification()
+                                    .builder()
+                                    .title("发现新版本")
+                                    .body(format!(
+                                        "v{} → v{}，可在设置中查看详情",
+                                        info.current_version, info.latest_version
+                                    ))
+                                    .show();
+                                let _ = app_handle.emit("auto-update-available", info);
+                            }
+                            Ok(_) => {
+                                tracing::info!("Auto update check: already at latest version");
+                            }
+                            Err(e) => {
+                                tracing::warn!("Auto update check failed: {}", e);
+                            }
+                        }
+                    });
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_app_version,
-            get_default_data_path,
-            get_original_default_path,
-            check_path_has_data,
-            cleanup_data_at_path,
-            set_data_path,
-            migrate_data_to_path,
-            export_data,
-            import_data,
-            restart_app,
-            show_window,
-            hide_window,
-            set_window_visibility,
-            minimize_window,
-            toggle_maximize,
-            close_window,
-            open_settings_window,
-            show_image_preview,
-            hide_image_preview,
-            show_text_preview,
-            hide_text_preview,
-            open_text_editor_window,
-            set_window_pinned,
-            is_window_pinned,
-            set_window_effect,
-            focus_clipboard_window,
-            restore_last_focus,
-            save_current_focus,
-            set_keyboard_nav_enabled,
-            is_admin_launch_enabled,
-            enable_admin_launch,
-            disable_admin_launch,
-            is_running_as_admin,
-            is_log_to_file_enabled,
-            set_log_to_file,
-            get_log_file_path,
+            commands::preview::get_app_version,
+            commands::data_transfer::get_default_data_path,
+            commands::data_transfer::get_original_default_path,
+            commands::data_transfer::check_path_has_data,
+            commands::data_transfer::cleanup_data_at_path,
+            commands::data_transfer::set_data_path,
+            commands::data_transfer::migrate_data_to_path,
+            commands::data_transfer::export_data,
+            commands::data_transfer::import_data,
+            commands::data_transfer::restart_app,
+            commands::window::show_window,
+            commands::window::hide_window,
+            commands::window::set_window_visibility,
+            commands::window::minimize_window,
+            commands::window::toggle_maximize,
+            commands::window::close_window,
+            commands::preview::open_settings_window,
+            commands::preview::show_image_preview,
+            commands::preview::hide_image_preview,
+            commands::preview::show_text_preview,
+            commands::preview::hide_text_preview,
+            commands::preview::open_text_editor_window,
+            commands::window::set_window_pinned,
+            commands::window::is_window_pinned,
+            commands::window::set_window_effect,
+            commands::window::focus_clipboard_window,
+            commands::window::restore_last_focus,
+            commands::window::save_current_focus,
+            commands::window::set_keyboard_nav_enabled,
+            commands::window::is_admin_launch_enabled,
+            commands::window::enable_admin_launch,
+            commands::window::disable_admin_launch,
+            commands::window::is_running_as_admin,
+            commands::preview::is_log_to_file_enabled,
+            commands::preview::set_log_to_file,
+            commands::preview::get_log_file_path,
             enable_winv_replacement,
             disable_winv_replacement,
             is_winv_replacement_enabled,
@@ -1519,10 +735,10 @@ pub fn run() {
             get_current_shortcut,
             get_quick_paste_shortcuts,
             set_quick_paste_shortcut,
-            check_for_update,
-            download_update,
-            cancel_update_download,
-            install_update,
+            commands::window::check_for_update,
+            commands::window::download_update,
+            commands::window::cancel_update_download,
+            commands::window::install_update,
             commands::clipboard::get_clipboard_items,
             commands::clipboard::get_clipboard_item,
             commands::clipboard::get_clipboard_count,
@@ -1531,6 +747,7 @@ pub fn run() {
             commands::clipboard::move_clipboard_item,
             commands::clipboard::bump_item_to_top,
             commands::clipboard::delete_clipboard_item,
+            commands::clipboard::batch_delete_clipboard_items,
             commands::clipboard::clear_history,
             commands::clipboard::clear_all_history,
             commands::clipboard::copy_to_clipboard,

@@ -14,6 +14,8 @@ pub struct ClipboardMonitor {
     running: Arc<AtomicBool>,
     /// 暂停计数器：> 0 时忽略剪贴板变化，防止并发复制操作竞态
     pause_count: Arc<AtomicU32>,
+    /// 用户手动暂停（托盘菜单），独立于内部 pause_count
+    user_paused: Arc<AtomicBool>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// 当前活动分组（None = 默认分组），与 AppState 共享
@@ -25,6 +27,7 @@ impl ClipboardMonitor {
         Self {
             running: Arc::new(AtomicBool::new(false)),
             pause_count: Arc::new(AtomicU32::new(0)),
+            user_paused: Arc::new(AtomicBool::new(false)),
             handler: Arc::new(Mutex::new(None)),
             thread_handle: Arc::new(Mutex::new(None)),
             active_group_id: Arc::new(Mutex::new(None)),
@@ -57,6 +60,7 @@ impl ClipboardMonitor {
 
         let running = self.running.clone();
         let pause_count = self.pause_count.clone();
+        let user_paused = self.user_paused.clone();
         let handler = self.handler.clone();
         let active_group_id = self.active_group_id.clone();
 
@@ -66,6 +70,7 @@ impl ClipboardMonitor {
             let clipboard_handler = MonitorHandler {
                 running: running.clone(),
                 pause_count,
+                user_paused,
                 handler,
                 app_handle,
                 active_group_id,
@@ -135,6 +140,15 @@ impl ClipboardMonitor {
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
+
+    /// 用户手动切换暂停状态，返回切换后的暂停状态
+    pub fn toggle_user_pause(&self) -> bool {
+        let was = self.user_paused.fetch_xor(true, Ordering::SeqCst);
+        let now = !was;
+        info!("Clipboard monitor user pause toggled: {}", now);
+        now
+    }
+
 }
 
 impl Default for ClipboardMonitor {
@@ -147,6 +161,7 @@ impl Default for ClipboardMonitor {
 struct MonitorHandler {
     running: Arc<AtomicBool>,
     pause_count: Arc<AtomicU32>,
+    user_paused: Arc<AtomicBool>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
     app_handle: AppHandle,
     active_group_id: Arc<Mutex<Option<i64>>>,
@@ -159,8 +174,8 @@ impl CMHandler for MonitorHandler {
             return CallbackResult::Stop;
         }
 
-        // 检查是否已暂停
-        if self.pause_count.load(Ordering::SeqCst) > 0 {
+        // 检查是否已暂停（内部计数或用户手动）
+        if self.pause_count.load(Ordering::SeqCst) > 0 || self.user_paused.load(Ordering::SeqCst) {
             debug!("Clipboard change ignored (paused)");
             return CallbackResult::Next;
         }

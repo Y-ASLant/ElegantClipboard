@@ -464,6 +464,35 @@ impl ClipboardRepository {
         Ok(())
     }
 
+    /// 批量删除指定 ID 的条目，返回被删除条目的图片路径（用于文件清理）
+    pub fn batch_delete(&self, ids: &[i64]) -> Result<(i64, Vec<String>), rusqlite::Error> {
+        if ids.is_empty() {
+            return Ok((0, vec![]));
+        }
+        let conn = self.write_conn.lock();
+        let placeholders: Vec<String> = ids.iter().map(|_| "?".to_string()).collect();
+        let in_clause = placeholders.join(",");
+
+        let sql = format!(
+            "SELECT image_path FROM clipboard_items WHERE id IN ({}) AND image_path IS NOT NULL",
+            in_clause
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params_ref: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let paths: Vec<String> = stmt
+            .query_map(params_ref.as_slice(), |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let del_sql = format!("DELETE FROM clipboard_items WHERE id IN ({})", in_clause);
+        let params_ref2: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let deleted = conn.execute(&del_sql, params_ref2.as_slice())? as i64;
+        debug!("Batch deleted {} clipboard items", deleted);
+        Ok((deleted, paths))
+    }
+
     /// 获取可清除条目的图片路径（按分组/类型过滤）
     pub fn get_clearable_image_paths(
         &self,

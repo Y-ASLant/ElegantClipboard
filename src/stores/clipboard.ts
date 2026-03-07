@@ -70,6 +70,35 @@ interface ClipboardState {
   /** Reset view state: clear search, clear type filter, scroll to top, refresh */
   resetView: () => Promise<void>;
   setupListener: () => Promise<() => void>;
+
+  // Batch selection
+  batchMode: boolean;
+  selectedIds: Set<number>;
+  lastSelectedIndex: number;
+  setBatchMode: (enabled: boolean) => void;
+  toggleSelect: (id: number, index: number, shiftKey: boolean) => void;
+  selectAll: () => void;
+  deselectAll: () => void;
+  batchDelete: () => Promise<void>;
+}
+
+async function doPaste(
+  get: () => ClipboardState,
+  id: number,
+  command: "paste_content" | "paste_content_as_plain",
+) {
+  try {
+    cancelPendingFocusRestore();
+    playPasteSound("immediate");
+    const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
+    await invoke(command, { id, closeWindow: pasteCloseWindow });
+    playPasteSound("after_success");
+    if (pasteMoveToTop) {
+      invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
+    }
+  } catch (error) {
+    logError(`Failed to ${command}:`, error);
+  }
 }
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
@@ -116,12 +145,12 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   setSelectedGroup: (group: string | null) => {
-    set({ selectedGroup: group });
+    set({ selectedGroup: group, batchMode: false, selectedIds: new Set(), lastSelectedIndex: -1 });
     get().fetchItems();
   },
 
   setSelectedGroupId: (groupId: number | null) => {
-    set({ selectedGroupId: groupId });
+    set({ selectedGroupId: groupId, batchMode: false, selectedIds: new Set(), lastSelectedIndex: -1 });
     invoke("set_active_group", { groupId }).catch(() => {});
     get().fetchItems();
   },
@@ -188,31 +217,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   pasteContent: async (id: number) => {
-    try {
-      cancelPendingFocusRestore();
-      playPasteSound();
-      const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
-      await invoke("paste_content", { id, closeWindow: pasteCloseWindow });
-      if (pasteMoveToTop) {
-        invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
-      }
-    } catch (error) {
-      logError("Failed to paste content:", error);
-    }
+    await doPaste(get, id, "paste_content");
   },
 
   pasteAsPlainText: async (id: number) => {
-    try {
-      cancelPendingFocusRestore();
-      playPasteSound();
-      const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
-      await invoke("paste_content_as_plain", { id, closeWindow: pasteCloseWindow });
-      if (pasteMoveToTop) {
-        invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
-      }
-    } catch (error) {
-      logError("Failed to paste as plain text:", error);
-    }
+    await doPaste(get, id, "paste_content_as_plain");
   },
 
   clearHistory: async (contentType = null) => {
@@ -236,17 +245,68 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     set((state) => ({
       searchQuery: "",
       selectedGroup: null,
+      batchMode: false,
+      selectedIds: new Set(),
+      lastSelectedIndex: -1,
       _resetToken: state._resetToken + 1,
     }));
     await get().fetchItems({ search: "" });
   },
 
   setupListener: async () => {
-    const unlisten = await listen<number>("clipboard-updated", () => {
-      playCopySound();
-      get().refresh();
+    const unlisten = await listen<number>("clipboard-updated", async () => {
+      playCopySound("immediate");
+      await get().refresh();
+      playCopySound("after_success");
     });
     return unlisten;
+  },
+
+  // Batch selection
+  batchMode: false,
+  selectedIds: new Set<number>(),
+  lastSelectedIndex: -1,
+
+  setBatchMode: (enabled) => {
+    set({ batchMode: enabled, selectedIds: new Set(), lastSelectedIndex: -1 });
+  },
+
+  toggleSelect: (id, index, shiftKey) => {
+    const { selectedIds, lastSelectedIndex, items } = get();
+    const next = new Set(selectedIds);
+
+    if (shiftKey && lastSelectedIndex >= 0) {
+      const from = Math.min(lastSelectedIndex, index);
+      const to = Math.max(lastSelectedIndex, index);
+      for (let i = from; i <= to; i++) {
+        if (items[i]) next.add(items[i].id);
+      }
+    } else {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    }
+    set({ selectedIds: next, lastSelectedIndex: index });
+  },
+
+  selectAll: () => {
+    const ids = new Set(get().items.map((item) => item.id));
+    set({ selectedIds: ids });
+  },
+
+  deselectAll: () => {
+    set({ selectedIds: new Set() });
+  },
+
+  batchDelete: async () => {
+    const { selectedIds } = get();
+    if (selectedIds.size === 0) return;
+    try {
+      await invoke("batch_delete_clipboard_items", { ids: Array.from(selectedIds) });
+      set({ selectedIds: new Set(), batchMode: false, lastSelectedIndex: -1 });
+      await get().refresh();
+    } catch (error) {
+      logError("Failed to batch delete:", error);
+    }
   },
 }));
 

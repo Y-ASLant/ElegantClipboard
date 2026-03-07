@@ -156,7 +156,7 @@ export function ThemeTab() {
                   role="radio"
                   aria-checked={isActive}
                   onClick={() => setDarkMode(opt.value)}
-                  className={`relative z-[1] rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  className={`relative z-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                     isActive
                       ? "text-primary-foreground"
                       : "text-foreground/80 hover:text-foreground"

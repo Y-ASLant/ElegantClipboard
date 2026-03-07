@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
+import { useUISettings } from "@/stores/ui-settings";
 
 export interface ShortcutSettings {
   shortcut: string;
@@ -59,6 +60,8 @@ export function ShortcutsTab({
   settings,
   onSettingsChange,
 }: ShortcutsTabProps) {
+  const keyboardNavigation = useUISettings((s) => s.keyboardNavigation);
+  const setKeyboardNavigation = useUISettings((s) => s.setKeyboardNavigation);
   const [winvLoading, setWinvLoading] = useState(false);
   const [winvError, setWinvError] = useState("");
   const [winvConfirmDialogOpen, setWinvConfirmDialogOpen] = useState(false);
@@ -322,6 +325,26 @@ export function ShortcutsTab({
   return (
     <>
       <div className="space-y-4">
+        {/* Keyboard Navigation Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">快捷导航</h3>
+          <p className="text-xs text-muted-foreground mb-4">使用键盘快速操作剪贴板列表</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">键盘导航</Label>
+                <p className="text-xs text-muted-foreground">
+                  方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除
+                </p>
+              </div>
+              <Switch
+                checked={keyboardNavigation}
+                onCheckedChange={setKeyboardNavigation}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Shortcut Card */}
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium mb-3">呼出快捷键</h3>
@@ -405,8 +428,8 @@ export function ShortcutsTab({
               </p>
             </div>
             {quickPasteExpanded
-              ? <ChevronUp16Regular className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              : <ChevronDown16Regular className="w-4 h-4 text-muted-foreground flex-shrink-0" />}
+              ? <ChevronUp16Regular className="w-4 h-4 text-muted-foreground shrink-0" />
+              : <ChevronDown16Regular className="w-4 h-4 text-muted-foreground shrink-0" />}
           </button>
 
           <div
