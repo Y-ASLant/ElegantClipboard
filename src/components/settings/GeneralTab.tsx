@@ -31,6 +31,8 @@ interface GeneralTabProps {
 export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const autoResetState = useUISettings((s) => s.autoResetState);
   const setAutoResetState = useUISettings((s) => s.setAutoResetState);
+  const windowAnimation = useUISettings((s) => s.windowAnimation);
+  const setWindowAnimation = useUISettings((s) => s.setWindowAnimation);
   const searchAutoFocus = useUISettings((s) => s.searchAutoFocus);
   const setSearchAutoFocus = useUISettings((s) => s.setSearchAutoFocus);
   const searchAutoClear = useUISettings((s) => s.searchAutoClear);
@@ -175,6 +177,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <Switch
                 checked={autoResetState}
                 onCheckedChange={setAutoResetState}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">入场动画</Label>
+                <p className="text-xs text-muted-foreground">
+                  窗口显示时播放淡入缩放动画
+                </p>
+              </div>
+              <Switch
+                checked={windowAnimation}
+                onCheckedChange={setWindowAnimation}
               />
             </div>
           </div>

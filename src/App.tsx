@@ -76,12 +76,15 @@ function App() {
   const cardDensity = useUISettings((s) => s.cardDensity);
   const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
   const toolbarButtons = useUISettings((s) => s.toolbarButtons);
+  const windowAnimation = useUISettings((s) => s.windowAnimation);
   const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const segmentContainerRef = useRef<HTMLDivElement>(null);
   const [segmentIndicator, setSegmentIndicator] = useState({ left: 0, width: 0 });
+  // 窗口入场动画状态：null = 初始（不添加任何 class），true = 入场动画，false = 隐藏
+  const [windowVisible, setWindowVisible] = useState<boolean | null>(null);
   // 分组下拉状态
   const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
   const groupDropdownRef = useRef<HTMLDivElement>(null);
@@ -230,6 +233,7 @@ function App() {
   // 窗口显示时按需刷新数据
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
+      setWindowVisible(true);
       // 重新读取设置（可能在设置窗口中更改）
       useUISettings.persist.rehydrate();
       if (searchAutoClear) {
@@ -258,6 +262,7 @@ function App() {
   // 窗口隐藏时关闭弹出层并可选重置状态
   useEffect(() => {
     const unlisten = listen("window-hidden", () => {
+      setWindowVisible(false);
       dismissOverlays();
       setGroupDropdownOpen(false);
       if (autoResetState) {
@@ -416,7 +421,7 @@ function App() {
   }, [isPinned, openSettings, togglePinned]);
 
   return (
-    <div className="h-screen flex flex-col bg-muted/40 overflow-hidden">
+    <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden", windowAnimation && windowVisible === true && "window-enter", windowAnimation && windowVisible === false && "window-hidden")}>
       {/* 顶栏：搜索 + 操作 */}
       <div
         className="flex items-center gap-2 px-2 pt-2 pb-0.5 shrink-0 select-none"

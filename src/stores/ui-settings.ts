@@ -44,6 +44,7 @@ interface UISettings {
   pasteMoveToTop: boolean;
   showCategoryFilter: boolean;
   showDragAreaIndicator: boolean;
+  windowAnimation: boolean;
   windowEffect: WindowEffect;
   toolbarButtons: ToolbarButton[];
   setCardMaxLines: (lines: number) => void;
@@ -75,6 +76,7 @@ interface UISettings {
   setPasteMoveToTop: (enabled: boolean) => void;
   setShowCategoryFilter: (enabled: boolean) => void;
   setShowDragAreaIndicator: (enabled: boolean) => void;
+  setWindowAnimation: (enabled: boolean) => void;
   setWindowEffect: (effect: WindowEffect) => void;
   setToolbarButtons: (buttons: ToolbarButton[]) => void;
 }
@@ -127,6 +129,7 @@ export const useUISettings = create<UISettings>()(
         pasteMoveToTop: false,
         showCategoryFilter: true,
         showDragAreaIndicator: true,
+        windowAnimation: true,
         windowEffect: "none" as WindowEffect,
         toolbarButtons: ["clear", "pin", "settings"] as ToolbarButton[],
 
@@ -158,6 +161,7 @@ export const useUISettings = create<UISettings>()(
         setPasteMoveToTop: makeSetter("pasteMoveToTop"),
         setShowCategoryFilter: makeSetter("showCategoryFilter"),
         setShowDragAreaIndicator: makeSetter("showDragAreaIndicator"),
+        setWindowAnimation: makeSetter("windowAnimation"),
         setToolbarButtons: makeSetter("toolbarButtons"),
 
         // Special setters with extra side effects
