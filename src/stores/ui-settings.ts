@@ -28,6 +28,7 @@ interface UISettings {
   previewPosition: "auto" | "left" | "right";
   imageAutoHeight: boolean;
   imageMaxHeight: number;
+  showImageFileName: boolean;
   colorTheme: ColorTheme;
   sharpCorners: boolean;
   autoResetState: boolean;
@@ -63,6 +64,7 @@ interface UISettings {
   setPreviewPosition: (pos: "auto" | "left" | "right") => void;
   setImageAutoHeight: (auto: boolean) => void;
   setImageMaxHeight: (height: number) => void;
+  setShowImageFileName: (show: boolean) => void;
   setColorTheme: (theme: ColorTheme) => void;
   setSharpCorners: (enabled: boolean) => void;
   setAutoResetState: (enabled: boolean) => void;
@@ -118,6 +120,7 @@ export const useUISettings = create<UISettings>()(
         previewPosition: "auto" as "auto" | "left" | "right",
         imageAutoHeight: true,
         imageMaxHeight: 512,
+        showImageFileName: true,
         colorTheme: "system" as ColorTheme,
         sharpCorners: false,
         autoResetState: false,
@@ -153,6 +156,7 @@ export const useUISettings = create<UISettings>()(
         setPreviewPosition: makeSetter("previewPosition"),
         setImageAutoHeight: makeSetter("imageAutoHeight"),
         setImageMaxHeight: makeSetter("imageMaxHeight"),
+        setShowImageFileName: makeSetter("showImageFileName"),
         setColorTheme: makeSetter("colorTheme"),
         setSharpCorners: makeSetter("sharpCorners"),
         setAutoResetState: makeSetter("autoResetState"),

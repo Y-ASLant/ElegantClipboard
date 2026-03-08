@@ -497,6 +497,20 @@ function App() {
           </span>
           <div className="flex items-center gap-1">
             <button
+              onClick={async () => {
+                try {
+                  await invoke("merge_paste_content", { ids: Array.from(selectedIds) });
+                  setBatchMode(false);
+                } catch (error) {
+                  logError("Merge paste failed:", error);
+                }
+              }}
+              disabled={selectedIds.size < 2}
+              className="text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              合并粘贴
+            </button>
+            <button
               onClick={() => setBatchDeleteDialogOpen(true)}
               disabled={selectedIds.size === 0}
               className="text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"

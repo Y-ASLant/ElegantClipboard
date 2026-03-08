@@ -183,6 +183,14 @@ impl CMHandler for MonitorHandler {
         // 先获取来源应用（在读取内容之前）
         let source = super::source_app::get_clipboard_source_app();
 
+        // 检查来源应用是否在排除列表中
+        if let Some(ref handler) = *self.handler.lock() {
+            if handler.is_source_app_excluded(&source) {
+                debug!("Clipboard change ignored (source app excluded: {:?})", source.as_ref().map(|s| &s.app_name));
+                return CallbackResult::Next;
+            }
+        }
+
         // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
         let content = match read_clipboard_content_with_retry() {
             Some(c) => c,
@@ -192,8 +200,12 @@ impl CMHandler for MonitorHandler {
         // 读取当前活动分组
         let group_id = *self.active_group_id.lock();
 
-        // 处理内容
+        // 检查内容类型 + 处理内容（单次加锁）
         if let Some(ref handler) = *self.handler.lock() {
+            if !handler.is_content_type_allowed(&content) {
+                debug!("Clipboard change ignored (content type not allowed)");
+                return CallbackResult::Next;
+            }
             match handler.process(content, source, group_id) {
                 Ok(Some(id)) => {
                     debug!("Processed clipboard item: {}", id);

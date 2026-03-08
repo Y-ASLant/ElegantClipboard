@@ -567,6 +567,7 @@ const FileImagePreview = memo(function FileImagePreview({
   sourceAppIcon?: string | null;
 }) {
   const [imgError, setImgError] = useState(false);
+  const showImageFileName = useUISettings((s) => s.showImageFileName);
   const fileName = getFileNameFromPath(filePath);
 
   // 虚拟列表复用组件时，filePath 变化需重置错误状态
@@ -608,9 +609,11 @@ const FileImagePreview = memo(function FileImagePreview({
         onError={() => setImgError(true)}
         imagePath={filePath}
         overlay={
-          <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/50 to-transparent px-2 py-1">
-            <p className="text-[11px] text-white truncate">{fileName}</p>
-          </div>
+          showImageFileName ? (
+            <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/50 to-transparent px-2 py-1">
+              <p className="text-[11px] text-white truncate">{fileName}</p>
+            </div>
+          ) : undefined
         }
       />
       <CardFooter

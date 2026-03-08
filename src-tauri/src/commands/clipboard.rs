@@ -584,6 +584,46 @@ pub async fn paste_text_direct(
     Ok(())
 }
 
+/// 合并粘贴：将多条记录的文本内容合并后粘贴
+#[tauri::command]
+pub async fn merge_paste_content(
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+    ids: Vec<i64>,
+    separator: Option<String>,
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Err("No items selected".to_string());
+    }
+
+    let repo = ClipboardRepository::new(&state.db);
+    let sep = separator.as_deref().unwrap_or("\n");
+
+    let mut texts: Vec<String> = Vec::new();
+    for id in &ids {
+        let item = repo
+            .get_by_id(*id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Item {} not found", id))?;
+
+        // 提取文本内容：text_content > preview > file_paths
+        if let Some(text) = item.text_content.filter(|t| !t.is_empty()) {
+            texts.push(text);
+        } else if let Some(preview) = item.preview.filter(|p| !p.is_empty()) {
+            texts.push(preview);
+        }
+    }
+
+    if texts.is_empty() {
+        return Err("选中的项目没有可合并的文本内容".to_string());
+    }
+
+    let merged = texts.join(sep);
+    paste_plain_text_to_active_window(&state, &app, &merged, true)?;
+    debug!("Merge pasted {} items ({} chars)", ids.len(), merged.len());
+    Ok(())
+}
+
 /// 粘贴快速槽位（1-9）对应条目到活动窗口。
 pub fn quick_paste_by_slot(
     state: &Arc<AppState>,

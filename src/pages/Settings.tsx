@@ -9,10 +9,12 @@ import {
   Info16Regular,
   ArrowSync16Regular,
   Speaker216Regular,
+  Filter16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
+import { AppFilterTab } from "@/components/settings/AppFilterTab";
 import { AudioTab } from "@/components/settings/AudioTab";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
@@ -32,7 +34,7 @@ import { cn } from "@/lib/utils";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
-type TabType = "general" | "display" | "theme" | "data" | "audio" | "shortcuts" | "about";
+type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "about";
 
 const navItems: {
   id: TabType;
@@ -43,6 +45,7 @@ const navItems: {
   { id: "display", label: "显示设置", icon: LayoutColumnTwo16Regular },
   { id: "theme", label: "外观主题", icon: Color16Regular },
   { id: "data", label: "数据管理", icon: Database16Regular },
+  { id: "appfilter", label: "应用过滤", icon: Filter16Regular },
   { id: "audio", label: "音效设置", icon: Speaker216Regular },
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
   { id: "about", label: "关于软件", icon: Info16Regular },
@@ -300,6 +303,8 @@ export function Settings() {
                   }
                 />
               )}
+
+              {activeTab === "appfilter" && <AppFilterTab />}
 
               {activeTab === "display" && <DisplayTab />}
 

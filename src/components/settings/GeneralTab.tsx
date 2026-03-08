@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,12 +48,30 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [persistWindowSize, setPersistWindowSize] = useState(true);
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
 
+  // 内容类型过滤
+  const ALL_MONITOR_TYPES = ["text", "html", "rtf", "image", "files"] as const;
+  const TYPE_LABELS: Record<string, string> = {
+    text: "纯文本",
+    html: "HTML",
+    rtf: "RTF",
+    image: "图片",
+    files: "文件",
+  };
+  const [monitorTypes, setMonitorTypes] = useState<Set<string>>(new Set(ALL_MONITOR_TYPES));
+
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "persist_window_size" })
       .then((v) => setPersistWindowSize(v !== "false"))
       .catch(() => {});
     invoke<string | null>("get_setting", { key: "auto_check_update" })
       .then((v) => setAutoCheckUpdate(v !== "false"))
+      .catch(() => {});
+    invoke<string | null>("get_setting", { key: "monitor_types" })
+      .then((v) => {
+        if (v && v.length > 0) {
+          setMonitorTypes(new Set(v.split(",").map((t) => t.trim()).filter(Boolean)));
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -79,6 +97,23 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       logError("Failed to save auto_check_update:", error);
     }
   };
+
+  const toggleMonitorType = useCallback(async (type: string) => {
+    setMonitorTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        // 至少保留一种类型
+        if (next.size <= 1) return prev;
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      const value = Array.from(next).join(",");
+      invoke("set_setting", { key: "monitor_types", value }).catch(() => {});
+      return next;
+    });
+  }, []);
+
 
   return (
     <>
@@ -245,6 +280,31 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               </div>
               <Switch checked={pasteMoveToTop} onCheckedChange={setPasteMoveToTop} />
             </div>
+          </div>
+        </div>
+
+        {/* Monitor Content Types Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">监听内容类型</h3>
+          <p className="text-xs text-muted-foreground mb-4">选择要监听的剪贴板内容类型，未勾选的类型将不会被记录</p>
+          <div className="flex flex-wrap gap-2">
+            {ALL_MONITOR_TYPES.map((type) => {
+              const active = monitorTypes.has(type);
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => toggleMonitorType(type)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
+                  }`}
+                >
+                  {TYPE_LABELS[type]}
+                </button>
+              );
+            })}
           </div>
         </div>
 

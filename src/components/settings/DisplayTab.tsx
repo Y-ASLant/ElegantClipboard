@@ -132,6 +132,7 @@ export function DisplayTab() {
     cardMaxLines, setCardMaxLines,
     imageAutoHeight, setImageAutoHeight,
     imageMaxHeight, setImageMaxHeight,
+    showImageFileName, setShowImageFileName,
     imagePreviewEnabled, setImagePreviewEnabled,
     textPreviewEnabled, setTextPreviewEnabled,
     previewUnboundedMode, setPreviewUnboundedMode,
@@ -325,6 +326,7 @@ export function DisplayTab() {
               </p>
             </div>
           )}
+
         </div>
       </div>
 
@@ -482,6 +484,14 @@ export function DisplayTab() {
             <Switch checked={showByteSize} onCheckedChange={setShowByteSize} />
           </div>
           
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">显示图片文件名</Label>
+              <p className="text-xs text-muted-foreground">在图片预览上显示文件名（如截图工具生成的名称）</p>
+            </div>
+            <Switch checked={showImageFileName} onCheckedChange={setShowImageFileName} />
+          </div>
+
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">显示复制来源</Label>

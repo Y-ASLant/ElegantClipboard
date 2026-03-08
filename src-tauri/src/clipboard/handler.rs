@@ -12,6 +12,56 @@ const MAX_PREVIEW_LENGTH: usize = 200;
 const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
 const DEFAULT_AUTO_CLEANUP_DAYS: i64 = 30;
 
+/// 通配符匹配（支持 * 和 ?，不区分大小写，O(n) 空间）
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
+    let text: Vec<char> = text.to_lowercase().chars().collect();
+    let tlen = text.len();
+
+    let mut prev = vec![false; tlen + 1];
+    let mut curr = vec![false; tlen + 1];
+    prev[0] = true;
+
+    for &pc in &pattern {
+        curr.fill(false);
+        if pc == '*' {
+            curr[0] = prev[0];
+            for j in 0..tlen {
+                curr[j + 1] = prev[j + 1] || curr[j];
+            }
+        } else {
+            for (j, &tc) in text.iter().enumerate() {
+                if pc == '?' || pc == tc {
+                    curr[j + 1] = prev[j];
+                }
+            }
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[tlen]
+}
+
+/// 检查来源应用是否匹配过滤规则
+/// 支持通配符模式和普通子串匹配，匹配目标：应用名、进程名、进程路径
+fn matches_app_filter(filter: &str, app_name: &str, exe_name: &str, exe_path: &str) -> bool {
+    let filter = filter.trim();
+    if filter.is_empty() {
+        return false;
+    }
+
+    if filter.contains('*') || filter.contains('?') {
+        wildcard_match(filter, app_name)
+            || wildcard_match(filter, exe_name)
+            || wildcard_match(filter, exe_path)
+    } else {
+        let f = filter.to_lowercase();
+        app_name.to_lowercase().contains(&f)
+            || exe_name.to_lowercase().contains(&f)
+            || exe_path.to_lowercase().contains(&f)
+    }
+}
+
 /// 按字符边界截断超长内容
 fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
     if max_size > 0 && content.len() > max_size {
@@ -110,6 +160,93 @@ impl ClipboardHandler {
             Some("ignore") => "ignore",
             Some("always_new") => "always_new",
             _ => "move_to_top", // 默认行为
+        }
+    }
+
+    /// 检查内容类型是否被允许监听
+    /// 读取 `monitor_types` 设置（逗号分隔，如 "text,html,rtf,image,files"）
+    /// 默认全部允许
+    pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
+        let allowed = self
+            .settings_repo
+            .get("monitor_types")
+            .ok()
+            .flatten();
+
+        // 无设置或空字符串 → 全部允许
+        let allowed = match allowed {
+            Some(ref s) if !s.is_empty() => s,
+            _ => return true,
+        };
+
+        let content_type = match content {
+            ClipboardContent::Text(_) => "text",
+            ClipboardContent::Html { .. } => "html",
+            ClipboardContent::Rtf { .. } => "rtf",
+            ClipboardContent::Image(_) => "image",
+            ClipboardContent::Files(_) => "files",
+        };
+
+        allowed.split(',').any(|t| t.trim() == content_type)
+    }
+
+    /// 检查来源应用是否应被过滤
+    /// 设置项：
+    ///   - `app_filter_enabled`: "true"/"false"（默认 false）
+    ///   - `app_filter_mode`: "blacklist"（默认）/ "whitelist"
+    ///   - `app_filter_list`: 逗号分隔的规则列表，支持通配符 * 和 ?
+    /// 黑名单模式：匹配则排除；白名单模式：不匹配则排除
+    pub fn is_source_app_excluded(&self, source: &Option<super::source_app::SourceAppInfo>) -> bool {
+        let source = match source {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // 检查是否启用
+        let enabled = self
+            .settings_repo
+            .get("app_filter_enabled")
+            .ok()
+            .flatten()
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if !enabled {
+            return false;
+        }
+
+        let filter_list = self
+            .settings_repo
+            .get("app_filter_list")
+            .ok()
+            .flatten();
+
+        let filter_list = match filter_list {
+            Some(ref s) if !s.is_empty() => s,
+            _ => return false,
+        };
+
+        let mode = self
+            .settings_repo
+            .get("app_filter_mode")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "blacklist".to_string());
+
+        // 从 exe_path 提取文件名
+        let exe_name = std::path::Path::new(&source.exe_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        let matches = filter_list.split(',').any(|entry| {
+            let entry = entry.trim();
+            if entry.is_empty() { return false; }
+            matches_app_filter(entry, &source.app_name, exe_name, &source.exe_path)
+        });
+
+        match mode.as_str() {
+            "whitelist" => !matches, // 白名单：不在列表中则排除
+            _ => matches,            // 黑名单（默认）：在列表中则排除
         }
     }
 

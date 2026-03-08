@@ -243,6 +243,26 @@ fn get_file_description(exe_path: &str) -> Option<String> {
     }
 }
 
+/// 公开版本供其他模块调用
+pub fn compute_icon_cache_key_pub(exe_path: &str) -> String {
+    compute_icon_cache_key(exe_path)
+}
+
+/// 获取应用显示名称（从 exe 版本信息读取 FileDescription，失败则用文件名）
+#[cfg(target_os = "windows")]
+pub fn get_app_display_name_pub(exe_path: &str) -> String {
+    get_app_display_name(exe_path)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn get_app_display_name_pub(exe_path: &str) -> String {
+    Path::new(exe_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
 fn compute_icon_cache_key(exe_path: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(exe_path.to_lowercase().as_bytes());

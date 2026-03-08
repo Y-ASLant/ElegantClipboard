@@ -198,6 +198,111 @@ pub async fn disable_autostart(
     Ok(())
 }
 
+// ============ 运行中应用列表（应用过滤选择器） ============
+
+#[derive(serde::Serialize, Clone)]
+pub struct RunningAppInfo {
+    pub name: String,
+    pub process: String,
+    pub icon: Option<String>,
+}
+
+/// 获取当前运行中的可见应用列表（用于应用过滤设置的可视化选择器）
+#[tauri::command]
+pub async fn get_running_apps(_state: State<'_, Arc<AppState>>) -> Result<Vec<RunningAppInfo>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::{HWND, LPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+        };
+        use windows::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        use windows_core::BOOL;
+
+        struct EnumCtx {
+            self_pid: u32,
+            apps: Vec<(String, String, String)>, // (name, process, exe_path)
+        }
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            unsafe {
+                let ctx = &mut *(lparam.0 as *mut EnumCtx);
+
+                if !IsWindowVisible(hwnd).as_bool() {
+                    return BOOL(1);
+                }
+
+                let mut pid: u32 = 0;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                if pid == 0 || pid == ctx.self_pid {
+                    return BOOL(1);
+                }
+
+                let mut title_buf = [0u16; 512];
+                let title_len = GetWindowTextW(hwnd, &mut title_buf);
+                if title_len <= 0 {
+                    return BOOL(1);
+                }
+                let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
+                if title.trim().is_empty() || title == "Program Manager" {
+                    return BOOL(1);
+                }
+
+                if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                    use windows::Win32::System::Threading::{QueryFullProcessImageNameW, PROCESS_NAME_FORMAT};
+                    let mut buf = [0u16; 1024];
+                    let mut size = buf.len() as u32;
+                    if QueryFullProcessImageNameW(
+                        handle,
+                        PROCESS_NAME_FORMAT(0),
+                        windows::core::PWSTR::from_raw(buf.as_mut_ptr()),
+                        &mut size,
+                    ).is_ok() && size > 0 {
+                        let path = String::from_utf16_lossy(&buf[..size as usize]);
+                        let process = path.split('\\').last().unwrap_or(&path).to_string();
+                        ctx.apps.push((title, process, path));
+                    }
+                    let _ = windows::Win32::Foundation::CloseHandle(handle);
+                }
+
+                BOOL(1)
+            }
+        }
+
+        let mut ctx = EnumCtx {
+            self_pid: std::process::id(),
+            apps: Vec::new(),
+        };
+
+        unsafe {
+            let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+        }
+
+        // 去重（按进程名）并提取图标
+        ctx.apps.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        ctx.apps.dedup_by(|a, b| a.1.to_lowercase() == b.1.to_lowercase());
+
+        let config = crate::config::AppConfig::load();
+        let icons_dir = config.get_data_dir().join("icons");
+
+        let result: Vec<RunningAppInfo> = ctx.apps.into_iter().map(|(_title, process, exe_path)| {
+            let name = crate::clipboard::source_app::get_app_display_name_pub(&exe_path);
+            let cache_key = crate::clipboard::source_app::compute_icon_cache_key_pub(&exe_path);
+            let icon = crate::clipboard::source_app::extract_and_cache_icon(&exe_path, &icons_dir, &cache_key);
+            RunningAppInfo { name, process, icon }
+        }).collect();
+
+        Ok(result)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
 // ============ 系统主题命令 ============
 
 /// RGB (0-255) 转 HSL 字符串 "H S% L%"
