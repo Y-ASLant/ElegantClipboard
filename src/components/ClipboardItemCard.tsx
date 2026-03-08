@@ -13,7 +13,7 @@ import {
   Circle16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import {
   CardFooter,
   FileContent,
@@ -408,6 +408,14 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     return () => {
       hideTextPreview();
     };
+  }, [hideTextPreview]);
+
+  // Cancel text preview timer when main window hides (prevents timer race on paste)
+  useEffect(() => {
+    const unlisten = listen("window-hidden", () => {
+      hideTextPreview();
+    });
+    return () => { unlisten.then((fn) => fn()); };
   }, [hideTextPreview]);
 
   const handlePaste = (e: React.MouseEvent) => {

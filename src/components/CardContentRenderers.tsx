@@ -8,7 +8,7 @@ import {
   Warning16Regular,
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { emitTo } from "@tauri-apps/api/event";
+import { emitTo, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
@@ -287,10 +287,24 @@ const ImagePreview = memo(function ImagePreview({
     ps.current.windowCss = null;
   }, [clearTimer]);
 
+  // Cancel preview timer and reset state when main window hides (prevents timer race on paste)
+  useEffect(() => {
+    const unlisten = listen("window-hidden", () => {
+      clearTimer();
+      ps.current.currentPath = undefined;
+      ps.current.visible = false;
+      ps.current.scale = 1.0;
+      ps.current.windowCss = null;
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [clearTimer]);
+
   // Show preview: bounded mode uses screen work area; unbounded mode uses a fixed large window.
   const showPreview = useCallback(async () => {
     if (!containerRef.current || !ps.current.currentPath) return;
     const bounds = await getPreviewBounds(previewPosition, containerRef.current);
+    // Abort if window was hidden during the async gap (currentPath cleared by window-hidden listener)
+    if (!ps.current.currentPath) return;
     const { imgNatural } = ps.current;
     const boundedMaxCssW = bounds.maxW / bounds.scale;
     const boundedMaxCssH = bounds.maxH / bounds.scale;

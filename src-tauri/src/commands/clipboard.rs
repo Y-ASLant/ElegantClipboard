@@ -660,12 +660,19 @@ fn paste_item_to_active_window(
         set_clipboard_content(item, &mut clipboard)?;
         debug!("paste_item: clipboard set ok");
 
+        // Always hide preview windows on paste (pinned window won't trigger hide_main_window_if_not_pinned)
+        super::hide_preview_windows(app);
+
         if close_window {
             hide_main_window_if_not_pinned(app);
         }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
+
+        // Post-paste safety: hide again in case show_image_preview raced with the earlier hide
+        super::hide_preview_windows(app);
+
         debug!("paste_item: simulate_paste ok");
         Ok(())
     })
@@ -687,12 +694,19 @@ fn paste_plain_text_to_active_window(
             .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
         debug!("paste_plain_text: clipboard set ok");
 
+        // Always hide preview windows on paste (pinned window won't trigger hide_main_window_if_not_pinned)
+        super::hide_preview_windows(app);
+
         if close_window {
             hide_main_window_if_not_pinned(app);
         }
 
         std::thread::sleep(std::time::Duration::from_millis(50));
         simulate_paste()?;
+
+        // Post-paste safety: hide again in case show_image_preview raced with the earlier hide
+        super::hide_preview_windows(app);
+
         debug!("paste_plain_text: simulate_paste ok");
         Ok(())
     })
