@@ -62,7 +62,7 @@ export function Settings() {
     auto_start: false,
     admin_launch: false,
     is_running_as_admin: false,
-    follow_cursor: true,
+    position_mode: "follow_cursor",
     shortcut: "Alt+C",
     winv_replacement: false,
     log_to_file: false,
@@ -124,7 +124,6 @@ export function Settings() {
     settings.auto_cleanup_days,
     settings.auto_start,
     settings.admin_launch,
-    settings.follow_cursor,
   ]);
 
   const loadSettings = async () => {
@@ -134,7 +133,7 @@ export function Settings() {
         maxHistoryCount,
         maxContentSize,
         autoCleanupDays,
-        followCursor,
+        positionMode,
         autoStart,
         adminLaunch,
         isRunningAsAdmin,
@@ -147,7 +146,7 @@ export function Settings() {
         invoke<string>("get_setting", { key: "max_history_count" }),
         invoke<string>("get_setting", { key: "max_content_size_kb" }),
         invoke<string>("get_setting", { key: "auto_cleanup_days" }),
-        invoke<string>("get_setting", { key: "follow_cursor" }),
+        invoke<string | null>("get_setting", { key: "position_mode" }),
         invoke<boolean>("is_autostart_enabled"),
         invoke<boolean>("is_admin_launch_enabled"),
         invoke<boolean>("is_running_as_admin"),
@@ -165,7 +164,7 @@ export function Settings() {
         auto_start: autoStart,
         admin_launch: adminLaunch,
         is_running_as_admin: isRunningAsAdmin,
-        follow_cursor: followCursor !== "false",
+        position_mode: (positionMode || "follow_cursor") as import("@/components/settings/GeneralTab").PositionMode,
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
         log_to_file: logToFile,
@@ -192,11 +191,6 @@ export function Settings() {
         key: "auto_cleanup_days",
         value: settings.auto_cleanup_days.toString(),
       });
-      await invoke("set_setting", {
-        key: "follow_cursor",
-        value: settings.follow_cursor.toString(),
-      });
-
       if (settings.auto_start) {
         await invoke("enable_autostart");
       } else {

@@ -76,6 +76,7 @@ pub async fn show_image_preview(
     );
 
     let _ = window.show();
+    crate::positioning::force_topmost(&window);
     Ok(())
 }
 
@@ -151,6 +152,7 @@ pub async fn show_text_preview(
     });
     let _ = window.emit("text-preview-update", update_payload.clone());
     let _ = window.show();
+    crate::positioning::force_topmost(&window);
 
     if newly_created {
         let window_clone = window.clone();

@@ -35,7 +35,7 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
             crate::commands::hide_preview_windows(app);
             let _ = window.emit("window-hidden", ());
         } else {
-            let follow_cursor = app
+            let position_mode = app
                 .try_state::<std::sync::Arc<AppState>>()
                 .map(|state| {
                     let repo = database::SettingsRepository::new(&state.db);
@@ -53,15 +53,23 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                             }));
                         }
                     }
-                    repo.get("follow_cursor").ok().flatten()
-                        .map(|v| v != "false").unwrap_or(true)
+                    // position_mode 优先；未设置时回退到旧版 follow_cursor
+                    if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
+                        crate::positioning::PositionMode::from_str(&mode_str)
+                    } else {
+                        let follow = repo.get("follow_cursor").ok().flatten()
+                            .map(|v| v != "false").unwrap_or(true);
+                        if follow {
+                            crate::positioning::PositionMode::FollowCursor
+                        } else {
+                            crate::positioning::PositionMode::FixedPosition
+                        }
+                    }
                 })
-                .unwrap_or(true);
+                .unwrap_or(crate::positioning::PositionMode::FollowCursor);
 
-            if follow_cursor {
-                if let Err(e) = crate::positioning::position_at_cursor(&window) {
-                    tracing::warn!("定位窗口失败: {}", e);
-                }
+            if let Err(e) = crate::positioning::position_window(&window, position_mode) {
+                tracing::warn!("定位窗口失败: {}", e);
             }
 
             crate::input_monitor::save_current_focus();
