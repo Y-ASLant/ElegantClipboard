@@ -108,14 +108,17 @@
 | **窗口特效** | window-vibrancy（Mica/Acrylic/Tabbed） |
 | **键盘模拟** | enigo |
 | **输入监控** | Win32 LL Hook（WH_MOUSE_LL + WH_KEYBOARD_LL，仅窗口可见时启用键盘钩子） |
-| **自动更新** | 基于 GitHub Release 的检查与下载 |
+| **自动更新** | 基于 GitHub Release 的检查与下载（支持系统代理） |
 | **CI/CD** | GitHub Actions（CI + Tag 触发 Release） |
 
 ## 安装
 
 ### 下载安装包
 
-从 [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) 页面下载最新版本的安装包。
+从 [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) 页面下载最新版本：
+
+- **安装版**（推荐）：`ElegantClipboard_x.x.x_x64-setup.exe`
+- **便携版**：`ElegantClipboard_x.x.x_x64_portable.exe`（无需安装，直接运行）
 
 ### winget
 
@@ -135,7 +138,7 @@ scoop install elegantclipboard
 #### 环境要求
 
 - Node.js 18+（推荐 LTS 版本）
-- Rust 1.80+（需要 `std::sync::LazyLock`）
+- Rust 1.85+（Rust edition 2024）
 - Windows 10/11
 
 #### 构建步骤

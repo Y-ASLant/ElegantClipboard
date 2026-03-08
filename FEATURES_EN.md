@@ -103,6 +103,7 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Version check** - Auto check on startup, manual trigger in settings
 - **Download progress** - Show download progress, cancelable
 - **Changelog** - Display release notes
+- **System proxy support** - Auto read Windows system proxy settings, works behind proxies
 
 ## System Integration
 
@@ -112,3 +113,4 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Quick paste** - Alt+number keys to quick paste items at position (customizable)
 - **Startup notification** - Show system notification on launch with shortcut hints
 - **Admin elevation** - UAC-free elevation via task scheduler (optional in settings)
+- **Portable mode** - Standalone portable exe available, auto-detects portable mode

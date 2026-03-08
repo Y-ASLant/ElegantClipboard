@@ -79,6 +79,7 @@ src-tauri/              # Rust 后端
 │   ├── admin_launch.rs     # 管理员启动功能
 │   ├── keyboard_hook.rs    # 窗口状态追踪
 │   ├── input_monitor.rs    # 全局鼠标监控（点击外部检测）
+│   ├── updater.rs          # 自动更新（GitHub Release 检查/下载，支持系统代理）
 │   ├── win_v_registry.rs   # Win+V 替换（注册表）
 │   ├── commands/           # Tauri 命令（按功能拆分）
 │   │   ├── mod.rs          # AppState 定义 + 模块导出
@@ -96,7 +97,7 @@ src-tauri/              # Rust 后端
 
 **命令模块**（`src-tauri/src/commands/`）：
 - `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`get_clipboard_item`、`get_clipboard_count`、`toggle_pin`、`toggle_favorite`、`move_clipboard_item`、`delete_clipboard_item`、`clear_history`、`clear_all_history`、`copy_to_clipboard`、`paste_content`
-- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`reset_settings`、`reset_all_data`、`select_folder_for_settings`、`open_data_folder`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`
+- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`reset_settings`、`reset_all_data`、`select_folder_for_settings`、`open_data_folder`、`is_portable_mode`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`
 - `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`、`get_file_details`、`save_file_as`
 
 **窗口/系统命令**（`lib.rs`）：
@@ -185,7 +186,7 @@ listen("ui-settings-changed", (event) => { ... });
 
 **点击外部隐藏**：
 - 由于窗口不可获取焦点，`onFocusChanged` 不会触发
-- 使用 `input_monitor.rs` 中的全局鼠标监控（`rdev`）
+- 使用 `input_monitor.rs` 中的全局鼠标监控（Win32 LL Hook）
 - 仅在窗口可见时启用监控，降低 CPU 占用
 - 使用 `AtomicI64` 实现无锁光标位置追踪
 
@@ -288,8 +289,6 @@ Windows 的注册表 `Run` 键会静默跳过需要 UAC 提权的程序，因此
 - `clipboard-rs` / `arboard` - 剪贴板操作
 - `enigo` - 键盘模拟粘贴
 - `window-vibrancy` - 窗口背景特效（Mica/Acrylic/Tabbed）
-- `wry` - WebView2 版本检测
-- `rdev` - 全局鼠标/键盘监控
 - `parking_lot` - 高性能锁
 - `blake3` - 内容哈希去重
 - `windows` / `winreg` - Windows API 和注册表

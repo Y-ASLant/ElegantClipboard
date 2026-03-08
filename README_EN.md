@@ -108,14 +108,17 @@ See [FEATURES_EN.md](FEATURES_EN.md) for complete feature list and terminology.
 | **Window Effects** | window-vibrancy (Mica/Acrylic/Tabbed) |
 | **Keyboard Simulation** | enigo |
 | **Input Monitoring** | Win32 LL Hook (WH_MOUSE_LL + WH_KEYBOARD_LL, only when window visible) |
-| **Auto Update** | GitHub Release based check & download |
+| **Auto Update** | GitHub Release based check & download (system proxy supported) |
 | **CI/CD** | GitHub Actions (CI + Tag triggers Release) |
 
 ## Installation
 
 ### Download Installer
 
-Download the latest version from [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases).
+Download the latest version from [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases):
+
+- **Installer** (recommended): `ElegantClipboard_x.x.x_x64-setup.exe`
+- **Portable**: `ElegantClipboard_x.x.x_x64_portable.exe` (no installation required)
 
 ### winget
 
@@ -135,7 +138,7 @@ scoop install elegantclipboard
 #### Requirements
 
 - Node.js 18+ (LTS recommended)
-- Rust 1.80+ (requires `std::sync::LazyLock`)
+- Rust 1.85+ (Rust edition 2024)
 - Windows 10/11
 
 #### Build Steps
