@@ -99,6 +99,7 @@ pub async fn show_text_preview(
     align: Option<String>,
     theme: Option<String>,
     sharp_corners: Option<bool>,
+    window_effect: Option<String>,
 ) -> Result<(), String> {
     let seq = TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
     let mut newly_created = false;
@@ -106,7 +107,7 @@ pub async fn show_text_preview(
         w
     } else {
         newly_created = true;
-        tauri::WebviewWindowBuilder::new(
+        let w = tauri::WebviewWindowBuilder::new(
             &app,
             "text-preview",
             tauri::WebviewUrl::App("/text-preview.html".into()),
@@ -121,7 +122,12 @@ pub async fn show_text_preview(
         .focused(false)
         .visible(false)
         .build()
-        .map_err(|e| format!("创建文本预览窗口失败: {}", e))?
+        .map_err(|e| format!("创建文本预览窗口失败: {}", e))?;
+
+        // Apply system-level window effect to match main window
+        apply_preview_window_effect(&w, window_effect.as_deref());
+
+        w
     };
 
     let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
@@ -212,6 +218,50 @@ pub async fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
 pub fn is_log_to_file_enabled() -> bool {
     AppConfig::load().is_log_to_file()
 }
+
+/// Apply system-level window effect (Acrylic/Mica/Tabbed) to a preview window.
+#[cfg(target_os = "windows")]
+fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&str>) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, WS_EX_LAYERED,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    let effect = match effect {
+        Some(e) if e != "none" => e,
+        _ => return,
+    };
+
+    let Ok(raw_hwnd) = window.hwnd() else { return };
+    let hwnd = HWND(raw_hwnd.0 as *mut _);
+
+    // Remove WS_EX_LAYERED so composition effects can render
+    unsafe {
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        if (ex_style as u32) & WS_EX_LAYERED.0 != 0 {
+            SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) & !WS_EX_LAYERED.0) as i32);
+            let _ = SetWindowPos(
+                hwnd, None, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            );
+        }
+    }
+
+    let result = match effect {
+        "mica" => window_vibrancy::apply_mica(window, None),
+        "acrylic" => window_vibrancy::apply_acrylic(window, Some((0, 0, 0, 0))),
+        "tabbed" => window_vibrancy::apply_tabbed(window, None),
+        _ => return,
+    };
+
+    if let Err(e) = result {
+        tracing::debug!("Preview window effect '{}' failed: {}", effect, e);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_preview_window_effect(_window: &tauri::WebviewWindow, _effect: Option<&str>) {}
 
 #[tauri::command]
 pub fn set_log_to_file(enabled: bool) -> Result<(), String> {

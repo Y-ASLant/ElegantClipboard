@@ -34,12 +34,10 @@ fn truncate_content(content: String, max_size: usize, content_type: &str) -> Str
 #[derive(Debug, Clone)]
 pub enum ClipboardContent {
     Text(String),
-    #[allow(dead_code)] // 预留: 监听器尚未捕获
     Html {
         html: String,
         text: Option<String>,
     },
-    #[allow(dead_code)] // 预留: 监听器尚未捕获
     Rtf {
         rtf: String,
         text: Option<String>,

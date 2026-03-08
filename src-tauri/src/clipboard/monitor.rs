@@ -284,7 +284,33 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
         Err(e) => debug!("Clipboard get_image failed: {} (may not contain image data or format unsupported)", e),
     }
 
-    // 尝试获取文本
+    // 尝试获取 HTML 富文本
+    if ctx.has(clipboard_rs::ContentFormat::Html) {
+        match ctx.get_html() {
+            Ok(html) if !html.is_empty() => {
+                let text = ctx.get_text().ok().filter(|t| !t.is_empty());
+                debug!("Got HTML from clipboard: {} bytes", html.len());
+                return Some(ClipboardContent::Html { html, text });
+            }
+            Ok(_) => {}
+            Err(e) => debug!("Clipboard get_html failed: {}", e),
+        }
+    }
+
+    // 尝试获取 RTF 富文本
+    if ctx.has(clipboard_rs::ContentFormat::Rtf) {
+        match ctx.get_rich_text() {
+            Ok(rtf) if !rtf.is_empty() => {
+                let text = ctx.get_text().ok().filter(|t| !t.is_empty());
+                debug!("Got RTF from clipboard: {} bytes", rtf.len());
+                return Some(ClipboardContent::Rtf { rtf, text });
+            }
+            Ok(_) => {}
+            Err(e) => debug!("Clipboard get_rich_text failed: {}", e),
+        }
+    }
+
+    // 尝试获取纯文本
     match arboard::Clipboard::new() {
         Ok(mut clipboard) => match clipboard.get_text() {
             Ok(text) if !text.is_empty() => {

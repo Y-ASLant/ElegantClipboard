@@ -352,6 +352,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         align,
         theme,
         sharpCorners,
+        windowEffect: useUISettings.getState().windowEffect,
       });
       textPreviewVisibleRef.current = true;
     } catch (error) {
