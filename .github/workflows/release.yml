@@ -92,7 +92,7 @@ jobs:
         run: |
           $v = "${{ steps.version.outputs.VERSION }}"
           $arch = "${{ matrix.arch }}"
-          $src = "src-tauri/target/${{ matrix.rust-target }}/release/ElegantClipboard.exe"
+          $src = "src-tauri/target/${{ matrix.rust-target }}/release/elegant-clipboard.exe"
           Copy-Item $src "ElegantClipboard_${v}_${arch}_portable.exe"
 
       - name: Upload portable to release
