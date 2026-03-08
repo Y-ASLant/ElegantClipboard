@@ -264,6 +264,30 @@ impl ClipboardRepository {
         }
     }
 
+    /// 按收藏列表位置获取完整条目，供收藏快速粘贴使用。
+    pub fn get_favorite_by_position(&self, index: usize, group_id: Option<i64>) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        let sql = format!(
+            "SELECT * FROM clipboard_items \
+             WHERE {} AND is_favorite = 1 \
+             ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
+             LIMIT 1 OFFSET ?",
+            group_cond
+        );
+        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
+            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
+        } else {
+            conn.query_row(&sql, params![index as i64], Self::row_to_item)
+        };
+
+        match result {
+            Ok(item) => Ok(Some(item)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// 列表查询列（排除大文本字段以减少 IPC 传输）
     const LIST_COLUMNS: &'static str =
         "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \
