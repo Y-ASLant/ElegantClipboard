@@ -475,7 +475,7 @@ const ImagePreview = memo(function ImagePreview({
 
   const imgClass = useMemo(() => {
     return imageAutoHeight
-      ? "w-full h-auto object-contain"
+      ? "max-w-full h-auto object-contain"
       : "w-full h-full object-contain";
   }, [imageAutoHeight]);
 
