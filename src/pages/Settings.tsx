@@ -34,6 +34,12 @@ import { cn } from "@/lib/utils";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
+const VALID_POSITION_MODES = new Set(["follow_cursor", "screen_center", "fixed_position"]);
+function normalizePositionMode(raw: string | null | undefined): import("@/components/settings/GeneralTab").PositionMode {
+  if (raw && VALID_POSITION_MODES.has(raw)) return raw as import("@/components/settings/GeneralTab").PositionMode;
+  return "follow_cursor";
+}
+
 type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "about";
 
 const navItems: {
@@ -168,7 +174,7 @@ export function Settings() {
         admin_launch: adminLaunch,
         is_running_as_admin: isRunningAsAdmin,
         is_portable: isPortable,
-        position_mode: (positionMode || "follow_cursor") as import("@/components/settings/GeneralTab").PositionMode,
+        position_mode: normalizePositionMode(positionMode),
         shortcut: currentShortcut || "Alt+C",
         winv_replacement: winvReplacement,
         log_to_file: logToFile,

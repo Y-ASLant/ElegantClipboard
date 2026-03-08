@@ -184,12 +184,11 @@ impl CMHandler for MonitorHandler {
         let source = super::source_app::get_clipboard_source_app();
 
         // 检查来源应用是否在排除列表中
-        if let Some(ref handler) = *self.handler.lock() {
-            if handler.is_source_app_excluded(&source) {
+        if let Some(ref handler) = *self.handler.lock()
+            && handler.is_source_app_excluded(&source) {
                 debug!("Clipboard change ignored (source app excluded: {:?})", source.as_ref().map(|s| &s.app_name));
                 return CallbackResult::Next;
             }
-        }
 
         // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
         let content = match read_clipboard_content_with_retry() {

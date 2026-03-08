@@ -286,8 +286,8 @@ impl ClipboardRepository {
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         // LIKE 搜索（支持中文，匹配全文任意位置）
-        if let Some(ref search) = options.search {
-            if !search.is_empty() {
+        if let Some(ref search) = options.search
+            && !search.is_empty() {
                 conditions.push(
                     "(text_content LIKE ? ESCAPE '\\' OR file_paths LIKE ? ESCAPE '\\')"
                         .to_string(),
@@ -302,7 +302,6 @@ impl ClipboardRepository {
                 params_vec.push(Box::new(pattern.clone()));
                 params_vec.push(Box::new(pattern));
             }
-        }
 
         // 支持逗号分隔的多类型筛选（如 "text,html,rtf"）
         Self::append_content_type_condition(

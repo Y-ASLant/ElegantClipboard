@@ -79,18 +79,20 @@ unsafe extern "system" fn wndproc_subclass(
     lparam: LPARAM,
 ) -> LRESULT {
     if msg == WM_MOUSEACTIVATE {
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
             return LRESULT(3); // MA_NOACTIVATE
         }
     }
 
     let original = ORIGINAL_WNDPROC.load(Ordering::Relaxed);
-    let original_proc = std::mem::transmute::<
-        isize,
-        Option<unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT>,
-    >(original);
-    CallWindowProcW(original_proc, hwnd, msg, wparam, lparam)
+    let original_proc = unsafe {
+        std::mem::transmute::<
+            isize,
+            Option<unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT>,
+        >(original)
+    };
+    unsafe { CallWindowProcW(original_proc, hwnd, msg, wparam, lparam) }
 }
 
 pub fn init(window: WebviewWindow) {
@@ -315,16 +317,15 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
     if code >= 0 {
         match wparam.0 as u32 {
             v if v == WM_MOUSEMOVE => {
-                if MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) {
-                    if let Some(info) = (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() {
+                if MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
+                    && let Some(info) = unsafe { (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() } {
                         CURSOR_X.store(info.pt.x as i64, Ordering::Relaxed);
                         CURSOR_Y.store(info.pt.y as i64, Ordering::Relaxed);
                     }
-                }
             }
             v if v == WM_LBUTTONDOWN || v == WM_RBUTTONDOWN => {
                 // 用点击事件自身的坐标更新光标位置，确保 bounds check 精确
-                if let Some(info) = (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() {
+                if let Some(info) = unsafe { (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() } {
                     CURSOR_X.store(info.pt.x as i64, Ordering::Relaxed);
                     CURSOR_Y.store(info.pt.y as i64, Ordering::Relaxed);
                 }
@@ -333,7 +334,7 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
             _ => {}
         }
     }
-    CallNextHookEx(None, code, wparam, lparam)
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 #[cfg(windows)]
@@ -347,7 +348,7 @@ unsafe extern "system" fn keyboard_hook_proc(
         let is_keydown = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
         let is_keyup = msg == WM_KEYUP || msg == WM_SYSKEYUP;
 
-        if let Some(info) = (lparam.0 as *const KBDLLHOOKSTRUCT).as_ref() {
+        if let Some(info) = unsafe { (lparam.0 as *const KBDLLHOOKSTRUCT).as_ref() } {
             if is_keydown && info.vkCode == u32::from(VK_ESCAPE.0) {
                 handle_escape_key();
             }
@@ -357,7 +358,7 @@ unsafe extern "system" fn keyboard_hook_proc(
             if KEYBOARD_NAV_ENABLED.load(Ordering::Relaxed) && (is_keydown || is_keyup) {
                 // 若本窗口已是前台（如搜索框聚焦），让按键正常走 DOM 路径
                 let main_raw = MAIN_HWND.load(Ordering::Relaxed);
-                let fg = GetForegroundWindow();
+                let fg = unsafe { GetForegroundWindow() };
                 if main_raw != 0 && fg.0 as isize != main_raw {
                     let nav_key = match info.vkCode {
                         v if v == VK_UP.0 as u32 => Some("ArrowUp"),
@@ -378,20 +379,19 @@ unsafe extern "system" fn keyboard_hook_proc(
             }
         }
     }
-    CallNextHookEx(None, code, wparam, lparam)
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 #[cfg(windows)]
 fn handle_nav_key(key: &str) {
-    if let Some(window) = MAIN_WINDOW.lock().as_ref() {
-        if window.is_visible().unwrap_or(false) {
+    if let Some(window) = MAIN_WINDOW.lock().as_ref()
+        && window.is_visible().unwrap_or(false) {
             let shift = unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) < 0 };
             let _ = window.emit("keyboard-nav", serde_json::json!({
                 "key": key,
                 "shift": shift,
             }));
         }
-    }
 }
 
 #[cfg(windows)]
@@ -461,11 +461,10 @@ fn handle_escape_key() {
     if !is_monitoring_active() {
         return;
     }
-    if let Some(window) = MAIN_WINDOW.lock().as_ref() {
-        if window.is_visible().unwrap_or(false) {
+    if let Some(window) = MAIN_WINDOW.lock().as_ref()
+        && window.is_visible().unwrap_or(false) {
             let _ = window.emit("escape-pressed", ());
         }
-    }
 }
 
 fn handle_click_outside() {
@@ -478,8 +477,8 @@ fn handle_click_outside() {
         );
         return;
     }
-    if let Some(window) = MAIN_WINDOW.lock().as_ref() {
-        if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
+    if let Some(window) = MAIN_WINDOW.lock().as_ref()
+        && window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
             info!("handle_click_outside: 窗口可见且点击在外部，执行隐藏");
             crate::commands::window::save_window_size_if_enabled(window.app_handle(), window);
             let _ = window.set_focusable(false);
@@ -491,5 +490,4 @@ fn handle_click_outside() {
             crate::commands::hide_preview_windows(window.app_handle());
             let _ = window.emit("window-hidden", ());
         }
-    }
 }

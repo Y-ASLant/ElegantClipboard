@@ -208,12 +208,11 @@ static FILE_LOG_GUARD: parking_lot::Mutex<Option<tracing_appender::non_blocking:
     parking_lot::Mutex::new(None);
 
 fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
-    if let Ok(meta) = std::fs::metadata(log_path) {
-        if meta.len() > max_size {
+    if let Ok(meta) = std::fs::metadata(log_path)
+        && meta.len() > max_size {
             let backup = log_path.with_extension("log.old");
             let _ = std::fs::rename(log_path, backup);
         }
-    }
 }
 
 fn init_logging(config: &AppConfig) {
@@ -410,11 +409,10 @@ fn set_quick_paste_shortcut(
             return Err("快捷键至少包含一个修饰键 (Ctrl/Alt)".to_string());
         }
     let main_sc = get_current_shortcut();
-        if let Some(main_parsed) = parse_shortcut(&main_sc) {
-            if parsed == main_parsed {
+        if let Some(main_parsed) = parse_shortcut(&main_sc)
+            && parsed == main_parsed {
                 return Err(format!("与呼出快捷键 {} 冲突", main_sc));
             }
-        }
     }
 
     let mut next_shortcuts = {
@@ -450,7 +448,7 @@ pub fn run() {
     let config = AppConfig::load();
     init_logging(&config);
 
-    match wry::webview_version() {
+    match tauri::webview_version() {
         Ok(ver) => tracing::info!("WebView2 runtime version: {}", ver),
         Err(e) => tracing::warn!("WebView2 version query failed: {}", e),
     }

@@ -270,7 +270,7 @@ pub async fn get_running_apps(_state: State<'_, Arc<AppState>>) -> Result<Vec<Ru
                         &mut size,
                     ).is_ok() && size > 0 {
                         let path = String::from_utf16_lossy(&buf[..size as usize]);
-                        let process = path.split('\\').last().unwrap_or(&path).to_string();
+                        let process = path.split('\\').next_back().unwrap_or(&path).to_string();
                         ctx.apps.push((title, process, path));
                     }
                     let _ = windows::Win32::Foundation::CloseHandle(handle);
@@ -399,13 +399,12 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
                     // 读取 lParam 中的 null 结尾宽字符串
                         let len = (0usize..256).find(|&i| *ptr.add(i) == 0).unwrap_or(0);
                         let slice = std::slice::from_raw_parts(ptr, len);
-                        if slice == windows::core::w!("ImmersiveColorSet").as_wide() {
-                            if let Some(handle) = WATCHER_APP_HANDLE.get() {
+                        if slice == windows::core::w!("ImmersiveColorSet").as_wide()
+                            && let Some(handle) = WATCHER_APP_HANDLE.get() {
                                 use tauri::Emitter;
                                 let color = read_accent_color_from_registry();
                                 let _ = handle.lock().emit("system-accent-color-changed", color);
                             }
-                        }
                     }
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)

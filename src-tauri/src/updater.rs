@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::Emitter;
-use tracing::info;
+use tracing::{debug, info};
 
 /// 下载取消标志
 static DOWNLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -27,6 +27,78 @@ const GITHUB_API_URL: &str =
 
 /// 编译时嵌入的可选 GitHub API Token
 const GITHUB_TOKEN: Option<&str> = option_env!("UPDATER_GITHUB_TOKEN");
+
+/// 构建带系统代理的 ureq Agent
+fn build_agent() -> ureq::Agent {
+    let mut builder = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(30)));
+
+    // 优先环境变量，其次 Windows 系统代理
+    if let Some(proxy) = ureq::Proxy::try_from_env() {
+        debug!("更新代理: 使用环境变量");
+        builder = builder.proxy(Some(proxy));
+    } else if let Some(proxy) = read_system_proxy() {
+        debug!("更新代理: 使用系统代理");
+        builder = builder.proxy(Some(proxy));
+    } else {
+        debug!("更新代理: 直连");
+    }
+
+    builder.build().into()
+}
+
+/// 从 Windows 注册表读取系统代理设置
+#[cfg(target_os = "windows")]
+fn read_system_proxy() -> Option<ureq::Proxy> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let inet = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+        .ok()?;
+    let enabled: u32 = inet.get_value("ProxyEnable").ok()?;
+    if enabled == 0 {
+        return None;
+    }
+    let server: String = inet.get_value("ProxyServer").ok()?;
+    if server.is_empty() {
+        return None;
+    }
+
+    // 格式可能是 "host:port" 或 "http=h:p;https=h:p;..."
+    let addr = if server.contains('=') {
+        // 提取 https 或 http 代理
+        server
+            .split(';')
+            .find_map(|seg| {
+                let seg = seg.trim();
+                if seg.starts_with("https=") {
+                    Some(seg.trim_start_matches("https=").to_string())
+                } else if seg.starts_with("http=") {
+                    Some(seg.trim_start_matches("http=").to_string())
+                } else {
+                    None
+                }
+            })?
+    } else {
+        server
+    };
+
+    let url = if addr.starts_with("http://") || addr.starts_with("https://") || addr.starts_with("socks") {
+        addr
+    } else {
+        format!("http://{}", addr)
+    };
+
+    debug!("系统代理地址: {}", url);
+    ureq::Proxy::new(&url).ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_system_proxy() -> Option<ureq::Proxy> {
+    None
+}
 
 // ── GitHub API 响应类型 ────────────────────────────────────────────────
 
@@ -67,19 +139,16 @@ pub fn check_update() -> Result<UpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION");
     info!("Checking for updates (current: v{})", current_version);
 
-    let mut req = ureq::get(GITHUB_API_URL)
-        .config()
-        .timeout_connect(Some(Duration::from_secs(15)))
-        .timeout_recv_response(Some(Duration::from_secs(15)))
-        .build()
+    let agent = build_agent();
+    let mut req = agent
+        .get(GITHUB_API_URL)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "ElegantClipboard");
 
-    if let Some(token) = GITHUB_TOKEN {
-        if !token.is_empty() {
+    if let Some(token) = GITHUB_TOKEN
+        && !token.is_empty() {
             req = req.header("Authorization", &format!("Bearer {}", token));
         }
-    }
 
     // GitHub 返回的列表已按发布时间倒序排列（最新在前）
     let releases: Vec<GitHubRelease> = match req.call() {
@@ -175,11 +244,9 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     info!("Downloading update: {}", file_name);
     reset_cancel();
 
-    let response = match ureq::get(url)
-        .config()
-        .timeout_connect(Some(Duration::from_secs(30)))
-        .timeout_recv_response(Some(Duration::from_secs(30)))
-        .build()
+    let agent = build_agent();
+    let response = match agent
+        .get(url)
         .header("User-Agent", "ElegantClipboard")
         .call()
     {

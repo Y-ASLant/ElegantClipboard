@@ -130,12 +130,11 @@ pub fn is_elevation_task_path_valid() -> bool {
         .creation_flags(CREATE_NO_WINDOW)
         .output();
 
-    if let Ok(o) = output {
-        if o.status.success() {
+    if let Ok(o) = output
+        && o.status.success() {
             let stdout = String::from_utf8_lossy(&o.stdout).to_lowercase();
             return stdout.contains(&current_exe);
         }
-    }
     false
 }
 

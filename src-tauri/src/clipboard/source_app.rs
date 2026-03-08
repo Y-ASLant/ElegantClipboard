@@ -27,13 +27,13 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
             return None;
         }
         let mut pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
         if pid == 0 || pid == self_pid {
             return None;
         }
 
-        let exe_path = get_exe_path_from_pid(pid)?;
-        let exe_path = resolve_uwp_app(hwnd, &exe_path).unwrap_or(exe_path);
+        let exe_path = unsafe { get_exe_path_from_pid(pid) }?;
+        let exe_path = unsafe { resolve_uwp_app(hwnd, &exe_path) }.unwrap_or(exe_path);
         let app_name = get_app_display_name(&exe_path);
         let icon_cache_key = compute_icon_cache_key(&exe_path);
 
@@ -46,12 +46,11 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
 
     unsafe {
         // 主策略: 剪贴板所有者（实际写入剪贴板的应用，对截图工具等更准确）
-        if let Ok(owner) = GetClipboardOwner() {
-            if let Some(info) = try_resolve(owner, self_pid) {
+        if let Ok(owner) = GetClipboardOwner()
+            && let Some(info) = try_resolve(owner, self_pid) {
                 debug!("来源(所有者): {} ({})", info.app_name, info.exe_path);
                 return Some(info);
             }
-        }
 
         // 补充策略: 前台窗口（部分应用不设置剪贴板所有者时的兜底）
         let fg = GetForegroundWindow();
@@ -79,16 +78,18 @@ unsafe fn get_exe_path_from_pid(pid: u32) -> Option<String> {
         PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
-    let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buf = [0u16; 1024];
     let mut size = buf.len() as u32;
-    let result = QueryFullProcessImageNameW(
-        handle,
-        PROCESS_NAME_FORMAT(0),
-        windows::core::PWSTR::from_raw(buf.as_mut_ptr()),
-        &mut size,
-    );
-    let _ = CloseHandle(handle);
+    let result = unsafe {
+        QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR::from_raw(buf.as_mut_ptr()),
+            &mut size,
+        )
+    };
+    let _ = unsafe { CloseHandle(handle) };
     result.ok()?;
 
     let path = String::from_utf16_lossy(&buf[..size as usize]);
@@ -114,7 +115,7 @@ unsafe fn resolve_uwp_app(
     }
 
     let mut host_pid: u32 = 0;
-    GetWindowThreadProcessId(owner_hwnd, Some(&mut host_pid));
+    unsafe { GetWindowThreadProcessId(owner_hwnd, Some(&mut host_pid)) };
 
     struct CallbackData {
         host_pid: u32,
@@ -127,15 +128,14 @@ unsafe fn resolve_uwp_app(
             let mut child_pid: u32 = 0;
             GetWindowThreadProcessId(hwnd, Some(&mut child_pid));
 
-            if child_pid != 0 && child_pid != data.host_pid {
-                if let Some(path) = get_exe_path_from_pid(child_pid) {
+            if child_pid != 0 && child_pid != data.host_pid
+                && let Some(path) = get_exe_path_from_pid(child_pid) {
                     let name = Path::new(&path).file_name().and_then(|n| n.to_str());
                     if !name.is_some_and(|n| n.eq_ignore_ascii_case("ApplicationFrameHost.exe")) {
                         data.found_path = Some(path);
                         return windows_core::BOOL::from(false);
                     }
                 }
-            }
             windows_core::BOOL::from(true)
         }
     }
@@ -144,11 +144,13 @@ unsafe fn resolve_uwp_app(
         host_pid,
         found_path: None,
     };
-    let _ = EnumChildWindows(
-        Some(owner_hwnd),
-        Some(enum_callback),
-        LPARAM(&mut data as *mut _ as isize),
-    );
+    let _ = unsafe {
+        EnumChildWindows(
+            Some(owner_hwnd),
+            Some(enum_callback),
+            LPARAM(&mut data as *mut _ as isize),
+        )
+    };
     data.found_path
 }
 
@@ -180,19 +182,21 @@ fn get_file_description(exe_path: &str) -> Option<String> {
         let wide: Vec<u16> = sub_path.encode_utf16().collect();
         let mut ptr: *mut c_void = std::ptr::null_mut();
         let mut len: u32 = 0;
-        if !VerQueryValueW(
-            buf.as_ptr() as *const c_void,
-            windows::core::PCWSTR::from_raw(wide.as_ptr()),
-            &mut ptr,
-            &mut len,
-        )
+        if !unsafe {
+            VerQueryValueW(
+                buf.as_ptr() as *const c_void,
+                windows::core::PCWSTR::from_raw(wide.as_ptr()),
+                &mut ptr,
+                &mut len,
+            )
+        }
         .as_bool()
             || ptr.is_null()
             || len == 0
         {
             return None;
         }
-        let slice = std::slice::from_raw_parts(ptr as *const u16, len as usize);
+        let slice = unsafe { std::slice::from_raw_parts(ptr as *const u16, len as usize) };
         let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
         let s = String::from_utf16_lossy(&slice[..end]).trim().to_string();
         if s.is_empty() {

@@ -195,6 +195,7 @@ impl ClipboardHandler {
     ///   - `app_filter_enabled`: "true"/"false"（默认 false）
     ///   - `app_filter_mode`: "blacklist"（默认）/ "whitelist"
     ///   - `app_filter_list`: 逗号分隔的规则列表，支持通配符 * 和 ?
+    ///
     /// 黑名单模式：匹配则排除；白名单模式：不匹配则排除
     pub fn is_source_app_excluded(&self, source: &Option<super::source_app::SourceAppInfo>) -> bool {
         let source = match source {

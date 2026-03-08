@@ -9,16 +9,14 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(app: &tauri::AppHan
         let settings_repo = database::SettingsRepository::new(&state.db);
         let persist = settings_repo.get("persist_window_size").ok().flatten()
             .map(|v| v != "false").unwrap_or(true);
-        if persist {
-            if let Ok(size) = window.inner_size() {
-                if let Ok(scale) = window.scale_factor() {
+        if persist
+            && let Ok(size) = window.inner_size()
+                && let Ok(scale) = window.scale_factor() {
                     let w = (size.width as f64 / scale).round() as u32;
                     let h = (size.height as f64 / scale).round() as u32;
                     let _ = settings_repo.set("window_width", &w.to_string());
                     let _ = settings_repo.set("window_height", &h.to_string());
                 }
-            }
-        }
     }
 }
 

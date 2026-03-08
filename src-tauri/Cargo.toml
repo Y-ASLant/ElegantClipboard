@@ -4,7 +4,7 @@ version = "0.0.0"
 description = "An elegant Windows clipboard manager"
 authors = ["ASLant"]
 license = "MIT"
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -74,8 +74,6 @@ clipboard-rs = "0.2"
 
 # Keyboard simulation for paste
 enigo = "0.6"
-# WebView2 version detection
-wry = "0.54"
 # Window backdrop effects (Mica/Acrylic)
 window-vibrancy = "0.5"
 
