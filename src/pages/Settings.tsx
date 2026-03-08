@@ -45,7 +45,7 @@ const navItems: {
   { id: "display", label: "显示设置", icon: LayoutColumnTwo16Regular },
   { id: "theme", label: "外观主题", icon: Color16Regular },
   { id: "data", label: "数据管理", icon: Database16Regular },
-  { id: "appfilter", label: "应用过滤", icon: Filter16Regular },
+  { id: "appfilter", label: "监听过滤", icon: Filter16Regular },
   { id: "audio", label: "音效设置", icon: Speaker216Regular },
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
   { id: "about", label: "关于软件", icon: Info16Regular },

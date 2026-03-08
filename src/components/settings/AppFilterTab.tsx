@@ -17,6 +17,15 @@ import { logError } from "@/lib/logger";
 interface AppMeta { name: string; icon: string | null }
 type RunningApp = { name: string; process: string; icon: string | null };
 
+const ALL_MONITOR_TYPES = ["text", "html", "rtf", "image", "files"] as const;
+const TYPE_LABELS: Record<string, string> = {
+  text: "纯文本",
+  html: "HTML",
+  rtf: "RTF",
+  image: "图片",
+  files: "文件",
+};
+
 export function AppFilterTab() {
   const [appFilterEnabled, setAppFilterEnabled] = useState(false);
   const [appFilterMode, setAppFilterMode] = useState<"blacklist" | "whitelist">("blacklist");
@@ -24,6 +33,7 @@ export function AppFilterTab() {
   const [excludeInput, setExcludeInput] = useState("");
   const [runningApps, setRunningApps] = useState<RunningApp[]>([]);
   const [showAppPicker, setShowAppPicker] = useState(false);
+  const [monitorTypes, setMonitorTypes] = useState<Set<string>>(new Set(ALL_MONITOR_TYPES));
   // 缓存进程名 → 应用信息（名称+图标），从选择器中获取
   const appMetaCache = useRef<Map<string, AppMeta>>(new Map());
 
@@ -41,6 +51,13 @@ export function AppFilterTab() {
         }
       })
       .catch(() => {});
+    invoke<string | null>("get_setting", { key: "monitor_types" })
+      .then((v) => {
+        if (v && v.length > 0) {
+          setMonitorTypes(new Set(v.split(",").map((t) => t.trim()).filter(Boolean)));
+        }
+      })
+      .catch(() => {});
     // 预加载一次运行中应用来填充图标缓存
     invoke<RunningApp[]>("get_running_apps")
       .then((apps) => {
@@ -49,6 +66,22 @@ export function AppFilterTab() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  const toggleMonitorType = useCallback((type: string) => {
+    setMonitorTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        // 至少保留一种类型
+        if (next.size <= 1) return prev;
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      const value = Array.from(next).join(",");
+      invoke("set_setting", { key: "monitor_types", value }).catch(() => {});
+      return next;
+    });
   }, []);
 
   const toggleAppFilter = useCallback((enabled: boolean) => {
@@ -101,6 +134,31 @@ export function AppFilterTab() {
 
   return (
     <div className="space-y-4">
+      {/* 监听内容类型 */}
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-medium mb-3">监听内容类型</h3>
+        <p className="text-xs text-muted-foreground mb-4">选择要监听的剪贴板内容类型，未勾选的类型将不会被记录</p>
+        <div className="flex flex-wrap gap-2">
+          {ALL_MONITOR_TYPES.map((type) => {
+            const active = monitorTypes.has(type);
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => toggleMonitorType(type)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                  active
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
+                }`}
+              >
+                {TYPE_LABELS[type]}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 开关 + 模式 */}
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
