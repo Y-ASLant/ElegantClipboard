@@ -100,7 +100,7 @@ export function TextEditor() {
     <div
       className={cn(
         "h-screen flex flex-col bg-muted/40 overflow-hidden p-3 gap-3",
-        !themeReady && "[&_*]:!transition-none",
+        !themeReady && "**:transition-none!",
       )}
     >
       <WindowTitleBar
