@@ -54,10 +54,15 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
         if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
             let _ = app.global_shortcut().unregister(sc);
         }
-        // 注销快速粘贴快捷键
+        // 注销快速粘贴快捷键（含小键盘变体）
         for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
             if let Some(sc) = parse_shortcut(s) {
                 let _ = app.global_shortcut().unregister(sc);
+            }
+            if let Some(numpad_str) = numpad_variant_str(s) {
+                if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+                    let _ = app.global_shortcut().unregister(numpad_sc);
+                }
             }
         }
         tracing::info!("All shortcuts disabled (except Win+V)");
@@ -108,6 +113,22 @@ fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
     shortcuts
 }
 
+/// 若快捷键的主键是数字（0-9），返回对应的小键盘变体字符串，如 "Alt+1" → "Alt+Numpad1"
+fn numpad_variant_str(shortcut_str: &str) -> Option<String> {
+    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    let last = *parts.last()?;
+    if last.len() == 1 && last.chars().next()?.is_ascii_digit() {
+        let mut result = parts[..parts.len() - 1].join("+");
+        if !result.is_empty() {
+            result.push('+');
+        }
+        result.push_str(&format!("Numpad{}", last));
+        Some(result)
+    } else {
+        None
+    }
+}
+
 fn apply_quick_paste_shortcuts(
     app: &tauri::AppHandle,
     shortcuts: &[String],
@@ -118,6 +139,12 @@ fn apply_quick_paste_shortcuts(
         }
         if let Some(shortcut) = parse_shortcut(s) {
             let _ = app.global_shortcut().unregister(shortcut);
+        }
+        // 同时注销小键盘变体
+        if let Some(numpad_str) = numpad_variant_str(s) {
+            if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+                let _ = app.global_shortcut().unregister(numpad_sc);
+            }
         }
     }
 
@@ -142,9 +169,8 @@ fn apply_quick_paste_shortcuts(
             }
         };
 
-        let reg_result = app
-            .global_shortcut()
-            .on_shortcut(parsed, move |app, _shortcut, event| match event.state {
+        let make_handler = |slot: u8| {
+            move |app: &tauri::AppHandle, _shortcut: &Shortcut, event: tauri_plugin_global_shortcut::ShortcutEvent| match event.state {
                 ShortcutState::Pressed => {
                     let any_focused = app
                         .webview_windows()
@@ -153,23 +179,18 @@ fn apply_quick_paste_shortcuts(
                     if any_focused {
                         return;
                     }
-
                     if PASTE_IN_PROGRESS.load(std::sync::atomic::Ordering::Acquire) {
                         return;
                     }
-
                     let is_first = {
                         let mut active = ACTIVE_QUICK_PASTE_SLOTS.lock();
-                        active.insert(slot) // true = 新插入
+                        active.insert(slot)
                     };
-
                     let state = app.state::<Arc<AppState>>().inner().clone();
                     let app_handle = app.clone();
                     std::thread::spawn(move || {
                         let _guard = QUICK_PASTE_LOCK.lock();
-
                         PASTE_IN_PROGRESS.store(true, std::sync::atomic::Ordering::Release);
-
                         if is_first {
                             if let Err(err) = commands::clipboard::quick_paste_by_slot(
                                 &state, &app_handle, slot,
@@ -183,20 +204,29 @@ fn apply_quick_paste_shortcuts(
                                 tracing::warn!("Quick paste repeat slot {} failed: {}", slot, err);
                             }
                         }
-
                         PASTE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::Release);
                     });
                 }
                 ShortcutState::Released => {
                     ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
                 }
-            });
+            }
+        };
+
+        let reg_result = app.global_shortcut().on_shortcut(parsed, make_handler(slot));
 
         if let Err(err) = reg_result {
             failures.insert(
                 slot,
                 format!("槽位 {} 注册失败（{}）: {}", slot, normalized, err),
             );
+        }
+
+        // 自动为数字键注册小键盘变体（如 Alt+1 → Alt+Numpad1）
+        if let Some(numpad_str) = numpad_variant_str(&normalized) {
+            if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+                let _ = app.global_shortcut().on_shortcut(numpad_sc, make_handler(slot));
+            }
         }
     }
 
