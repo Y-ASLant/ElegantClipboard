@@ -113,7 +113,7 @@ function DedupStrategyCard() {
                     ? "text-primary-foreground"
                     : "text-foreground/80 hover:text-foreground"
                 }`}
-                title={opt.desc}
+
               >
                 {opt.label}
               </button>

@@ -106,7 +106,7 @@ export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonP
         <button
           onClick={onScrollToTop}
           className="w-7 h-7 rounded-md flex items-center justify-center text-primary hover:bg-accent transition-colors"
-          title="回到顶部"
+
         >
           <ArrowUp16Regular className="w-4 h-4" />
         </button>
@@ -119,7 +119,7 @@ export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonP
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           className="w-7 h-5 rounded-md flex items-center justify-center cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors touch-none"
-          title="拖拽调整位置"
+
         >
           <svg width="10" height="9" viewBox="0 0 10 9" fill="currentColor">
             <circle cx="2.5" cy="2" r="1.2" />
