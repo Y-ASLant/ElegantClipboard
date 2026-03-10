@@ -646,6 +646,28 @@ pub fn quick_paste_by_slot(
     Ok(())
 }
 
+/// 粘贴收藏快速槽位（1-9）对应条目到活动窗口。
+pub fn quick_paste_favorite_by_slot(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    slot: u8,
+) -> Result<(), String> {
+    if !(1..=9).contains(&slot) {
+        return Err("收藏槽位必须在 1-9 之间".to_string());
+    }
+
+    let repo = ClipboardRepository::new(&state.db);
+    let active_group = *state.active_group_id.lock();
+    let item = repo
+        .get_favorite_by_position((slot - 1) as usize, active_group)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("收藏槽位 {} 没有可用的收藏条目", slot))?;
+
+    paste_item_to_active_window(state, app, &item, true)?;
+    debug!("Quick pasted favorite slot {} with item {}", slot, item.id);
+    Ok(())
+}
+
 /// 公共粘贴执行：写剪贴板 → 隐藏窗口 → 模拟 Ctrl+V
 fn paste_item_to_active_window(
     state: &Arc<AppState>,

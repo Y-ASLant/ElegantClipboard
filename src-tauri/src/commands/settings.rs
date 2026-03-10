@@ -485,3 +485,73 @@ pub async fn get_system_accent_color() -> Result<Option<String>, String> {
         Ok(None)
     }
 }
+
+// ============ 系统字体命令 ============
+
+/// 获取系统已安装的字体家族列表
+#[tauri::command]
+pub fn get_system_fonts() -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::collections::BTreeSet;
+        use windows::Win32::Foundation::LPARAM;
+        use windows::Win32::Graphics::Gdi::{
+            CreateDCW, DeleteDC, EnumFontFamiliesExW, DEFAULT_CHARSET, LOGFONTW, TEXTMETRICW,
+        };
+
+        let mut font_names = BTreeSet::new();
+
+        unsafe extern "system" fn callback(
+            lf: *const LOGFONTW,
+            _tm: *const TEXTMETRICW,
+            _font_type: u32,
+            lparam: LPARAM,
+        ) -> i32 {
+            unsafe {
+                let names = &mut *(lparam.0 as *mut BTreeSet<String>);
+                let face = &(*lf).lfFaceName;
+                let len = face.iter().position(|&c| c == 0).unwrap_or(face.len());
+                let name = String::from_utf16_lossy(&face[..len]);
+                // 跳过空名称和垂直书写字体（以 @ 开头）
+                if !name.is_empty() && !name.starts_with('@') {
+                    names.insert(name);
+                }
+            }
+            1
+        }
+
+        unsafe {
+            let hdc = CreateDCW(
+                windows::core::w!("DISPLAY"),
+                None,
+                None,
+                None,
+            );
+            if hdc.is_invalid() {
+                return Vec::new();
+            }
+
+            let logfont = LOGFONTW {
+                lfCharSet: DEFAULT_CHARSET,
+                ..Default::default()
+            };
+
+            EnumFontFamiliesExW(
+                hdc,
+                &logfont,
+                Some(callback),
+                LPARAM(&mut font_names as *mut _ as isize),
+                0,
+            );
+
+            let _ = DeleteDC(hdc);
+        }
+
+        font_names.into_iter().collect()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}

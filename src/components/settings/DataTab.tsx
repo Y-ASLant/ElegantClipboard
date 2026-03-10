@@ -55,34 +55,28 @@ function formatDataSize(bytes: number): string {
 }
 
 type DedupStrategy = "move_to_top" | "ignore" | "always_new";
+type TextDedupMode = "semantic" | "strict";
 
 const dedupOptions: { value: DedupStrategy; label: string; desc: string }[] = [
-  { value: "move_to_top", label: "置顶已有", desc: "相同内容移到最前" },
-  { value: "ignore", label: "忽略", desc: "不记录重复内容" },
-  { value: "always_new", label: "总是新建", desc: "每次都创建新条目" },
+  { value: "move_to_top", label: "置顶已有", desc: "将已有记录更新到最新" },
+  { value: "ignore", label: "忽略", desc: "丢弃重复内容，保留原记录" },
+  { value: "always_new", label: "总是新建", desc: "不去重，允许重复记录" },
+];
+const textDedupModeOptions: { value: TextDedupMode; label: string; desc: string }[] = [
+  { value: "semantic", label: "语义去重", desc: "忽略空白和格式差异（推荐）" },
+  { value: "strict", label: "严格去重", desc: "内容完全一致才视为重复" },
 ];
 
-function DedupStrategyCard() {
-  const [strategy, setStrategy] = useState<DedupStrategy>("move_to_top");
+interface DedupStrategyCardProps {
+  strategy: DedupStrategy;
+  onChange: (value: DedupStrategy) => void | Promise<void>;
+}
+
+function DedupStrategyCard({ strategy, onChange }: DedupStrategyCardProps) {
   const activeDedupIndex = Math.max(
     0,
     dedupOptions.findIndex((opt) => opt.value === strategy),
   );
-
-  useEffect(() => {
-    invoke<string | null>("get_setting", { key: "dedup_strategy" }).then((val) => {
-      if (val === "ignore" || val === "always_new") setStrategy(val);
-    }).catch(() => {});
-  }, []);
-
-  const handleChange = async (value: DedupStrategy) => {
-    setStrategy(value);
-    try {
-      await invoke("set_setting", { key: "dedup_strategy", value });
-    } catch (error) {
-      logError("Failed to save dedup strategy:", error);
-    }
-  };
 
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -107,13 +101,13 @@ function DedupStrategyCard() {
                 type="button"
                 role="radio"
                 aria-checked={isActive}
-                onClick={() => handleChange(opt.value)}
+                onClick={() => { void onChange(opt.value); }}
                 className={`relative z-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
                   isActive
                     ? "text-primary-foreground"
                     : "text-foreground/80 hover:text-foreground"
                 }`}
-                title={opt.desc}
+
               >
                 {opt.label}
               </button>
@@ -128,6 +122,79 @@ function DedupStrategyCard() {
   );
 }
 
+
+function TextDedupModeCard({ dedupStrategy }: { dedupStrategy: DedupStrategy }) {
+  const [mode, setMode] = useState<TextDedupMode>("semantic");
+  const dedupEnabled = dedupStrategy !== "always_new";
+  const activeIndex = Math.max(
+    0,
+    textDedupModeOptions.findIndex((opt) => opt.value === mode),
+  );
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "text_dedup_mode" }).then((val) => {
+      if (val === "strict") setMode("strict");
+      else setMode("semantic");
+    }).catch(() => {});
+  }, []);
+
+  const handleChange = async (value: TextDedupMode) => {
+    setMode(value);
+    try {
+      await invoke("set_setting", { key: "text_dedup_mode", value });
+    } catch (error) {
+      logError("Failed to save text dedup mode:", error);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">文本去重模式</h3>
+      <p className="text-xs text-muted-foreground mb-4">控制文本/HTML/RTF 的重复判断方式</p>
+      <div
+        role="radiogroup"
+        aria-label="文本去重模式"
+        aria-disabled={!dedupEnabled}
+        className={`relative rounded-lg border p-1 ${dedupEnabled ? "bg-muted/40" : "bg-muted/30 opacity-70"}`}
+      >
+        <div className="relative grid grid-cols-2">
+          <div
+            aria-hidden
+            className={`absolute inset-y-0 left-0 w-1/2 rounded-md shadow-sm will-change-transform transition-transform duration-200 ease-out ${dedupEnabled ? "bg-primary" : "bg-muted-foreground/25"}`}
+            style={{ transform: `translateX(${activeIndex * 100}%)` }}
+          />
+          {textDedupModeOptions.map((opt) => {
+            const isActive = mode === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={isActive}
+                disabled={!dedupEnabled}
+                onClick={() => { if (dedupEnabled) void handleChange(opt.value); }}
+                className={`relative z-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  !dedupEnabled
+                    ? "text-muted-foreground cursor-not-allowed"
+                    : isActive
+                    ? "text-primary-foreground"
+                    : "text-foreground/80 hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mt-2">
+        {dedupEnabled
+          ? textDedupModeOptions.find((o) => o.value === mode)?.desc
+          : "当前为“总是新建”，文本去重模式不会生效。"}
+      </p>
+    </div>
+  );
+}
 export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -150,6 +217,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [exportImportMsg, setExportImportMsg] = useState<string | null>(null);
+  const [dedupStrategy, setDedupStrategy] = useState<DedupStrategy>("move_to_top");
 
   // 数据清理
   type CleanAction = "clear_history" | "reset_settings" | "reset_all";
@@ -233,6 +301,25 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       refreshDataSize();
     }
   }, [refreshDataSize]);
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "dedup_strategy" })
+      .then((val) => {
+        if (val === "ignore" || val === "always_new") {
+          setDedupStrategy(val);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleDedupStrategyChange = async (value: DedupStrategy) => {
+    setDedupStrategy(value);
+    try {
+      await invoke("set_setting", { key: "dedup_strategy", value });
+    } catch (error) {
+      logError("Failed to save dedup strategy:", error);
+    }
+  };
 
   const selectFolder = async () => {
     try {
@@ -535,7 +622,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         </div>
 
         {/* Dedup Strategy Card */}
-        <DedupStrategyCard />
+        <DedupStrategyCard strategy={dedupStrategy} onChange={handleDedupStrategyChange} />
+        <TextDedupModeCard dedupStrategy={dedupStrategy} />
 
         {/* History Limit Card */}
         <div className="rounded-lg border bg-card p-4">

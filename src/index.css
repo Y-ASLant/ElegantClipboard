@@ -379,12 +379,7 @@ textarea,
     -webkit-app-region: no-drag;
 }
 
-/* Clipboard content uses system default font for better readability */
-.clipboard-content {
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
-        Arial, sans-serif;
-}
+/* Clipboard content font: controlled via inline style + CSS variables --card-font-family / --card-font-size */
 
 /* Path display uses system monospace font */
 .path-text {

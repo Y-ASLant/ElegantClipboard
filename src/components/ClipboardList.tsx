@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo, useState } from "react";
+import { useEffect, useRef, useCallback, useMemo, useState, type RefObject } from "react";
 import { CSS } from "@dnd-kit/utilities";
 import {
   ClipboardMultiple16Regular,
@@ -10,6 +10,7 @@ import { Virtuoso, VirtuosoHandle } from "react-virtuoso";
 import { useShallow } from "zustand/react/shallow";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { Separator } from "@/components/ui/separator";
+import { focusWindowImmediately } from "@/hooks/useInputFocus";
 import { useSortableList } from "@/hooks/useSortableList";
 import { GROUPS } from "@/lib/constants";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
@@ -19,6 +20,10 @@ import type { OverlayScrollbars } from "overlayscrollbars";
 
 interface SortableClipboardItem extends ClipboardItem {
   _sortId: string;
+}
+
+interface ClipboardListProps {
+  searchInputRef: RefObject<HTMLInputElement | null>;
 }
 
 // Virtuoso scrollSeek 占位符 — 快速滚动时替代完整卡片，接收精确高度避免布局抖动
@@ -38,11 +43,12 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
   </div>
 );
 
-export function ClipboardList() {
+export function ClipboardList({ searchInputRef }: ClipboardListProps) {
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const osInstanceRef = useRef<OverlayScrollbars | null>(null);
+  const focusSearchInFlightRef = useRef<Promise<void> | null>(null);
   const [customScrollParent, setCustomScrollParent] =
     useState<HTMLElement | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -235,9 +241,41 @@ export function ClipboardList() {
     }
   }, [_resetToken, scrollToTop]);
 
+  const focusSearchInput = useCallback(() => {
+    const target = searchInputRef.current;
+    if (!target) return;
+    if (document.activeElement === target) return;
+    if (focusSearchInFlightRef.current) return;
+
+    const applyFocus = () => {
+      const input = searchInputRef.current;
+      if (!input) return;
+      input.focus();
+    };
+
+    const task = (async () => {
+      // 非前台窗口（后端钩子路径）下，先抢回窗口焦点再聚焦输入框
+      if (!document.hasFocus()) {
+        await focusWindowImmediately();
+      }
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          applyFocus();
+          resolve();
+        });
+      });
+    })()
+      .catch(() => {})
+      .finally(() => {
+        focusSearchInFlightRef.current = null;
+      });
+
+    focusSearchInFlightRef.current = task;
+  }, [searchInputRef]);
+
   // 键盘导航共用处理函数
   const handleNavKey = useCallback(
-    (key: string, shift: boolean) => {
+    (key: string, shift: boolean, source: "default" | "search-input" = "default") => {
       if (!useUISettings.getState().keyboardNavigation) return;
       if (useClipboardStore.getState().batchMode) return;
 
@@ -261,6 +299,16 @@ export function ClipboardList() {
         case "ArrowUp": {
           const { items: upItems, activeIndex: cur } = useClipboardStore.getState();
           if (upItems.length === 0) return;
+          if (cur === 0) {
+            // 顶部再上移：退出列表高亮并回到搜索框
+            setActiveIndex(-1);
+            focusSearchInput();
+            break;
+          }
+          // 搜索输入框内，且当前已无高亮时，ArrowUp 不再进入列表，避免与“回到搜索”形成抖动循环
+          if (cur === -1 && source === "search-input") {
+            break;
+          }
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           let next = cur;
           if (cur > 0) next = cur - 1;
@@ -304,23 +352,40 @@ export function ClipboardList() {
         }
       }
     },
-    [setActiveIndex, pasteContent, pasteAsPlainText, deleteItem],
+    [setActiveIndex, pasteContent, pasteAsPlainText, deleteItem, focusSearchInput],
   );
 
   // DOM keydown（窗口聚焦时）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 焦点在输入框/文本域时，不拦截任何导航键
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
-      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", "Delete"].includes(e.key)) {
+      if (e.isComposing) return;
+
+      const target = e.target;
+      const el = target instanceof HTMLElement ? target : null;
+      const isEditable =
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el?.isContentEditable;
+      const isSearchInput =
+        el instanceof HTMLInputElement &&
+        el === searchInputRef.current;
+
+      // 普通输入控件保持原生键盘行为
+      if (isEditable && !isSearchInput) return;
+
+      // 搜索输入框仅透传上下导航，避免破坏左右移动光标/删除/回车输入语义
+      const navKeys = isSearchInput
+        ? ["ArrowUp", "ArrowDown"]
+        : ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Enter", "Delete"];
+
+      if (navKeys.includes(e.key)) {
         e.preventDefault();
-        handleNavKey(e.key, e.shiftKey);
+        handleNavKey(e.key, e.shiftKey, isSearchInput ? "search-input" : "default");
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleNavKey]);
+  }, [handleNavKey, searchInputRef]);
 
   // Tauri 键盘钩子事件（窗口无需聚焦，聚焦时跳过避免重复）
   useEffect(() => {

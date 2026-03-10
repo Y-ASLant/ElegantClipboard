@@ -1,4 +1,5 @@
 use super::{ContentType, Database};
+use crate::clipboard::semantic_hash_from_text;
 use parking_lot::Mutex;
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ pub struct ClipboardItem {
     pub image_path: Option<String>,
     pub file_paths: Option<String>,
     pub content_hash: String,
+    pub semantic_hash: String,
     pub preview: Option<String>,
     pub byte_size: i64,
     pub image_width: Option<i64>,
@@ -43,6 +45,7 @@ pub struct NewClipboardItem {
     pub image_path: Option<String>,
     pub file_paths: Option<Vec<String>>,
     pub content_hash: String,
+    pub semantic_hash: String,
     pub preview: Option<String>,
     pub byte_size: i64,
     pub image_width: Option<i64>,
@@ -64,6 +67,7 @@ impl Default for NewClipboardItem {
             image_path: None,
             file_paths: None,
             content_hash: String::new(),
+            semantic_hash: String::new(),
             preview: None,
             byte_size: 0,
             image_width: None,
@@ -103,6 +107,21 @@ pub struct ClipboardRepository {
     read_conn: Arc<Mutex<Connection>>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum HashColumn {
+    Content,
+    Semantic,
+}
+
+impl HashColumn {
+    fn as_sql(self) -> &'static str {
+        match self {
+            HashColumn::Content => "content_hash",
+            HashColumn::Semantic => "semantic_hash",
+        }
+    }
+}
+
 impl ClipboardRepository {
     pub fn new(db: &Database) -> Self {
         Self {
@@ -130,9 +149,9 @@ impl ClipboardRepository {
         conn.execute(
             "INSERT INTO clipboard_items 
              (content_type, text_content, html_content, rtf_content, image_path, file_paths, 
-              content_hash, preview, byte_size, image_width, image_height, sort_order, 
+              content_hash, semantic_hash, preview, byte_size, image_width, image_height, sort_order, 
               char_count, source_app_name, source_app_icon, group_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 item.content_type.as_str(),
                 item.text_content,
@@ -141,6 +160,7 @@ impl ClipboardRepository {
                 item.image_path,
                 file_paths_json,
                 item.content_hash,
+                item.semantic_hash,
                 item.preview,
                 item.byte_size,
                 item.image_width,
@@ -162,15 +182,39 @@ impl ClipboardRepository {
     }
 
     pub fn exists_by_hash(&self, hash: &str, group_id: Option<i64>) -> Result<bool, rusqlite::Error> {
+        self.exists_by_column(HashColumn::Content, hash, group_id)
+    }
+
+    pub fn exists_by_semantic_hash(
+        &self,
+        hash: &str,
+        group_id: Option<i64>,
+    ) -> Result<bool, rusqlite::Error> {
+        self.exists_by_column(HashColumn::Semantic, hash, group_id)
+    }
+
+    fn exists_by_column(
+        &self,
+        column: HashColumn,
+        hash: &str,
+        group_id: Option<i64>,
+    ) -> Result<bool, rusqlite::Error> {
         let conn = self.read_conn.lock();
+        let column = column.as_sql();
         let count: i64 = match group_id {
             Some(gid) => conn.query_row(
-                "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1 AND group_id = ?2",
+                &format!(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1 AND group_id = ?2",
+                    column
+                ),
                 params![hash, gid],
                 |row| row.get(0),
             )?,
             None => conn.query_row(
-                "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = ?1 AND group_id IS NULL",
+                &format!(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1 AND group_id IS NULL",
+                    column
+                ),
                 params![hash],
                 |row| row.get(0),
             )?,
@@ -180,6 +224,23 @@ impl ClipboardRepository {
 
     /// 更新已有条目的访问时间并置顶
     pub fn touch_by_hash(&self, hash: &str, group_id: Option<i64>) -> Result<Option<i64>, rusqlite::Error> {
+        self.touch_by_column(HashColumn::Content, hash, group_id)
+    }
+
+    pub fn touch_by_semantic_hash(
+        &self,
+        hash: &str,
+        group_id: Option<i64>,
+    ) -> Result<Option<i64>, rusqlite::Error> {
+        self.touch_by_column(HashColumn::Semantic, hash, group_id)
+    }
+
+    fn touch_by_column(
+        &self,
+        column: HashColumn,
+        hash: &str,
+        group_id: Option<i64>,
+    ) -> Result<Option<i64>, rusqlite::Error> {
         let conn = self.write_conn.lock();
 
         let max_sort_order: i64 = conn
@@ -192,11 +253,13 @@ impl ClipboardRepository {
         let new_sort = max_sort_order + 1;
 
         let (group_cond, group_param) = Self::group_condition(group_id);
+        let column = column.as_sql();
         let select_sql = format!(
             "SELECT id FROM clipboard_items \
-             WHERE content_hash = ? AND {} \
+             WHERE {} = ? AND {} \
              ORDER BY sort_order DESC, created_at DESC, id DESC \
              LIMIT 1",
+            column,
             group_cond
         );
 
@@ -264,17 +327,41 @@ impl ClipboardRepository {
         }
     }
 
+    /// 按收藏列表位置获取完整条目，供收藏快速粘贴使用。
+    pub fn get_favorite_by_position(&self, index: usize, group_id: Option<i64>) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let (group_cond, group_param) = Self::group_condition(group_id);
+        let sql = format!(
+            "SELECT * FROM clipboard_items \
+             WHERE {} AND is_favorite = 1 \
+             ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
+             LIMIT 1 OFFSET ?",
+            group_cond
+        );
+        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
+            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
+        } else {
+            conn.query_row(&sql, params![index as i64], Self::row_to_item)
+        };
+
+        match result {
+            Ok(item) => Ok(Some(item)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     /// 列表查询列（排除大文本字段以减少 IPC 传输）
     const LIST_COLUMNS: &'static str =
         "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \
-         image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, \
+         image_path, file_paths, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
          is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon";
 
     /// 搜索查询列（含 text_content 用于关键词上下文预览）
     const SEARCH_COLUMNS: &'static str =
         "id, content_type, text_content, NULL AS html_content, NULL AS rtf_content, \
-         image_path, file_paths, content_hash, preview, byte_size, image_width, image_height, \
+         image_path, file_paths, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
          is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon";
 
@@ -690,13 +777,14 @@ impl ClipboardRepository {
         hasher.update(b"text:");
         hasher.update(new_text.as_bytes());
         let content_hash = hasher.finalize().to_hex().to_string();
+        let semantic_hash = semantic_hash_from_text(new_text).unwrap_or_else(|| content_hash.clone());
 
         // 降级为 text 类型，清除 html/rtf 内容
         conn.execute(
-            "UPDATE clipboard_items SET text_content = ?1, preview = ?2, content_hash = ?3, \
-             byte_size = ?4, char_count = ?5, content_type = 'text', \
-             html_content = NULL, rtf_content = NULL WHERE id = ?6",
-            params![new_text, preview, content_hash, byte_size, char_count, id],
+            "UPDATE clipboard_items SET text_content = ?1, preview = ?2, content_hash = ?3, semantic_hash = ?4, \
+             byte_size = ?5, char_count = ?6, content_type = 'text', \
+             html_content = NULL, rtf_content = NULL WHERE id = ?7",
+            params![new_text, preview, content_hash, semantic_hash, byte_size, char_count, id],
         )?;
         debug!("Updated text content for item {}", id);
         Ok(())
@@ -777,6 +865,7 @@ impl ClipboardRepository {
             image_path: row.get("image_path")?,
             file_paths: row.get("file_paths")?,
             content_hash: row.get("content_hash")?,
+            semantic_hash: row.get("semantic_hash")?,
             preview: row.get("preview")?,
             byte_size: row.get("byte_size")?,
             image_width: row.get("image_width")?,

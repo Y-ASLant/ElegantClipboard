@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     image_path TEXT,
     file_paths TEXT,
     content_hash TEXT NOT NULL,
+    semantic_hash TEXT NOT NULL,
     preview TEXT,
     byte_size INTEGER DEFAULT 0,
     image_width INTEGER,
@@ -60,6 +61,8 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
 -- Per-group hash index: duplicates are allowed when dedup strategy is "always_new"
 CREATE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
@@ -69,6 +72,8 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('hotkey', 'Ctrl+Shift+V'),
     ('max_history_count', '10000'),
     ('max_content_size_kb', '1024'),
+    ('dedup_strategy', 'move_to_top'),
+    ('text_dedup_mode', 'semantic'),
     ('auto_start', 'false'),
     ('theme', 'system'),
     ('language', 'zh-CN'),

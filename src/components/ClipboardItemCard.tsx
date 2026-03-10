@@ -343,6 +343,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
     try {
       invoke("hide_image_preview").catch(() => {});
+      const uiState = useUISettings.getState();
       await invoke("show_text_preview", {
         text: textContent,
         winX,
@@ -352,7 +353,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         align,
         theme,
         sharpCorners,
-        windowEffect: useUISettings.getState().windowEffect,
+        windowEffect: uiState.windowEffect,
+        fontFamily: uiState.previewFont || null,
+        fontSize: uiState.previewFontSize,
       });
       textPreviewVisibleRef.current = true;
     } catch (error) {
@@ -532,7 +535,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               className={cn(
                 "absolute inset-y-0 left-0 z-10 flex items-center justify-center rounded-l-lg cursor-grab active:cursor-grabbing",
                 showDragAreaIndicator
-                  ? "border-r border-dashed border-border/50 bg-background/20 text-muted-foreground/85 opacity-0 group-hover:opacity-55 transition-[opacity,colors] duration-150 hover:bg-background/35 hover:text-foreground"
+                  ? "border-r border-dashed border-primary/40 bg-primary/15 text-primary opacity-0 group-hover:opacity-90 transition-[opacity,colors] duration-150 hover:bg-primary/25 hover:text-primary"
                   : "border-r border-transparent bg-transparent text-transparent opacity-0",
               )}
               style={{ width: dragHandleWidth }}
@@ -541,7 +544,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             >
               <span
                 aria-hidden
-                className="pointer-events-none text-[10px] leading-tight text-center text-muted-foreground"
+                className="pointer-events-none text-[10px] leading-tight text-center text-primary/80"
               >
                 拖拽区域
               </span>
@@ -556,7 +559,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               className={cn(
                 "absolute inset-y-0 right-0 z-10 flex items-center justify-center rounded-r-lg cursor-grab active:cursor-grabbing",
                 showDragAreaIndicator
-                  ? "border-l border-dashed border-border/50 bg-background/20 text-muted-foreground/85 opacity-0 group-hover:opacity-55 transition-[opacity,colors] duration-150 hover:bg-background/35 hover:text-foreground"
+                  ? "border-l border-dashed border-primary/40 bg-primary/15 text-primary opacity-0 group-hover:opacity-90 transition-[opacity,colors] duration-150 hover:bg-primary/25 hover:text-primary"
                   : "border-l border-transparent bg-transparent text-transparent opacity-0",
               )}
               style={{ width: dragHandleWidth }}
@@ -565,7 +568,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             >
               <span
                 aria-hidden
-                className="pointer-events-none text-[10px] leading-tight text-center text-muted-foreground"
+                className="pointer-events-none text-[10px] leading-tight text-center text-primary/80"
               >
                 拖拽区域
               </span>
@@ -574,14 +577,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             {showDragAreaIndicator && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute inset-y-0 z-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                className="pointer-events-none absolute inset-y-0 z-6 flex items-center justify-center bg-amber-500/12 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                 style={{ left: dragHandleWidth, right: dragHandleWidth }}
               >
-                <div className="absolute inset-y-1 left-0 border-l border-dashed border-border/50" />
-                <div className="absolute inset-y-1 right-0 border-r border-dashed border-border/50" />
-                <div className="rounded border border-dashed border-border/60 bg-background/80 px-2 py-1 text-center">
-                  <div className="text-[10px] leading-none text-muted-foreground">粘贴、预览触发区域</div>
-                  <div className="mt-0.5 text-[10px] leading-none text-muted-foreground/90">点击卡片可粘贴</div>
+                <div className="text-center">
+                  <div className="text-[10px] leading-none text-amber-700/80 dark:text-amber-300/80">粘贴、预览触发区域</div>
+                  <div className="mt-0.5 text-[10px] leading-none text-amber-700/80 dark:text-amber-300/80">点击卡片可粘贴</div>
+                  <div className="mt-0.5 text-[10px] leading-none text-amber-700/80 dark:text-amber-300/80">可在设置中关闭</div>
                 </div>
               </div>
             )}
@@ -628,8 +630,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onWheel={handleTextWheel}
             >
               <pre
-                className="clipboard-content text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-all m-0"
+                className="clipboard-content leading-relaxed text-foreground/90 whitespace-pre-wrap break-all m-0"
                 style={{
+                  fontFamily: "var(--card-font-family)",
+                  fontSize: "var(--card-font-size, 14px)",
                   display: "-webkit-box",
                   WebkitLineClamp: cardMaxLines,
                   WebkitBoxOrient: "vertical",

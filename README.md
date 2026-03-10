@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/v/release/Y-ASLant/ElegantClipboard?label=version&color=blue" alt="version"></a>
+  <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/downloads/Y-ASLant/ElegantClipboard/total?label=downloads&color=brightgreen" alt="downloads"></a>
   <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="platform">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license">
   <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>

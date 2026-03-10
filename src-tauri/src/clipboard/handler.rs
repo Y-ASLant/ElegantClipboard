@@ -1,4 +1,5 @@
 use super::source_app::{self, SourceAppInfo};
+use super::{compute_semantic_hash, semantic_hash_from_text};
 use crate::database::{
     ClipboardRepository, ContentType, Database, NewClipboardItem, SettingsRepository,
 };
@@ -96,6 +97,12 @@ pub enum ClipboardContent {
     Files(Vec<String>),
 }
 
+#[derive(Debug, Clone)]
+struct ContentHashes {
+    content_hash: String,
+    semantic_hash: String,
+}
+
 pub struct ClipboardHandler {
     repository: ClipboardRepository,
     settings_repo: SettingsRepository,
@@ -165,6 +172,18 @@ impl ClipboardHandler {
     /// 检查内容类型是否被允许监听
     /// 读取 `monitor_types` 设置（逗号分隔，如 "text,html,rtf,image,files"）
     /// 默认全部允许
+    fn get_text_dedup_mode(&self) -> &str {
+        match self
+            .settings_repo
+            .get("text_dedup_mode")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("strict") => "strict",
+            _ => "semantic",
+        }
+    }
     pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
         let allowed = self
             .settings_repo
@@ -261,12 +280,7 @@ impl ClipboardHandler {
 
         // max_content_size 仅限制文本类内容
         if max_content_size > 0 {
-            let is_text_content = matches!(
-                content,
-                ClipboardContent::Text(_)
-                    | ClipboardContent::Html { .. }
-                    | ClipboardContent::Rtf { .. }
-            );
+            let is_text_content = Self::is_text_like_content(&content);
             if is_text_content {
                 let content_size = self.get_content_size(&content);
                 if content_size > max_content_size {
@@ -279,14 +293,24 @@ impl ClipboardHandler {
             }
         }
 
-        let hash = self.calculate_hash(&content);
+        let hashes = self.calculate_hashes(&content);
         let dedup = self.get_dedup_strategy();
+        let text_like = Self::is_text_like_content(&content);
+        let text_dedup_mode = self.get_text_dedup_mode();
+        let text_use_strict = text_like && text_dedup_mode == "strict";
 
         if dedup != "always_new"
-            && self
-                .repository
-                .exists_by_hash(&hash, group_id)
-                .map_err(|e| e.to_string())?
+            && if text_like {
+                if text_use_strict {
+                    self.repository.exists_by_hash(&hashes.content_hash, group_id)
+                } else {
+                    self.repository
+                        .exists_by_semantic_hash(&hashes.semantic_hash, group_id)
+                }
+            } else {
+                self.repository.exists_by_hash(&hashes.content_hash, group_id)
+            }
+            .map_err(|e| e.to_string())?
         {
             match dedup {
                 "ignore" => {
@@ -296,10 +320,21 @@ impl ClipboardHandler {
                 _ => {
                     // move_to_top: 更新访问时间并置顶
                     debug!("Content already exists, updating access time (dedup=move_to_top)");
-                    return self
-                        .repository
-                        .touch_by_hash(&hash, group_id)
-                        .map_err(|e| e.to_string());
+                    return if text_like {
+                        if text_use_strict {
+                            self.repository
+                                .touch_by_hash(&hashes.content_hash, group_id)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            self.repository
+                                .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
+                                .map_err(|e| e.to_string())
+                        }
+                    } else {
+                        self.repository
+                            .touch_by_hash(&hashes.content_hash, group_id)
+                            .map_err(|e| e.to_string())
+                    };
                 }
             }
         }
@@ -317,15 +352,15 @@ impl ClipboardHandler {
         };
 
         let mut item = match content {
-            ClipboardContent::Text(text) => self.process_text(text, hash, max_content_size)?,
+            ClipboardContent::Text(text) => self.process_text(text, &hashes, max_content_size)?,
             ClipboardContent::Html { html, text } => {
-                self.process_html(html, text, hash, max_content_size)?
+                self.process_html(html, text, &hashes, max_content_size)?
             }
             ClipboardContent::Rtf { rtf, text } => {
-                self.process_rtf(rtf, text, hash, max_content_size)?
+                self.process_rtf(rtf, text, &hashes, max_content_size)?
             }
-            ClipboardContent::Image(data) => self.process_image(data, hash)?,
-            ClipboardContent::Files(files) => self.process_files(files, hash)?,
+            ClipboardContent::Image(data) => self.process_image(data, &hashes)?,
+            ClipboardContent::Files(files) => self.process_files(files, &hashes)?,
         };
 
         item.source_app_name = source_app_name;
@@ -383,6 +418,35 @@ impl ClipboardHandler {
         }
     }
 
+    fn is_text_like_content(content: &ClipboardContent) -> bool {
+        matches!(
+            content,
+            ClipboardContent::Text(_) | ClipboardContent::Html { .. } | ClipboardContent::Rtf { .. }
+        )
+    }
+
+    fn calculate_hashes(&self, content: &ClipboardContent) -> ContentHashes {
+        let content_hash = self.calculate_hash(content);
+        let semantic_hash = match content {
+            ClipboardContent::Text(text) => {
+                semantic_hash_from_text(text).unwrap_or_else(|| content_hash.clone())
+            }
+            ClipboardContent::Html { text, .. } => {
+                compute_semantic_hash("html", text.as_deref(), &content_hash)
+            }
+            ClipboardContent::Rtf { text, .. } => {
+                compute_semantic_hash("rtf", text.as_deref(), &content_hash)
+            }
+            ClipboardContent::Image(_) => content_hash.clone(),
+            ClipboardContent::Files(_) => content_hash.clone(),
+        };
+
+        ContentHashes {
+            content_hash,
+            semantic_hash,
+        }
+    }
+
     fn calculate_hash(&self, content: &ClipboardContent) -> String {
         let mut hasher = Hasher::new();
 
@@ -418,7 +482,7 @@ impl ClipboardHandler {
     fn process_text(
         &self,
         text: String,
-        hash: String,
+        hashes: &ContentHashes,
         max_size: usize,
     ) -> Result<NewClipboardItem, String> {
         let byte_size = text.len() as i64;
@@ -429,7 +493,8 @@ impl ClipboardHandler {
         Ok(NewClipboardItem {
             content_type: ContentType::Text,
             text_content: Some(text_content),
-            content_hash: hash,
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
             preview: Some(preview),
             byte_size,
             char_count,
@@ -441,7 +506,7 @@ impl ClipboardHandler {
         &self,
         html: String,
         text: Option<String>,
-        hash: String,
+        hashes: &ContentHashes,
         max_size: usize,
     ) -> Result<NewClipboardItem, String> {
         let byte_size = html.len() as i64;
@@ -457,7 +522,8 @@ impl ClipboardHandler {
             content_type: ContentType::Html,
             text_content: text,
             html_content: Some(html_content),
-            content_hash: hash,
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
             preview: Some(preview),
             byte_size,
             char_count,
@@ -469,7 +535,7 @@ impl ClipboardHandler {
         &self,
         rtf: String,
         text: Option<String>,
-        hash: String,
+        hashes: &ContentHashes,
         max_size: usize,
     ) -> Result<NewClipboardItem, String> {
         let byte_size = rtf.len() as i64;
@@ -485,7 +551,8 @@ impl ClipboardHandler {
             content_type: ContentType::Rtf,
             text_content: text,
             rtf_content: Some(rtf_content),
-            content_hash: hash,
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
             preview: Some(preview),
             byte_size,
             char_count,
@@ -494,15 +561,21 @@ impl ClipboardHandler {
     }
 
     /// 处理图片内容：保存到磁盘并提取宽高元数据
-    fn process_image(&self, data: Vec<u8>, hash: String) -> Result<NewClipboardItem, String> {
+    fn process_image(&self, data: Vec<u8>, hashes: &ContentHashes) -> Result<NewClipboardItem, String> {
         let byte_size = data.len() as i64;
 
-        let filename = format!("{}.png", &hash[..16]);
+        let filename = format!("{}.png", &hashes.content_hash[..16]);
         let image_path = self.images_path.join(&filename);
         let image_path_str = image_path.to_string_lossy().to_string();
 
         let (image_width, image_height) = self.extract_image_dimensions(&data)?;
-        debug!("Processing image: {}x{}, {} bytes, hash={}", image_width, image_height, byte_size, &hash[..16]);
+        debug!(
+            "Processing image: {}x{}, {} bytes, hash={}",
+            image_width,
+            image_height,
+            byte_size,
+            &hashes.content_hash[..16]
+        );
 
         // 同步写入文件，确保插入数据库前文件已就绪（异步写入会引发竞态）
         if let Err(e) = std::fs::write(&image_path, &data) {
@@ -513,7 +586,8 @@ impl ClipboardHandler {
         Ok(NewClipboardItem {
             content_type: ContentType::Image,
             image_path: Some(image_path_str),
-            content_hash: hash,
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
             preview: Some("[图片]".to_string()),
             byte_size,
             image_width: Some(image_width),
@@ -532,7 +606,7 @@ impl ClipboardHandler {
         Ok((w as i64, h as i64))
     }
 
-    fn process_files(&self, files: Vec<String>, hash: String) -> Result<NewClipboardItem, String> {
+    fn process_files(&self, files: Vec<String>, hashes: &ContentHashes) -> Result<NewClipboardItem, String> {
         use std::path::Path;
         debug!("Processing {} file(s)", files.len());
 
@@ -558,7 +632,8 @@ impl ClipboardHandler {
         Ok(NewClipboardItem {
             content_type: ContentType::Files,
             file_paths: Some(files),
-            content_hash: hash,
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
             preview: Some(preview),
             byte_size,
             ..Default::default()

@@ -528,7 +528,7 @@ function App() {
 
       {/* 剪贴板列表 */}
       <div className="flex-1 overflow-hidden">
-        <ClipboardList />
+        <ClipboardList searchInputRef={inputRef} />
       </div>
 
       {/* 底部分组选择 */}

@@ -27,7 +27,8 @@ export interface ShortcutSettings {
 
 type ShortcutEditTarget =
   | { type: "main" }
-  | { type: "quick-paste"; slot: number };
+  | { type: "quick-paste"; slot: number }
+  | { type: "favorite-paste"; slot: number };
 
 const QUICK_PASTE_SLOT_COUNT = 9;
 const QUICK_PASTE_EMPTY_LABEL = "点击设置快捷键";
@@ -80,6 +81,10 @@ export function ShortcutsTab({
   const [loadingSlot, setLoadingSlot] = useState<number | null>(null);
   const [slotErrors, setSlotErrors] = useState<Record<number, string>>({});
   const [quickPasteExpanded, setQuickPasteExpanded] = useState(false);
+  const [favPasteShortcuts, setFavPasteShortcuts] = useState<string[]>([]);
+  const [favPasteLoaded, setFavPasteLoaded] = useState(false);
+  const [favPasteExpanded, setFavPasteExpanded] = useState(false);
+  const [favSlotErrors, setFavSlotErrors] = useState<Record<number, string>>({});
 
   // 处理快捷键录入的键盘事件
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -113,8 +118,8 @@ export function ShortcutsTab({
         setShortcutError("Shift 不能单独作为修饰键，请配合 Ctrl/Alt 使用");
         return;
       }
-      // 快速粘贴禁止使用 Win 键（Win+数字 是系统任务栏快捷键）
-      if (e.metaKey && editTarget?.type === "quick-paste") {
+      // 快速粘贴/收藏粘贴禁止使用 Win 键（Win+数字 是系统任务栏快捷键）
+      if (e.metaKey && (editTarget?.type === "quick-paste" || editTarget?.type === "favorite-paste")) {
         setShortcutError("快速粘贴不支持 Win 修饰键（Win+数字 是系统任务栏快捷键）");
         return;
       }
@@ -150,6 +155,17 @@ export function ShortcutsTab({
         logError("Failed to load quick paste shortcuts:", error);
       } finally {
         if (!disposed) setQuickPasteLoaded(true);
+      }
+      try {
+        const favShortcuts = await invoke<string[]>("get_favorite_paste_shortcuts");
+        if (disposed) return;
+        if (Array.isArray(favShortcuts) && favShortcuts.length === QUICK_PASTE_SLOT_COUNT) {
+          setFavPasteShortcuts(favShortcuts);
+        }
+      } catch (error) {
+        logError("Failed to load favorite paste shortcuts:", error);
+      } finally {
+        if (!disposed) setFavPasteLoaded(true);
       }
     };
     loadQuickPasteShortcuts();
@@ -203,20 +219,64 @@ export function ShortcutsTab({
         return `与快捷粘贴位置 ${i + 1} 冲突`;
       }
     }
+    // 与收藏快速粘贴槽位比较（编辑时跳过自身）
+    for (let i = 0; i < favPasteShortcuts.length; i++) {
+      const s = favPasteShortcuts[i];
+      if (!s) continue;
+      if (target.type === "favorite-paste" && target.slot === i) continue;
+      if (normalized === normalizeForCompare(s)) {
+        return `与收藏快捷粘贴位置 ${i + 1} 冲突`;
+      }
+    }
     return null;
   };
 
-  // 调用后端设置槽位快捷键并更新本地状态
-  const applySlotShortcut = async (idx: number, shortcut: string) => {
-    setLoadingSlot(idx);
-    setSlotErrors((prev) => { const { [idx]: _, ...rest } = prev; return rest; });
-    await invoke("set_quick_paste_shortcut", { slot: idx + 1, shortcut });
-    setQuickPasteShortcuts((prev) => {
-      const next = [...prev];
-      next[idx] = shortcut;
-      return next;
-    });
+  // 通用槽位操作工厂，消除 quick/favorite 重复逻辑
+  const createSlotOps = (
+    cmd: string,
+    setShortcuts: React.Dispatch<React.SetStateAction<string[]>>,
+    setErrors: React.Dispatch<React.SetStateAction<Record<number, string>>>,
+    slotOffset: number,
+  ) => {
+    const apply = async (idx: number, shortcut: string) => {
+      setLoadingSlot(idx + slotOffset);
+      setErrors((prev) => { const { [idx]: _, ...rest } = prev; return rest; });
+      await invoke(cmd, { slot: idx + 1, shortcut });
+      setShortcuts((prev) => { const next = [...prev]; next[idx] = shortcut; return next; });
+    };
+    const disable = (idx: number) => {
+      apply(idx, "").catch((error) => {
+        setErrors((prev) => ({ ...prev, [idx]: String(error) }));
+      }).finally(() => setLoadingSlot(null));
+    };
+    const batchReset = async (defaults: string[], currentShortcuts: string[]) => {
+      const mainNorm = normalizeForCompare(activeMainShortcut);
+      for (let i = 0; i < QUICK_PASTE_SLOT_COUNT; i++) {
+        if (currentShortcuts[i] === defaults[i]) continue;
+        if (defaults[i] && normalizeForCompare(defaults[i]) === mainNorm) {
+          setErrors((prev) => ({ ...prev, [i]: `${defaults[i]} 与呼出快捷键冲突，已跳过` }));
+          continue;
+        }
+        try { await apply(i, defaults[i]); } catch (error) {
+          setErrors((prev) => ({ ...prev, [i]: String(error) }));
+        }
+      }
+      setLoadingSlot(null);
+    };
+    const batchDisable = async (currentShortcuts: string[]) => {
+      for (let i = 0; i < QUICK_PASTE_SLOT_COUNT; i++) {
+        if (!currentShortcuts[i]) continue;
+        try { await apply(i, ""); } catch (error) {
+          setErrors((prev) => ({ ...prev, [i]: String(error) }));
+        }
+      }
+      setLoadingSlot(null);
+    };
+    return { apply, disable, batchReset, batchDisable };
   };
+
+  const quickOps = createSlotOps("set_quick_paste_shortcut", setQuickPasteShortcuts, setSlotErrors, 0);
+  const favOps = createSlotOps("set_favorite_paste_shortcut", setFavPasteShortcuts, setFavSlotErrors, 100);
 
   const saveShortcut = async () => {
     if (!editTarget) {
@@ -244,8 +304,10 @@ export function ShortcutsTab({
           value: tempShortcut,
         });
         onSettingsChange({ ...settings, shortcut: tempShortcut });
+      } else if (editTarget.type === "quick-paste") {
+        await quickOps.apply(editTarget.slot, tempShortcut);
       } else {
-        await applySlotShortcut(editTarget.slot, tempShortcut);
+        await favOps.apply(editTarget.slot, tempShortcut);
       }
       setShortcutDialogOpen(false);
       setRecordingShortcut(false);
@@ -255,47 +317,16 @@ export function ShortcutsTab({
       setShortcutError(`保存失败: ${error}`);
       if (editTarget.type === "quick-paste") {
         setSlotErrors((prev) => ({ ...prev, [editTarget.slot]: String(error) }));
+      } else if (editTarget.type === "favorite-paste") {
+        setFavSlotErrors((prev) => ({ ...prev, [editTarget.slot]: String(error) }));
       }
     } finally {
       setLoadingSlot(null);
     }
   };
 
-  const handleDisableSlot = (idx: number) => {
-    applySlotShortcut(idx, "").catch((error) => {
-      setSlotErrors((prev) => ({ ...prev, [idx]: String(error) }));
-    }).finally(() => setLoadingSlot(null));
-  };
-
-  const handleBatchResetAll = async () => {
-    const defaults = Array.from({ length: QUICK_PASTE_SLOT_COUNT }, (_, i) => `Alt+${i + 1}`);
-    const mainNorm = normalizeForCompare(activeMainShortcut);
-    for (let i = 0; i < QUICK_PASTE_SLOT_COUNT; i++) {
-      if (quickPasteShortcuts[i] === defaults[i]) continue;
-      if (normalizeForCompare(defaults[i]) === mainNorm) {
-        setSlotErrors((prev) => ({ ...prev, [i]: `Alt+${i + 1} 与呼出快捷键冲突，已跳过` }));
-        continue;
-      }
-      try {
-        await applySlotShortcut(i, defaults[i]);
-      } catch (error) {
-        setSlotErrors((prev) => ({ ...prev, [i]: String(error) }));
-      }
-    }
-    setLoadingSlot(null);
-  };
-
-  const handleBatchDisableAll = async () => {
-    for (let i = 0; i < QUICK_PASTE_SLOT_COUNT; i++) {
-      if (!quickPasteShortcuts[i]) continue;
-      try {
-        await applySlotShortcut(i, "");
-      } catch (error) {
-        setSlotErrors((prev) => ({ ...prev, [i]: String(error) }));
-      }
-    }
-    setLoadingSlot(null);
-  };
+  const QUICK_DEFAULTS = Array.from({ length: QUICK_PASTE_SLOT_COUNT }, (_, i) => `Alt+${i + 1}`);
+  const FAV_DEFAULTS = ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "", "", "", "", "", ""];
 
   // 用户确认后执行 Win+V 切换
   const executeWinvToggle = async () => {
@@ -447,7 +478,7 @@ export function ShortcutsTab({
                     size="sm"
                     className="h-7 text-xs"
                     disabled={loadingSlot !== null}
-                    onClick={handleBatchResetAll}
+                    onClick={() => quickOps.batchReset(QUICK_DEFAULTS, quickPasteShortcuts)}
                   >
                     全部恢复默认
                   </Button>
@@ -456,7 +487,7 @@ export function ShortcutsTab({
                     size="sm"
                     className="h-7 text-xs text-muted-foreground"
                     disabled={loadingSlot !== null || quickPasteShortcuts.every((s) => !s)}
-                    onClick={handleBatchDisableAll}
+                    onClick={() => quickOps.batchDisable(quickPasteShortcuts)}
                   >
                     全部禁用
                   </Button>
@@ -490,7 +521,7 @@ export function ShortcutsTab({
                         size="sm"
                         className="h-8 text-muted-foreground"
                         disabled={loadingSlot === idx || !shortcut}
-                        onClick={() => handleDisableSlot(idx)}
+                        onClick={() => quickOps.disable(idx)}
                       >
                         禁用
                       </Button>
@@ -503,6 +534,100 @@ export function ShortcutsTab({
               </div>
               <p className="text-xs text-muted-foreground mt-3">
                 建议使用包含修饰键的组合（如 Alt+1、Ctrl+Shift+1）以减少冲突
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Favorite Paste Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <button
+            type="button"
+            className="flex items-center justify-between w-full text-left"
+            onClick={() => setFavPasteExpanded((v) => !v)}
+          >
+            <div>
+              <h3 className="text-sm font-medium">收藏快捷粘贴</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                为收藏列表中的前 9 条记录设置全局快捷键
+              </p>
+            </div>
+            {favPasteExpanded
+              ? <ChevronUp16Regular className="w-4 h-4 text-muted-foreground shrink-0" />
+              : <ChevronDown16Regular className="w-4 h-4 text-muted-foreground shrink-0" />}
+          </button>
+
+          <div
+            className={cn(
+              "grid transition-[grid-template-rows] duration-200 ease-in-out",
+              favPasteExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+            )}
+          >
+            <div className="overflow-hidden">
+              <div className="pt-4 space-y-2">
+                {/* Batch operations */}
+                <div className="flex gap-2 mb-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={loadingSlot !== null}
+                    onClick={() => favOps.batchReset(FAV_DEFAULTS, favPasteShortcuts)}
+                  >
+                    全部恢复默认
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground"
+                    disabled={loadingSlot !== null || favPasteShortcuts.every((s) => !s)}
+                    onClick={() => favOps.batchDisable(favPasteShortcuts)}
+                  >
+                    全部禁用
+                  </Button>
+                </div>
+
+                {(favPasteLoaded ? favPasteShortcuts : ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "", "", "", "", "", ""]).map((shortcut, idx) => (
+                  <div key={idx}>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs w-28 shrink-0">{`收藏粘贴位置${idx + 1}`}</Label>
+                      <Input
+                        value={shortcut}
+                        placeholder={QUICK_PASTE_EMPTY_LABEL}
+                        readOnly
+                        className={cn(
+                          "h-8 text-sm flex-1 bg-muted",
+                          shortcut && "font-mono",
+                          favSlotErrors[idx] && "border-destructive",
+                        )}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        disabled={loadingSlot === idx + 100}
+                        onClick={() => openEditDialog({ type: "favorite-paste", slot: idx }, shortcut)}
+                      >
+                        修改
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-muted-foreground"
+                        disabled={loadingSlot === idx + 100 || !shortcut}
+                        onClick={() => favOps.disable(idx)}
+                      >
+                        禁用
+                      </Button>
+                    </div>
+                    {favSlotErrors[idx] && (
+                      <p className="text-xs text-destructive mt-1 ml-28 pl-2">{favSlotErrors[idx]}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                默认前 3 个槽位启用（Ctrl+Alt+1/2/3），粘贴收藏列表中对应位置的记录
               </p>
             </div>
           </div>
@@ -537,6 +662,20 @@ export function ShortcutsTab({
                 )}
               </div>
             )}
+            {favPasteLoaded && favPasteShortcuts.some((s) => s) && (
+              <div className="space-y-1 mt-1">
+                {favPasteShortcuts.map((shortcut, idx) =>
+                  shortcut ? (
+                    <div key={`fav-${idx}`} className="flex items-center justify-between py-1.5 px-3 rounded-md bg-muted/50">
+                      <span className="text-xs text-muted-foreground">收藏粘贴 {idx + 1}</span>
+                      <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-background px-1.5 font-mono text-[10px] font-medium">
+                        {shortcut}
+                      </kbd>
+                    </div>
+                  ) : null,
+                )}
+              </div>
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-2">
             注：自定义快捷键和 Win+V 只能二选一，不能同时生效
@@ -557,10 +696,12 @@ export function ShortcutsTab({
             <DialogTitle>
               {editTarget?.type === "quick-paste"
                 ? `修改快速粘贴位置 ${editTarget.slot + 1}`
-                : "修改快捷键"}
+                : editTarget?.type === "favorite-paste"
+                  ? `修改收藏粘贴位置 ${editTarget.slot + 1}`
+                  : "修改快捷键"}
             </DialogTitle>
             <DialogDescription>
-              {editTarget?.type === "quick-paste"
+              {editTarget?.type === "quick-paste" || editTarget?.type === "favorite-paste"
                 ? "按下新的快捷键组合来设置快速粘贴"
                 : "按下新的快捷键组合来设置呼出剪贴板的快捷键"}
             </DialogDescription>
@@ -602,6 +743,9 @@ export function ShortcutsTab({
               onClick={() => {
                 if (editTarget?.type === "quick-paste") {
                   setTempShortcut(`Alt+${editTarget.slot + 1}`);
+                } else if (editTarget?.type === "favorite-paste") {
+                  const favDefaults = ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3"];
+                  setTempShortcut(favDefaults[editTarget.slot] || "");
                 } else {
                   setTempShortcut("Alt+C");
                 }

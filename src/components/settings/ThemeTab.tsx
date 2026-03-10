@@ -3,7 +3,10 @@ import {
   Checkmark16Filled,
   Desktop16Regular,
 } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
@@ -14,12 +17,57 @@ const DARK_MODE_OPTIONS: { value: DarkMode; label: string }[] = [
   { value: "dark", label: "深色" },
 ];
 
+function FontSettingGroup({ label, fonts, font, onFontChange, fontSize, onFontSizeChange, min, max }: {
+  label: string;
+  fonts: string[];
+  font: string;
+  onFontChange: (v: string) => void;
+  fontSize: number;
+  onFontSizeChange: (v: number) => void;
+  min: number;
+  max: number;
+}) {
+  return (
+    <div className="space-y-3">
+      <Label className="text-xs font-medium">{label}</Label>
+      <Select value={font || "__default__"} onValueChange={(v) => onFontChange(v === "__default__" ? "" : v)}>
+        <SelectTrigger className="w-full h-8 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="max-h-64 overflow-y-auto">
+          <SelectItem value="__default__" className="text-xs">默认字体</SelectItem>
+          {fonts.map((f) => (
+            <SelectItem key={f} value={f} className="text-xs">{f}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">字号</Label>
+        <span className="text-xs font-medium tabular-nums">{fontSize}px</span>
+      </div>
+      <Slider value={[fontSize]} onValueChange={(v) => onFontSizeChange(v[0])} min={min} max={max} step={1} />
+    </div>
+  );
+}
+
 export function ThemeTab() {
-  const { colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode, windowEffect, setWindowEffect } = useUISettings();
+  const {
+    colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode,
+    windowEffect, setWindowEffect, customFont, setCustomFont, uiFontSize, setUIFontSize,
+    cardFont, setCardFont, cardFontSize, setCardFontSize,
+    previewFont, setPreviewFont, previewFontSize, setPreviewFontSize,
+    resetFontSettings,
+  } = useUISettings();
   const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
 
   // 强调色变化时重新渲染
   useEffect(() => subscribeAccentColor(setSystemAccentColor), []);
+
+  // 加载系统字体列表
+  useEffect(() => {
+    invoke<string[]>("get_system_fonts").then(setSystemFonts).catch(() => {});
+  }, []);
 
   const themes: {
     id: ColorTheme;
@@ -221,6 +269,28 @@ export function ThemeTab() {
             </button>
           ))}
         </div>
+      </div>
+      {/* Font Settings */}
+      <div className="rounded-lg border bg-card p-4 space-y-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-medium mb-1">字体设置</h3>
+            <p className="text-xs text-muted-foreground">分别设置界面、卡片内容和悬浮预览的字体</p>
+          </div>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            onClick={resetFontSettings}
+          >
+            重置
+          </button>
+        </div>
+
+        <FontSettingGroup label="界面字体" fonts={systemFonts} font={customFont} onFontChange={setCustomFont} fontSize={uiFontSize} onFontSizeChange={setUIFontSize} min={12} max={18} />
+        <hr className="border-border" />
+        <FontSettingGroup label="卡片内容字体" fonts={systemFonts} font={cardFont} onFontChange={setCardFont} fontSize={cardFontSize} onFontSizeChange={setCardFontSize} min={12} max={18} />
+        <hr className="border-border" />
+        <FontSettingGroup label="悬浮预览字体" fonts={systemFonts} font={previewFont} onFontChange={setPreviewFont} fontSize={previewFontSize} onFontSizeChange={setPreviewFontSize} min={11} max={18} />
       </div>
     </div>
   );

@@ -1,7 +1,9 @@
+mod dedup;
 mod handler;
 mod monitor;
 pub mod source_app;
 
+pub(crate) use dedup::{compute_semantic_hash, semantic_hash_from_text};
 pub use handler::*;
 pub use monitor::*;
 

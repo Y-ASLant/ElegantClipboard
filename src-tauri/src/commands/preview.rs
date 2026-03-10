@@ -103,6 +103,8 @@ pub async fn show_text_preview(
     theme: Option<String>,
     sharp_corners: Option<bool>,
     window_effect: Option<String>,
+    font_family: Option<String>,
+    font_size: Option<f64>,
 ) -> Result<(), String> {
     let seq = TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
     let mut newly_created = false;
@@ -151,6 +153,8 @@ pub async fn show_text_preview(
         "align": align.as_deref().unwrap_or("left"),
         "theme": theme.as_deref().unwrap_or("light"),
         "sharpCorners": sharp_corners.unwrap_or(false),
+        "fontFamily": font_family,
+        "fontSize": font_size,
     });
     let _ = window.emit("text-preview-update", update_payload.clone());
     let _ = window.show();

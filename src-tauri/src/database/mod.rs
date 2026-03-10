@@ -4,8 +4,9 @@ mod schema;
 pub use repository::*;
 pub use schema::*;
 
+use crate::clipboard::compute_semantic_hash;
 use parking_lot::Mutex;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -212,6 +213,7 @@ impl Database {
                     image_path TEXT,
                     file_paths TEXT,
                     content_hash TEXT NOT NULL,
+                    semantic_hash TEXT NOT NULL,
                     preview TEXT,
                     byte_size INTEGER DEFAULT 0,
                     image_width INTEGER,
@@ -235,7 +237,7 @@ impl Database {
                 tx.execute_batch(
                     "INSERT INTO clipboard_items_new 
                      SELECT id, content_type, text_content, html_content, rtf_content,
-                            image_path, file_paths, content_hash, preview, byte_size,
+                            image_path, file_paths, content_hash, content_hash, preview, byte_size,
                             image_width, image_height, is_pinned, is_favorite, sort_order,
                             created_at, updated_at, access_count, last_accessed_at, char_count,
                             source_app_name, source_app_icon,
@@ -246,7 +248,7 @@ impl Database {
                 tx.execute_batch(
                     "INSERT INTO clipboard_items_new 
                      SELECT id, content_type, text_content, html_content, rtf_content,
-                            image_path, file_paths, content_hash, preview, byte_size,
+                            image_path, file_paths, content_hash, content_hash, preview, byte_size,
                             image_width, image_height, is_pinned, is_favorite, sort_order,
                             created_at, updated_at, access_count, last_accessed_at, char_count,
                             source_app_name, source_app_icon, NULL
@@ -274,6 +276,8 @@ impl Database {
                  CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
                  CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
                  CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
@@ -299,6 +303,81 @@ impl Database {
                ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;",
         )?;
 
+        // Migration 8: add semantic_hash and backfill existing rows.
+        let has_semantic_hash: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'semantic_hash'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_semantic_hash {
+            info!("Migrating database: adding semantic_hash column");
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN semantic_hash TEXT;",
+            )?;
+        }
+
+        Self::backfill_semantic_hashes(conn)?;
+
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default
+               ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
+             CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group
+               ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;",
+        )?;
+
+        Ok(())
+    }
+
+    fn backfill_semantic_hashes(conn: &Connection) -> Result<(), rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT id, content_type, text_content, content_hash, semantic_hash
+             FROM clipboard_items
+             WHERE semantic_hash IS NULL
+                OR semantic_hash = ''
+                OR (content_type IN ('text', 'html', 'rtf') AND semantic_hash = content_hash)",
+        )?;
+
+        let mut updates: Vec<(i64, String)> = Vec::new();
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        })?;
+
+        for row in rows {
+            let (id, content_type, text_content, content_hash, existing_semantic_hash) = row?;
+            let computed_semantic_hash =
+                compute_semantic_hash(&content_type, text_content.as_deref(), &content_hash);
+
+            if existing_semantic_hash.as_deref() != Some(computed_semantic_hash.as_str()) {
+                updates.push((id, computed_semantic_hash));
+            }
+        }
+        drop(stmt);
+
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        let updated_count = updates.len();
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut update_stmt =
+                tx.prepare("UPDATE clipboard_items SET semantic_hash = ?1 WHERE id = ?2")?;
+            for (id, semantic_hash) in updates {
+                update_stmt.execute(params![semantic_hash, id])?;
+            }
+        }
+        tx.commit()?;
+        info!(
+            "Migration complete: semantic_hash backfilled for {} rows",
+            updated_count
+        );
         Ok(())
     }
 

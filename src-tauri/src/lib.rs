@@ -36,13 +36,66 @@ impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
 static CURRENT_QUICK_PASTE_SHORTCUTS: parking_lot::RwLock<Vec<String>> =
     parking_lot::RwLock::new(Vec::new());
+static CURRENT_FAVORITE_PASTE_SHORTCUTS: parking_lot::RwLock<Vec<String>> =
+    parking_lot::RwLock::new(Vec::new());
 static QUICK_PASTE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 static ACTIVE_QUICK_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<u8>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
+static ACTIVE_FAVORITE_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashSet<u8>>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
 /// simulate_paste 释放修饰键时可能导致 OS 重新触发快捷键，用此标志拦截假触发
 static PASTE_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// 快捷键是否已被用户临时禁用（Win+V 除外）
 static SHORTCUTS_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[derive(Clone, Copy)]
+enum PasteKind {
+    Quick,
+    Favorite,
+}
+
+impl PasteKind {
+    fn label(self) -> &'static str {
+        match self {
+            PasteKind::Quick => "槽位",
+            PasteKind::Favorite => "收藏槽位",
+        }
+    }
+    fn defaults(self) -> Vec<String> {
+        match self {
+            PasteKind::Quick => default_quick_paste_shortcuts(),
+            PasteKind::Favorite => default_favorite_paste_shortcuts(),
+        }
+    }
+    fn setting_key(self, slot: u8) -> String {
+        match self {
+            PasteKind::Quick => quick_paste_setting_key(slot),
+            PasteKind::Favorite => favorite_paste_setting_key(slot),
+        }
+    }
+    fn read_current(self) -> Vec<String> {
+        let current = match self {
+            PasteKind::Quick => CURRENT_QUICK_PASTE_SHORTCUTS.read().clone(),
+            PasteKind::Favorite => CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone(),
+        };
+        if current.len() == 9 { current } else { self.defaults() }
+    }
+}
+
+/// 注销一组快捷键（含小键盘变体）
+fn unregister_shortcut_list(app: &tauri::AppHandle, list: &[String]) {
+    for s in list {
+        if s.is_empty() { continue; }
+        if let Some(sc) = parse_shortcut(s) {
+            let _ = app.global_shortcut().unregister(sc);
+        }
+        if let Some(numpad_str) = numpad_variant_str(s) {
+            if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+                let _ = app.global_shortcut().unregister(numpad_sc);
+            }
+        }
+    }
+}
 
 /// 临时禁用所有快捷键（Win+V 除外），返回切换后的禁用状态
 pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
@@ -50,19 +103,13 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
     let was = SHORTCUTS_DISABLED.fetch_xor(true, Ordering::SeqCst);
     let disabled = !was;
     if disabled {
-        // 注销主快捷键
         if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
             let _ = app.global_shortcut().unregister(sc);
         }
-        // 注销快速粘贴快捷键
-        for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
-            if let Some(sc) = parse_shortcut(s) {
-                let _ = app.global_shortcut().unregister(sc);
-            }
-        }
+        unregister_shortcut_list(app, &CURRENT_QUICK_PASTE_SHORTCUTS.read());
+        unregister_shortcut_list(app, &CURRENT_FAVORITE_PASTE_SHORTCUTS.read());
         tracing::info!("All shortcuts disabled (except Win+V)");
     } else {
-        // 恢复主快捷键
         if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
@@ -70,9 +117,10 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
                 }
             });
         }
-        // 恢复快速粘贴快捷键
         let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
-        apply_quick_paste_shortcuts(app, &shortcuts);
+        apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
+        let fav_shortcuts = CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone();
+        apply_paste_shortcuts(app, &fav_shortcuts, PasteKind::Favorite);
         tracing::info!("All shortcuts re-enabled");
     }
     disabled
@@ -108,19 +156,59 @@ fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
     shortcuts
 }
 
-fn apply_quick_paste_shortcuts(
-    app: &tauri::AppHandle,
-    shortcuts: &[String],
-) -> HashMap<u8, String> {
-    for s in CURRENT_QUICK_PASTE_SHORTCUTS.read().iter() {
-        if s.is_empty() {
-            continue;
-        }
-        if let Some(shortcut) = parse_shortcut(s) {
-            let _ = app.global_shortcut().unregister(shortcut);
+fn default_favorite_paste_shortcuts() -> Vec<String> {
+    // 默认只有前 3 个槽位有快捷键，其余留空
+    let mut shortcuts = vec![String::new(); 9];
+    shortcuts[0] = "Ctrl+Alt+1".to_string();
+    shortcuts[1] = "Ctrl+Alt+2".to_string();
+    shortcuts[2] = "Ctrl+Alt+3".to_string();
+    shortcuts
+}
+
+fn favorite_paste_setting_key(slot: u8) -> String {
+    format!("favorite_paste_shortcut_{}", slot)
+}
+
+fn load_favorite_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
+    let mut shortcuts = default_favorite_paste_shortcuts();
+    for slot in 1..=9 {
+        let key = favorite_paste_setting_key(slot);
+        if let Ok(Some(value)) = repo.get(&key) {
+            shortcuts[(slot - 1) as usize] = normalize_shortcut_value(&value);
         }
     }
+    shortcuts
+}
 
+/// 若快捷键的主键是数字（0-9），返回对应的小键盘变体字符串，如 "Alt+1" → "Alt+Numpad1"
+fn numpad_variant_str(shortcut_str: &str) -> Option<String> {
+    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    let last = *parts.last()?;
+    if last.len() == 1 && last.chars().next()?.is_ascii_digit() {
+        let mut result = parts[..parts.len() - 1].join("+");
+        if !result.is_empty() {
+            result.push('+');
+        }
+        result.push_str(&format!("Numpad{}", last));
+        Some(result)
+    } else {
+        None
+    }
+}
+
+fn apply_paste_shortcuts(
+    app: &tauri::AppHandle,
+    shortcuts: &[String],
+    kind: PasteKind,
+) -> HashMap<u8, String> {
+    // 注销旧快捷键
+    let old = match kind {
+        PasteKind::Quick => CURRENT_QUICK_PASTE_SHORTCUTS.read().clone(),
+        PasteKind::Favorite => CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone(),
+    };
+    unregister_shortcut_list(app, &old);
+
+    let label = kind.label();
     let mut failures = HashMap::new();
     let mut applied = vec![String::new(); 9];
 
@@ -137,70 +225,74 @@ fn apply_quick_paste_shortcuts(
         let parsed = match parse_shortcut(&normalized) {
             Some(v) => v,
             None => {
-                failures.insert(slot, format!("槽位 {} 快捷键格式无效: {}", slot, normalized));
+                failures.insert(slot, format!("{} {} 快捷键格式无效: {}", label, slot, normalized));
                 continue;
             }
         };
 
-        let reg_result = app
-            .global_shortcut()
-            .on_shortcut(parsed, move |app, _shortcut, event| match event.state {
+        let make_handler = |slot: u8, kind: PasteKind| {
+            move |app: &tauri::AppHandle, _shortcut: &Shortcut, event: tauri_plugin_global_shortcut::ShortcutEvent| match event.state {
                 ShortcutState::Pressed => {
                     let any_focused = app
                         .webview_windows()
                         .values()
                         .any(|w| w.is_focused().unwrap_or(false));
-                    if any_focused {
-                        return;
-                    }
-
-                    if PASTE_IN_PROGRESS.load(std::sync::atomic::Ordering::Acquire) {
-                        return;
-                    }
-
-                    let is_first = {
-                        let mut active = ACTIVE_QUICK_PASTE_SLOTS.lock();
-                        active.insert(slot) // true = 新插入
+                    if any_focused { return; }
+                    if PASTE_IN_PROGRESS.load(std::sync::atomic::Ordering::Acquire) { return; }
+                    let active_slots = match kind {
+                        PasteKind::Quick => &*ACTIVE_QUICK_PASTE_SLOTS,
+                        PasteKind::Favorite => &*ACTIVE_FAVORITE_PASTE_SLOTS,
                     };
-
+                    let is_first = active_slots.lock().insert(slot);
                     let state = app.state::<Arc<AppState>>().inner().clone();
                     let app_handle = app.clone();
                     std::thread::spawn(move || {
                         let _guard = QUICK_PASTE_LOCK.lock();
-
                         PASTE_IN_PROGRESS.store(true, std::sync::atomic::Ordering::Release);
-
                         if is_first {
-                            if let Err(err) = commands::clipboard::quick_paste_by_slot(
-                                &state, &app_handle, slot,
-                            ) {
-                                tracing::warn!("Quick paste slot {} failed: {}", slot, err);
-                                ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
+                            let result = match kind {
+                                PasteKind::Quick => commands::clipboard::quick_paste_by_slot(&state, &app_handle, slot),
+                                PasteKind::Favorite => commands::clipboard::quick_paste_favorite_by_slot(&state, &app_handle, slot),
+                            };
+                            if let Err(err) = result {
+                                tracing::warn!("{} {} 粘贴失败: {}", kind.label(), slot, err);
+                                active_slots.lock().remove(&slot);
                             }
                         } else {
                             std::thread::sleep(std::time::Duration::from_millis(50));
                             if let Err(err) = commands::clipboard::simulate_paste() {
-                                tracing::warn!("Quick paste repeat slot {} failed: {}", slot, err);
+                                tracing::warn!("{} {} 重复粘贴失败: {}", kind.label(), slot, err);
                             }
                         }
-
                         PASTE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::Release);
                     });
                 }
                 ShortcutState::Released => {
-                    ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot);
+                    match kind {
+                        PasteKind::Quick => ACTIVE_QUICK_PASTE_SLOTS.lock().remove(&slot),
+                        PasteKind::Favorite => ACTIVE_FAVORITE_PASTE_SLOTS.lock().remove(&slot),
+                    };
                 }
-            });
+            }
+        };
 
+        let reg_result = app.global_shortcut().on_shortcut(parsed, make_handler(slot, kind));
         if let Err(err) = reg_result {
-            failures.insert(
-                slot,
-                format!("槽位 {} 注册失败（{}）: {}", slot, normalized, err),
-            );
+            failures.insert(slot, format!("{} {} 注册失败（{}）: {}", label, slot, normalized, err));
+        }
+
+        // 自动为数字键注册小键盘变体
+        if let Some(numpad_str) = numpad_variant_str(&normalized) {
+            if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+                let _ = app.global_shortcut().on_shortcut(numpad_sc, make_handler(slot, kind));
+            }
         }
     }
 
-    *CURRENT_QUICK_PASTE_SHORTCUTS.write() = applied;
+    match kind {
+        PasteKind::Quick => *CURRENT_QUICK_PASTE_SHORTCUTS.write() = applied,
+        PasteKind::Favorite => *CURRENT_FAVORITE_PASTE_SHORTCUTS.write() = applied,
+    }
     failures
 }
 
@@ -371,27 +463,21 @@ fn get_current_shortcut() -> String {
         .unwrap_or_else(|| "Alt+C".to_string())
 }
 
-fn reload_quick_paste_shortcuts_from_settings(app: &tauri::AppHandle) -> HashMap<u8, String> {
+fn reload_paste_shortcuts_from_settings(app: &tauri::AppHandle, kind: PasteKind) -> HashMap<u8, String> {
     let state = app.state::<Arc<AppState>>();
     let settings_repo = SettingsRepository::new(&state.db);
-    let shortcuts = load_quick_paste_shortcuts(&settings_repo);
-    apply_quick_paste_shortcuts(app, &shortcuts)
+    let shortcuts = match kind {
+        PasteKind::Quick => load_quick_paste_shortcuts(&settings_repo),
+        PasteKind::Favorite => load_favorite_paste_shortcuts(&settings_repo),
+    };
+    apply_paste_shortcuts(app, &shortcuts, kind)
 }
 
-#[tauri::command]
-fn get_quick_paste_shortcuts() -> Vec<String> {
-    let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
-    if current.len() == 9 {
-        return current.clone();
-    }
-    default_quick_paste_shortcuts()
-}
-
-#[tauri::command]
-fn set_quick_paste_shortcut(
-    app: tauri::AppHandle,
+fn set_paste_shortcut_inner(
+    app: &tauri::AppHandle,
     slot: u8,
     shortcut: String,
+    kind: PasteKind,
 ) -> Result<(), String> {
     if !(1..=9).contains(&slot) {
         return Err("slot must be between 1 and 9".to_string());
@@ -408,39 +494,52 @@ fn set_quick_paste_shortcut(
         if !shortcut_has_modifier(&normalized) {
             return Err("快捷键至少包含一个修饰键 (Ctrl/Alt)".to_string());
         }
-    let main_sc = get_current_shortcut();
+        let main_sc = get_current_shortcut();
         if let Some(main_parsed) = parse_shortcut(&main_sc)
             && parsed == main_parsed {
                 return Err(format!("与呼出快捷键 {} 冲突", main_sc));
             }
     }
 
-    let mut next_shortcuts = {
-        let current = CURRENT_QUICK_PASTE_SHORTCUTS.read();
-        if current.len() == 9 {
-            current.clone()
-        } else {
-            default_quick_paste_shortcuts()
-        }
-    };
+    let mut next_shortcuts = kind.read_current();
     let idx = (slot - 1) as usize;
     let previous = next_shortcuts[idx].clone();
     next_shortcuts[idx] = normalized.clone();
 
-    let failures = apply_quick_paste_shortcuts(&app, &next_shortcuts);
+    let failures = apply_paste_shortcuts(app, &next_shortcuts, kind);
     if let Some(err) = failures.get(&slot) {
         next_shortcuts[idx] = previous;
-        let _ = apply_quick_paste_shortcuts(&app, &next_shortcuts);
+        let _ = apply_paste_shortcuts(app, &next_shortcuts, kind);
         return Err(err.clone());
     }
 
     let state = app.state::<Arc<AppState>>();
     let settings_repo = SettingsRepository::new(&state.db);
     settings_repo
-        .set(&quick_paste_setting_key(slot), &normalized)
+        .set(&kind.setting_key(slot), &normalized)
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[tauri::command]
+fn get_quick_paste_shortcuts() -> Vec<String> {
+    PasteKind::Quick.read_current()
+}
+
+#[tauri::command]
+fn set_quick_paste_shortcut(app: tauri::AppHandle, slot: u8, shortcut: String) -> Result<(), String> {
+    set_paste_shortcut_inner(&app, slot, shortcut, PasteKind::Quick)
+}
+
+#[tauri::command]
+fn get_favorite_paste_shortcuts() -> Vec<String> {
+    PasteKind::Favorite.read_current()
+}
+
+#[tauri::command]
+fn set_favorite_paste_shortcut(app: tauri::AppHandle, slot: u8, shortcut: String) -> Result<(), String> {
+    set_paste_shortcut_inner(&app, slot, shortcut, PasteKind::Favorite)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -553,9 +652,11 @@ pub fn run() {
                     }
                 });
 
-            let quick_paste_failures = reload_quick_paste_shortcuts_from_settings(app.handle());
-            for (slot, err) in quick_paste_failures {
-                tracing::warn!("快速粘贴快捷键注册失败（槽位 {}）: {}", slot, err);
+            for kind in [PasteKind::Quick, PasteKind::Favorite] {
+                let failures = reload_paste_shortcuts_from_settings(app.handle(), kind);
+                for (slot, err) in &failures {
+                    tracing::warn!("{} {} 快捷键注册失败: {}", kind.label(), slot, err);
+                }
             }
 
             if let Some(window) = app.get_webview_window("main") {
@@ -731,6 +832,8 @@ pub fn run() {
             get_current_shortcut,
             get_quick_paste_shortcuts,
             set_quick_paste_shortcut,
+            get_favorite_paste_shortcuts,
+            set_favorite_paste_shortcut,
             commands::window::check_for_update,
             commands::window::download_update,
             commands::window::cancel_update_download,
@@ -770,6 +873,7 @@ pub fn run() {
             commands::settings::enable_autostart,
             commands::settings::disable_autostart,
             commands::settings::get_system_accent_color,
+            commands::settings::get_system_fonts,
             commands::file_ops::check_files_exist,
             commands::file_ops::show_in_explorer,
             commands::file_ops::paste_as_path,

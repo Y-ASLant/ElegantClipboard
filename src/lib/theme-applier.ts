@@ -57,10 +57,46 @@ function applyWindowEffect() {
         document.documentElement.setAttribute("data-window-effect", windowEffect);
       })
       .catch(() => {
-        // 特效不支持（如 Win10 不支持 Mica/Tabbed），回退
+        // 特效不支持（如 Win10 不支持 Mica/Tabbed），回退 CSS 但不重置持久化偏好，
+        // 下次启动仍会尝试应用（可能是窗口尚未就绪的临时失败）
         document.documentElement.setAttribute("data-window-effect", "none");
-        useUISettings.setState({ windowEffect: "none" });
       });
+  }
+}
+
+const DEFAULT_FONT_STACK = '"CustomFont", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const DEFAULT_CONTENT_FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+
+function applyFontSettings() {
+  const { customFont, uiFontSize, cardFont, cardFontSize } = useUISettings.getState();
+  const root = document.documentElement;
+
+  // --- UI 字体 ---
+  if (customFont) {
+    document.body.style.fontFamily = `"${customFont}", ${DEFAULT_FONT_STACK}`;
+  } else {
+    document.body.style.removeProperty("font-family");
+  }
+
+  // --- UI 字号：缩放 html 根字号 ---
+  const rootPx = (uiFontSize / 14) * 16;
+  if (Math.abs(rootPx - 16) < 0.01) {
+    root.style.removeProperty("font-size");
+  } else {
+    root.style.fontSize = `${rootPx}px`;
+  }
+
+  // --- 卡片字体（始终设置变量，确保 inline style 引用有效） ---
+  root.style.setProperty(
+    "--card-font-family",
+    cardFont ? `"${cardFont}", ${DEFAULT_CONTENT_FONT_STACK}` : DEFAULT_CONTENT_FONT_STACK,
+  );
+
+  // --- 卡片字号（固定 px，不受根字号缩放） ---
+  if (cardFontSize !== 14) {
+    root.style.setProperty("--card-font-size", `${cardFontSize}px`);
+  } else {
+    root.style.removeProperty("--card-font-size");
   }
 }
 
@@ -126,6 +162,14 @@ export function initTheme(): Promise<void> {
         applyWindowEffect();
       }
     }
+    if (
+      state.customFont !== prev.customFont ||
+      state.uiFontSize !== prev.uiFontSize ||
+      state.cardFont !== prev.cardFont ||
+      state.cardFontSize !== prev.cardFontSize
+    ) {
+      applyFontSettings();
+    }
     if (state.colorTheme !== prev.colorTheme) {
       if (state.colorTheme === "system" && !_accentColor) {
         // 切换到系统主题但还未获取强调色
@@ -148,7 +192,16 @@ export function initTheme(): Promise<void> {
 
   // --- 初始化应用 ---
   applySharpCorners();
-  applyWindowEffect();
+  // 窗口特效和自定义字体依赖持久化值，必须等 hydration 完成后再应用，
+  // 否则会读到默认值导致特效不生效
+  if (useUISettings.persist.hasHydrated()) {
+    applyWindowEffect();
+    applyFontSettings();
+  }
+  useUISettings.persist.onFinishHydration(() => {
+    applyWindowEffect();
+    applyFontSettings();
+  });
   // 始终获取强调色以供主题预览使用
   invoke<string | null>("get_system_accent_color")
     .then((color) => {

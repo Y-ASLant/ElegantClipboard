@@ -109,10 +109,20 @@
       const { listen } = window.__TAURI__.event;
 
       listen('text-preview-update', (event) => {
-        const { text, align, theme, sharpCorners } = event.payload || {};
+        const { text, align, theme, sharpCorners, fontFamily, fontSize } = event.payload || {};
         setTheme(theme);
         setSharpCorners(Boolean(sharpCorners));
         document.body.dataset.align = align === 'right' ? 'right' : 'left';
+        if (fontFamily) {
+          content.style.fontFamily = '"' + fontFamily + '", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
+        } else {
+          content.style.fontFamily = '';
+        }
+        if (fontSize && typeof fontSize === 'number') {
+          content.style.fontSize = fontSize + 'px';
+        } else {
+          content.style.fontSize = '';
+        }
         content.textContent = typeof text === 'string' ? text : '';
         panel.classList.add('visible');
       });

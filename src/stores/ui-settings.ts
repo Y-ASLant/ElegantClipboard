@@ -51,6 +51,12 @@ interface UISettings {
   windowAnimation: boolean;
   windowEffect: WindowEffect;
   toolbarButtons: ToolbarButton[];
+  customFont: string;
+  uiFontSize: number;
+  cardFont: string;
+  cardFontSize: number;
+  previewFont: string;
+  previewFontSize: number;
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -86,6 +92,13 @@ interface UISettings {
   setWindowAnimation: (enabled: boolean) => void;
   setWindowEffect: (effect: WindowEffect) => void;
   setToolbarButtons: (buttons: ToolbarButton[]) => void;
+  setCustomFont: (font: string) => void;
+  setUIFontSize: (size: number) => void;
+  setCardFont: (font: string) => void;
+  setCardFontSize: (size: number) => void;
+  setPreviewFont: (font: string) => void;
+  setPreviewFontSize: (size: number) => void;
+  resetFontSettings: () => void;
 }
 
 const STORAGE_KEY = "clipboard-ui-settings";
@@ -142,6 +155,12 @@ export const useUISettings = create<UISettings>()(
         windowAnimation: false,
         windowEffect: "none" as WindowEffect,
         toolbarButtons: ["clear", "batch", "pin", "settings"] as ToolbarButton[],
+        customFont: "",
+        uiFontSize: 14,
+        cardFont: "",
+        cardFontSize: 14,
+        previewFont: "",
+        previewFontSize: 13,
 
         setCardMaxLines: makeSetter("cardMaxLines"),
         setShowTime: makeSetter("showTime"),
@@ -176,6 +195,17 @@ export const useUISettings = create<UISettings>()(
         setShowDragAreaIndicator: makeSetter("showDragAreaIndicator"),
         setWindowAnimation: makeSetter("windowAnimation"),
         setToolbarButtons: makeSetter("toolbarButtons"),
+        setCustomFont: makeSetter("customFont"),
+        setUIFontSize: makeSetter("uiFontSize"),
+        setCardFont: makeSetter("cardFont"),
+        setCardFontSize: makeSetter("cardFontSize"),
+        setPreviewFont: makeSetter("previewFont"),
+        setPreviewFontSize: makeSetter("previewFontSize"),
+        resetFontSettings: () => {
+          const defaults = { customFont: "", uiFontSize: 14, cardFont: "", cardFontSize: 14, previewFont: "", previewFontSize: 13 };
+          set(defaults);
+          broadcastChange(defaults);
+        },
 
         // 带额外副作用的 setter
         setKeyboardNavigation: (enabled) => {
