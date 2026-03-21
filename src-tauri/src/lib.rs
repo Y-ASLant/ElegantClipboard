@@ -89,10 +89,9 @@ fn unregister_shortcut_list(app: &tauri::AppHandle, list: &[String]) {
         if let Some(sc) = parse_shortcut(s) {
             let _ = app.global_shortcut().unregister(sc);
         }
-        if let Some(numpad_str) = numpad_variant_str(s) {
-            if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+        if let Some(numpad_str) = numpad_variant_str(s)
+            && let Some(numpad_sc) = parse_shortcut(&numpad_str) {
                 let _ = app.global_shortcut().unregister(numpad_sc);
-            }
         }
     }
 }
@@ -282,10 +281,9 @@ fn apply_paste_shortcuts(
         }
 
         // 自动为数字键注册小键盘变体
-        if let Some(numpad_str) = numpad_variant_str(&normalized) {
-            if let Some(numpad_sc) = parse_shortcut(&numpad_str) {
+        if let Some(numpad_str) = numpad_variant_str(&normalized)
+            && let Some(numpad_sc) = parse_shortcut(&numpad_str) {
                 let _ = app.global_shortcut().on_shortcut(numpad_sc, make_handler(slot, kind));
-            }
         }
     }
 
@@ -672,6 +670,30 @@ pub fn run() {
                             width: w,
                             height: h,
                         }));
+                    }
+                }
+                // 启动阶段恢复「上一次位置」，覆盖托盘左键首次显示路径
+                let position_mode = settings_repo
+                    .get("position_mode")
+                    .ok()
+                    .flatten()
+                    .map(|v| crate::positioning::PositionMode::from_str(&v))
+                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+                if position_mode == crate::positioning::PositionMode::FixedPosition {
+                    let x = settings_repo
+                        .get("window_x")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+                    let y = settings_repo
+                        .get("window_y")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+                    if let (Some(x), Some(y)) = (x, y) {
+                        let _ = window.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition::new(x, y),
+                        ));
                     }
                 }
 

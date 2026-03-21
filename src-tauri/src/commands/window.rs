@@ -10,6 +10,12 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
 ) {
     if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
         let settings_repo = database::SettingsRepository::new(&state.db);
+        // 始终记录窗口位置，供「上一次位置」模式跨重启恢复
+        if let Ok(pos) = window.outer_position() {
+            let _ = settings_repo.set("window_x", &pos.x.to_string());
+            let _ = settings_repo.set("window_y", &pos.y.to_string());
+        }
+
         let persist = settings_repo
             .get("persist_window_size")
             .ok()
@@ -25,6 +31,13 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
             let _ = settings_repo.set("window_width", &w.to_string());
             let _ = settings_repo.set("window_height", &h.to_string());
         }
+    }
+}
+
+/// 保存主窗口当前几何信息（位置 + 可选尺寸）。
+pub(crate) fn save_main_window_placement<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        save_window_size_if_enabled(app, &window);
     }
 }
 
@@ -96,7 +109,25 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                 })
                 .unwrap_or(crate::positioning::PositionMode::FollowCursor);
 
-            if let Err(e) = crate::positioning::position_window(&window, position_mode) {
+            if position_mode == crate::positioning::PositionMode::FixedPosition {
+                if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+                    let repo = database::SettingsRepository::new(&state.db);
+                    let x = repo
+                        .get("window_x")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+                    let y = repo
+                        .get("window_y")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+                    if let (Some(x), Some(y)) = (x, y) {
+                        let _ = window
+                            .set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+                    }
+                }
+            } else if let Err(e) = crate::positioning::position_window(&window, position_mode) {
                 tracing::warn!("定位窗口失败: {}", e);
             }
 
@@ -371,6 +402,7 @@ pub fn cancel_update_download() {
 
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
+    save_main_window_placement(&app);
     crate::updater::install(&installer_path)?;
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     app.exit(0);

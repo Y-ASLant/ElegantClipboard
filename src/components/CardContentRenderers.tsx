@@ -78,6 +78,29 @@ const MAX_SCALE_BOUNDED = 5.0;
 const MAX_SCALE_UNBOUNDED = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
+let imagePreviewLease = 0;
+let imagePreviewWanted = false;
+
+function acquireImagePreviewLease(): number {
+  imagePreviewLease += 1;
+  imagePreviewWanted = true;
+  return imagePreviewLease;
+}
+
+function revokeImagePreviewLease(lease: number): void {
+  if (imagePreviewLease === lease) {
+    imagePreviewLease += 1;
+    imagePreviewWanted = false;
+  }
+}
+
+function isImagePreviewLeaseCurrent(lease: number): boolean {
+  return imagePreviewLease === lease;
+}
+
+function isImagePreviewWanted(): boolean {
+  return imagePreviewWanted;
+}
 
 /** 预览窗口定位边界（物理像素） */
 interface PreviewBounds {
@@ -251,6 +274,7 @@ const ImagePreview = memo(function ImagePreview({
   const containerRef = useRef<HTMLDivElement>(null);
   const previewHoveringRef = useRef(false);
   const previewReqIdRef = useRef(0);
+  const previewLeaseRef = useRef<number | null>(null);
   const zoomEmitRafRef = useRef<number | null>(null);
   const pendingZoomPayloadRef = useRef<{
     width: number;
@@ -272,6 +296,11 @@ const ImagePreview = memo(function ImagePreview({
   const hidePreview = useCallback(() => {
     previewHoveringRef.current = false;
     previewReqIdRef.current += 1;
+    const closingLease = previewLeaseRef.current;
+    if (closingLease !== null) {
+      revokeImagePreviewLease(closingLease);
+      previewLeaseRef.current = null;
+    }
     clearTimer();
     if (zoomEmitRafRef.current !== null) {
       cancelAnimationFrame(zoomEmitRafRef.current);
@@ -279,7 +308,12 @@ const ImagePreview = memo(function ImagePreview({
     }
     pendingZoomPayloadRef.current = null;
     ps.current.currentPath = undefined;
-    if (ps.current.visible) {
+    if (closingLease !== null) {
+      ps.current.visible = false;
+      invoke("hide_image_preview", { token: closingLease }).catch((e) =>
+        logError("Failed to hide preview:", e),
+      );
+    } else if (ps.current.visible) {
       ps.current.visible = false;
       invoke("hide_image_preview").catch((e) =>
         logError("Failed to hide preview:", e),
@@ -297,11 +331,11 @@ const ImagePreview = memo(function ImagePreview({
   }, [hidePreview]);
 
   // 显示预览：有界模式用屏幕工作区，无界模式用固定大窗口
-  const showPreview = useCallback(async (reqId: number, path: string) => {
+  const showPreview = useCallback(async (reqId: number, lease: number, path: string) => {
     if (!containerRef.current) return;
-    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) return;
     const bounds = await getPreviewBounds(previewPosition, containerRef.current);
-    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) return;
     const { imgNatural } = ps.current;
     const boundedMaxCssW = bounds.maxW / bounds.scale;
     const boundedMaxCssH = bounds.maxH / bounds.scale;
@@ -341,14 +375,17 @@ const ImagePreview = memo(function ImagePreview({
         winWidth: winW,
         winHeight: winH,
         align,
+        token: lease,
       });
-      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) {
+      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) {
         ps.current.visible = false;
         ps.current.bounds = null;
         ps.current.windowCss = null;
-        invoke("hide_image_preview").catch((e) =>
-          logError("Failed to hide preview:", e),
-        );
+        if (!isImagePreviewWanted()) {
+          invoke("hide_image_preview", { token: lease }).catch((e) =>
+            logError("Failed to hide preview:", e),
+          );
+        }
         return;
       }
       ps.current.visible = true;
@@ -368,10 +405,12 @@ const ImagePreview = memo(function ImagePreview({
     previewHoveringRef.current = true;
     previewReqIdRef.current += 1;
     const reqId = previewReqIdRef.current;
+    const lease = acquireImagePreviewLease();
+    previewLeaseRef.current = lease;
     ps.current.currentPath = imagePath;
     clearTimer();
     timerRef.current = setTimeout(() => {
-      void showPreview(reqId, imagePath);
+      void showPreview(reqId, lease, imagePath);
     }, hoverPreviewDelay);
   }, [imagePath, imagePreviewEnabled, batchMode, clearTimer, showPreview, hoverPreviewDelay]);
 
@@ -470,18 +509,9 @@ const ImagePreview = memo(function ImagePreview({
 
   useEffect(() => {
     return () => {
-      clearTimer();
-      if (zoomEmitRafRef.current !== null) {
-        cancelAnimationFrame(zoomEmitRafRef.current);
-        zoomEmitRafRef.current = null;
-      }
-      pendingZoomPayloadRef.current = null;
-      if (ps.current.visible)
-        invoke("hide_image_preview").catch((e) =>
-          logError("Failed to hide preview:", e),
-        );
+      hidePreview();
     };
-  }, [clearTimer]);
+  }, [hidePreview]);
 
   // 非自适应模式时按 cardMaxLines 计算高度
   const containerStyle = useMemo(() => {

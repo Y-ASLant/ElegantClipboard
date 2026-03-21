@@ -331,6 +331,7 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
+    crate::commands::window::save_main_window_placement(&app);
     if crate::admin_launch::restart_app() {
         app.exit(0);
     } else {
