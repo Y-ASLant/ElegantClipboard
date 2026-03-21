@@ -249,6 +249,8 @@ const ImagePreview = memo(function ImagePreview({
   const imageMaxHeight = useUISettings((s) => s.imageMaxHeight);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewHoveringRef = useRef(false);
+  const previewReqIdRef = useRef(0);
   const zoomEmitRafRef = useRef<number | null>(null);
   const pendingZoomPayloadRef = useRef<{
     width: number;
@@ -268,12 +270,15 @@ const ImagePreview = memo(function ImagePreview({
   }, []);
 
   const hidePreview = useCallback(() => {
+    previewHoveringRef.current = false;
+    previewReqIdRef.current += 1;
     clearTimer();
     if (zoomEmitRafRef.current !== null) {
       cancelAnimationFrame(zoomEmitRafRef.current);
       zoomEmitRafRef.current = null;
     }
     pendingZoomPayloadRef.current = null;
+    ps.current.currentPath = undefined;
     if (ps.current.visible) {
       ps.current.visible = false;
       invoke("hide_image_preview").catch((e) =>
@@ -281,27 +286,22 @@ const ImagePreview = memo(function ImagePreview({
       );
     }
     ps.current.scale = 1.0;
+    ps.current.bounds = null;
     ps.current.windowCss = null;
   }, [clearTimer]);
 
   // 主窗口隐藏时取消预览计时器，防止粘贴竞态
   useEffect(() => {
-    const unlisten = listen("window-hidden", () => {
-      clearTimer();
-      ps.current.currentPath = undefined;
-      ps.current.visible = false;
-      ps.current.scale = 1.0;
-      ps.current.windowCss = null;
-    });
+    const unlisten = listen("window-hidden", hidePreview);
     return () => { unlisten.then((fn) => fn()); };
-  }, [clearTimer]);
+  }, [hidePreview]);
 
   // 显示预览：有界模式用屏幕工作区，无界模式用固定大窗口
-  const showPreview = useCallback(async () => {
-    if (!containerRef.current || !ps.current.currentPath) return;
+  const showPreview = useCallback(async (reqId: number, path: string) => {
+    if (!containerRef.current) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) return;
     const bounds = await getPreviewBounds(previewPosition, containerRef.current);
-    // 异步期间窗口已隐藏则中止
-    if (!ps.current.currentPath) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) return;
     const { imgNatural } = ps.current;
     const boundedMaxCssW = bounds.maxW / bounds.scale;
     const boundedMaxCssH = bounds.maxH / bounds.scale;
@@ -332,7 +332,7 @@ const ImagePreview = memo(function ImagePreview({
     const align = bounds.side === "left" ? "right" : "left";
     try {
       await invoke("show_image_preview", {
-        imagePath: ps.current.currentPath,
+        imagePath: path,
         imgWidth: width,
         imgHeight: height,
         offsetY,
@@ -342,8 +342,20 @@ const ImagePreview = memo(function ImagePreview({
         winHeight: winH,
         align,
       });
+      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) {
+        ps.current.visible = false;
+        ps.current.bounds = null;
+        ps.current.windowCss = null;
+        invoke("hide_image_preview").catch((e) =>
+          logError("Failed to hide preview:", e),
+        );
+        return;
+      }
+      ps.current.visible = true;
     } catch {
       ps.current.visible = false;
+      ps.current.bounds = null;
+      ps.current.windowCss = null;
     }
   }, [previewPosition, previewUnboundedMode]);
 
@@ -353,10 +365,21 @@ const ImagePreview = memo(function ImagePreview({
 
   const handleMouseEnter = useCallback(() => {
     if (!imagePath || !imagePreviewEnabled || batchMode) return;
+    previewHoveringRef.current = true;
+    previewReqIdRef.current += 1;
+    const reqId = previewReqIdRef.current;
     ps.current.currentPath = imagePath;
     clearTimer();
-    timerRef.current = setTimeout(showPreview, hoverPreviewDelay);
+    timerRef.current = setTimeout(() => {
+      void showPreview(reqId, imagePath);
+    }, hoverPreviewDelay);
   }, [imagePath, imagePreviewEnabled, batchMode, clearTimer, showPreview, hoverPreviewDelay]);
+
+  useEffect(() => {
+    if (!imagePreviewEnabled || batchMode) {
+      hidePreview();
+    }
+  }, [imagePreviewEnabled, batchMode, hidePreview]);
 
   // Ctrl+滚轮缩放，合并跨窗口事件为每帧一次
   const handleWheel = useCallback(

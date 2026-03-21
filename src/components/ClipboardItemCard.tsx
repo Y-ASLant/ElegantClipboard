@@ -263,6 +263,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   }, []);
 
   const hideTextPreview = useCallback(() => {
+    textPreviewReqIdRef.current += 1;
     clearTextPreviewTimer();
     textPreviewHoveringRef.current = false;
     if (textScrollEmitRafRef.current !== null) {
@@ -357,6 +358,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         fontFamily: uiState.previewFont || null,
         fontSize: uiState.previewFontSize,
       });
+      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) {
+        textPreviewVisibleRef.current = false;
+        invoke("hide_text_preview").catch(() => {});
+        return;
+      }
       textPreviewVisibleRef.current = true;
     } catch (error) {
       textPreviewVisibleRef.current = false;
@@ -372,8 +378,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   }, [textPreviewEnabled, isTextLikeContent, batchMode, clearTextPreviewTimer, showTextPreview, hoverPreviewDelay]);
 
   const handleTextMouseLeave = useCallback(() => {
-    textPreviewHoveringRef.current = false;
-    textPreviewReqIdRef.current += 1;
     hideTextPreview();
   }, [hideTextPreview]);
 
