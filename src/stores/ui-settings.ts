@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { logError } from "@/lib/logger";
 
 export type ColorTheme = "default" | "emerald" | "cyan" | "system";
 export type DarkMode = "light" | "dark" | "auto";
@@ -106,12 +107,14 @@ const SYNC_EVENT = "ui-settings-changed";
 
 // 广播设置变更
 const broadcastChange = (state: Partial<UISettings>) => {
-  emit(SYNC_EVENT, state).catch(() => {});
+  emit(SYNC_EVENT, state).catch((error) => {
+    logError("Failed to broadcast UI settings change:", error);
+  });
 };
 
 export const useUISettings = create<UISettings>()(
   persist(
-    (set) => {
+    (set, get) => {
       // 工厂方法：创建更新状态并广播变更的 setter
       const makeSetter = <K extends keyof UISettings>(key: K) =>
         (value: UISettings[K]) => {
@@ -209,15 +212,26 @@ export const useUISettings = create<UISettings>()(
 
         // 带额外副作用的 setter
         setKeyboardNavigation: (enabled) => {
+          const previous = get().keyboardNavigation;
           set({ keyboardNavigation: enabled });
           broadcastChange({ keyboardNavigation: enabled });
-          invoke("set_keyboard_nav_enabled", { enabled }).catch(() => {});
+          invoke("set_keyboard_nav_enabled", { enabled }).catch((error) => {
+            logError("Failed to set keyboard navigation:", error);
+            set({ keyboardNavigation: previous });
+            broadcastChange({ keyboardNavigation: previous });
+          });
         },
         setWindowEffect: (effect) => {
+          const previous = get().windowEffect;
           set({ windowEffect: effect });
           broadcastChange({ windowEffect: effect });
           document.documentElement.setAttribute("data-window-effect", effect);
-          invoke("set_window_effect", { effect }).catch(() => {});
+          invoke("set_window_effect", { effect }).catch((error) => {
+            logError("Failed to set window effect:", error);
+            set({ windowEffect: previous });
+            broadcastChange({ windowEffect: previous });
+            document.documentElement.setAttribute("data-window-effect", previous);
+          });
         },
       };
     },

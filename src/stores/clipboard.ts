@@ -150,7 +150,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   setSelectedGroupId: (groupId: number | null) => {
     set({ selectedGroupId: groupId, batchMode: false, selectedIds: new Set(), lastSelectedIndex: -1 });
-    invoke("set_active_group", { groupId }).catch(() => {});
+    invoke("set_active_group", { groupId }).catch((error) => {
+      logError("Failed to persist active group:", error);
+    });
     get().fetchItems();
   },
 

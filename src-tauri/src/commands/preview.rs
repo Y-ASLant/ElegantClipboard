@@ -1,9 +1,28 @@
 use crate::config::AppConfig;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{Emitter, Manager};
 
 /// 文本预览更新序列号，用于取消过期的延迟重试
 pub(crate) static TEXT_PREVIEW_UPDATE_SEQ: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
+static IMAGE_PREVIEW_TOKEN: AtomicU64 = AtomicU64::new(0);
+static TEXT_PREVIEW_TOKEN: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+fn promote_preview_token(slot: &AtomicU64, token: u64) -> bool {
+    slot.fetch_max(token, Ordering::AcqRel);
+    slot.load(Ordering::Acquire) == token
+}
+
+#[inline]
+fn is_preview_token_current(slot: &AtomicU64, token: u64) -> bool {
+    slot.load(Ordering::Acquire) == token
+}
+
+#[inline]
+fn invalidate_preview_token(slot: &AtomicU64, token: u64) {
+    slot.fetch_max(token.saturating_add(1), Ordering::AcqRel);
+}
 
 #[tauri::command]
 pub fn get_app_version() -> String {
@@ -23,7 +42,13 @@ pub async fn show_image_preview(
     win_width: f64,
     win_height: f64,
     align: Option<String>,
+    token: Option<u64>,
 ) -> Result<(), String> {
+    let token = token.unwrap_or(0);
+    if token != 0 && !promote_preview_token(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
     let mut newly_created = false;
     let window = if let Some(w) = app.get_webview_window("image-preview") {
         w
@@ -47,6 +72,10 @@ pub async fn show_image_preview(
         .map_err(|e| format!("创建预览窗口失败: {}", e))?
     };
 
+    if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
     let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: win_width as u32,
         height: win_height as u32,
@@ -58,6 +87,9 @@ pub async fn show_image_preview(
 
     if newly_created {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+            return Ok(());
+        }
     }
 
     let _ = window.set_always_on_top(true);
@@ -75,14 +107,30 @@ pub async fn show_image_preview(
         }),
     );
 
+    if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
     let _ = window.show();
+    if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+        let _ = window.hide();
+        return Ok(());
+    }
     crate::positioning::force_topmost(&window);
     tracing::debug!("image-preview shown at ({}, {}), size {}x{}, created={}", win_x, win_y, win_width, win_height, newly_created);
     Ok(())
 }
 
 #[tauri::command]
-pub async fn hide_image_preview(app: tauri::AppHandle) {
+pub async fn hide_image_preview(app: tauri::AppHandle, token: Option<u64>) {
+    if let Some(t) = token
+        && t != 0
+    {
+        if !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, t) {
+            return;
+        }
+        invalidate_preview_token(&IMAGE_PREVIEW_TOKEN, t);
+    }
     if let Some(window) = app.get_webview_window("image-preview") {
         let _ = window.hide();
         let _ = window.emit("image-preview-clear", ());
@@ -105,7 +153,17 @@ pub async fn show_text_preview(
     window_effect: Option<String>,
     font_family: Option<String>,
     font_size: Option<f64>,
+    token: Option<u64>,
 ) -> Result<(), String> {
+    let token = token.unwrap_or(0);
+    if token != 0 && !promote_preview_token(&TEXT_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
     let seq = TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
     let mut newly_created = false;
     let window = if let Some(w) = app.get_webview_window("text-preview") {
@@ -135,6 +193,10 @@ pub async fn show_text_preview(
         w
     };
 
+    if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
     let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: win_width as u32,
         height: win_height as u32,
@@ -157,7 +219,14 @@ pub async fn show_text_preview(
         "fontSize": font_size,
     });
     let _ = window.emit("text-preview-update", update_payload.clone());
+    if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
     let _ = window.show();
+    if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
+        let _ = window.hide();
+        return Ok(());
+    }
     crate::positioning::force_topmost(&window);
     tracing::debug!("text-preview shown at ({}, {}), size {}x{}, created={}", win_x, win_y, win_width, win_height, newly_created);
 
@@ -178,7 +247,15 @@ pub async fn show_text_preview(
 }
 
 #[tauri::command]
-pub async fn hide_text_preview(app: tauri::AppHandle) {
+pub async fn hide_text_preview(app: tauri::AppHandle, token: Option<u64>) {
+    if let Some(t) = token
+        && t != 0
+    {
+        if !is_preview_token_current(&TEXT_PREVIEW_TOKEN, t) {
+            return;
+        }
+        invalidate_preview_token(&TEXT_PREVIEW_TOKEN, t);
+    }
     TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     if let Some(window) = app.get_webview_window("text-preview") {
         let _ = window.hide();

@@ -4,19 +4,51 @@ use tauri::{Emitter, Manager};
 
 /// 若「记住窗口大小」开关启用，将当前窗口逻辑尺寸保存到 settings 表。
 /// 所有隐藏主窗口的路径都应在 hide 前调用此函数。
-pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(app: &tauri::AppHandle<R>, window: &tauri::WebviewWindow<R>) {
+pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+) {
     if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
         let settings_repo = database::SettingsRepository::new(&state.db);
-        let persist = settings_repo.get("persist_window_size").ok().flatten()
-            .map(|v| v != "false").unwrap_or(true);
+        // 始终记录窗口位置，供「上一次位置」模式跨重启恢复
+        match window.outer_position() {
+            Ok(pos) => {
+                if let Err(e) = settings_repo.set("window_x", &pos.x.to_string()) {
+                    tracing::warn!("保存 window_x 失败: {}", e);
+                }
+                if let Err(e) = settings_repo.set("window_y", &pos.y.to_string()) {
+                    tracing::warn!("保存 window_y 失败: {}", e);
+                }
+            }
+            Err(e) => tracing::warn!("读取窗口位置失败: {}", e),
+        }
+
+        let persist = settings_repo
+            .get("persist_window_size")
+            .ok()
+            .flatten()
+            .map(|v| v != "false")
+            .unwrap_or(true);
         if persist
             && let Ok(size) = window.inner_size()
-                && let Ok(scale) = window.scale_factor() {
-                    let w = (size.width as f64 / scale).round() as u32;
-                    let h = (size.height as f64 / scale).round() as u32;
-                    let _ = settings_repo.set("window_width", &w.to_string());
-                    let _ = settings_repo.set("window_height", &h.to_string());
-                }
+            && let Ok(scale) = window.scale_factor()
+        {
+            let w = (size.width as f64 / scale).round() as u32;
+            let h = (size.height as f64 / scale).round() as u32;
+            if let Err(e) = settings_repo.set("window_width", &w.to_string()) {
+                tracing::warn!("保存 window_width 失败: {}", e);
+            }
+            if let Err(e) = settings_repo.set("window_height", &h.to_string()) {
+                tracing::warn!("保存 window_height 失败: {}", e);
+            }
+        }
+    }
+}
+
+/// 保存主窗口当前几何信息（位置 + 可选尺寸）。
+pub(crate) fn save_main_window_placement<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        save_window_size_if_enabled(app, &window);
     }
 }
 
@@ -37,12 +69,22 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                 .try_state::<std::sync::Arc<AppState>>()
                 .map(|state| {
                     let repo = database::SettingsRepository::new(&state.db);
-                    let persist = repo.get("persist_window_size").ok().flatten()
-                        .map(|v| v != "false").unwrap_or(true);
+                    let persist = repo
+                        .get("persist_window_size")
+                        .ok()
+                        .flatten()
+                        .map(|v| v != "false")
+                        .unwrap_or(true);
                     if persist {
-                        let w = repo.get("window_width").ok().flatten()
+                        let w = repo
+                            .get("window_width")
+                            .ok()
+                            .flatten()
                             .and_then(|v| v.parse::<f64>().ok());
-                        let h = repo.get("window_height").ok().flatten()
+                        let h = repo
+                            .get("window_height")
+                            .ok()
+                            .flatten()
                             .and_then(|v| v.parse::<f64>().ok());
                         if let (Some(w), Some(h)) = (w, h) {
                             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
@@ -57,20 +99,46 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                         tracing::debug!("定位模式: {:?} (from position_mode='{}')", mode, mode_str);
                         mode
                     } else {
-                        let follow = repo.get("follow_cursor").ok().flatten()
-                            .map(|v| v != "false").unwrap_or(true);
+                        let follow = repo
+                            .get("follow_cursor")
+                            .ok()
+                            .flatten()
+                            .map(|v| v != "false")
+                            .unwrap_or(true);
                         let mode = if follow {
                             crate::positioning::PositionMode::FollowCursor
                         } else {
                             crate::positioning::PositionMode::FixedPosition
                         };
-                        tracing::debug!("定位模式: {:?} (legacy fallback, follow_cursor={})", mode, follow);
+                        tracing::debug!(
+                            "定位模式: {:?} (legacy fallback, follow_cursor={})",
+                            mode,
+                            follow
+                        );
                         mode
                     }
                 })
                 .unwrap_or(crate::positioning::PositionMode::FollowCursor);
 
-            if let Err(e) = crate::positioning::position_window(&window, position_mode) {
+            if position_mode == crate::positioning::PositionMode::FixedPosition {
+                if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+                    let repo = database::SettingsRepository::new(&state.db);
+                    let x = repo
+                        .get("window_x")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+                    let y = repo
+                        .get("window_y")
+                        .ok()
+                        .flatten()
+                        .and_then(|v| v.parse::<i32>().ok());
+                    if let (Some(x), Some(y)) = (x, y) {
+                        let _ = window
+                            .set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+                    }
+                }
+            } else if let Err(e) = crate::positioning::position_window(&window, position_mode) {
                 tracing::warn!("定位窗口失败: {}", e);
             }
 
@@ -167,13 +235,17 @@ pub fn is_window_pinned() -> bool {
 }
 
 #[tauri::command]
-pub fn set_window_effect(window: tauri::WebviewWindow, effect: String, dark: Option<bool>) -> Result<(), String> {
+pub fn set_window_effect(
+    window: tauri::WebviewWindow,
+    effect: String,
+    dark: Option<bool>,
+) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
-            GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, WS_EX_LAYERED,
-            SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+            SWP_NOZORDER, SetWindowLongW, SetWindowPos, WS_EX_LAYERED,
         };
 
         let raw_hwnd = window.hwnd().map_err(|e| e.to_string())?;
@@ -186,15 +258,33 @@ pub fn set_window_effect(window: tauri::WebviewWindow, effect: String, dark: Opt
             let has_layered = (ex_style as u32) & WS_EX_LAYERED.0 != 0;
 
             if is_effect && has_layered {
-                SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) & !WS_EX_LAYERED.0) as i32);
+                SetWindowLongW(
+                    hwnd,
+                    GWL_EXSTYLE,
+                    ((ex_style as u32) & !WS_EX_LAYERED.0) as i32,
+                );
                 let _ = SetWindowPos(
-                    hwnd, None, 0, 0, 0, 0,
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
                 );
             } else if !is_effect && !has_layered {
-                SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) | WS_EX_LAYERED.0) as i32);
+                SetWindowLongW(
+                    hwnd,
+                    GWL_EXSTYLE,
+                    ((ex_style as u32) | WS_EX_LAYERED.0) as i32,
+                );
                 let _ = SetWindowPos(
-                    hwnd, None, 0, 0, 0, 0,
+                    hwnd,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
                 );
             }
@@ -221,11 +311,17 @@ pub fn set_window_effect(window: tauri::WebviewWindow, effect: String, dark: Opt
                 let cur_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
                 if (cur_style as u32) & WS_EX_LAYERED.0 == 0 {
                     SetWindowLongW(
-                        hwnd, GWL_EXSTYLE,
+                        hwnd,
+                        GWL_EXSTYLE,
                         ((cur_style as u32) | WS_EX_LAYERED.0) as i32,
                     );
                     let _ = SetWindowPos(
-                        hwnd, None, 0, 0, 0, 0,
+                        hwnd,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
                     );
                 }
@@ -258,7 +354,13 @@ pub fn save_current_focus() {
 pub async fn set_keyboard_nav_enabled(window: tauri::WebviewWindow, enabled: bool) {
     crate::input_monitor::set_keyboard_nav_enabled(enabled);
     // 不再因键盘导航切换而抢焦点，导航键通过低级钩子转发
-    if !enabled && window.is_visible().unwrap_or(false) && !crate::input_monitor::is_window_pinned() {
+    // 仅主窗口在关闭键盘导航时尝试还原焦点，避免设置窗口被意外切走
+    let is_main_window = window.label() == "main";
+    if is_main_window
+        && !enabled
+        && window.is_visible().unwrap_or(false)
+        && !crate::input_monitor::is_window_pinned()
+    {
         // 关闭时若窗口仍聚焦则恢复
         if window.is_focused().unwrap_or(false) {
             crate::input_monitor::restore_last_focus(&window);
@@ -311,6 +413,7 @@ pub fn cancel_update_download() {
 
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
+    save_main_window_placement(&app);
     crate::updater::install(&installer_path)?;
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     app.exit(0);

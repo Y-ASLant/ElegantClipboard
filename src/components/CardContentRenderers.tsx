@@ -78,6 +78,29 @@ const MAX_SCALE_BOUNDED = 5.0;
 const MAX_SCALE_UNBOUNDED = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
+let imagePreviewLease = 0;
+let imagePreviewWanted = false;
+
+function acquireImagePreviewLease(): number {
+  imagePreviewLease += 1;
+  imagePreviewWanted = true;
+  return imagePreviewLease;
+}
+
+function revokeImagePreviewLease(lease: number): void {
+  if (imagePreviewLease === lease) {
+    imagePreviewLease += 1;
+    imagePreviewWanted = false;
+  }
+}
+
+function isImagePreviewLeaseCurrent(lease: number): boolean {
+  return imagePreviewLease === lease;
+}
+
+function isImagePreviewWanted(): boolean {
+  return imagePreviewWanted;
+}
 
 /** 预览窗口定位边界（物理像素） */
 interface PreviewBounds {
@@ -249,6 +272,9 @@ const ImagePreview = memo(function ImagePreview({
   const imageMaxHeight = useUISettings((s) => s.imageMaxHeight);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const previewHoveringRef = useRef(false);
+  const previewReqIdRef = useRef(0);
+  const previewLeaseRef = useRef<number | null>(null);
   const zoomEmitRafRef = useRef<number | null>(null);
   const pendingZoomPayloadRef = useRef<{
     width: number;
@@ -268,40 +294,48 @@ const ImagePreview = memo(function ImagePreview({
   }, []);
 
   const hidePreview = useCallback(() => {
+    previewHoveringRef.current = false;
+    previewReqIdRef.current += 1;
+    const closingLease = previewLeaseRef.current;
+    if (closingLease !== null) {
+      revokeImagePreviewLease(closingLease);
+      previewLeaseRef.current = null;
+    }
     clearTimer();
     if (zoomEmitRafRef.current !== null) {
       cancelAnimationFrame(zoomEmitRafRef.current);
       zoomEmitRafRef.current = null;
     }
     pendingZoomPayloadRef.current = null;
-    if (ps.current.visible) {
+    ps.current.currentPath = undefined;
+    if (closingLease !== null) {
+      ps.current.visible = false;
+      invoke("hide_image_preview", { token: closingLease }).catch((e) =>
+        logError("Failed to hide preview:", e),
+      );
+    } else if (ps.current.visible) {
       ps.current.visible = false;
       invoke("hide_image_preview").catch((e) =>
         logError("Failed to hide preview:", e),
       );
     }
     ps.current.scale = 1.0;
+    ps.current.bounds = null;
     ps.current.windowCss = null;
   }, [clearTimer]);
 
   // 主窗口隐藏时取消预览计时器，防止粘贴竞态
   useEffect(() => {
-    const unlisten = listen("window-hidden", () => {
-      clearTimer();
-      ps.current.currentPath = undefined;
-      ps.current.visible = false;
-      ps.current.scale = 1.0;
-      ps.current.windowCss = null;
-    });
+    const unlisten = listen("window-hidden", hidePreview);
     return () => { unlisten.then((fn) => fn()); };
-  }, [clearTimer]);
+  }, [hidePreview]);
 
   // 显示预览：有界模式用屏幕工作区，无界模式用固定大窗口
-  const showPreview = useCallback(async () => {
-    if (!containerRef.current || !ps.current.currentPath) return;
+  const showPreview = useCallback(async (reqId: number, lease: number, path: string) => {
+    if (!containerRef.current) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) return;
     const bounds = await getPreviewBounds(previewPosition, containerRef.current);
-    // 异步期间窗口已隐藏则中止
-    if (!ps.current.currentPath) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) return;
     const { imgNatural } = ps.current;
     const boundedMaxCssW = bounds.maxW / bounds.scale;
     const boundedMaxCssH = bounds.maxH / bounds.scale;
@@ -332,7 +366,7 @@ const ImagePreview = memo(function ImagePreview({
     const align = bounds.side === "left" ? "right" : "left";
     try {
       await invoke("show_image_preview", {
-        imagePath: ps.current.currentPath,
+        imagePath: path,
         imgWidth: width,
         imgHeight: height,
         offsetY,
@@ -341,9 +375,24 @@ const ImagePreview = memo(function ImagePreview({
         winWidth: winW,
         winHeight: winH,
         align,
+        token: lease,
       });
+      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) {
+        ps.current.visible = false;
+        ps.current.bounds = null;
+        ps.current.windowCss = null;
+        if (!isImagePreviewWanted()) {
+          invoke("hide_image_preview", { token: lease }).catch((e) =>
+            logError("Failed to hide preview:", e),
+          );
+        }
+        return;
+      }
+      ps.current.visible = true;
     } catch {
       ps.current.visible = false;
+      ps.current.bounds = null;
+      ps.current.windowCss = null;
     }
   }, [previewPosition, previewUnboundedMode]);
 
@@ -353,10 +402,23 @@ const ImagePreview = memo(function ImagePreview({
 
   const handleMouseEnter = useCallback(() => {
     if (!imagePath || !imagePreviewEnabled || batchMode) return;
+    previewHoveringRef.current = true;
+    previewReqIdRef.current += 1;
+    const reqId = previewReqIdRef.current;
+    const lease = acquireImagePreviewLease();
+    previewLeaseRef.current = lease;
     ps.current.currentPath = imagePath;
     clearTimer();
-    timerRef.current = setTimeout(showPreview, hoverPreviewDelay);
+    timerRef.current = setTimeout(() => {
+      void showPreview(reqId, lease, imagePath);
+    }, hoverPreviewDelay);
   }, [imagePath, imagePreviewEnabled, batchMode, clearTimer, showPreview, hoverPreviewDelay]);
+
+  useEffect(() => {
+    if (!imagePreviewEnabled || batchMode) {
+      hidePreview();
+    }
+  }, [imagePreviewEnabled, batchMode, hidePreview]);
 
   // Ctrl+滚轮缩放，合并跨窗口事件为每帧一次
   const handleWheel = useCallback(
@@ -447,18 +509,9 @@ const ImagePreview = memo(function ImagePreview({
 
   useEffect(() => {
     return () => {
-      clearTimer();
-      if (zoomEmitRafRef.current !== null) {
-        cancelAnimationFrame(zoomEmitRafRef.current);
-        zoomEmitRafRef.current = null;
-      }
-      pendingZoomPayloadRef.current = null;
-      if (ps.current.visible)
-        invoke("hide_image_preview").catch((e) =>
-          logError("Failed to hide preview:", e),
-        );
+      hidePreview();
     };
-  }, [clearTimer]);
+  }, [hidePreview]);
 
   // 非自适应模式时按 cardMaxLines 计算高度
   const containerStyle = useMemo(() => {

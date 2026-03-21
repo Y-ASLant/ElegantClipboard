@@ -135,7 +135,9 @@ function TextDedupModeCard({ dedupStrategy }: { dedupStrategy: DedupStrategy }) 
     invoke<string | null>("get_setting", { key: "text_dedup_mode" }).then((val) => {
       if (val === "strict") setMode("strict");
       else setMode("semantic");
-    }).catch(() => {});
+    }).catch((error) => {
+      logError("Failed to load text dedup mode:", error);
+    });
   }, []);
 
   const handleChange = async (value: TextDedupMode) => {
@@ -291,7 +293,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       setDataSize(info);
       setDataSizeTime(time);
       sessionStorage.setItem("data-size-cache", JSON.stringify({ info, time }));
-    } catch { /* ignore */ }
+    } catch (error) {
+      logError("Failed to refresh data size:", error);
+    }
     setDataSizeLoading(false);
   }, []);
 
@@ -309,7 +313,9 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
           setDedupStrategy(val);
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load dedup strategy:", error);
+      });
   }, []);
 
   const handleDedupStrategyChange = async (value: DedupStrategy) => {

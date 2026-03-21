@@ -56,10 +56,14 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "persist_window_size" })
       .then((v) => setPersistWindowSize(v !== "false"))
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load persist_window_size:", error);
+      });
     invoke<string | null>("get_setting", { key: "auto_check_update" })
       .then((v) => setAutoCheckUpdate(v !== "false"))
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load auto_check_update:", error);
+      });
   }, []);
 
   const changePositionMode = async (mode: PositionMode) => {

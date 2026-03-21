@@ -99,6 +99,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
         "restart" => {
             // 使用支持 UAC 提权的重启逻辑
             // app.restart() 不触发提权，用自定义重启
+            crate::commands::window::save_main_window_placement(app);
             if crate::admin_launch::restart_app() {
                 app.exit(0);
             } else {
@@ -106,6 +107,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             }
         }
         "quit" => {
+            crate::commands::window::save_main_window_placement(app);
             app.exit(0);
         }
         _ => {}

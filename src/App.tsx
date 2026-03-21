@@ -220,7 +220,9 @@ function App() {
   useEffect(() => {
     invoke<boolean>("is_window_pinned").then(setIsPinned);
     const kbNav = useUISettings.getState().keyboardNavigation;
-    invoke("set_keyboard_nav_enabled", { enabled: kbNav }).catch(() => {});
+    invoke("set_keyboard_nav_enabled", { enabled: kbNav }).catch((error) => {
+      logError("Failed to sync keyboard navigation setting:", error);
+    });
   }, []);
 
   // 窗口出现时短暂抑制工具栏提示，防止闪烁

@@ -12,6 +12,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { logError } from "@/lib/logger";
 import { useUISettings } from "@/stores/ui-settings";
 
 const THEME_CLASSES = ["theme-emerald", "theme-cyan", "theme-system"];
@@ -48,7 +49,9 @@ function applyWindowEffect() {
   if (windowEffect === "none") {
     // 移除特效：立即清除 CSS 透明
     document.documentElement.setAttribute("data-window-effect", "none");
-    invoke("set_window_effect", { effect: "none", dark: null }).catch(() => {});
+    invoke("set_window_effect", { effect: "none", dark: null }).catch((error) => {
+      logError("Failed to disable window effect:", error);
+    });
   } else {
     // 应用特效：先设 DWM 背景，再激活 CSS 透明
     const dark = getIsDark();
@@ -56,9 +59,10 @@ function applyWindowEffect() {
       .then(() => {
         document.documentElement.setAttribute("data-window-effect", windowEffect);
       })
-      .catch(() => {
+      .catch((error) => {
         // 特效不支持（如 Win10 不支持 Mica/Tabbed），回退 CSS 但不重置持久化偏好，
         // 下次启动仍会尝试应用（可能是窗口尚未就绪的临时失败）
+        logError(`Failed to apply window effect '${windowEffect}', fallback to none:`, error);
         document.documentElement.setAttribute("data-window-effect", "none");
       });
   }
@@ -139,7 +143,9 @@ export function initTheme(): Promise<void> {
       if (useUISettings.getState().textPreviewEnabled) {
         emitTo("text-preview", "text-preview-theme", {
           theme: nextTextPreviewTheme,
-        }).catch(() => {});
+        }).catch((error) => {
+          logError("Failed to sync text preview theme:", error);
+        });
       }
     }
   }
@@ -176,6 +182,9 @@ export function initTheme(): Promise<void> {
         invoke<string | null>("get_system_accent_color").then((color) => {
           _accentColor = color;
           apply();
+        }).catch((error) => {
+          logError("Failed to fetch system accent color on theme switch:", error);
+          apply();
         });
       } else {
         apply();
@@ -209,7 +218,10 @@ export function initTheme(): Promise<void> {
       notifyAccentSubscribers();
       apply();
     })
-    .catch(() => apply())
+    .catch((error) => {
+      logError("Failed to fetch initial system accent color:", error);
+      apply();
+    })
     .finally(() => _readyResolve?.());
 
   return _readyPromise;

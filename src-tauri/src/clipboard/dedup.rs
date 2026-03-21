@@ -10,7 +10,7 @@ fn hash_with_prefix(prefix: &[u8], bytes: &[u8]) -> String {
 }
 
 /// Normalize user-visible text so semantically equivalent clipboard text
-/// (line endings, zero-width chars, trailing spaces) hashes consistently.
+/// (line endings, zero-width chars, trailing spaces/tabs) hashes consistently.
 pub(crate) fn normalize_semantic_text(text: &str) -> String {
     let with_lf = text.replace("\r\n", "\n").replace('\r', "\n");
     let mut cleaned = String::with_capacity(with_lf.len());
@@ -53,7 +53,9 @@ pub(crate) fn compute_semantic_hash(
     text_content: Option<&str>,
     content_hash: &str,
 ) -> String {
-    let is_text_like = matches!(content_type, "text" | "html" | "rtf");
+    let is_text_like = content_type.eq_ignore_ascii_case("text")
+        || content_type.eq_ignore_ascii_case("html")
+        || content_type.eq_ignore_ascii_case("rtf");
     if is_text_like
         && let Some(text) = text_content
         && let Some(hash) = semantic_hash_from_text(text)
@@ -61,4 +63,27 @@ pub(crate) fn compute_semantic_hash(
         return hash;
     }
     content_hash.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_semantic_hash, normalize_semantic_text};
+
+    #[test]
+    fn normalize_text_removes_invisible_chars_and_trailing_whitespace() {
+        let input = "A\u{200B}\u{00A0}B\t  \r\nline 2\t\n\n";
+        let normalized = normalize_semantic_text(input);
+        assert_eq!(normalized, "A B\nline 2");
+    }
+
+    #[test]
+    fn compute_semantic_hash_accepts_uppercase_content_type() {
+        let text_hash = compute_semantic_hash("TEXT", Some("hello"), "fallback");
+        let html_hash = compute_semantic_hash("HTML", Some("hello"), "fallback");
+        let rtf_hash = compute_semantic_hash("RTF", Some("hello"), "fallback");
+
+        assert_eq!(text_hash, html_hash);
+        assert_eq!(text_hash, rtf_hash);
+        assert_ne!(text_hash, "fallback");
+    }
 }

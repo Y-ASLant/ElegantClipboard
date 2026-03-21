@@ -40,24 +40,32 @@ export function AppFilterTab() {
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "app_filter_enabled" })
       .then((v) => setAppFilterEnabled(v === "true"))
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load app_filter_enabled:", error);
+      });
     invoke<string | null>("get_setting", { key: "app_filter_mode" })
       .then((v) => { if (v === "whitelist") setAppFilterMode("whitelist"); })
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load app_filter_mode:", error);
+      });
     invoke<string | null>("get_setting", { key: "app_filter_list" })
       .then((v) => {
         if (v && v.length > 0) {
           setAppFilterList(v.split(",").map((t) => t.trim()).filter(Boolean));
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load app_filter_list:", error);
+      });
     invoke<string | null>("get_setting", { key: "monitor_types" })
       .then((v) => {
         if (v && v.length > 0) {
           setMonitorTypes(new Set(v.split(",").map((t) => t.trim()).filter(Boolean)));
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to load monitor_types:", error);
+      });
     // 预加载一次运行中应用来填充图标缓存
     invoke<RunningApp[]>("get_running_apps")
       .then((apps) => {
@@ -65,7 +73,9 @@ export function AppFilterTab() {
           appMetaCache.current.set(app.process.toLowerCase(), { name: app.name, icon: app.icon });
         }
       })
-      .catch(() => {});
+      .catch((error) => {
+        logError("Failed to preload running apps:", error);
+      });
   }, []);
 
   const toggleMonitorType = useCallback((type: string) => {
@@ -79,20 +89,32 @@ export function AppFilterTab() {
         next.add(type);
       }
       const value = Array.from(next).join(",");
-      invoke("set_setting", { key: "monitor_types", value }).catch(() => {});
+      const rollback = new Set(prev);
+      invoke("set_setting", { key: "monitor_types", value }).catch((error) => {
+        logError("Failed to save monitor_types:", error);
+        setMonitorTypes(rollback);
+      });
       return next;
     });
   }, []);
 
   const toggleAppFilter = useCallback((enabled: boolean) => {
+    const previous = appFilterEnabled;
     setAppFilterEnabled(enabled);
-    invoke("set_setting", { key: "app_filter_enabled", value: String(enabled) }).catch(() => {});
-  }, []);
+    invoke("set_setting", { key: "app_filter_enabled", value: String(enabled) }).catch((error) => {
+      logError("Failed to save app_filter_enabled:", error);
+      setAppFilterEnabled(previous);
+    });
+  }, [appFilterEnabled]);
 
   const switchAppFilterMode = useCallback((mode: "blacklist" | "whitelist") => {
+    const previous = appFilterMode;
     setAppFilterMode(mode);
-    invoke("set_setting", { key: "app_filter_mode", value: mode }).catch(() => {});
-  }, []);
+    invoke("set_setting", { key: "app_filter_mode", value: mode }).catch((error) => {
+      logError("Failed to save app_filter_mode:", error);
+      setAppFilterMode(previous);
+    });
+  }, [appFilterMode]);
 
   const addFilterApp = useCallback((name: string, meta?: AppMeta) => {
     const trimmed = name.trim();
@@ -103,7 +125,10 @@ export function AppFilterTab() {
     setAppFilterList((prev) => {
       if (prev.some((a) => a.toLowerCase() === trimmed.toLowerCase())) return prev;
       const next = [...prev, trimmed];
-      invoke("set_setting", { key: "app_filter_list", value: next.join(",") }).catch(() => {});
+      invoke("set_setting", { key: "app_filter_list", value: next.join(",") }).catch((error) => {
+        logError("Failed to save app_filter_list (add):", error);
+        setAppFilterList(prev);
+      });
       return next;
     });
   }, []);
@@ -111,7 +136,10 @@ export function AppFilterTab() {
   const removeFilterApp = useCallback((name: string) => {
     setAppFilterList((prev) => {
       const next = prev.filter((a) => a !== name);
-      invoke("set_setting", { key: "app_filter_list", value: next.join(",") }).catch(() => {});
+      invoke("set_setting", { key: "app_filter_list", value: next.join(",") }).catch((error) => {
+        logError("Failed to save app_filter_list (remove):", error);
+        setAppFilterList(prev);
+      });
       return next;
     });
   }, []);
@@ -124,8 +152,8 @@ export function AppFilterTab() {
         appMetaCache.current.set(app.process.toLowerCase(), { name: app.name, icon: app.icon });
       }
       setShowAppPicker(true);
-    } catch {
-      logError("Failed to load running apps");
+    } catch (error) {
+      logError("Failed to load running apps:", error);
     }
   }, []);
 

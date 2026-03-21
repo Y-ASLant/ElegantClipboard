@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { logError } from "@/lib/logger";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
 
@@ -66,7 +67,11 @@ export function ThemeTab() {
 
   // 加载系统字体列表
   useEffect(() => {
-    invoke<string[]>("get_system_fonts").then(setSystemFonts).catch(() => {});
+    invoke<string[]>("get_system_fonts")
+      .then(setSystemFonts)
+      .catch((error) => {
+        logError("Failed to load system fonts:", error);
+      });
   }, []);
 
   const themes: {

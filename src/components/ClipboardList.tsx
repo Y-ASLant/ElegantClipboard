@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { focusWindowImmediately } from "@/hooks/useInputFocus";
 import { useSortableList } from "@/hooks/useSortableList";
 import { GROUPS } from "@/lib/constants";
+import { logError } from "@/lib/logger";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
@@ -265,7 +266,9 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
         });
       });
     })()
-      .catch(() => {})
+      .catch((error) => {
+        logError("Failed to focus search input:", error);
+      })
       .finally(() => {
         focusSearchInFlightRef.current = null;
       });

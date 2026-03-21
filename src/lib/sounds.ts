@@ -1,15 +1,27 @@
 // 轻量级音效反馈（Web Audio 合成音，无需外部音频文件）
 
+import { logError } from "@/lib/logger";
 import { useUISettings } from "@/stores/ui-settings";
 
 // 立即创建并预热 AudioContext（WebView2 无 autoplay 限制）
 let _ctx: AudioContext | null = null;
+let _audioFailureLogged = false;
+
+function logAudioFailureOnce(message: string, error: unknown): void {
+  if (_audioFailureLogged) return;
+  _audioFailureLogged = true;
+  logError(message, error);
+}
 
 function getCtx(): AudioContext {
   if (!_ctx) {
     _ctx = new AudioContext();
     // 预热：播放静音音调，激活音频管线
-    if (_ctx.state === "suspended") _ctx.resume().catch(() => {});
+    if (_ctx.state === "suspended") {
+      _ctx.resume().catch((error) => {
+        logAudioFailureOnce("Failed to resume AudioContext:", error);
+      });
+    }
     const osc = _ctx.createOscillator();
     const gain = _ctx.createGain();
     gain.gain.value = 0;
@@ -37,7 +49,10 @@ function playTone(freq: number, duration: number, volume = 0.15) {
     gain.connect(ac.destination);
     osc.start();
     osc.stop(ac.currentTime + duration);
-  } catch { /* audio not available */ }
+  } catch (error) {
+    // 运行环境不支持音频时仅记录一次，避免高频音效路径刷屏。
+    logAudioFailureOnce("Audio unavailable, skip sound effect:", error);
+  }
 }
 
 export function playCopySound(timing: "immediate" | "after_success") {

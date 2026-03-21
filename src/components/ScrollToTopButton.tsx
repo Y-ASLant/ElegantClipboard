@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { ArrowUp16Regular } from "@fluentui/react-icons";
+import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "scroll-to-top-pos";
@@ -12,7 +13,14 @@ function loadAnchor(): AnchoredPos {
   try {
     const p = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "");
     if ((p.side === "left" || p.side === "right") && typeof p.bottom === "number") return p;
-  } catch {}
+  } catch (error) {
+    logError("Failed to parse scroll-to-top anchor, reset to default:", error);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (removeError) {
+      logError("Failed to clear invalid scroll-to-top anchor:", removeError);
+    }
+  }
   return { side: "right", bottom: MARGIN };
 }
 

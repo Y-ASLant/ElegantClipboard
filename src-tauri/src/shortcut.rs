@@ -79,8 +79,8 @@ fn parse_key_code(key: &str) -> Option<Code> {
             }
 
     // 小键盘数字 Numpad0-Numpad9
-    if key.starts_with("NUMPAD") {
-        if let Ok(n) = key[6..].parse::<usize>() {
+    if let Some(rest) = key.strip_prefix("NUMPAD")
+        && let Ok(n) = rest.parse::<usize>() {
             const NUMPADS: [Code; 10] = [
                 Code::Numpad0, Code::Numpad1, Code::Numpad2, Code::Numpad3, Code::Numpad4,
                 Code::Numpad5, Code::Numpad6, Code::Numpad7, Code::Numpad8, Code::Numpad9,
@@ -88,7 +88,6 @@ fn parse_key_code(key: &str) -> Option<Code> {
             if n <= 9 {
                 return Some(NUMPADS[n]);
             }
-        }
     }
 
     // 特殊键
