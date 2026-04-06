@@ -237,6 +237,12 @@ export const useUISettings = create<UISettings>()(
     },
     {
       name: STORAGE_KEY,
+      version: 1,
+      // 深度合并：确保旧存储中缺失的新增字段使用代码默认值，而不是被忽略
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...(persistedState as Partial<UISettings>),
+      }),
     }
   )
 );
@@ -247,7 +253,7 @@ let unlistenFn: (() => void) | null = null;
 // 初始化设置监听器（每个窗口调用一次）
 export async function initUISettingsListener() {
   if (unlistenFn) return; // 已初始化
-  
+
   try {
     unlistenFn = await listen<Partial<UISettings>>(SYNC_EVENT, (event) => {
       useUISettings.setState(event.payload);
