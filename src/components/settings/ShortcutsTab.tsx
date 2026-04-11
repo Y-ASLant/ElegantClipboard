@@ -732,6 +732,12 @@ export function ShortcutsTab({
               <p className="text-sm text-destructive">{shortcutError}</p>
             )}
 
+            {tempShortcut.includes("Shift") && /\d/.test(tempShortcut) && (
+              <p className="text-xs text-amber-500">
+                注意：受系统底层机制限制，含有 Shift 键的数字组合不支持使用小键盘触发。
+              </p>
+            )}
+
             <p className="text-xs text-muted-foreground">
               快捷键必须包含至少一个修饰键 (Ctrl / Alt / Win) 加一个普通按键，Shift 可配合使用
             </p>
