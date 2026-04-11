@@ -1,12 +1,4 @@
 //! 管理员启动配置
-//!
-//! 偏好存储在 `AppConfig.run_as_admin` 中（替代旧版 `AppCompatFlags\Layers` 注册表方案）。
-//!
-//! 提权流程：
-//! 1. 应用通过注册表 `Run` 或手动启动（非提权）
-//! 2. 检测到 `run_as_admin == true` 且未提权
-//! 3. 通过预创建的计划任务（`schtasks /Run`，免 UAC）或 UAC 弹窗提权
-//! 4. 当前非提权实例退出
 
 use crate::config::AppConfig;
 use std::path::PathBuf;
@@ -103,11 +95,89 @@ pub fn self_elevate() -> bool {
         && task_scheduler::is_elevation_task_path_valid()
         && task_scheduler::run_elevation_task()
     {
-        return true;
+        // 验证提权进程是否真正启动（防止 Queued 状态导致的假成功）
+        if wait_for_new_instance(5) {
+            return true;
+        }
+        tracing::warn!("计划任务声称成功但未检测到提权进程，回退到 UAC");
     }
 
     // 回退到 UAC 弹窗提权
-    elevate_with_uac()
+    if elevate_with_uac() {
+        // ShellExecuteW "runas" 返回时进程通常已创建，但仍需验证
+        // 避免提权进程在初始化阶段崩溃导致两个实例都退出
+        if wait_for_new_instance(3) {
+            return true;
+        }
+        tracing::warn!("UAC 提权声称成功但未检测到提权进程");
+    }
+
+    false
+}
+
+/// 等待另一个同名进程出现（最多 `timeout_secs` 秒）
+/// 用于验证 `schtasks /Run` 是否真正启动了提权实例
+#[cfg(target_os = "windows")]
+fn wait_for_new_instance(timeout_secs: u32) -> bool {
+    let exe_name = match std::env::current_exe() {
+        Ok(p) => match p.file_name() {
+            Some(n) => n.to_string_lossy().to_lowercase(),
+            None => return false,
+        },
+        Err(_) => return false,
+    };
+    let our_pid = std::process::id();
+
+    for _ in 0..timeout_secs * 2 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        if has_other_instance(&exe_name, our_pid) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 检查是否存在另一个同名进程（排除自身 PID）
+#[cfg(target_os = "windows")]
+fn has_other_instance(exe_name: &str, our_pid: u32) -> bool {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::*;
+
+    unsafe {
+        let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let null_pos = entry
+                    .szExeFile
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..null_pos]).to_lowercase();
+
+                if name == *exe_name && entry.th32ProcessID != our_pid {
+                    let _ = CloseHandle(snapshot);
+                    return true;
+                }
+
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        let _ = CloseHandle(snapshot);
+        false
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
