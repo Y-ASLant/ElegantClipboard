@@ -630,8 +630,8 @@ pub fn quick_paste_by_slot(
     app: &tauri::AppHandle,
     slot: u8,
 ) -> Result<(), String> {
-    if !(1..=9).contains(&slot) {
-        return Err("Quick paste slot must be between 1 and 9".to_string());
+    if !(1..=10).contains(&slot) {
+        return Err("Quick paste slot must be between 1 and 10".to_string());
     }
 
     let repo = ClipboardRepository::new(&state.db);
@@ -652,8 +652,8 @@ pub fn quick_paste_favorite_by_slot(
     app: &tauri::AppHandle,
     slot: u8,
 ) -> Result<(), String> {
-    if !(1..=9).contains(&slot) {
-        return Err("收藏槽位必须在 1-9 之间".to_string());
+    if !(1..=10).contains(&slot) {
+        return Err("收藏槽位必须在 1-10 之间".to_string());
     }
 
     let repo = ClipboardRepository::new(&state.db);

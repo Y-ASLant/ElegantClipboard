@@ -30,7 +30,7 @@ type ShortcutEditTarget =
   | { type: "quick-paste"; slot: number }
   | { type: "favorite-paste"; slot: number };
 
-const QUICK_PASTE_SLOT_COUNT = 9;
+const QUICK_PASTE_SLOT_COUNT = 10;
 const QUICK_PASTE_EMPTY_LABEL = "点击设置快捷键";
 
 /** KeyboardEvent.code 到快捷键名称的映射 */
@@ -325,8 +325,8 @@ export function ShortcutsTab({
     }
   };
 
-  const QUICK_DEFAULTS = Array.from({ length: QUICK_PASTE_SLOT_COUNT }, (_, i) => `Alt+${i + 1}`);
-  const FAV_DEFAULTS = ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "", "", "", "", "", ""];
+  const QUICK_DEFAULTS = Array.from({ length: QUICK_PASTE_SLOT_COUNT }, (_, i) => `Alt+${i === 9 ? 0 : i + 1}`);
+  const FAV_DEFAULTS = ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "", "", "", "", "", "", ""];
 
   // 用户确认后执行 Win+V 切换
   const executeWinvToggle = async () => {
@@ -455,7 +455,7 @@ export function ShortcutsTab({
             <div>
               <h3 className="text-sm font-medium">快捷粘贴位置</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                为前 9 条剪贴板记录设置全局快捷键（按默认排序：置顶优先）
+                为前 10 条剪贴板记录设置全局快捷键（按默认排序：置顶优先）
               </p>
             </div>
             {quickPasteExpanded
@@ -493,10 +493,10 @@ export function ShortcutsTab({
                   </Button>
                 </div>
 
-                {(quickPasteLoaded ? quickPasteShortcuts : Array.from({ length: QUICK_PASTE_SLOT_COUNT }, (_, i) => `Alt+${i + 1}`)).map((shortcut, idx) => (
+                {(quickPasteLoaded ? quickPasteShortcuts : Array.from({ length: QUICK_PASTE_SLOT_COUNT }, (_, i) => `Alt+${i === 9 ? 0 : i + 1}`)).map((shortcut, idx) => (
                   <div key={idx}>
                     <div className="flex items-center gap-2">
-                      <Label className="text-xs w-28 shrink-0">{`快速粘贴位置${idx + 1}`}</Label>
+                      <Label className="text-xs w-28 shrink-0">{`快速粘贴位置${idx === 9 ? 10 : idx + 1}`}</Label>
                       <Input
                         value={shortcut}
                         placeholder={QUICK_PASTE_EMPTY_LABEL}
@@ -549,7 +549,7 @@ export function ShortcutsTab({
             <div>
               <h3 className="text-sm font-medium">收藏快捷粘贴</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                为收藏列表中的前 9 条记录设置全局快捷键
+                为收藏列表中的前 10 条记录设置全局快捷键
               </p>
             </div>
             {favPasteExpanded
@@ -587,10 +587,10 @@ export function ShortcutsTab({
                   </Button>
                 </div>
 
-                {(favPasteLoaded ? favPasteShortcuts : ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "", "", "", "", "", ""]).map((shortcut, idx) => (
+                {(favPasteLoaded ? favPasteShortcuts : ["Ctrl+Alt+1", "Ctrl+Alt+2", "Ctrl+Alt+3", "", "", "", "", "", "", ""]).map((shortcut, idx) => (
                   <div key={idx}>
                     <div className="flex items-center gap-2">
-                      <Label className="text-xs w-28 shrink-0">{`收藏粘贴位置${idx + 1}`}</Label>
+                      <Label className="text-xs w-28 shrink-0">{`收藏粘贴位置${idx === 9 ? 10 : idx + 1}`}</Label>
                       <Input
                         value={shortcut}
                         placeholder={QUICK_PASTE_EMPTY_LABEL}

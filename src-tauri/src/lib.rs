@@ -78,7 +78,7 @@ impl PasteKind {
             PasteKind::Quick => CURRENT_QUICK_PASTE_SHORTCUTS.read().clone(),
             PasteKind::Favorite => CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone(),
         };
-        if current.len() == 9 { current } else { self.defaults() }
+        if current.len() == 10 { current } else { self.defaults() }
     }
 }
 
@@ -126,7 +126,9 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
 }
 
 fn default_quick_paste_shortcuts() -> Vec<String> {
-    (1..=9).map(|slot| format!("Alt+{}", slot)).collect()
+    let mut defaults: Vec<String> = (1..=9).map(|slot| format!("Alt+{}", slot)).collect();
+    defaults.push("Alt+0".to_string());
+    defaults
 }
 
 fn quick_paste_setting_key(slot: u8) -> String {
@@ -146,7 +148,7 @@ fn shortcut_has_modifier(shortcut: &str) -> bool {
 
 fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
     let mut shortcuts = default_quick_paste_shortcuts();
-    for slot in 1..=9 {
+    for slot in 1..=10 {
         let key = quick_paste_setting_key(slot);
         if let Ok(Some(value)) = repo.get(&key) {
             shortcuts[(slot - 1) as usize] = normalize_shortcut_value(&value);
@@ -157,7 +159,7 @@ fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
 
 fn default_favorite_paste_shortcuts() -> Vec<String> {
     // 默认只有前 3 个槽位有快捷键，其余留空
-    let mut shortcuts = vec![String::new(); 9];
+    let mut shortcuts = vec![String::new(); 10];
     shortcuts[0] = "Ctrl+Alt+1".to_string();
     shortcuts[1] = "Ctrl+Alt+2".to_string();
     shortcuts[2] = "Ctrl+Alt+3".to_string();
@@ -170,7 +172,7 @@ fn favorite_paste_setting_key(slot: u8) -> String {
 
 fn load_favorite_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
     let mut shortcuts = default_favorite_paste_shortcuts();
-    for slot in 1..=9 {
+    for slot in 1..=10 {
         let key = favorite_paste_setting_key(slot);
         if let Ok(Some(value)) = repo.get(&key) {
             shortcuts[(slot - 1) as usize] = normalize_shortcut_value(&value);
@@ -209,9 +211,9 @@ fn apply_paste_shortcuts(
 
     let label = kind.label();
     let mut failures = HashMap::new();
-    let mut applied = vec![String::new(); 9];
+    let mut applied = vec![String::new(); 10];
 
-    for slot in 1..=9 {
+    for slot in 1..=10 {
         let idx = (slot - 1) as usize;
         let shortcut_str = shortcuts.get(idx).cloned().unwrap_or_default();
         let normalized = normalize_shortcut_value(&shortcut_str);
@@ -477,7 +479,7 @@ fn set_paste_shortcut_inner(
     shortcut: String,
     kind: PasteKind,
 ) -> Result<(), String> {
-    if !(1..=9).contains(&slot) {
+    if !(1..=10).contains(&slot) {
         return Err("slot must be between 1 and 9".to_string());
     }
 
