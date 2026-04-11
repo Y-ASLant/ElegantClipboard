@@ -48,18 +48,18 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
         // 主策略: 剪贴板所有者（实际写入剪贴板的应用，对截图工具等更准确）
         if let Ok(owner) = GetClipboardOwner()
             && let Some(info) = try_resolve(owner, self_pid) {
-                debug!("来源(所有者): {} ({})", info.app_name, info.exe_path);
+                debug!("Source (owner): {} ({})", info.app_name, info.exe_path);
                 return Some(info);
             }
 
         // 补充策略: 前台窗口（部分应用不设置剪贴板所有者时的兜底）
         let fg = GetForegroundWindow();
         if let Some(info) = try_resolve(fg, self_pid) {
-            debug!("来源(前台): {} ({})", info.app_name, info.exe_path);
+            debug!("Source (foreground): {} ({})", info.app_name, info.exe_path);
             return Some(info);
         }
 
-        debug!("无法识别剪贴板来源");
+        debug!("Unable to identify clipboard source");
         None
     }
 }
@@ -284,7 +284,7 @@ pub fn extract_and_cache_icon(exe_path: &str, icons_dir: &Path, cache_key: &str)
     std::fs::create_dir_all(icons_dir).ok()?;
     let png_data = extract_icon_png(exe_path)?;
     if let Err(e) = std::fs::write(&icon_path, &png_data) {
-        warn!("图标缓存失败 {}: {}", exe_path, e);
+        warn!("Icon cache failed for {}: {}", exe_path, e);
         return None;
     }
     Some(icon_path.to_string_lossy().to_string())

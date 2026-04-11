@@ -14,13 +14,13 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
         match window.outer_position() {
             Ok(pos) => {
                 if let Err(e) = settings_repo.set("window_x", &pos.x.to_string()) {
-                    tracing::warn!("保存 window_x 失败: {}", e);
+                    tracing::warn!("Failed to save window_x: {}", e);
                 }
                 if let Err(e) = settings_repo.set("window_y", &pos.y.to_string()) {
-                    tracing::warn!("保存 window_y 失败: {}", e);
+                    tracing::warn!("Failed to save window_y: {}", e);
                 }
             }
-            Err(e) => tracing::warn!("读取窗口位置失败: {}", e),
+            Err(e) => tracing::warn!("Failed to read window position: {}", e),
         }
 
         let persist = settings_repo
@@ -36,10 +36,10 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
             let w = (size.width as f64 / scale).round() as u32;
             let h = (size.height as f64 / scale).round() as u32;
             if let Err(e) = settings_repo.set("window_width", &w.to_string()) {
-                tracing::warn!("保存 window_width 失败: {}", e);
+                tracing::warn!("Failed to save window_width: {}", e);
             }
             if let Err(e) = settings_repo.set("window_height", &h.to_string()) {
-                tracing::warn!("保存 window_height 失败: {}", e);
+                tracing::warn!("Failed to save window_height: {}", e);
             }
         }
     }
@@ -96,7 +96,7 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                     // position_mode 优先；未设置时回退到旧版 follow_cursor
                     if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
                         let mode = crate::positioning::PositionMode::from_str(&mode_str);
-                        tracing::debug!("定位模式: {:?} (from position_mode='{}')", mode, mode_str);
+                        tracing::debug!("Position mode: {:?} (from position_mode='{}')", mode, mode_str);
                         mode
                     } else {
                         let follow = repo
@@ -111,7 +111,7 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                             crate::positioning::PositionMode::FixedPosition
                         };
                         tracing::debug!(
-                            "定位模式: {:?} (legacy fallback, follow_cursor={})",
+                            "Position mode: {:?} (legacy fallback, follow_cursor={})",
                             mode,
                             follow
                         );
@@ -139,7 +139,7 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                     }
                 }
             } else if let Err(e) = crate::positioning::position_window(&window, position_mode) {
-                tracing::warn!("定位窗口失败: {}", e);
+                tracing::warn!("Failed to position window: {}", e);
             }
 
             crate::input_monitor::save_current_focus();

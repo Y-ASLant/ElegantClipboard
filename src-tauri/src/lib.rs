@@ -254,13 +254,13 @@ fn apply_paste_shortcuts(
                                 PasteKind::Favorite => commands::clipboard::quick_paste_favorite_by_slot(&state, &app_handle, slot),
                             };
                             if let Err(err) = result {
-                                tracing::warn!("{} {} 粘贴失败: {}", kind.label(), slot, err);
+                                tracing::warn!("{} {} paste failed: {}", kind.label(), slot, err);
                                 active_slots.lock().remove(&slot);
                             }
                         } else {
                             std::thread::sleep(std::time::Duration::from_millis(50));
                             if let Err(err) = commands::clipboard::simulate_paste() {
-                                tracing::warn!("{} {} 重复粘贴失败: {}", kind.label(), slot, err);
+                                tracing::warn!("{} {} repeat paste failed: {}", kind.label(), slot, err);
                             }
                         }
                         PASTE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::Release);
@@ -612,12 +612,12 @@ pub fn run() {
                     match app.autolaunch().is_enabled() {
                         Ok(false) => {
                             if let Err(e) = app.autolaunch().enable() {
-                                tracing::warn!("自启动恢复失败: {}", e);
+                                tracing::warn!("Auto-start recovery failed: {}", e);
                             } else {
-                                tracing::info!("自启动已自动恢复（更新/导入后）");
+                                tracing::info!("Auto-start recovered (after update/import)");
                             }
                         }
-                        Err(e) => tracing::warn!("检查自启动状态失败: {}", e),
+                        Err(e) => tracing::warn!("Failed to check auto-start status: {}", e),
                         _ => {}
                     }
                 }
@@ -653,7 +653,7 @@ pub fn run() {
             for kind in [PasteKind::Quick, PasteKind::Favorite] {
                 let failures = reload_paste_shortcuts_from_settings(app.handle(), kind);
                 for (slot, err) in &failures {
-                    tracing::warn!("{} {} 快捷键注册失败: {}", kind.label(), slot, err);
+                    tracing::warn!("{} {} shortcut registration failed: {}", kind.label(), slot, err);
                 }
             }
 

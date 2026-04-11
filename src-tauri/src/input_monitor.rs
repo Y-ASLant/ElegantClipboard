@@ -114,7 +114,7 @@ pub fn start_monitoring() {
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
     {
-        warn!("输入监控已在运行");
+        warn!("Input monitor already running");
         return;
     }
 
@@ -123,14 +123,14 @@ pub fn start_monitoring() {
         run_hook_thread();
 
         #[cfg(not(windows))]
-        warn!("当前平台不支持输入监控");
+        warn!("Input monitoring not supported on this platform");
 
         MONITOR_RUNNING.store(false, Ordering::SeqCst);
         #[cfg(windows)]
         HOOK_THREAD_ID.store(0, Ordering::SeqCst);
     });
 
-    info!("输入监控已启动");
+    info!("Input monitor started");
 }
 
 pub fn enable_mouse_monitoring() {
@@ -236,10 +236,10 @@ fn run_hook_thread() {
     match mouse_hook {
         Ok(hook) => {
             TL_MOUSE_HOOK.with(|h| *h.borrow_mut() = Some(hook));
-            info!("WH_MOUSE_LL 钩子已安装");
+            info!("WH_MOUSE_LL hook installed");
         }
         Err(e) => {
-            error!("WH_MOUSE_LL 钩子安装失败: {:?}", e);
+            error!("WH_MOUSE_LL hook install failed: {:?}", e);
             return;
         }
     }
@@ -256,9 +256,9 @@ fn run_hook_thread() {
         )
     };
     if focus_hook.0.is_null() {
-        warn!("WinEventHook(FOREGROUND) 安装失败，固定模式焦点还原可能不准确");
+        warn!("WinEventHook(FOREGROUND) install failed, fixed-mode focus restore may be inaccurate");
     } else {
-        info!("WinEventHook(FOREGROUND) 已安装");
+        info!("WinEventHook(FOREGROUND) installed");
     }
 
     HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
@@ -279,7 +279,7 @@ fn run_hook_thread() {
                     };
                     match kb_hook {
                         Ok(hook) => TL_KEYBOARD_HOOK.with(|h| *h.borrow_mut() = Some(hook)),
-                        Err(e) => error!("WH_KEYBOARD_LL 钩子安装失败: {:?}", e),
+                        Err(e) => error!("WH_KEYBOARD_LL hook install failed: {:?}", e),
                     }
                 }
             }
@@ -308,7 +308,7 @@ fn run_hook_thread() {
         unsafe { let _ = UnhookWinEvent(focus_hook); }
     }
 
-    info!("输入监控线程已退出");
+    info!("Input monitor thread exited");
 }
 
 #[cfg(windows)]
@@ -477,7 +477,7 @@ fn handle_click_outside() {
     }
     if let Some(window) = MAIN_WINDOW.lock().as_ref()
         && window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
-            info!("handle_click_outside: 窗口可见且点击在外部，执行隐藏");
+            info!("handle_click_outside: window visible and click outside, hiding");
             crate::commands::window::save_window_size_if_enabled(window.app_handle(), window);
             let _ = window.set_focusable(false);
             let _ = window.hide();

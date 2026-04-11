@@ -119,7 +119,7 @@ fn get_config_path() -> PathBuf {
 
 /// 将数据从旧路径迁移到新路径
 pub fn migrate_data(old_path: &PathBuf, new_path: &PathBuf) -> Result<MigrationResult, String> {
-    info!("正在迁移数据: {:?} -> {:?}", old_path, new_path);
+    info!("Migrating data: {:?} -> {:?}", old_path, new_path);
 
     // 确保新目录存在
     fs::create_dir_all(new_path).map_err(|e| format!("创建新目录失败: {}", e))?;

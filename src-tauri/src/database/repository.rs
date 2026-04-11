@@ -122,6 +122,116 @@ impl HashColumn {
     }
 }
 
+/// Dynamic SQL condition builder to reduce boilerplate in repository query methods.
+///
+/// Replaces repetitive patterns of condition assembly, parameter boxing, and
+/// reference conversion with a fluent builder API.
+struct ConditionBuilder {
+    conditions: Vec<String>,
+    params: Vec<Box<dyn rusqlite::ToSql>>,
+}
+
+impl ConditionBuilder {
+    fn new() -> Self {
+        Self { conditions: Vec::new(), params: Vec::new() }
+    }
+
+    /// Add non-pinned + non-favorite conditions (clearable items).
+    fn clearable(mut self) -> Self {
+        self.conditions.push("is_pinned = 0".to_string());
+        self.conditions.push("is_favorite = 0".to_string());
+        self
+    }
+
+    /// Add group_id filter (NULL = default group, Some(id) = custom group).
+    fn group(mut self, group_id: Option<i64>) -> Self {
+        let (cond, param) = ClipboardRepository::group_condition(group_id);
+        self.conditions.push(cond.to_string());
+        if let Some(gid) = param {
+            self.params.push(Box::new(gid));
+        }
+        self
+    }
+
+    /// Add content_type filter (supports comma-separated multi-type).
+    fn content_type(mut self, content_type: Option<&str>) -> Self {
+        ClipboardRepository::append_content_type_condition(
+            content_type,
+            &mut self.conditions,
+            &mut self.params,
+        );
+        self
+    }
+
+    /// Add a condition without an associated parameter.
+    fn condition(mut self, cond: &str) -> Self {
+        self.conditions.push(cond.to_string());
+        self
+    }
+
+    /// Add a condition with an associated parameter.
+    fn condition_with_param(mut self, cond: &str, value: impl rusqlite::ToSql + 'static) -> Self {
+        self.conditions.push(cond.to_string());
+        self.params.push(Box::new(value));
+        self
+    }
+
+    /// Push a trailing parameter (e.g., for LIMIT clauses outside WHERE).
+    fn param(mut self, value: impl rusqlite::ToSql + 'static) -> Self {
+        self.params.push(Box::new(value));
+        self
+    }
+
+    /// Build the WHERE clause (includes leading ` WHERE `).
+    fn where_clause(&self) -> String {
+        if self.conditions.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", self.conditions.join(" AND "))
+        }
+    }
+
+    /// Get parameter references for query execution.
+    fn param_refs(&self) -> Vec<&dyn rusqlite::ToSql> {
+        self.params.iter().map(|p| p.as_ref()).collect()
+    }
+
+    /// SELECT single-column string results with optional trailing SQL.
+    fn select_strings(
+        &self,
+        conn: &Connection,
+        prefix: &str,
+        suffix: &str,
+    ) -> Result<Vec<String>, rusqlite::Error> {
+        let sql = if suffix.is_empty() {
+            format!("{}{}", prefix, self.where_clause())
+        } else {
+            format!("{}{} {}", prefix, self.where_clause(), suffix)
+        };
+        let refs = self.param_refs();
+        let mut stmt = conn.prepare(&sql)?;
+        let results = stmt
+            .query_map(refs.as_slice(), |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(results)
+    }
+
+    /// DELETE FROM clipboard_items and return affected row count.
+    fn delete_items(&self, conn: &Connection) -> Result<i64, rusqlite::Error> {
+        let sql = format!("DELETE FROM clipboard_items{}", self.where_clause());
+        let refs = self.param_refs();
+        Ok(conn.execute(&sql, refs.as_slice())? as i64)
+    }
+
+    /// COUNT(*) on clipboard_items.
+    fn count_items(&self, conn: &Connection) -> Result<i64, rusqlite::Error> {
+        let sql = format!("SELECT COUNT(*) FROM clipboard_items{}", self.where_clause());
+        let refs = self.param_refs();
+        conn.query_row(&sql, refs.as_slice(), |row| row.get(0))
+    }
+}
+
 impl ClipboardRepository {
     pub fn new(db: &Database) -> Self {
         Self {
@@ -586,27 +696,12 @@ impl ClipboardRepository {
         content_type: Option<&str>,
     ) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let mut conditions: Vec<String> = vec![
-            "is_pinned = 0".to_string(),
-            "is_favorite = 0".to_string(),
-            "image_path IS NOT NULL".to_string(),
-        ];
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        conditions.push(group_cond.to_string());
-        if let Some(gid) = group_param {
-            params_vec.push(Box::new(gid));
-        }
-        Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
-        let mut sql = "SELECT image_path FROM clipboard_items".to_string();
-        Self::append_where(&mut sql, &conditions);
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&sql)?;
-        let paths: Vec<String> = stmt
-            .query_map(params_refs.as_slice(), |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(paths)
+        ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .content_type(content_type)
+            .condition("image_path IS NOT NULL")
+            .select_strings(&conn, "SELECT image_path FROM clipboard_items", "")
     }
 
     /// 清空历史（保留置顶和收藏），按分组/类型过滤
@@ -616,22 +711,11 @@ impl ClipboardRepository {
         content_type: Option<&str>,
     ) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        let mut conditions: Vec<String> = vec![
-            "is_pinned = 0".to_string(),
-            "is_favorite = 0".to_string(),
-        ];
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        conditions.push(group_cond.to_string());
-        if let Some(gid) = group_param {
-            params_vec.push(Box::new(gid));
-        }
-        Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
-        let mut sql = "DELETE FROM clipboard_items".to_string();
-        Self::append_where(&mut sql, &conditions);
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-        let deleted = conn.execute(&sql, params_refs.as_slice())?;
-        Ok(deleted as i64)
+        ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .content_type(content_type)
+            .delete_items(&conn)
     }
 
     /// 获取所有条目的图片路径（含置顶和收藏）
@@ -647,7 +731,7 @@ impl ClipboardRepository {
         Ok(paths)
     }
 
-    /// »ñÈ¡Ö¸¶¨·Ö×éÄÚËùÓÐÌõÄ¿µÄÍ¼Æ¬Â·¾¶£¨°üÀ¨ÖÃ¶¥ºÍÊÕ²Ø£©
+    /// Get all image paths within a specific group (including pinned and favorites).
     pub fn get_image_paths_by_group(&self, group_id: i64) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let mut stmt = conn.prepare(
@@ -671,41 +755,23 @@ impl ClipboardRepository {
     /// 删除 N 天前的非置顶/非收藏条目（按分组），返回 (删除数, 关联图片路径)
     pub fn delete_older_than(&self, days: i64, group_id: Option<i64>) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
+        let age_cond = "created_at < datetime('now', 'localtime', '-' || ? || ' days')";
 
-        let select_sql = format!(
-            "SELECT image_path FROM clipboard_items \
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL \
-             AND {} \
-             AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
-            group_cond
-        );
-        let delete_sql = format!(
-            "DELETE FROM clipboard_items \
-             WHERE is_pinned = 0 AND is_favorite = 0 \
-             AND {} \
-             AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
-            group_cond
-        );
+        let image_paths = ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .condition("image_path IS NOT NULL")
+            .condition_with_param(age_cond, days)
+            .select_strings(&conn, "SELECT image_path FROM clipboard_items", "")?;
 
-        let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { select_params.push(Box::new(gid)); }
-        select_params.push(Box::new(days));
-        let select_refs: Vec<&dyn rusqlite::ToSql> = select_params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&select_sql)?;
-        let image_paths: Vec<String> = stmt
-            .query_map(select_refs.as_slice(), |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut delete_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { delete_params.push(Box::new(gid)); }
-        delete_params.push(Box::new(days));
-        let delete_refs: Vec<&dyn rusqlite::ToSql> = delete_params.iter().map(|p| p.as_ref()).collect();
-        let deleted = conn.execute(&delete_sql, delete_refs.as_slice())?;
+        let deleted = ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .condition_with_param(age_cond, days)
+            .delete_items(&conn)?;
 
         debug!("Auto-cleanup: deleted {} items older than {} days (group: {:?})", deleted, days, group_id);
-        Ok((deleted as i64, image_paths))
+        Ok((deleted, image_paths))
     }
 
     /// 执行最大数量限制（按分组），返回 (删除数, 图片路径)
@@ -715,56 +781,42 @@ impl ClipboardRepository {
         }
 
         let conn = self.write_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-
-        let count_sql = format!(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {}",
-            group_cond
-        );
-        let mut count_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { count_params.push(Box::new(gid)); }
-        let count_refs: Vec<&dyn rusqlite::ToSql> = count_params.iter().map(|p| p.as_ref()).collect();
-        let current_count: i64 = conn.query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))?;
+        let current_count = ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .count_items(&conn)?;
 
         if current_count <= max_count {
             return Ok((0, vec![]));
         }
-
         let to_delete = current_count - max_count;
 
-        let select_sql = format!(
-            "SELECT image_path FROM clipboard_items \
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL AND {} \
-             ORDER BY created_at ASC LIMIT ?",
-            group_cond
-        );
+        let image_paths = ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .condition("image_path IS NOT NULL")
+            .param(to_delete)
+            .select_strings(
+                &conn,
+                "SELECT image_path FROM clipboard_items",
+                "ORDER BY created_at ASC LIMIT ?",
+            )?;
+
+        let del_cb = ConditionBuilder::new()
+            .clearable()
+            .group(group_id)
+            .param(to_delete);
         let delete_sql = format!(
             "DELETE FROM clipboard_items WHERE id IN (\
-                SELECT id FROM clipboard_items \
-                WHERE is_pinned = 0 AND is_favorite = 0 AND {} \
+                SELECT id FROM clipboard_items{} \
                 ORDER BY created_at ASC LIMIT ?\
-             )",
-            group_cond
+            )",
+            del_cb.where_clause()
         );
-
-        let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { select_params.push(Box::new(gid)); }
-        select_params.push(Box::new(to_delete));
-        let select_refs: Vec<&dyn rusqlite::ToSql> = select_params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&select_sql)?;
-        let image_paths: Vec<String> = stmt
-            .query_map(select_refs.as_slice(), |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        let mut delete_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { delete_params.push(Box::new(gid)); }
-        delete_params.push(Box::new(to_delete));
-        let delete_refs: Vec<&dyn rusqlite::ToSql> = delete_params.iter().map(|p| p.as_ref()).collect();
-        let deleted = conn.execute(&delete_sql, delete_refs.as_slice())?;
+        let deleted = conn.execute(&delete_sql, del_cb.param_refs().as_slice())? as i64;
 
         debug!("Enforced max count: deleted {} oldest items (group: {:?})", deleted, group_id);
-        Ok((deleted as i64, image_paths))
+        Ok((deleted, image_paths))
     }
 
     /// 更新文本内容（编辑功能）

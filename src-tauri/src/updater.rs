@@ -36,13 +36,13 @@ fn build_agent() -> ureq::Agent {
 
     // 优先环境变量，其次 Windows 系统代理
     if let Some(proxy) = ureq::Proxy::try_from_env() {
-        debug!("更新代理: 使用环境变量");
+        debug!("Update proxy: using environment variable");
         builder = builder.proxy(Some(proxy));
     } else if let Some(proxy) = read_system_proxy() {
-        debug!("更新代理: 使用系统代理");
+        debug!("Update proxy: using system proxy");
         builder = builder.proxy(Some(proxy));
     } else {
-        debug!("更新代理: 直连");
+        debug!("Update proxy: direct connection");
     }
 
     builder.build().into()
@@ -91,7 +91,7 @@ fn read_system_proxy() -> Option<ureq::Proxy> {
         format!("http://{}", addr)
     };
 
-    debug!("系统代理地址: {}", url);
+    debug!("System proxy address: {}", url);
     ureq::Proxy::new(&url).ok()
 }
 

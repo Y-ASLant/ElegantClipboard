@@ -86,7 +86,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
-    info!("系统托盘已初始化");
+    info!("System tray initialized");
     Ok(())
 }
 

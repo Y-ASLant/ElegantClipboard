@@ -31,19 +31,19 @@ fn restore_prev_foreground_window() {
 
     let prev = crate::input_monitor::get_prev_foreground_hwnd();
     if prev == 0 {
-        tracing::warn!("hide: PREV_FOREGROUND_HWND 为 0，无法恢复前台窗口");
+        tracing::warn!("hide: PREV_FOREGROUND_HWND is 0, cannot restore foreground window");
         return;
     }
 
     let hwnd = HWND(prev as *mut _);
     let current_fg = unsafe { GetForegroundWindow() };
     if current_fg.0 as isize == prev {
-        tracing::info!("hide: 目标窗口已是前台，跳过 SetForegroundWindow");
+        tracing::info!("hide: target is already foreground, skipping SetForegroundWindow");
     } else if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
         let _ = unsafe { SetForegroundWindow(hwnd) };
-        tracing::info!("hide: 已恢复前台窗口 hwnd={:#x}", prev);
+        tracing::info!("hide: restored foreground window hwnd={:#x}", prev);
     } else {
-        tracing::warn!("hide: prev_hwnd={:#x} 已无效", prev);
+        tracing::warn!("hide: prev_hwnd={:#x} is no longer valid", prev);
     }
 }
 

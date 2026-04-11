@@ -99,7 +99,7 @@ pub fn self_elevate() -> bool {
         if wait_for_new_instance(5) {
             return true;
         }
-        tracing::warn!("计划任务声称成功但未检测到提权进程，回退到 UAC");
+        tracing::warn!("Scheduled task claimed success but elevated process not detected, falling back to UAC");
     }
 
     // 回退到 UAC 弹窗提权
@@ -109,7 +109,7 @@ pub fn self_elevate() -> bool {
         if wait_for_new_instance(3) {
             return true;
         }
-        tracing::warn!("UAC 提权声称成功但未检测到提权进程");
+        tracing::warn!("UAC elevation claimed success but elevated process not detected");
     }
 
     false
