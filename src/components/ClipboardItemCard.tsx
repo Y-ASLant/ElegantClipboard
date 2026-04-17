@@ -380,9 +380,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       document.documentElement.classList.contains("dark") ? "dark" : "light";
 
     try {
-      invoke("hide_image_preview").catch((error) => {
-        logError("Failed to hide image preview:", error);
-      });
       const uiState = useUISettings.getState();
       await invoke("show_text_preview", {
         text: textContent,

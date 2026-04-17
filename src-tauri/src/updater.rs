@@ -308,11 +308,18 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     Ok(file_path.to_string_lossy().to_string())
 }
 
-/// 启动已下载的 NSIS 安装程序。
+/// 启动已下载的 NSIS 安装程序（应用内更新场景）。
+///
+/// 参数说明：
+/// - `/P`：passive 模式，仅显示进度 UI，跳过欢迎页/许可页/完成页，无需用户点击下一步。
+/// - `/R`：安装成功后自动重启已安装的应用，实现"点更新 → 自动换版启动"。
+///
+/// 完全静默可改用 `/S`；此处选 `/P` 是为了让用户能看到更新进度反馈。
 pub fn install(installer_path: &str) -> Result<(), String> {
-    info!("Launching installer: {}", installer_path);
+    info!("Launching installer (passive + restart): {}", installer_path);
 
     std::process::Command::new(installer_path)
+        .args(["/P", "/R"])
         .spawn()
         .map_err(|e| format!("启动安装程序失败: {}", e))?;
 

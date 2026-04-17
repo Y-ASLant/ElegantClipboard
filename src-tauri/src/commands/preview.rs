@@ -20,11 +20,6 @@ fn is_preview_token_current(slot: &AtomicU64, token: u64) -> bool {
 }
 
 #[inline]
-fn invalidate_preview_token(slot: &AtomicU64, token: u64) {
-    slot.fetch_max(token.saturating_add(1), Ordering::AcqRel);
-}
-
-#[inline]
 fn invalidate_all_preview_tokens(slot: &AtomicU64) {
     slot.fetch_add(1, Ordering::AcqRel);
 }
@@ -150,10 +145,12 @@ pub async fn hide_image_preview(app: tauri::AppHandle, token: Option<u64>) {
     if let Some(t) = token
         && t != 0
     {
-        if !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, t) {
+        // 原子抢占：无论 show 是否已 promote，都把 token 推到 t+1，
+        // 既阻止后续迟到的 show(t)，又保证 prev != t 时不误杀更新的预览。
+        let prev = IMAGE_PREVIEW_TOKEN.fetch_max(t.saturating_add(1), Ordering::AcqRel);
+        if prev != t {
             return;
         }
-        invalidate_preview_token(&IMAGE_PREVIEW_TOKEN, t);
     }
     force_hide_image_preview(&app);
 }
@@ -271,10 +268,11 @@ pub async fn hide_text_preview(app: tauri::AppHandle, token: Option<u64>) {
     if let Some(t) = token
         && t != 0
     {
-        if !is_preview_token_current(&TEXT_PREVIEW_TOKEN, t) {
+        // 原子抢占：同 hide_image_preview，解决 show/hide 并发调度时的顺序竞态。
+        let prev = TEXT_PREVIEW_TOKEN.fetch_max(t.saturating_add(1), Ordering::AcqRel);
+        if prev != t {
             return;
         }
-        invalidate_preview_token(&TEXT_PREVIEW_TOKEN, t);
     }
     force_hide_text_preview(&app);
 }
