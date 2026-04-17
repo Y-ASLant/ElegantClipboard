@@ -52,124 +52,119 @@ pub(crate) fn save_main_window_placement<R: tauri::Runtime>(app: &tauri::AppHand
     }
 }
 
-/// 切换主窗口显示/隐藏
+fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    let position_mode = app
+        .try_state::<std::sync::Arc<AppState>>()
+        .map(|state| {
+            let repo = database::SettingsRepository::new(&state.db);
+            let persist = repo
+                .get("persist_window_size")
+                .ok()
+                .flatten()
+                .map(|v| v != "false")
+                .unwrap_or(true);
+            if persist {
+                let w = repo
+                    .get("window_width")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<f64>().ok());
+                let h = repo
+                    .get("window_height")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| v.parse::<f64>().ok());
+                if let (Some(w), Some(h)) = (w, h) {
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                        width: w,
+                        height: h,
+                    }));
+                }
+            }
+            if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
+                crate::positioning::PositionMode::from_str(&mode_str)
+            } else {
+                let follow = repo
+                    .get("follow_cursor")
+                    .ok()
+                    .flatten()
+                    .map(|v| v != "false")
+                    .unwrap_or(true);
+                if follow {
+                    crate::positioning::PositionMode::FollowCursor
+                } else {
+                    crate::positioning::PositionMode::FixedPosition
+                }
+            }
+        })
+        .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+
+    if position_mode == crate::positioning::PositionMode::FixedPosition {
+        if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+            let repo = database::SettingsRepository::new(&state.db);
+            let x = repo
+                .get("window_x")
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<i32>().ok());
+            let y = repo
+                .get("window_y")
+                .ok()
+                .flatten()
+                .and_then(|v| v.parse::<i32>().ok());
+            if let (Some(x), Some(y)) = (x, y) {
+                let _ = window.set_position(tauri::Position::Physical(
+                    tauri::PhysicalPosition::new(x, y),
+                ));
+            }
+        }
+    } else if let Err(e) = crate::positioning::position_window(window, position_mode) {
+        tracing::warn!("Failed to position window: {}", e);
+    }
+}
+
+pub(crate) fn show_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    position_main_window(app, window);
+    crate::input_monitor::save_current_focus();
+    let _ = window.set_focusable(false);
+    let _ = window.unminimize();
+    let _ = window.show();
+    crate::positioning::force_topmost(window);
+    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
+    crate::input_monitor::enable_mouse_monitoring();
+    let _ = window.emit("window-shown", ());
+}
+
+pub(crate) fn hide_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    save_window_size_if_enabled(app, window);
+    let _ = window.set_focusable(false);
+    let _ = window.hide();
+    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+    crate::input_monitor::disable_mouse_monitoring();
+    crate::commands::hide_preview_windows(app);
+    let _ = window.emit("window-hidden", ());
+}
+
 pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if crate::keyboard_hook::get_window_state() == crate::keyboard_hook::WindowState::Visible {
-            save_window_size_if_enabled(app, &window);
-
-            let _ = window.set_focusable(false);
-            let _ = window.hide();
-            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-            crate::input_monitor::disable_mouse_monitoring();
-            crate::commands::hide_preview_windows(app);
-            let _ = window.emit("window-hidden", ());
+        let is_visible = window.is_visible().unwrap_or(false);
+        let is_minimized = window.is_minimized().unwrap_or(false);
+        if is_visible && !is_minimized {
+            hide_main_window(app, &window);
         } else {
-            let position_mode = app
-                .try_state::<std::sync::Arc<AppState>>()
-                .map(|state| {
-                    let repo = database::SettingsRepository::new(&state.db);
-                    let persist = repo
-                        .get("persist_window_size")
-                        .ok()
-                        .flatten()
-                        .map(|v| v != "false")
-                        .unwrap_or(true);
-                    if persist {
-                        let w = repo
-                            .get("window_width")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.parse::<f64>().ok());
-                        let h = repo
-                            .get("window_height")
-                            .ok()
-                            .flatten()
-                            .and_then(|v| v.parse::<f64>().ok());
-                        if let (Some(w), Some(h)) = (w, h) {
-                            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                                width: w,
-                                height: h,
-                            }));
-                        }
-                    }
-                    // position_mode 优先；未设置时回退到旧版 follow_cursor
-                    if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
-                        let mode = crate::positioning::PositionMode::from_str(&mode_str);
-                        tracing::debug!("Position mode: {:?} (from position_mode='{}')", mode, mode_str);
-                        mode
-                    } else {
-                        let follow = repo
-                            .get("follow_cursor")
-                            .ok()
-                            .flatten()
-                            .map(|v| v != "false")
-                            .unwrap_or(true);
-                        let mode = if follow {
-                            crate::positioning::PositionMode::FollowCursor
-                        } else {
-                            crate::positioning::PositionMode::FixedPosition
-                        };
-                        tracing::debug!(
-                            "Position mode: {:?} (legacy fallback, follow_cursor={})",
-                            mode,
-                            follow
-                        );
-                        mode
-                    }
-                })
-                .unwrap_or(crate::positioning::PositionMode::FollowCursor);
-
-            if position_mode == crate::positioning::PositionMode::FixedPosition {
-                if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
-                    let repo = database::SettingsRepository::new(&state.db);
-                    let x = repo
-                        .get("window_x")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<i32>().ok());
-                    let y = repo
-                        .get("window_y")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<i32>().ok());
-                    if let (Some(x), Some(y)) = (x, y) {
-                        let _ = window
-                            .set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
-                    }
-                }
-            } else if let Err(e) = crate::positioning::position_window(&window, position_mode) {
-                tracing::warn!("Failed to position window: {}", e);
-            }
-
-            crate::input_monitor::save_current_focus();
-            // 强制保持非激活展示，避免瞬态窗口（如 PowerToys/Wox 的 Alt+Enter 面板）因失焦关闭
-            let _ = window.set_focusable(false);
-            let _ = window.show();
-            crate::positioning::force_topmost(&window);
-            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
-            crate::input_monitor::enable_mouse_monitoring();
-            let _ = window.emit("window-shown", ());
+            show_main_window(app, &window);
         }
     }
 }
 
 #[tauri::command]
 pub async fn show_window(window: tauri::WebviewWindow) {
-    let _ = window.show();
-    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Visible);
-    let _ = window.emit("window-shown", ());
+    show_main_window(window.app_handle(), &window);
 }
 
 #[tauri::command]
 pub async fn hide_window(window: tauri::WebviewWindow) {
-    save_window_size_if_enabled(window.app_handle(), &window);
-    let _ = window.set_focusable(false);
-    let _ = window.hide();
-    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-    crate::input_monitor::disable_mouse_monitoring();
-    crate::commands::hide_preview_windows(window.app_handle());
-    let _ = window.emit("window-hidden", ());
+    hide_main_window(window.app_handle(), &window);
 }
 
 #[tauri::command]
@@ -189,6 +184,9 @@ pub fn set_window_visibility(visible: bool) {
 #[tauri::command]
 pub async fn minimize_window(window: tauri::WebviewWindow) {
     let _ = window.minimize();
+    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+    crate::input_monitor::disable_mouse_monitoring();
+    crate::commands::hide_preview_windows(window.app_handle());
 }
 
 #[tauri::command]
@@ -202,13 +200,7 @@ pub async fn toggle_maximize(window: tauri::WebviewWindow) {
 
 #[tauri::command]
 pub async fn close_window(window: tauri::WebviewWindow) {
-    save_window_size_if_enabled(window.app_handle(), &window);
-    let _ = window.set_focusable(false);
-    let _ = window.hide();
-    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-    crate::input_monitor::disable_mouse_monitoring();
-    crate::commands::hide_preview_windows(window.app_handle());
-    let _ = window.emit("window-hidden", ());
+    hide_main_window(window.app_handle(), &window);
 }
 
 #[tauri::command]

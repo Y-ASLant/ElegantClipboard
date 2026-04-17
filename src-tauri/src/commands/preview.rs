@@ -24,6 +24,30 @@ fn invalidate_preview_token(slot: &AtomicU64, token: u64) {
     slot.fetch_max(token.saturating_add(1), Ordering::AcqRel);
 }
 
+#[inline]
+fn invalidate_all_preview_tokens(slot: &AtomicU64) {
+    slot.fetch_add(1, Ordering::AcqRel);
+}
+
+pub(crate) fn force_hide_image_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    invalidate_all_preview_tokens(&IMAGE_PREVIEW_TOKEN);
+    if let Some(window) = app.get_webview_window("image-preview") {
+        let _ = window.hide();
+        let _ = window.emit("image-preview-clear", ());
+        tracing::debug!("image-preview force hidden");
+    }
+}
+
+pub(crate) fn force_hide_text_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    invalidate_all_preview_tokens(&TEXT_PREVIEW_TOKEN);
+    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, Ordering::AcqRel);
+    if let Some(window) = app.get_webview_window("text-preview") {
+        let _ = window.hide();
+        let _ = window.emit("text-preview-clear", ());
+        tracing::debug!("text-preview force hidden");
+    }
+}
+
 #[tauri::command]
 pub fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -131,11 +155,7 @@ pub async fn hide_image_preview(app: tauri::AppHandle, token: Option<u64>) {
         }
         invalidate_preview_token(&IMAGE_PREVIEW_TOKEN, t);
     }
-    if let Some(window) = app.get_webview_window("image-preview") {
-        let _ = window.hide();
-        let _ = window.emit("image-preview-clear", ());
-        tracing::debug!("image-preview hidden");
-    }
+    force_hide_image_preview(&app);
 }
 
 #[tauri::command]
@@ -256,12 +276,7 @@ pub async fn hide_text_preview(app: tauri::AppHandle, token: Option<u64>) {
         }
         invalidate_preview_token(&TEXT_PREVIEW_TOKEN, t);
     }
-    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-    if let Some(window) = app.get_webview_window("text-preview") {
-        let _ = window.hide();
-        let _ = window.emit("text-preview-clear", ());
-        tracing::debug!("text-preview hidden");
-    }
+    force_hide_text_preview(&app);
 }
 
 #[tauri::command]

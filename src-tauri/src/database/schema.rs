@@ -69,17 +69,14 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES
-    ('hotkey', 'Ctrl+Shift+V'),
+    ('global_shortcut', 'Alt+C'),
     ('max_history_count', '10000'),
     ('max_content_size_kb', '1024'),
     ('dedup_strategy', 'move_to_top'),
     ('text_dedup_mode', 'semantic'),
-    ('auto_start', 'false'),
+    ('autostart_enabled', 'false'),
     ('theme', 'system'),
     ('language', 'zh-CN'),
-    ('save_images', 'true'),
-    ('save_html', 'true'),
-    ('save_rtf', 'false'),
     ('auto_cleanup_days', '30');
 "#;
 
@@ -103,7 +100,6 @@ impl ContentType {
             ContentType::Files => "files",
         }
     }
-
 }
 
 impl std::fmt::Display for ContentType {

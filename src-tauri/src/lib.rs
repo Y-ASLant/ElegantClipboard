@@ -357,6 +357,24 @@ fn init_logging(config: &AppConfig) {
         .init();
 }
 
+fn migrate_legacy_settings(repo: &SettingsRepository) {
+    let migrations = [
+        ("hotkey", "global_shortcut"),
+        ("auto_start", "autostart_enabled"),
+    ];
+
+    for (old_key, new_key) in migrations {
+        let existing = repo.get(new_key).ok().flatten();
+        if existing.is_some() {
+            continue;
+        }
+        if let Ok(Some(value)) = repo.get(old_key)
+            && let Err(err) = repo.set(new_key, &value) {
+                tracing::warn!("Failed to migrate setting '{}' -> '{}': {}", old_key, new_key, err);
+            }
+    }
+}
+
 #[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     let saved_shortcut_str = get_current_shortcut();
@@ -600,6 +618,7 @@ pub fn run() {
             let state = Arc::new(AppState { db, monitor, active_group_id });
 
             let settings_repo = database::SettingsRepository::new(&state.db);
+            migrate_legacy_settings(&settings_repo);
 
             // 安装更新后注册表 Run 条目会被清除，根据数据库偏好自动恢复自启动
             {

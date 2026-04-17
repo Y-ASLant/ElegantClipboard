@@ -4,7 +4,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Manager,
 };
 use tracing::info;
 
@@ -61,25 +61,13 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                // 左键点击：切换窗口可见性
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    if window.is_visible().unwrap_or(false) {
-                        crate::commands::window::save_window_size_if_enabled(tray.app_handle(), &window);
-                        let _ = window.hide();
-                        crate::input_monitor::disable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(
-                            crate::keyboard_hook::WindowState::Hidden,
-                        );
-                        crate::commands::hide_preview_windows(tray.app_handle());
-                        let _ = window.emit("window-hidden", ());
+                    let is_visible = window.is_visible().unwrap_or(false);
+                    let is_minimized = window.is_minimized().unwrap_or(false);
+                    if is_visible && !is_minimized {
+                        crate::commands::window::hide_main_window(tray.app_handle(), &window);
                     } else if !crate::keyboard_hook::was_recently_hidden(300) {
-                        // 窗口刚被隐藏(<300ms)则跳过，避免立即重新显示
-                        let _ = window.show();
-                        crate::input_monitor::enable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(
-                            crate::keyboard_hook::WindowState::Visible,
-                        );
-                        let _ = window.emit("window-shown", ());
+                        crate::commands::window::show_main_window(tray.app_handle(), &window);
                     }
                 }
             }

@@ -71,27 +71,14 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
     }
 }
 
-/// 隐藏图片预览窗口（若存在）。
 pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    use tauri::{Emitter, Manager};
-
-    if let Some(preview) = app.get_webview_window("image-preview") {
-        let _ = preview.hide();
-        let _ = preview.emit("image-preview-clear", ());
-    }
+    crate::commands::preview::force_hide_image_preview(app);
 }
 
-/// 隐藏文本预览窗口（若存在）。
 pub(crate) fn hide_text_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    use tauri::{Emitter, Manager};
-
-    if let Some(preview) = app.get_webview_window("text-preview") {
-        let _ = preview.hide();
-        let _ = preview.emit("text-preview-clear", ());
-    }
+    crate::commands::preview::force_hide_text_preview(app);
 }
 
-/// 隐藏所有悬浮预览窗口（图片 / 文本）。
 pub(crate) fn hide_preview_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     hide_image_preview_window(app);
     hide_text_preview_window(app);

@@ -17,11 +17,6 @@ pub enum WindowState {
 static WINDOW_STATE: LazyLock<RwLock<WindowState>> =
     LazyLock::new(|| RwLock::new(WindowState::Hidden));
 
-/// 获取当前窗口状态
-pub fn get_window_state() -> WindowState {
-    *WINDOW_STATE.read()
-}
-
 /// 窗口上次隐藏的时间戳（毫秒），用于托盘点击防抖
 static LAST_HIDDEN_AT: AtomicU64 = AtomicU64::new(0);
 
