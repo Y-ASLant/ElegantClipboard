@@ -169,7 +169,7 @@ pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), Strin
 pub fn is_portable_mode() -> bool {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| !d.join("unins000.exe").exists()))
+        .and_then(|p| p.parent().map(|d| !d.join("uninstall.exe").exists()))
         .unwrap_or(true)
 }
 
