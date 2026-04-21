@@ -887,6 +887,7 @@ pub fn run() {
             commands::clipboard::toggle_pin,
             commands::clipboard::toggle_favorite,
             commands::clipboard::move_clipboard_item,
+            commands::clipboard::move_favorite_clipboard_item,
             commands::clipboard::bump_item_to_top,
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::batch_delete_clipboard_items,

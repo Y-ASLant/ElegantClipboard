@@ -62,6 +62,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
     fetchItems,
     setupListener,
     moveItem,
+    moveFavoriteItem,
     togglePin,
     setActiveIndex,
     pasteContent,
@@ -78,6 +79,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       fetchItems: s.fetchItems,
       setupListener: s.setupListener,
       moveItem: s.moveItem,
+      moveFavoriteItem: s.moveFavoriteItem,
       togglePin: s.togglePin,
       setActiveIndex: s.setActiveIndex,
       pasteContent: s.pasteContent,
@@ -137,6 +139,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       const fromItem = currentItems[oldIndex];
       const toItem = currentItems[newIndex];
       if (!fromItem || !toItem) return;
+      const isFavoritesView = selectedGroup === "__favorites__";
 
       const currentPinnedCount = currentItems.filter((item) => item.is_pinned).length;
       const fromIsPinned = oldIndex < currentPinnedCount;
@@ -154,9 +157,11 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       try {
         if (fromIsPinned !== toIsPinned) {
           await togglePin(fromItem.id);
-          await moveItem(fromItem.id, toItem.id);
+          if (isFavoritesView) await moveFavoriteItem(fromItem.id, toItem.id);
+          else await moveItem(fromItem.id, toItem.id);
         } else {
-          await moveItem(fromItem.id, toItem.id);
+          if (isFavoritesView) await moveFavoriteItem(fromItem.id, toItem.id);
+          else await moveItem(fromItem.id, toItem.id);
         }
       } catch {
         // store 内部已记录错误
@@ -164,7 +169,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
         setOptimisticItems(null);
       }
     },
-    [renderedItems, moveItem, togglePin],
+    [renderedItems, selectedGroup, moveItem, moveFavoriteItem, togglePin],
   );
 
   const {

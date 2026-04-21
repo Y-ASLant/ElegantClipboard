@@ -220,6 +220,7 @@ impl Database {
                     image_height INTEGER,
                     is_pinned INTEGER DEFAULT 0,
                     is_favorite INTEGER DEFAULT 0,
+                    favorite_order INTEGER DEFAULT 0,
                     sort_order INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
@@ -238,7 +239,8 @@ impl Database {
                     "INSERT INTO clipboard_items_new 
                      SELECT id, content_type, text_content, html_content, rtf_content,
                             image_path, file_paths, content_hash, content_hash, preview, byte_size,
-                            image_width, image_height, is_pinned, is_favorite, sort_order,
+                            image_width, image_height, is_pinned, is_favorite,
+                            CASE WHEN is_favorite = 1 THEN sort_order ELSE 0 END, sort_order,
                             created_at, updated_at, access_count, last_accessed_at, char_count,
                             source_app_name, source_app_icon,
                             (SELECT MIN(ig.group_id) FROM item_groups ig WHERE ig.item_id = clipboard_items.id)
@@ -249,7 +251,8 @@ impl Database {
                     "INSERT INTO clipboard_items_new 
                      SELECT id, content_type, text_content, html_content, rtf_content,
                             image_path, file_paths, content_hash, content_hash, preview, byte_size,
-                            image_width, image_height, is_pinned, is_favorite, sort_order,
+                            image_width, image_height, is_pinned, is_favorite,
+                            CASE WHEN is_favorite = 1 THEN sort_order ELSE 0 END, sort_order,
                             created_at, updated_at, access_count, last_accessed_at, char_count,
                             source_app_name, source_app_icon, NULL
                      FROM clipboard_items;"
@@ -279,6 +282,7 @@ impl Database {
                  CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
                  CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
                  -- 重建触发器
@@ -293,7 +297,27 @@ impl Database {
             info!("Migration complete: group_id column added, table rebuilt");
         }
 
-        // 迁移 7: 允许重复 content_hash（always_new 策略），保留索引但移除唯一约束
+        // 迁移 7: favorite_order
+        let has_favorite_order: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'favorite_order'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_favorite_order {
+            info!("Migrating database: adding favorite_order column");
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN favorite_order INTEGER DEFAULT 0;
+                 UPDATE clipboard_items
+                 SET favorite_order = sort_order
+                 WHERE is_favorite = 1;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order
+                   ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;",
+            )?;
+            info!("Migration complete: favorite_order column added");
+        }
+
+        // 迁移 8: 允许重复 content_hash（always_new 策略），保留索引但移除唯一约束
         conn.execute_batch(
             "DROP INDEX IF EXISTS idx_clipboard_hash_default;
              DROP INDEX IF EXISTS idx_clipboard_hash_group;

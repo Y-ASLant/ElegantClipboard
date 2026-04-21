@@ -391,6 +391,20 @@ pub async fn move_clipboard_item(
     Ok(())
 }
 
+/// 与目标收藏条目交换收藏排序位置
+#[tauri::command]
+pub async fn move_favorite_clipboard_item(
+    state: State<'_, Arc<AppState>>,
+    from_id: i64,
+    to_id: i64,
+) -> Result<(), String> {
+    let repo = ClipboardRepository::new(&state.db);
+    repo.move_favorite_item_by_id(from_id, to_id)
+        .map_err(|e| e.to_string())?;
+    debug!("Moved favorite clipboard item {} to position of {}", from_id, to_id);
+    Ok(())
+}
+
 /// 粘贴后置顶：将条目移到非置顶区最前面（sort_order 设为全表最大值 + 1）
 #[tauri::command]
 pub async fn bump_item_to_top(

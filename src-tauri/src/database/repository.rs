@@ -23,6 +23,7 @@ pub struct ClipboardItem {
     pub image_height: Option<i64>,
     pub is_pinned: bool,
     pub is_favorite: bool,
+    pub favorite_order: i64,
     pub sort_order: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -444,7 +445,7 @@ impl ClipboardRepository {
         let sql = format!(
             "SELECT * FROM clipboard_items \
              WHERE {} AND is_favorite = 1 \
-             ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
+             ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC \
              LIMIT 1 OFFSET ?",
             group_cond
         );
@@ -465,14 +466,14 @@ impl ClipboardRepository {
     const LIST_COLUMNS: &'static str =
         "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \
          image_path, file_paths, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
-         is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
+         is_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon";
 
     /// 搜索查询列（含 text_content 用于关键词上下文预览）
     const SEARCH_COLUMNS: &'static str =
         "id, content_type, text_content, NULL AS html_content, NULL AS rtf_content, \
          image_path, file_paths, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
-         is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
+         is_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon";
 
     /// 构建通用的 WHERE 条件（content_type / pinned_only / favorite_only / search）
@@ -588,8 +589,14 @@ impl ClipboardRepository {
         let (conditions, mut params_vec) = Self::build_filter_conditions(&options);
         Self::append_where(&mut sql, &conditions);
 
-        // 排序：置顶优先 → sort_order 降序 → 时间降序
-        sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
+        if options.favorite_only {
+            sql.push_str(
+                " ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC",
+            );
+        } else {
+            // 排序：置顶优先 → sort_order 降序 → 时间降序
+            sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
+        }
 
         if let Some(limit) = options.limit {
             sql.push_str(" LIMIT ? OFFSET ?");
@@ -639,17 +646,38 @@ impl ClipboardRepository {
 
     pub fn toggle_favorite(&self, id: i64) -> Result<bool, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        conn.execute(
-            "UPDATE clipboard_items SET is_favorite = NOT is_favorite WHERE id = ?1",
-            params![id],
-        )?;
-
-        let favorite: bool = conn.query_row(
+        let was_favorite: bool = conn.query_row(
             "SELECT is_favorite FROM clipboard_items WHERE id = ?1",
             params![id],
             |row| row.get(0),
         )?;
+        let favorite = !was_favorite;
+        let tx = conn.unchecked_transaction()?;
 
+        if favorite {
+            let max_favorite_order: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(MAX(favorite_order), 0) FROM clipboard_items WHERE is_favorite = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            tx.execute(
+                "UPDATE clipboard_items
+                 SET is_favorite = 1, favorite_order = ?1
+                 WHERE id = ?2",
+                params![max_favorite_order + 1, id],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE clipboard_items
+                 SET is_favorite = 0, favorite_order = 0
+                 WHERE id = ?1",
+                params![id],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(favorite)
     }
 
@@ -907,6 +935,46 @@ impl ClipboardRepository {
         Ok(())
     }
 
+    /// 交换两个收藏条目的排序位置
+    pub fn move_favorite_item_by_id(&self, from_id: i64, to_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+
+        let from_favorite_order: i64 = conn.query_row(
+            "SELECT favorite_order FROM clipboard_items WHERE id = ?1 AND is_favorite = 1",
+            params![from_id],
+            |row| row.get(0),
+        )?;
+
+        let to_favorite_order: i64 = conn.query_row(
+            "SELECT favorite_order FROM clipboard_items WHERE id = ?1 AND is_favorite = 1",
+            params![to_id],
+            |row| row.get(0),
+        )?;
+
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "UPDATE clipboard_items SET favorite_order = ?1 WHERE id = ?2 AND is_favorite = 1",
+            params![to_favorite_order, from_id],
+        )?;
+        tx.execute(
+            "UPDATE clipboard_items SET favorite_order = ?1 WHERE id = ?2 AND is_favorite = 1",
+            params![from_favorite_order, to_id],
+        )?;
+        tx.commit()?;
+
+        debug!(
+            "Moved favorite item {} (favorite_order: {} -> {}) with item {} (favorite_order: {} -> {})",
+            from_id,
+            from_favorite_order,
+            to_favorite_order,
+            to_id,
+            to_favorite_order,
+            from_favorite_order
+        );
+
+        Ok(())
+    }
+
     fn row_to_item(row: &Row) -> Result<ClipboardItem, rusqlite::Error> {
         Ok(ClipboardItem {
             id: row.get("id")?,
@@ -924,6 +992,7 @@ impl ClipboardRepository {
             image_height: row.get("image_height")?,
             is_pinned: row.get("is_pinned")?,
             is_favorite: row.get("is_favorite")?,
+            favorite_order: row.get("favorite_order")?,
             sort_order: row.get("sort_order")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
