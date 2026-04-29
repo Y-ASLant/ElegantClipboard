@@ -1,0 +1,454 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Custom Font */
+@font-face {
+    font-family: "CustomFont";
+    src: url("/fonts.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* shadcn/ui standard theme */
+@theme {
+    --color-background: hsl(0 0% 100%);
+    --color-foreground: hsl(222.2 84% 4.9%);
+    --color-card: hsl(0 0% 100%);
+    --color-card-foreground: hsl(222.2 84% 4.9%);
+    --color-popover: hsl(0 0% 100%);
+    --color-popover-foreground: hsl(222.2 84% 4.9%);
+    --color-primary: hsl(222.2 47.4% 11.2%);
+    --color-primary-foreground: hsl(210 40% 98%);
+    --color-secondary: hsl(210 40% 96.1%);
+    --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
+    --color-muted: hsl(210 40% 96.1%);
+    --color-muted-foreground: hsl(215.4 16.3% 46.9%);
+    --color-accent: hsl(210 40% 96.1%);
+    --color-accent-foreground: hsl(222.2 47.4% 11.2%);
+    --color-destructive: hsl(0 84.2% 60.2%);
+    --color-destructive-foreground: hsl(210 40% 98%);
+    --color-border: hsl(214.3 31.8% 91.4%);
+    --color-input: hsl(214.3 31.8% 91.4%);
+    --color-ring: hsl(222.2 84% 4.9%);
+    --color-chart-1: hsl(12 76% 61%);
+    --color-chart-2: hsl(173 58% 39%);
+    --color-chart-3: hsl(197 37% 24%);
+    --color-chart-4: hsl(43 74% 66%);
+    --color-chart-5: hsl(27 87% 67%);
+    --radius: 0.5rem;
+    --radius-lg: 0.5rem;
+    --radius-md: calc(0.5rem - 2px);
+    --radius-sm: calc(0.5rem - 4px);
+}
+
+/* Dark mode — neutral gray tones (low saturation) to avoid blue tint;
+   lightness lifted from ~5% to ~10% to reduce eye strain. */
+.dark {
+    --color-background: hsl(220 6% 11%);
+    --color-foreground: hsl(210 15% 95%);
+    --color-card: hsl(220 6% 18%);
+    --color-card-foreground: hsl(210 15% 95%);
+    --color-popover: hsl(220 6% 18%);
+    --color-popover-foreground: hsl(210 15% 95%);
+    --color-primary: hsl(210 15% 95%);
+    --color-primary-foreground: hsl(220 8% 16%);
+    --color-secondary: hsl(220 5% 23%);
+    --color-secondary-foreground: hsl(210 15% 95%);
+    --color-muted: hsl(220 5% 23%);
+    --color-muted-foreground: hsl(220 8% 62%);
+    --color-accent: hsl(220 5% 23%);
+    --color-accent-foreground: hsl(210 15% 95%);
+    --color-destructive: hsl(0 62.8% 30.6%);
+    --color-destructive-foreground: hsl(210 15% 95%);
+    --color-border: hsl(220 5% 26%);
+    --color-input: hsl(220 5% 26%);
+    --color-ring: hsl(220 8% 80%);
+}
+
+/* ========== Theme Color Variants ========== */
+
+/* Emerald Theme - Light */
+.theme-emerald {
+    --color-primary: hsl(158 64% 22%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(158 50% 95%);
+    --color-secondary-foreground: hsl(158 64% 22%);
+    --color-accent: hsl(158 50% 95%);
+    --color-accent-foreground: hsl(158 64% 22%);
+    --color-muted: hsl(158 30% 96%);
+    --color-muted-foreground: hsl(158 20% 40%);
+    --color-border: hsl(158 30% 90%);
+    --color-input: hsl(158 30% 90%);
+    --color-ring: hsl(158 64% 22%);
+}
+
+/* Cyan Theme - Light */
+.theme-cyan {
+    --color-primary: hsl(188 70% 25%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(188 50% 95%);
+    --color-secondary-foreground: hsl(188 70% 25%);
+    --color-accent: hsl(188 50% 95%);
+    --color-accent-foreground: hsl(188 70% 25%);
+    --color-muted: hsl(188 30% 96%);
+    --color-muted-foreground: hsl(188 20% 40%);
+    --color-border: hsl(188 30% 90%);
+    --color-input: hsl(188 30% 90%);
+    --color-ring: hsl(188 70% 25%);
+}
+
+/* Emerald Theme - Dark */
+.dark.theme-emerald {
+    --color-primary: hsl(158 64% 32%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(158 25% 20%);
+    --color-secondary-foreground: hsl(158 64% 32%);
+    --color-accent: hsl(158 25% 20%);
+    --color-accent-foreground: hsl(158 64% 32%);
+    --color-muted: hsl(158 20% 18%);
+    --color-muted-foreground: hsl(158 25% 60%);
+    --color-border: hsl(158 20% 20%);
+    --color-input: hsl(158 20% 20%);
+    --color-ring: hsl(158 64% 32%);
+}
+
+/* Cyan Theme - Dark */
+.dark.theme-cyan {
+    --color-primary: hsl(188 70% 35%);
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(188 25% 20%);
+    --color-secondary-foreground: hsl(188 70% 35%);
+    --color-accent: hsl(188 25% 20%);
+    --color-accent-foreground: hsl(188 70% 35%);
+    --color-muted: hsl(188 20% 18%);
+    --color-muted-foreground: hsl(188 25% 60%);
+    --color-border: hsl(188 20% 20%);
+    --color-input: hsl(188 20% 20%);
+    --color-ring: hsl(188 70% 35%);
+}
+
+/* ========== System Theme (Dynamic Accent Color) ========== */
+
+/* System Theme - Light - uses --system-accent-h (hue), --system-accent-s (saturation), and --system-accent-l (lightness) set by JS */
+.theme-system {
+    --color-primary: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(var(--system-accent-h) 40% 95%);
+    --color-secondary-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+    --color-accent: hsl(var(--system-accent-h) 40% 95%);
+    --color-accent-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+    --color-muted: hsl(var(--system-accent-h) 25% 96%);
+    --color-muted-foreground: hsl(var(--system-accent-h) 20% 40%);
+    --color-border: hsl(var(--system-accent-h) 25% 90%);
+    --color-input: hsl(var(--system-accent-h) 25% 90%);
+    --color-ring: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            var(--system-accent-l, 35%)
+    );
+}
+
+/* System Theme - Dark */
+.dark.theme-system {
+    /* For dark mode, we adjust the lightness to be brighter than the original for better visibility */
+    --color-primary: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+    --color-primary-foreground: hsl(0 0% 100%);
+    --color-secondary: hsl(var(--system-accent-h) 20% 20%);
+    --color-secondary-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+    --color-accent: hsl(var(--system-accent-h) 20% 20%);
+    --color-accent-foreground: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+    --color-muted: hsl(var(--system-accent-h) 15% 18%);
+    --color-muted-foreground: hsl(var(--system-accent-h) 25% 70%);
+    --color-border: hsl(var(--system-accent-h) 15% 20%);
+    --color-input: hsl(var(--system-accent-h) 15% 20%);
+    --color-ring: hsl(
+        var(--system-accent-h) var(--system-accent-s)
+            calc(var(--system-accent-l, 55%) + 10%)
+    );
+}
+
+/* ========== Window Effect (Glass/Mica/Acrylic) ========== */
+
+/* Light mode glass backgrounds — only override surface colors that need
+   transparency for the DWM backdrop to show through.  Do NOT override
+   muted/secondary/accent so the active color-theme is preserved. */
+:not(.dark)[data-window-effect="mica"],
+:not(.dark)[data-window-effect="acrylic"],
+:not(.dark)[data-window-effect="tabbed"] {
+    --color-background: hsl(0 0% 100% / 0.75);
+    --color-card: hsl(0 0% 100% / 0.6);
+    --color-popover: hsl(0 0% 100% / 0.85);
+    --color-muted: hsl(210 40% 96.1% / 0.55);
+    --color-input: hsl(214.3 31.8% 91.4% / 0.5);
+    --color-border: hsl(0 0% 80% / 0.5);
+}
+
+/* Acrylic is more transparent */
+:not(.dark)[data-window-effect="acrylic"] {
+    --color-background: hsl(0 0% 100% / 0.65);
+    --color-card: hsl(0 0% 100% / 0.45);
+    --color-muted: hsl(210 40% 96.1% / 0.4);
+}
+
+/* Dark mode glass backgrounds */
+html.dark[data-window-effect="mica"],
+html.dark[data-window-effect="acrylic"],
+html.dark[data-window-effect="tabbed"] {
+    --color-background: hsl(220 6% 11% / 0.7);
+    --color-card: hsl(220 6% 18% / 0.55);
+    --color-popover: hsl(220 6% 18% / 0.85);
+    --color-muted: hsl(220 5% 23% / 0.45);
+    --color-input: hsl(220 5% 26% / 0.4);
+    --color-border: hsl(220 5% 30% / 0.5);
+}
+
+html.dark[data-window-effect="acrylic"] {
+    --color-background: hsl(220 6% 11% / 0.55);
+    --color-card: hsl(220 6% 18% / 0.4);
+    --color-muted: hsl(220 5% 23% / 0.35);
+}
+
+/* Glass html and body must be transparent for DWM backdrop to show through */
+[data-window-effect="mica"],
+[data-window-effect="acrylic"],
+[data-window-effect="tabbed"],
+[data-window-effect="mica"] body,
+[data-window-effect="acrylic"] body,
+[data-window-effect="tabbed"] body {
+    background-color: transparent;
+}
+
+/* Sharp corners mode (Windows 10 style) */
+.sharp-corners,
+.sharp-corners * {
+    --radius: 0px !important;
+    --radius-lg: 0px !important;
+    --radius-md: 0px !important;
+    --radius-sm: 0px !important;
+    border-radius: 0px !important;
+}
+
+/* Base styles */
+* {
+    border-color: var(--color-border);
+}
+
+/* Remove focus outline globally (Tauri app doesn't need keyboard navigation indicators).
+   Do not remove box-shadow here: it would kill shadows on context menu, cards, etc. when they receive focus. */
+*:focus,
+*:focus-visible {
+    outline: none !important;
+}
+
+body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+        "CustomFont",
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        "Helvetica Neue",
+        Arial,
+        sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Base layout */
+html {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    /* overflow:hidden on <html> breaks the CSS canvas-background propagation rule,
+       so body's background-color won't reach the compositing canvas.
+       With transparent:true in WebView2 the canvas would be fully transparent
+       unless <html> declares its own background-color. */
+    background-color: var(--color-background);
+}
+body,
+#root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* Disable text selection except for inputs */
+body {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* Allow text selection in input fields */
+input,
+textarea,
+[contenteditable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+/* OverlayScrollbars custom styling */
+.os-theme-custom {
+    --os-size: 6px;
+    --os-padding-perpendicular: 0px;
+    --os-padding-axis: 0px;
+    --os-track-border-radius: 2px;
+    --os-track-bg: transparent;
+    --os-track-bg-hover: transparent;
+    --os-track-bg-active: transparent;
+    --os-handle-border-radius: 2px;
+    --os-handle-bg: hsl(from var(--color-primary) h s l / 0.2);
+    --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.35);
+    --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.45);
+    --os-handle-min-size: 40px;
+    --os-handle-max-size: none;
+    --os-handle-perpendicular-size: 100%;
+    --os-handle-perpendicular-size-hover: 100%;
+    --os-handle-perpendicular-size-active: 100%;
+    --os-handle-interactive-area-offset: 0px;
+}
+
+.dark .os-theme-custom {
+    --os-handle-bg: hsl(from var(--color-primary) h s l / 0.25);
+    --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.4);
+    --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.5);
+}
+
+/* Scrollbar always visible during scroll, auto-hide after delay */
+.os-theme-custom > .os-scrollbar {
+    transition: opacity 0.3s ease;
+}
+
+/* Ensure scrollbar is overlay (floating above content) */
+.os-theme-custom .os-scrollbar {
+    z-index: 100;
+}
+
+/* Ensure scrollbar doesn't trigger drag */
+.os-scrollbar,
+.os-scrollbar-track,
+.os-scrollbar-handle {
+    pointer-events: auto !important;
+}
+
+.os-scrollbar * {
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+/* Hide scrollbars for other elements */
+*:not(.custom-scrollbar) {
+    scrollbar-width: none;
+}
+
+*:not(.custom-scrollbar)::-webkit-scrollbar {
+    display: none;
+}
+
+/* Draggable region for custom titlebar */
+[data-tauri-drag-region] {
+    -webkit-app-region: drag;
+}
+
+[data-tauri-drag-region] button,
+[data-tauri-drag-region] input,
+[data-tauri-drag-region] a {
+    -webkit-app-region: no-drag;
+}
+
+/* Clipboard content font: controlled via inline style + CSS variables --card-font-family / --card-font-size */
+
+/* Path display uses system monospace font */
+.path-text {
+    font-family:
+        "Cascadia Code", "Fira Code", Consolas, "SF Mono", Monaco,
+        "Andale Mono", monospace;
+}
+
+/* Search highlight */
+.search-highlight {
+    background-color: hsl(from var(--color-primary) h s l / 0.2);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.dark .search-highlight {
+    background-color: hsl(from var(--color-primary) h s l / 0.3);
+}
+
+/* Settings page staggered fade-in (reuses tw-animate-css enter keyframe) */
+.animate-settings-in,
+.animate-settings-in > * {
+    --tw-enter-opacity: 0;
+    animation: enter 0.2s ease-out both;
+}
+
+.animate-settings-in > *:nth-child(1) { animation-delay: 0ms; }
+.animate-settings-in > *:nth-child(2) { animation-delay: 30ms; }
+.animate-settings-in > *:nth-child(3) { animation-delay: 60ms; }
+.animate-settings-in > *:nth-child(4) { animation-delay: 90ms; }
+.animate-settings-in > *:nth-child(5) { animation-delay: 120ms; }
+
+/* Window entrance animation (fade + scale) */
+@keyframes window-enter {
+    from {
+        opacity: 0;
+        transform: scale(0.96) translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.window-hidden {
+    opacity: 0;
+}
+
+.window-enter {
+    animation: window-enter 0.15s ease-out both;
+}
+
+/* Paste feedback flash */
+@keyframes paste-flash {
+    0% {
+        background-color: hsl(from var(--color-primary) h s l / 0.15);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.animate-paste-flash {
+    animation: paste-flash 0.3s ease-out;
+}
+
+/* Dragging cursor - from QuickClipboard optimization */
+body.dragging-cursor,
+body.dragging-cursor * {
+    cursor: grabbing !important;
+}
