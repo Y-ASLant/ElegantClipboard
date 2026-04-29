@@ -343,6 +343,7 @@ export async function loadSyncedSettings() {
     }
     if (Object.keys(patch).length > 0) {
       useUISettings.setState(patch);
+      broadcastChange(patch as Partial<UISettings>);
     }
   } catch {
     // 忽略错误（如非 Tauri 环境）

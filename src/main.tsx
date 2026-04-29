@@ -11,7 +11,7 @@ import "overlayscrollbars/overlayscrollbars.css";
 import "./index.css";
 
 const ALLOWED_CTRL_LETTER_KEYS = new Set(["a", "c", "v", "x", "z", "y"]);
-const BLOCKED_BROWSER_KEYS = new Set(["Tab", "F5", "F7"]);
+const BLOCKED_BROWSER_KEYS = new Set(["Tab", "F1", "F3", "F5", "F6", "F7", "F11", "F12"]);
 
 // 禁用右键菜单
 document.addEventListener("contextmenu", (e) => {
@@ -26,7 +26,7 @@ document.addEventListener("keydown", (e) => {
       e.preventDefault();
     }
   }
-  // 拦截 Tab 导航、F5 刷新、F7 光标浏览
+  // 拦截 Tab 导航、F1 帮助、F3 查找、F5 刷新、F6 地址栏、F7 光标浏览、F11 全屏、F12 开发者工具
   if (BLOCKED_BROWSER_KEYS.has(e.key)) {
     e.preventDefault();
   }
