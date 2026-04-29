@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ElegantClipboard</title>
+  </head>
+
+  <body>
+    <script>
+      // Apply theme & dark mode synchronously before React renders to prevent flash
+      try {
+        var s = JSON.parse(localStorage.getItem('clipboard-ui-settings') || '{}');
+        var t = s && s.state && s.state.colorTheme;
+        if (t && t !== 'default' && t !== 'system') {
+          document.documentElement.classList.add('theme-' + t);
+        }
+        // Dark mode: respect user's explicit setting (dark/light/auto)
+        var dm = s && s.state && s.state.darkMode;
+        if (dm === 'dark' || (dm !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+      // OCR 截图窗口: 在 React 挂载前就设置透明背景，防止白屏闪烁
+      if (location.pathname.indexOf('ocr-screenshot') !== -1) {
+        document.documentElement.style.background = 'transparent';
+        document.body && (document.body.style.background = 'transparent');
+        document.addEventListener('DOMContentLoaded', function() {
+          document.body.style.background = 'transparent';
+        });
+      }
+    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
