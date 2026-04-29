@@ -1,6 +1,6 @@
 [package]
 name = "elegant-clipboard"
-version = "0.0.0"
+version = "1.0.0"
 description = "An elegant Windows clipboard manager"
 authors = ["ASLant"]
 license = "MIT"
