@@ -1,0 +1,142 @@
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
+
+/// 将按键字符串解析为 Code
+fn parse_key_code(key: &str) -> Option<Code> {
+    // 字母 A-Z
+    const LETTERS: [Code; 26] = [
+        Code::KeyA,
+        Code::KeyB,
+        Code::KeyC,
+        Code::KeyD,
+        Code::KeyE,
+        Code::KeyF,
+        Code::KeyG,
+        Code::KeyH,
+        Code::KeyI,
+        Code::KeyJ,
+        Code::KeyK,
+        Code::KeyL,
+        Code::KeyM,
+        Code::KeyN,
+        Code::KeyO,
+        Code::KeyP,
+        Code::KeyQ,
+        Code::KeyR,
+        Code::KeyS,
+        Code::KeyT,
+        Code::KeyU,
+        Code::KeyV,
+        Code::KeyW,
+        Code::KeyX,
+        Code::KeyY,
+        Code::KeyZ,
+    ];
+    // 数字 0-9
+    const DIGITS: [Code; 10] = [
+        Code::Digit0,
+        Code::Digit1,
+        Code::Digit2,
+        Code::Digit3,
+        Code::Digit4,
+        Code::Digit5,
+        Code::Digit6,
+        Code::Digit7,
+        Code::Digit8,
+        Code::Digit9,
+    ];
+    // 功能键 F1-F12
+    const F_KEYS: [Code; 12] = [
+        Code::F1,
+        Code::F2,
+        Code::F3,
+        Code::F4,
+        Code::F5,
+        Code::F6,
+        Code::F7,
+        Code::F8,
+        Code::F9,
+        Code::F10,
+        Code::F11,
+        Code::F12,
+    ];
+
+    // 单个字母
+    if key.len() == 1 {
+        let c = key.chars().next()?;
+        if c.is_ascii_uppercase() {
+            return Some(LETTERS[(c as usize) - ('A' as usize)]);
+        }
+        if c.is_ascii_digit() {
+            return Some(DIGITS[(c as usize) - ('0' as usize)]);
+        }
+    }
+
+    // 功能键 F1-F12
+    if key.starts_with('F') && key.len() <= 3
+        && let Ok(n) = key[1..].parse::<usize>()
+            && (1..=12).contains(&n) {
+                return Some(F_KEYS[n - 1]);
+            }
+
+    // 小键盘数字 Numpad0-Numpad9
+    if let Some(rest) = key.strip_prefix("NUMPAD")
+        && let Ok(n) = rest.parse::<usize>() {
+            const NUMPADS: [Code; 10] = [
+                Code::Numpad0, Code::Numpad1, Code::Numpad2, Code::Numpad3, Code::Numpad4,
+                Code::Numpad5, Code::Numpad6, Code::Numpad7, Code::Numpad8, Code::Numpad9,
+            ];
+            if n <= 9 {
+                return Some(NUMPADS[n]);
+            }
+    }
+
+    // 特殊键
+    match key {
+        "SPACE" => Some(Code::Space),
+        "TAB" => Some(Code::Tab),
+        "ENTER" | "RETURN" => Some(Code::Enter),
+        "BACKSPACE" => Some(Code::Backspace),
+        "DELETE" | "DEL" => Some(Code::Delete),
+        "ESCAPE" | "ESC" => Some(Code::Escape),
+        "HOME" => Some(Code::Home),
+        "END" => Some(Code::End),
+        "PAGEUP" => Some(Code::PageUp),
+        "PAGEDOWN" => Some(Code::PageDown),
+        "UP" | "ARROWUP" => Some(Code::ArrowUp),
+        "DOWN" | "ARROWDOWN" => Some(Code::ArrowDown),
+        "LEFT" | "ARROWLEFT" => Some(Code::ArrowLeft),
+        "RIGHT" | "ARROWRIGHT" => Some(Code::ArrowRight),
+        "`" | "BACKQUOTE" => Some(Code::Backquote),
+        _ => None,
+    }
+}
+
+/// 将 "CTRL+SHIFT+V" 格式字符串解析为 Shortcut 对象
+pub fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
+    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let mut modifiers = Modifiers::empty();
+    let mut key_code = None;
+
+    for part in parts {
+        let upper = part.to_uppercase();
+        match upper.as_str() {
+            "CTRL" | "CONTROL" => modifiers |= Modifiers::CONTROL,
+            "ALT" => modifiers |= Modifiers::ALT,
+            "SHIFT" => modifiers |= Modifiers::SHIFT,
+            "WIN" | "SUPER" | "META" | "CMD" => modifiers |= Modifiers::SUPER,
+            _ => key_code = parse_key_code(&upper),
+        }
+    }
+
+    key_code.map(|code| {
+        if modifiers.is_empty() {
+            Shortcut::new(None, code)
+        } else {
+            Shortcut::new(Some(modifiers), code)
+        }
+    })
+}

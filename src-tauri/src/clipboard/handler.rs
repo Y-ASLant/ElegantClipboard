@@ -1,0 +1,736 @@
+use super::source_app::{self, SourceAppInfo};
+use super::{compute_semantic_hash, semantic_hash_from_text};
+use crate::database::{
+    ClipboardRepository, ContentType, Database, NewClipboardItem, SettingsRepository,
+};
+use blake3::Hasher;
+use image::ImageReader;
+use std::path::PathBuf;
+use tracing::{debug, info, warn};
+
+const DEFAULT_MAX_CONTENT_SIZE: usize = 1_048_576;
+const MAX_PREVIEW_LENGTH: usize = 200;
+const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
+const DEFAULT_AUTO_CLEANUP_DAYS: i64 = 30;
+
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts", "mpeg", "mpg",
+];
+
+fn is_video_files(files: &[String]) -> bool {
+    !files.is_empty()
+        && files.iter().all(|f| {
+            let ext = f.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            VIDEO_EXTENSIONS.contains(&ext.as_str())
+        })
+}
+
+/// 通配符匹配（支持 * 和 ?，不区分大小写，O(n) 空间）
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
+    let text: Vec<char> = text.to_lowercase().chars().collect();
+    let tlen = text.len();
+
+    let mut prev = vec![false; tlen + 1];
+    let mut curr = vec![false; tlen + 1];
+    prev[0] = true;
+
+    for &pc in &pattern {
+        curr.fill(false);
+        if pc == '*' {
+            curr[0] = prev[0];
+            for j in 0..tlen {
+                curr[j + 1] = prev[j + 1] || curr[j];
+            }
+        } else {
+            for (j, &tc) in text.iter().enumerate() {
+                if pc == '?' || pc == tc {
+                    curr[j + 1] = prev[j];
+                }
+            }
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+
+    prev[tlen]
+}
+
+/// 检查来源应用是否匹配过滤规则
+/// 支持通配符模式和普通子串匹配，匹配目标：应用名、进程名、进程路径
+fn matches_app_filter(filter: &str, app_name: &str, exe_name: &str, exe_path: &str) -> bool {
+    let filter = filter.trim();
+    if filter.is_empty() {
+        return false;
+    }
+
+    if filter.contains('*') || filter.contains('?') {
+        wildcard_match(filter, app_name)
+            || wildcard_match(filter, exe_name)
+            || wildcard_match(filter, exe_path)
+    } else {
+        let f = filter.to_lowercase();
+        app_name.to_lowercase().contains(&f)
+            || exe_name.to_lowercase().contains(&f)
+            || exe_path.to_lowercase().contains(&f)
+    }
+}
+
+/// 按字符边界截断超长内容
+fn truncate_content(content: String, max_size: usize, content_type: &str) -> String {
+    if max_size > 0 && content.len() > max_size {
+        warn!(
+            "{} content truncated from {} to {} bytes",
+            content_type,
+            content.len(),
+            max_size
+        );
+        content
+            .char_indices()
+            .take_while(|(i, _)| *i < max_size)
+            .map(|(_, c)| c)
+            .collect()
+    } else {
+        content
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ClipboardContent {
+    Text(String),
+    Html {
+        html: String,
+        text: Option<String>,
+    },
+    Rtf {
+        rtf: String,
+        text: Option<String>,
+    },
+    Image(Vec<u8>),
+    Files(Vec<String>),
+}
+
+#[derive(Debug, Clone)]
+struct ContentHashes {
+    content_hash: String,
+    semantic_hash: String,
+}
+
+pub struct ClipboardHandler {
+    repository: ClipboardRepository,
+    settings_repo: SettingsRepository,
+    images_path: PathBuf,
+    icons_path: PathBuf,
+}
+
+impl ClipboardHandler {
+    pub fn new(db: &Database, images_path: PathBuf) -> Self {
+        std::fs::create_dir_all(&images_path).ok();
+
+        // 图标目录与图片目录同级
+        let icons_path = images_path.parent().unwrap_or(&images_path).join("icons");
+        std::fs::create_dir_all(&icons_path).ok();
+
+        Self {
+            repository: ClipboardRepository::new(db),
+            settings_repo: SettingsRepository::new(db),
+            images_path,
+            icons_path,
+        }
+    }
+
+    fn get_max_content_size(&self) -> usize {
+        self.settings_repo
+            .get("max_content_size_kb")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|kb| kb * 1024)
+            .unwrap_or(DEFAULT_MAX_CONTENT_SIZE)
+    }
+
+    fn get_max_history_count(&self) -> i64 {
+        self.settings_repo
+            .get("max_history_count")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_MAX_HISTORY_COUNT)
+    }
+
+    fn get_auto_cleanup_days(&self) -> i64 {
+        self.settings_repo
+            .get("auto_cleanup_days")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS)
+    }
+
+    fn get_size_limit_bytes(&self, key: &str) -> usize {
+        self.settings_repo
+            .get(key)
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|kb| kb * 1024)
+            .unwrap_or(0)
+    }
+
+    fn get_dedup_strategy(&self) -> &str {
+        // 每次读取策略（用户可能修改设置）
+        match self
+            .settings_repo
+            .get("dedup_strategy")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("ignore") => "ignore",
+            Some("always_new") => "always_new",
+            _ => "move_to_top", // 默认行为
+        }
+    }
+
+    /// 检查内容类型是否被允许监听
+    /// 读取 `monitor_types` 设置（逗号分隔，如 "text,html,rtf,image,files"）
+    /// 默认全部允许
+    fn get_text_dedup_mode(&self) -> &str {
+        match self
+            .settings_repo
+            .get("text_dedup_mode")
+            .ok()
+            .flatten()
+            .as_deref()
+        {
+            Some("strict") => "strict",
+            _ => "semantic",
+        }
+    }
+    pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
+        let allowed = self
+            .settings_repo
+            .get("monitor_types")
+            .ok()
+            .flatten();
+
+        // 无设置或空字符串 → 全部允许
+        let allowed = match allowed {
+            Some(ref s) if !s.is_empty() => s,
+            _ => return true,
+        };
+
+        let content_type = match content {
+            ClipboardContent::Text(_) => "text",
+            ClipboardContent::Html { .. } => "html",
+            ClipboardContent::Rtf { .. } => "rtf",
+            ClipboardContent::Image(_) => "image",
+            ClipboardContent::Files(files) => {
+                if is_video_files(files) { "video" } else { "files" }
+            }
+        };
+
+        allowed.split(',').any(|t| t.trim() == content_type)
+    }
+
+    /// 检查来源应用是否应被过滤
+    /// 设置项：
+    ///   - `app_filter_enabled`: "true"/"false"（默认 false）
+    ///   - `app_filter_mode`: "blacklist"（默认）/ "whitelist"
+    ///   - `app_filter_list`: 逗号分隔的规则列表，支持通配符 * 和 ?
+    ///
+    /// 黑名单模式：匹配则排除；白名单模式：不匹配则排除
+    pub fn is_source_app_excluded(&self, source: &Option<super::source_app::SourceAppInfo>) -> bool {
+        let source = match source {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // 检查是否启用
+        let enabled = self
+            .settings_repo
+            .get("app_filter_enabled")
+            .ok()
+            .flatten()
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if !enabled {
+            return false;
+        }
+
+        let filter_list = self
+            .settings_repo
+            .get("app_filter_list")
+            .ok()
+            .flatten();
+
+        let filter_list = match filter_list {
+            Some(ref s) if !s.is_empty() => s,
+            _ => return false,
+        };
+
+        let mode = self
+            .settings_repo
+            .get("app_filter_mode")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "blacklist".to_string());
+
+        // 提取可执行文件名
+        let exe_name = std::path::Path::new(&source.exe_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        let matches = filter_list.split(',').any(|entry| {
+            let entry = entry.trim();
+            if entry.is_empty() { return false; }
+            matches_app_filter(entry, &source.app_name, exe_name, &source.exe_path)
+        });
+
+        match mode.as_str() {
+            "whitelist" => !matches, // 白名单：不在列表中则排除
+            _ => matches,            // 黑名单（默认）：在列表中则排除
+        }
+    }
+
+    /// 处理剪贴板内容，去重后存入数据库
+    pub fn process(
+        &self,
+        content: ClipboardContent,
+        source: Option<SourceAppInfo>,
+    ) -> Result<Option<i64>, String> {
+        let max_content_size = self.get_max_content_size();
+
+        // 文本大小限制
+        if max_content_size > 0 && Self::is_text_like_content(&content) {
+            let content_size = self.get_content_size(&content);
+            if content_size > max_content_size {
+                warn!("Text size {} bytes exceeds max {} bytes, skipping", content_size, max_content_size);
+                return Ok(None);
+            }
+        }
+
+        // 图片大小限制
+        if let ClipboardContent::Image(ref data) = content {
+            let max_image = self.get_size_limit_bytes("max_image_size_kb");
+            if max_image > 0 && data.len() > max_image {
+                warn!("Image size {} bytes exceeds max {} bytes, skipping", data.len(), max_image);
+                return Ok(None);
+            }
+        }
+
+        // 文件/视频大小限制
+        if let ClipboardContent::Files(ref files) = content {
+            let total: u64 = files.iter().filter_map(|f| {
+                let p = std::path::Path::new(f);
+                if p.is_file() { std::fs::metadata(p).ok().map(|m| m.len()) } else { None }
+            }).sum();
+            if is_video_files(files) {
+                let max_video = self.get_size_limit_bytes("max_video_size_kb");
+                if max_video > 0 && (total as usize) > max_video {
+                    warn!("Video size {} bytes exceeds max {} bytes, skipping", total, max_video);
+                    return Ok(None);
+                }
+            } else {
+                let max_file = self.get_size_limit_bytes("max_file_size_kb");
+                if max_file > 0 && (total as usize) > max_file {
+                    warn!("Files size {} bytes exceeds max {} bytes, skipping", total, max_file);
+                    return Ok(None);
+                }
+            }
+        }
+
+        let hashes = self.calculate_hashes(&content);
+        let dedup = self.get_dedup_strategy();
+        let text_like = Self::is_text_like_content(&content);
+        let text_dedup_mode = self.get_text_dedup_mode();
+        let text_use_strict = text_like && text_dedup_mode == "strict";
+
+        if dedup != "always_new"
+            && if text_like {
+                if text_use_strict {
+                    self.repository.exists_by_hash(&hashes.content_hash)
+                } else {
+                    self.repository
+                        .exists_by_semantic_hash(&hashes.semantic_hash)
+                }
+            } else {
+                self.repository.exists_by_hash(&hashes.content_hash)
+            }
+            .map_err(|e| e.to_string())?
+        {
+            match dedup {
+                "ignore" => {
+                    debug!("Content already exists, ignoring (dedup=ignore)");
+                    return Ok(None);
+                }
+                _ => {
+                    // move_to_top: 更新访问时间并置顶
+                    debug!("Content already exists, updating access time (dedup=move_to_top)");
+                    return if text_like {
+                        if text_use_strict {
+                            self.repository
+                                .touch_by_hash(&hashes.content_hash)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            self.repository
+                                .touch_by_semantic_hash(&hashes.semantic_hash)
+                                .map_err(|e| e.to_string())
+                        }
+                    } else {
+                        self.repository
+                            .touch_by_hash(&hashes.content_hash)
+                            .map_err(|e| e.to_string())
+                    };
+                }
+            }
+        }
+
+        let (source_app_name, source_app_icon) = match source {
+            Some(ref info) => {
+                let icon_path = source_app::extract_and_cache_icon(
+                    &info.exe_path,
+                    &self.icons_path,
+                    &info.icon_cache_key,
+                );
+                (Some(info.app_name.clone()), icon_path)
+            }
+            None => (None, None),
+        };
+
+        let mut item = match content {
+            ClipboardContent::Text(text) => self.process_text(text, &hashes, max_content_size)?,
+            ClipboardContent::Html { html, text } => {
+                self.process_html(html, text, &hashes, max_content_size)?
+            }
+            ClipboardContent::Rtf { rtf, text } => {
+                self.process_rtf(rtf, text, &hashes, max_content_size)?
+            }
+            ClipboardContent::Image(data) => self.process_image(data, &hashes)?,
+            ClipboardContent::Files(files) => {
+                if is_video_files(&files) {
+                    self.process_video(files, &hashes)?
+                } else {
+                    self.process_files(files, &hashes)?
+                }
+            }
+        };
+
+        item.source_app_name = source_app_name;
+        item.source_app_icon = source_app_icon;
+
+        let log_type = format!("{:?}", item.content_type);
+        let log_size = item.byte_size;
+        let log_source = item.source_app_name.clone().unwrap_or_else(|| "unknown".to_string());
+
+        let id = self.repository.insert(item).map_err(|e| e.to_string())?;
+        info!(
+            "Stored clipboard item: id={}, type={}, size={} bytes, source={}",
+            id, log_type, log_size, log_source
+        );
+
+        // 执行最大历史数限制，清理旧图片
+        let max_history_count = self.get_max_history_count();
+        if max_history_count > 0 {
+            match self.repository.enforce_max_count(max_history_count) {
+                Ok((deleted, image_paths)) => {
+                    super::cleanup_image_files(&image_paths);
+                    if deleted > 0 {
+                        debug!("Enforced max count: removed {} old items", deleted);
+                    }
+                }
+                Err(e) => warn!("Failed to enforce max history count: {}", e),
+            }
+        }
+
+        // 自动清理超过指定天数的旧记录
+        let auto_cleanup_days = self.get_auto_cleanup_days();
+        if auto_cleanup_days > 0 {
+            match self.repository.delete_older_than(auto_cleanup_days) {
+                Ok((deleted, image_paths)) => {
+                    super::cleanup_image_files(&image_paths);
+                    if deleted > 0 {
+                        info!("Auto-cleanup: removed {} items older than {} days", deleted, auto_cleanup_days);
+                    }
+                }
+                Err(e) => warn!("Failed to auto-cleanup old items: {}", e),
+            }
+        }
+
+        Ok(Some(id))
+    }
+
+    fn get_content_size(&self, content: &ClipboardContent) -> usize {
+        match content {
+            ClipboardContent::Text(text) => text.len(),
+            ClipboardContent::Html { html, .. } => html.len(),
+            ClipboardContent::Rtf { rtf, .. } => rtf.len(),
+            ClipboardContent::Image(data) => data.len(),
+            ClipboardContent::Files(files) => files.iter().map(|f| f.len()).sum(),
+        }
+    }
+
+    fn is_text_like_content(content: &ClipboardContent) -> bool {
+        matches!(
+            content,
+            ClipboardContent::Text(_) | ClipboardContent::Html { .. } | ClipboardContent::Rtf { .. }
+        )
+    }
+
+    fn calculate_hashes(&self, content: &ClipboardContent) -> ContentHashes {
+        let content_hash = self.calculate_hash(content);
+        let semantic_hash = match content {
+            ClipboardContent::Text(text) => {
+                semantic_hash_from_text(text).unwrap_or_else(|| content_hash.clone())
+            }
+            ClipboardContent::Html { text, .. } => {
+                compute_semantic_hash("html", text.as_deref(), &content_hash)
+            }
+            ClipboardContent::Rtf { text, .. } => {
+                compute_semantic_hash("rtf", text.as_deref(), &content_hash)
+            }
+            ClipboardContent::Image(_) => content_hash.clone(),
+            ClipboardContent::Files(_) => content_hash.clone(),
+        };
+
+        ContentHashes {
+            content_hash,
+            semantic_hash,
+        }
+    }
+
+    fn calculate_hash(&self, content: &ClipboardContent) -> String {
+        let mut hasher = Hasher::new();
+
+        match content {
+            ClipboardContent::Text(text) => {
+                hasher.update(b"text:");
+                hasher.update(text.as_bytes());
+            }
+            ClipboardContent::Html { html, .. } => {
+                hasher.update(b"html:");
+                hasher.update(html.as_bytes());
+            }
+            ClipboardContent::Rtf { rtf, .. } => {
+                hasher.update(b"rtf:");
+                hasher.update(rtf.as_bytes());
+            }
+            ClipboardContent::Image(data) => {
+                hasher.update(b"image:");
+                hasher.update(data);
+            }
+            ClipboardContent::Files(files) => {
+                hasher.update(b"files:");
+                for file in files {
+                    hasher.update(file.as_bytes());
+                    hasher.update(b"|");
+                }
+            }
+        }
+
+        hasher.finalize().to_hex().to_string()
+    }
+
+    fn process_text(
+        &self,
+        text: String,
+        hashes: &ContentHashes,
+        max_size: usize,
+    ) -> Result<NewClipboardItem, String> {
+        let byte_size = text.len() as i64;
+        let char_count = Some(text.chars().count() as i64);
+        let preview = Self::create_preview(&text);
+        let text_content = truncate_content(text, max_size, "Text");
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Text,
+            text_content: Some(text_content),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some(preview),
+            byte_size,
+            char_count,
+            ..Default::default()
+        })
+    }
+
+    fn process_html(
+        &self,
+        html: String,
+        text: Option<String>,
+        hashes: &ContentHashes,
+        max_size: usize,
+    ) -> Result<NewClipboardItem, String> {
+        let byte_size = html.len() as i64;
+        let preview = text
+            .as_ref()
+            .map(|t| Self::create_preview(t))
+            .unwrap_or_else(|| Self::create_preview(&html));
+        let html_content = truncate_content(html, max_size, "HTML");
+
+        let char_count = text.as_ref().map(|t| t.chars().count() as i64);
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Html,
+            text_content: text,
+            html_content: Some(html_content),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some(preview),
+            byte_size,
+            char_count,
+            ..Default::default()
+        })
+    }
+
+    fn process_rtf(
+        &self,
+        rtf: String,
+        text: Option<String>,
+        hashes: &ContentHashes,
+        max_size: usize,
+    ) -> Result<NewClipboardItem, String> {
+        let byte_size = rtf.len() as i64;
+        let preview = text
+            .as_ref()
+            .map(|t| Self::create_preview(t))
+            .unwrap_or_else(|| "[RTF Content]".to_string());
+        let rtf_content = truncate_content(rtf, max_size, "RTF");
+
+        let char_count = text.as_ref().map(|t| t.chars().count() as i64);
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Rtf,
+            text_content: text,
+            rtf_content: Some(rtf_content),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some(preview),
+            byte_size,
+            char_count,
+            ..Default::default()
+        })
+    }
+
+    /// 处理图片内容：保存到磁盘并提取宽高元数据
+    fn process_image(&self, data: Vec<u8>, hashes: &ContentHashes) -> Result<NewClipboardItem, String> {
+        let byte_size = data.len() as i64;
+
+        let filename = format!("{}.png", &hashes.content_hash[..16]);
+        let image_path = self.images_path.join(&filename);
+        let image_path_str = image_path.to_string_lossy().to_string();
+
+        let (image_width, image_height) = self.extract_image_dimensions(&data)?;
+        debug!(
+            "Processing image: {}x{}, {} bytes, hash={}",
+            image_width,
+            image_height,
+            byte_size,
+            &hashes.content_hash[..16]
+        );
+
+        // 同步写入文件，确保插入数据库前文件已就绪（异步写入会引发竞态）
+        if let Err(e) = std::fs::write(&image_path, &data) {
+            return Err(format!("Failed to save image: {}", e));
+        }
+        debug!("Saved image to {:?}", image_path);
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Image,
+            image_path: Some(image_path_str),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some("[图片]".to_string()),
+            byte_size,
+            image_width: Some(image_width),
+            image_height: Some(image_height),
+            ..Default::default()
+        })
+    }
+
+    fn extract_image_dimensions(&self, data: &[u8]) -> Result<(i64, i64), String> {
+        let (w, h) = ImageReader::new(std::io::Cursor::new(data))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .into_dimensions()
+            .map_err(|e| format!("Failed to read image dimensions: {}", e))?;
+
+        Ok((w as i64, h as i64))
+    }
+
+    fn process_files(&self, files: Vec<String>, hashes: &ContentHashes) -> Result<NewClipboardItem, String> {
+        use std::path::Path;
+        debug!("Processing {} file(s)", files.len());
+
+        // 仅计算普通文件大小（目录开销大且意义有限）
+        let byte_size: i64 = files
+            .iter()
+            .filter_map(|f| {
+                let path = Path::new(f);
+                if path.is_file() {
+                    std::fs::metadata(path).ok().map(|m| m.len() as i64)
+                } else {
+                    None // 跳过目录
+                }
+            })
+            .sum();
+
+        let preview = if files.len() == 1 {
+            files[0].clone()
+        } else {
+            format!("{} files", files.len())
+        };
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Files,
+            file_paths: Some(files),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some(preview),
+            byte_size,
+            ..Default::default()
+        })
+    }
+
+    fn process_video(&self, files: Vec<String>, hashes: &ContentHashes) -> Result<NewClipboardItem, String> {
+        use std::path::Path;
+        debug!("Processing {} video file(s)", files.len());
+
+        let byte_size: i64 = files
+            .iter()
+            .filter_map(|f| {
+                let path = Path::new(f);
+                if path.is_file() {
+                    std::fs::metadata(path).ok().map(|m| m.len() as i64)
+                } else {
+                    None
+                }
+            })
+            .sum();
+
+        let preview = if files.len() == 1 {
+            files[0].clone()
+        } else {
+            format!("{} videos", files.len())
+        };
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Video,
+            file_paths: Some(files),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some(preview),
+            byte_size,
+            ..Default::default()
+        })
+    }
+
+    fn create_preview(text: &str) -> String {
+        let trimmed = text.trim();
+        if let Some((idx, _)) = trimmed.char_indices().nth(MAX_PREVIEW_LENGTH) {
+            format!("{}...", &trimmed[..idx])
+        } else {
+            trimmed.to_string()
+        }
+    }
+}

@@ -1,0 +1,103 @@
+[package]
+name = "elegant-clipboard"
+version = "1.0.0"
+description = "An elegant Windows clipboard manager"
+authors = ["ASLant"]
+license = "MIT"
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "elegant_clipboard_lib"
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+panic = "abort"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri core
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+rusqlite = { version = "0.38", features = ["bundled", "backup"] }
+
+# Async runtime (only the features Tauri commands actually need)
+tokio = { version = "1", features = ["rt", "time"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tracing-appender = "0.2"
+chrono = "0.4"
+
+# Hashing (fast)
+blake3 = "1"
+
+# UUID generation (device identification)
+uuid = { version = "1", features = ["v4"] }
+
+# High-performance locks
+parking_lot = "0.12"
+
+# Parallel processing
+rayon = "1.10"
+
+# Image handling (PNG-only for clipboard screenshots)
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# ZIP archive for data export/import
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# HTTP client for WebDAV sync
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+base64 = "0.22"
+
+
+# Cross-platform clipboard
+arboard = "3"
+clipboard-master = "4"
+clipboard-rs = "0.2"
+
+# Keyboard simulation for paste
+enigo = "0.6"
+# Window backdrop effects (Mica/Acrylic)
+window-vibrancy = "0.5"
+
+# Windows API for low-level keyboard hook and admin check
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Accessibility",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_Graphics_Dwm",
+    "Win32_System_DataExchange",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_HiDpi",
+    "Win32_System_SystemInformation",
+] }
+# Windows registry for disabling system Win+V and admin launch
+winreg = "0.55"
+windows-core = "0.61"
