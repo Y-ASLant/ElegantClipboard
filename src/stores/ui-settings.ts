@@ -13,7 +13,7 @@ export type SoundTiming = "immediate" | "after_success";
 export type ToolbarButton = "clear" | "pin" | "batch" | "settings";
 
 export const DEFAULT_TOOLBAR_BUTTONS: ToolbarButton[] = ["clear", "batch", "pin", "settings"];
-export const MAX_TOOLBAR_BUTTONS = 5;
+export const MAX_TOOLBAR_BUTTONS = 4;
 
 interface UISettings {
   cardMaxLines: number;
@@ -51,6 +51,9 @@ interface UISettings {
   showDragAreaIndicator: boolean;
   windowAnimation: boolean;
   windowEffect: WindowEffect;
+  hideFavoritedFromMain: boolean;
+  hideTaggedFromMain: boolean;
+  enabledMonitorTypes: string[];
   toolbarButtons: ToolbarButton[];
   customFont: string;
   uiFontSize: number;
@@ -92,6 +95,9 @@ interface UISettings {
   setShowDragAreaIndicator: (enabled: boolean) => void;
   setWindowAnimation: (enabled: boolean) => void;
   setWindowEffect: (effect: WindowEffect) => void;
+  setHideFavoritedFromMain: (enabled: boolean) => void;
+  setHideTaggedFromMain: (enabled: boolean) => void;
+  setEnabledMonitorTypes: (types: string[]) => void;
   setToolbarButtons: (buttons: ToolbarButton[]) => void;
   setCustomFont: (font: string) => void;
   setUIFontSize: (size: number) => void;
@@ -157,6 +163,9 @@ export const useUISettings = create<UISettings>()(
         showDragAreaIndicator: true,
         windowAnimation: false,
         windowEffect: "none" as WindowEffect,
+        hideFavoritedFromMain: false,
+        hideTaggedFromMain: false,
+        enabledMonitorTypes: ["text", "image", "files", "video"],
         toolbarButtons: ["clear", "batch", "pin", "settings"] as ToolbarButton[],
         customFont: "",
         uiFontSize: 14,
@@ -197,6 +206,24 @@ export const useUISettings = create<UISettings>()(
         setShowCategoryFilter: makeSetter("showCategoryFilter"),
         setShowDragAreaIndicator: makeSetter("showDragAreaIndicator"),
         setWindowAnimation: makeSetter("windowAnimation"),
+        setHideFavoritedFromMain: (enabled) => {
+          set({ hideFavoritedFromMain: enabled });
+          broadcastChange({ hideFavoritedFromMain: enabled });
+          invoke("set_setting", { key: "hide_favorited_from_main", value: String(enabled) }).catch((error) => {
+            logError("Failed to persist hideFavoritedFromMain:", error);
+          });
+        },
+        setHideTaggedFromMain: (enabled) => {
+          set({ hideTaggedFromMain: enabled });
+          broadcastChange({ hideTaggedFromMain: enabled });
+          invoke("set_setting", { key: "hide_tagged_from_main", value: String(enabled) }).catch((error) => {
+            logError("Failed to persist hideTaggedFromMain:", error);
+          });
+        },
+        setEnabledMonitorTypes: (types) => {
+          set({ enabledMonitorTypes: types });
+          broadcastChange({ enabledMonitorTypes: types } as unknown as Partial<UISettings>);
+        },
         setToolbarButtons: makeSetter("toolbarButtons"),
         setCustomFont: makeSetter("customFont"),
         setUIFontSize: makeSetter("uiFontSize"),
@@ -237,6 +264,36 @@ export const useUISettings = create<UISettings>()(
     },
     {
       name: STORAGE_KEY,
+      version: 3,
+      migrate: (persisted: unknown, version: number) => {
+        const state = persisted as Record<string, unknown>;
+        if (version < 1) {
+          // v0 → v1: 工具栏新增 favorites 按钮
+          const buttons = state.toolbarButtons as string[] | undefined;
+          if (buttons && !buttons.includes("favorites")) {
+            const idx = buttons.indexOf("clear");
+            buttons.splice(idx >= 0 ? idx + 1 : 0, 0, "favorites");
+            state.toolbarButtons = buttons;
+          }
+        }
+        if (version < 2) {
+          // v1 → v2: 工具栏新增 tags 按钮
+          const buttons = state.toolbarButtons as string[] | undefined;
+          if (buttons && !buttons.includes("tags")) {
+            const idx = buttons.indexOf("favorites");
+            buttons.splice(idx >= 0 ? idx + 1 : 0, 0, "tags");
+            state.toolbarButtons = buttons;
+          }
+        }
+        if (version < 3) {
+          // v2 → v3: favorites 和 tags 改为常驻按钮，从工具栏移除
+          const buttons = state.toolbarButtons as string[] | undefined;
+          if (buttons) {
+            state.toolbarButtons = buttons.filter(b => b !== "favorites" && b !== "tags");
+          }
+        }
+        return state as unknown as UISettings;
+      },
     }
   )
 );
@@ -265,7 +322,35 @@ export function cleanupUISettingsListener() {
   }
 }
 
+// 从后端数据库加载需同步的设置（用于启动初始化和云端同步下载后刷新）
+export async function loadSyncedSettings() {
+  try {
+    const keys = ["hide_favorited_from_main", "hide_tagged_from_main", "monitor_types"];
+    const values = await Promise.all(
+      keys.map((key) => invoke<string | null>("get_setting", { key }))
+    );
+    const patch: Record<string, unknown> = {};
+    if (values[0] !== null && values[0] !== undefined) patch.hideFavoritedFromMain = values[0] === "true";
+    if (values[1] !== null && values[1] !== undefined) patch.hideTaggedFromMain = values[1] === "true";
+    if (values[2] && (values[2] as string).length > 0) {
+      const rawSet = new Set((values[2] as string).split(",").map((t) => t.trim()).filter(Boolean));
+      const uiTypes: string[] = [];
+      if (rawSet.has("text") || rawSet.has("html") || rawSet.has("rtf")) uiTypes.push("text");
+      if (rawSet.has("image")) uiTypes.push("image");
+      if (rawSet.has("files")) uiTypes.push("files");
+      if (rawSet.has("video")) uiTypes.push("video");
+      if (uiTypes.length > 0) patch.enabledMonitorTypes = uiTypes;
+    }
+    if (Object.keys(patch).length > 0) {
+      useUISettings.setState(patch);
+    }
+  } catch {
+    // 忽略错误（如非 Tauri 环境）
+  }
+}
+
 // 浏览器环境自动初始化
 if (typeof window !== "undefined") {
   initUISettingsListener();
+  loadSyncedSettings();
 }

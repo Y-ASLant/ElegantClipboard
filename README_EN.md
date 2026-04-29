@@ -61,7 +61,7 @@ Hover text preview shares the same preview position and hover preview delay sett
 - **Low footprint** - Tray resident, non-intrusive to core workflow, window doesn't steal focus, monitoring only when visible
 - **High performance** - Optimized LIKE search (CJK text support), virtual list for 10k+ records, async image processing, content hash deduplication
 - **Modern** - Tauri 2.0 + React 19 + Tailwind CSS 4, type-safe, elegant architecture
-- **Fully local offline** - Data stored locally, no network requests, no cloud sync, privacy first
+- **Local first** - Data stored locally by default, optional WebDAV cloud sync, privacy first
 
 ## Features
 
@@ -109,6 +109,7 @@ See [FEATURES_EN.md](FEATURES_EN.md) for complete feature list and terminology.
 | **Window Effects** | window-vibrancy (Mica/Acrylic/Tabbed) |
 | **Keyboard Simulation** | enigo |
 | **Input Monitoring** | Win32 LL Hook (WH_MOUSE_LL + WH_KEYBOARD_LL, only when window visible) |
+| **Cloud Sync** | WebDAV (reqwest + base64) |
 | **Auto Update** | GitHub Release based check & download (system proxy supported) |
 | **CI/CD** | GitHub Actions (CI + Tag triggers Release) |
 

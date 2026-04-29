@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "settings", "image-preview", "text-preview", "text-editor-*"],
+  "windows": ["main", "settings", "image-preview", "text-preview", "text-editor-*", "ocr-screenshot", "ocr-result", "translate-result"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

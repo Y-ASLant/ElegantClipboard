@@ -52,8 +52,62 @@ pub(crate) fn save_main_window_placement<R: tauri::Runtime>(app: &tauri::AppHand
     }
 }
 
+/// 同步将设置窗口从 TOPMOST 层移除（使主窗口可以显示在其上方）
+#[cfg(target_os = "windows")]
+fn demote_settings_window(app: &tauri::AppHandle) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, HWND_NOTOPMOST,
+    };
+    if let Some(sw) = app.get_webview_window("settings") {
+        if sw.is_visible().unwrap_or(false) {
+            if let Ok(hwnd) = sw.hwnd() {
+                unsafe {
+                    let _ = SetWindowPos(
+                        HWND(hwnd.0 as *mut _),
+                        Some(HWND_NOTOPMOST),
+                        0, 0, 0, 0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn demote_settings_window(_app: &tauri::AppHandle) {}
+
+/// 同步将设置窗口恢复到 TOPMOST 层（主窗口隐藏后使设置窗口重新置顶）
+#[cfg(target_os = "windows")]
+fn promote_settings_window(app: &tauri::AppHandle) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, HWND_TOPMOST,
+    };
+    if let Some(sw) = app.get_webview_window("settings") {
+        if sw.is_visible().unwrap_or(false) {
+            if let Ok(hwnd) = sw.hwnd() {
+                unsafe {
+                    let _ = SetWindowPos(
+                        HWND(hwnd.0 as *mut _),
+                        Some(HWND_TOPMOST),
+                        0, 0, 0, 0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn promote_settings_window(_app: &tauri::AppHandle) {}
+
 /// 切换主窗口显示/隐藏
-pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
+/// `reposition`: 为 true 时根据用户设置重新定位窗口（热键唤起）；
+///               为 false 时在上次位置直接显示（托盘点击）。
+pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle, reposition: bool) {
     if let Some(window) = app.get_webview_window("main") {
         if crate::keyboard_hook::get_window_state() == crate::keyboard_hook::WindowState::Visible {
             save_window_size_if_enabled(app, &window);
@@ -63,6 +117,8 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             crate::input_monitor::disable_mouse_monitoring();
             crate::commands::hide_preview_windows(app);
+            // 主窗口隐藏后，恢复设置窗口的置顶
+            promote_settings_window(app);
             let _ = window.emit("window-hidden", ());
         } else {
             let position_mode = app
@@ -120,29 +176,33 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
                 })
                 .unwrap_or(crate::positioning::PositionMode::FollowCursor);
 
-            if position_mode == crate::positioning::PositionMode::FixedPosition {
-                if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
-                    let repo = database::SettingsRepository::new(&state.db);
-                    let x = repo
-                        .get("window_x")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<i32>().ok());
-                    let y = repo
-                        .get("window_y")
-                        .ok()
-                        .flatten()
-                        .and_then(|v| v.parse::<i32>().ok());
-                    if let (Some(x), Some(y)) = (x, y) {
-                        let _ = window
-                            .set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+            if reposition {
+                if position_mode == crate::positioning::PositionMode::FixedPosition {
+                    if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+                        let repo = database::SettingsRepository::new(&state.db);
+                        let x = repo
+                            .get("window_x")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.parse::<i32>().ok());
+                        let y = repo
+                            .get("window_y")
+                            .ok()
+                            .flatten()
+                            .and_then(|v| v.parse::<i32>().ok());
+                        if let (Some(x), Some(y)) = (x, y) {
+                            let _ = window
+                                .set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x, y)));
+                        }
                     }
+                } else if let Err(e) = crate::positioning::position_window(&window, position_mode) {
+                    tracing::warn!("定位窗口失败: {}", e);
                 }
-            } else if let Err(e) = crate::positioning::position_window(&window, position_mode) {
-                tracing::warn!("定位窗口失败: {}", e);
             }
 
             crate::input_monitor::save_current_focus();
+            // 若设置窗口已打开，用 Win32 同步取消其置顶，再显示主窗口
+            demote_settings_window(app);
             // 强制保持非激活展示，避免瞬态窗口（如 PowerToys/Wox 的 Alt+Enter 面板）因失焦关闭
             let _ = window.set_focusable(false);
             let _ = window.show();
@@ -214,6 +274,11 @@ pub async fn close_window(window: tauri::WebviewWindow) {
 #[tauri::command]
 pub async fn set_window_pinned(window: tauri::WebviewWindow, pinned: bool) {
     crate::input_monitor::set_window_pinned(pinned);
+    // 持久化到设置表，重启和云端同步时可恢复
+    if let Some(state) = window.app_handle().try_state::<std::sync::Arc<AppState>>() {
+        let settings_repo = database::SettingsRepository::new(&state.db);
+        let _ = settings_repo.set("window_pinned", if pinned { "true" } else { "false" });
+    }
     if pinned {
         let _ = window.set_focusable(false);
         #[cfg(windows)]
@@ -418,4 +483,27 @@ pub async fn install_update(app: tauri::AppHandle, installer_path: String) -> Re
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     app.exit(0);
     Ok(())
+}
+
+/// 检测当前系统是否为 Windows 11（Build >= 22000）
+#[tauri::command]
+pub fn is_windows_11() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::System::SystemInformation::{GetVersionExW, OSVERSIONINFOW};
+        unsafe {
+            let mut info = OSVERSIONINFOW {
+                dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
+                ..Default::default()
+            };
+            if GetVersionExW(&mut info).is_ok() {
+                return info.dwBuildNumber >= 22000;
+            }
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }

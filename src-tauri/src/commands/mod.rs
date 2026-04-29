@@ -1,22 +1,22 @@
 pub mod clipboard;
 pub mod data_transfer;
 pub mod file_ops;
-pub mod groups;
+pub mod tags;
 pub mod preview;
 pub mod settings;
+pub mod sync;
+pub mod translate;
+pub mod ocr;
 pub mod window;
 
 use crate::clipboard::ClipboardMonitor;
 use crate::database::Database;
-use parking_lot::Mutex;
 use std::sync::Arc;
 
 /// 应用状态：包含数据库与剪贴板监控器
 pub struct AppState {
     pub db: Database,
     pub monitor: ClipboardMonitor,
-    /// 当前活动分组 ID（None = 默认分组）
-    pub active_group_id: Arc<Mutex<Option<i64>>>,
 }
 
 /// 多屏/高 DPI 下隐藏窗口后系统可能不自动还原前台窗口，导致 Ctrl+V 无接收者。

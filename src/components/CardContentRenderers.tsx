@@ -5,10 +5,13 @@ import {
   Document16Regular,
   Folder16Regular,
   Warning16Regular,
+  Video16Regular,
+  Play16Filled,
 } from "@fluentui/react-icons";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
+import { useShallow } from "zustand/react/shallow";
 import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { logError } from "@/lib/logger";
@@ -27,7 +30,7 @@ interface CardFooterProps {
   sourceAppIcon?: string | null;
 }
 
-export const CardFooter = ({
+export const CardFooter = memo(({
   metaItems,
   index,
   showBadge = true,
@@ -68,7 +71,7 @@ export const CardFooter = ({
       )}
     </div>
   </div>
-);
+));
 
 // ============ 图片悬浮预览（原生窗口） ============
 
@@ -100,6 +103,18 @@ function isImagePreviewLeaseCurrent(lease: number): boolean {
 
 function isImagePreviewWanted(): boolean {
   return imagePreviewWanted;
+}
+
+// ============ 全局 window-hidden 清理注册表（图片预览） ============
+const imagePreviewCleanupCallbacks = new Set<() => void>();
+let _imageWindowHiddenListenerInit = false;
+
+function ensureImageWindowHiddenListener() {
+  if (_imageWindowHiddenListenerInit) return;
+  _imageWindowHiddenListenerInit = true;
+  listen("window-hidden", () => {
+    imagePreviewCleanupCallbacks.forEach((cb) => cb());
+  });
 }
 
 /** 预览窗口定位边界（物理像素） */
@@ -250,7 +265,7 @@ const defaultPreviewState = (): PreviewState => ({
   windowCss: null,
 });
 
-const ImagePreview = memo(function ImagePreview({
+export const ImagePreview = memo(function ImagePreview({
   src,
   alt,
   onError,
@@ -263,13 +278,20 @@ const ImagePreview = memo(function ImagePreview({
   overlay?: React.ReactNode;
   imagePath?: string;
 }) {
-  const imagePreviewEnabled = useUISettings((s) => s.imagePreviewEnabled);
-  const previewUnboundedMode = useUISettings((s) => s.previewUnboundedMode);
-  const previewZoomStep = useUISettings((s) => s.previewZoomStep);
-  const previewPosition = useUISettings((s) => s.previewPosition);
-  const imageAutoHeight = useUISettings((s) => s.imageAutoHeight);
-  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
-  const imageMaxHeight = useUISettings((s) => s.imageMaxHeight);
+  const {
+    imagePreviewEnabled, previewUnboundedMode, previewZoomStep,
+    previewPosition, imageAutoHeight, cardMaxLines, imageMaxHeight,
+    hoverPreviewDelay,
+  } = useUISettings(useShallow((s) => ({
+    imagePreviewEnabled: s.imagePreviewEnabled,
+    previewUnboundedMode: s.previewUnboundedMode,
+    previewZoomStep: s.previewZoomStep,
+    previewPosition: s.previewPosition,
+    imageAutoHeight: s.imageAutoHeight,
+    cardMaxLines: s.cardMaxLines,
+    imageMaxHeight: s.imageMaxHeight,
+    hoverPreviewDelay: s.hoverPreviewDelay,
+  })));
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const previewHoveringRef = useRef(false);
@@ -324,10 +346,11 @@ const ImagePreview = memo(function ImagePreview({
     ps.current.windowCss = null;
   }, [clearTimer]);
 
-  // 主窗口隐藏时取消预览计时器，防止粘贴竞态
+  // 主窗口隐藏时取消预览（通过全局清理注册表，避免每个组件单独订阅 Tauri 事件）
   useEffect(() => {
-    const unlisten = listen("window-hidden", hidePreview);
-    return () => { unlisten.then((fn) => fn()); };
+    ensureImageWindowHiddenListener();
+    imagePreviewCleanupCallbacks.add(hidePreview);
+    return () => { imagePreviewCleanupCallbacks.delete(hidePreview); };
   }, [hidePreview]);
 
   // 显示预览：有界模式用屏幕工作区，无界模式用固定大窗口
@@ -395,8 +418,6 @@ const ImagePreview = memo(function ImagePreview({
       ps.current.windowCss = null;
     }
   }, [previewPosition, previewUnboundedMode]);
-
-  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
 
   const batchMode = useClipboardStore((s) => s.batchMode);
 
@@ -763,7 +784,7 @@ export const FileContent = memo(function FileContent({
               <p
                 className={cn(
                   "text-sm font-medium",
-                  filesInvalid ? "text-red-500" : "text-foreground",
+                  filesInvalid ? "text-red-500 line-through" : "text-foreground",
                 )}
               >
                 {filePaths.length} 个文件
@@ -774,7 +795,7 @@ export const FileContent = memo(function FileContent({
               <p
                 className={cn(
                   "text-xs truncate mt-0.5",
-                  filesInvalid ? "text-red-400" : "text-muted-foreground",
+                  filesInvalid ? "text-red-400 line-through" : "text-muted-foreground",
                 )}
               >
                 <HighlightText
@@ -792,7 +813,7 @@ export const FileContent = memo(function FileContent({
               <p
                 className={cn(
                   "text-sm font-medium truncate",
-                  filesInvalid ? "text-red-500" : "text-foreground",
+                  filesInvalid ? "text-red-500 line-through" : "text-foreground",
                 )}
               >
                 <HighlightText
@@ -828,3 +849,202 @@ export const FileContent = memo(function FileContent({
   );
 });
 
+// ============ 视频内容 ============
+
+interface VideoContentProps {
+  filePaths: string[];
+  filesInvalid: boolean;
+  preview: string | null;
+  metaItems: string[];
+  index?: number;
+  showBadge?: boolean;
+  isDragOverlay?: boolean;
+  sourceAppName?: string | null;
+  sourceAppIcon?: string | null;
+}
+
+export const VideoContent = memo(function VideoContent({
+  filePaths,
+  filesInvalid,
+  preview,
+  metaItems,
+  index,
+  showBadge,
+  isDragOverlay,
+  sourceAppName,
+  sourceAppIcon,
+}: VideoContentProps) {
+  const isMultiple = filePaths.length > 1;
+  const firstPath = filePaths[0] || "";
+  const fileName = getFileNameFromPath(firstPath || preview || "");
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [thumbError, setThumbError] = useState(false);
+
+  // 从视频文件生成缩略图
+  useEffect(() => {
+    if (filesInvalid || !firstPath || isMultiple) {
+      setThumbUrl(null);
+      setThumbError(false);
+      return;
+    }
+
+    let cancelled = false;
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = convertFileSrc(firstPath);
+
+    video.addEventListener("loadeddata", () => {
+      if (cancelled) return;
+      video.currentTime = Math.min(1, video.duration * 0.1);
+    });
+
+    video.addEventListener("seeked", () => {
+      if (cancelled) return;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(video, 0, 0);
+          setThumbUrl(canvas.toDataURL("image/jpeg", 0.7));
+        } else {
+          setThumbError(true);
+        }
+      } catch {
+        setThumbError(true);
+      }
+    });
+
+    video.addEventListener("error", () => {
+      if (!cancelled) setThumbError(true);
+    });
+
+    return () => {
+      cancelled = true;
+      video.src = "";
+      video.load();
+    };
+  }, [firstPath, filesInvalid, isMultiple]);
+
+  // 有缩略图且单个视频文件时显示预览
+  if (!isMultiple && !filesInvalid && thumbUrl && !thumbError) {
+    return (
+      <div className="flex-1 min-w-0 px-3 py-2.5">
+        <div className="relative w-full rounded-sm overflow-hidden bg-muted/30">
+          <img
+            src={thumbUrl}
+            alt={fileName}
+            className="w-full h-auto max-h-48 object-cover"
+          />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-black/50 flex items-center justify-center">
+              <Play16Filled className="w-5 h-5 text-white ml-0.5" />
+            </div>
+          </div>
+          <div className="absolute bottom-0 left-0 right-0 bg-linear-to-t from-black/50 to-transparent px-2 py-1">
+            <p className="text-[11px] text-white truncate">{fileName}</p>
+          </div>
+        </div>
+        <CardFooter
+          metaItems={metaItems}
+          index={index}
+          showBadge={showBadge}
+          isDragOverlay={isDragOverlay}
+          sourceAppName={sourceAppName}
+          sourceAppIcon={sourceAppIcon}
+        />
+      </div>
+    );
+  }
+
+  // 无缩略图、多文件、或失效时回退为图标+文件名样式
+  return (
+    <div className="flex-1 min-w-0 px-3 py-2.5">
+      <div className="flex items-start gap-2.5">
+        <div
+          className={cn(
+            "shrink-0 w-10 h-10 rounded-lg flex items-center justify-center",
+            filesInvalid
+              ? "bg-red-50 dark:bg-red-950"
+              : "bg-purple-50 dark:bg-purple-950",
+          )}
+        >
+          {filesInvalid ? (
+            <Warning16Regular className="w-5 h-5 text-red-500" />
+          ) : isMultiple ? (
+            <Folder16Regular className="w-5 h-5 text-purple-500" />
+          ) : (
+            <Video16Regular className="w-5 h-5 text-purple-500" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          {isMultiple ? (
+            <>
+              <p
+                className={cn(
+                  "text-sm font-medium",
+                  filesInvalid ? "text-red-500 line-through" : "text-foreground",
+                )}
+              >
+                {filePaths.length} 个视频
+                {filesInvalid && (
+                  <span className="ml-1.5 text-xs font-normal">(已失效)</span>
+                )}
+              </p>
+              <p
+                className={cn(
+                  "text-xs truncate mt-0.5",
+                  filesInvalid ? "text-red-400 line-through" : "text-muted-foreground",
+                )}
+              >
+                <HighlightText
+                  text={
+                    filePaths
+                      .map((p) => getFileNameFromPath(p))
+                      .slice(0, 3)
+                      .join(", ") + (filePaths.length > 3 ? "..." : "")
+                  }
+                />
+              </p>
+            </>
+          ) : (
+            <>
+              <p
+                className={cn(
+                  "text-sm font-medium truncate",
+                  filesInvalid ? "text-red-500 line-through" : "text-foreground",
+                )}
+              >
+                <HighlightText text={fileName} />
+                {filesInvalid && (
+                  <span className="ml-1.5 text-xs font-normal">(已失效)</span>
+                )}
+              </p>
+              <p
+                className={cn(
+                  "text-xs truncate mt-0.5",
+                  filesInvalid
+                    ? "text-red-400 line-through"
+                    : "text-muted-foreground",
+                )}
+              >
+                <HighlightText text={firstPath || preview || ""} />
+              </p>
+            </>
+          )}
+        </div>
+      </div>
+      <CardFooter
+        metaItems={metaItems}
+        index={index}
+        showBadge={showBadge}
+        isDragOverlay={isDragOverlay}
+        sourceAppName={sourceAppName}
+        sourceAppIcon={sourceAppIcon}
+      />
+    </div>
+  );
+});

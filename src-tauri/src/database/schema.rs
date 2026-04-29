@@ -1,19 +1,26 @@
 pub const SCHEMA_SQL: &str = r#"
--- Custom groups table (must be created before clipboard_items due to FK)
-CREATE TABLE IF NOT EXISTS groups (
+-- Tags table
+CREATE TABLE IF NOT EXISTS tags (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    color TEXT,
-    sort_order INTEGER DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Item-Tag junction table (many-to-many)
+CREATE TABLE IF NOT EXISTS item_tags (
+    item_id INTEGER NOT NULL REFERENCES clipboard_items(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (item_id, tag_id)
+);
+CREATE INDEX IF NOT EXISTS idx_item_tags_tag ON item_tags(tag_id);
+
 -- Clipboard items table
--- group_id IS NULL  => default group (ungrouped)
--- group_id = <id>  => belongs to that custom group
 CREATE TABLE IF NOT EXISTS clipboard_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    content_type TEXT NOT NULL CHECK(content_type IN ('text', 'image', 'html', 'rtf', 'files')),
+    content_type TEXT NOT NULL CHECK(content_type IN ('text', 'image', 'html', 'rtf', 'files', 'video')),
     text_content TEXT,
     html_content TEXT,
     rtf_content TEXT,
@@ -35,7 +42,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     char_count INTEGER,
     source_app_name TEXT,
     source_app_icon TEXT,
-    group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
+    files_valid INTEGER DEFAULT 1
 );
 
 -- Settings table
@@ -58,14 +65,10 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_a
 CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_items(is_favorite) WHERE is_favorite = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_items(content_type);
--- Per-group hash index: duplicates are allowed when dedup strategy is "always_new"
-CREATE INDEX IF NOT EXISTS idx_clipboard_hash_default ON clipboard_items(content_hash) WHERE group_id IS NULL;
-CREATE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
-CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_items(content_hash);
+CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash ON clipboard_items(semantic_hash);
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
-CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES
@@ -91,6 +94,7 @@ pub enum ContentType {
     Html,
     Rtf,
     Files,
+    Video,
 }
 
 impl ContentType {
@@ -101,6 +105,7 @@ impl ContentType {
             ContentType::Html => "html",
             ContentType::Rtf => "rtf",
             ContentType::Files => "files",
+            ContentType::Video => "video",
         }
     }
 

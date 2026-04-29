@@ -131,9 +131,7 @@ fn get_monitor_at_cursor(
     Ok(MonitorInfo { x: 0, y: 0, width: 1920, height: 1080 })
 }
 
-const GAP: i32 = 12;
-
-/// 跟随光标：优先右下方，X 轴溢出翻转，Y 轴溢出钳位
+/// 跟随光标：以光标为中心显示窗口，边缘钳位确保不超出显示器
 fn calc_follow_cursor(
     cx: i32,
     cy: i32,
@@ -142,11 +140,11 @@ fn calc_follow_cursor(
 ) -> PhysicalPosition<i32> {
     let (w, h) = (window_size.width as i32, window_size.height as i32);
 
-    let mut x = cx + GAP;
-    let y = cy + GAP;
+    // 以光标为中心
+    let x = cx - w / 2;
+    let y = cy - h / 2;
 
-    if x + w > m.x + m.width { x = cx - w - GAP; }
-
+    // 钳位到显示器范围内
     let x = x.max(m.x).min(m.x + m.width - w);
     let y = y.max(m.y).min(m.y + m.height - h);
 

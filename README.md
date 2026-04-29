@@ -61,7 +61,7 @@
 - **低占用** - 托盘常驻，不打扰核心工作流，窗口不抢占焦点，仅可见时启用监控
 - **高性能** - 优化的 LIKE 搜索（兼容 CJK 文本）、虚拟列表处理万级记录、异步图像处理、内容哈希去重
 - **现代化** - Tauri 2.0 + React 19 + Tailwind CSS 4，类型安全，优雅架构
-- **本地化离线** - 数据完全本地存储，无网络请求，无云同步，隐私至上
+- **本地优先** - 数据默认本地存储，可选 WebDAV 云端同步，隐私至上
 
 ## 功能特性
 
@@ -109,6 +109,7 @@
 | **窗口特效** | window-vibrancy（Mica/Acrylic/Tabbed） |
 | **键盘模拟** | enigo |
 | **输入监控** | Win32 LL Hook（WH_MOUSE_LL + WH_KEYBOARD_LL，仅窗口可见时启用键盘钩子） |
+| **云同步** | WebDAV（reqwest + base64） |
 | **自动更新** | 基于 GitHub Release 的检查与下载（支持系统代理） |
 | **CI/CD** | GitHub Actions（CI + Tag 触发 Release） |
 

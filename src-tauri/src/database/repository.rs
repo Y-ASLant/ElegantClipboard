@@ -31,8 +31,8 @@ pub struct ClipboardItem {
     pub char_count: Option<i64>,
     pub source_app_name: Option<String>,
     pub source_app_icon: Option<String>,
-    /// 文件是否有效（查询时计算，不存储）
-    #[serde(default, skip_deserializing)]
+    /// 文件是否存在（仅 files 类型，持久化到数据库）
+    #[serde(default)]
     pub files_valid: Option<bool>,
 }
 
@@ -53,8 +53,6 @@ pub struct NewClipboardItem {
     pub char_count: Option<i64>,
     pub source_app_name: Option<String>,
     pub source_app_icon: Option<String>,
-    /// None = 默认分组，Some(id) = 自定义分组
-    pub group_id: Option<i64>,
 }
 
 impl Default for NewClipboardItem {
@@ -75,7 +73,6 @@ impl Default for NewClipboardItem {
             char_count: None,
             source_app_name: None,
             source_app_icon: None,
-            group_id: None,
         }
     }
 }
@@ -86,16 +83,17 @@ pub struct QueryOptions {
     pub content_type: Option<String>,
     pub pinned_only: bool,
     pub favorite_only: bool,
-    pub group_id: Option<i64>,
+    pub tag_id: Option<i64>,
+    pub exclude_favorited: bool,
+    pub exclude_tagged: bool,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Group {
+pub struct Tag {
     pub id: i64,
     pub name: String,
-    pub color: Option<String>,
     pub sort_order: i64,
     pub created_at: String,
     pub item_count: i64,
@@ -150,8 +148,8 @@ impl ClipboardRepository {
             "INSERT INTO clipboard_items 
              (content_type, text_content, html_content, rtf_content, image_path, file_paths, 
               content_hash, semantic_hash, preview, byte_size, image_width, image_height, sort_order, 
-              char_count, source_app_name, source_app_icon, group_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+              char_count, source_app_name, source_app_icon)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 item.content_type.as_str(),
                 item.text_content,
@@ -169,77 +167,62 @@ impl ClipboardRepository {
                 item.char_count,
                 item.source_app_name,
                 item.source_app_icon,
-                item.group_id,
             ],
         )?;
 
         let id = conn.last_insert_rowid();
         debug!(
-            "Inserted clipboard item with id: {}, sort_order: {}, group_id: {:?}",
-            id, new_sort_order, item.group_id
+            "Inserted clipboard item with id: {}, sort_order: {}",
+            id, new_sort_order
         );
         Ok(id)
     }
 
-    pub fn exists_by_hash(&self, hash: &str, group_id: Option<i64>) -> Result<bool, rusqlite::Error> {
-        self.exists_by_column(HashColumn::Content, hash, group_id)
+    pub fn exists_by_hash(&self, hash: &str) -> Result<bool, rusqlite::Error> {
+        self.exists_by_column(HashColumn::Content, hash)
     }
 
     pub fn exists_by_semantic_hash(
         &self,
         hash: &str,
-        group_id: Option<i64>,
     ) -> Result<bool, rusqlite::Error> {
-        self.exists_by_column(HashColumn::Semantic, hash, group_id)
+        self.exists_by_column(HashColumn::Semantic, hash)
     }
 
     fn exists_by_column(
         &self,
         column: HashColumn,
         hash: &str,
-        group_id: Option<i64>,
     ) -> Result<bool, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let column = column.as_sql();
-        let count: i64 = match group_id {
-            Some(gid) => conn.query_row(
-                &format!(
-                    "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1 AND group_id = ?2",
-                    column
-                ),
-                params![hash, gid],
-                |row| row.get(0),
-            )?,
-            None => conn.query_row(
-                &format!(
-                    "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1 AND group_id IS NULL",
-                    column
-                ),
-                params![hash],
-                |row| row.get(0),
-            )?,
-        };
+        let count: i64 = conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1",
+                column
+            ),
+            params![hash],
+            |row| row.get(0),
+        )?;
         Ok(count > 0)
     }
 
     /// 更新已有条目的访问时间并置顶
-    pub fn touch_by_hash(&self, hash: &str, group_id: Option<i64>) -> Result<Option<i64>, rusqlite::Error> {
-        self.touch_by_column(HashColumn::Content, hash, group_id)
+    pub fn touch_by_hash(&self, hash: &str) -> Result<Option<i64>, rusqlite::Error> {
+        self.touch_by_column(HashColumn::Content, hash)
     }
 
     pub fn touch_by_semantic_hash(
         &self,
         hash: &str,
-        group_id: Option<i64>,
     ) -> Result<Option<i64>, rusqlite::Error> {
-        self.touch_by_column(HashColumn::Semantic, hash, group_id)
+        self.touch_by_column(HashColumn::Semantic, hash)
     }
 
     fn touch_by_column(
         &self,
         column: HashColumn,
         hash: &str,
-        group_id: Option<i64>,
     ) -> Result<Option<i64>, rusqlite::Error> {
         let conn = self.write_conn.lock();
 
@@ -252,22 +235,17 @@ impl ClipboardRepository {
             .unwrap_or(0);
         let new_sort = max_sort_order + 1;
 
-        let (group_cond, group_param) = Self::group_condition(group_id);
         let column = column.as_sql();
         let select_sql = format!(
             "SELECT id FROM clipboard_items \
-             WHERE {} = ? AND {} \
+             WHERE {} = ? \
              ORDER BY sort_order DESC, created_at DESC, id DESC \
              LIMIT 1",
-            column,
-            group_cond
+            column
         );
 
-        let target_id: Result<i64, _> = if let Some(gid) = group_param {
-            conn.query_row(&select_sql, params![hash, gid], |row| row.get(0))
-        } else {
-            conn.query_row(&select_sql, params![hash], |row| row.get(0))
-        };
+        let target_id: Result<i64, _> =
+            conn.query_row(&select_sql, params![hash], |row| row.get(0));
 
         match target_id {
             Ok(id) => {
@@ -304,21 +282,15 @@ impl ClipboardRepository {
     }
 
     /// 按默认排序位置获取完整条目（含文本内容），供快速粘贴使用。
-    pub fn get_by_position(&self, index: usize, group_id: Option<i64>) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+    pub fn get_by_position(&self, index: usize) -> Result<Option<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        let sql = format!(
+        let result = conn.query_row(
             "SELECT * FROM clipboard_items \
-             WHERE {} \
              ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
              LIMIT 1 OFFSET ?",
-            group_cond
+            params![index as i64],
+            Self::row_to_item,
         );
-        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
-            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
-        } else {
-            conn.query_row(&sql, params![index as i64], Self::row_to_item)
-        };
 
         match result {
             Ok(item) => Ok(Some(item)),
@@ -328,21 +300,16 @@ impl ClipboardRepository {
     }
 
     /// 按收藏列表位置获取完整条目，供收藏快速粘贴使用。
-    pub fn get_favorite_by_position(&self, index: usize, group_id: Option<i64>) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+    pub fn get_favorite_by_position(&self, index: usize) -> Result<Option<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        let sql = format!(
+        let result = conn.query_row(
             "SELECT * FROM clipboard_items \
-             WHERE {} AND is_favorite = 1 \
+             WHERE is_favorite = 1 \
              ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
              LIMIT 1 OFFSET ?",
-            group_cond
+            params![index as i64],
+            Self::row_to_item,
         );
-        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
-            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
-        } else {
-            conn.query_row(&sql, params![index as i64], Self::row_to_item)
-        };
 
         match result {
             Ok(item) => Ok(Some(item)),
@@ -356,16 +323,16 @@ impl ClipboardRepository {
         "id, content_type, NULL AS text_content, NULL AS html_content, NULL AS rtf_content, \
          image_path, file_paths, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
          is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
-         source_app_name, source_app_icon";
+         source_app_name, source_app_icon, files_valid";
 
     /// 搜索查询列（含 text_content 用于关键词上下文预览）
     const SEARCH_COLUMNS: &'static str =
         "id, content_type, text_content, NULL AS html_content, NULL AS rtf_content, \
          image_path, file_paths, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
          is_pinned, is_favorite, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
-         source_app_name, source_app_icon";
+         source_app_name, source_app_icon, files_valid";
 
-    /// 构建通用的 WHERE 条件（content_type / pinned_only / favorite_only / search）
+    /// 构建通用的 WHERE 条件（content_type / pinned_only / favorite_only / search / tag_id）
     fn build_filter_conditions(
         options: &QueryOptions,
     ) -> (Vec<String>, Vec<Box<dyn rusqlite::ToSql>>) {
@@ -405,22 +372,25 @@ impl ClipboardRepository {
             conditions.push("is_favorite = 1".to_string());
         }
 
-        // 分组过滤：None = 默认分组（group_id IS NULL），Some(id) = 自定义分组
-        let (group_cond, group_param) = Self::group_condition(options.group_id);
-        conditions.push(group_cond.to_string());
-        if let Some(gid) = group_param {
-            params_vec.push(Box::new(gid));
+        // 标签过滤：通过 item_tags 关联表筛选
+        if let Some(tag_id) = options.tag_id {
+            conditions.push(
+                "id IN (SELECT item_id FROM item_tags WHERE tag_id = ?)".to_string(),
+            );
+            params_vec.push(Box::new(tag_id));
+        }
+
+        // 排除已收藏条目（主页隐藏已收藏）
+        if options.exclude_favorited {
+            conditions.push("is_favorite = 0".to_string());
+        }
+
+        // 排除有标签的条目（主页隐藏已标记）
+        if options.exclude_tagged {
+            conditions.push("id NOT IN (SELECT item_id FROM item_tags)".to_string());
         }
 
         (conditions, params_vec)
-    }
-
-    /// 将 group_id 转换为 SQL 条件片段和可选参数
-    fn group_condition(group_id: Option<i64>) -> (&'static str, Option<i64>) {
-        match group_id {
-            Some(gid) => ("group_id = ?", Some(gid)),
-            None      => ("group_id IS NULL", None),
-        }
     }
 
     /// 将 content_type（支持逗号分隔）转换为 SQL 条件并追加参数。
@@ -474,12 +444,55 @@ impl ClipboardRepository {
             Self::LIST_COLUMNS
         };
 
-        let mut sql = format!("SELECT {} FROM clipboard_items", columns);
-        let (conditions, mut params_vec) = Self::build_filter_conditions(&options);
+        // 当按标签过滤时，使用 JOIN 以便按 item_tags.sort_order 排序
+        let tag_id_value = options.tag_id;
+        let mut opts_for_filter = options.clone();
+        if tag_id_value.is_some() {
+            opts_for_filter.tag_id = None; // 避免 build_filter_conditions 产生子查询
+        }
+
+        // 当按标签过滤时，需要给列名加表前缀以避免歧义
+        let prefixed_columns;
+        let select_columns = if tag_id_value.is_some() {
+            prefixed_columns = columns
+                .split(", ")
+                .map(|col| {
+                    if col.starts_with("NULL ") || col.contains(" AS ") {
+                        col.to_string()
+                    } else {
+                        format!("clipboard_items.{}", col)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            prefixed_columns.as_str()
+        } else {
+            columns
+        };
+
+        let mut sql = format!("SELECT {} FROM clipboard_items", select_columns);
+        if tag_id_value.is_some() {
+            sql.push_str(
+                " INNER JOIN item_tags ON item_tags.item_id = clipboard_items.id AND item_tags.tag_id = ?"
+            );
+        }
+
+        let (conditions, mut params_vec) = Self::build_filter_conditions(&opts_for_filter);
+
+        // JOIN 参数需要插在 WHERE 参数之前
+        if let Some(tid) = tag_id_value {
+            params_vec.insert(0, Box::new(tid));
+        }
+
         Self::append_where(&mut sql, &conditions);
 
-        // 排序：置顶优先 → sort_order 降序 → 时间降序
-        sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
+        if tag_id_value.is_some() {
+            // 标签视图：按 item_tags.sort_order 升序，再按时间降序
+            sql.push_str(" ORDER BY item_tags.sort_order ASC, clipboard_items.created_at DESC");
+        } else {
+            // 排序：置顶优先 → sort_order 降序 → 时间降序
+            sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
+        }
 
         if let Some(limit) = options.limit {
             sql.push_str(" LIMIT ? OFFSET ?");
@@ -543,6 +556,16 @@ impl ClipboardRepository {
         Ok(favorite)
     }
 
+    /// 统计引用同一 image_path 的其他条目数量（排除指定 id）
+    pub fn count_image_path_refs(&self, image_path: &str, exclude_id: i64) -> Result<i64, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE image_path = ?1 AND id != ?2",
+            params![image_path, exclude_id],
+            |row| row.get(0),
+        )
+    }
+
     pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
         conn.execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
@@ -579,10 +602,9 @@ impl ClipboardRepository {
         Ok((deleted, paths))
     }
 
-    /// 获取可清除条目的图片路径（按分组/类型过滤）
+    /// 获取可清除条目的图片路径（按类型过滤）
     pub fn get_clearable_image_paths(
         &self,
-        group_id: Option<i64>,
         content_type: Option<&str>,
     ) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
@@ -590,13 +612,9 @@ impl ClipboardRepository {
             "is_pinned = 0".to_string(),
             "is_favorite = 0".to_string(),
             "image_path IS NOT NULL".to_string(),
+            "id NOT IN (SELECT item_id FROM item_tags)".to_string(),
         ];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        conditions.push(group_cond.to_string());
-        if let Some(gid) = group_param {
-            params_vec.push(Box::new(gid));
-        }
         Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
         let mut sql = "SELECT image_path FROM clipboard_items".to_string();
         Self::append_where(&mut sql, &conditions);
@@ -609,23 +627,18 @@ impl ClipboardRepository {
         Ok(paths)
     }
 
-    /// 清空历史（保留置顶和收藏），按分组/类型过滤
+    /// 清空历史（保留置顶、收藏和有标签的条目），按类型过滤
     pub fn clear_history(
         &self,
-        group_id: Option<i64>,
         content_type: Option<&str>,
     ) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
         let mut conditions: Vec<String> = vec![
             "is_pinned = 0".to_string(),
             "is_favorite = 0".to_string(),
+            "id NOT IN (SELECT item_id FROM item_tags)".to_string(),
         ];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        conditions.push(group_cond.to_string());
-        if let Some(gid) = group_param {
-            params_vec.push(Box::new(gid));
-        }
         Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
         let mut sql = "DELETE FROM clipboard_items".to_string();
         Self::append_where(&mut sql, &conditions);
@@ -647,84 +660,66 @@ impl ClipboardRepository {
         Ok(paths)
     }
 
-    /// »ñÈ¡Ö¸¶¨·Ö×éÄÚËùÓÐÌõÄ¿µÄÍ¼Æ¬Â·¾¶£¨°üÀ¨ÖÃ¶¥ºÍÊÕ²Ø£©
-    pub fn get_image_paths_by_group(&self, group_id: i64) -> Result<Vec<String>, rusqlite::Error> {
+    /// 获取所有条目的图标路径（含置顶和收藏）
+    pub fn get_all_icon_paths(&self) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT image_path FROM clipboard_items \
-             WHERE image_path IS NOT NULL AND group_id = ?1",
+            "SELECT DISTINCT source_app_icon FROM clipboard_items WHERE source_app_icon IS NOT NULL",
         )?;
         let paths = stmt
-            .query_map(params![group_id], |row| row.get::<_, String>(0))?
+            .query_map([], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
         Ok(paths)
     }
 
-    /// 清空所有历史（包括置顶和收藏）
+    /// 清空所有历史（包括置顶和收藏），同时删除所有标签数据
     pub fn clear_all(&self) -> Result<i64, rusqlite::Error> {
         let conn = self.write_conn.lock();
+        conn.execute("DELETE FROM item_tags", [])?;
+        conn.execute("DELETE FROM tags", [])?;
         let deleted = conn.execute("DELETE FROM clipboard_items", [])?;
         Ok(deleted as i64)
     }
 
-    /// 删除 N 天前的非置顶/非收藏条目（按分组），返回 (删除数, 关联图片路径)
-    pub fn delete_older_than(&self, days: i64, group_id: Option<i64>) -> Result<(i64, Vec<String>), rusqlite::Error> {
+    /// 删除 N 天前的非置顶/非收藏条目，返回 (删除数, 关联图片路径)
+    pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
 
-        let select_sql = format!(
+        let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items \
              WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL \
-             AND {} \
              AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
-            group_cond
-        );
-        let delete_sql = format!(
-            "DELETE FROM clipboard_items \
-             WHERE is_pinned = 0 AND is_favorite = 0 \
-             AND {} \
-             AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
-            group_cond
-        );
-
-        let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { select_params.push(Box::new(gid)); }
-        select_params.push(Box::new(days));
-        let select_refs: Vec<&dyn rusqlite::ToSql> = select_params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&select_sql)?;
+        )?;
         let image_paths: Vec<String> = stmt
-            .query_map(select_refs.as_slice(), |row| row.get::<_, String>(0))?
+            .query_map(params![days], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
 
-        let mut delete_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { delete_params.push(Box::new(gid)); }
-        delete_params.push(Box::new(days));
-        let delete_refs: Vec<&dyn rusqlite::ToSql> = delete_params.iter().map(|p| p.as_ref()).collect();
-        let deleted = conn.execute(&delete_sql, delete_refs.as_slice())?;
+        let deleted = conn.execute(
+            "DELETE FROM clipboard_items \
+             WHERE is_pinned = 0 AND is_favorite = 0 \
+             AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
+            params![days],
+        )?;
 
-        debug!("Auto-cleanup: deleted {} items older than {} days (group: {:?})", deleted, days, group_id);
+        debug!("Auto-cleanup: deleted {} items older than {} days", deleted, days);
         Ok((deleted as i64, image_paths))
     }
 
-    /// 执行最大数量限制（按分组），返回 (删除数, 图片路径)
-    pub fn enforce_max_count(&self, max_count: i64, group_id: Option<i64>) -> Result<(i64, Vec<String>), rusqlite::Error> {
+    /// 执行最大数量限制，返回 (删除数, 图片路径)
+    pub fn enforce_max_count(&self, max_count: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         if max_count <= 0 {
             return Ok((0, vec![]));
         }
 
         let conn = self.write_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
 
-        let count_sql = format!(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {}",
-            group_cond
-        );
-        let mut count_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { count_params.push(Box::new(gid)); }
-        let count_refs: Vec<&dyn rusqlite::ToSql> = count_params.iter().map(|p| p.as_ref()).collect();
-        let current_count: i64 = conn.query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))?;
+        let current_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
+            [],
+            |row| row.get(0),
+        )?;
 
         if current_count <= max_count {
             return Ok((0, vec![]));
@@ -732,38 +727,26 @@ impl ClipboardRepository {
 
         let to_delete = current_count - max_count;
 
-        let select_sql = format!(
+        let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items \
-             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL AND {} \
+             WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL \
              ORDER BY created_at ASC LIMIT ?",
-            group_cond
-        );
-        let delete_sql = format!(
-            "DELETE FROM clipboard_items WHERE id IN (\
-                SELECT id FROM clipboard_items \
-                WHERE is_pinned = 0 AND is_favorite = 0 AND {} \
-                ORDER BY created_at ASC LIMIT ?\
-             )",
-            group_cond
-        );
-
-        let mut select_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { select_params.push(Box::new(gid)); }
-        select_params.push(Box::new(to_delete));
-        let select_refs: Vec<&dyn rusqlite::ToSql> = select_params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&select_sql)?;
+        )?;
         let image_paths: Vec<String> = stmt
-            .query_map(select_refs.as_slice(), |row| row.get::<_, String>(0))?
+            .query_map(params![to_delete], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok())
             .collect();
 
-        let mut delete_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-        if let Some(gid) = group_param { delete_params.push(Box::new(gid)); }
-        delete_params.push(Box::new(to_delete));
-        let delete_refs: Vec<&dyn rusqlite::ToSql> = delete_params.iter().map(|p| p.as_ref()).collect();
-        let deleted = conn.execute(&delete_sql, delete_refs.as_slice())?;
+        let deleted = conn.execute(
+            "DELETE FROM clipboard_items WHERE id IN (\
+                SELECT id FROM clipboard_items \
+                WHERE is_pinned = 0 AND is_favorite = 0 \
+                ORDER BY created_at ASC LIMIT ?\
+             )",
+            params![to_delete],
+        )?;
 
-        debug!("Enforced max count: deleted {} oldest items (group: {:?})", deleted, group_id);
+        debug!("Enforced max count: deleted {} oldest items", deleted);
         Ok((deleted as i64, image_paths))
     }
 
@@ -880,8 +863,171 @@ impl ClipboardRepository {
             char_count: row.get("char_count")?,
             source_app_name: row.get("source_app_name")?,
             source_app_icon: row.get("source_app_icon")?,
-            files_valid: None, // 查询时计算
+            files_valid: row.get("files_valid")?
         })
+    }
+
+    /// 查询符合同步条件的条目（按类型过滤 + 大小限制）
+    pub fn query_items_for_sync(
+        &self,
+        type_filter_sql: &str,
+        max_byte_size: i64,
+    ) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let sql = format!(
+            "SELECT * FROM clipboard_items WHERE content_type IN ({}) AND byte_size <= ?1 ORDER BY created_at DESC",
+            type_filter_sql
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let items = stmt
+            .query_map(params![max_byte_size], Self::row_to_item)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(items)
+    }
+
+    /// 查询所有 files 类型条目的 (id, file_paths, current_files_valid)
+    pub fn get_file_items_for_validity_check(&self) -> Result<Vec<(i64, String, Option<bool>)>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, file_paths, files_valid FROM clipboard_items WHERE content_type IN ('files', 'video') AND file_paths IS NOT NULL"
+        )?;
+        let items = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<bool>>(2)?))
+        })?.filter_map(|r| r.ok()).collect();
+        Ok(items)
+    }
+
+    /// 批量更新 files_valid，仅更新实际变化的行，返回变化数
+    pub fn batch_update_files_valid(&self, updates: &[(i64, bool)]) -> Result<usize, rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let mut stmt = conn.prepare_cached(
+            "UPDATE clipboard_items SET files_valid = ?1 WHERE id = ?2 AND (files_valid IS NULL OR files_valid != ?1)"
+        )?;
+        let mut changed = 0usize;
+        for &(id, valid) in updates {
+            if stmt.execute(params![valid, id])? > 0 {
+                changed += 1;
+            }
+        }
+        Ok(changed)
+    }
+
+    /// 获取所有已失效的 files 类型条目的 file_paths（用于同步过滤）
+    pub fn get_invalid_file_paths_set(&self) -> std::collections::HashSet<String> {
+        let conn = self.read_conn.lock();
+        let mut set = std::collections::HashSet::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT file_paths FROM clipboard_items WHERE content_type IN ('files', 'video') AND files_valid = 0 AND file_paths IS NOT NULL"
+        ) {
+            if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                for row in rows.flatten() {
+                    let paths: Vec<String> = serde_json::from_str(&row).unwrap_or_default();
+                    for p in paths {
+                        set.insert(p);
+                    }
+                }
+            }
+        }
+        set
+    }
+
+    /// 查询所有 files 类型条目的 (file_paths, files_valid)，用于数据大小统计（含失效状态）
+    pub fn get_files_stats_with_validity(&self) -> Result<Vec<(String, Option<bool>)>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT file_paths, files_valid FROM clipboard_items WHERE content_type IN ('files', 'video') AND file_paths IS NOT NULL"
+        )?;
+        let items = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<bool>>(1)?))
+        })?.filter_map(|r| r.ok()).collect();
+        Ok(items)
+    }
+
+    /// 查询所有 files/video 类型条目的 (content_type, file_paths, files_valid)，用于导出
+    pub fn get_file_items_for_export(&self) -> Result<Vec<(String, String, Option<bool>)>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT content_type, file_paths, files_valid FROM clipboard_items WHERE content_type IN ('files', 'video') AND file_paths IS NOT NULL"
+        )?;
+        let items = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<bool>>(2)?))
+        })?.filter_map(|r| r.ok()).collect();
+        Ok(items)
+    }
+
+    /// 导入同步条目（基于 content_hash 去重，已存在则跳过）
+    pub fn import_sync_items(&self, items: &[ClipboardItem]) -> Result<usize, rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let mut count = 0usize;
+
+        let max_sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let total = items.len() as i64;
+        for (i, item) in items.iter().enumerate() {
+            // 跳过已存在的条目
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM clipboard_items WHERE content_hash = ?1",
+                    params![item.content_hash],
+                    |row| row.get(0),
+                )
+                .unwrap_or(true);
+
+            if exists {
+                // 远端标记失效时，同步更新本地的 files_valid 状态
+                if (item.content_type == "files" || item.content_type == "video") && item.files_valid == Some(false) {
+                    let _ = conn.execute(
+                        "UPDATE clipboard_items SET files_valid = 0 WHERE content_hash = ?1 AND (files_valid IS NULL OR files_valid != 0)",
+                        params![item.content_hash],
+                    );
+                }
+                continue;
+            }
+
+            conn.execute(
+                "INSERT INTO clipboard_items
+                 (content_type, text_content, html_content, rtf_content, image_path, file_paths,
+                  content_hash, semantic_hash, preview, byte_size, image_width, image_height,
+                  is_pinned, is_favorite, sort_order, created_at, updated_at,
+                  access_count, last_accessed_at, char_count, source_app_name, source_app_icon, files_valid)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                params![
+                    item.content_type,
+                    item.text_content,
+                    item.html_content,
+                    item.rtf_content,
+                    item.image_path,
+                    item.file_paths,
+                    item.content_hash,
+                    item.semantic_hash,
+                    item.preview,
+                    item.byte_size,
+                    item.image_width,
+                    item.image_height,
+                    item.is_pinned,
+                    item.is_favorite,
+                    max_sort_order + total - i as i64,
+                    item.created_at,
+                    item.updated_at,
+                    item.access_count,
+                    item.last_accessed_at,
+                    item.char_count,
+                    item.source_app_name,
+                    item.source_app_icon,
+                    item.files_valid,
+                ],
+            )?;
+            count += 1;
+        }
+
+        Ok(count)
     }
 }
 
@@ -943,13 +1089,13 @@ impl SettingsRepository {
     }
 }
 
-/// 自定义分组仓库
-pub struct GroupRepository {
+/// 标签仓库
+pub struct TagRepository {
     write_conn: Arc<Mutex<Connection>>,
     read_conn: Arc<Mutex<Connection>>,
 }
 
-impl GroupRepository {
+impl TagRepository {
     pub fn new(db: &Database) -> Self {
         Self {
             write_conn: db.write_connection(),
@@ -957,110 +1103,282 @@ impl GroupRepository {
         }
     }
 
-    /// 列出所有分组（含每个分组的条目数）
-    pub fn list_with_count(&self) -> Result<Vec<Group>, rusqlite::Error> {
+    /// 列出所有标签（含每个标签的条目数）
+    pub fn list_with_count(&self) -> Result<Vec<Tag>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT g.id, g.name, g.color, g.sort_order, g.created_at, \
-             COUNT(ci.id) AS item_count \
-             FROM groups g \
-             LEFT JOIN clipboard_items ci ON ci.group_id = g.id \
-             GROUP BY g.id \
-             ORDER BY g.sort_order ASC, g.created_at ASC",
+            "SELECT t.id, t.name, t.sort_order, t.created_at, \
+             COUNT(it.item_id) AS item_count \
+             FROM tags t \
+             LEFT JOIN item_tags it ON it.tag_id = t.id \
+             GROUP BY t.id \
+             ORDER BY t.sort_order ASC, t.created_at ASC",
         )?;
-        let groups = stmt
+        let tags = stmt
             .query_map([], |row| {
-                Ok(Group {
+                Ok(Tag {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    color: row.get(2)?,
-                    sort_order: row.get(3)?,
-                    created_at: row.get(4)?,
-                    item_count: row.get(5)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                    item_count: row.get(4)?,
                 })
             })?
             .filter_map(|r| r.ok())
             .collect();
-        Ok(groups)
+        Ok(tags)
     }
 
-    /// 创建新分组，返回完整分组对象
-    pub fn create(&self, name: &str, color: Option<&str>) -> Result<Group, rusqlite::Error> {
+    /// 创建新标签，返回完整标签对象
+    pub fn create(&self, name: &str) -> Result<Tag, rusqlite::Error> {
         let conn = self.write_conn.lock();
-        let max_sort: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(sort_order), -1) FROM groups",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(-1);
+        // Get next sort_order
+        let max_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM tags",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        let sort_order = max_order + 1;
         conn.execute(
-            "INSERT INTO groups (name, color, sort_order) VALUES (?1, ?2, ?3)",
-            params![name, color, max_sort + 1],
+            "INSERT INTO tags (name, sort_order) VALUES (?1, ?2)",
+            params![name, sort_order],
         )?;
         let id = conn.last_insert_rowid();
-        let group = conn.query_row(
-            "SELECT g.id, g.name, g.color, g.sort_order, g.created_at, 0 AS item_count FROM groups g WHERE g.id = ?1",
+        let tag = conn.query_row(
+            "SELECT id, name, sort_order, created_at FROM tags WHERE id = ?1",
             params![id],
-            |row| Ok(Group {
+            |row| Ok(Tag {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                color: row.get(2)?,
-                sort_order: row.get(3)?,
-                created_at: row.get(4)?,
-                item_count: row.get(5)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                item_count: 0,
             }),
         )?;
-        debug!("Created group: id={}, name={}", id, name);
-        Ok(group)
+        debug!("Created tag: id={}, name={}", id, name);
+        Ok(tag)
     }
 
-    /// 重命名分组
+    /// 重命名标签
     pub fn rename(&self, id: i64, name: &str) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
         conn.execute(
-            "UPDATE groups SET name = ?1 WHERE id = ?2",
+            "UPDATE tags SET name = ?1 WHERE id = ?2",
             params![name, id],
         )?;
-        debug!("Renamed group {} to {}", id, name);
+        debug!("Renamed tag {} to {}", id, name);
         Ok(())
     }
 
-    /// 更新分组颜色
-    pub fn update_color(&self, id: i64, color: Option<&str>) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute(
-            "UPDATE groups SET color = ?1 WHERE id = ?2",
-            params![color, id],
-        )?;
-        debug!("Updated color of group {} to {:?}", id, color);
-        Ok(())
-    }
-
-    /// 删除分组（ON DELETE CASCADE 自动删除该分组的所有 clipboard_items）
+    /// 删除标签（item_tags 中的关联通过 ON DELETE CASCADE 自动删除）
     pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
-        conn.execute("DELETE FROM groups WHERE id = ?1", params![id])?;
-        debug!("Deleted group {}", id);
+        conn.execute("DELETE FROM tags WHERE id = ?1", params![id])?;
+        debug!("Deleted tag {}", id);
         Ok(())
     }
 
-    /// 删除所有自定义分组（及其关联条目通过 ON DELETE CASCADE 一并删除）
-    pub fn delete_all(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute("DELETE FROM groups", [])?;
-        debug!("Deleted all groups");
-        Ok(())
-    }
-
-    /// 将条目移动到指定分组（None = 移回默认分组）
-    pub fn move_item_to_group(&self, item_id: i64, group_id: Option<i64>) -> Result<(), rusqlite::Error> {
+    /// 为条目添加标签
+    pub fn add_tag_to_item(&self, item_id: i64, tag_id: i64) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
         conn.execute(
-            "UPDATE clipboard_items SET group_id = ?1 WHERE id = ?2",
-            params![group_id, item_id],
+            "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?1, ?2)",
+            params![item_id, tag_id],
         )?;
-        debug!("Moved item {} to group {:?}", item_id, group_id);
+        debug!("Added tag {} to item {}", tag_id, item_id);
         Ok(())
     }
+
+    /// 从条目移除标签
+    pub fn remove_tag_from_item(&self, item_id: i64, tag_id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute(
+            "DELETE FROM item_tags WHERE item_id = ?1 AND tag_id = ?2",
+            params![item_id, tag_id],
+        )?;
+        debug!("Removed tag {} from item {}", tag_id, item_id);
+        Ok(())
+    }
+
+    /// 获取条目的所有标签
+    pub fn get_tags_for_item(&self, item_id: i64) -> Result<Vec<Tag>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name, t.sort_order, t.created_at, 0 AS item_count \
+             FROM tags t \
+             INNER JOIN item_tags it ON it.tag_id = t.id \
+             WHERE it.item_id = ?1 \
+             ORDER BY t.sort_order ASC",
+        )?;
+        let tags = stmt
+            .query_map(params![item_id], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                    item_count: row.get(4)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(tags)
+    }
+
+    /// 批量更新标签内条目的排序
+    pub fn reorder_tag_items(&self, tag_id: i64, item_ids: &[i64]) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let mut stmt = conn.prepare(
+            "UPDATE item_tags SET sort_order = ?1 WHERE tag_id = ?2 AND item_id = ?3",
+        )?;
+        for (i, item_id) in item_ids.iter().enumerate() {
+            stmt.execute(params![i as i64, tag_id, item_id])?;
+        }
+        debug!("Reordered {} items in tag {}", item_ids.len(), tag_id);
+        Ok(())
+    }
+
+    /// 批量更新标签排序
+    pub fn reorder_tags(&self, tag_ids: &[i64]) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let mut stmt = conn.prepare("UPDATE tags SET sort_order = ?1 WHERE id = ?2")?;
+        for (i, id) in tag_ids.iter().enumerate() {
+            stmt.execute(params![i as i64, id])?;
+        }
+        debug!("Reordered {} tags", tag_ids.len());
+        Ok(())
+    }
+
+    /// 导出标签及其条目关联（使用 content_hash 而非 item_id，以便跨设备匹配）
+    pub fn export_tags_sync_data(&self) -> Result<TagsSyncData, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+
+        // 导出所有标签
+        let mut stmt = conn.prepare(
+            "SELECT name, sort_order, created_at FROM tags ORDER BY sort_order ASC",
+        )?;
+        let tags: Vec<TagSyncEntry> = stmt
+            .query_map([], |row| {
+                Ok(TagSyncEntry {
+                    name: row.get(0)?,
+                    sort_order: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // 导出条目-标签关联（用 content_hash 标识条目，含 sort_order）
+        let mut stmt = conn.prepare(
+            "SELECT ci.content_hash, t.name, it.sort_order \
+             FROM item_tags it \
+             INNER JOIN clipboard_items ci ON ci.id = it.item_id \
+             INNER JOIN tags t ON t.id = it.tag_id",
+        )?;
+        let associations: Vec<TagAssocSyncEntry> = stmt
+            .query_map([], |row| {
+                Ok(TagAssocSyncEntry {
+                    content_hash: row.get(0)?,
+                    tag_name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(TagsSyncData { tags, associations })
+    }
+
+    /// 导入标签及其条目关联
+    pub fn import_tags_sync_data(&self, data: &TagsSyncData) -> Result<usize, rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        let mut count = 0usize;
+
+        // 导入标签（按 name 去重，已有则更新 sort_order）
+        for tag in &data.tags {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM tags WHERE name = ?1",
+                    params![tag.name],
+                    |row| row.get(0),
+                )
+                .unwrap_or(true);
+
+            if !exists {
+                conn.execute(
+                    "INSERT INTO tags (name, sort_order, created_at) VALUES (?1, ?2, ?3)",
+                    params![tag.name, tag.sort_order, tag.created_at],
+                )?;
+                count += 1;
+            } else {
+                conn.execute(
+                    "UPDATE tags SET sort_order = ?1 WHERE name = ?2",
+                    params![tag.sort_order, tag.name],
+                )?;
+            }
+        }
+
+        // 导入条目-标签关联
+        let mut assoc_count = 0usize;
+        for assoc in &data.associations {
+            // 查找本地条目 id（通过 content_hash）
+            let item_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM clipboard_items WHERE content_hash = ?1 LIMIT 1",
+                    params![assoc.content_hash],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            // 查找本地标签 id（通过 name）
+            let tag_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM tags WHERE name = ?1",
+                    params![assoc.tag_name],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            if let (Some(item_id), Some(tag_id)) = (item_id, tag_id) {
+                let inserted = conn.execute(
+                    "INSERT OR IGNORE INTO item_tags (item_id, tag_id, sort_order) VALUES (?1, ?2, ?3)",
+                    params![item_id, tag_id, assoc.sort_order],
+                )?;
+                if inserted > 0 {
+                    assoc_count += 1;
+                } else {
+                    // 已存在则更新 sort_order
+                    conn.execute(
+                        "UPDATE item_tags SET sort_order = ?1 WHERE item_id = ?2 AND tag_id = ?3",
+                        params![assoc.sort_order, item_id, tag_id],
+                    )?;
+                }
+            }
+        }
+
+        debug!("Imported {} tags, {} associations", count, assoc_count);
+        Ok(count)
+    }
+}
+
+/// 标签同步数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagsSyncData {
+    pub tags: Vec<TagSyncEntry>,
+    pub associations: Vec<TagAssocSyncEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagSyncEntry {
+    pub name: String,
+    pub sort_order: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagAssocSyncEntry {
+    pub content_hash: String,
+    pub tag_name: String,
+    #[serde(default)]
+    pub sort_order: i64,
 }

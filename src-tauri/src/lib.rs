@@ -3,6 +3,7 @@ mod clipboard;
 mod commands;
 mod config;
 mod database;
+mod game_mode;
 mod input_monitor;
 mod keyboard_hook;
 mod positioning;
@@ -10,6 +11,8 @@ mod shortcut;
 mod task_scheduler;
 mod tray;
 mod updater;
+pub(crate) mod proxy;
+mod webdav;
 mod win_v_registry;
 
 use clipboard::ClipboardMonitor;
@@ -46,7 +49,7 @@ static ACTIVE_FAVORITE_PASTE_SLOTS: std::sync::LazyLock<parking_lot::Mutex<HashS
 /// simulate_paste 释放修饰键时可能导致 OS 重新触发快捷键，用此标志拦截假触发
 static PASTE_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// 快捷键是否已被用户临时禁用（Win+V 除外）
-static SHORTCUTS_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) static SHORTCUTS_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 enum PasteKind {
@@ -96,30 +99,44 @@ fn unregister_shortcut_list(app: &tauri::AppHandle, list: &[String]) {
     }
 }
 
+/// 注销所有快捷键（Win+V 除外）
+pub(crate) fn disable_all_shortcuts(app: &tauri::AppHandle) {
+    if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
+        let _ = app.global_shortcut().unregister(sc);
+    }
+    unregister_shortcut_list(app, &CURRENT_QUICK_PASTE_SHORTCUTS.read());
+    unregister_shortcut_list(app, &CURRENT_FAVORITE_PASTE_SHORTCUTS.read());
+    commands::ocr::unregister_ocr_shortcut(app);
+    commands::translate::unregister_translate_selection_shortcut(app);
+}
+
+/// 重新注册所有快捷键（Win+V 除外）
+pub(crate) fn enable_all_shortcuts(app: &tauri::AppHandle) {
+    if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
+        let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                commands::window::toggle_window_visibility(app, true);
+            }
+        });
+    }
+    let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
+    apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
+    let fav_shortcuts = CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone();
+    apply_paste_shortcuts(app, &fav_shortcuts, PasteKind::Favorite);
+    commands::ocr::register_ocr_shortcut(app);
+    commands::translate::register_translate_selection_shortcut(app);
+}
+
 /// 临时禁用所有快捷键（Win+V 除外），返回切换后的禁用状态
 pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
     use std::sync::atomic::Ordering;
     let was = SHORTCUTS_DISABLED.fetch_xor(true, Ordering::SeqCst);
     let disabled = !was;
     if disabled {
-        if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
-            let _ = app.global_shortcut().unregister(sc);
-        }
-        unregister_shortcut_list(app, &CURRENT_QUICK_PASTE_SHORTCUTS.read());
-        unregister_shortcut_list(app, &CURRENT_FAVORITE_PASTE_SHORTCUTS.read());
+        disable_all_shortcuts(app);
         tracing::info!("All shortcuts disabled (except Win+V)");
     } else {
-        if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
-            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app);
-                }
-            });
-        }
-        let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
-        apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
-        let fav_shortcuts = CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone();
-        apply_paste_shortcuts(app, &fav_shortcuts, PasteKind::Favorite);
+        enable_all_shortcuts(app);
         tracing::info!("All shortcuts re-enabled");
     }
     disabled
@@ -368,7 +385,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app);
+                    commands::window::toggle_window_visibility(app, true);
                 }
             });
         }
@@ -378,7 +395,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     if let Err(e) = app.global_shortcut()
         .on_shortcut(winv_shortcut, |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
-                commands::window::toggle_window_visibility(app);
+                commands::window::toggle_window_visibility(app, true);
             }
         })
     {
@@ -386,7 +403,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app);
+                    commands::window::toggle_window_visibility(app, true);
                 }
             });
         }
@@ -411,7 +428,7 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
             .global_shortcut()
             .on_shortcut(shortcut, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app);
+                    commands::window::toggle_window_visibility(app, true);
                 }
             });
     }
@@ -443,7 +460,7 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
     app.global_shortcut()
         .on_shortcut(new_sc, |app, _shortcut, event| {
             if event.state == ShortcutState::Pressed {
-                commands::window::toggle_window_visibility(app);
+                commands::window::toggle_window_visibility(app, true);
             }
         })
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
@@ -540,6 +557,34 @@ fn set_favorite_paste_shortcut(app: tauri::AppHandle, slot: u8, shortcut: String
     set_paste_shortcut_inner(&app, slot, shortcut, PasteKind::Favorite)
 }
 
+#[tauri::command]
+fn set_game_mode_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = database::SettingsRepository::new(&state.db);
+    settings_repo
+        .set("game_mode_enabled", if enabled { "true" } else { "false" })
+        .map_err(|e| format!("保存游戏模式设置失败: {}", e))?;
+
+    if enabled {
+        game_mode::start(app);
+    } else {
+        game_mode::stop();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn is_game_mode_enabled(app: tauri::AppHandle) -> bool {
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = database::SettingsRepository::new(&state.db);
+    settings_repo
+        .get("game_mode_enabled")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let config = AppConfig::load();
@@ -591,11 +636,13 @@ pub fn run() {
 
             let db = Database::new(db_path).map_err(|e| e.to_string())?;
 
+            // 清理孤立的图片/图标文件（磁盘有文件但数据库无引用）
+            clipboard::cleanup_orphan_files(&db, &config.get_data_dir());
+
             let monitor = ClipboardMonitor::new();
             monitor.init(&db, images_path);
 
-            let active_group_id = monitor.active_group_id();
-            let state = Arc::new(AppState { db, monitor, active_group_id });
+            let state = Arc::new(AppState { db, monitor });
 
             let settings_repo = database::SettingsRepository::new(&state.db);
 
@@ -629,10 +676,36 @@ pub fn run() {
                 .flatten()
                 .unwrap_or_else(|| "Alt+C".to_string());
 
+            // 恢复窗口置顶状态
+            let saved_pinned = settings_repo
+                .get("window_pinned")
+                .ok()
+                .flatten()
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            if saved_pinned {
+                input_monitor::set_window_pinned(true);
+            }
+
             state.monitor.start(app.handle().clone());
             app.manage(state);
 
             let _ = tray::setup_tray(app.handle());
+
+            // 根据设置决定是否显示托盘图标
+            {
+                let show_tray = settings_repo
+                    .get("show_tray_icon")
+                    .ok()
+                    .flatten()
+                    .map(|v| v != "false")
+                    .unwrap_or(true);
+                if !show_tray {
+                    if let Some(tray) = app.tray_by_id("main-tray") {
+                        let _ = tray.set_visible(false);
+                    }
+                }
+            }
 
             *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
             let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {
@@ -646,7 +719,7 @@ pub fn run() {
                 .global_shortcut()
                 .on_shortcut(shortcut, |app, _shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        commands::window::toggle_window_visibility(app);
+                        commands::window::toggle_window_visibility(app, true);
                     }
                 });
 
@@ -654,6 +727,25 @@ pub fn run() {
                 let failures = reload_paste_shortcuts_from_settings(app.handle(), kind);
                 for (slot, err) in &failures {
                     tracing::warn!("{} {} 快捷键注册失败: {}", kind.label(), slot, err);
+                }
+            }
+
+            // 注册 OCR 快捷键
+            commands::ocr::register_ocr_shortcut(app.handle());
+
+            // 注册翻译选中文字快捷键
+            commands::translate::register_translate_selection_shortcut(app.handle());
+
+            // 启动游戏模式检测（如已启用）
+            {
+                let game_mode = settings_repo
+                    .get("game_mode_enabled")
+                    .ok()
+                    .flatten()
+                    .map(|v| v == "true")
+                    .unwrap_or(false);
+                if game_mode {
+                    game_mode::start(app.handle().clone());
                 }
             }
 
@@ -747,6 +839,15 @@ pub fn run() {
 
             #[cfg(target_os = "windows")]
             commands::settings::start_accent_color_watcher(app.handle().clone());
+
+            // 启动 WebDAV 自动同步后台线程
+            {
+                let app_state = app.state::<Arc<AppState>>();
+                webdav::start_auto_sync_task(
+                    app_state.db.clone(),
+                    config.get_data_dir(),
+                );
+            }
 
             {
                 use tauri_plugin_notification::NotificationExt;
@@ -844,6 +945,7 @@ pub fn run() {
             commands::window::enable_admin_launch,
             commands::window::disable_admin_launch,
             commands::window::is_running_as_admin,
+            commands::window::is_windows_11,
             commands::preview::is_log_to_file_enabled,
             commands::preview::set_log_to_file,
             commands::preview::get_log_file_path,
@@ -860,6 +962,8 @@ pub fn run() {
             commands::window::download_update,
             commands::window::cancel_update_download,
             commands::window::install_update,
+            set_game_mode_enabled,
+            is_game_mode_enabled,
             commands::clipboard::get_clipboard_items,
             commands::clipboard::get_clipboard_item,
             commands::clipboard::get_clipboard_count,
@@ -896,19 +1000,40 @@ pub fn run() {
             commands::settings::disable_autostart,
             commands::settings::get_system_accent_color,
             commands::settings::get_system_fonts,
+            commands::settings::set_tray_visible,
             commands::file_ops::check_files_exist,
+            commands::file_ops::refresh_files_validity,
             commands::file_ops::show_in_explorer,
             commands::file_ops::paste_as_path,
             commands::file_ops::get_file_details,
             commands::file_ops::save_file_as,
             commands::file_ops::get_data_size,
-            commands::clipboard::set_active_group,
-            commands::groups::get_groups,
-            commands::groups::create_group,
-            commands::groups::rename_group,
-            commands::groups::update_group_color,
-            commands::groups::delete_group,
-            commands::groups::move_item_to_group,
+            commands::tags::get_tags,
+            commands::tags::create_tag,
+            commands::tags::rename_tag,
+            commands::tags::delete_tag,
+            commands::tags::add_tag_to_item,
+            commands::tags::remove_tag_from_item,
+            commands::tags::get_item_tags,
+            commands::tags::reorder_tags,
+            commands::tags::reorder_tag_items,
+            commands::sync::webdav_test_connection,
+            commands::sync::webdav_upload,
+            commands::sync::webdav_download,
+            commands::translate::translate_text,
+            commands::translate::write_text_to_clipboard,
+            commands::translate::get_pending_translate_text,
+            commands::translate::open_translate_result_window,
+            commands::translate::update_translate_selection_shortcut,
+            commands::ocr::ocr_capture_screen,
+            commands::ocr::ocr_crop_region,
+            commands::ocr::ocr_recognize_baidu,
+            commands::ocr::open_ocr_screenshot_window,
+            commands::ocr::ocr_screenshot_ready,
+            commands::ocr::open_ocr_result_window,
+            commands::ocr::get_pending_ocr_text,
+            commands::ocr::update_ocr_shortcut,
+            commands::ocr::ocr_toggle_enabled,
         ])
         .run(tauri::generate_context!());
 

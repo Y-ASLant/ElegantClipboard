@@ -13,18 +13,38 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { logError } from "@/lib/logger";
+import { useUISettings } from "@/stores/ui-settings";
 
 interface AppMeta { name: string; icon: string | null }
 type RunningApp = { name: string; process: string; icon: string | null };
 
-const ALL_MONITOR_TYPES = ["text", "html", "rtf", "image", "files"] as const;
+const ALL_MONITOR_TYPES = ["text", "image", "files", "video"] as const;
 const TYPE_LABELS: Record<string, string> = {
-  text: "纯文本",
-  html: "HTML",
-  rtf: "RTF",
+  text: "文本",
   image: "图片",
   files: "文件",
+  video: "视频",
 };
+
+/** UI 类型 → 后端原始类型（文本统一包含 text、html、rtf） */
+function uiTypesToRaw(uiTypes: Set<string>): string[] {
+  const raw: string[] = [];
+  if (uiTypes.has("text")) raw.push("text", "html", "rtf");
+  if (uiTypes.has("image")) raw.push("image");
+  if (uiTypes.has("files")) raw.push("files");
+  if (uiTypes.has("video")) raw.push("video");
+  return raw;
+}
+
+/** 后端原始类型 → UI 类型 */
+function rawTypesToUI(rawTypes: Set<string>): Set<string> {
+  const ui = new Set<string>();
+  if (rawTypes.has("text") || rawTypes.has("html") || rawTypes.has("rtf")) ui.add("text");
+  if (rawTypes.has("image")) ui.add("image");
+  if (rawTypes.has("files")) ui.add("files");
+  if (rawTypes.has("video")) ui.add("video");
+  return ui;
+}
 
 export function AppFilterTab() {
   const [appFilterEnabled, setAppFilterEnabled] = useState(false);
@@ -60,7 +80,8 @@ export function AppFilterTab() {
     invoke<string | null>("get_setting", { key: "monitor_types" })
       .then((v) => {
         if (v && v.length > 0) {
-          setMonitorTypes(new Set(v.split(",").map((t) => t.trim()).filter(Boolean)));
+          const rawSet = new Set(v.split(",").map((t) => t.trim()).filter(Boolean));
+          setMonitorTypes(rawTypesToUI(rawSet));
         }
       })
       .catch((error) => {
@@ -82,18 +103,20 @@ export function AppFilterTab() {
     setMonitorTypes((prev) => {
       const next = new Set(prev);
       if (next.has(type)) {
-        // 至少保留一种类型
-        if (next.size <= 1) return prev;
+        // 确保转换后至少保留一种后端类型
         next.delete(type);
+        if (uiTypesToRaw(next).length === 0) return prev;
       } else {
         next.add(type);
       }
-      const value = Array.from(next).join(",");
+      const value = uiTypesToRaw(next).join(",");
       const rollback = new Set(prev);
       invoke("set_setting", { key: "monitor_types", value }).catch((error) => {
         logError("Failed to save monitor_types:", error);
         setMonitorTypes(rollback);
+        useUISettings.getState().setEnabledMonitorTypes(Array.from(rollback));
       });
+      useUISettings.getState().setEnabledMonitorTypes(Array.from(next));
       return next;
     });
   }, []);

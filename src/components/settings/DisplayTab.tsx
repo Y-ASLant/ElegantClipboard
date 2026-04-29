@@ -148,7 +148,8 @@ export function DisplayTab() {
     timeFormat, setTimeFormat,
     toolbarButtons, setToolbarButtons,
     showCategoryFilter, setShowCategoryFilter,
-    showDragAreaIndicator, setShowDragAreaIndicator,
+    hideFavoritedFromMain, setHideFavoritedFromMain,
+    hideTaggedFromMain, setHideTaggedFromMain,
   } = useUISettings();
   const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled;
 
@@ -231,6 +232,20 @@ export function DisplayTab() {
                 </div>
                 <Switch checked={showCategoryFilter} onCheckedChange={setShowCategoryFilter} />
               </div>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-xs">收藏后从主页隐藏</Label>
+                  <p className="text-xs text-muted-foreground">已收藏的条目不在主页显示，仅在收藏页可见</p>
+                </div>
+                <Switch checked={hideFavoritedFromMain} onCheckedChange={setHideFavoritedFromMain} />
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-xs">标记后从主页隐藏</Label>
+                  <p className="text-xs text-muted-foreground">已添加标签的条目不在主页显示，仅在标签页可见</p>
+                </div>
+                <Switch checked={hideTaggedFromMain} onCheckedChange={setHideTaggedFromMain} />
+              </div>
             </div>
           </SortableContext>
         </DndContext>
@@ -283,18 +298,6 @@ export function DisplayTab() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">显示区域提示</Label>
-              <p className="text-xs text-muted-foreground">
-                在卡片左右显示可拖拽区域，中间显示粘贴区域提示，不影响拖拽功能
-              </p>
-            </div>
-            <Switch
-              checked={showDragAreaIndicator}
-              onCheckedChange={setShowDragAreaIndicator}
-            />
-          </div>
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">

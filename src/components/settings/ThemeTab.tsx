@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Checkmark16Filled,
   Desktop16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
+import { useShallow } from "zustand/react/shallow";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
@@ -11,6 +12,34 @@ import { Switch } from "@/components/ui/switch";
 import { logError } from "@/lib/logger";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
+
+// ============ 系统字体缓存（避免每次切换选项卡重新枚举） ============
+let _cachedFonts: string[] | null = null;
+let _fontPromise: Promise<string[]> | null = null;
+
+function fetchSystemFontsOnce(): Promise<string[]> {
+  if (_cachedFonts) return Promise.resolve(_cachedFonts);
+  if (!_fontPromise) {
+    _fontPromise = invoke<string[]>("get_system_fonts")
+      .then((fonts) => { _cachedFonts = fonts; return fonts; })
+      .catch((error) => { logError("Failed to load system fonts:", error); _fontPromise = null; return []; });
+  }
+  return _fontPromise;
+}
+
+// ============ Windows 11 检测缓存 ============
+let _isWin11: boolean | null = null;
+let _win11Promise: Promise<boolean> | null = null;
+
+function checkIsWindows11Once(): Promise<boolean> {
+  if (_isWin11 !== null) return Promise.resolve(_isWin11);
+  if (!_win11Promise) {
+    _win11Promise = invoke<boolean>("is_windows_11")
+      .then((v) => { _isWin11 = v; return v; })
+      .catch(() => { _isWin11 = false; _win11Promise = null; return false; });
+  }
+  return _win11Promise;
+}
 
 const DARK_MODE_OPTIONS: { value: DarkMode; label: string }[] = [
   { value: "auto", label: "跟随系统" },
@@ -58,29 +87,45 @@ export function ThemeTab() {
     cardFont, setCardFont, cardFontSize, setCardFontSize,
     previewFont, setPreviewFont, previewFontSize, setPreviewFontSize,
     resetFontSettings,
-  } = useUISettings();
+  } = useUISettings(useShallow((s) => ({
+    colorTheme: s.colorTheme, setColorTheme: s.setColorTheme,
+    sharpCorners: s.sharpCorners, setSharpCorners: s.setSharpCorners,
+    darkMode: s.darkMode, setDarkMode: s.setDarkMode,
+    windowEffect: s.windowEffect, setWindowEffect: s.setWindowEffect,
+    customFont: s.customFont, setCustomFont: s.setCustomFont,
+    uiFontSize: s.uiFontSize, setUIFontSize: s.setUIFontSize,
+    cardFont: s.cardFont, setCardFont: s.setCardFont,
+    cardFontSize: s.cardFontSize, setCardFontSize: s.setCardFontSize,
+    previewFont: s.previewFont, setPreviewFont: s.setPreviewFont,
+    previewFontSize: s.previewFontSize, setPreviewFontSize: s.setPreviewFontSize,
+    resetFontSettings: s.resetFontSettings,
+  })));
   const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
-  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [systemFonts, setSystemFonts] = useState<string[]>(() => _cachedFonts ?? []);
+  const [isWin11, setIsWin11] = useState<boolean>(() => _isWin11 ?? true);
 
   // 强调色变化时重新渲染
   useEffect(() => subscribeAccentColor(setSystemAccentColor), []);
 
-  // 加载系统字体列表
+  // 加载系统字体列表（首次枚举后缓存，后续从 useState 初始化直接命中）
   useEffect(() => {
-    invoke<string[]>("get_system_fonts")
-      .then(setSystemFonts)
-      .catch((error) => {
-        logError("Failed to load system fonts:", error);
-      });
+    if (_cachedFonts) return;
+    fetchSystemFontsOnce().then(setSystemFonts);
   }, []);
 
-  const themes: {
+  // 检测是否为 Windows 11
+  useEffect(() => {
+    if (_isWin11 !== null) return;
+    checkIsWindows11Once().then(setIsWin11);
+  }, []);
+
+  const themes = useMemo<{
     id: ColorTheme;
     name: string;
     description: string;
     icon?: React.ComponentType<{ className?: string }>;
     getPreview: () => { primary: string; secondary: string };
-  }[] = [
+  }[]>(() => [
     {
       id: "system",
       name: "跟随系统",
@@ -124,7 +169,7 @@ export function ThemeTab() {
         secondary: "#ecfeff",
       }),
     },
-  ];
+  ], [systemAccentColor]);
 
   const activeDarkModeIndex = Math.max(
     0,
@@ -252,27 +297,34 @@ export function ThemeTab() {
             { value: "mica" as WindowEffect, label: "Mica", desc: "柔和半透明材质" },
             { value: "acrylic" as WindowEffect, label: "Acrylic", desc: "模糊透明毛玻璃" },
             { value: "tabbed" as WindowEffect, label: "Tabbed", desc: "Mica 变体，更深色调" },
-          ]).map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setWindowEffect(opt.value)}
-              className={`flex flex-col items-start p-3 rounded-md border transition-all duration-200 text-left ${
-                windowEffect === opt.value
-                  ? "border-primary bg-primary/5"
-                  : "border-transparent hover:bg-accent"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium">{opt.label}</span>
-                {windowEffect === opt.value && (
-                  <Checkmark16Filled className="w-3.5 h-3.5 text-primary" />
-                )}
-              </div>
-              <span className="text-[11px] text-muted-foreground mt-0.5">
-                {opt.desc}
-              </span>
-            </button>
-          ))}
+          ]).map((opt) => {
+            const needsWin11 = opt.value !== "none";
+            const disabled = needsWin11 && !isWin11;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => !disabled && setWindowEffect(opt.value)}
+                disabled={disabled}
+                className={`flex flex-col items-start p-3 rounded-md border transition-all duration-200 text-left ${
+                  disabled
+                    ? "opacity-50 cursor-not-allowed border-transparent"
+                    : windowEffect === opt.value
+                      ? "border-primary bg-primary/5"
+                      : "border-transparent hover:bg-accent"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium">{opt.label}</span>
+                  {!disabled && windowEffect === opt.value && (
+                    <Checkmark16Filled className="w-3.5 h-3.5 text-primary" />
+                  )}
+                </div>
+                <span className="text-[11px] text-muted-foreground mt-0.5">
+                  {disabled ? "仅支持 Windows 11" : opt.desc}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
       {/* Font Settings */}

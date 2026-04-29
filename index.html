@@ -22,6 +22,14 @@
           document.documentElement.classList.add('dark');
         }
       } catch (e) {}
+      // OCR 截图窗口: 在 React 挂载前就设置透明背景，防止白屏闪烁
+      if (location.pathname.indexOf('ocr-screenshot') !== -1) {
+        document.documentElement.style.background = 'transparent';
+        document.body && (document.body.style.background = 'transparent');
+        document.addEventListener('DOMContentLoaded', function() {
+          document.body.style.background = 'transparent';
+        });
+      }
     </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
