@@ -1,6 +1,8 @@
 import {
   Person16Regular,
   Code16Regular,
+  Star16Regular,
+  Alert16Regular,
 } from "@fluentui/react-icons";
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import { logError } from "@/lib/logger";
@@ -40,7 +42,7 @@ export function AboutTab() {
           <div className="flex items-center justify-between py-1.5">
             <div className="flex items-center gap-2">
               <Person16Regular className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">原作者</span>
+              <span className="text-sm text-muted-foreground">作者</span>
             </div>
             <span className="text-sm font-medium text-primary">ASLant</span>
           </div>
@@ -54,6 +56,36 @@ export function AboutTab() {
               className="text-sm font-medium text-primary hover:underline"
             >
               @Y-ASLant
+            </button>
+          </div>
+          <div className="flex items-center justify-between py-1.5">
+            <div className="flex items-center gap-2">
+              <Star16Regular className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">给个Star</span>
+            </div>
+            <button
+              onClick={() =>
+                openUrl("https://github.com/Y-ASLant/ElegantClipboard")
+              }
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              ElegantClipboard
+            </button>
+          </div>
+          <div className="flex items-center justify-between py-1.5">
+            <div className="flex items-center gap-2">
+              <Alert16Regular className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">反馈问题</span>
+            </div>
+            <button
+              onClick={() =>
+                openUrl(
+                  "https://github.com/Y-ASLant/ElegantClipboard/issues",
+                )
+              }
+              className="text-sm font-medium text-primary hover:underline"
+            >
+              提交Issue
             </button>
           </div>
         </div>
