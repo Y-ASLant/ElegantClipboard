@@ -1,0 +1,924 @@
+import { useState, useEffect, useCallback } from "react";
+import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular, Delete16Regular, ArrowCounterclockwise16Regular, ArrowClockwise16Regular } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { logError } from "@/lib/logger";
+
+export interface DataSettings {
+  data_path: string;
+  max_history_count: number;
+  max_content_size_kb: number;
+  max_image_size_kb: number;
+  max_file_size_kb: number;
+  max_video_size_kb: number;
+  auto_cleanup_days: number;
+}
+
+interface DataTabProps {
+  settings: DataSettings;
+  onSettingsChange: (settings: DataSettings) => void;
+}
+
+interface MigrationResult {
+  db_migrated: boolean;
+  images_migrated: boolean;
+  files_copied: number;
+  bytes_copied: number;
+  errors: string[];
+}
+
+interface DataSizeInfo {
+  db_size: number;
+  images_size: number;
+  images_count: number;
+  files_size: number;
+  files_count: number;
+  files_invalid_count: number;
+  videos_size: number;
+  videos_count: number;
+  videos_invalid_count: number;
+  total_size: number;
+}
+
+function formatDataSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+type DedupStrategy = "move_to_top" | "ignore" | "always_new";
+type TextDedupMode = "semantic" | "strict";
+
+const dedupOptions: { value: DedupStrategy; label: string; desc: string }[] = [
+  { value: "move_to_top", label: "置顶已有", desc: "将已有记录更新到最新" },
+  { value: "ignore", label: "忽略", desc: "丢弃重复内容，保留原记录" },
+  { value: "always_new", label: "总是新建", desc: "不去重，允许重复记录" },
+];
+const textDedupModeOptions: { value: TextDedupMode; label: string; desc: string }[] = [
+  { value: "semantic", label: "语义去重", desc: "忽略空白和格式差异（推荐）" },
+  { value: "strict", label: "严格去重", desc: "内容完全一致才视为重复" },
+];
+
+interface DedupStrategyCardProps {
+  strategy: DedupStrategy;
+  onChange: (value: DedupStrategy) => void | Promise<void>;
+}
+
+function DedupStrategyCard({ strategy, onChange }: DedupStrategyCardProps) {
+  const activeDedupIndex = Math.max(
+    0,
+    dedupOptions.findIndex((opt) => opt.value === strategy),
+  );
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">重复内容处理</h3>
+      <p className="text-xs text-muted-foreground mb-4">复制相同内容时的处理方式</p>
+      <div
+        role="radiogroup"
+        aria-label="重复内容处理"
+        className="relative rounded-lg border bg-muted/40 p-1"
+      >
+        <div className="relative grid grid-cols-3">
+          <div
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-1/3 rounded-md bg-primary shadow-sm will-change-transform transition-transform duration-200 ease-out"
+            style={{ transform: `translateX(${activeDedupIndex * 100}%)` }}
+          />
+          {dedupOptions.map((opt) => {
+            const isActive = strategy === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={isActive}
+                onClick={() => { void onChange(opt.value); }}
+                className={`relative z-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? "text-primary-foreground"
+                    : "text-foreground/80 hover:text-foreground"
+                }`}
+
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mt-2">
+        {dedupOptions.find((o) => o.value === strategy)?.desc}
+      </p>
+    </div>
+  );
+}
+
+
+function TextDedupModeCard({ dedupStrategy }: { dedupStrategy: DedupStrategy }) {
+  const [mode, setMode] = useState<TextDedupMode>("semantic");
+  const dedupEnabled = dedupStrategy !== "always_new";
+  const activeIndex = Math.max(
+    0,
+    textDedupModeOptions.findIndex((opt) => opt.value === mode),
+  );
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "text_dedup_mode" }).then((val) => {
+      if (val === "strict") setMode("strict");
+      else setMode("semantic");
+    }).catch((error) => {
+      logError("Failed to load text dedup mode:", error);
+    });
+  }, []);
+
+  const handleChange = async (value: TextDedupMode) => {
+    setMode(value);
+    try {
+      await invoke("set_setting", { key: "text_dedup_mode", value });
+    } catch (error) {
+      logError("Failed to save text dedup mode:", error);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-medium mb-3">文本去重模式</h3>
+      <p className="text-xs text-muted-foreground mb-4">控制文本的重复判断方式</p>
+      <div
+        role="radiogroup"
+        aria-label="文本去重模式"
+        aria-disabled={!dedupEnabled}
+        className={`relative rounded-lg border p-1 ${dedupEnabled ? "bg-muted/40" : "bg-muted/30 opacity-70"}`}
+      >
+        <div className="relative grid grid-cols-2">
+          <div
+            aria-hidden
+            className={`absolute inset-y-0 left-0 w-1/2 rounded-md shadow-sm will-change-transform transition-transform duration-200 ease-out ${dedupEnabled ? "bg-primary" : "bg-muted-foreground/25"}`}
+            style={{ transform: `translateX(${activeIndex * 100}%)` }}
+          />
+          {textDedupModeOptions.map((opt) => {
+            const isActive = mode === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="radio"
+                aria-checked={isActive}
+                disabled={!dedupEnabled}
+                onClick={() => { if (dedupEnabled) void handleChange(opt.value); }}
+                className={`relative z-1 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  !dedupEnabled
+                    ? "text-muted-foreground cursor-not-allowed"
+                    : isActive
+                    ? "text-primary-foreground"
+                    : "text-foreground/80 hover:text-foreground"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mt-2">
+        {dedupEnabled
+          ? textDedupModeOptions.find((o) => o.value === mode)?.desc
+          : "当前为“总是新建”，文本去重模式不会生效。"}
+      </p>
+    </div>
+  );
+}
+export function DataTab({ settings, onSettingsChange }: DataTabProps) {
+  const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [destHasData, setDestHasData] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [dataSize, setDataSize] = useState<DataSizeInfo | null>(() => {
+    try {
+      const cached = sessionStorage.getItem("data-size-cache");
+      return cached ? JSON.parse(cached).info : null;
+    } catch { return null; }
+  });
+  const [dataSizeTime, setDataSizeTime] = useState<string | null>(() => {
+    try {
+      const cached = sessionStorage.getItem("data-size-cache");
+      return cached ? JSON.parse(cached).time : null;
+    } catch { return null; }
+  });
+  const [dataSizeLoading, setDataSizeLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [exportImportMsg, setExportImportMsg] = useState<string | null>(null);
+  const [dedupStrategy, setDedupStrategy] = useState<DedupStrategy>("move_to_top");
+
+  // 数据清理
+  type CleanAction = "clear_history" | "reset_settings" | "reset_all";
+  const [cleanDialogAction, setCleanDialogAction] = useState<CleanAction | null>(null);
+  const [cleanLoading, setCleanLoading] = useState(false);
+  const [cleanMsg, setCleanMsg] = useState<string | null>(null);
+
+  const cleanActionConfig: Record<CleanAction, {
+    title: string;
+    description: string;
+    warning: string;
+    buttonText: string;
+    command: string;
+    needsRestart: boolean;
+  }> = {
+    clear_history: {
+      title: "清空剪贴板历史",
+      description: "删除所有剪贴板历史记录",
+      warning: "此操作将删除包括置顶和收藏在内的所有剪贴板记录，且不可恢复。",
+      buttonText: "确认清空",
+      command: "clear_all_history",
+      needsRestart: false,
+    },
+    reset_settings: {
+      title: "恢复默认配置",
+      description: "重置所有设置为默认值，保留数据内容",
+      warning: "此操作将清除所有应用设置并恢复为默认值，剪贴板数据不受影响，应用将重启。",
+      buttonText: "确认恢复",
+      command: "reset_settings",
+      needsRestart: true,
+    },
+    reset_all: {
+      title: "重置所有数据",
+      description: "删除所有数据并恢复默认设置",
+      warning: "此操作将删除所有剪贴板数据、图片文件及所有设置，恢复应用至初始状态，且不可恢复。",
+      buttonText: "确认重置",
+      command: "reset_all_data",
+      needsRestart: true,
+    },
+  };
+
+  const handleCleanAction = async () => {
+    if (!cleanDialogAction) return;
+    const config = cleanActionConfig[cleanDialogAction];
+    setCleanLoading(true);
+    setCleanMsg(null);
+    try {
+      await invoke(config.command);
+      setCleanDialogAction(null);
+      if (config.needsRestart) {
+        // 清除前端持久化设置以免重启后残留
+        localStorage.removeItem("clipboard-ui-settings");
+        sessionStorage.removeItem("data-size-cache");
+        await invoke("restart_app");
+      } else {
+        setCleanMsg("操作成功。");
+        await refreshDataSize();
+        // 通知主窗口刷新列表
+        emit("clipboard-updated").catch(() => {});
+      }
+    } catch (error) {
+      setCleanMsg(`操作失败: ${error}`);
+    } finally {
+      setCleanLoading(false);
+    }
+  };
+
+  const refreshDataSize = useCallback(async () => {
+    setDataSizeLoading(true);
+    try {
+      const changed = await invoke<number>("refresh_files_validity");
+      const info = await invoke<DataSizeInfo>("get_data_size");
+      const time = new Date().toLocaleTimeString();
+      setDataSize(info);
+      setDataSizeTime(time);
+      sessionStorage.setItem("data-size-cache", JSON.stringify({ info, time }));
+      // 文件失效状态有变化时通知主窗口刷新
+      if (changed > 0) {
+        emit("clipboard-updated").catch(() => {});
+      }
+    } catch (error) {
+      logError("Failed to refresh data size:", error);
+    }
+    setDataSizeLoading(false);
+  }, []);
+
+  // 进入页面时自动加载数据统计（无缓存时）
+  useEffect(() => {
+    if (!dataSize) {
+      refreshDataSize();
+    }
+  }, [refreshDataSize]);
+
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "dedup_strategy" })
+      .then((val) => {
+        if (val === "ignore" || val === "always_new") {
+          setDedupStrategy(val);
+        }
+      })
+      .catch((error) => {
+        logError("Failed to load dedup strategy:", error);
+      });
+  }, []);
+
+  const handleDedupStrategyChange = async (value: DedupStrategy) => {
+    setDedupStrategy(value);
+    try {
+      await invoke("set_setting", { key: "dedup_strategy", value });
+    } catch (error) {
+      logError("Failed to save dedup strategy:", error);
+    }
+  };
+
+  const selectFolder = async () => {
+    try {
+      const path = await invoke<string | null>("select_folder_for_settings");
+      if (path && path !== settings.data_path) {
+        // 检查是否有现有数据需要迁移
+        const currentPath = await invoke<string>("get_default_data_path");
+        if (currentPath && currentPath !== path) {
+          const hasData = await invoke<boolean>("check_path_has_data", { path });
+          setPendingPath(path);
+          setDestHasData(hasData);
+          setMigrationError(null);
+          setMigrationDialogOpen(true);
+        } else {
+          // 无需迁移，直接设置路径
+          await invoke("set_data_path", { path });
+          onSettingsChange({ ...settings, data_path: path });
+        }
+      }
+    } catch (error) {
+      logError("Failed to select folder:", error);
+    }
+  };
+
+  const handleMigrate = async () => {
+    if (!pendingPath) return;
+    
+    setMigrating(true);
+    setMigrationError(null);
+    
+    try {
+      const result = await invoke<MigrationResult>("migrate_data_to_path", { 
+        newPath: pendingPath 
+      });
+      
+      if (result.errors.length > 0) {
+        setMigrationError(`迁移完成但有错误: ${result.errors.join(", ")}`);
+      } else {
+        // 成功，重启应用
+        setMigrationDialogOpen(false);
+        onSettingsChange({ ...settings, data_path: pendingPath });
+        await invoke("restart_app");
+      }
+    } catch (error) {
+      setMigrationError(`迁移失败: ${error}`);
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const handleSkipMigration = async () => {
+    if (!pendingPath) return;
+    
+    try {
+      // 不删除旧位置数据：当前数据库连接未关闭，强制删除会触发 OS error 32。
+      // 旧数据留在磁盘上无害，用户可手动清理。
+      await invoke("set_data_path", { path: pendingPath });
+      onSettingsChange({ ...settings, data_path: pendingPath });
+      setMigrationDialogOpen(false);
+      // 重启以使用新路径
+      await invoke("restart_app");
+    } catch (error) {
+      setMigrationError(`设置失败: ${error}`);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    setExportImportMsg(null);
+    try {
+      const msg = await invoke<string>("export_data");
+      setExportImportMsg(msg);
+    } catch (error) {
+      const errStr = `${error}`;
+      if (!errStr.includes("取消")) {
+        setExportImportMsg(`导出失败: ${error}`);
+      }
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    setExportImportMsg(null);
+    try {
+      const msg = await invoke<string>("import_data");
+      setExportImportMsg(msg);
+      // 导入成功后重启应用
+      await invoke("restart_app");
+    } catch (error) {
+      const errStr = `${error}`;
+      if (!errStr.includes("取消")) {
+        setExportImportMsg(`导入失败: ${error}`);
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const openDataFolder = async () => {
+    try {
+      await invoke("open_data_folder");
+    } catch (error) {
+      logError("Failed to open folder:", error);
+    }
+  };
+
+  const resetToDefault = async () => {
+    try {
+      const defaultPath = await invoke<string>("get_original_default_path");
+      if (defaultPath !== settings.data_path) {
+        setPendingPath(defaultPath);
+        setMigrationError(null);
+        setMigrationDialogOpen(true);
+      }
+    } catch (error) {
+      logError("Failed to reset path:", error);
+    }
+  };
+
+  return (
+    <>
+      <div className="space-y-4">
+        {/* Data Size Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium">数据统计</h3>
+            <div className="flex items-center gap-2">
+              {dataSizeTime && (
+                <span className="text-xs text-muted-foreground">更新于 {dataSizeTime}</span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={refreshDataSize}
+                disabled={dataSizeLoading}
+                className="h-6 w-6"
+              >
+                <ArrowSync16Regular className={`w-3.5 h-3.5 ${dataSizeLoading ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground mb-3">数量为按内容去重后的唯一文件数，相同内容仅计一次</p>
+          {dataSize ? (
+            <div className="grid grid-cols-5 gap-2">
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.total_size)}</p>
+                <p className="text-xs text-muted-foreground">总大小</p>
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.db_size)}</p>
+                <p className="text-xs text-muted-foreground">数据库</p>
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.images_size)}</p>
+                <p className="text-xs text-muted-foreground">图片（{dataSize.images_count}）</p>
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.files_size)}</p>
+                <p className="text-xs text-muted-foreground">文件（{dataSize.files_count}）</p>
+                {dataSize.files_invalid_count > 0 && (
+                  <p className="text-xs text-destructive/70">失效（{dataSize.files_invalid_count}）</p>
+                )}
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.videos_size)}</p>
+                <p className="text-xs text-muted-foreground">视频（{dataSize.videos_count}）</p>
+                {dataSize.videos_invalid_count > 0 && (
+                  <p className="text-xs text-destructive/70">失效（{dataSize.videos_invalid_count}）</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">点击右上角刷新按钮查看数据大小</p>
+          )}
+        </div>
+
+        {/* Storage Path Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">数据存储</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置剪贴板数据的存储位置</p>
+          <div className="space-y-2">
+            <Label htmlFor="data-path" className="text-xs">存储路径</Label>
+            <div className="flex gap-2">
+              <Input
+                id="data-path"
+                value={settings.data_path}
+                placeholder="加载中..."
+                readOnly
+                className="flex-1 h-8 text-sm path-text"
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" onClick={selectFolder} className="h-8 w-8">
+                    <Folder16Regular className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>选择文件夹</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" onClick={openDataFolder} className="h-8 w-8">
+                    <Open16Regular className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>打开文件夹</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                修改路径将迁移数据并重启应用
+              </p>
+              <button
+                onClick={resetToDefault}
+                className="text-xs text-primary hover:underline"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Export / Import Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">数据备份</h3>
+          <p className="text-xs text-muted-foreground mb-4">导出或导入剪贴板数据（ZIP 格式）</p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={exporting || importing}
+              className="flex-1"
+            >
+              <ArrowUpload16Regular className="w-4 h-4 mr-1.5" />
+              {exporting ? "导出中..." : "导出数据"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleImport}
+              disabled={exporting || importing}
+              className="flex-1"
+            >
+              <ArrowDownload16Regular className="w-4 h-4 mr-1.5" />
+              {importing ? "导入中..." : "导入数据"}
+            </Button>
+          </div>
+          {exportImportMsg && (
+            <p className={`text-xs mt-2 ${exportImportMsg.includes("失败") ? "text-destructive" : "text-muted-foreground"}`}>
+              {exportImportMsg}
+            </p>
+          )}
+        </div>
+
+        {/* Data Cleanup Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-1">数据清理</h3>
+          <p className="text-xs text-muted-foreground mb-4">清理和重置应用数据</p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm">清空剪贴板历史</p>
+                <p className="text-xs text-muted-foreground">删除所有剪贴板历史记录</p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setCleanMsg(null); setCleanDialogAction("clear_history"); }}
+              >
+                <Delete16Regular className="w-4 h-4 mr-1.5" />
+                清空历史
+              </Button>
+            </div>
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm">恢复默认配置</p>
+                <p className="text-xs text-muted-foreground">重置所有设置为默认值，保留数据内容</p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setCleanMsg(null); setCleanDialogAction("reset_settings"); }}
+              >
+                <ArrowCounterclockwise16Regular className="w-4 h-4 mr-1.5" />
+                恢复默认
+              </Button>
+            </div>
+            <div className="h-px bg-border" />
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm">重置所有数据</p>
+                <p className="text-xs text-muted-foreground">删除所有数据并恢复默认设置</p>
+              </div>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="shrink-0"
+                onClick={() => { setCleanMsg(null); setCleanDialogAction("reset_all"); }}
+              >
+                <ArrowClockwise16Regular className="w-4 h-4 mr-1.5" />
+                重置应用
+              </Button>
+            </div>
+          </div>
+          {cleanMsg && (
+            <p className={`text-xs mt-3 ${cleanMsg.includes("失败") ? "text-destructive" : "text-muted-foreground"}`}>
+              {cleanMsg}
+            </p>
+          )}
+        </div>
+
+        {/* Dedup Strategy Card */}
+        <DedupStrategyCard strategy={dedupStrategy} onChange={handleDedupStrategyChange} />
+        <TextDedupModeCard dedupStrategy={dedupStrategy} />
+
+        {/* History Limit Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">历史记录</h3>
+          <p className="text-xs text-muted-foreground mb-4">配置历史记录的存储限制</p>
+          
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">最大历史记录数</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_history_count === 0 ? "无限制" : settings.max_history_count.toLocaleString()}
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_history_count]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_history_count: value[0] })}
+                min={0}
+                max={10000}
+                step={100}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单条文本最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_content_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_content_size_kb >= 1024 
+                      ? `${(settings.max_content_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_content_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_content_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_content_size_kb: value[0] })}
+                min={0}
+                max={10240}
+                step={64}
+              />
+              <p className="text-xs text-muted-foreground">
+                仅限制文本，设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单张图片最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_image_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_image_size_kb >= 1024 
+                      ? `${(settings.max_image_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_image_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_image_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_image_size_kb: value[0] })}
+                min={0}
+                max={51200}
+                step={512}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单个文件最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_file_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_file_size_kb >= 1024 
+                      ? `${(settings.max_file_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_file_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_file_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_file_size_kb: value[0] })}
+                min={0}
+                max={512000}
+                step={1024}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单条视频最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_video_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_video_size_kb >= 1024 
+                      ? `${(settings.max_video_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_video_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_video_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_video_size_kb: value[0] })}
+                min={0}
+                max={512000}
+                step={1024}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">自动清理天数</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.auto_cleanup_days === 0 ? "不自动清理" : `${settings.auto_cleanup_days} 天`}
+                </span>
+              </div>
+              <Slider
+                value={[settings.auto_cleanup_days]}
+                onValueChange={(value) => onSettingsChange({ ...settings, auto_cleanup_days: value[0] })}
+                min={0}
+                max={365}
+                step={5}
+              />
+              <p className="text-xs text-muted-foreground">
+                自动删除超过指定天数的历史记录，设为 0 表示不自动清理
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Data Cleanup Confirmation Dialog */}
+      <Dialog open={cleanDialogAction !== null} onOpenChange={(open) => { if (!open && !cleanLoading) setCleanDialogAction(null); }}>
+        <DialogContent className="max-w-md" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>
+              {cleanDialogAction ? cleanActionConfig[cleanDialogAction].title : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {cleanDialogAction ? cleanActionConfig[cleanDialogAction].warning : ""}
+            </DialogDescription>
+          </DialogHeader>
+          {cleanMsg && (
+            <p className="text-sm text-destructive">{cleanMsg}</p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCleanDialogAction(null)}
+              disabled={cleanLoading}
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCleanAction}
+              disabled={cleanLoading}
+            >
+              {cleanLoading
+                ? "处理中..."
+                : (cleanDialogAction ? cleanActionConfig[cleanDialogAction].buttonText : "")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Migration Confirmation Dialog */}
+      <Dialog open={migrationDialogOpen} onOpenChange={setMigrationDialogOpen}>
+        <DialogContent className="max-w-md" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{destHasData ? "目标位置已有数据" : "迁移数据"}</DialogTitle>
+            <DialogDescription>
+              {destHasData
+                ? "新位置已存在剪贴板数据，请选择保留哪一份数据。"
+                : "是否将现有数据迁移到新位置？"}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-3 py-2">
+            <div className="text-sm">
+              <span className="text-muted-foreground">当前位置：</span>
+              <span className="path-text text-xs block mt-1 p-2 bg-muted rounded">
+                {settings.data_path}
+              </span>
+            </div>
+            <div className="text-sm">
+              <span className="text-muted-foreground">新位置：</span>
+              <span className="path-text text-xs block mt-1 p-2 bg-muted rounded">
+                {pendingPath}
+              </span>
+            </div>
+            
+            {migrationError && (
+              <p className="text-sm text-destructive">{migrationError}</p>
+            )}
+          </div>
+          
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setMigrationDialogOpen(false)}
+              disabled={migrating}
+            >
+              取消
+            </Button>
+            {destHasData ? (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  {migrating ? "覆盖中..." : "保留旧位置数据"}
+                </Button>
+                <Button
+                  onClick={handleSkipMigration}
+                  disabled={migrating}
+                >
+                  保留新位置数据
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  onClick={handleSkipMigration}
+                  disabled={migrating}
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                >
+                  不迁移
+                </Button>
+                <Button
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                >
+                  {migrating ? "迁移中..." : "迁移数据"}
+                </Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
