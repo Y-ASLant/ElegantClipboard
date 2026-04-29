@@ -233,7 +233,9 @@ export function SyncTab() {
       const msg = await invoke<string>("webdav_download");
       setStatusMsg(msg);
       setStatusType("success");
-      // 刷新从云端同步的设置
+      // 后端重新加载运行时设置（快捷键、托盘图标、游戏模式等）
+      await invoke("reload_runtime_settings").catch(() => {});
+      // 前端刷新从云端同步的设置
       await loadSyncedSettings();
       await useOcrSettings.getState().loadSettings();
       await useTranslateSettings.getState().loadSettings();
