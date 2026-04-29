@@ -557,6 +557,74 @@ fn set_favorite_paste_shortcut(app: tauri::AppHandle, slot: u8, shortcut: String
     set_paste_shortcut_inner(&app, slot, shortcut, PasteKind::Favorite)
 }
 
+/// 云端同步下载后，重新加载运行时设置（快捷键、托盘图标、游戏模式等）
+#[tauri::command]
+fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = database::SettingsRepository::new(&state.db);
+
+    // 1. 重新注册主呼出快捷键
+    disable_all_shortcuts(&app);
+    let saved_shortcut = settings_repo
+        .get("toggle_shortcut")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Alt+C".to_string());
+    *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
+
+    let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {
+        Shortcut::new(Some(Modifiers::SUPER), Code::KeyV)
+    } else {
+        parse_shortcut(&saved_shortcut)
+            .unwrap_or_else(|| Shortcut::new(Some(Modifiers::ALT), Code::KeyC))
+    };
+    let _ = app
+        .global_shortcut()
+        .on_shortcut(shortcut, |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                commands::window::toggle_window_visibility(app, true);
+            }
+        });
+
+    // 2. 重新注册快速粘贴 / 收藏粘贴快捷键
+    for kind in [PasteKind::Quick, PasteKind::Favorite] {
+        reload_paste_shortcuts_from_settings(&app, kind);
+    }
+
+    // 3. 重新注册 OCR 快捷键
+    commands::ocr::register_ocr_shortcut(&app);
+
+    // 4. 重新注册翻译选中文字快捷键
+    commands::translate::register_translate_selection_shortcut(&app);
+
+    // 5. 刷新托盘图标可见性
+    let show_tray = settings_repo
+        .get("show_tray_icon")
+        .ok()
+        .flatten()
+        .map(|v| v != "false")
+        .unwrap_or(true);
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_visible(show_tray);
+    }
+
+    // 6. 刷新游戏模式
+    let game_mode = settings_repo
+        .get("game_mode_enabled")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    if game_mode {
+        game_mode::start(app.clone());
+    } else {
+        game_mode::stop();
+    }
+
+    tracing::info!("运行时设置已重新加载（云端同步后）");
+    Ok(())
+}
+
 #[tauri::command]
 fn set_game_mode_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<Arc<AppState>>();
@@ -962,6 +1030,7 @@ pub fn run() {
             commands::window::download_update,
             commands::window::cancel_update_download,
             commands::window::install_update,
+            reload_runtime_settings,
             set_game_mode_enabled,
             is_game_mode_enabled,
             commands::clipboard::get_clipboard_items,
