@@ -1,0 +1,60 @@
+name: Update Scoop Bucket
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-bucket:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Extract version from release tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Download installers and compute SHA256
+        id: hash
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          BASE_URL="https://github.com/Y-ASLant/ElegantClipboard/releases/download/v${VERSION}"
+
+          curl -sL "${BASE_URL}/ElegantClipboard_${VERSION}_x64-setup.exe" -o x64.exe
+          curl -sL "${BASE_URL}/ElegantClipboard_${VERSION}_arm64-setup.exe" -o arm64.exe
+
+          echo "X64_HASH=$(sha256sum x64.exe | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "ARM64_HASH=$(sha256sum arm64.exe | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Update bucket manifest
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          X64_HASH="${{ steps.hash.outputs.X64_HASH }}"
+          ARM64_HASH="${{ steps.hash.outputs.ARM64_HASH }}"
+          BASE="https://github.com/Y-ASLant/ElegantClipboard/releases/download"
+
+          jq --arg v "$VERSION" \
+             --arg x64_hash "$X64_HASH" \
+             --arg arm64_hash "$ARM64_HASH" \
+             --arg x64_url "${BASE}/v${VERSION}/ElegantClipboard_${VERSION}_x64-setup.exe#/dl.7z" \
+             --arg arm64_url "${BASE}/v${VERSION}/ElegantClipboard_${VERSION}_arm64-setup.exe#/dl.7z" \
+             '.version = $v
+              | .architecture."64bit".url = $x64_url
+              | .architecture."64bit".hash = $x64_hash
+              | .architecture.arm64.url = $arm64_url
+              | .architecture.arm64.hash = $arm64_hash' \
+             bucket/elegantclipboard.json > bucket/tmp.json
+          mv bucket/tmp.json bucket/elegantclipboard.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bucket/elegantclipboard.json
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "scoop: update to ${{ steps.version.outputs.VERSION }}"
+          git push
