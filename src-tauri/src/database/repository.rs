@@ -1081,6 +1081,23 @@ impl SettingsRepository {
         Ok(settings)
     }
 
+    /// 读取设置值，出错或不存在时返回默认值
+    pub fn get_or(&self, key: &str, default: &str) -> String {
+        self.get(key)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| default.to_string())
+    }
+
+    /// 读取布尔设置，出错或不存在时返回默认值
+    pub fn get_bool(&self, key: &str, default: bool) -> bool {
+        self.get(key)
+            .ok()
+            .flatten()
+            .map(|v| v == "true")
+            .unwrap_or(default)
+    }
+
     /// 清空所有设置
     pub fn clear_all(&self) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();

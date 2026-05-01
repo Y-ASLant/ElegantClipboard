@@ -100,6 +100,8 @@ async function doPaste(
   }
 }
 
+const EMPTY_SET: ReadonlySet<number> = new Set<number>();
+
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
   items: [],
   isLoading: false,
@@ -164,12 +166,12 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   setSelectedCategory: (category: string | null) => {
-    set({ selectedCategory: category, batchMode: false, selectedIds: new Set(), lastSelectedIndex: -1 });
+    set({ selectedCategory: category, batchMode: false, selectedIds: EMPTY_SET as Set<number>, lastSelectedIndex: -1 });
     get().fetchItems();
   },
 
   setSelectedTagId: (tagId: number | null) => {
-    set({ selectedTagId: tagId, batchMode: false, selectedIds: new Set(), lastSelectedIndex: -1 });
+    set({ selectedTagId: tagId, batchMode: false, selectedIds: EMPTY_SET as Set<number>, lastSelectedIndex: -1 });
     get().fetchItems();
   },
 
@@ -268,7 +270,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       searchQuery: "",
       selectedCategory: null,
       batchMode: false,
-      selectedIds: new Set(),
+      selectedIds: EMPTY_SET as Set<number>,
       lastSelectedIndex: -1,
       _resetToken: state._resetToken + 1,
     }));
@@ -288,7 +290,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   lastSelectedIndex: -1,
 
   setBatchMode: (enabled) => {
-    set({ batchMode: enabled, selectedIds: new Set(), lastSelectedIndex: -1 });
+    set({ batchMode: enabled, selectedIds: EMPTY_SET as Set<number>, lastSelectedIndex: -1 });
   },
 
   toggleSelect: (id, index, shiftKey) => {
@@ -314,7 +316,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   deselectAll: () => {
-    set({ selectedIds: new Set() });
+    set({ selectedIds: EMPTY_SET as Set<number> });
   },
 
   batchDelete: async () => {
@@ -322,7 +324,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     if (selectedIds.size === 0) return;
     try {
       await invoke("batch_delete_clipboard_items", { ids: Array.from(selectedIds) });
-      set({ selectedIds: new Set(), batchMode: false, lastSelectedIndex: -1 });
+      set({ selectedIds: EMPTY_SET as Set<number>, batchMode: false, lastSelectedIndex: -1 });
       await get().refresh();
     } catch (error) {
       logError("Failed to batch delete:", error);
