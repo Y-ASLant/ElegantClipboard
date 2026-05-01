@@ -910,8 +910,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     </div>
   );
 
-  // 上下文菜单配置
-  const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
+  // 上下文菜单配置（仅在依赖变化时重新计算）
+  const contextMenuItems = useMemo<ContextMenuItemConfig[] | null>(() => {
     if (isDragOverlay || batchMode) return null;
     // 文本类内容可编辑
     if (item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf") {
@@ -947,7 +947,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       ];
     }
     return null;
-  })();
+  }, [isDragOverlay, batchMode, item.content_type, item.id, item.image_path, filesInvalid, translateEnabled, translating]);
 
   if (contextMenuItems) {
     return (

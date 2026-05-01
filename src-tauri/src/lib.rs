@@ -57,6 +57,13 @@ enum PasteKind {
     Favorite,
 }
 
+/// 全局快捷键回调：按下时切换窗口可见性
+fn on_toggle_shortcut(app: &tauri::AppHandle, _shortcut: &Shortcut, event: tauri_plugin_global_shortcut::ShortcutEvent) {
+    if event.state == ShortcutState::Pressed {
+        commands::window::toggle_window_visibility(app, true);
+    }
+}
+
 impl PasteKind {
     fn label(self) -> &'static str {
         match self {
@@ -113,11 +120,7 @@ pub(crate) fn disable_all_shortcuts(app: &tauri::AppHandle) {
 /// 重新注册所有快捷键（Win+V 除外）
 pub(crate) fn enable_all_shortcuts(app: &tauri::AppHandle) {
     if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
-        let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                commands::window::toggle_window_visibility(app, true);
-            }
-        });
+        let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
     }
     let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
     apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
@@ -383,29 +386,17 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
 
     if let Err(e) = win_v_registry::disable_win_v_hotkey(true) {
         if let Some(sc) = saved_shortcut {
-            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app, true);
-                }
-            });
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         return Err(e);
     }
     let winv_shortcut = Shortcut::new(Some(Modifiers::SUPER), Code::KeyV);
     if let Err(e) = app.global_shortcut()
-        .on_shortcut(winv_shortcut, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                commands::window::toggle_window_visibility(app, true);
-            }
-        })
+        .on_shortcut(winv_shortcut, on_toggle_shortcut)
     {
         let _ = win_v_registry::enable_win_v_hotkey(true);
         if let Some(sc) = saved_shortcut {
-            let _ = app.global_shortcut().on_shortcut(sc, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app, true);
-                }
-            });
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         return Err(format!("Failed to register Win+V shortcut: {}", e));
     }
@@ -426,11 +417,7 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(shortcut) = parse_shortcut(&get_current_shortcut()) {
         let _ = app
             .global_shortcut()
-            .on_shortcut(shortcut, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    commands::window::toggle_window_visibility(app, true);
-                }
-            });
+            .on_shortcut(shortcut, on_toggle_shortcut);
     }
 
     let state = app.state::<Arc<AppState>>();
@@ -458,11 +445,7 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
     }
 
     app.global_shortcut()
-        .on_shortcut(new_sc, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                commands::window::toggle_window_visibility(app, true);
-            }
-        })
+        .on_shortcut(new_sc, on_toggle_shortcut)
         .map_err(|e| format!("Failed to register shortcut: {}", e))?;
 
     *CURRENT_SHORTCUT.write() = Some(new_shortcut.clone());
@@ -565,11 +548,7 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
 
     // 1. 重新注册主呼出快捷键
     disable_all_shortcuts(&app);
-    let saved_shortcut = settings_repo
-        .get("toggle_shortcut")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "Alt+C".to_string());
+    let saved_shortcut = settings_repo.get_or("toggle_shortcut", "Alt+C");
     *CURRENT_SHORTCUT.write() = Some(saved_shortcut.clone());
 
     let shortcut = if win_v_registry::is_win_v_hotkey_disabled() {
@@ -580,11 +559,7 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
     };
     let _ = app
         .global_shortcut()
-        .on_shortcut(shortcut, |app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                commands::window::toggle_window_visibility(app, true);
-            }
-        });
+        .on_shortcut(shortcut, on_toggle_shortcut);
 
     // 2. 重新注册快速粘贴 / 收藏粘贴快捷键
     for kind in [PasteKind::Quick, PasteKind::Favorite] {
@@ -598,23 +573,13 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
     commands::translate::register_translate_selection_shortcut(&app);
 
     // 5. 刷新托盘图标可见性
-    let show_tray = settings_repo
-        .get("show_tray_icon")
-        .ok()
-        .flatten()
-        .map(|v| v != "false")
-        .unwrap_or(true);
+    let show_tray = settings_repo.get_bool("show_tray_icon", true);
     if let Some(tray) = app.tray_by_id("main-tray") {
         let _ = tray.set_visible(show_tray);
     }
 
     // 6. 刷新游戏模式
-    let game_mode = settings_repo
-        .get("game_mode_enabled")
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    let game_mode = settings_repo.get_bool("game_mode_enabled", false);
     if game_mode {
         game_mode::start(app.clone());
     } else {
@@ -645,12 +610,7 @@ fn set_game_mode_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), Str
 fn is_game_mode_enabled(app: tauri::AppHandle) -> bool {
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
-    settings_repo
-        .get("game_mode_enabled")
-        .ok()
-        .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false)
+    settings_repo.get_bool("game_mode_enabled", false)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -695,8 +655,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .setup(|app| {
-            let config = AppConfig::load();
+        .setup(move |app| {
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
 
@@ -717,12 +676,7 @@ pub fn run() {
             // 安装更新后注册表 Run 条目会被清除，根据数据库偏好自动恢复自启动
             {
                 use tauri_plugin_autostart::ManagerExt;
-                let want_autostart = settings_repo
-                    .get("autostart_enabled")
-                    .ok()
-                    .flatten()
-                    .map(|v| v == "true")
-                    .unwrap_or(false);
+                let want_autostart = settings_repo.get_bool("autostart_enabled", false);
                 if want_autostart {
                     match app.autolaunch().is_enabled() {
                         Ok(false) => {
@@ -738,19 +692,10 @@ pub fn run() {
                 }
             }
 
-            let saved_shortcut = settings_repo
-                .get("global_shortcut")
-                .ok()
-                .flatten()
-                .unwrap_or_else(|| "Alt+C".to_string());
+            let saved_shortcut = settings_repo.get_or("global_shortcut", "Alt+C");
 
             // 恢复窗口置顶状态
-            let saved_pinned = settings_repo
-                .get("window_pinned")
-                .ok()
-                .flatten()
-                .map(|v| v == "true")
-                .unwrap_or(false);
+            let saved_pinned = settings_repo.get_bool("window_pinned", false);
             if saved_pinned {
                 input_monitor::set_window_pinned(true);
             }
@@ -762,12 +707,7 @@ pub fn run() {
 
             // 根据设置决定是否显示托盘图标
             {
-                let show_tray = settings_repo
-                    .get("show_tray_icon")
-                    .ok()
-                    .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true);
+                let show_tray = settings_repo.get_bool("show_tray_icon", true);
                 if !show_tray {
                     if let Some(tray) = app.tray_by_id("main-tray") {
                         let _ = tray.set_visible(false);
@@ -785,11 +725,7 @@ pub fn run() {
 
             let _ = app
                 .global_shortcut()
-                .on_shortcut(shortcut, |app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
-                        commands::window::toggle_window_visibility(app, true);
-                    }
-                });
+                .on_shortcut(shortcut, on_toggle_shortcut);
 
             for kind in [PasteKind::Quick, PasteKind::Favorite] {
                 let failures = reload_paste_shortcuts_from_settings(app.handle(), kind);
@@ -806,20 +742,14 @@ pub fn run() {
 
             // 启动游戏模式检测（如已启用）
             {
-                let game_mode = settings_repo
-                    .get("game_mode_enabled")
-                    .ok()
-                    .flatten()
-                    .map(|v| v == "true")
-                    .unwrap_or(false);
+                let game_mode = settings_repo.get_bool("game_mode_enabled", false);
                 if game_mode {
                     game_mode::start(app.handle().clone());
                 }
             }
 
             if let Some(window) = app.get_webview_window("main") {
-                let persist = settings_repo.get("persist_window_size").ok().flatten()
-                    .map(|v| v != "false").unwrap_or(true);
+                let persist = settings_repo.get_bool("persist_window_size", true);
                 if persist {
                     let custom_width = settings_repo.get("window_width").ok().flatten()
                         .and_then(|v| v.parse::<f64>().ok());
@@ -833,12 +763,9 @@ pub fn run() {
                     }
                 }
                 // 启动阶段恢复「上一次位置」，覆盖托盘左键首次显示路径
-                let position_mode = settings_repo
-                    .get("position_mode")
-                    .ok()
-                    .flatten()
-                    .map(|v| crate::positioning::PositionMode::from_str(&v))
-                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+                let position_mode = crate::positioning::PositionMode::from_str(
+                    &settings_repo.get_or("position_mode", "follow_cursor"),
+                );
                 if position_mode == crate::positioning::PositionMode::FixedPosition {
                     let x = settings_repo
                         .get("window_x")

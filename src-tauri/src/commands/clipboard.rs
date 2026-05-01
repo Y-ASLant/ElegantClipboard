@@ -132,30 +132,34 @@ fn find_keyword_char_pos_slow(text: &str, keyword_lower: &str) -> Option<usize> 
 }
 
 /// 根据字符级位置信息构建上下文片段。
+/// 使用迭代器直接定位字节偏移，避免为整个文本分配 char_indices Vec。
 fn build_context_snippet(
     text: &str,
     keyword_char_pos: usize,
     keyword_char_len: usize,
     max_len: usize,
 ) -> String {
-    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
-    let text_char_count = char_indices.len();
-
     let context_before = max_len / 3;
     let start_char = keyword_char_pos.saturating_sub(context_before);
-    let end_char =
-        (keyword_char_pos + keyword_char_len + max_len - context_before).min(text_char_count);
+    let window_char_len = keyword_char_len + max_len - context_before;
 
-    if end_char <= start_char {
-        return text.chars().take(max_len).collect();
-    }
-
-    let byte_start = char_indices[start_char].0;
-    let byte_end = if end_char < text_char_count {
-        char_indices[end_char].0
-    } else {
-        text.len()
+    // 用迭代器跳过 start_char 个字符，取得 byte_start
+    let mut iter = text.char_indices().skip(start_char);
+    let byte_start = match iter.next() {
+        Some((b, _)) => b,
+        None => return text.chars().take(max_len).collect(),
     };
+
+    // 继续迭代 window_char_len - 1 个字符取得 byte_end
+    let mut byte_end = text.len();
+    let mut has_more = false;
+    for (i, (b, _)) in iter.enumerate() {
+        if i + 1 >= window_char_len {
+            byte_end = b;
+            has_more = true;
+            break;
+        }
+    }
 
     let slice = &text[byte_start..byte_end];
     let mut result = String::with_capacity(slice.len() + 6);
@@ -163,7 +167,7 @@ fn build_context_snippet(
         result.push_str("...");
     }
     result.push_str(slice);
-    if end_char < text_char_count {
+    if has_more {
         result.push_str("...");
     }
     result

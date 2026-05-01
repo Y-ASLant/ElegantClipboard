@@ -49,6 +49,29 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
   </div>
 );
 
+// 静态配置对象提取到组件外部，避免每次渲染重新创建
+const OVERLAY_SCROLLBARS_OPTIONS = {
+  scrollbars: {
+    theme: "os-theme-custom" as const,
+    visibility: "auto" as const,
+    autoHide: "scroll" as const,
+    autoHideDelay: 1000,
+  },
+  overflow: {
+    x: "hidden" as const,
+    y: "scroll" as const,
+  },
+};
+
+const VIRTUOSO_VIEWPORT_INCREASE = { top: 400, bottom: 400 };
+
+const VIRTUOSO_SCROLL_SEEK_CONFIG = {
+  enter: (velocity: number) => Math.abs(velocity) > 2000,
+  exit: (velocity: number) => Math.abs(velocity) < 500,
+};
+
+const VIRTUOSO_COMPONENTS = { ScrollSeekPlaceholder };
+
 export function ClipboardList({ searchInputRef }: ClipboardListProps) {
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -538,18 +561,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       <div ref={listContainerRef} onMouseOver={handleToolbarMouseOver} onMouseOut={handleToolbarMouseOut} className="h-full relative" style={{ maskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)' }}>
         <OverlayScrollbarsComponent
           element="div"
-          options={{
-            scrollbars: {
-              theme: "os-theme-custom",
-              visibility: "auto",
-              autoHide: "scroll",
-              autoHideDelay: 1000,
-            },
-            overflow: {
-              x: "hidden",
-              y: "scroll",
-            },
-          }}
+          options={OVERLAY_SCROLLBARS_OPTIONS}
           events={{
             initialized: (instance: OverlayScrollbars) => {
               osInstanceRef.current = instance;
@@ -571,12 +583,9 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
                 defaultItemHeight={defaultItemHeight}
-                increaseViewportBy={{ top: 400, bottom: 400 }}
-                scrollSeekConfiguration={{
-                  enter: (velocity) => Math.abs(velocity) > 2000,
-                  exit: (velocity) => Math.abs(velocity) < 500,
-                }}
-                components={{ ScrollSeekPlaceholder }}
+                increaseViewportBy={VIRTUOSO_VIEWPORT_INCREASE}
+                scrollSeekConfiguration={VIRTUOSO_SCROLL_SEEK_CONFIG}
+                components={VIRTUOSO_COMPONENTS}
                 customScrollParent={customScrollParent}
                 scrollerRef={(ref) => {
                   if (ref instanceof HTMLElement) {
