@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { ScanText16Regular, Copy16Regular, Translate16Regular } from "@fluentui/react-icons";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { ScanText16Regular, Copy16Regular, Translate16Regular, Edit16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import Linkify from "linkify-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
@@ -12,6 +13,7 @@ import { translateText } from "@/lib/translate";
 import { useTranslateSettings } from "@/stores/translate-settings";
 import { useOcrSettings } from "@/stores/ocr-settings";
 import { cn } from "@/lib/utils";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export function OcrResult() {
   const [text, setText] = useState("");
@@ -23,6 +25,36 @@ export function OcrResult() {
   const [translatedCopied, setTranslatedCopied] = useState(false);
   const [ocrRecognizing, setOcrRecognizing] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [editing, setEditing] = useState(false);
+
+  // Linkify 配置：URL 渲染为蓝色下划线，Ctrl+点击打开
+  const linkifyOptions = useMemo(() => ({
+    render: ({
+      attributes,
+      content,
+    }: {
+      tagName: string;
+      attributes: Record<string, any>;
+      content: string;
+    }) => {
+      const href = attributes.href as string;
+      return (
+        <span
+          className="text-primary underline underline-offset-2 decoration-primary/60 hover:decoration-primary cursor-pointer"
+          title={`Ctrl+\u70b9\u51fb\u6253\u5f00\u94fe\u63a5`}
+          onMouseDown={(e: React.MouseEvent) => {
+            if (e.ctrlKey) {
+              e.preventDefault();
+              e.stopPropagation();
+              openUrl(href).catch((err) => logError("打开链接失败:", err));
+            }
+          }}
+        >
+          {content}
+        </span>
+      );
+    },
+  }), []);
 
   const translateEnabled = useTranslateSettings((s) => s.enabled);
   const translateLoaded = useTranslateSettings((s) => s.loaded);
@@ -67,6 +99,7 @@ export function OcrResult() {
         // 空文本 = 开始识别
         setText("");
         setOcrRecognizing(true);
+        setEditing(false);
       } else {
         const newText = event.payload;
         setText(newText);
@@ -110,6 +143,7 @@ export function OcrResult() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+
   const handleCopy = useCallback(async () => {
     try {
       await invoke("write_text_to_clipboard", {
@@ -150,6 +184,7 @@ export function OcrResult() {
     }
   }, [translatedText, recordTranslation]);
 
+
   return (
     <div
       className={cn(
@@ -166,26 +201,56 @@ export function OcrResult() {
       <Card className="flex-1 overflow-hidden flex flex-col min-h-0">
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <span className="text-xs font-medium text-muted-foreground">{ocrRecognizing ? "正在识别中..." : "识别结果"}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={handleCopy}
-            disabled={!text.trim()}
-          >
-            <Copy16Regular className="w-3 h-3 mr-1" />
-            {copied ? "已复制" : "复制"}
-          </Button>
+          <div className="flex items-center gap-1">
+            {!ocrRecognizing && text.trim() && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => {
+                  setEditing((v) => !v);
+                  if (!editing) {
+                    requestAnimationFrame(() => textareaRef.current?.focus());
+                  }
+                }}
+              >
+                <Edit16Regular className="w-3 h-3 mr-1" />
+                {editing ? "完成" : "编辑"}
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handleCopy}
+              disabled={!text.trim()}
+            >
+              <Copy16Regular className="w-3 h-3 mr-1" />
+              {copied ? "已复制" : "复制"}
+            </Button>
+          </div>
         </div>
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="flex-1 w-full resize-none border-0 bg-transparent px-4 pb-3 text-sm leading-relaxed font-mono focus:outline-none placeholder:text-muted-foreground"
-          placeholder={ocrRecognizing ? "正在识别中..." : "等待识别结果..."}
-          spellCheck={false}
-          autoFocus
-        />
+        {editing ? (
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="flex-1 w-full resize-none border-0 bg-transparent px-4 pb-3 text-sm leading-relaxed font-mono focus:outline-none placeholder:text-muted-foreground"
+            placeholder="编辑识别结果..."
+            spellCheck={false}
+            autoFocus
+          />
+        ) : (
+          <div className="flex-1 overflow-auto px-4 pb-3 text-sm leading-relaxed font-mono whitespace-pre-wrap break-words select-text cursor-text">
+            {text ? (
+              <Linkify options={linkifyOptions}>{text}</Linkify>
+            ) : (
+              <span className="text-muted-foreground">
+                {ocrRecognizing ? "正在识别中..." : "等待识别结果..."}
+              </span>
+            )}
+          </div>
+        )}
       </Card>
 
       {/* 翻译结果 */}
