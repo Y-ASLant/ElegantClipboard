@@ -510,6 +510,17 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
 
+    // 0. 同步热键注册模式（云端设置可能与本地不同）
+    let saved_mode = hotkey::HotkeyMode::from_str(&settings_repo.get_or("hotkey_mode", "register"));
+    if hotkey::get_mode() != saved_mode {
+        disable_all_shortcuts(&app);
+        if win_v_registry::is_win_v_hotkey_disabled() {
+            hotkey::unregister("Win+V");
+        }
+        hotkey::switch_mode(&app, saved_mode);
+        tracing::info!("热键模式已切换为: {:?}（云端同步）", saved_mode);
+    }
+
     // 1. 重新注册主呼出快捷键
     disable_all_shortcuts(&app);
     let saved_shortcut = settings_repo.get_or("toggle_shortcut", "Alt+C");
