@@ -62,6 +62,17 @@ static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 #[cfg(windows)]
 static ORIGINAL_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 
+#[cfg(windows)]
+static TASKBAR_CREATED_MSG_ID: AtomicU32 = AtomicU32::new(0);
+#[cfg(windows)]
+static TRAY_APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Explorer 重启后恢复托盘可见性的自定义消息。
+/// PostMessage 保证在所有 SendMessage 广播（含 Tauri 内部托盘重建）之后
+/// 才被消息泵分发，延迟仅一个泵周期（微秒级），肉眼不可见。
+#[cfg(windows)]
+const MSG_RESTORE_TRAY_VISIBILITY: u32 = 0x8001; // WM_APP + 1
+
 // 低级钩子（LL hook）必须由安装它的线程负责卸载，使用 thread_local 存储句柄
 #[cfg(windows)]
 thread_local! {
@@ -69,8 +80,9 @@ thread_local! {
     static TL_KEYBOARD_HOOK: RefCell<Option<HHOOK>> = const { RefCell::new(None) };
 }
 
-/// 窗口子类过程：当 WS_EX_NOACTIVATE 已设置时拦截 WM_MOUSEACTIVATE 返回 MA_NOACTIVATE，
-/// 防止鼠标点击激活窗口导致目标应用瞬态 UI（搜索栏、下拉等）因失焦而关闭。
+/// 窗口子类过程：
+/// 1. 拦截 WM_MOUSEACTIVATE 返回 MA_NOACTIVATE（防止鼠标点击激活窗口）
+/// 2. 拦截 TaskbarCreated 消息，Explorer 重启后立即恢复托盘图标可见性设置
 #[cfg(windows)]
 unsafe extern "system" fn wndproc_subclass(
     hwnd: HWND,
@@ -83,6 +95,22 @@ unsafe extern "system" fn wndproc_subclass(
         if ex_style & WS_EX_NOACTIVATE.0 != 0 {
             return LRESULT(3); // MA_NOACTIVATE
         }
+    }
+
+    // Explorer 重启后系统通过 SendMessage 广播 TaskbarCreated，
+    // Tauri 的 tray-icon 内部窗口也会收到并重建图标（默认可见）。
+    // 用 PostMessage 投递自定义消息：Windows 保证 Posted 消息
+    // 在所有 SendMessage 广播完成后才被分发，此时托盘已重建完毕。
+    let tc_msg = TASKBAR_CREATED_MSG_ID.load(Ordering::Relaxed);
+    if tc_msg != 0 && msg == tc_msg {
+        unsafe { let _ = PostMessageW(Some(hwnd), MSG_RESTORE_TRAY_VISIBILITY, WPARAM(0), LPARAM(0)); }
+    }
+
+    if msg == MSG_RESTORE_TRAY_VISIBILITY {
+        if let Some(app) = TRAY_APP_HANDLE.get() {
+            crate::restore_tray_visibility(app);
+        }
+        return LRESULT(0);
     }
 
     let original = ORIGINAL_WNDPROC.load(Ordering::Relaxed);
@@ -99,6 +127,12 @@ pub fn init(window: WebviewWindow) {
     #[cfg(windows)]
     if let Ok(hwnd) = window.hwnd() {
         MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
+
+        // 注册 TaskbarCreated 消息，用于检测 Explorer 重启
+        let tc_msg = unsafe { RegisterWindowMessageW(windows::core::w!("TaskbarCreated")) };
+        TASKBAR_CREATED_MSG_ID.store(tc_msg, Ordering::Relaxed);
+        let _ = TRAY_APP_HANDLE.set(window.app_handle().clone());
+
         // 子类化主窗口：拦截 WM_MOUSEACTIVATE 防止鼠标点击时激活窗口
         let raw_hwnd = HWND(hwnd.0 as *mut _);
         let original = unsafe {

@@ -367,16 +367,15 @@ fn init_logging(config: &AppConfig) {
         .init();
 }
 
-/// Explorer 重启后托盘图标会被系统重建为默认可见状态，
-/// 需要根据用户设置重新应用可见性。
-fn restore_tray_visibility(app: &tauri::AppHandle) {
+
+/// 根据用户设置应用托盘图标可见性。
+/// 托盘图标始终存在（仅创建一次），通过 set_visible 切换显隐。
+pub(crate) fn restore_tray_visibility(app: &tauri::AppHandle) {
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
     let show_tray = settings_repo.get_bool("show_tray_icon", true);
-    if !show_tray {
-        if let Some(tray) = app.tray_by_id("main-tray") {
-            let _ = tray.set_visible(false);
-        }
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_visible(show_tray);
     }
 }
 
@@ -395,8 +394,6 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         return Err("Failed to register Win+V shortcut".to_string());
     }
 
-    restore_tray_visibility(&app);
-
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
     let _ = settings_repo.set("winv_replacement", "true");
@@ -410,8 +407,6 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     win_v_registry::enable_win_v_hotkey(true)?;
 
     hotkey::register(&get_current_shortcut(), Arc::new(on_toggle_shortcut));
-
-    restore_tray_visibility(&app);
 
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
@@ -568,10 +563,7 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
     commands::translate::register_translate_selection_shortcut(&app);
 
     // 5. 刷新托盘图标可见性
-    let show_tray = settings_repo.get_bool("show_tray_icon", true);
-    if let Some(tray) = app.tray_by_id("main-tray") {
-        let _ = tray.set_visible(show_tray);
-    }
+    restore_tray_visibility(&app);
 
     // 6. 刷新游戏模式
     let game_mode = settings_repo.get_bool("game_mode_enabled", false);
@@ -733,17 +725,10 @@ pub fn run() {
             state.monitor.start(app.handle().clone());
             app.manage(state);
 
+            // 托盘图标始终创建（仅一次），通过 set_visible 控制显隐，
+            // 避免反复创建/销毁导致 Explorer 重启时出现重复图标。
             let _ = tray::setup_tray(app.handle());
-
-            // 根据设置决定是否显示托盘图标
-            {
-                let show_tray = settings_repo.get_bool("show_tray_icon", true);
-                if !show_tray {
-                    if let Some(tray) = app.tray_by_id("main-tray") {
-                        let _ = tray.set_visible(false);
-                    }
-                }
-            }
+            restore_tray_visibility(app.handle());
 
             // 根据设置选择热键模式
             let hotkey_mode = hotkey::HotkeyMode::from_str(

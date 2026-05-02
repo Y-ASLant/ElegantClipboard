@@ -8,7 +8,7 @@ use tauri::{
 };
 use tracing::info;
 
-/// 初始化系统托盘图标和菜单
+/// 初始化系统托盘图标和菜单（仅在启动时调用一次，终身不销毁）
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon_data = include_bytes!("../../icons/icon.png");
     let img = image::load_from_memory(icon_data)?;
