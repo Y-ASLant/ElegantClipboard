@@ -1,7 +1,8 @@
 //! 游戏模式：检测全屏应用时自动暂停剪贴板监控和全局快捷键。
 //!
-//! 使用 Windows `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` 事件驱动，
-//! 辅以定时重检（3 秒），确保独占全屏等场景也能可靠检测。
+//! 纯事件驱动：通过 `SetWinEventHook` 监听多种系统事件（前台切换、
+//! 窗口调整大小、最小化/还原、桌面切换等），覆盖包括独占全屏在内的
+//! 几乎所有全屏转换场景，无需定时轮询。
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tauri::Manager;
@@ -24,9 +25,17 @@ static GENERATION: AtomicU32 = AtomicU32::new(0);
 #[cfg(target_os = "windows")]
 const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
 #[cfg(target_os = "windows")]
-const WINEVENT_SKIPOWNPROCESS: u32 = 0x0002;
+const EVENT_SYSTEM_MOVESIZEEND: u32 = 0x000B;
 #[cfg(target_os = "windows")]
-const RECHECK_INTERVAL_MS: u32 = 3000;
+const EVENT_SYSTEM_SWITCHEND: u32 = 0x0015;
+#[cfg(target_os = "windows")]
+const EVENT_SYSTEM_MINIMIZESTART: u32 = 0x0016;
+#[cfg(target_os = "windows")]
+const EVENT_SYSTEM_MINIMIZEEND: u32 = 0x0017;
+#[cfg(target_os = "windows")]
+const EVENT_SYSTEM_DESKTOPSWITCH: u32 = 0x0020;
+#[cfg(target_os = "windows")]
+const WINEVENT_SKIPOWNPROCESS: u32 = 0x0002;
 
 /// 启动游戏模式检测
 pub fn start(app: tauri::AppHandle) {
@@ -84,7 +93,6 @@ fn run_event_loop(generation: u32) {
     use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent};
     use windows::Win32::UI::WindowsAndMessaging::{
         DispatchMessageW, GetMessageW, TranslateMessage, MSG,
-        SetTimer, KillTimer, WM_TIMER,
     };
 
     unsafe {
@@ -96,26 +104,40 @@ fn run_event_loop(generation: u32) {
         let tid = GetCurrentThreadId();
         WATCHER_THREAD_ID.store(tid, Ordering::SeqCst);
 
-        let hook = SetWinEventHook(
+        // 监听多种系统事件，覆盖几乎所有全屏转换场景：
+        // - EVENT_SYSTEM_FOREGROUND:     前台窗口切换
+        // - EVENT_SYSTEM_MOVESIZEEND:    窗口调整大小完成（进入全屏）
+        // - EVENT_SYSTEM_SWITCHEND:      Alt+Tab 切换完成
+        // - EVENT_SYSTEM_MINIMIZESTART:  独占全屏游戏通常表现为窗口最小化
+        // - EVENT_SYSTEM_MINIMIZEEND:    从独占全屏返回
+        let hook_sys = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
-            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_MINIMIZEEND,
             None,
-            Some(on_foreground_changed),
+            Some(on_system_event),
             0,
             0,
-            WINEVENT_SKIPOWNPROCESS, // 跳过本进程事件，回调在本线程（out-of-context）
+            WINEVENT_SKIPOWNPROCESS,
         );
 
-        if hook.0.is_null() {
+        // - EVENT_SYSTEM_DESKTOPSWITCH:  虚拟桌面切换
+        let hook_desktop = SetWinEventHook(
+            EVENT_SYSTEM_DESKTOPSWITCH,
+            EVENT_SYSTEM_DESKTOPSWITCH,
+            None,
+            Some(on_system_event),
+            0,
+            0,
+            WINEVENT_SKIPOWNPROCESS,
+        );
+
+        if hook_sys.0.is_null() {
             tracing::error!("游戏模式: SetWinEventHook 失败");
             GAME_MODE_ENABLED.store(false, Ordering::SeqCst);
             return;
         }
 
-        // 定时重检：某些独占全屏游戏可能不触发 EVENT_SYSTEM_FOREGROUND
-        let timer_id = SetTimer(None, 1, RECHECK_INTERVAL_MS, None);
-
-        tracing::info!("游戏模式: 事件监听已启动（事件驱动 + {}s 定时重检）", RECHECK_INTERVAL_MS / 1000);
+        tracing::info!("游戏模式: 事件监听已启动（纯事件驱动）");
 
         // 启动时立即检测当前状态
         check_and_update();
@@ -123,16 +145,14 @@ fn run_event_loop(generation: u32) {
         // 消息循环——GetMessageW 在无消息时阻塞，不消耗 CPU
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            if msg.message == WM_TIMER {
-                check_and_update();
-            } else {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
         }
 
-        let _ = KillTimer(None, timer_id);
-        let _ = UnhookWinEvent(hook);
+        let _ = UnhookWinEvent(hook_sys);
+        if !hook_desktop.0.is_null() {
+            let _ = UnhookWinEvent(hook_desktop);
+        }
         WATCHER_THREAD_ID.store(0, Ordering::SeqCst);
 
         // 退出时：仅当代际匹配时才恢复功能（防止旧线程覆盖新线程的状态）
@@ -147,18 +167,26 @@ fn run_event_loop(generation: u32) {
     }
 }
 
-/// WinEvent 回调——仅在前台窗口切换时被系统调用
+/// WinEvent 回调——过滤并响应与全屏检测相关的系统事件
 #[cfg(target_os = "windows")]
-unsafe extern "system" fn on_foreground_changed(
+unsafe extern "system" fn on_system_event(
     _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
-    _event: u32,
+    event: u32,
     _hwnd: windows::Win32::Foundation::HWND,
     _id_object: i32,
     _id_child: i32,
     _id_event_thread: u32,
     _event_time: u32,
 ) {
-    check_and_update();
+    match event {
+        EVENT_SYSTEM_FOREGROUND
+        | EVENT_SYSTEM_MOVESIZEEND
+        | EVENT_SYSTEM_SWITCHEND
+        | EVENT_SYSTEM_MINIMIZESTART
+        | EVENT_SYSTEM_MINIMIZEEND
+        | EVENT_SYSTEM_DESKTOPSWITCH => check_and_update(),
+        _ => {}
+    }
 }
 
 /// 检测前台窗口是否全屏，按需切换抑制状态
