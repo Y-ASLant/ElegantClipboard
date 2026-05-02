@@ -1,7 +1,7 @@
 //! 游戏模式：检测全屏应用时自动暂停剪贴板监控和全局快捷键。
 //!
 //! 使用 Windows `SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` 事件驱动，
-//! 仅在前台窗口切换时触发检测，空闲时零 CPU 开销。
+//! 辅以定时重检（3 秒），确保独占全屏等场景也能可靠检测。
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tauri::Manager;
@@ -17,12 +17,16 @@ static GAME_MODE_SUPPRESSED: AtomicBool = AtomicBool::new(false);
 static WATCHER_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 /// 全局 AppHandle 引用（供事件回调使用，应用生命周期内不变）
 static GAME_MODE_APP: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+/// 代际计数器，用于区分不同的 start/stop 周期，防止旧线程干扰新线程
+static GENERATION: AtomicU32 = AtomicU32::new(0);
 
 // Windows 常量
 #[cfg(target_os = "windows")]
 const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
 #[cfg(target_os = "windows")]
 const WINEVENT_SKIPOWNPROCESS: u32 = 0x0002;
+#[cfg(target_os = "windows")]
+const RECHECK_INTERVAL_MS: u32 = 3000;
 
 /// 启动游戏模式检测
 pub fn start(app: tauri::AppHandle) {
@@ -30,19 +34,25 @@ pub fn start(app: tauri::AppHandle) {
         return; // 已在运行
     }
     let _ = GAME_MODE_APP.set(app);
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
 
     std::thread::Builder::new()
         .name("game-mode-watcher".into())
-        .spawn(|| {
+        .spawn(move || {
             #[cfg(target_os = "windows")]
-            run_event_loop();
+            run_event_loop(generation);
         })
         .expect("failed to spawn game-mode-watcher thread");
 }
 
 /// 停止游戏模式检测
 pub fn stop() {
-    GAME_MODE_ENABLED.store(false, Ordering::SeqCst);
+    if !GAME_MODE_ENABLED.swap(false, Ordering::SeqCst) {
+        return; // 未在运行
+    }
+
+    // 递增代际，使旧线程退出时不再执行恢复
+    GENERATION.fetch_add(1, Ordering::SeqCst);
 
     // 向事件循环线程发送 WM_QUIT 使其退出
     #[cfg(target_os = "windows")]
@@ -56,15 +66,26 @@ pub fn stop() {
             }
         }
     }
+
+    // 如果当前处于抑制状态，立即恢复
+    if GAME_MODE_SUPPRESSED.swap(false, Ordering::Relaxed) {
+        if let Some(app) = GAME_MODE_APP.get() {
+            restore_features(app);
+            tracing::info!("游戏模式: 已停止，功能已恢复");
+        }
+    }
 }
 
 // ── Windows 实现 ──────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
-fn run_event_loop() {
+fn run_event_loop(generation: u32) {
     use windows::Win32::System::Threading::GetCurrentThreadId;
     use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent};
-    use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, TranslateMessage, MSG};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, TranslateMessage, MSG,
+        SetTimer, KillTimer, WM_TIMER,
+    };
 
     unsafe {
         // 确保本线程获取物理像素坐标（不受缩放影响）
@@ -91,7 +112,10 @@ fn run_event_loop() {
             return;
         }
 
-        tracing::info!("游戏模式: 事件监听已启动（零轮询）");
+        // 定时重检：某些独占全屏游戏可能不触发 EVENT_SYSTEM_FOREGROUND
+        let timer_id = SetTimer(None, 1, RECHECK_INTERVAL_MS, None);
+
+        tracing::info!("游戏模式: 事件监听已启动（事件驱动 + {}s 定时重检）", RECHECK_INTERVAL_MS / 1000);
 
         // 启动时立即检测当前状态
         check_and_update();
@@ -99,20 +123,27 @@ fn run_event_loop() {
         // 消息循环——GetMessageW 在无消息时阻塞，不消耗 CPU
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            if msg.message == WM_TIMER {
+                check_and_update();
+            } else {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
         }
 
+        let _ = KillTimer(None, timer_id);
         let _ = UnhookWinEvent(hook);
         WATCHER_THREAD_ID.store(0, Ordering::SeqCst);
 
-        // 退出时若仍在抑制则恢复
-        if GAME_MODE_SUPPRESSED.swap(false, Ordering::Relaxed) {
-            if let Some(app) = GAME_MODE_APP.get() {
-                restore_features(app);
+        // 退出时：仅当代际匹配时才恢复功能（防止旧线程覆盖新线程的状态）
+        if GENERATION.load(Ordering::SeqCst) == generation {
+            if GAME_MODE_SUPPRESSED.swap(false, Ordering::Relaxed) {
+                if let Some(app) = GAME_MODE_APP.get() {
+                    restore_features(app);
+                }
             }
         }
-        tracing::info!("游戏模式: 事件监听已退出");
+        tracing::info!("游戏模式: 事件监听已退出 (generation={})", generation);
     }
 }
 

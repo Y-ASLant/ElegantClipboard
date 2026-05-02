@@ -67,17 +67,31 @@ pub fn unregister(shortcut_str: &str) {
     }
 }
 
-/// 临时禁用所有快捷键（游戏模式用，仅 LowLevel 模式有效）
+/// 临时禁用所有快捷键（游戏模式用）
 pub fn disable_all() {
-    if *MODE.read() == HotkeyMode::LowLevel {
-        crate::low_level_shortcut::disable_all();
+    match *MODE.read() {
+        HotkeyMode::LowLevel => crate::low_level_shortcut::disable_all(),
+        HotkeyMode::Register => {
+            if let Some(app) = APP_HANDLE.get() {
+                crate::disable_all_shortcuts(app);
+                // Register 模式下也需要注销 Win+V（如果已启用）
+                if crate::win_v_registry::is_win_v_hotkey_disabled() {
+                    unregister("Win+V");
+                }
+            }
+        }
     }
 }
 
 /// 重新启用所有快捷键
 pub fn enable_all() {
-    if *MODE.read() == HotkeyMode::LowLevel {
-        crate::low_level_shortcut::enable_all();
+    match *MODE.read() {
+        HotkeyMode::LowLevel => crate::low_level_shortcut::enable_all(),
+        HotkeyMode::Register => {
+            if let Some(app) = APP_HANDLE.get() {
+                crate::enable_all_shortcuts(app);
+            }
+        }
     }
 }
 
