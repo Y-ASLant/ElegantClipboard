@@ -1,4 +1,4 @@
-use super::{ClipboardContent, ClipboardHandler};
+use super::{ClipboardContent, ClipboardHandler, handler::is_video_files};
 use crate::database::Database;
 use clipboard_master::{CallbackResult, ClipboardHandler as CMHandler, Master};
 use parking_lot::Mutex;
@@ -257,7 +257,11 @@ fn read_clipboard_content() -> Option<ClipboardContent> {
     match ctx.get_files() {
         Ok(files) if !files.is_empty() => {
             debug!("Got {} files from clipboard", files.len());
-            return Some(ClipboardContent::Files(files));
+            return if is_video_files(&files) {
+                Some(ClipboardContent::Video(files))
+            } else {
+                Some(ClipboardContent::Files(files))
+            };
         }
         Ok(_) => {} // 空文件列表，继续尝试其他格式
         Err(e) => debug!("Clipboard get_files failed: {}", e),

@@ -17,7 +17,7 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts", "mpeg", "mpg",
 ];
 
-fn is_video_files(files: &[String]) -> bool {
+pub(super) fn is_video_files(files: &[String]) -> bool {
     !files.is_empty()
         && files.iter().all(|f| {
             let ext = f.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
@@ -107,6 +107,7 @@ pub enum ClipboardContent {
     },
     Image(Vec<u8>),
     Files(Vec<String>),
+    Video(Vec<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -224,9 +225,8 @@ impl ClipboardHandler {
             ClipboardContent::Html { .. } => "html",
             ClipboardContent::Rtf { .. } => "rtf",
             ClipboardContent::Image(_) => "image",
-            ClipboardContent::Files(files) => {
-                if is_video_files(files) { "video" } else { "files" }
-            }
+            ClipboardContent::Files(_) => "files",
+            ClipboardContent::Video(_) => "video",
         };
 
         allowed.split(',').any(|t| t.trim() == content_type)
@@ -319,24 +319,29 @@ impl ClipboardHandler {
             }
         }
 
-        // 文件/视频大小限制
+        // 文件大小限制
         if let ClipboardContent::Files(ref files) = content {
             let total: u64 = files.iter().filter_map(|f| {
                 let p = std::path::Path::new(f);
                 if p.is_file() { std::fs::metadata(p).ok().map(|m| m.len()) } else { None }
             }).sum();
-            if is_video_files(files) {
-                let max_video = self.get_size_limit_bytes("max_video_size_kb");
-                if max_video > 0 && (total as usize) > max_video {
-                    warn!("Video size {} bytes exceeds max {} bytes, skipping", total, max_video);
-                    return Ok(None);
-                }
-            } else {
-                let max_file = self.get_size_limit_bytes("max_file_size_kb");
-                if max_file > 0 && (total as usize) > max_file {
-                    warn!("Files size {} bytes exceeds max {} bytes, skipping", total, max_file);
-                    return Ok(None);
-                }
+            let max_file = self.get_size_limit_bytes("max_file_size_kb");
+            if max_file > 0 && (total as usize) > max_file {
+                warn!("Files size {} bytes exceeds max {} bytes, skipping", total, max_file);
+                return Ok(None);
+            }
+        }
+
+        // 视频大小限制
+        if let ClipboardContent::Video(ref files) = content {
+            let total: u64 = files.iter().filter_map(|f| {
+                let p = std::path::Path::new(f);
+                if p.is_file() { std::fs::metadata(p).ok().map(|m| m.len()) } else { None }
+            }).sum();
+            let max_video = self.get_size_limit_bytes("max_video_size_kb");
+            if max_video > 0 && (total as usize) > max_video {
+                warn!("Video size {} bytes exceeds max {} bytes, skipping", total, max_video);
+                return Ok(None);
             }
         }
 
@@ -407,13 +412,8 @@ impl ClipboardHandler {
                 self.process_rtf(rtf, text, &hashes, max_content_size)?
             }
             ClipboardContent::Image(data) => self.process_image(data, &hashes)?,
-            ClipboardContent::Files(files) => {
-                if is_video_files(&files) {
-                    self.process_video(files, &hashes)?
-                } else {
-                    self.process_files(files, &hashes)?
-                }
-            }
+            ClipboardContent::Files(files) => self.process_files(files, &hashes)?,
+            ClipboardContent::Video(files) => self.process_video(files, &hashes)?,
         };
 
         item.source_app_name = source_app_name;
@@ -466,7 +466,7 @@ impl ClipboardHandler {
             ClipboardContent::Html { html, .. } => html.len(),
             ClipboardContent::Rtf { rtf, .. } => rtf.len(),
             ClipboardContent::Image(data) => data.len(),
-            ClipboardContent::Files(files) => files.iter().map(|f| f.len()).sum(),
+            ClipboardContent::Files(files) | ClipboardContent::Video(files) => files.iter().map(|f| f.len()).sum(),
         }
     }
 
@@ -489,8 +489,7 @@ impl ClipboardHandler {
             ClipboardContent::Rtf { text, .. } => {
                 compute_semantic_hash("rtf", text.as_deref(), &content_hash)
             }
-            ClipboardContent::Image(_) => content_hash.clone(),
-            ClipboardContent::Files(_) => content_hash.clone(),
+            ClipboardContent::Image(_) | ClipboardContent::Files(_) | ClipboardContent::Video(_) => content_hash.clone(),
         };
 
         ContentHashes {
@@ -521,6 +520,13 @@ impl ClipboardHandler {
             }
             ClipboardContent::Files(files) => {
                 hasher.update(b"files:");
+                for file in files {
+                    hasher.update(file.as_bytes());
+                    hasher.update(b"|");
+                }
+            }
+            ClipboardContent::Video(files) => {
+                hasher.update(b"video:");
                 for file in files {
                     hasher.update(file.as_bytes());
                     hasher.update(b"|");
