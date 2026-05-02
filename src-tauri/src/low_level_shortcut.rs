@@ -50,6 +50,9 @@ static HOOK_THREAD_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU
 /// 快捷键是否启用
 static ENABLED: AtomicBool = AtomicBool::new(true);
 
+/// Win 键在本次按下周期中是否被用作快捷键修饰键（用于抑制开始菜单）
+static WIN_USED_IN_COMBO: AtomicBool = AtomicBool::new(false);
+
 // ── 公开 API ──────────────────────────────────────────────────────────
 
 /// 启动低级键盘钩子线程（仅调用一次）
@@ -266,7 +269,17 @@ unsafe extern "system" fn hook_proc(
             return unsafe { CallNextHookEx(None, code, wparam, lparam) };
         }
 
-        // 跳过修饰键本身
+        // 处理 Win 键释放：如果本次按下周期中 Win 键被用作快捷键修饰键，
+        // 吞掉释放事件以阻止 Windows 打开开始菜单
+        if is_win_vk(vk) {
+            let is_release = w == WM_KEYUP_U || w == WM_SYSKEYUP_U;
+            if is_release && WIN_USED_IN_COMBO.swap(false, Ordering::SeqCst) {
+                return LRESULT(1);
+            }
+            return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+        }
+
+        // 跳过其他修饰键本身
         if !is_modifier_vk(vk) {
             let is_press = w == WM_KEYDOWN_U || w == WM_SYSKEYDOWN_U;
             let is_release = w == WM_KEYUP_U || w == WM_SYSKEYUP_U;
@@ -278,6 +291,10 @@ unsafe extern "system" fn hook_proc(
                 let callback = REGISTRY.read().get(&key).map(|e| e.callback.clone());
                 if let Some(cb) = callback {
                     ACTIVE.lock().insert(key);
+                    // 标记 Win 键已被用作修饰键
+                    if mods & MOD_WIN != 0 {
+                        WIN_USED_IN_COMBO.store(true, Ordering::SeqCst);
+                    }
                     if let Some(app) = APP_HANDLE.get() {
                         let app = app.clone();
                         std::thread::spawn(move || {
@@ -320,6 +337,11 @@ unsafe extern "system" fn hook_proc(
     }
 
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+#[cfg(target_os = "windows")]
+fn is_win_vk(vk: u32) -> bool {
+    matches!(vk, 0x5B | 0x5C) // VK_LWIN, VK_RWIN
 }
 
 #[cfg(target_os = "windows")]
