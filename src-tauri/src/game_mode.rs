@@ -140,7 +140,6 @@ fn check_and_update() {
 
     let fullscreen = is_foreground_fullscreen();
     let was_suppressed = GAME_MODE_SUPPRESSED.load(Ordering::Relaxed);
-
     if fullscreen && !was_suppressed {
         suppress_features(app);
         GAME_MODE_SUPPRESSED.store(true, Ordering::Relaxed);
@@ -155,11 +154,14 @@ fn check_and_update() {
 /// 检测当前前台窗口是否为全屏应用（排除桌面和 Shell 窗口）
 #[cfg(target_os = "windows")]
 fn is_foreground_fullscreen() -> bool {
+    use windows::Win32::Foundation::RECT;
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetDesktopWindow, GetForegroundWindow, GetShellWindow, GetWindowRect,
+        GetWindowLongW, GWL_STYLE, GWL_EXSTYLE,
+        WS_MINIMIZE, WS_EX_TOPMOST,
     };
 
     unsafe {
@@ -173,13 +175,34 @@ fn is_foreground_fullscreen() -> bool {
             return false;
         }
 
+        // 排除过渡窗口（ForegroundStaging 等）
+        let mut class_buf = [0u16; 256];
+        let class_len = windows::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, &mut class_buf);
+        let class_name = String::from_utf16_lossy(&class_buf[..class_len as usize]);
+        if class_name == "ForegroundStaging" || class_name == "MultitaskingViewFrame" {
+            return false;
+        }
+
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+
+        // 策略1: 独占全屏——窗口被最小化（坐标为 -32000）但仍是前台窗口且为最顶层
+        if (style & WS_MINIMIZE.0 != 0) && (ex_style & WS_EX_TOPMOST.0 != 0) {
+            return true;
+        }
+
         // 获取窗口矩形
-        let mut window_rect = windows::Win32::Foundation::RECT::default();
+        let mut window_rect = RECT::default();
         if GetWindowRect(hwnd, &mut window_rect).is_err() {
             return false;
         }
 
-        // 比较窗口矩形与所在显示器矩形
+        // 策略2: 独占全屏——窗口坐标在屏幕外（-32000 区域）
+        if window_rect.left <= -30000 && window_rect.top <= -30000 {
+            return true;
+        }
+
+        // 获取显示器矩形
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
@@ -188,31 +211,67 @@ fn is_foreground_fullscreen() -> bool {
         if !GetMonitorInfoW(monitor, &mut info).as_bool() {
             return false;
         }
-
         let s = info.rcMonitor;
-        window_rect.left <= s.left
+        let mon_w = s.right - s.left;
+        let mon_h = s.bottom - s.top;
+
+        // 策略3: 标准全屏——窗口矩形覆盖整个显示器
+        if window_rect.left <= s.left
             && window_rect.top <= s.top
             && window_rect.right >= s.right
             && window_rect.bottom >= s.bottom
+        {
+            return true;
+        }
+
+        // 策略4: 无边框全屏窗口可能有阴影/扩展帧，使用 DwmGetWindowAttribute
+        // 获取实际可见区域（不含阴影）
+        let mut frame_rect = RECT::default();
+        let hr = windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(
+            hwnd,
+            windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut frame_rect as *mut _ as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        );
+        if hr.is_ok() {
+            if frame_rect.left <= s.left
+                && frame_rect.top <= s.top
+                && frame_rect.right >= s.right
+                && frame_rect.bottom >= s.bottom
+            {
+                return true;
+            }
+        }
+
+        // 策略5: 宽松匹配——窗口尺寸接近显示器尺寸（±16 像素容差）
+        let win_w = window_rect.right - window_rect.left;
+        let win_h = window_rect.bottom - window_rect.top;
+        if win_w >= mon_w - 16 && win_h >= mon_h - 16
+            && win_w <= mon_w + 16 && win_h <= mon_h + 16
+        {
+            return true;
+        }
+
+        false
     }
 }
 
 // ── 功能抑制 / 恢复 ──────────────────────────────────────────────────
 
-/// 抑制功能：暂停剪贴板监控 + 注销所有快捷键
+/// 抑制功能：暂停剪贴板监控 + 禁用所有快捷键
 fn suppress_features(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<Arc<AppState>>() {
         state.monitor.pause();
     }
-    crate::disable_all_shortcuts(app);
+    crate::hotkey::disable_all();
 }
 
-/// 恢复功能：恢复剪贴板监控 + 重新注册快捷键（尊重用户手动禁用状态）
+/// 恢复功能：恢复剪贴板监控 + 重新启用快捷键（尊重用户手动禁用状态）
 fn restore_features(app: &tauri::AppHandle) {
     if let Some(state) = app.try_state::<Arc<AppState>>() {
         state.monitor.resume();
     }
     if !crate::SHORTCUTS_DISABLED.load(Ordering::Relaxed) {
-        crate::enable_all_shortcuts(app);
+        crate::hotkey::enable_all();
     }
 }

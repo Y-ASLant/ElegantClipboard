@@ -52,7 +52,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [persistWindowSize, setPersistWindowSize] = useState(true);
   const [showTrayIcon, setShowTrayIcon] = useState(true);
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
-  const [gameModeEnabled, setGameModeEnabled] = useState(false);
 
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "persist_window_size" })
@@ -70,22 +69,8 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       .catch((error) => {
         logError("Failed to load auto_check_update:", error);
       });
-    invoke<boolean>("is_game_mode_enabled")
-      .then((v) => setGameModeEnabled(v))
-      .catch((error) => {
-        logError("Failed to load game_mode_enabled:", error);
-      });
   }, []);
 
-  const toggleGameMode = async (enabled: boolean) => {
-    setGameModeEnabled(enabled);
-    try {
-      await invoke("set_game_mode_enabled", { enabled });
-    } catch (error) {
-      logError("Failed to set game mode:", error);
-      setGameModeEnabled(!enabled);
-    }
-  };
 
   const toggleTrayIcon = async (visible: boolean) => {
     setShowTrayIcon(visible);
@@ -314,23 +299,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
           </div>
         </div>
 
-
-        {/* Game Mode Card */}
-        <div className="rounded-lg border bg-card p-4">
-          <h3 className="text-sm font-medium mb-3">游戏模式</h3>
-          <p className="text-xs text-muted-foreground mb-4">
-            检测到全屏应用（游戏等）时，自动暂停剪贴板监控和所有全局快捷键，退出全屏后自动恢复
-          </p>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-xs">启用游戏模式</Label>
-              <p className="text-xs text-muted-foreground">
-                切换窗口时自动检测，空闲时零开销
-              </p>
-            </div>
-            <Switch checked={gameModeEnabled} onCheckedChange={toggleGameMode} />
-          </div>
-        </div>
 
         {/* Log Card */}
         <div className="rounded-lg border bg-card p-4">
