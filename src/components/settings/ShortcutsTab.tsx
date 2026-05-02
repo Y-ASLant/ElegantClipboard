@@ -398,6 +398,7 @@ export function ShortcutsTab({
           <h3 className="text-sm font-medium mb-3">热键注册方式</h3>
           <p className="text-xs text-muted-foreground mb-4">
             选择全局快捷键的注册方式。切换后所有快捷键会自动重新注册。
+            如果未开启游戏模式但热键仍无法在某些应用中生效，建议切换为「低级键盘钩子」。
           </p>
           <div className="space-y-3">
             <label
@@ -415,9 +416,9 @@ export function ShortcutsTab({
                 {hotkeyMode === "register" && <div className="h-2 w-2 rounded-full bg-primary" />}
               </div>
               <div className="space-y-0.5">
-                <div className="text-xs font-medium">RegisterHotKey API（默认）</div>
+                <div className="text-xs font-medium">系统标准API（默认）</div>
                 <p className="text-xs text-muted-foreground">
-                  使用系统标准 API。不会穿透全屏应用，无需游戏模式。
+                  在窗口化全屏（无边框窗口）下仍可生效，但在真全屏（独占全屏）应用中不生效。
                 </p>
               </div>
             </label>
@@ -438,31 +439,29 @@ export function ShortcutsTab({
               <div className="space-y-0.5">
                 <div className="text-xs font-medium">低级键盘钩子</div>
                 <p className="text-xs text-muted-foreground">
-                  可穿透全屏应用，适合需要在全屏游戏中使用快捷键或截图的场景。<br/>可配合「游戏模式」在全屏时自动暂停。
+                  可穿透真全屏（独占全屏）应用，适合需要在全屏游戏中使用快捷键或截图的场景。
                 </p>
               </div>
             </label>
           </div>
         </div>
 
-        {/* Game Mode Card - 仅低级键盘钩子模式下显示 */}
-        {hotkeyMode === "hook" && (
-          <div className="rounded-lg border bg-card p-4">
-            <h3 className="text-sm font-medium mb-3">游戏模式</h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              检测到全屏应用（游戏等）时，自动暂停剪贴板监控和所有全局快捷键，退出全屏后自动恢复
-            </p>
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-xs">启用游戏模式</Label>
-                <p className="text-xs text-muted-foreground">
-                  切换窗口时自动检测，空闲时零开销
-                </p>
-              </div>
-              <Switch checked={gameModeEnabled} onCheckedChange={toggleGameMode} />
+        {/* Game Mode Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">游戏模式</h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            检测到全屏应用（包括窗口化全屏和独占全屏）时，自动暂停剪贴板监控和所有全局快捷键，退出全屏后自动恢复
+          </p>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">启用游戏模式</Label>
+              <p className="text-xs text-muted-foreground">
+                切换窗口时自动检测，空闲时零开销
+              </p>
             </div>
+            <Switch checked={gameModeEnabled} onCheckedChange={toggleGameMode} />
           </div>
-        )}
+        </div>
 
         {/* Keyboard Navigation Card */}
         <div className="rounded-lg border bg-card p-4">

@@ -112,9 +112,14 @@ pub(crate) fn disable_all_shortcuts(app: &tauri::AppHandle) {
     commands::translate::unregister_translate_selection_shortcut(app);
 }
 
-/// 重新注册所有快捷键（Win+V 除外）
+/// 重新注册所有快捷键（根据 Win+V 替代状态自动选择主呼出键）
 pub(crate) fn enable_all_shortcuts(app: &tauri::AppHandle) {
-    hotkey::register(&get_current_shortcut(), Arc::new(on_toggle_shortcut));
+    // Win+V 替代模式下只注册 Win+V，否则注册自定义快捷键
+    if win_v_registry::is_win_v_hotkey_disabled() {
+        hotkey::register("Win+V", Arc::new(on_toggle_shortcut));
+    } else {
+        hotkey::register(&get_current_shortcut(), Arc::new(on_toggle_shortcut));
+    }
     let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
     apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
     let fav_shortcuts = CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone();
@@ -362,6 +367,19 @@ fn init_logging(config: &AppConfig) {
         .init();
 }
 
+/// Explorer 重启后托盘图标会被系统重建为默认可见状态，
+/// 需要根据用户设置重新应用可见性。
+fn restore_tray_visibility(app: &tauri::AppHandle) {
+    let state = app.state::<Arc<AppState>>();
+    let settings_repo = database::SettingsRepository::new(&state.db);
+    let show_tray = settings_repo.get_bool("show_tray_icon", true);
+    if !show_tray {
+        if let Some(tray) = app.tray_by_id("main-tray") {
+            let _ = tray.set_visible(false);
+        }
+    }
+}
+
 #[tauri::command]
 async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     let saved_shortcut_str = get_current_shortcut();
@@ -377,6 +395,8 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         return Err("Failed to register Win+V shortcut".to_string());
     }
 
+    restore_tray_visibility(&app);
+
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
     let _ = settings_repo.set("winv_replacement", "true");
@@ -390,6 +410,8 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     win_v_registry::enable_win_v_hotkey(true)?;
 
     hotkey::register(&get_current_shortcut(), Arc::new(on_toggle_shortcut));
+
+    restore_tray_visibility(&app);
 
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
@@ -551,14 +573,12 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
         let _ = tray.set_visible(show_tray);
     }
 
-    // 6. 刷新游戏模式（仅低级钩子模式下有效）
-    if hotkey::get_mode() == hotkey::HotkeyMode::LowLevel {
-        let game_mode = settings_repo.get_bool("game_mode_enabled", false);
-        if game_mode {
-            game_mode::start(app.clone());
-        } else {
-            game_mode::stop();
-        }
+    // 6. 刷新游戏模式
+    let game_mode = settings_repo.get_bool("game_mode_enabled", false);
+    if game_mode {
+        game_mode::start(app.clone());
+    } else {
+        game_mode::stop();
     }
 
     tracing::info!("运行时设置已重新加载（云端同步后）");
@@ -567,10 +587,6 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn set_game_mode_enabled(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    // 游戏模式仅在低级钩子模式下有效
-    if hotkey::get_mode() != hotkey::HotkeyMode::LowLevel {
-        return Err("游戏模式仅在低级键盘钩子模式下可用".to_string());
-    }
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
     settings_repo
@@ -615,25 +631,7 @@ fn set_hotkey_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
     hotkey::switch_mode(&app, new_mode);
 
     // 重新注册所有快捷键
-    let shortcut_str = if win_v_registry::is_win_v_hotkey_disabled() {
-        "Win+V".to_string()
-    } else {
-        get_current_shortcut()
-    };
-    hotkey::register(&shortcut_str, Arc::new(on_toggle_shortcut));
     enable_all_shortcuts(&app);
-
-    // 如果切到 Register 模式，停止游戏模式
-    if new_mode == hotkey::HotkeyMode::Register {
-        game_mode::stop();
-    } else {
-        // 如果切到 LowLevel 模式且游戏模式已启用，启动它
-        let state = app.state::<Arc<AppState>>();
-        let settings_repo = database::SettingsRepository::new(&state.db);
-        if settings_repo.get_bool("game_mode_enabled", false) {
-            game_mode::start(app.clone());
-        }
-    }
 
     // 保存设置
     let state = app.state::<Arc<AppState>>();
@@ -774,12 +772,10 @@ pub fn run() {
             // 注册翻译选中文字快捷键
             commands::translate::register_translate_selection_shortcut(app.handle());
 
-            // 启动游戏模式检测（仅低级钩子模式下有效）
-            if hotkey_mode == hotkey::HotkeyMode::LowLevel {
-                let game_mode = settings_repo.get_bool("game_mode_enabled", false);
-                if game_mode {
-                    game_mode::start(app.handle().clone());
-                }
+            // 启动游戏模式检测
+            let game_mode = settings_repo.get_bool("game_mode_enabled", false);
+            if game_mode {
+                game_mode::start(app.handle().clone());
             }
 
             if let Some(window) = app.get_webview_window("main") {
