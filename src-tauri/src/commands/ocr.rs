@@ -411,9 +411,6 @@ pub async fn get_pending_ocr_text() -> Result<String, String> {
 
 /// 注册 OCR 快捷键
 pub fn register_ocr_shortcut(app: &tauri::AppHandle) {
-    use crate::shortcut::parse_shortcut;
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-
     let state = match app.try_state::<Arc<AppState>>() {
         Some(s) => s,
         None => return,
@@ -435,25 +432,20 @@ pub fn register_ocr_shortcut(app: &tauri::AppHandle) {
         _ => return,
     };
 
-    let shortcut = match parse_shortcut(&shortcut_str) {
-        Some(s) => s,
-        None => {
-            tracing::warn!("OCR 快捷键格式无效: {}", shortcut_str);
-            return;
-        }
-    };
+    let registered = crate::hotkey::register(
+        &shortcut_str,
+        std::sync::Arc::new(|app, key_state| {
+            if key_state == crate::hotkey::KeyState::Pressed {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    trigger_ocr_capture(&app);
+                });
+            }
+        }),
+    );
 
-    let result = app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
-            let app = app.clone();
-            std::thread::spawn(move || {
-                trigger_ocr_capture(&app);
-            });
-        }
-    });
-
-    if let Err(e) = result {
-        tracing::warn!("OCR 快捷键注册失败: {}", e);
+    if !registered {
+        tracing::warn!("OCR 快捷键格式无效: {}", shortcut_str);
     } else {
         tracing::info!("OCR 快捷键已注册: {}", shortcut_str);
     }
@@ -461,9 +453,6 @@ pub fn register_ocr_shortcut(app: &tauri::AppHandle) {
 
 /// 注销 OCR 快捷键
 pub fn unregister_ocr_shortcut(app: &tauri::AppHandle) {
-    use crate::shortcut::parse_shortcut;
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-
     let state = match app.try_state::<Arc<AppState>>() {
         Some(s) => s,
         None => return,
@@ -472,9 +461,7 @@ pub fn unregister_ocr_shortcut(app: &tauri::AppHandle) {
 
     if let Some(shortcut_str) = settings_repo.get("ocr_shortcut").ok().flatten() {
         if !shortcut_str.is_empty() {
-            if let Some(sc) = parse_shortcut(&shortcut_str) {
-                let _ = app.global_shortcut().unregister(sc);
-            }
+            crate::hotkey::unregister(&shortcut_str);
         }
     }
 }

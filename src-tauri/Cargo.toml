@@ -26,10 +26,10 @@ tauri-build = { version = "2", features = [] }
 # Tauri core
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
-tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 
 # Serialization
