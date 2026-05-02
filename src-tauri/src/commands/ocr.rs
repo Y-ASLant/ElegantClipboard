@@ -468,10 +468,12 @@ pub fn unregister_ocr_shortcut(app: &tauri::AppHandle) {
 
 /// 触发 OCR 截图流程
 fn trigger_ocr_capture(app: &tauri::AppHandle) {
-    // 隐藏主窗口
+    // 隐藏主窗口并同步状态
     if let Some(main_win) = app.get_webview_window("main") {
         if main_win.is_visible().unwrap_or(false) {
             let _ = main_win.hide();
+            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+            crate::input_monitor::disable_mouse_monitoring();
         }
     }
 
