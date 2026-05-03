@@ -93,12 +93,30 @@ export function OcrResult() {
     });
   }, []);
 
-  // 挂载后从 Rust 获取暂存文本
+  // 挂载后从 Rust 获取暂存文本（兜底：防止窗口刚创建时 emit 事件丢失）
   useEffect(() => {
     invoke<string>("get_pending_ocr_text").then((t) => {
       if (t) {
         setText(t);
         setOcrRecognizing(false);
+        // 自动复制
+        const { autoCopy, recordOcrCopy: record } = useOcrSettings.getState();
+        if (autoCopy && t.trim()) {
+          invoke("write_text_to_clipboard", { text: t, record }).catch(() => {});
+        }
+        // 自动翻译
+        const { autoTranslate } = useOcrSettings.getState();
+        const { enabled: transEnabled } = useTranslateSettings.getState();
+        if (autoTranslate && transEnabled && t.trim()) {
+          setTranslating(true);
+          translateText(t).then((r) => {
+            setTranslatedText(r);
+          }).catch((e) => {
+            setTranslateError(String(e));
+          }).finally(() => {
+            setTranslating(false);
+          });
+        }
       }
     }).catch(() => {});
   }, []);

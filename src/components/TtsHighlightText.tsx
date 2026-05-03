@@ -5,6 +5,8 @@ import { useTtsSettings } from "@/stores/tts-settings";
 
 interface TtsHighlightTextProps {
   text: string;
+  /** TTS 未激活时的回退渲染（如搜索高亮组件），不传则渲染纯文本 */
+  fallback?: React.ReactNode;
 }
 
 /**
@@ -13,11 +15,16 @@ interface TtsHighlightTextProps {
  * 按当前 charOffset/charLength 将正在朗读的词高亮显示。
  * 受 TTS 设置中 highlightWord 开关控制。
  */
-export const TtsHighlightText = memo(function TtsHighlightText({ text }: TtsHighlightTextProps) {
+export const TtsHighlightText = memo(function TtsHighlightText({ text, fallback }: TtsHighlightTextProps) {
   const highlightEnabled = useTtsSettings((s) => s.highlightWord);
   const { isActive, charOffset, charLength } = useTtsPlayback(
     useShallow((s) => {
-      const active = s.isPlaying && s.sourceText === text;
+      const src = s.sourceText ?? "";
+      const active = s.isPlaying && (
+        src === text ||
+        src.startsWith(text) ||
+        text.startsWith(src)
+      );
       return {
         isActive: active,
         charOffset: active ? s.charOffset : 0,
@@ -27,7 +34,7 @@ export const TtsHighlightText = memo(function TtsHighlightText({ text }: TtsHigh
   );
 
   if (!highlightEnabled || !isActive || charLength === 0) {
-    return <>{text}</>;
+    return <>{fallback ?? text}</>;
   }
 
   const before = text.slice(0, charOffset);

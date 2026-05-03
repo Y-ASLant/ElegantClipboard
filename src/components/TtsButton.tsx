@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Speaker216Regular, DismissCircle16Regular } from "@fluentui/react-icons";
 import { speak, stopSpeaking, isSpeaking } from "@/lib/tts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTtsSettings } from "@/stores/tts-settings";
 
 interface TtsButtonProps {
   /** 要朗读的文本 */
@@ -21,6 +22,7 @@ export function TtsButton({
   className = "p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors",
   iconClassName = "w-3.5 h-3.5",
 }: TtsButtonProps) {
+  const ttsEnabled = useTtsSettings((s) => s.enabled);
   const [speaking, setSpeaking] = useState(false);
 
   useEffect(() => {
@@ -43,6 +45,8 @@ export function TtsButton({
     },
     [text, speaking],
   );
+
+  if (!ttsEnabled) return null;
 
   return (
     <Tooltip>
@@ -71,6 +75,7 @@ export function TtsButtonLarge({
   getTextFn?: () => string;
   disabled?: boolean;
 }) {
+  const ttsEnabled = useTtsSettings((s) => s.enabled);
   const [speaking, setSpeaking] = useState(false);
 
   useEffect(() => {
@@ -95,6 +100,8 @@ export function TtsButtonLarge({
     },
     [text, getTextFn, speaking],
   );
+
+  if (!ttsEnabled) return null;
 
   return (
     <button

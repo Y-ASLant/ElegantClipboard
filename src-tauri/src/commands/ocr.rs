@@ -230,6 +230,7 @@ pub async fn ocr_recognize_baidu(
     image_base64: String,
     api_key: String,
     secret_key: String,
+    accuracy: String,
     proxy_mode: String,
     proxy_url: String,
 ) -> Result<String, String> {
@@ -239,10 +240,15 @@ pub async fn ocr_recognize_baidu(
         // 1. 获取 access_token（优先返回缓存）
         let access_token = get_baidu_access_token(&client, &api_key, &secret_key)?;
 
-        // 2. 调用通用文字识别（高精度版）
+        // 2. 根据精度选择 API：high = 高精度版，standard = 标准版
+        let endpoint = if accuracy == "standard" {
+            "general_basic"
+        } else {
+            "accurate_basic"
+        };
         let ocr_url = format!(
-            "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic?access_token={}",
-            access_token
+            "https://aip.baidubce.com/rest/2.0/ocr/v1/{}?access_token={}",
+            endpoint, access_token
         );
         let body = format!("image={}", urlencoded(&image_base64));
         let ocr_resp = client
@@ -369,6 +375,9 @@ pub async fn ocr_screenshot_ready(app: tauri::AppHandle) -> Result<(), String> {
 pub async fn open_ocr_result_window(app: tauri::AppHandle, text: String) -> Result<(), String> {
     let label = "ocr-result";
 
+    // 始终暂存最新文本，防止窗口刚创建、前端尚未就绪时 emit 的事件丢失
+    *PENDING_OCR_TEXT.lock().unwrap() = text.clone();
+
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.emit("ocr-result-update", &text);
         let _ = window.unminimize();
@@ -395,9 +404,6 @@ pub async fn open_ocr_result_window(app: tauri::AppHandle, text: String) -> Resu
     .center()
     .build()
     .map_err(|e| format!("创建 OCR 结果窗口失败: {}", e))?;
-
-    // 暂存文本，前端挂载后通过 get_pending_ocr_text 命令获取
-    *PENDING_OCR_TEXT.lock().unwrap() = text;
 
     Ok(())
 }

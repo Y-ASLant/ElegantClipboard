@@ -12,6 +12,7 @@ export async function recognizeText(imageBase64: string): Promise<string> {
       imageBase64,
       apiKey: ocrSettings.baiduApiKey,
       secretKey: ocrSettings.baiduSecretKey,
+      accuracy: ocrSettings.accuracy || "high",
       proxyMode: ocrSettings.proxyMode || "none",
       proxyUrl: ocrSettings.proxyUrl || "",
     });

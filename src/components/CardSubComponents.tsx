@@ -12,6 +12,7 @@ import {
   ChevronDown16Regular,
   Tag16Regular,
   Translate16Regular,
+  Speaker216Regular,
 } from "@fluentui/react-icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -186,6 +187,7 @@ interface ActionToolbarProps {
   onDelete: (e: React.MouseEvent) => void;
   onTag?: (e: React.MouseEvent) => void;
   onTranslate?: (e: React.MouseEvent) => void;
+  onTts?: (e: React.MouseEvent) => void;
 }
 
 export const ActionToolbar = memo(function ActionToolbar({
@@ -196,6 +198,7 @@ export const ActionToolbar = memo(function ActionToolbar({
   onDelete,
   onTag,
   onTranslate,
+  onTts,
 }: ActionToolbarProps) { return (
   <div
     className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
@@ -249,6 +252,21 @@ export const ActionToolbar = memo(function ActionToolbar({
       </TooltipTrigger>
       <TooltipContent>复制</TooltipContent>
     </Tooltip>
+    {onTts && (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onTts}
+            className="h-6 w-6"
+          >
+            <Speaker216Regular className="w-3.5 h-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>朗读</TooltipContent>
+      </Tooltip>
+    )}
     {onTranslate && (
       <Tooltip>
         <TooltipTrigger asChild>

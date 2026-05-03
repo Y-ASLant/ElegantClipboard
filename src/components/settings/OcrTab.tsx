@@ -35,6 +35,7 @@ export function OcrTab() {
     recordOcrCopy, setRecordOcrCopy,
     autoCopy, setAutoCopy,
     autoTranslate, setAutoTranslate,
+    accuracy, setAccuracy,
     shortcut, setShortcut,
     baiduApiKey, setBaiduApiKey,
     baiduSecretKey, setBaiduSecretKey,
@@ -283,9 +284,25 @@ export function OcrTab() {
           <div className="rounded-lg border bg-card p-4">
             <h3 className="text-sm font-medium mb-3">识别接口</h3>
             <p className="text-xs text-muted-foreground mb-4">
-              当前使用百度 OCR 高精度识别接口
+              配置百度 OCR 识别接口参数
             </p>
             <div className="space-y-3">
+              {/* 识别精度 */}
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-xs">识别精度</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {accuracy === "high" ? "精度更高，速度较慢" : "速度更快，精度略低"}
+                  </p>
+                </div>
+                <Select value={accuracy} onValueChange={(v) => setAccuracy(v as "high" | "standard")}>
+                  <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">高精度版</SelectItem>
+                    <SelectItem value="standard">标准版（更快）</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">API Key</Label>
                 <Input

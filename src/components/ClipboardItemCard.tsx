@@ -76,7 +76,9 @@ import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useTagStore } from "@/stores/tags";
 import { useUISettings } from "@/stores/ui-settings";
 import { useTranslateSettings } from "@/stores/translate-settings";
+import { useTtsSettings } from "@/stores/tts-settings";
 import { translateText } from "@/lib/translate";
+import { speak, stopSpeaking, isSpeaking } from "@/lib/tts";
 
 // ============ 类型定义 ============
 
@@ -302,6 +304,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
   const tagPopoverRef = useRef<HTMLDivElement>(null);
   const translateEnabled = useTranslateSettings((s) => s.enabled);
+  const ttsToolbarEnabled = useTtsSettings((s) => s.enabled && s.showToolbarTts);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
@@ -784,7 +787,14 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   overflow: "hidden",
                 }}
               >
-                <HighlightText text={item.preview || item.text_content || `[${config.label}]`} />
+                {ttsToolbarEnabled ? (
+                  <TtsHighlightText
+                    text={item.preview || item.text_content || `[${config.label}]`}
+                    fallback={<HighlightText text={item.preview || item.text_content || `[${config.label}]`} />}
+                  />
+                ) : (
+                  <HighlightText text={item.preview || item.text_content || `[${config.label}]`} />
+                )}
               </pre>
               <CardFooter
                 metaItems={metaItems}
@@ -804,6 +814,20 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onToggleFavorite={handleToggleFavorite}
               onCopy={handleCopy}
               onDelete={handleDelete}
+              onTts={ttsToolbarEnabled && isTextLikeContent && getLogicalContentType(item) === "text" ? (e) => {
+                e.stopPropagation();
+                if (isSpeaking()) { stopSpeaking(); return; }
+                (async () => {
+                  let txt = item.text_content || "";
+                  if (!txt) {
+                    try {
+                      const detail = await invoke<ClipboardItemDetail | null>("get_clipboard_item", { id: item.id });
+                      txt = detail?.text_content || detail?.preview || item.preview || "";
+                    } catch { /* fallback to preview */ txt = item.preview || ""; }
+                  }
+                  if (txt.trim()) speak(txt, "en-US");
+                })();
+              } : undefined}
               onTranslate={translateEnabled && isTextLikeContent && getLogicalContentType(item) === "text" ? (e) => {
                 e.stopPropagation();
                 handleTranslate();

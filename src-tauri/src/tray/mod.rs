@@ -114,8 +114,8 @@ pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("/settings".into()),
     )
     .title("设置")
-    .inner_size(800.0, 560.0)
-    .min_inner_size(580.0, 480.0)
+    .inner_size(800.0, 600.0)
+    .min_inner_size(700.0, 580.0)
     .decorations(false)
     .transparent(true)
     .shadow(true)

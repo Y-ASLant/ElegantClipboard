@@ -12,6 +12,7 @@ const broadcastChange = (state: Partial<OcrSettings>) => {
 };
 
 export type OcrProvider = "baidu";
+export type OcrAccuracy = "high" | "standard";
 
 export interface OcrSettings {
   enabled: boolean;
@@ -19,6 +20,7 @@ export interface OcrSettings {
   autoCopy: boolean;
   autoTranslate: boolean;
   provider: OcrProvider;
+  accuracy: OcrAccuracy;
   shortcut: string;
   // Baidu OCR
   baiduApiKey: string;
@@ -37,6 +39,7 @@ interface OcrSettingsStore extends OcrSettings {
   setAutoCopy: (auto: boolean) => void;
   setAutoTranslate: (auto: boolean) => void;
   setProvider: (provider: OcrProvider) => void;
+  setAccuracy: (accuracy: OcrAccuracy) => void;
   setShortcut: (shortcut: string) => void;
   setBaiduApiKey: (key: string) => void;
   setBaiduSecretKey: (key: string) => void;
@@ -50,6 +53,7 @@ const SETTING_KEYS: Record<string, keyof OcrSettings> = {
   ocr_auto_copy: "autoCopy",
   ocr_auto_translate: "autoTranslate",
   ocr_provider: "provider",
+  ocr_accuracy: "accuracy",
   ocr_shortcut: "shortcut",
   ocr_baidu_api_key: "baiduApiKey",
   ocr_baidu_secret_key: "baiduSecretKey",
@@ -63,6 +67,7 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
   autoCopy: false,
   autoTranslate: false,
   provider: "baidu",
+  accuracy: "high",
   shortcut: "",
   baiduApiKey: "",
   baiduSecretKey: "",
@@ -83,6 +88,7 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
         autoCopy: m.get("ocr_auto_copy") === "true",
         autoTranslate: m.get("ocr_auto_translate") === "true",
         provider: (m.get("ocr_provider") as OcrProvider) || "baidu",
+        accuracy: (m.get("ocr_accuracy") as OcrAccuracy) || "high",
         shortcut: m.get("ocr_shortcut") || "",
         baiduApiKey: m.get("ocr_baidu_api_key") || "",
         baiduSecretKey: m.get("ocr_baidu_secret_key") || "",
@@ -127,6 +133,11 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
     set({ provider });
     get().saveSetting("ocr_provider", provider);
     broadcastChange({ provider });
+  },
+  setAccuracy: (accuracy) => {
+    set({ accuracy });
+    get().saveSetting("ocr_accuracy", accuracy);
+    broadcastChange({ accuracy });
   },
   setShortcut: (shortcut) => {
     set({ shortcut });

@@ -14,6 +14,8 @@ const broadcastChange = (state: Partial<TtsSettings>) => {
 export type TtsEngine = "edge" | "browser";
 
 export interface TtsSettings {
+  /** 总开关 */
+  enabled: boolean;
   engine: TtsEngine;
   /** 统一模式声源 */
   edgeVoice: string;
@@ -33,12 +35,15 @@ export interface TtsSettings {
   browserAccent: string;
   /** 朗读时逐词高亮 */
   highlightWord: boolean;
+  /** 悬浮工具栏显示朗读按钮 */
+  showToolbarTts: boolean;
 }
 
 interface TtsSettingsStore extends TtsSettings {
   loaded: boolean;
   loadSettings: () => Promise<void>;
   saveSetting: (key: string, value: string) => Promise<void>;
+  setEnabled: (enabled: boolean) => void;
   setEngine: (engine: TtsEngine) => void;
   setEdgeVoice: (voice: string) => void;
   setEdgeVoiceEn: (voice: string) => void;
@@ -51,9 +56,11 @@ interface TtsSettingsStore extends TtsSettings {
   setProxyUrl: (url: string) => void;
   setBrowserAccent: (accent: string) => void;
   setHighlightWord: (highlight: boolean) => void;
+  setShowToolbarTts: (show: boolean) => void;
 }
 
 const SETTING_KEYS: Record<string, keyof TtsSettings> = {
+  tts_enabled: "enabled",
   tts_engine: "engine",
   tts_edge_voice: "edgeVoice",
   tts_edge_voice_en: "edgeVoiceEn",
@@ -66,9 +73,11 @@ const SETTING_KEYS: Record<string, keyof TtsSettings> = {
   tts_proxy_url: "proxyUrl",
   tts_browser_accent: "browserAccent",
   tts_highlight_word: "highlightWord",
+  tts_show_toolbar: "showToolbarTts",
 };
 
 export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
+  enabled: true,
   engine: "edge",
   edgeVoice: "zh-CN-XiaoxiaoNeural",
   edgeVoiceEn: "en-US-AriaNeural",
@@ -81,6 +90,7 @@ export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
   proxyUrl: "",
   browserAccent: "en-US",
   highlightWord: true,
+  showToolbarTts: false,
   loaded: false,
 
   loadSettings: async () => {
@@ -91,6 +101,7 @@ export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
       );
       const m = new Map(keys.map((k, i) => [k, values[i]]));
       set({
+        enabled: m.get("tts_enabled") !== "false",
         engine: (m.get("tts_engine") as TtsEngine) || "edge",
         edgeVoice: m.get("tts_edge_voice") || "zh-CN-XiaoxiaoNeural",
         edgeVoiceEn: m.get("tts_edge_voice_en") || "en-US-AriaNeural",
@@ -103,6 +114,7 @@ export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
         proxyUrl: m.get("tts_proxy_url") || "",
         browserAccent: m.get("tts_browser_accent") || "en-US",
         highlightWord: m.get("tts_highlight_word") !== "false",
+        showToolbarTts: m.get("tts_show_toolbar") === "true",
         loaded: true,
       });
     } catch (error) {
@@ -118,6 +130,11 @@ export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
     }
   },
 
+  setEnabled: (enabled) => {
+    set({ enabled });
+    get().saveSetting("tts_enabled", enabled ? "true" : "false");
+    broadcastChange({ enabled });
+  },
   setEngine: (engine) => {
     set({ engine });
     get().saveSetting("tts_engine", engine);
@@ -177,6 +194,11 @@ export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
     set({ highlightWord });
     get().saveSetting("tts_highlight_word", highlightWord ? "true" : "false");
     broadcastChange({ highlightWord });
+  },
+  setShowToolbarTts: (showToolbarTts) => {
+    set({ showToolbarTts });
+    get().saveSetting("tts_show_toolbar", showToolbarTts ? "true" : "false");
+    broadcastChange({ showToolbarTts });
   },
 }));
 

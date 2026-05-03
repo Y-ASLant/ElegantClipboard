@@ -11,6 +11,7 @@ import {
   ArrowSync16Regular,
   Translate16Regular,
   ScanText16Regular,
+  Speaker216Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -26,6 +27,7 @@ import {
 } from "@/components/settings/ShortcutsTab";
 import { ThemeTab } from "@/components/settings/ThemeTab";
 import { TranslateTab } from "@/components/settings/TranslateTab";
+import { TtsTab } from "@/components/settings/TtsTab";
 import { OcrTab } from "@/components/settings/OcrTab";
 import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,7 +45,7 @@ function normalizePositionMode(raw: string | null | undefined): import("@/compon
   return "follow_cursor";
 }
 
-type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "ocr" | "translate" | "sync" | "about";
+type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "ocr" | "translate" | "tts" | "sync" | "about";
 
 const navItems: {
   id: TabType;
@@ -58,6 +60,7 @@ const navItems: {
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
   { id: "ocr", label: "OCR识别", icon: ScanText16Regular },
   { id: "translate", label: "条目翻译", icon: Translate16Regular },
+  { id: "tts", label: "语音朗读", icon: Speaker216Regular },
   { id: "sync", label: "云端同步", icon: ArrowSync16Regular },
   { id: "about", label: "关于软件", icon: Info16Regular },
 ];
@@ -358,6 +361,8 @@ export function Settings() {
               {activeTab === "ocr" && <OcrTab />}
 
               {activeTab === "translate" && <TranslateTab />}
+
+              {activeTab === "tts" && <TtsTab />}
 
               {activeTab === "sync" && <SyncTab />}
             </div>
