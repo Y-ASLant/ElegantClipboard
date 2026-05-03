@@ -63,6 +63,9 @@ export function ShortcutsTab({
 }: ShortcutsTabProps) {
   const keyboardNavigation = useUISettings((s) => s.keyboardNavigation);
   const setKeyboardNavigation = useUISettings((s) => s.setKeyboardNavigation);
+  const [hotkeyMode, setHotkeyMode] = useState("register");
+  const [hotkeySwitching, setHotkeySwitching] = useState(false);
+  const [gameModeEnabled, setGameModeEnabled] = useState(false);
   const [winvLoading, setWinvLoading] = useState(false);
   const [winvError, setWinvError] = useState("");
   const [winvConfirmDialogOpen, setWinvConfirmDialogOpen] = useState(false);
@@ -141,6 +144,40 @@ export function ShortcutsTab({
       return () => window.removeEventListener("keydown", handleKeyDown);
     }
   }, [recordingShortcut, handleKeyDown]);
+
+  useEffect(() => {
+    invoke<string>("get_hotkey_mode")
+      .then((v) => setHotkeyMode(v))
+      .catch((error) => logError("Failed to load hotkey_mode:", error));
+    invoke<boolean>("is_game_mode_enabled")
+      .then((v) => setGameModeEnabled(v))
+      .catch((error) => logError("Failed to load game_mode_enabled:", error));
+  }, []);
+
+  const switchHotkeyMode = async (mode: string) => {
+    if (mode === hotkeyMode || hotkeySwitching) return;
+    setHotkeySwitching(true);
+    const prev = hotkeyMode;
+    setHotkeyMode(mode);
+    try {
+      await invoke("set_hotkey_mode", { mode });
+    } catch (error) {
+      logError("Failed to set hotkey mode:", error);
+      setHotkeyMode(prev);
+    } finally {
+      setHotkeySwitching(false);
+    }
+  };
+
+  const toggleGameMode = async (enabled: boolean) => {
+    setGameModeEnabled(enabled);
+    try {
+      await invoke("set_game_mode_enabled", { enabled });
+    } catch (error) {
+      logError("Failed to set game mode:", error);
+      setGameModeEnabled(!enabled);
+    }
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -356,6 +393,76 @@ export function ShortcutsTab({
   return (
     <>
       <div className="space-y-4">
+        {/* Hotkey Mode Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">热键注册方式</h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            选择全局快捷键的注册方式。切换后所有快捷键会自动重新注册。
+            如果未开启游戏模式但热键仍无法在某些应用中生效，建议切换为「低级键盘钩子」。
+          </p>
+          <div className="space-y-3">
+            <label
+              className={cn(
+                "flex items-start gap-3 rounded-md border p-3 cursor-pointer transition-colors",
+                hotkeyMode === "register" ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+                hotkeySwitching && "opacity-50 pointer-events-none"
+              )}
+              onClick={() => switchHotkeyMode("register")}
+            >
+              <div className={cn(
+                "mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                hotkeyMode === "register" ? "border-primary" : "border-muted-foreground/40"
+              )}>
+                {hotkeyMode === "register" && <div className="h-2 w-2 rounded-full bg-primary" />}
+              </div>
+              <div className="space-y-0.5">
+                <div className="text-xs font-medium">系统标准API（默认）</div>
+                <p className="text-xs text-muted-foreground">
+                  在窗口化全屏（无边框窗口）下仍可生效，但在真全屏（独占全屏）应用中不生效。
+                </p>
+              </div>
+            </label>
+            <label
+              className={cn(
+                "flex items-start gap-3 rounded-md border p-3 cursor-pointer transition-colors",
+                hotkeyMode === "hook" ? "border-primary bg-primary/5" : "hover:bg-muted/50",
+                hotkeySwitching && "opacity-50 pointer-events-none"
+              )}
+              onClick={() => switchHotkeyMode("hook")}
+            >
+              <div className={cn(
+                "mt-0.5 h-4 w-4 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                hotkeyMode === "hook" ? "border-primary" : "border-muted-foreground/40"
+              )}>
+                {hotkeyMode === "hook" && <div className="h-2 w-2 rounded-full bg-primary" />}
+              </div>
+              <div className="space-y-0.5">
+                <div className="text-xs font-medium">低级键盘钩子</div>
+                <p className="text-xs text-muted-foreground">
+                  可穿透真全屏（独占全屏）应用，适合需要在全屏游戏中使用快捷键或截图的场景。
+                </p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* Game Mode Card */}
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-medium mb-3">游戏模式</h3>
+          <p className="text-xs text-muted-foreground mb-4">
+            检测到全屏应用（包括窗口化全屏和独占全屏）时，自动暂停剪贴板监控和所有全局快捷键，退出全屏后自动恢复
+          </p>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">启用游戏模式</Label>
+              <p className="text-xs text-muted-foreground">
+                切换窗口时自动检测，空闲时零开销
+              </p>
+            </div>
+            <Switch checked={gameModeEnabled} onCheckedChange={toggleGameMode} />
+          </div>
+        </div>
+
         {/* Keyboard Navigation Card */}
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-medium mb-3">快捷导航</h3>
@@ -365,7 +472,7 @@ export function ShortcutsTab({
               <div className="space-y-0.5">
                 <Label className="text-xs">键盘导航</Label>
                 <p className="text-xs text-muted-foreground">
-                  方向键选择条目和切换分组、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除
+                  方向键选择条目和切换分类、Enter 粘贴、Shift+Enter 纯文本粘贴、Delete 删除
                 </p>
               </div>
               <Switch

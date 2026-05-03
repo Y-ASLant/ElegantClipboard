@@ -271,6 +271,7 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
         let _ = window.show();
+        let _ = window.set_always_on_top(true);
         let _ = window.set_focus();
         return Ok(());
     }
@@ -288,6 +289,7 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
     .shadow(true)
     .visible(false)
     .resizable(true)
+    .always_on_top(true)
     .center()
     .build()
     .map_err(|e| format!("创建编辑器窗口失败: {}", e))?;

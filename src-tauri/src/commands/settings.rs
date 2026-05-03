@@ -70,6 +70,23 @@ pub struct MonitorStatus {
     pub paused: bool,
 }
 
+// ============ 托盘图标命令 ============
+
+/// 设置托盘图标可见性
+#[tauri::command]
+pub async fn set_tray_visible(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    visible: bool,
+) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray.set_visible(visible).map_err(|e| e.to_string())?;
+    }
+    let repo = SettingsRepository::new(&state.db);
+    let _ = repo.set("show_tray_icon", if visible { "true" } else { "false" });
+    Ok(())
+}
+
 // ============ 数据库命令 ============
 
 /// 优化数据库
@@ -126,19 +143,14 @@ pub async fn reset_settings(state: State<'_, Arc<AppState>>) -> Result<(), Strin
 /// 重置所有数据（删除剪贴板条目 + 自定义分组 + 设置 + 图片文件）
 #[tauri::command]
 pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    use crate::database::{ClipboardRepository, GroupRepository};
+    use crate::database::ClipboardRepository;
     use std::fs;
     use tracing::info;
 
-    // 清空剪贴板数据
     let clipboard_repo = ClipboardRepository::new(&state.db);
     let image_paths = clipboard_repo.get_all_image_paths().unwrap_or_default();
     clipboard_repo.clear_all().map_err(|e| e.to_string())?;
     crate::clipboard::cleanup_image_files(&image_paths);
-
-    // 清空自定义分组
-    let group_repo = GroupRepository::new(&state.db);
-    group_repo.delete_all().map_err(|e| e.to_string())?;
 
     // 清空设置
     let settings_repo = SettingsRepository::new(&state.db);

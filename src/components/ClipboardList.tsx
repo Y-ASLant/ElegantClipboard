@@ -12,7 +12,7 @@ import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { Separator } from "@/components/ui/separator";
 import { focusWindowImmediately } from "@/hooks/useInputFocus";
 import { useSortableList } from "@/hooks/useSortableList";
-import { GROUPS } from "@/lib/constants";
+import { getVisibleCategories } from "@/lib/constants";
 import { logError } from "@/lib/logger";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
@@ -25,6 +25,11 @@ interface SortableClipboardItem extends ClipboardItem {
 
 interface ClipboardListProps {
   searchInputRef: RefObject<HTMLInputElement | null>;
+}
+
+function getPinnedBoundary(items: SortableClipboardItem[]): number {
+  const firstUnpinnedIndex = items.findIndex((item) => !item.is_pinned);
+  return firstUnpinnedIndex === -1 ? items.length : firstUnpinnedIndex;
 }
 
 // Virtuoso scrollSeek 占位符 — 快速滚动时替代完整卡片，接收精确高度避免布局抖动
@@ -44,6 +49,29 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
   </div>
 );
 
+// 静态配置对象提取到组件外部，避免每次渲染重新创建
+const OVERLAY_SCROLLBARS_OPTIONS = {
+  scrollbars: {
+    theme: "os-theme-custom" as const,
+    visibility: "auto" as const,
+    autoHide: "scroll" as const,
+    autoHideDelay: 1000,
+  },
+  overflow: {
+    x: "hidden" as const,
+    y: "scroll" as const,
+  },
+};
+
+const VIRTUOSO_VIEWPORT_INCREASE = { top: 400, bottom: 400 };
+
+const VIRTUOSO_SCROLL_SEEK_CONFIG = {
+  enter: (velocity: number) => Math.abs(velocity) > 2000,
+  exit: (velocity: number) => Math.abs(velocity) < 500,
+};
+
+const VIRTUOSO_COMPONENTS = { ScrollSeekPlaceholder };
+
 export function ClipboardList({ searchInputRef }: ClipboardListProps) {
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -53,12 +81,14 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
   const [customScrollParent, setCustomScrollParent] =
     useState<HTMLElement | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const [hideScrollTopForToolbar, setHideScrollTopForToolbar] = useState(false);
   const [optimisticItems, setOptimisticItems] = useState<SortableClipboardItem[] | null>(null);
   const {
     items,
     isLoading,
     searchQuery,
-    selectedGroup,
+    selectedCategory,
     fetchItems,
     setupListener,
     moveItem,
@@ -73,8 +103,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       items: s.items,
       isLoading: s.isLoading,
       searchQuery: s.searchQuery,
-      selectedGroup: s.selectedGroup,
-      selectedGroupId: s.selectedGroupId,
+      selectedCategory: s.selectedCategory,
       fetchItems: s.fetchItems,
       setupListener: s.setupListener,
       moveItem: s.moveItem,
@@ -120,15 +149,14 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
     setOptimisticItems(null);
   }, [itemsWithSortId]);
 
-  // 后端已按 is_pinned DESC 排序，直接计算置顶数即可
+  // 后端已按 is_pinned DESC 排序，直接找到分界点即可
   const pinnedCount = useMemo(
-    () => renderedItems.filter((item) => item.is_pinned).length,
+    () => getPinnedBoundary(renderedItems),
     [renderedItems],
   );
 
   // 搜索/类型筛选时隐藏快捷粘贴序号（过滤后的顺序与快捷粘贴槽位顺序不一致）
-  // 自定义分组仍显示序号（quick_paste 分组隔离）
-  const showSlotBadges = !searchQuery && !selectedGroup;
+  const showSlotBadges = !searchQuery && !selectedCategory;
 
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
@@ -138,7 +166,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       const toItem = currentItems[newIndex];
       if (!fromItem || !toItem) return;
 
-      const currentPinnedCount = currentItems.filter((item) => item.is_pinned).length;
+      const currentPinnedCount = getPinnedBoundary(currentItems);
       const fromIsPinned = oldIndex < currentPinnedCount;
       const toIsPinned = newIndex < currentPinnedCount;
 
@@ -209,6 +237,27 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       });
     };
   }, [activeId]);
+
+  // 工具栏与回到顶部按钮重叠检测：悬浮工具栏时若遮挡按钮则暂时隐藏
+  const handleToolbarMouseOver = useCallback((e: React.MouseEvent) => {
+    const toolbar = (e.target as HTMLElement).closest('[data-action-toolbar]');
+    if (!toolbar) return;
+    const btn = listContainerRef.current?.querySelector('[data-scroll-top-btn]');
+    if (!btn) return;
+    const tRect = toolbar.getBoundingClientRect();
+    const bRect = btn.getBoundingClientRect();
+    const overlaps = tRect.left < bRect.right && tRect.right > bRect.left &&
+                     tRect.top < bRect.bottom && tRect.bottom > bRect.top;
+    setHideScrollTopForToolbar(overlaps);
+  }, []);
+
+  const handleToolbarMouseOut = useCallback((e: React.MouseEvent) => {
+    const toolbar = (e.target as HTMLElement).closest('[data-action-toolbar]');
+    if (!toolbar) return;
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related && toolbar.contains(related)) return;
+    setHideScrollTopForToolbar(false);
+  }, []);
 
   // 监听滚动位置，控制回到顶部按钮显示（节流）
   useEffect(() => {
@@ -286,17 +335,19 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
         case "ArrowLeft": {
           if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
-          const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
-          if (curIdx > 0) setSelectedGroup(GROUPS[curIdx - 1].value);
+          const { selectedCategory: sc, setSelectedCategory: ssc } = useClipboardStore.getState();
+          const cats = getVisibleCategories(useUISettings.getState().enabledMonitorTypes);
+          const curIdx = cats.findIndex((g) => g.value === sc);
+          if (curIdx > 0) ssc(cats[curIdx - 1].value);
           break;
         }
         case "ArrowRight": {
           if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
-          const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
-          if (curIdx < GROUPS.length - 1) setSelectedGroup(GROUPS[curIdx + 1].value);
+          const { selectedCategory: sc, setSelectedCategory: ssc } = useClipboardStore.getState();
+          const cats = getVisibleCategories(useUISettings.getState().enabledMonitorTypes);
+          const curIdx = cats.findIndex((g) => g.value === sc);
+          if (curIdx < cats.length - 1) ssc(cats[curIdx + 1].value);
           break;
         }
         case "ArrowUp": {
@@ -507,21 +558,10 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full relative" style={{ maskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)' }}>
+      <div ref={listContainerRef} onMouseOver={handleToolbarMouseOver} onMouseOut={handleToolbarMouseOut} className="h-full relative" style={{ maskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)' }}>
         <OverlayScrollbarsComponent
           element="div"
-          options={{
-            scrollbars: {
-              theme: "os-theme-custom",
-              visibility: "auto",
-              autoHide: "scroll",
-              autoHideDelay: 1000,
-            },
-            overflow: {
-              x: "hidden",
-              y: "scroll",
-            },
-          }}
+          options={OVERLAY_SCROLLBARS_OPTIONS}
           events={{
             initialized: (instance: OverlayScrollbars) => {
               osInstanceRef.current = instance;
@@ -543,12 +583,9 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
                 defaultItemHeight={defaultItemHeight}
-                increaseViewportBy={{ top: 400, bottom: 400 }}
-                scrollSeekConfiguration={{
-                  enter: (velocity) => Math.abs(velocity) > 2000,
-                  exit: (velocity) => Math.abs(velocity) < 500,
-                }}
-                components={{ ScrollSeekPlaceholder }}
+                increaseViewportBy={VIRTUOSO_VIEWPORT_INCREASE}
+                scrollSeekConfiguration={VIRTUOSO_SCROLL_SEEK_CONFIG}
+                components={VIRTUOSO_COMPONENTS}
                 customScrollParent={customScrollParent}
                 scrollerRef={(ref) => {
                   if (ref instanceof HTMLElement) {
@@ -559,7 +596,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
             )}
           </SortableContext>
         </OverlayScrollbarsComponent>
-        <ScrollToTopButton visible={showScrollTop} onScrollToTop={() => scrollToTop(true)} />
+        <ScrollToTopButton visible={showScrollTop} forceHide={hideScrollTopForToolbar} onScrollToTop={() => scrollToTop(true)} />
       </div>
 
       <DragOverlay

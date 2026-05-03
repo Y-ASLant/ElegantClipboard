@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Folder16Regular, Open16Regular, ArrowSync16Regular, ArrowDownload16Regular, ArrowUpload16Regular, Delete16Regular, ArrowCounterclockwise16Regular, ArrowClockwise16Regular } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,6 +25,9 @@ export interface DataSettings {
   data_path: string;
   max_history_count: number;
   max_content_size_kb: number;
+  max_image_size_kb: number;
+  max_file_size_kb: number;
+  max_video_size_kb: number;
   auto_cleanup_days: number;
 }
 
@@ -44,6 +48,12 @@ interface DataSizeInfo {
   db_size: number;
   images_size: number;
   images_count: number;
+  files_size: number;
+  files_count: number;
+  files_invalid_count: number;
+  videos_size: number;
+  videos_count: number;
+  videos_invalid_count: number;
   total_size: number;
 }
 
@@ -152,7 +162,7 @@ function TextDedupModeCard({ dedupStrategy }: { dedupStrategy: DedupStrategy }) 
   return (
     <div className="rounded-lg border bg-card p-4">
       <h3 className="text-sm font-medium mb-3">文本去重模式</h3>
-      <p className="text-xs text-muted-foreground mb-4">控制文本/HTML/RTF 的重复判断方式</p>
+      <p className="text-xs text-muted-foreground mb-4">控制文本的重复判断方式</p>
       <div
         role="radiogroup"
         aria-label="文本去重模式"
@@ -277,6 +287,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       } else {
         setCleanMsg("操作成功。");
         await refreshDataSize();
+        // 通知主窗口刷新列表
+        emit("clipboard-updated").catch(() => {});
       }
     } catch (error) {
       setCleanMsg(`操作失败: ${error}`);
@@ -288,11 +300,16 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const refreshDataSize = useCallback(async () => {
     setDataSizeLoading(true);
     try {
+      const changed = await invoke<number>("refresh_files_validity");
       const info = await invoke<DataSizeInfo>("get_data_size");
       const time = new Date().toLocaleTimeString();
       setDataSize(info);
       setDataSizeTime(time);
       sessionStorage.setItem("data-size-cache", JSON.stringify({ info, time }));
+      // 文件失效状态有变化时通知主窗口刷新
+      if (changed > 0) {
+        emit("clipboard-updated").catch(() => {});
+      }
     } catch (error) {
       logError("Failed to refresh data size:", error);
     }
@@ -469,19 +486,34 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
               </Button>
             </div>
           </div>
+          <p className="text-xs text-muted-foreground mb-3">数量为按内容去重后的唯一文件数，相同内容仅计一次</p>
           {dataSize ? (
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center p-2 rounded-md bg-muted/50">
+            <div className="grid grid-cols-5 gap-2">
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
                 <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.total_size)}</p>
                 <p className="text-xs text-muted-foreground">总大小</p>
               </div>
-              <div className="text-center p-2 rounded-md bg-muted/50">
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
                 <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.db_size)}</p>
                 <p className="text-xs text-muted-foreground">数据库</p>
               </div>
-              <div className="text-center p-2 rounded-md bg-muted/50">
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
                 <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.images_size)}</p>
-                <p className="text-xs text-muted-foreground">图片（{dataSize.images_count} 张）</p>
+                <p className="text-xs text-muted-foreground">图片（{dataSize.images_count}）</p>
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.files_size)}</p>
+                <p className="text-xs text-muted-foreground">文件（{dataSize.files_count}）</p>
+                {dataSize.files_invalid_count > 0 && (
+                  <p className="text-xs text-destructive/70">失效（{dataSize.files_invalid_count}）</p>
+                )}
+              </div>
+              <div className="flex flex-col items-center justify-center p-2 rounded-md bg-muted/50">
+                <p className="text-sm font-medium tabular-nums">{formatDataSize(dataSize.videos_size)}</p>
+                <p className="text-xs text-muted-foreground">视频（{dataSize.videos_count}）</p>
+                {dataSize.videos_invalid_count > 0 && (
+                  <p className="text-xs text-destructive/70">失效（{dataSize.videos_invalid_count}）</p>
+                )}
               </div>
             </div>
           ) : (
@@ -676,7 +708,79 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
                 step={64}
               />
               <p className="text-xs text-muted-foreground">
-                仅限制文本/HTML/RTF，图片和文件不受此限制，设为 0 表示无限制
+                仅限制文本，设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单张图片最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_image_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_image_size_kb >= 1024 
+                      ? `${(settings.max_image_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_image_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_image_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_image_size_kb: value[0] })}
+                min={0}
+                max={51200}
+                step={512}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单个文件最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_file_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_file_size_kb >= 1024 
+                      ? `${(settings.max_file_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_file_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_file_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_file_size_kb: value[0] })}
+                min={0}
+                max={512000}
+                step={1024}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单条视频最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_video_size_kb === 0 
+                    ? "无限制"
+                    : settings.max_video_size_kb >= 1024 
+                      ? `${(settings.max_video_size_kb / 1024).toFixed(1)} MB`
+                      : `${settings.max_video_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_video_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_video_size_kb: value[0] })}
+                min={0}
+                max={512000}
+                step={1024}
+              />
+              <p className="text-xs text-muted-foreground">
+                设为 0 表示无限制
               </p>
             </div>
 

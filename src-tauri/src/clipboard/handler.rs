@@ -13,6 +13,18 @@ const MAX_PREVIEW_LENGTH: usize = 200;
 const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
 const DEFAULT_AUTO_CLEANUP_DAYS: i64 = 30;
 
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "ts", "mpeg", "mpg",
+];
+
+pub(super) fn is_video_files(files: &[String]) -> bool {
+    !files.is_empty()
+        && files.iter().all(|f| {
+            let ext = f.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+            VIDEO_EXTENSIONS.contains(&ext.as_str())
+        })
+}
+
 /// 通配符匹配（支持 * 和 ?，不区分大小写，O(n) 空间）
 fn wildcard_match(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
@@ -95,6 +107,7 @@ pub enum ClipboardContent {
     },
     Image(Vec<u8>),
     Files(Vec<String>),
+    Video(Vec<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +167,16 @@ impl ClipboardHandler {
             .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS)
     }
 
+    fn get_size_limit_bytes(&self, key: &str) -> usize {
+        self.settings_repo
+            .get(key)
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<usize>().ok())
+            .map(|kb| kb * 1024)
+            .unwrap_or(0)
+    }
+
     fn get_dedup_strategy(&self) -> &str {
         // 每次读取策略（用户可能修改设置）
         match self
@@ -203,6 +226,7 @@ impl ClipboardHandler {
             ClipboardContent::Rtf { .. } => "rtf",
             ClipboardContent::Image(_) => "image",
             ClipboardContent::Files(_) => "files",
+            ClipboardContent::Video(_) => "video",
         };
 
         allowed.split(',').any(|t| t.trim() == content_type)
@@ -274,22 +298,50 @@ impl ClipboardHandler {
         &self,
         content: ClipboardContent,
         source: Option<SourceAppInfo>,
-        group_id: Option<i64>,
     ) -> Result<Option<i64>, String> {
         let max_content_size = self.get_max_content_size();
 
-        // max_content_size 仅限制文本类内容
-        if max_content_size > 0 {
-            let is_text_content = Self::is_text_like_content(&content);
-            if is_text_content {
-                let content_size = self.get_content_size(&content);
-                if content_size > max_content_size {
-                    warn!(
-                        "Content size {} bytes exceeds max {} bytes, skipping",
-                        content_size, max_content_size
-                    );
-                    return Ok(None);
-                }
+        // 文本大小限制
+        if max_content_size > 0 && Self::is_text_like_content(&content) {
+            let content_size = self.get_content_size(&content);
+            if content_size > max_content_size {
+                warn!("Text size {} bytes exceeds max {} bytes, skipping", content_size, max_content_size);
+                return Ok(None);
+            }
+        }
+
+        // 图片大小限制
+        if let ClipboardContent::Image(ref data) = content {
+            let max_image = self.get_size_limit_bytes("max_image_size_kb");
+            if max_image > 0 && data.len() > max_image {
+                warn!("Image size {} bytes exceeds max {} bytes, skipping", data.len(), max_image);
+                return Ok(None);
+            }
+        }
+
+        // 文件大小限制
+        if let ClipboardContent::Files(ref files) = content {
+            let total: u64 = files.iter().filter_map(|f| {
+                let p = std::path::Path::new(f);
+                if p.is_file() { std::fs::metadata(p).ok().map(|m| m.len()) } else { None }
+            }).sum();
+            let max_file = self.get_size_limit_bytes("max_file_size_kb");
+            if max_file > 0 && (total as usize) > max_file {
+                warn!("Files size {} bytes exceeds max {} bytes, skipping", total, max_file);
+                return Ok(None);
+            }
+        }
+
+        // 视频大小限制
+        if let ClipboardContent::Video(ref files) = content {
+            let total: u64 = files.iter().filter_map(|f| {
+                let p = std::path::Path::new(f);
+                if p.is_file() { std::fs::metadata(p).ok().map(|m| m.len()) } else { None }
+            }).sum();
+            let max_video = self.get_size_limit_bytes("max_video_size_kb");
+            if max_video > 0 && (total as usize) > max_video {
+                warn!("Video size {} bytes exceeds max {} bytes, skipping", total, max_video);
+                return Ok(None);
             }
         }
 
@@ -302,13 +354,13 @@ impl ClipboardHandler {
         if dedup != "always_new"
             && if text_like {
                 if text_use_strict {
-                    self.repository.exists_by_hash(&hashes.content_hash, group_id)
+                    self.repository.exists_by_hash(&hashes.content_hash)
                 } else {
                     self.repository
-                        .exists_by_semantic_hash(&hashes.semantic_hash, group_id)
+                        .exists_by_semantic_hash(&hashes.semantic_hash)
                 }
             } else {
-                self.repository.exists_by_hash(&hashes.content_hash, group_id)
+                self.repository.exists_by_hash(&hashes.content_hash)
             }
             .map_err(|e| e.to_string())?
         {
@@ -323,16 +375,16 @@ impl ClipboardHandler {
                     return if text_like {
                         if text_use_strict {
                             self.repository
-                                .touch_by_hash(&hashes.content_hash, group_id)
+                                .touch_by_hash(&hashes.content_hash)
                                 .map_err(|e| e.to_string())
                         } else {
                             self.repository
-                                .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
+                                .touch_by_semantic_hash(&hashes.semantic_hash)
                                 .map_err(|e| e.to_string())
                         }
                     } else {
                         self.repository
-                            .touch_by_hash(&hashes.content_hash, group_id)
+                            .touch_by_hash(&hashes.content_hash)
                             .map_err(|e| e.to_string())
                     };
                 }
@@ -361,11 +413,11 @@ impl ClipboardHandler {
             }
             ClipboardContent::Image(data) => self.process_image(data, &hashes)?,
             ClipboardContent::Files(files) => self.process_files(files, &hashes)?,
+            ClipboardContent::Video(files) => self.process_video(files, &hashes)?,
         };
 
         item.source_app_name = source_app_name;
         item.source_app_icon = source_app_icon;
-        item.group_id = group_id;
 
         let log_type = format!("{:?}", item.content_type);
         let log_size = item.byte_size;
@@ -380,7 +432,7 @@ impl ClipboardHandler {
         // 执行最大历史数限制，清理旧图片
         let max_history_count = self.get_max_history_count();
         if max_history_count > 0 {
-            match self.repository.enforce_max_count(max_history_count, group_id) {
+            match self.repository.enforce_max_count(max_history_count) {
                 Ok((deleted, image_paths)) => {
                     super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
@@ -394,7 +446,7 @@ impl ClipboardHandler {
         // 自动清理超过指定天数的旧记录
         let auto_cleanup_days = self.get_auto_cleanup_days();
         if auto_cleanup_days > 0 {
-            match self.repository.delete_older_than(auto_cleanup_days, group_id) {
+            match self.repository.delete_older_than(auto_cleanup_days) {
                 Ok((deleted, image_paths)) => {
                     super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
@@ -414,7 +466,7 @@ impl ClipboardHandler {
             ClipboardContent::Html { html, .. } => html.len(),
             ClipboardContent::Rtf { rtf, .. } => rtf.len(),
             ClipboardContent::Image(data) => data.len(),
-            ClipboardContent::Files(files) => files.iter().map(|f| f.len()).sum(),
+            ClipboardContent::Files(files) | ClipboardContent::Video(files) => files.iter().map(|f| f.len()).sum(),
         }
     }
 
@@ -437,8 +489,7 @@ impl ClipboardHandler {
             ClipboardContent::Rtf { text, .. } => {
                 compute_semantic_hash("rtf", text.as_deref(), &content_hash)
             }
-            ClipboardContent::Image(_) => content_hash.clone(),
-            ClipboardContent::Files(_) => content_hash.clone(),
+            ClipboardContent::Image(_) | ClipboardContent::Files(_) | ClipboardContent::Video(_) => content_hash.clone(),
         };
 
         ContentHashes {
@@ -469,6 +520,13 @@ impl ClipboardHandler {
             }
             ClipboardContent::Files(files) => {
                 hasher.update(b"files:");
+                for file in files {
+                    hasher.update(file.as_bytes());
+                    hasher.update(b"|");
+                }
+            }
+            ClipboardContent::Video(files) => {
+                hasher.update(b"video:");
                 for file in files {
                     hasher.update(file.as_bytes());
                     hasher.update(b"|");
@@ -631,6 +689,39 @@ impl ClipboardHandler {
 
         Ok(NewClipboardItem {
             content_type: ContentType::Files,
+            file_paths: Some(files),
+            content_hash: hashes.content_hash.clone(),
+            semantic_hash: hashes.semantic_hash.clone(),
+            preview: Some(preview),
+            byte_size,
+            ..Default::default()
+        })
+    }
+
+    fn process_video(&self, files: Vec<String>, hashes: &ContentHashes) -> Result<NewClipboardItem, String> {
+        use std::path::Path;
+        debug!("Processing {} video file(s)", files.len());
+
+        let byte_size: i64 = files
+            .iter()
+            .filter_map(|f| {
+                let path = Path::new(f);
+                if path.is_file() {
+                    std::fs::metadata(path).ok().map(|m| m.len() as i64)
+                } else {
+                    None
+                }
+            })
+            .sum();
+
+        let preview = if files.len() == 1 {
+            files[0].clone()
+        } else {
+            format!("{} videos", files.len())
+        };
+
+        Ok(NewClipboardItem {
+            content_type: ContentType::Video,
             file_paths: Some(files),
             content_hash: hashes.content_hash.clone(),
             semantic_hash: hashes.semantic_hash.clone(),

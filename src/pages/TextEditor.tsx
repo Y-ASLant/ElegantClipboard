@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Edit16Filled } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -46,13 +46,40 @@ export function TextEditor() {
     );
   }, [id]);
 
-  // ESC 关闭
+  // Refs for stable keydown handler
+  const textRef = useRef(text);
+  const originalTextRef = useRef(originalText);
+  const savingRef = useRef(saving);
+  textRef.current = text;
+  originalTextRef.current = originalText;
+  savingRef.current = saving;
+
+  const hasChanges = text !== originalText;
+
+  const handleSave = useCallback(async () => {
+    if (textRef.current === originalTextRef.current || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const deleted = await invoke<boolean>("update_text_content", { id, newText: textRef.current });
+      if (deleted) {
+        getCurrentWindow().close();
+        return;
+      }
+      setOriginalText(textRef.current);
+    } catch (error) {
+      logError("Failed to save:", error);
+    } finally {
+      setSaving(false);
+    }
+  }, [id]);
+
+  // ESC 关闭 / Ctrl+S 保存（稳定监听器，不随每次输入重建）
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         getCurrentWindow().close();
       }
-      // Ctrl+S 保存
       if (e.ctrlKey && e.key === "s") {
         e.preventDefault();
         handleSave();
@@ -60,26 +87,9 @@ export function TextEditor() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [text, originalText]);
+  }, [handleSave]);
 
-  const hasChanges = text !== originalText;
-
-  const handleSave = async () => {
-    if (!hasChanges || saving) return;
-    setSaving(true);
-    try {
-      const deleted = await invoke<boolean>("update_text_content", { id, newText: text });
-      if (deleted) {
-        getCurrentWindow().close();
-        return;
-      }
-      setOriginalText(text);
-    } catch (error) {
-      logError("Failed to save:", error);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const byteSize = useMemo(() => new Blob([text]).size, [text]);
 
   const handleSaveAndClose = async () => {
     if (saving) return;
@@ -132,7 +142,7 @@ export function TextEditor() {
       <Card className="shrink-0">
         <div className="h-11 flex items-center justify-between px-4">
           <span className="text-xs text-muted-foreground">
-            {text.length} 字符 · {new Blob([text]).size} 字节
+            {text.length} 字符 · {byteSize} 字节
           </span>
           <div className="flex gap-2">
             <Button

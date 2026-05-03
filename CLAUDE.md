@@ -40,11 +40,20 @@ cd src-tauri && cargo test
 - **工具栏自定义**：可配置工具栏按钮的显示、隐藏和排序
 - **数据清理**：三级数据清理操作（清空历史 / 恢复默认配置 / 重置所有数据）
 - **图片预览窗口**：独立悬浮窗口显示图片，支持缩放和左右定位
+- **文本预览窗口**：独立悬浮窗口显示长文本，智能计算预览尺寸
+- **文本编辑器窗口**：独立编辑窗口支持 Ctrl+S 保存、修改检测、字符/字节统计
 - **动态主题系统**：支持 default/emerald/cyan/system 四种主题，system 主题跟随 Windows 系统强调色
+- **标签管理**：支持创建/重命名/删除标签，拖拽排序标签和标签内条目，右键菜单批量操作
+- **快速粘贴**：Alt+1~9 快捷键直接粘贴最近条目，Ctrl+Alt+1~3 粘贴收藏条目
+- **WebDAV 同步**：支持 WebDAV 云端数据同步（上传/下载/自动同步）
+- **音频反馈**：复制/粘贴操作时可选音效提示（Web Audio API）
+- **应用过滤**：可配置忽略指定应用程序的剪贴板变更
 - **搜索高亮**：搜索结果自动提取关键词上下文，提升搜索体验
-- **一键回到顶部**：滚动超过 200px 显示悬浮按钮
+- **一键回到顶部**：可拖拽的悬浮按钮，支持左右吸附，位置持久化
 - **窗口状态重置**：关闭时自动重置搜索和滚动位置（可通过 `autoResetState` 配置）
 - **文件操作增强**：文件有效性检查、另存为、显示在资源管理器等功能
+- **数据路径自定义**：支持自定义数据存储路径，含数据迁移/导入/导出功能
+- **管理员启动**：支持 UAC 提权运行，自动迁移自启动机制
 
 ## 项目架构
 
@@ -56,36 +65,67 @@ ElegantClipboard 是一个基于 Tauri 2.0 的剪贴板管理工具，采用 Rea
 src/                    # React 前端
 ├── components/
 │   ├── ClipboardList.tsx        # 虚拟滚动列表
-│   ├── ClipboardItemCard.tsx    # 卡片组件
-│   ├── CardContentRenderers.tsx # 内容渲染器（图片/文件预览）
-│   ├── settings/                # 设置页面组件
+│   ├── ClipboardItemCard.tsx    # 卡片组件（上下文菜单、标签分配）
+│   ├── CardContentRenderers.tsx # 内容渲染器（图片/文件预览、卡片底部）
+│   ├── CardSubComponents.tsx    # 子组件（文件详情、标签区域、操作工具栏）
+│   ├── TagsView.tsx             # 标签视图（拖拽排序、内联创建、批量操作）
+│   ├── HighlightText.tsx        # 搜索关键词高亮组件
+│   ├── ScrollToTopButton.tsx    # 可拖拽回到顶部按钮（左右吸附）
+│   ├── WindowTitleBar.tsx       # 自定义标题栏（拖拽区域 + 最小化/关闭）
+│   ├── text-preview.ts          # 文本预览尺寸计算 + LRU 缓存
+│   ├── settings/                # 设置页 Tab 组件
+│   │   ├── GeneralTab.tsx       # 常规设置
+│   │   ├── DisplayTab.tsx       # 显示设置
+│   │   ├── ThemeTab.tsx         # 主题设置
+│   │   ├── DataTab.tsx          # 数据管理
+│   │   ├── ShortcutsTab.tsx     # 快捷键设置
+│   │   ├── AppFilterTab.tsx     # 应用过滤
+│   │   ├── SyncTab.tsx          # WebDAV 同步
+│   │   ├── AudioTab.tsx         # 音频设置
+│   │   └── AboutTab.tsx         # 关于
 │   └── ui/                      # shadcn/ui 基础组件（Radix 封装）
 ├── hooks/
-│   └── useSortableList.ts       # 拖拽排序 Hook
+│   ├── useSortableList.ts       # 拖拽排序 Hook（dnd-kit 集成）
+│   └── useInputFocus.ts         # 输入焦点管理 Hook（动态窗口可赚取焦点切换）
 ├── lib/
-│   ├── constants.ts             # 常量（工具栏按钮注册表等）
+│   ├── constants.ts             # 常量（工具栏按钮注册表、类型映射）
+│   ├── format.ts                # 内容类型检测、格式化工具、文件路径解析
 │   ├── theme-applier.ts         # 主题/窗口特效应用器
-│   └── utils.ts                 # 工具函数
-├── stores/            # Zustand 状态管理
-└── main.tsx           # 入口点（简单路由）
+│   ├── sounds.ts                # 音频反馈（Web Audio API）
+│   ├── logger.ts                # 日志工具
+│   └── utils.ts                 # cn() 工具函数（clsx + tailwind-merge）
+├── stores/                    # Zustand 状态管理
+│   ├── clipboard.ts             # 剪贴板数据状态（搜索/分类/标签过滤）
+│   ├── tags.ts                  # 标签 CRUD 状态
+│   └── ui-settings.ts           # UI 设置（持久化 + 多窗口同步）
+├── pages/
+│   ├── Settings.tsx             # 设置窗口（多 Tab）
+│   └── TextEditor.tsx           # 文本编辑窗口
+└── main.tsx                   # 入口点（路由 + 全局快捷键拦截）
 
 src-tauri/              # Rust 后端
 ├── src/
 │   ├── main.rs             # 入口点
-│   ├── lib.rs              # 核心库（Tauri 命令注册、窗口管理）
-│   ├── config.rs           # 配置文件管理
+│   ├── lib.rs              # 核心库（插件注册、快捷键管理、应用初始化）
+│   ├── config.rs           # 配置文件管理（数据路径、便携模式）
 │   ├── shortcut.rs         # 快捷键解析模块
 │   ├── positioning.rs      # 窗口定位（多显示器支持）
 │   ├── admin_launch.rs     # 管理员启动功能
+│   ├── task_scheduler.rs   # Windows 任务计划程序（管理员自启动）
 │   ├── keyboard_hook.rs    # 窗口状态追踪
-│   ├── input_monitor.rs    # 全局鼠标监控（点击外部检测）
-│   ├── updater.rs          # 自动更新（GitHub Release 检查/下载，支持系统代理）
+│   ├── input_monitor.rs    # 全局鼠标监控（点击外部检测、前台窗口追踪）
+│   ├── webdav.rs           # WebDAV 同步（上传/下载/自动同步任务）
 │   ├── win_v_registry.rs   # Win+V 替换（注册表）
 │   ├── commands/           # Tauri 命令（按功能拆分）
-│   │   ├── mod.rs          # AppState 定义 + 模块导出
+│   │   ├── mod.rs          # AppState 定义 + 公共函数（监控暂停/恢复、前台窗口还原）
 │   │   ├── clipboard.rs    # 剪贴板 CRUD 命令
-│   │   ├── settings.rs     # 设置/监控/自启动命令
-│   │   └── file_ops.rs     # 文件操作命令（并行检查）
+│   │   ├── window.rs       # 窗口管理命令（显示/隐藏/置顶/特效/焦点）
+│   │   ├── preview.rs      # 预览窗口命令（图片/文本预览、文本编辑器）
+│   │   ├── settings.rs     # 设置/监控/自启动/强调色命令
+│   │   ├── file_ops.rs     # 文件操作命令（rayon 并行检查）
+│   │   ├── tags.rs         # 标签 CRUD 命令
+│   │   ├── data_transfer.rs # 数据迁移/导入/导出命令
+│   │   └── sync.rs         # WebDAV 同步命令
 │   ├── clipboard/          # 剪贴板监控模块
 │   ├── database/           # SQLite 数据库
 │   └── tray/               # 系统托盘
@@ -96,14 +136,18 @@ src-tauri/              # Rust 后端
 **后端（Rust）**：命令按功能模块化组织，在 `lib.rs` 通过 `invoke_handler` 注册。
 
 **命令模块**（`src-tauri/src/commands/`）：
-- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`get_clipboard_item`、`get_clipboard_count`、`toggle_pin`、`toggle_favorite`、`move_clipboard_item`、`delete_clipboard_item`、`clear_history`、`clear_all_history`、`copy_to_clipboard`、`paste_content`
-- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`reset_settings`、`reset_all_data`、`select_folder_for_settings`、`open_data_folder`、`is_portable_mode`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`
-- `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`、`get_file_details`、`save_file_as`
+- `clipboard.rs` - 剪贴板 CRUD：`get_clipboard_items`、`get_clipboard_item`、`get_clipboard_count`、`toggle_pin`、`toggle_favorite`、`move_clipboard_item`、`bump_item_to_top`、`delete_clipboard_item`、`batch_delete_clipboard_items`、`clear_history`、`clear_all_history`、`copy_to_clipboard`、`paste_content`、`paste_content_as_plain`、`paste_text_direct`、`merge_paste_content`、`update_text_content`
+- `window.rs` - 窗口管理：`show_window`、`hide_window`、`set_window_visibility`、`minimize_window`、`toggle_maximize`、`close_window`、`set_window_pinned`、`is_window_pinned`、`set_window_effect`、`focus_clipboard_window`、`restore_last_focus`、`save_current_focus`、`set_keyboard_nav_enabled`、`is_admin_launch_enabled`、`enable_admin_launch`、`disable_admin_launch`、`is_running_as_admin`
+- `preview.rs` - 预览/编辑：`open_settings_window`、`show_image_preview`、`hide_image_preview`、`show_text_preview`、`hide_text_preview`、`open_text_editor_window`、`get_app_version`、`is_log_to_file_enabled`、`set_log_to_file`、`get_log_file_path`
+- `settings.rs` - 设置/监控：`get_setting`、`set_setting`、`get_all_settings`、`pause_monitor`、`resume_monitor`、`get_monitor_status`、`optimize_database`、`vacuum_database`、`reset_settings`、`reset_all_data`、`select_folder_for_settings`、`open_data_folder`、`is_portable_mode`、`is_autostart_enabled`、`enable_autostart`、`disable_autostart`、`get_system_accent_color`、`get_system_fonts`、`set_tray_visible`
+- `file_ops.rs` - 文件操作：`check_files_exist`（rayon 并行）、`show_in_explorer`、`paste_as_path`、`get_file_details`、`save_file_as`、`get_data_size`
+- `tags.rs` - 标签管理：`get_tags`、`create_tag`、`rename_tag`、`delete_tag`、`add_tag_to_item`、`remove_tag_from_item`、`get_item_tags`、`reorder_tags`、`reorder_tag_items`
+- `data_transfer.rs` - 数据迁移：`get_default_data_path`、`get_original_default_path`、`check_path_has_data`、`cleanup_data_at_path`、`set_data_path`、`migrate_data_to_path`、`export_data`、`import_data`、`restart_app`
+- `sync.rs` - 云同步：`webdav_test_connection`、`webdav_upload`、`webdav_download`
 
-**窗口/系统命令**（`lib.rs`）：
-- 窗口管理：`show_window`、`hide_window`、`set_window_pinned`、`set_window_effect`、`open_settings_window`
-- 管理员启动：`is_admin_launch_enabled`、`enable_admin_launch`、`is_running_as_admin`
-- 快捷键：`update_shortcut`、`enable_winv_replacement`
+**快捷键命令**（`lib.rs`）：
+- 全局快捷键：`update_shortcut`、`get_current_shortcut`、`enable_winv_replacement`、`disable_winv_replacement`、`is_winv_replacement_enabled`
+- 快速粘贴：`get_quick_paste_shortcuts`、`set_quick_paste_shortcut`、`get_favorite_paste_shortcuts`、`set_favorite_paste_shortcut`
 
 **前端（TypeScript）**：通过 `@tauri-apps/api/core` 的 `invoke()` 函数调用：
 
@@ -132,7 +176,8 @@ const items = await invoke<ClipboardItem[]>("get_clipboard_items", {
 
 **3. 状态管理**
 - **前端**：Zustand stores（`src/stores/`）
-  - `clipboard.ts` - 剪贴板数据状态
+  - `clipboard.ts` - 剪贴板数据状态（搜索、分类过滤、标签过滤、键盘导航索引）
+  - `tags.ts` - 标签 CRUD 状态（乐观更新 + 失败回滚）
   - `ui-settings.ts` - UI 设置（持久化 + 多窗口同步）
     - `cardMaxLines` - 卡片最大行数
     - `showTime/CharCount/ByteSize` - 元数据显示开关
@@ -237,14 +282,17 @@ Windows 的注册表 `Run` 键会静默跳过需要 UAC 提权的程序，因此
 
 **表结构**：
 - `clipboard_items` - 剪贴板历史
+- `tags` - 标签定义（name UNIQUE，sort_order 排序）
+- `item_tags` - 条目-标签关联（多对多，ON DELETE CASCADE）
 - `settings` - 键值对配置
 
 **特性**：
-- 内容哈希去重（`content_hash` UNIQUE 约束）
+- 双哈希去重：`content_hash`（原始内容） + `semantic_hash`（语义去重，忽略空白等差异）
 - 自动时间戳更新触发器
-- 性能索引：`created_at`、`is_pinned`、`is_favorite`、`content_type`、`sort_order`、`access_count`
+- 性能索引：`created_at DESC`、`is_pinned`（部分索引）、`is_favorite`（部分索引）、`content_type`、`sort_order DESC`、`access_count DESC + last_accessed_at DESC`、`semantic_hash`、`item_tags(tag_id)`
 - 图片元数据：`image_width`、`image_height` 字段
-- 运行时字段：`files_valid`（文��有效性检查结果，不存储）
+- 来源追踪：`source_app_name`、`source_app_icon`（复制来源应用）
+- 运行时字段：`files_valid`（文件有效性检查结果，不存储）
 
 **搜索实现**：
 - 使用 SQL `LIKE` 查询，无需 FTS5
@@ -254,22 +302,46 @@ Windows 的注册表 `Run` 键会静默跳过需要 UAC 提权的程序，因此
 
 ## 前端路由
 
-位置：`src/main.tsx:38-46`
+位置：`src/main.tsx:33-44`
 
 使用简单的基于路径的路由：
 - `/` 或默认 → 主窗口（`App` 组件）
 - `/settings` 或 `/settings.html` → 设置窗口（`Settings` 组件）
-- `/image-preview.html` → 图片预览窗口（独立透明窗口）
+- `/editor` 或 `/editor.html` → 文本编辑器窗口（`TextEditor` 组件）
 
-## 图片预览窗口
+注：图片预览和文本预览窗口由后端直接创建 WebView 窗口，不经过此路由。
 
-位置：`src-tauri/src/lib.rs:show_image_preview`
+## 预览与编辑窗口
+
+### 图片预览窗口
+
+位置：`src-tauri/src/commands/preview.rs:show_image_preview`
 
 独立透明悬浮窗口，用于大图预览：
 - 窗口定位自动计算，填充主窗口左侧或右侧可用空间
 - 支持缩放（previewZoomStep 配置，默认 15%）
 - 鼠标离开预览区域或主窗口隐藏时自动隐藏
 - CSS `object-fit` 处理图片尺寸，窗口大小不变
+
+### 文本预览窗口
+
+位置：`src-tauri/src/commands/preview.rs:show_text_preview`、`src/components/text-preview.ts`
+
+独立悬浮窗口，用于长文本预览：
+- 智能尺寸计算：根据文本行数和最长行宽度动态计算窗口大小
+- 宽字符检测：正确计算 CJK 字符占位宽度
+- LRU 缓存：最多缓存 180 条预览内容，避免重复加载
+- 截断保护：最多处理 24000 字符 / 900 行
+
+### 文本编辑器窗口
+
+位置：`src/pages/TextEditor.tsx`
+
+独立编辑窗口，用于修改剪贴板条目文本内容：
+- Ctrl+S 保存、ESC 关闭
+- 修改检测（dirty state），未保存指示器
+- 字符数 + 字节数实时统计
+- 保存后内容为空则自动删除条目并关闭窗口
 
 ## 剪贴板处理
 
@@ -366,6 +438,11 @@ std::thread::spawn(move || {
 - 文件 I/O 在后台线程执行，不阻塞剪贴板监控
 - BLAKE3 哈希生成文件名，自动去重
 
+**监控恢复防抖**（`commands/mod.rs`）：
+- 粘贴操作需要暂停监控避免重复记录
+- 全局单线程处理恢复请求，500ms 静默期后批量恢复
+- 避免每次粘贴都 spawn 新线程，减少资源消耗
+
 ### 前端虚拟化
 
 位置：`src/components/ClipboardList.tsx`
@@ -442,6 +519,23 @@ Rust 编译缓存目录配置在 `src-tauri/.cargo/config.toml`：
 - 解析函数：`parse_shortcut()` → `Shortcut` 对象
 - 快捷键注册：通过 `tauri-plugin-global-shortcut` 在运行时动态注册
 - Win+V 替换模式：检测 `win_v_registry::is_win_v_hotkey_disabled()` 自动切换到 Win+V
+
+**快速粘贴快捷键**（`lib.rs`）：
+- 快速粘贴：默认 Alt+1~9，直接粘贴最近 N 条剪贴板内容
+- 收藏粘贴：默认 Ctrl+Alt+1~3，粘贴收藏条目
+- 不支持 Win 修饰键（与系统任务栏快捷键冲突）
+- 冲突检测：自动检查与全局呼出快捷键的冲突
+- 失败回滚：注册失败时自动恢复上一个有效配置
+
+## WebDAV 同步
+
+位置：`src-tauri/src/webdav.rs`、`src-tauri/src/commands/sync.rs`
+
+支持通过 WebDAV 协议将数据库同步到云端：
+- `webdav_test_connection` - 测试服务器连接
+- `webdav_upload` - 上传数据库到服务器
+- `webdav_download` - 从服务器下载并合并数据
+- 自动同步任务：后台线程定时执行（`start_auto_sync_task`）
 
 ## ESLint 配置
 

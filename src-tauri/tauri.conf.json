@@ -15,9 +15,9 @@
       {
         "label": "main",
         "title": "ElegantClipboard",
-        "width": 360,
+        "width": 400,
         "height": 640,
-        "minWidth": 300,
+        "minWidth": 400,
         "minHeight": 400,
         "decorations": false,
         "transparent": true,

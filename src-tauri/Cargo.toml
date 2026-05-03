@@ -26,10 +26,10 @@ tauri-build = { version = "2", features = [] }
 # Tauri core
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
-tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 
 # Serialization
@@ -51,6 +51,9 @@ chrono = "0.4"
 # Hashing (fast)
 blake3 = "1"
 
+# UUID generation (device identification)
+uuid = { version = "1", features = ["v4"] }
+
 # High-performance locks
 parking_lot = "0.12"
 
@@ -65,6 +68,14 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 # ZIP archive for data export/import
 zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# HTTP client for WebDAV sync
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+base64 = "0.22"
+
+# WebSocket for Edge TTS
+tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+sha2 = "0.10"
 
 
 # Cross-platform clipboard
@@ -92,6 +103,7 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
     "Win32_UI_HiDpi",
+    "Win32_System_SystemInformation",
 ] }
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"

@@ -11,7 +11,7 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 
 ## Clipboard Management
 
-- **Multi-type support** - Text, Image, File, HTML, RTF content types
+- **Multi-type support** - Text, Image, File, HTML, RTF and more content types
 - **Unlimited history** - Auto record all copied content, always accessible
 - **Smart search** - Real-time search with optimized LIKE queries (CJK text optimized)
 - **Content deduplication** - BLAKE3 hash auto-deduplication, no duplicate storage
@@ -22,6 +22,7 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Text editing** - Double-click or right-click to edit saved text
 - **Source app recognition** - Auto record source application name and icon
 - **Deduplication strategy** - Three modes: pin/ignore/always create new
+- **Tag management** - Add custom tags to items, filter and manage by tags
 - **Import/Export** - JSON format support for data migration
 
 ## Search Optimization
@@ -73,15 +74,35 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Multi-monitor support** - Smart positioning, keep window within screen bounds
 - **Remember window size** - Optional persist window size, restore on restart (default on)
 
+## OCR Text Recognition
+
+- **Screenshot recognition** - Capture screen area for text recognition
+- **Shortcut trigger** - Quick launch OCR screenshot via shortcut (default F6)
+- **Result management** - Edit and copy recognition results, multiple OCR engine configs
+- **Dedicated settings** - Configure OCR parameters in settings
+
+## Translation
+
+- **Item translation** - Translate clipboard items
+- **Multi-engine support** - Configure different translation service engines
+- **Translation result page** - Dedicated translation result display page
+- **Dedicated settings** - Configure translation engines and parameters in settings
+
+## Cloud Sync
+
+- **WebDAV sync** - Sync clipboard data via WebDAV protocol
+- **Auto sync** - Background auto sync, no manual operation needed
+- **Proxy support** - HTTP/SOCKS proxy support for various network environments
+- **Dedicated settings** - Configure WebDAV server address, account, etc.
+
 ## Customization
 
 - **Toolbar customization** - Configure toolbar button visibility and order
 - **Custom storage path** - Support data migration and custom path
 - **History limit** - Set max records (0 for unlimited)
-- **Content size limit** - Configurable max size per item
+- **Content size limit** - Configurable max size per item (text, image, file, video separately)
 - **Display settings** - Preview lines (1-10), time format, char count/size/source app toggle
 - **Card density** - Compact/Standard/Loose spacing
-- **Sound feedback** - Optional copy/paste operation sounds
 - **Preview settings** - Separate toggles for image/text preview, hover preview delay (default 500ms), zoom step (5%-50%), position preference
 - **Window state reset** - Auto reset search and scroll on hide (optional)
 - **Auto start** - Run on system startup
@@ -105,9 +126,15 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Changelog** - Display release notes
 - **System proxy support** - Auto read Windows system proxy settings, works behind proxies
 
+## Game Mode
+
+- **One-click enable** - Enable game mode in settings to pause clipboard monitoring
+- **Reduce interruptions** - Avoid clipboard popups during games or fullscreen apps
+
 ## System Integration
 
 - **System tray** - Left-click toggle window, right-click menu (settings, restart, exit)
+- **Tray icon toggle** - Show/hide tray icon in settings
 - **Non-focus window** - Window doesn't steal focus, no interruption
 - **Keyboard simulation** - Windows SendInput, others use enigo for Ctrl+V
 - **Quick paste** - Alt+number keys to quick paste items at position (customizable)

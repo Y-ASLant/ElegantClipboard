@@ -50,8 +50,8 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
   const [pendingLogToFile, setPendingLogToFile] = useState<boolean | null>(null);
   const [persistWindowSize, setPersistWindowSize] = useState(true);
+  const [showTrayIcon, setShowTrayIcon] = useState(true);
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
-
 
   useEffect(() => {
     invoke<string | null>("get_setting", { key: "persist_window_size" })
@@ -59,12 +59,36 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       .catch((error) => {
         logError("Failed to load persist_window_size:", error);
       });
+    invoke<string | null>("get_setting", { key: "show_tray_icon" })
+      .then((v) => setShowTrayIcon(v !== "false"))
+      .catch((error) => {
+        logError("Failed to load show_tray_icon:", error);
+      });
     invoke<string | null>("get_setting", { key: "auto_check_update" })
       .then((v) => setAutoCheckUpdate(v !== "false"))
       .catch((error) => {
         logError("Failed to load auto_check_update:", error);
       });
   }, []);
+
+
+  const toggleTrayIcon = async (visible: boolean) => {
+    setShowTrayIcon(visible);
+    try {
+      await invoke("set_tray_visible", { visible });
+    } catch (error) {
+      logError("Failed to set tray visibility:", error);
+    }
+  };
+
+  const toggleAutoCheckUpdate = async (enabled: boolean) => {
+    setAutoCheckUpdate(enabled);
+    try {
+      await invoke("set_setting", { key: "auto_check_update", value: String(enabled) });
+    } catch (error) {
+      logError("Failed to save auto_check_update:", error);
+    }
+  };
 
   const changePositionMode = async (mode: PositionMode) => {
     onSettingsChange({ ...settings, position_mode: mode });
@@ -86,15 +110,6 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       }
     } catch (error) {
       logError("Failed to save persist_window_size:", error);
-    }
-  };
-
-  const toggleAutoCheckUpdate = async (enabled: boolean) => {
-    setAutoCheckUpdate(enabled);
-    try {
-      await invoke("set_setting", { key: "auto_check_update", value: String(enabled) });
-    } catch (error) {
-      logError("Failed to save auto_check_update:", error);
     }
   };
 
@@ -144,9 +159,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             </div>
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
+                <Label className="text-xs">显示托盘图标</Label>
+                <p className="text-xs text-muted-foreground">
+                  在系统任务栏显示托盘图标
+                </p>
+              </div>
+              <Switch checked={showTrayIcon} onCheckedChange={toggleTrayIcon} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
                 <Label className="text-xs">自动检查更新</Label>
                 <p className="text-xs text-muted-foreground">
-                  仅在程序启动时自动检查更新
+                  启动后自动检查新版本
                 </p>
               </div>
               <Switch
@@ -194,7 +218,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <div className="space-y-0.5">
                 <Label className="text-xs">自动重置状态</Label>
                 <p className="text-xs text-muted-foreground">
-                  关闭窗口时重置搜索、分组筛选和滚动位置
+                  关闭窗口时重置搜索、分类筛选和滚动位置
                 </p>
               </div>
               <Switch

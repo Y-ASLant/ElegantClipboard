@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   Pin16Regular,
   Pin16Filled,
@@ -10,6 +10,9 @@ import {
   Folder16Regular,
   Warning16Regular,
   ChevronDown16Regular,
+  Tag16Regular,
+  Translate16Regular,
+  Speaker216Regular,
 } from "@fluentui/react-icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -121,24 +124,23 @@ export const FileDetailsDialog = ({
   </Dialog>
 );
 
-// ============ 移动到分组（内联折叠） ============
+// ============ 标签管理（内联折叠） ============
 
-export function MoveToGroupSection({
+export function TagAssignSection({
   itemId,
-  groups,
-  selectedGroupId,
-  moveItemToGroup,
+  allTags,
+  itemTagIds,
+  onAddTag,
+  onRemoveTag,
 }: {
   itemId: number;
-  groups: { id: number; name: string }[];
-  selectedGroupId: number | null;
-  moveItemToGroup: (itemId: number, groupId: number | null) => Promise<void>;
+  allTags: { id: number; name: string }[];
+  itemTagIds: Set<number>;
+  onAddTag: (itemId: number, tagId: number) => Promise<void>;
+  onRemoveTag: (itemId: number, tagId: number) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
-  // 当前在默认分组：显示所有自定义分组；当前在自定义分组：显示默认 + 其他自定义分组
-  const otherGroups = groups.filter((g) => g.id !== selectedGroupId);
-  const showDefault = selectedGroupId !== null;
-  if (!showDefault && otherGroups.length === 0) return null;
+  if (allTags.length === 0) return null;
   return (
     <>
       <ContextMenuSeparator />
@@ -147,23 +149,28 @@ export function MoveToGroupSection({
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); setExpanded((v) => !v); }}
         className="flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground"
       >
-        <span>移动到分组</span>
+        <span>标签</span>
         <ChevronDown16Regular
           className={cn("ml-auto h-4 w-4 transition-transform duration-150", expanded && "rotate-180")}
         />
       </div>
       {expanded && (
         <>
-          {showDefault && (
-            <ContextMenuItem className="pl-6" onClick={() => moveItemToGroup(itemId, null)}>
-              默认分组
-            </ContextMenuItem>
-          )}
-          {otherGroups.map((g) => (
-            <ContextMenuItem className="pl-6" key={g.id} onClick={() => moveItemToGroup(itemId, g.id)}>
-              {g.name}
-            </ContextMenuItem>
-          ))}
+          {allTags.map((t) => {
+            const isAssigned = itemTagIds.has(t.id);
+            return (
+              <ContextMenuItem
+                className="pl-6"
+                key={t.id}
+                onClick={() => isAssigned ? onRemoveTag(itemId, t.id) : onAddTag(itemId, t.id)}
+              >
+                <span className={cn("mr-2", isAssigned ? "text-primary" : "text-muted-foreground")}>
+                  {isAssigned ? "✓" : " "}
+                </span>
+                {t.name}
+              </ContextMenuItem>
+            );
+          })}
         </>
       )}
     </>
@@ -178,18 +185,25 @@ interface ActionToolbarProps {
   onToggleFavorite: (e: React.MouseEvent) => void;
   onCopy: (e: React.MouseEvent) => void;
   onDelete: (e: React.MouseEvent) => void;
+  onTag?: (e: React.MouseEvent) => void;
+  onTranslate?: (e: React.MouseEvent) => void;
+  onTts?: (e: React.MouseEvent) => void;
 }
 
-export const ActionToolbar = ({
+export const ActionToolbar = memo(function ActionToolbar({
   item,
   onTogglePin,
   onToggleFavorite,
   onCopy,
   onDelete,
-}: ActionToolbarProps) => (
+  onTag,
+  onTranslate,
+  onTts,
+}: ActionToolbarProps) { return (
   <div
     className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
     data-drag-ignore="true"
+    data-action-toolbar
   >
     <Tooltip>
       <TooltipTrigger asChild>
@@ -238,6 +252,51 @@ export const ActionToolbar = ({
       </TooltipTrigger>
       <TooltipContent>复制</TooltipContent>
     </Tooltip>
+    {onTts && (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onTts}
+            className="h-6 w-6"
+          >
+            <Speaker216Regular className="w-3.5 h-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>朗读</TooltipContent>
+      </Tooltip>
+    )}
+    {onTranslate && (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onTranslate}
+            className="h-6 w-6"
+          >
+            <Translate16Regular className="w-3.5 h-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>翻译</TooltipContent>
+      </Tooltip>
+    )}
+    {onTag && (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onTag}
+            className="h-6 w-6"
+          >
+            <Tag16Regular className="w-3.5 h-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>标签</TooltipContent>
+      </Tooltip>
+    )}
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
@@ -252,4 +311,4 @@ export const ActionToolbar = ({
       <TooltipContent>删除</TooltipContent>
     </Tooltip>
   </div>
-);
+); });

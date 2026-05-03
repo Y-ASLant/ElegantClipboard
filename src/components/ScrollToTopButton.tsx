@@ -31,9 +31,10 @@ function saveAnchor(a: AnchoredPos) {
 interface ScrollToTopButtonProps {
   visible: boolean;
   onScrollToTop: () => void;
+  forceHide?: boolean;
 }
 
-export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonProps) {
+export function ScrollToTopButton({ visible, onScrollToTop, forceHide }: ScrollToTopButtonProps) {
   const [anchor, setAnchor] = useState<AnchoredPos>(loadAnchor);
   // dragOffset: 拖拽中临时的 right 值，null 表示未在拖拽
   const [dragOffset, setDragOffset] = useState<{ right: number; bottom: number } | null>(null);
@@ -101,10 +102,11 @@ export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonP
     <div
       ref={panelRef}
       style={style}
+      data-scroll-top-btn
       className={cn(
         "absolute z-10",
         snapping ? "transition-all duration-300 ease-out" : "transition-opacity duration-200",
-        visible
+        visible && !forceHide
           ? "opacity-100 pointer-events-auto"
           : "opacity-0 pointer-events-none",
       )}

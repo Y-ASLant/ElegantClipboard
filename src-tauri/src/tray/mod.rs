@@ -4,11 +4,11 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Manager,
 };
 use tracing::info;
 
-/// 初始化系统托盘图标和菜单
+/// 初始化系统托盘图标和菜单（仅在启动时调用一次，终身不销毁）
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon_data = include_bytes!("../../icons/icon.png");
     let img = image::load_from_memory(icon_data)?;
@@ -61,26 +61,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                // 左键点击：切换窗口可见性
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    if window.is_visible().unwrap_or(false) {
-                        crate::commands::window::save_window_size_if_enabled(tray.app_handle(), &window);
-                        let _ = window.hide();
-                        crate::input_monitor::disable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(
-                            crate::keyboard_hook::WindowState::Hidden,
-                        );
-                        crate::commands::hide_preview_windows(tray.app_handle());
-                        let _ = window.emit("window-hidden", ());
-                    } else if !crate::keyboard_hook::was_recently_hidden(300) {
-                        // 窗口刚被隐藏(<300ms)则跳过，避免立即重新显示
-                        let _ = window.show();
-                        crate::input_monitor::enable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(
-                            crate::keyboard_hook::WindowState::Visible,
-                        );
-                        let _ = window.emit("window-shown", ());
-                    }
+                // 左键点击：切换窗口可见性（统一走 toggle 逻辑）
+                if !crate::keyboard_hook::was_recently_hidden(300) {
+                    crate::commands::window::toggle_window_visibility(tray.app_handle(), false);
                 }
             }
         })
@@ -120,6 +103,7 @@ pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.unminimize();
         let _ = window.show();
+        let _ = window.set_always_on_top(true);
         let _ = window.set_focus();
         return Ok(());
     }
@@ -130,15 +114,16 @@ pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         tauri::WebviewUrl::App("/settings".into()),
     )
     .title("设置")
-    .inner_size(800.0, 560.0)
-    .min_inner_size(580.0, 480.0)
+    .inner_size(800.0, 600.0)
+    .min_inner_size(700.0, 580.0)
     .decorations(false)
     .transparent(true)
     .shadow(true)
     .visible(false)
-    .resizable(true);
+    .resizable(true)
+    .always_on_top(true);
 
-    // 居中于主窗口所在显示器（使用物理像素避免 DPI 换算误差）
+    // 居中于主窗口所在的显示器（使用物理像素避免 DPI 换算误差）
     let mut phys_pos: Option<tauri::PhysicalPosition<i32>> = None;
     if let Some(main_win) = app.get_webview_window("main") {
         if let (Ok(pos), Ok(size)) = (main_win.outer_position(), main_win.outer_size()) {

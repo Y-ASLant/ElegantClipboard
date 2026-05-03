@@ -11,23 +11,32 @@ import {
   Edit16Regular,
   CheckmarkCircle16Filled,
   Circle16Regular,
+  ReOrderDotsVertical16Regular,
+  Add16Regular,
+  Translate16Regular,
+  ArrowSync16Regular,
+  Dismiss16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useShallow } from "zustand/react/shallow";
 import {
   CardFooter,
   FileContent,
+  VideoContent,
   getPreviewBounds,
   ImageCard,
 } from "@/components/CardContentRenderers";
 import {
   ActionToolbar,
   FileDetailsDialog,
-  MoveToGroupSection,
+  TagAssignSection,
   type FileListItem,
   type ContextMenuItemConfig,
 } from "@/components/CardSubComponents";
 import { HighlightText } from "@/components/HighlightText";
+import { TtsHighlightText } from "@/components/TtsHighlightText";
 import {
   type ClipboardItemDetail,
   sampleTextPreview,
@@ -49,6 +58,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { focusWindowImmediately } from "@/hooks/useInputFocus";
+import { TtsButton } from "@/components/TtsButton";
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import {
   contentTypeConfig,
@@ -56,13 +67,18 @@ import {
   formatCharCount,
   formatSize,
   getFileNameFromPath,
+  getLogicalContentType,
   parseFilePaths,
 } from "@/lib/format";
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
-import { useGroupStore } from "@/stores/groups";
+import { useTagStore } from "@/stores/tags";
 import { useUISettings } from "@/stores/ui-settings";
+import { useTranslateSettings } from "@/stores/translate-settings";
+import { useTtsSettings } from "@/stores/tts-settings";
+import { translateText } from "@/lib/translate";
+import { speak, stopSpeaking, isSpeaking } from "@/lib/tts";
 
 // ============ 类型定义 ============
 
@@ -75,29 +91,135 @@ interface ClipboardItemCardProps {
 }
 
 const clipboardActions = () => useClipboardStore.getState();
-const fileValidityCache = new Map<string, boolean>();
+
 let textPreviewLease = 0;
 let textPreviewWanted = false;
 
-function acquireTextPreviewLease(): number {
+export function acquireTextPreviewLease(): number {
   textPreviewLease += 1;
   textPreviewWanted = true;
   return textPreviewLease;
 }
 
-function revokeTextPreviewLease(lease: number): void {
+export function revokeTextPreviewLease(lease: number): void {
   if (textPreviewLease === lease) {
     textPreviewLease += 1;
     textPreviewWanted = false;
   }
 }
 
-function isTextPreviewLeaseCurrent(lease: number): boolean {
+export function isTextPreviewLeaseCurrent(lease: number): boolean {
   return textPreviewLease === lease;
 }
 
-function isTextPreviewWanted(): boolean {
+export function isTextPreviewWanted(): boolean {
   return textPreviewWanted;
+}
+
+// ============ 全局 window-hidden 清理注册表 ============
+// 替代每张卡片各自订阅 Tauri 事件，改为单一全局监听 + 回调注册
+export const textPreviewCleanupCallbacks = new Set<() => void>();
+let _windowHiddenListenerInit = false;
+
+export function ensureWindowHiddenListener() {
+  if (_windowHiddenListenerInit) return;
+  _windowHiddenListenerInit = true;
+  listen("window-hidden", () => {
+    textPreviewCleanupCallbacks.forEach((cb) => cb());
+  });
+}
+
+// ============ 标签弹出层 ============
+
+function TagPopover({
+  popoverRef,
+  tags,
+  itemTagIds,
+  onToggle,
+  onCreateAndAssign,
+}: {
+  popoverRef: React.RefObject<HTMLDivElement | null>;
+  tags: { id: number; name: string }[];
+  itemTagIds: Set<number>;
+  onToggle: (tagId: number, isAssigned: boolean) => Promise<void>;
+  onCreateAndAssign: (name: string) => Promise<void>;
+}) {
+  const [newName, setNewName] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    // auto-focus input when popover opens, enable OS keyboard focus
+    const t = setTimeout(async () => {
+      await focusWindowImmediately();
+      inputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleCreate = async () => {
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    await onCreateAndAssign(trimmed);
+    setNewName("");
+  };
+
+  return (
+    <div
+      ref={popoverRef}
+      className="absolute right-1 top-0 z-30 w-[170px] rounded-lg border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-100"
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      {/* existing tags */}
+      {tags.length > 0 && (
+        <div className="max-h-36 overflow-y-auto p-1">
+          {tags.map((t) => {
+            const isAssigned = itemTagIds.has(t.id);
+            return (
+              <div
+                key={t.id}
+                onClick={() => onToggle(t.id, isAssigned)}
+                className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-default hover:bg-accent hover:text-accent-foreground transition-colors duration-100"
+              >
+                <span className={cn(
+                  "w-3.5 h-3.5 shrink-0 flex items-center justify-center rounded border text-[10px] transition-colors duration-100",
+                  isAssigned
+                    ? "bg-primary border-primary text-primary-foreground"
+                    : "border-muted-foreground/30",
+                )}>
+                  {isAssigned && "✓"}
+                </span>
+                <span className="truncate">{t.name}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* new tag input */}
+      <div className={cn("px-1.5 py-1.5 flex items-center gap-1", tags.length > 0 && "border-t")}>
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="新建标签…"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onFocus={() => focusWindowImmediately()}
+          onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); e.stopPropagation(); }}
+          onKeyUp={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          className="flex-1 min-w-0 h-6 px-1.5 text-xs rounded-md border bg-background outline-none focus:ring-1 focus:ring-ring transition-shadow"
+        />
+        <button
+          onClick={handleCreate}
+          onMouseDown={(e) => e.stopPropagation()}
+          disabled={!newName.trim()}
+          className="shrink-0 w-5 h-5 flex items-center justify-center rounded-md hover:bg-accent text-primary disabled:opacity-30 transition-colors"
+        >
+          <Add16Regular className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ============ 主卡片组件 ============
@@ -156,23 +278,49 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     pasteContent,
     pasteAsPlainText,
   } = clipboardActions();
-  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
-  const showTime = useUISettings((s) => s.showTime);
-  const showCharCount = useUISettings((s) => s.showCharCount);
-  const showByteSize = useUISettings((s) => s.showByteSize);
-  const showSourceApp = useUISettings((s) => s.showSourceApp);
-  const sourceAppDisplay = useUISettings((s) => s.sourceAppDisplay);
-  const showDragAreaIndicator = useUISettings((s) => s.showDragAreaIndicator);
-  const textPreviewEnabled = useUISettings((s) => s.textPreviewEnabled);
-  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
-  const previewPosition = useUISettings((s) => s.previewPosition);
-  const sharpCorners = useUISettings((s) => s.sharpCorners);
+  const {
+    cardMaxLines, showTime, showCharCount, showByteSize,
+    showSourceApp, sourceAppDisplay, textPreviewEnabled,
+    hoverPreviewDelay, previewPosition, sharpCorners, timeFormat,
+  } = useUISettings(useShallow((s) => ({
+    cardMaxLines: s.cardMaxLines,
+    showTime: s.showTime,
+    showCharCount: s.showCharCount,
+    showByteSize: s.showByteSize,
+    showSourceApp: s.showSourceApp,
+    sourceAppDisplay: s.sourceAppDisplay,
+    textPreviewEnabled: s.textPreviewEnabled,
+    hoverPreviewDelay: s.hoverPreviewDelay,
+    previewPosition: s.previewPosition,
+    sharpCorners: s.sharpCorners,
+    timeFormat: s.timeFormat,
+  })));
 
   const [justPasted, setJustPasted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
-  const { groups, moveItemToGroup } = useGroupStore();
-  const selectedGroupId = useClipboardStore((s) => s.selectedGroupId);
+  const [localTags, setLocalTags] = useState<{ id: number; name: string }[]>([]);
+  const [itemTagIds, setItemTagIds] = useState<Set<number>>(new Set());
+  const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
+  const tagPopoverRef = useRef<HTMLDivElement>(null);
+  const translateEnabled = useTranslateSettings((s) => s.enabled);
+  const ttsToolbarEnabled = useTtsSettings((s) => s.enabled && s.showToolbarTts);
+  const [translatedText, setTranslatedText] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+
+  // close tag popover on click outside
+  useEffect(() => {
+    if (!tagPopoverOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (tagPopoverRef.current && !tagPopoverRef.current.contains(e.target as Node)) {
+        setTagPopoverOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [tagPopoverOpen]);
+
   const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textPreviewVisibleRef = useRef(false);
   const textPreviewAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -183,59 +331,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const textScrollPendingDeltaRef = useRef(0);
 
   const filePaths = useMemo(
-    () => item.content_type === "files" ? parseFilePaths(item.file_paths) : [],
+    () => (item.content_type === "files" || item.content_type === "video") ? parseFilePaths(item.file_paths) : [],
     [item.content_type, item.file_paths],
   );
-  const [runtimeFilesValid, setRuntimeFilesValid] = useState<
-    boolean | undefined
-  >(undefined);
-
-  useEffect(() => {
-    if (item.content_type !== "files") {
-      setRuntimeFilesValid(undefined);
-      return;
-    }
-
-    if (item.files_valid !== undefined) {
-      setRuntimeFilesValid(item.files_valid);
-      return;
-    }
-
-    if (filePaths.length === 0) {
-      setRuntimeFilesValid(false);
-      return;
-    }
-
-    const cacheKey = item.file_paths ?? filePaths.join("\n");
-    const cached = fileValidityCache.get(cacheKey);
-    if (cached !== undefined) {
-      setRuntimeFilesValid(cached);
-      return;
-    }
-
-    let cancelled = false;
-    invoke<Record<string, { exists: boolean; is_dir: boolean }>>(
-      "check_files_exist",
-      { paths: filePaths },
-    )
-      .then((checkResult) => {
-        const allExist = filePaths.every((path) => checkResult[path]?.exists);
-        fileValidityCache.set(cacheKey, allExist);
-        if (!cancelled) setRuntimeFilesValid(allExist);
-      })
-      .catch((error) => {
-        logError("Failed to check files exist:", error);
-        if (!cancelled) setRuntimeFilesValid(undefined);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [item.content_type, item.files_valid, item.file_paths, filePaths]);
-
-  const effectiveFilesValid = item.files_valid ?? runtimeFilesValid;
   const filesInvalid =
-    item.content_type === "files" && effectiveFilesValid === false;
+    (item.content_type === "files" || item.content_type === "video") && item.files_valid === false;
   const isTextLikeContent =
     item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf";
 
@@ -266,9 +366,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   };
 
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
-  const dragHandleWidth = "clamp(40px, 14%, 72px)";
-
-  const timeFormat = useUISettings((s) => s.timeFormat);
 
   const metaItems = useMemo(() => {
     const items: string[] = [];
@@ -470,12 +567,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     };
   }, [hideTextPreview]);
 
-  // 主窗口隐藏时取消文本预览计时器
+  // 主窗口隐藏时取消文本预览（通过全局清理注册表，避免每张卡片单独订阅 Tauri 事件）
   useEffect(() => {
-    const unlisten = listen("window-hidden", () => {
-      hideTextPreview();
-    });
-    return () => { unlisten.then((fn) => fn()); };
+    ensureWindowHiddenListener();
+    textPreviewCleanupCallbacks.add(hideTextPreview);
+    return () => { textPreviewCleanupCallbacks.delete(hideTextPreview); };
   }, [hideTextPreview]);
 
   const handlePaste = (e: React.MouseEvent) => {
@@ -490,23 +586,23 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       setTimeout(() => setJustPasted(false), 300);
     }
   };
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     copyToClipboard(item.id);
-  };
-  const handleCopyCtxMenu = () => copyToClipboard(item.id);
-  const handleTogglePin = (e: React.MouseEvent) => {
+  }, [item.id, copyToClipboard]);
+  const handleCopyCtxMenu = useCallback(() => copyToClipboard(item.id), [item.id, copyToClipboard]);
+  const handleTogglePin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     togglePin(item.id);
-  };
-  const handleToggleFavorite = (e: React.MouseEvent) => {
+  }, [item.id, togglePin]);
+  const handleToggleFavorite = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     toggleFavorite(item.id);
-  };
-  const handleDelete = (e: React.MouseEvent) => {
+  }, [item.id, toggleFavorite]);
+  const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     deleteItem(item.id);
-  };
+  }, [item.id, deleteItem]);
 
   const handleShowInExplorer = async () => {
     if (filePaths.length > 0) {
@@ -565,10 +661,43 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     }
   };
 
+  const handleEdit = async () => {
+    try {
+      await invoke("open_text_editor_window", { id: item.id });
+    } catch (error) {
+      logError("Failed to open editor:", error);
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (translating) return;
+    const text = item.text_content || item.preview || "";
+    if (!text) return;
+    setTranslating(true);
+    setTranslateError(null);
+    try {
+      const result = await translateText(text);
+      setTranslatedText(result);
+    } catch (error) {
+      setTranslateError(String(error));
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const handleCopyTranslation = async () => {
+    if (!translatedText) return;
+    try {
+      await invoke("write_text_to_clipboard", { text: translatedText, record: useTranslateSettings.getState().recordTranslation });
+    } catch (error) {
+      logError("Failed to copy translation:", error);
+    }
+  };
+
   // ---- 卡片内容 ----
 
   const cardContent = (
-    <div ref={setNodeRef} style={style}>
+    <div ref={setNodeRef} style={style} className="relative">
       <Card
         className={cn(
         "group relative cursor-pointer overflow-hidden shadow-none dark:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.09),0_2px_8px_-1px_rgba(0,0,0,0.5)] hover:shadow-sm dark:hover:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.12),0_4px_12px_-2px_rgba(0,0,0,0.6)] hover:border-primary/30 ring-1 ring-black/4 dark:ring-white/10",
@@ -581,70 +710,19 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         onClick={handlePaste}
       >
         {!isDragging && !isDragOverlay && !batchMode && (
-          <>
-            <button
-              ref={setActivatorNodeRef}
-              {...attributes}
-              {...listeners}
-              type="button"
-              data-drag-handle="true"
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                "absolute inset-y-0 left-0 z-10 flex items-center justify-center rounded-l-lg cursor-grab active:cursor-grabbing",
-                showDragAreaIndicator
-                  ? "border-r border-dashed border-primary/40 bg-primary/15 text-primary opacity-0 group-hover:opacity-90 transition-[opacity,colors] duration-150 hover:bg-primary/25 hover:text-primary"
-                  : "border-r border-transparent bg-transparent text-transparent opacity-0",
-              )}
-              style={{ width: dragHandleWidth }}
-              aria-label="拖拽区域"
-              tabIndex={showDragAreaIndicator ? 0 : -1}
-            >
-              <span
-                aria-hidden
-                className="pointer-events-none text-[10px] leading-tight text-center text-primary/80"
-              >
-                拖拽区域
-              </span>
-            </button>
-
-            <button
-              {...attributes}
-              {...listeners}
-              type="button"
-              data-drag-handle="true"
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                "absolute inset-y-0 right-0 z-10 flex items-center justify-center rounded-r-lg cursor-grab active:cursor-grabbing",
-                showDragAreaIndicator
-                  ? "border-l border-dashed border-primary/40 bg-primary/15 text-primary opacity-0 group-hover:opacity-90 transition-[opacity,colors] duration-150 hover:bg-primary/25 hover:text-primary"
-                  : "border-l border-transparent bg-transparent text-transparent opacity-0",
-              )}
-              style={{ width: dragHandleWidth }}
-              aria-label="拖拽区域"
-              tabIndex={showDragAreaIndicator ? 0 : -1}
-            >
-              <span
-                aria-hidden
-                className="pointer-events-none text-[10px] leading-tight text-center text-primary/80"
-              >
-                拖拽区域
-              </span>
-            </button>
-
-            {showDragAreaIndicator && (
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-y-0 z-6 flex items-center justify-center bg-amber-500/12 opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                style={{ left: dragHandleWidth, right: dragHandleWidth }}
-              >
-                <div className="text-center">
-                  <div className="text-[10px] leading-none text-amber-700/80 dark:text-amber-300/80">粘贴、预览触发区域</div>
-                  <div className="mt-0.5 text-[10px] leading-none text-amber-700/80 dark:text-amber-300/80">点击卡片可粘贴</div>
-                  <div className="mt-0.5 text-[10px] leading-none text-amber-700/80 dark:text-amber-300/80">可在设置中关闭</div>
-                </div>
-              </div>
-            )}
-          </>
+          <button
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            type="button"
+            data-drag-handle="true"
+            onClick={(e) => e.stopPropagation()}
+            className="absolute inset-y-0 left-0 z-10 w-5 flex items-center justify-center rounded-l-lg cursor-grab active:cursor-grabbing text-muted-foreground/0 hover:text-muted-foreground/70 hover:bg-muted/50 transition-colors duration-150"
+            aria-label="拖拽排序"
+            tabIndex={-1}
+          >
+            <ReOrderDotsVertical16Regular className="w-3.5 h-3.5" />
+          </button>
         )}
         <div className="flex">
           <div className={cn(
@@ -666,7 +744,19 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
               sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
             />
-          ) : item.content_type === "files" ? (
+          ) : item.content_type === "video" ? (
+            <VideoContent
+              filePaths={filePaths}
+              filesInvalid={filesInvalid}
+              preview={item.preview}
+              metaItems={metaItems}
+              index={index}
+              showBadge={showBadge}
+              isDragOverlay={isDragOverlay}
+              sourceAppName={showSourceApp && sourceAppDisplay !== "icon" ? item.source_app_name : undefined}
+              sourceAppIcon={showSourceApp && sourceAppDisplay !== "name" ? item.source_app_icon : undefined}
+            />
+          ) : (item.content_type === "files") ? (
             <FileContent
               filePaths={filePaths}
               filesInvalid={filesInvalid}
@@ -697,7 +787,14 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   overflow: "hidden",
                 }}
               >
-                <HighlightText text={item.preview || item.text_content || `[${config.label}]`} />
+                {ttsToolbarEnabled ? (
+                  <TtsHighlightText
+                    text={item.preview || item.text_content || `[${config.label}]`}
+                    fallback={<HighlightText text={item.preview || item.text_content || `[${config.label}]`} />}
+                  />
+                ) : (
+                  <HighlightText text={item.preview || item.text_content || `[${config.label}]`} />
+                )}
               </pre>
               <CardFooter
                 metaItems={metaItems}
@@ -717,6 +814,35 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onToggleFavorite={handleToggleFavorite}
               onCopy={handleCopy}
               onDelete={handleDelete}
+              onTts={ttsToolbarEnabled && isTextLikeContent && getLogicalContentType(item) === "text" ? (e) => {
+                e.stopPropagation();
+                if (isSpeaking()) { stopSpeaking(); return; }
+                (async () => {
+                  let txt = item.text_content || "";
+                  if (!txt) {
+                    try {
+                      const detail = await invoke<ClipboardItemDetail | null>("get_clipboard_item", { id: item.id });
+                      txt = detail?.text_content || detail?.preview || item.preview || "";
+                    } catch { /* fallback to preview */ txt = item.preview || ""; }
+                  }
+                  if (txt.trim()) speak(txt, "en-US");
+                })();
+              } : undefined}
+              onTranslate={translateEnabled && isTextLikeContent && getLogicalContentType(item) === "text" ? (e) => {
+                e.stopPropagation();
+                handleTranslate();
+              } : undefined}
+              onTag={(e) => {
+                e.stopPropagation();
+                if (!tagPopoverOpen) {
+                  const tagStore = useTagStore.getState();
+                  setLocalTags(tagStore.tags);
+                  tagStore.getItemTags(item.id).then((tagList) => {
+                    setItemTagIds(new Set(tagList.map((t) => t.id)));
+                  });
+                }
+                setTagPopoverOpen((o) => !o);
+              }}
             />
           )}
 
@@ -731,31 +857,108 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
           )}
         </div>
       </Card>
+      {/* Tag popover rendered outside Card to avoid overflow-hidden clipping */}
+      {tagPopoverOpen && (
+        <TagPopover
+          popoverRef={tagPopoverRef}
+          tags={localTags}
+          itemTagIds={itemTagIds}
+          onToggle={async (tagId, isAssigned) => {
+            const tagStore = useTagStore.getState();
+            if (isAssigned) {
+              await tagStore.removeTagFromItem(item.id, tagId);
+              setItemTagIds((prev) => { const next = new Set(prev); next.delete(tagId); return next; });
+            } else {
+              await tagStore.addTagToItem(item.id, tagId);
+              setItemTagIds((prev) => new Set([...prev, tagId]));
+            }
+          }}
+          onCreateAndAssign={async (name) => {
+            const tagStore = useTagStore.getState();
+            const tag = await tagStore.createTag(name);
+            if (tag) {
+              await tagStore.addTagToItem(item.id, tag.id);
+              setItemTagIds((prev) => new Set([...prev, tag.id]));
+            }
+          }}
+        />
+      )}
+      {/* 翻译结果区域 */}
+      {(translating || translatedText || translateError) && (
+        <div
+          className="mt-1 rounded-lg border bg-muted/50 px-3 py-2 text-xs"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {translating && (
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <ArrowSync16Regular className="w-3.5 h-3.5 animate-spin" />
+              <span>翻译中…</span>
+            </div>
+          )}
+          {translateError && !translating && (
+            <div className="text-destructive">{translateError}</div>
+          )}
+          {translatedText && !translating && (
+            <div className="relative group/translate">
+              <pre
+                className="whitespace-pre-wrap break-all text-foreground/90 leading-relaxed m-0"
+                style={{
+                  fontFamily: "var(--card-font-family)",
+                  fontSize: "var(--card-font-size, 14px)",
+                }}
+              >
+                <TtsHighlightText text={translatedText} />
+              </pre>
+              <div className="absolute right-0 bottom-0 flex items-center gap-0.5 bg-background/90 rounded-md px-0.5 shadow-sm border opacity-0 group-hover/translate:opacity-100 transition-opacity">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={handleCopyTranslation}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Copy16Regular className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>复制翻译</TooltipContent>
+                </Tooltip>
+                <TtsButton text={translatedText || ""} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => { setTranslatedText(null); setTranslateError(null); }}
+                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Dismiss16Regular className="w-3.5 h-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>关闭</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 
-  const handleEdit = async () => {
-    try {
-      await invoke("open_text_editor_window", { id: item.id });
-    } catch (error) {
-      logError("Failed to open editor:", error);
-    }
-  };
-
-  // 上下文菜单配置
-  const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
+  // 上下文菜单配置（仅在依赖变化时重新计算）
+  const contextMenuItems = useMemo<ContextMenuItemConfig[] | null>(() => {
     if (isDragOverlay || batchMode) return null;
-    // 文本类内容（text/html/rtf）可编辑
+    // 文本类内容可编辑
     if (item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf") {
-      return [
+      const items: ContextMenuItemConfig[] = [
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: () => pasteContent(item.id) },
         { icon: TextDescription16Regular, label: "粘贴为纯文本", onClick: () => pasteAsPlainText(item.id) },
         { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
         { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
-        { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
       ];
+      if (translateEnabled) {
+        items.push({ icon: Translate16Regular, label: translating ? "翻译中…" : "翻译", onClick: handleTranslate, disabled: translating, separator: true });
+      }
+      items.push({ icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: !translateEnabled });
+      return items;
     }
-    if (item.content_type === "files") {
+    if (item.content_type === "files" || item.content_type === "video") {
       return [
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: () => pasteContent(item.id) },
         { icon: TextDescription16Regular, label: "粘贴为路径", onClick: handlePasteAsPath },
@@ -775,12 +978,20 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       ];
     }
     return null;
-  })();
+  }, [isDragOverlay, batchMode, item.content_type, item.id, item.image_path, filesInvalid, translateEnabled, translating]);
 
   if (contextMenuItems) {
     return (
       <>
-        <ContextMenu>
+        <ContextMenu onOpenChange={(open) => {
+          if (open) {
+            const tagStore = useTagStore.getState();
+            setLocalTags(tagStore.tags);
+            tagStore.getItemTags(item.id).then((tagList) => {
+              setItemTagIds(new Set(tagList.map((t) => t.id)));
+            });
+          }
+        }}>
           <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
           <ContextMenuContent className="w-48">
             {contextMenuItems.map((mi, idx) => (
@@ -796,16 +1007,23 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                 </ContextMenuItem>
               </Fragment>
             ))}
-            {/* 分组内联折叠（排除当前分组，显示可移动的目标分组）*/}
-            <MoveToGroupSection
+            {/* 标签管理 */}
+            <TagAssignSection
               itemId={item.id}
-              groups={groups}
-              selectedGroupId={selectedGroupId}
-              moveItemToGroup={moveItemToGroup}
+              allTags={localTags}
+              itemTagIds={itemTagIds}
+              onAddTag={async (itemId, tagId) => {
+                await useTagStore.getState().addTagToItem(itemId, tagId);
+                setItemTagIds((prev) => new Set([...prev, tagId]));
+              }}
+              onRemoveTag={async (itemId, tagId) => {
+                await useTagStore.getState().removeTagFromItem(itemId, tagId);
+                setItemTagIds((prev) => { const next = new Set(prev); next.delete(tagId); return next; });
+              }}
             />
           </ContextMenuContent>
         </ContextMenu>
-        {item.content_type === "files" && (
+        {(item.content_type === "files" || item.content_type === "video") && (
           <FileDetailsDialog
             open={detailsOpen}
             onOpenChange={setDetailsOpen}

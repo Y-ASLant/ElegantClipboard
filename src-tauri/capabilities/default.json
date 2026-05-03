@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "settings", "image-preview", "text-preview", "text-editor-*"],
+  "windows": ["main", "settings", "image-preview", "text-preview", "text-editor-*", "ocr-screenshot", "ocr-result", "translate-result"],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -21,15 +21,16 @@
     "core:tray:default",
     "core:tray:allow-set-tooltip",
     "opener:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "global-shortcut:allow-is-registered",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
-    "notification:default"
+    "notification:default",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all",
+    "global-shortcut:allow-is-registered"
   ]
 }
