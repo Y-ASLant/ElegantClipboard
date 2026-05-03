@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ScanText16Regular, Copy16Regular, Translate16Regular, Edit16Regular } from "@fluentui/react-icons";
+import { TtsButtonLarge } from "@/components/TtsButton";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,8 +13,11 @@ import { initTheme } from "@/lib/theme-applier";
 import { translateText } from "@/lib/translate";
 import { useTranslateSettings } from "@/stores/translate-settings";
 import { useOcrSettings } from "@/stores/ocr-settings";
+import { useTtsSettings } from "@/stores/tts-settings";
 import { cn } from "@/lib/utils";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { TtsHighlightText } from "@/components/TtsHighlightText";
+import { useTtsPlayback } from "@/stores/tts-playback";
 
 export function OcrResult() {
   const [text, setText] = useState("");
@@ -25,6 +29,8 @@ export function OcrResult() {
   const [translatedCopied, setTranslatedCopied] = useState(false);
   const [ocrRecognizing, setOcrRecognizing] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const ocrTextRef = useRef<HTMLDivElement>(null);
+  const translationRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
 
   // Linkify 配置：URL 渲染为蓝色下划线，Ctrl+点击打开
@@ -61,12 +67,17 @@ export function OcrResult() {
   const recordTranslation = useTranslateSettings((s) => s.recordTranslation);
   const ocrRecordCopy = useOcrSettings((s) => s.recordOcrCopy);
   const ocrLoaded = useOcrSettings((s) => s.loaded);
+  const ttsHighlight = useTtsSettings((s) => s.highlightWord);
+  const ttsPlayingOcr = useTtsPlayback((s) => s.isPlaying && s.sourceText === text) && ttsHighlight;
+
+  const ttsLoaded = useTtsSettings((s) => s.loaded);
 
   // 加载设置
   useEffect(() => {
     if (!translateLoaded) useTranslateSettings.getState().loadSettings();
     if (!ocrLoaded) useOcrSettings.getState().loadSettings();
-  }, [translateLoaded, ocrLoaded]);
+    if (!ttsLoaded) useTtsSettings.getState().loadSettings();
+  }, [translateLoaded, ocrLoaded, ttsLoaded]);
 
   // 加载主题后显示窗口
   useEffect(() => {
@@ -194,7 +205,7 @@ export function OcrResult() {
     >
       <WindowTitleBar
         icon={<ScanText16Regular className="w-5 h-5 text-muted-foreground" />}
-        title="OCR 识别结果"
+        title="OCR识别结果"
       />
 
       {/* 识别结果 */}
@@ -228,6 +239,20 @@ export function OcrResult() {
               <Copy16Regular className="w-3 h-3 mr-1" />
               {copied ? "已复制" : "复制"}
             </Button>
+            <TtsButtonLarge
+              disabled={!text.trim() || ocrRecognizing}
+              getTextFn={() => {
+                const sel = window.getSelection();
+                if (sel && sel.toString().trim() && ocrTextRef.current?.contains(sel.anchorNode)) {
+                  return sel.toString();
+                }
+                if (editing && textareaRef.current) {
+                  const { selectionStart, selectionEnd, value } = textareaRef.current;
+                  if (selectionStart !== selectionEnd) return value.slice(selectionStart, selectionEnd);
+                }
+                return text;
+              }}
+            />
           </div>
         </div>
         {editing ? (
@@ -241,9 +266,9 @@ export function OcrResult() {
             autoFocus
           />
         ) : (
-          <div className="flex-1 overflow-auto px-4 pb-3 text-sm leading-relaxed font-mono whitespace-pre-wrap break-words select-text cursor-text">
+          <div ref={ocrTextRef} className="flex-1 overflow-auto px-4 pb-3 text-sm leading-relaxed font-mono whitespace-pre-wrap break-words select-text cursor-text">
             {text ? (
-              <Linkify options={linkifyOptions}>{text}</Linkify>
+              ttsPlayingOcr ? <TtsHighlightText text={text} /> : <Linkify options={linkifyOptions}>{text}</Linkify>
             ) : (
               <span className="text-muted-foreground">
                 {ocrRecognizing ? "正在识别中..." : "等待识别结果..."}
@@ -268,10 +293,19 @@ export function OcrResult() {
                 <Copy16Regular className="w-3 h-3 mr-1" />
                 {translatedCopied ? "已复制" : "复制"}
               </Button>
+              <TtsButtonLarge
+                getTextFn={() => {
+                  const sel = window.getSelection();
+                  if (sel && sel.toString().trim() && translationRef.current?.contains(sel.anchorNode)) {
+                    return sel.toString();
+                  }
+                  return translatedText;
+                }}
+              />
             </div>
           </div>
-          <div className="flex-1 overflow-auto px-4 pb-3 select-text">
-            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-text">{translatedText}</p>
+          <div ref={translationRef} className="flex-1 overflow-auto px-4 pb-3 select-text">
+            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-text"><TtsHighlightText text={translatedText} /></p>
           </div>
         </Card>
       )}

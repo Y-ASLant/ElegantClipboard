@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useOcrSettings } from "@/stores/ocr-settings";
 import { logError } from "@/lib/logger";
 
-/** 调用百度 OCR 识别 */
+/** 调用百度 OCR识别 */
 export async function recognizeText(imageBase64: string): Promise<string> {
   const ocrSettings = useOcrSettings.getState();
   if (!ocrSettings.enabled) throw new Error("OCR 功能未启用");
@@ -17,7 +17,7 @@ export async function recognizeText(imageBase64: string): Promise<string> {
     });
     return result;
   } catch (error) {
-    logError("OCR 识别失败:", error);
+    logError("OCR识别失败:", error);
     throw error;
   }
 }

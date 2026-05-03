@@ -1,12 +1,13 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
-import { Settings } from "./pages/Settings";
-import { TextEditor } from "./pages/TextEditor";
-import { OcrScreenshot } from "./pages/OcrScreenshot";
-import { OcrResult } from "./pages/OcrResult";
-import { TranslateResult } from "./pages/TranslateResult";
+
+const Settings = lazy(() => import("./pages/Settings").then(m => ({ default: m.Settings })));
+const TextEditor = lazy(() => import("./pages/TextEditor").then(m => ({ default: m.TextEditor })));
+const OcrScreenshot = lazy(() => import("./pages/OcrScreenshot").then(m => ({ default: m.OcrScreenshot })));
+const OcrResult = lazy(() => import("./pages/OcrResult").then(m => ({ default: m.OcrResult })));
+const TranslateResult = lazy(() => import("./pages/TranslateResult").then(m => ({ default: m.TranslateResult })));
 import "overlayscrollbars/overlayscrollbars.css";
 import "./index.css";
 
@@ -37,19 +38,19 @@ function Router() {
   const path = window.location.pathname;
   
   if (path === "/settings" || path === "/settings.html") {
-    return <Settings />;
+    return <Suspense fallback={null}><Settings /></Suspense>;
   }
   if (path === "/editor" || path === "/editor.html") {
-    return <TextEditor />;
+    return <Suspense fallback={null}><TextEditor /></Suspense>;
   }
   if (path.startsWith("/ocr-screenshot")) {
-    return <OcrScreenshot />;
+    return <Suspense fallback={null}><OcrScreenshot /></Suspense>;
   }
   if (path === "/ocr-result" || path === "/ocr-result.html") {
-    return <OcrResult />;
+    return <Suspense fallback={null}><OcrResult /></Suspense>;
   }
   if (path === "/translate-result" || path === "/translate-result.html") {
-    return <TranslateResult />;
+    return <Suspense fallback={null}><TranslateResult /></Suspense>;
   }
   
   return <App />;

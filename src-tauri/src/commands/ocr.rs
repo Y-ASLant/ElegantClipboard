@@ -364,7 +364,7 @@ pub async fn ocr_screenshot_ready(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 打开 OCR 识别结果窗口
+/// 打开 OCR识别结果窗口
 #[tauri::command]
 pub async fn open_ocr_result_window(app: tauri::AppHandle, text: String) -> Result<(), String> {
     let label = "ocr-result";
@@ -383,7 +383,7 @@ pub async fn open_ocr_result_window(app: tauri::AppHandle, text: String) -> Resu
         label,
         tauri::WebviewUrl::App("/ocr-result".into()),
     )
-    .title("OCR 识别结果")
+    .title("OCR识别结果")
     .inner_size(520.0, 420.0)
     .min_inner_size(360.0, 300.0)
     .decorations(false)

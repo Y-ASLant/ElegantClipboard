@@ -17,6 +17,10 @@ const CODE_KEYWORDS = [
   "=>", "</", "select ", "insert into", "update ", "delete from",
 ];
 
+const LINE_SPLIT_RE = /\r?\n/;
+const INDENTED_LINE_RE = /^\s{2,}\S/;
+const CODE_BRACKETS_RE = /[{};<>]/;
+
 export const contentTypeConfig: Record<string, { label: string }> = {
   text: { label: "文本" },
   image: { label: "图片" },
@@ -54,10 +58,10 @@ export function isCodeText(text: string): boolean {
     return true;
   }
 
-  const lines = value.split(/\r?\n/);
-  const indentedLines = lines.filter((line) => /^\s{2,}\S/.test(line)).length;
+  const lines = value.split(LINE_SPLIT_RE);
+  const indentedLines = lines.filter((line) => INDENTED_LINE_RE.test(line)).length;
 
-  return lines.length >= 3 && indentedLines >= 1 && /[{};<>]/.test(value);
+  return lines.length >= 3 && indentedLines >= 1 && CODE_BRACKETS_RE.test(value);
 }
 
 export function formatTime(dateStr: string, format: "absolute" | "relative" = "absolute"): string {

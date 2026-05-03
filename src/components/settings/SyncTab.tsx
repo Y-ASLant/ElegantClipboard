@@ -10,6 +10,7 @@ import { logError } from "@/lib/logger";
 import { loadSyncedSettings } from "@/stores/ui-settings";
 import { useOcrSettings } from "@/stores/ocr-settings";
 import { useTranslateSettings } from "@/stores/translate-settings";
+import { useTtsSettings } from "@/stores/tts-settings";
 import {
   ArrowSync16Regular,
   ArrowUp16Regular,
@@ -239,6 +240,7 @@ export function SyncTab() {
       await loadSyncedSettings();
       await useOcrSettings.getState().loadSettings();
       await useTranslateSettings.getState().loadSettings();
+      await useTtsSettings.getState().loadSettings();
       // 通知主窗口刷新列表
       emit("clipboard-updated").catch(() => {});
     } catch (error) {

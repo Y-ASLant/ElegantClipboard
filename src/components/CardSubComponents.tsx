@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   Pin16Regular,
   Pin16Filled,
@@ -188,7 +188,7 @@ interface ActionToolbarProps {
   onTranslate?: (e: React.MouseEvent) => void;
 }
 
-export const ActionToolbar = ({
+export const ActionToolbar = memo(function ActionToolbar({
   item,
   onTogglePin,
   onToggleFavorite,
@@ -196,7 +196,7 @@ export const ActionToolbar = ({
   onDelete,
   onTag,
   onTranslate,
-}: ActionToolbarProps) => (
+}: ActionToolbarProps) { return (
   <div
     className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
     data-drag-ignore="true"
@@ -293,4 +293,4 @@ export const ActionToolbar = ({
       <TooltipContent>删除</TooltipContent>
     </Tooltip>
   </div>
-);
+); });

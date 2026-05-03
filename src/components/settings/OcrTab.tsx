@@ -146,13 +146,13 @@ export function OcrTab() {
     <div className="space-y-4">
       {/* 总开关 */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">OCR 识别</h3>
+        <h3 className="text-sm font-medium mb-3">OCR识别</h3>
         <p className="text-xs text-muted-foreground mb-4">
           开启后，按下快捷键可截取屏幕区域并识别其中的文字
         </p>
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <Label className="text-xs">启用 OCR 识别</Label>
+            <Label className="text-xs">启用 OCR识别</Label>
             <p className="text-xs text-muted-foreground">
               开启后可通过快捷键触发屏幕截图文字识别
             </p>

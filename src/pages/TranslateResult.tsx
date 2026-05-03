@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Translate16Regular, Copy16Regular } from "@fluentui/react-icons";
+import { TtsButtonLarge } from "@/components/TtsButton";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -10,7 +11,10 @@ import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { translateText } from "@/lib/translate";
 import { useTranslateSettings } from "@/stores/translate-settings";
+import { useTtsSettings } from "@/stores/tts-settings";
 import { cn } from "@/lib/utils";
+import { TtsHighlightText } from "@/components/TtsHighlightText";
+import { useTtsPlayback } from "@/stores/tts-playback";
 
 export function TranslateResult() {
   const [text, setText] = useState("");
@@ -21,14 +25,19 @@ export function TranslateResult() {
   const [translateError, setTranslateError] = useState("");
   const [translatedCopied, setTranslatedCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const translationRef = useRef<HTMLDivElement>(null);
 
   const recordTranslation = useTranslateSettings((s) => s.recordTranslation);
   const translateLoaded = useTranslateSettings((s) => s.loaded);
+  const ttsLoaded = useTtsSettings((s) => s.loaded);
+  const ttsHighlight = useTtsSettings((s) => s.highlightWord);
+  const ttsPlayingOriginal = useTtsPlayback((s) => s.isPlaying && s.sourceText === text) && ttsHighlight;
 
   // 加载设置
   useEffect(() => {
     if (!translateLoaded) useTranslateSettings.getState().loadSettings();
-  }, [translateLoaded]);
+    if (!ttsLoaded) useTtsSettings.getState().loadSettings();
+  }, [translateLoaded, ttsLoaded]);
 
   // 加载主题后显示窗口
   useEffect(() => {
@@ -141,25 +150,43 @@ export function TranslateResult() {
       <Card className="flex-1 overflow-hidden flex flex-col min-h-0">
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <span className="text-xs font-medium text-muted-foreground">原文</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={handleCopy}
-          >
-            <Copy16Regular className="w-3 h-3 mr-1" />
-            {copied ? "已复制" : "复制"}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={handleCopy}
+            >
+              <Copy16Regular className="w-3 h-3 mr-1" />
+              {copied ? "已复制" : "复制"}
+            </Button>
+            <TtsButtonLarge
+              disabled={!text.trim()}
+              getTextFn={() => {
+                if (textareaRef.current) {
+                  const { selectionStart, selectionEnd, value } = textareaRef.current;
+                  if (selectionStart !== selectionEnd) return value.slice(selectionStart, selectionEnd);
+                }
+                return text;
+              }}
+            />
+          </div>
         </div>
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="flex-1 w-full resize-none border-0 bg-transparent px-4 pb-3 text-sm leading-relaxed font-mono focus:outline-none placeholder:text-muted-foreground"
-          placeholder="等待选中文字..."
-          spellCheck={false}
-          readOnly
-        />
+        {ttsPlayingOriginal ? (
+          <div className="flex-1 w-full overflow-auto px-4 pb-3 text-sm leading-relaxed font-mono whitespace-pre-wrap break-words select-text cursor-text">
+            <TtsHighlightText text={text} />
+          </div>
+        ) : (
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="flex-1 w-full resize-none border-0 bg-transparent px-4 pb-3 text-sm leading-relaxed font-mono focus:outline-none placeholder:text-muted-foreground"
+            placeholder="等待选中文字..."
+            spellCheck={false}
+            readOnly
+          />
+        )}
       </Card>
 
       {/* 翻译结果 */}
@@ -180,16 +207,25 @@ export function TranslateResult() {
                   <Copy16Regular className="w-3 h-3 mr-1" />
                   {translatedCopied ? "已复制" : "复制"}
                 </Button>
+                <TtsButtonLarge
+                  getTextFn={() => {
+                    const sel = window.getSelection();
+                    if (sel && sel.toString().trim() && translationRef.current?.contains(sel.anchorNode)) {
+                      return sel.toString();
+                    }
+                    return translatedText;
+                  }}
+                />
               </>
             )}
           </div>
         </div>
-        <div className="flex-1 overflow-auto px-4 pb-3">
+        <div ref={translationRef} className="flex-1 overflow-auto px-4 pb-3">
           {translating && (
             <p className="text-sm text-muted-foreground">正在翻译...</p>
           )}
           {translatedText && (
-            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-text select-text">{translatedText}</p>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap cursor-text select-text"><TtsHighlightText text={translatedText} /></p>
           )}
           {translateError && (
             <p className="text-sm text-destructive">{translateError}</p>

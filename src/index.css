@@ -447,6 +447,22 @@ textarea,
     animation: paste-flash 0.3s ease-out;
 }
 
+/* TTS 朗读逐词高亮 */
+.tts-highlight {
+    background-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    color: var(--color-primary-foreground);
+    font-weight: 600;
+    border-radius: 3px;
+    padding: 1px 3px;
+    margin: 0 -1px;
+    box-decoration-break: clone;
+    transition: background-color 0.12s ease;
+}
+
+.dark .tts-highlight {
+    background-color: color-mix(in srgb, var(--color-primary) 50%, transparent);
+}
+
 /* Dragging cursor - from QuickClipboard optimization */
 body.dragging-cursor,
 body.dragging-cursor * {

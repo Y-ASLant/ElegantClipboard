@@ -1047,6 +1047,8 @@ pub fn run() {
             commands::ocr::get_pending_ocr_text,
             commands::ocr::update_ocr_shortcut,
             commands::ocr::ocr_toggle_enabled,
+            commands::tts::tts_speak_edge,
+            commands::tts::tts_get_edge_voices,
         ])
         .run(tauri::generate_context!());
 

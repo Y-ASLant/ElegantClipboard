@@ -56,7 +56,7 @@ const navItems: {
   { id: "data", label: "数据管理", icon: Database16Regular },
   { id: "appfilter", label: "监听过滤", icon: Filter16Regular },
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
-  { id: "ocr", label: "OCR 识别", icon: ScanText16Regular },
+  { id: "ocr", label: "OCR识别", icon: ScanText16Regular },
   { id: "translate", label: "条目翻译", icon: Translate16Regular },
   { id: "sync", label: "云端同步", icon: ArrowSync16Regular },
   { id: "about", label: "关于软件", icon: Info16Regular },

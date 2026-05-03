@@ -36,6 +36,7 @@ import {
   type ContextMenuItemConfig,
 } from "@/components/CardSubComponents";
 import { HighlightText } from "@/components/HighlightText";
+import { TtsHighlightText } from "@/components/TtsHighlightText";
 import {
   type ClipboardItemDetail,
   sampleTextPreview,
@@ -58,6 +59,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { focusWindowImmediately } from "@/hooks/useInputFocus";
+import { TtsButton } from "@/components/TtsButton";
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import {
   contentTypeConfig,
@@ -65,6 +67,7 @@ import {
   formatCharCount,
   formatSize,
   getFileNameFromPath,
+  getLogicalContentType,
   parseFilePaths,
 } from "@/lib/format";
 import { logError } from "@/lib/logger";
@@ -294,12 +297,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [justPasted, setJustPasted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
-  const { tags, addTagToItem, removeTagFromItem, getItemTags, createTag } = useTagStore();
+  const [localTags, setLocalTags] = useState<{ id: number; name: string }[]>([]);
   const [itemTagIds, setItemTagIds] = useState<Set<number>>(new Set());
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
   const tagPopoverRef = useRef<HTMLDivElement>(null);
   const translateEnabled = useTranslateSettings((s) => s.enabled);
-  const recordTranslation = useTranslateSettings((s) => s.recordTranslation);
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
@@ -581,23 +583,23 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       setTimeout(() => setJustPasted(false), 300);
     }
   };
-  const handleCopy = (e: React.MouseEvent) => {
+  const handleCopy = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     copyToClipboard(item.id);
-  };
-  const handleCopyCtxMenu = () => copyToClipboard(item.id);
-  const handleTogglePin = (e: React.MouseEvent) => {
+  }, [item.id, copyToClipboard]);
+  const handleCopyCtxMenu = useCallback(() => copyToClipboard(item.id), [item.id, copyToClipboard]);
+  const handleTogglePin = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     togglePin(item.id);
-  };
-  const handleToggleFavorite = (e: React.MouseEvent) => {
+  }, [item.id, togglePin]);
+  const handleToggleFavorite = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     toggleFavorite(item.id);
-  };
-  const handleDelete = (e: React.MouseEvent) => {
+  }, [item.id, toggleFavorite]);
+  const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     deleteItem(item.id);
-  };
+  }, [item.id, deleteItem]);
 
   const handleShowInExplorer = async () => {
     if (filePaths.length > 0) {
@@ -683,7 +685,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const handleCopyTranslation = async () => {
     if (!translatedText) return;
     try {
-      await invoke("write_text_to_clipboard", { text: translatedText, record: recordTranslation });
+      await invoke("write_text_to_clipboard", { text: translatedText, record: useTranslateSettings.getState().recordTranslation });
     } catch (error) {
       logError("Failed to copy translation:", error);
     }
@@ -802,14 +804,16 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onToggleFavorite={handleToggleFavorite}
               onCopy={handleCopy}
               onDelete={handleDelete}
-              onTranslate={translateEnabled && isTextLikeContent ? (e) => {
+              onTranslate={translateEnabled && isTextLikeContent && getLogicalContentType(item) === "text" ? (e) => {
                 e.stopPropagation();
                 handleTranslate();
               } : undefined}
               onTag={(e) => {
                 e.stopPropagation();
                 if (!tagPopoverOpen) {
-                  getItemTags(item.id).then((tagList) => {
+                  const tagStore = useTagStore.getState();
+                  setLocalTags(tagStore.tags);
+                  tagStore.getItemTags(item.id).then((tagList) => {
                     setItemTagIds(new Set(tagList.map((t) => t.id)));
                   });
                 }
@@ -833,21 +837,23 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       {tagPopoverOpen && (
         <TagPopover
           popoverRef={tagPopoverRef}
-          tags={tags}
+          tags={localTags}
           itemTagIds={itemTagIds}
           onToggle={async (tagId, isAssigned) => {
+            const tagStore = useTagStore.getState();
             if (isAssigned) {
-              await removeTagFromItem(item.id, tagId);
+              await tagStore.removeTagFromItem(item.id, tagId);
               setItemTagIds((prev) => { const next = new Set(prev); next.delete(tagId); return next; });
             } else {
-              await addTagToItem(item.id, tagId);
+              await tagStore.addTagToItem(item.id, tagId);
               setItemTagIds((prev) => new Set([...prev, tagId]));
             }
           }}
           onCreateAndAssign={async (name) => {
-            const tag = await createTag(name);
+            const tagStore = useTagStore.getState();
+            const tag = await tagStore.createTag(name);
             if (tag) {
-              await addTagToItem(item.id, tag.id);
+              await tagStore.addTagToItem(item.id, tag.id);
               setItemTagIds((prev) => new Set([...prev, tag.id]));
             }
           }}
@@ -877,7 +883,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   fontSize: "var(--card-font-size, 14px)",
                 }}
               >
-                {translatedText}
+                <TtsHighlightText text={translatedText} />
               </pre>
               <div className="absolute right-0 bottom-0 flex items-center gap-0.5 bg-background/90 rounded-md px-0.5 shadow-sm border opacity-0 group-hover/translate:opacity-100 transition-opacity">
                 <Tooltip>
@@ -891,6 +897,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                   </TooltipTrigger>
                   <TooltipContent>复制翻译</TooltipContent>
                 </Tooltip>
+                <TtsButton text={translatedText || ""} />
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -954,7 +961,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       <>
         <ContextMenu onOpenChange={(open) => {
           if (open) {
-            getItemTags(item.id).then((tagList) => {
+            const tagStore = useTagStore.getState();
+            setLocalTags(tagStore.tags);
+            tagStore.getItemTags(item.id).then((tagList) => {
               setItemTagIds(new Set(tagList.map((t) => t.id)));
             });
           }
@@ -977,14 +986,14 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             {/* 标签管理 */}
             <TagAssignSection
               itemId={item.id}
-              allTags={tags}
+              allTags={localTags}
               itemTagIds={itemTagIds}
               onAddTag={async (itemId, tagId) => {
-                await addTagToItem(itemId, tagId);
+                await useTagStore.getState().addTagToItem(itemId, tagId);
                 setItemTagIds((prev) => new Set([...prev, tagId]));
               }}
               onRemoveTag={async (itemId, tagId) => {
-                await removeTagFromItem(itemId, tagId);
+                await useTagStore.getState().removeTagFromItem(itemId, tagId);
                 setItemTagIds((prev) => { const next = new Set(prev); next.delete(tagId); return next; });
               }}
             />
