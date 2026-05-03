@@ -35,6 +35,7 @@ import {
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emitTo } from "@tauri-apps/api/event";
 import { ImagePreview, getPreviewBounds } from "@/components/CardContentRenderers";
+import { HighlightText } from "@/components/HighlightText";
 import {
   acquireTextPreviewLease,
   revokeTextPreviewLease,
@@ -981,7 +982,7 @@ function SortableTagItemRow({
             onMouseLeave={onTextLeave}
             onWheel={onTextWheel}
           >
-            <p className="text-xs leading-relaxed line-clamp-2 break-all text-foreground/90">{truncated || "(空)"}</p>
+            <p className="text-xs leading-relaxed line-clamp-2 break-all text-foreground/90"><HighlightText text={truncated || "(空)"} /></p>
             <div className="flex items-center gap-1.5 mt-1">
               <span className="inline-flex items-center text-[10px] text-muted-foreground px-1 py-px rounded bg-muted/60">
                 {typeConfig.label}
@@ -1128,7 +1129,7 @@ function TagItemRow({
             onMouseLeave={onTextLeave}
             onWheel={onTextWheel}
           >
-            <p className="text-xs leading-relaxed line-clamp-2 break-all text-foreground/90">{truncated || "(空)"}</p>
+            <p className="text-xs leading-relaxed line-clamp-2 break-all text-foreground/90"><HighlightText text={truncated || "(空)"} /></p>
             <div className="flex items-center gap-1.5 mt-1">
               <span className="inline-flex items-center text-[10px] text-muted-foreground px-1 py-px rounded bg-muted/60">
                 {typeConfig.label}
