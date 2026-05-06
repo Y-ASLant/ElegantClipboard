@@ -22,7 +22,7 @@ document.addEventListener("keydown", (e) => {
     }
   }
   // 拦截 Tab 导航、F5 刷新、F7 光标浏览
-  if (e.key === "Tab" || e.key === "F5" || e.key === "F7") {
+  if (e.key === "Tab" || e.key === "F1" || e.key === "F3" || e.key === "F5" || e.key === "F6" || e.key === "F7" || e.key === "F11" || e.key === "F12") {
     e.preventDefault();
   }
 });
