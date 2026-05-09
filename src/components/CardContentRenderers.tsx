@@ -81,10 +81,16 @@ const BASE_PREVIEW_H = 500;
 let imagePreviewLease = 0;
 let imagePreviewWanted = false;
 
-function acquireImagePreviewLease(): number {
-  imagePreviewLease += 1;
+async function acquireImagePreviewLease(): Promise<number> {
+  // lease 由后端 IMAGE_PREVIEW_TOKEN 原子分配（与 invalidate 共享同一原子），
+  // 从结构上保证 invalidate 之后的旧 lease 必然 < 当前 TOKEN，promote 必失败。
+  const lease = await invoke<number>("allocate_image_preview_lease");
+  // 多个并发 invoke 解析顺序不确定，仅在分配值更大时更新本地最大值
+  if (lease > imagePreviewLease) {
+    imagePreviewLease = lease;
+  }
   imagePreviewWanted = true;
-  return imagePreviewLease;
+  return lease;
 }
 
 function revokeImagePreviewLease(lease: number): void {
@@ -405,13 +411,20 @@ const ImagePreview = memo(function ImagePreview({
     previewHoveringRef.current = true;
     previewReqIdRef.current += 1;
     const reqId = previewReqIdRef.current;
-    const lease = acquireImagePreviewLease();
-    previewLeaseRef.current = lease;
     ps.current.currentPath = imagePath;
     clearTimer();
-    timerRef.current = setTimeout(() => {
-      void showPreview(reqId, lease, imagePath);
-    }, hoverPreviewDelay);
+    void (async () => {
+      const lease = await acquireImagePreviewLease();
+      // 异步分配期间用户可能已经离开或触发新的悬停，重新校验后再装定时器
+      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) {
+        revokeImagePreviewLease(lease);
+        return;
+      }
+      previewLeaseRef.current = lease;
+      timerRef.current = setTimeout(() => {
+        void showPreview(reqId, lease, imagePath);
+      }, hoverPreviewDelay);
+    })();
   }, [imagePath, imagePreviewEnabled, batchMode, clearTimer, showPreview, hoverPreviewDelay]);
 
   useEffect(() => {

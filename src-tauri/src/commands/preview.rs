@@ -24,6 +24,16 @@ fn invalidate_all_preview_tokens(slot: &AtomicU64) {
     slot.fetch_add(1, Ordering::AcqRel);
 }
 
+#[tauri::command]
+pub fn allocate_image_preview_lease() -> u64 {
+    IMAGE_PREVIEW_TOKEN.fetch_add(1, Ordering::AcqRel) + 1
+}
+
+#[tauri::command]
+pub fn allocate_text_preview_lease() -> u64 {
+    TEXT_PREVIEW_TOKEN.fetch_add(1, Ordering::AcqRel) + 1
+}
+
 pub(crate) fn force_hide_image_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     invalidate_all_preview_tokens(&IMAGE_PREVIEW_TOKEN);
     if let Some(window) = app.get_webview_window("image-preview") {

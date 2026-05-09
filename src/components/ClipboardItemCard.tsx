@@ -79,10 +79,15 @@ const fileValidityCache = new Map<string, boolean>();
 let textPreviewLease = 0;
 let textPreviewWanted = false;
 
-function acquireTextPreviewLease(): number {
-  textPreviewLease += 1;
+async function acquireTextPreviewLease(): Promise<number> {
+  // lease 由后端 TEXT_PREVIEW_TOKEN 原子分配，与 invalidate 共享同一原子，
+  // 从结构上保证 invalidate 之后的旧 lease 必然 < 当前 TOKEN，promote 必失败。
+  const lease = await invoke<number>("allocate_text_preview_lease");
+  if (lease > textPreviewLease) {
+    textPreviewLease = lease;
+  }
   textPreviewWanted = true;
-  return textPreviewLease;
+  return lease;
 }
 
 function revokeTextPreviewLease(lease: number): void {
@@ -416,12 +421,19 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     textPreviewHoveringRef.current = true;
     textPreviewReqIdRef.current += 1;
     const reqId = textPreviewReqIdRef.current;
-    const lease = acquireTextPreviewLease();
-    textPreviewLeaseRef.current = lease;
     clearTextPreviewTimer();
-    textPreviewTimerRef.current = setTimeout(() => {
-      void showTextPreview(reqId, lease);
-    }, hoverPreviewDelay);
+    void (async () => {
+      const lease = await acquireTextPreviewLease();
+      // 异步分配期间用户可能已离开或触发新悬停，重新校验后再装定时器
+      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) {
+        revokeTextPreviewLease(lease);
+        return;
+      }
+      textPreviewLeaseRef.current = lease;
+      textPreviewTimerRef.current = setTimeout(() => {
+        void showTextPreview(reqId, lease);
+      }, hoverPreviewDelay);
+    })();
   }, [textPreviewEnabled, isTextLikeContent, batchMode, clearTextPreviewTimer, showTextPreview, hoverPreviewDelay]);
 
   const handleTextMouseLeave = useCallback(() => {
