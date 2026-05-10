@@ -52,22 +52,31 @@ fn restore_prev_foreground_window() {
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
     use tauri::{Emitter, Manager};
 
-    if !crate::input_monitor::is_window_pinned() {
-        if let Some(window) = app.get_webview_window("main") {
-            // 窗口已隐藏时无需操作（快捷粘贴 Alt+N 不经过 UI，窗口本就不可见）
-            if !window.is_visible().unwrap_or(false) {
-                return;
-            }
+    if crate::input_monitor::is_window_pinned() {
+        return;
+    }
+
+    // 记录是否真正隐藏过主窗，用于区分「刚关闭主窗」与「Alt+N 快捷粘贴主窗本就不可见」两种情形。
+    let main_was_visible = match app.get_webview_window("main") {
+        Some(window) if window.is_visible().unwrap_or(false) => {
             window::save_window_size_if_enabled(app, &window);
             let _ = window.set_focusable(false);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             crate::input_monitor::disable_mouse_monitoring();
             let _ = window.emit("window-hidden", ());
+            true
         }
-        hide_preview_windows(app);
+        _ => false,
+    };
 
-        #[cfg(target_os = "windows")]
+    // 总是清理预览窗口：避免主窗关闭与悬停倒计时竞态下残留的孤儿预览，
+    // 无法仅靠前端监听 window-hidden 事件兜底。
+    hide_preview_windows(app);
+
+    // 仅在刚刚真正隐藏主窗时才恢复目标应用焦点（Alt+N 粘贴无需此操作）。
+    #[cfg(target_os = "windows")]
+    if main_was_visible {
         restore_prev_foreground_window();
     }
 }

@@ -24,6 +24,30 @@ fn invalidate_preview_token(slot: &AtomicU64, token: u64) {
     slot.fetch_max(token.saturating_add(1), Ordering::AcqRel);
 }
 
+#[inline]
+fn invalidate_all_preview_tokens(slot: &AtomicU64) {
+    slot.fetch_add(1, Ordering::AcqRel);
+}
+
+pub(crate) fn force_hide_image_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    invalidate_all_preview_tokens(&IMAGE_PREVIEW_TOKEN);
+    if let Some(window) = app.get_webview_window("image-preview") {
+        let _ = window.hide();
+        let _ = window.emit("image-preview-clear", ());
+        tracing::debug!("image-preview force hidden");
+    }
+}
+
+pub(crate) fn force_hide_text_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    invalidate_all_preview_tokens(&TEXT_PREVIEW_TOKEN);
+    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, Ordering::AcqRel);
+    if let Some(window) = app.get_webview_window("text-preview") {
+        let _ = window.hide();
+        let _ = window.emit("text-preview-clear", ());
+        tracing::debug!("text-preview force hidden");
+    }
+}
+
 #[tauri::command]
 pub fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -46,6 +70,18 @@ pub async fn show_image_preview(
 ) -> Result<(), String> {
     let token = token.unwrap_or(0);
     if token != 0 && !promote_preview_token(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    // 守卫：主窗必须可见，否则拒绝显示预览。
+    // 防御悬停倒计时与主窗关闭之间的竞态：即便 token 巧合匹配通过 promote，
+    // 也会在此拦下"孤儿预览"，并顺手 force_hide 清理残留窗口。
+    if !app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+    {
+        force_hide_image_preview(&app);
         return Ok(());
     }
 
@@ -157,6 +193,17 @@ pub async fn show_text_preview(
 ) -> Result<(), String> {
     let token = token.unwrap_or(0);
     if token != 0 && !promote_preview_token(&TEXT_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    // 守卫：主窗必须可见，否则拒绝显示预览。
+    // 与 show_image_preview 对称，防御悬停倒计时与主窗关闭之间的竞态。
+    if !app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+    {
+        force_hide_text_preview(&app);
         return Ok(());
     }
 
