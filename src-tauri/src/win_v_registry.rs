@@ -3,9 +3,9 @@
 //! 修改注册表彼底禁用 Windows 内置剪贴板历史，比键盘钉更可靠。
 
 #[cfg(windows)]
-use winreg::enums::*;
-#[cfg(windows)]
 use winreg::RegKey;
+#[cfg(windows)]
+use winreg::enums::*;
 
 #[cfg(windows)]
 const EXPLORER_ADVANCED_PATH: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced";

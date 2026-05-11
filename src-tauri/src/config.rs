@@ -74,18 +74,20 @@ impl AppConfig {
     /// 获取数据库路径
     pub fn get_db_path(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path
-            && !custom_path.is_empty() {
-                return PathBuf::from(custom_path).join("clipboard.db");
-            }
+            && !custom_path.is_empty()
+        {
+            return PathBuf::from(custom_path).join("clipboard.db");
+        }
         crate::database::get_default_db_path()
     }
 
     /// 获取图片存储路径
     pub fn get_images_path(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path
-            && !custom_path.is_empty() {
-                return PathBuf::from(custom_path).join("images");
-            }
+            && !custom_path.is_empty()
+        {
+            return PathBuf::from(custom_path).join("images");
+        }
         crate::database::get_default_images_path()
     }
 
@@ -102,9 +104,10 @@ impl AppConfig {
     /// 获取数据目录路径
     pub fn get_data_dir(&self) -> PathBuf {
         if let Some(ref custom_path) = self.data_path
-            && !custom_path.is_empty() {
-                return PathBuf::from(custom_path);
-            }
+            && !custom_path.is_empty()
+        {
+            return PathBuf::from(custom_path);
+        }
         crate::database::get_default_db_path()
             .parent()
             .map(|p| p.to_path_buf())
@@ -119,7 +122,7 @@ fn get_config_path() -> PathBuf {
 
 /// 将数据从旧路径迁移到新路径
 pub fn migrate_data(old_path: &PathBuf, new_path: &PathBuf) -> Result<MigrationResult, String> {
-    info!("正在迁移数据: {:?} -> {:?}", old_path, new_path);
+    info!("Migrating data: {:?} -> {:?}", old_path, new_path);
 
     // 确保新目录存在
     fs::create_dir_all(new_path).map_err(|e| format!("创建新目录失败: {}", e))?;

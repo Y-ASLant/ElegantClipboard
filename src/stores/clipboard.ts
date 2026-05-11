@@ -21,6 +21,7 @@ export interface ClipboardItem {
   image_height: number | null;
   is_pinned: boolean;
   is_favorite: boolean;
+  favorite_order: number;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -61,6 +62,7 @@ interface ClipboardState {
   togglePin: (id: number) => Promise<void>;
   toggleFavorite: (id: number) => Promise<void>;
   moveItem: (fromId: number, toId: number) => Promise<void>;
+  moveFavoriteItem: (fromId: number, toId: number) => Promise<void>;
   deleteItem: (id: number) => Promise<void>;
   copyToClipboard: (id: number) => Promise<void>;
   pasteContent: (id: number) => Promise<void>;
@@ -195,6 +197,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       logError("Failed to move item:", error);
+    }
+  },
+
+  moveFavoriteItem: async (fromId: number, toId: number) => {
+    try {
+      await invoke("move_favorite_clipboard_item", { fromId, toId });
+      await get().refresh();
+    } catch (error) {
+      logError("Failed to move favorite item:", error);
     }
   },
 

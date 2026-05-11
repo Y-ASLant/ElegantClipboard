@@ -31,19 +31,19 @@ fn restore_prev_foreground_window() {
 
     let prev = crate::input_monitor::get_prev_foreground_hwnd();
     if prev == 0 {
-        tracing::warn!("hide: PREV_FOREGROUND_HWND 为 0，无法恢复前台窗口");
+        tracing::warn!("hide: PREV_FOREGROUND_HWND is 0, cannot restore foreground window");
         return;
     }
 
     let hwnd = HWND(prev as *mut _);
     let current_fg = unsafe { GetForegroundWindow() };
     if current_fg.0 as isize == prev {
-        tracing::info!("hide: 目标窗口已是前台，跳过 SetForegroundWindow");
+        tracing::info!("hide: target is already foreground, skipping SetForegroundWindow");
     } else if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
         let _ = unsafe { SetForegroundWindow(hwnd) };
-        tracing::info!("hide: 已恢复前台窗口 hwnd={:#x}", prev);
+        tracing::info!("hide: restored foreground window hwnd={:#x}", prev);
     } else {
-        tracing::warn!("hide: prev_hwnd={:#x} 已无效", prev);
+        tracing::warn!("hide: prev_hwnd={:#x} is no longer valid", prev);
     }
 }
 
@@ -51,47 +51,43 @@ fn restore_prev_foreground_window() {
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
     use tauri::{Emitter, Manager};
 
-    if !crate::input_monitor::is_window_pinned() {
-        if let Some(window) = app.get_webview_window("main") {
-            // 窗口已隐藏时无需操作（快捷粘贴 Alt+N 不经过 UI，窗口本就不可见）
-            if !window.is_visible().unwrap_or(false) {
-                return;
-            }
+    if crate::input_monitor::is_window_pinned() {
+        return;
+    }
+
+    // 记录是否真正隐藏过主窗，用于区分「刚关闭主窗」与「Alt+N 快捷粘贴主窗本就不可见」两种情形。
+    let main_was_visible = match app.get_webview_window("main") {
+        Some(window) if window.is_visible().unwrap_or(false) => {
             window::save_window_size_if_enabled(app, &window);
             let _ = window.set_focusable(false);
             let _ = window.hide();
             crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
             crate::input_monitor::disable_mouse_monitoring();
             let _ = window.emit("window-hidden", ());
+            true
         }
-        hide_preview_windows(app);
+        _ => false,
+    };
 
-        #[cfg(target_os = "windows")]
+    // 总是清理预览窗口：避免主窗关闭与悬停倒计时竞态下残留的孤儿预览，
+    // 无法仅靠前端监听 window-hidden 事件兜底。
+    hide_preview_windows(app);
+
+    // 仅在刚刚真正隐藏主窗时才恢复目标应用焦点（Alt+N 粘贴无需此操作）。
+    #[cfg(target_os = "windows")]
+    if main_was_visible {
         restore_prev_foreground_window();
     }
 }
 
-/// 隐藏图片预览窗口（若存在）。
 pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    use tauri::{Emitter, Manager};
-
-    if let Some(preview) = app.get_webview_window("image-preview") {
-        let _ = preview.hide();
-        let _ = preview.emit("image-preview-clear", ());
-    }
+    crate::commands::preview::force_hide_image_preview(app);
 }
 
-/// 隐藏文本预览窗口（若存在）。
 pub(crate) fn hide_text_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    use tauri::{Emitter, Manager};
-
-    if let Some(preview) = app.get_webview_window("text-preview") {
-        let _ = preview.hide();
-        let _ = preview.emit("text-preview-clear", ());
-    }
+    crate::commands::preview::force_hide_text_preview(app);
 }
 
-/// 隐藏所有悬浮预览窗口（图片 / 文本）。
 pub(crate) fn hide_preview_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     hide_image_preview_window(app);
     hide_text_preview_window(app);

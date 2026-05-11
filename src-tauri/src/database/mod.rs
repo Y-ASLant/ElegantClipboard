@@ -6,7 +6,7 @@ pub use schema::*;
 
 use crate::clipboard::compute_semantic_hash;
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, params};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -199,7 +199,7 @@ impl Database {
                     color TEXT,
                     sort_order INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT (datetime('now', 'localtime'))
-                );"
+                );",
             )?;
 
             // 建新表（含 group_id）
@@ -220,6 +220,7 @@ impl Database {
                     image_height INTEGER,
                     is_pinned INTEGER DEFAULT 0,
                     is_favorite INTEGER DEFAULT 0,
+                    favorite_order INTEGER DEFAULT 0,
                     sort_order INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
@@ -238,7 +239,8 @@ impl Database {
                     "INSERT INTO clipboard_items_new 
                      SELECT id, content_type, text_content, html_content, rtf_content,
                             image_path, file_paths, content_hash, content_hash, preview, byte_size,
-                            image_width, image_height, is_pinned, is_favorite, sort_order,
+                            image_width, image_height, is_pinned, is_favorite,
+                            CASE WHEN is_favorite = 1 THEN sort_order ELSE 0 END, sort_order,
                             created_at, updated_at, access_count, last_accessed_at, char_count,
                             source_app_name, source_app_icon,
                             (SELECT MIN(ig.group_id) FROM item_groups ig WHERE ig.item_id = clipboard_items.id)
@@ -249,10 +251,11 @@ impl Database {
                     "INSERT INTO clipboard_items_new 
                      SELECT id, content_type, text_content, html_content, rtf_content,
                             image_path, file_paths, content_hash, content_hash, preview, byte_size,
-                            image_width, image_height, is_pinned, is_favorite, sort_order,
+                            image_width, image_height, is_pinned, is_favorite,
+                            CASE WHEN is_favorite = 1 THEN sort_order ELSE 0 END, sort_order,
                             created_at, updated_at, access_count, last_accessed_at, char_count,
                             source_app_name, source_app_icon, NULL
-                     FROM clipboard_items;"
+                     FROM clipboard_items;",
                 )?;
             }
 
@@ -261,7 +264,7 @@ impl Database {
                 "DELETE FROM clipboard_items_new WHERE id NOT IN (
                     SELECT MAX(id) FROM clipboard_items_new
                     GROUP BY COALESCE(CAST(group_id AS TEXT), 'NULL'), content_hash
-                );"
+                );",
             )?;
 
             // 删除旧表并重命名
@@ -279,6 +282,7 @@ impl Database {
                  CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;
                  CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
                  CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
                  -- 重建触发器
@@ -293,7 +297,27 @@ impl Database {
             info!("Migration complete: group_id column added, table rebuilt");
         }
 
-        // 迁移 7: 允许重复 content_hash（always_new 策略），保留索引但移除唯一约束
+        // 迁移 7: favorite_order
+        let has_favorite_order: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'favorite_order'",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !has_favorite_order {
+            info!("Migrating database: adding favorite_order column");
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN favorite_order INTEGER DEFAULT 0;
+                 UPDATE clipboard_items
+                 SET favorite_order = sort_order
+                 WHERE is_favorite = 1;
+                 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order
+                   ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;",
+            )?;
+            info!("Migration complete: favorite_order column added");
+        }
+
+        // 迁移 8: 允许重复 content_hash（always_new 策略），保留索引但移除唯一约束
         conn.execute_batch(
             "DROP INDEX IF EXISTS idx_clipboard_hash_default;
              DROP INDEX IF EXISTS idx_clipboard_hash_group;
@@ -312,9 +336,7 @@ impl Database {
 
         if !has_semantic_hash {
             info!("Migrating database: adding semantic_hash column");
-            conn.execute_batch(
-                "ALTER TABLE clipboard_items ADD COLUMN semantic_hash TEXT;",
-            )?;
+            conn.execute_batch("ALTER TABLE clipboard_items ADD COLUMN semantic_hash TEXT;")?;
         }
 
         Self::backfill_semantic_hashes(conn)?;
@@ -326,6 +348,70 @@ impl Database {
                ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;",
         )?;
 
+        // 迁移 9: 修复 issue #81 收藏顺序乱跳的根因——存量数据中存在重复或零值
+        // favorite_order，导致收藏列表排序退化为 sort_order/created_at 等次级键，
+        // 进而被复制/粘贴动作引发的 bump_to_top / touch_by_column 间接打乱。
+        // 这里按用户当前看到的顺序 (favorite_order DESC, id DESC) 重新分配单调递增、
+        // 互不相同的整数；toggle_favorite / move_favorite_item_by_id 已天然保证
+        // favorite_order 唯一，所以一次规整后就不会再退化。
+        Self::normalize_favorite_order(conn)?;
+
+        Ok(())
+    }
+
+    /// 将所有 `is_favorite = 1` 的条目的 `favorite_order` 规整为
+    /// 单调递增、互不相同的整数，保留当前显示顺序。
+    /// 当不存在重复或零值时直接跳过，避免无谓写入。
+    fn normalize_favorite_order(conn: &Connection) -> Result<(), rusqlite::Error> {
+        // 是否存在并列或为零的 favorite_order
+        let needs_fix: bool = conn.query_row(
+            "SELECT (COUNT(*) > COUNT(DISTINCT favorite_order)) \
+             OR EXISTS(SELECT 1 FROM clipboard_items WHERE is_favorite = 1 AND favorite_order <= 0) \
+             FROM clipboard_items WHERE is_favorite = 1",
+            [],
+            |row| row.get(0),
+        ).unwrap_or(false);
+
+        if !needs_fix {
+            return Ok(());
+        }
+
+        // 取出所有收藏项 id，按当前显示顺序排列（最前面的在最前）
+        let ids: Vec<i64> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM clipboard_items \
+                 WHERE is_favorite = 1 \
+                 ORDER BY favorite_order DESC, id DESC",
+            )?;
+            stmt.query_map([], |row| row.get::<_, i64>(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Migrating database: normalizing favorite_order for {} items",
+            ids.len()
+        );
+
+        let total = ids.len() as i64;
+        let tx = conn.unchecked_transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE clipboard_items SET favorite_order = ?1 \
+                 WHERE id = ?2 AND is_favorite = 1",
+            )?;
+            for (idx, id) in ids.iter().enumerate() {
+                let new_order = total - idx as i64; // 最前面的得到最大值
+                stmt.execute(params![new_order, id])?;
+            }
+        }
+        tx.commit()?;
+
+        info!("Migration complete: favorite_order normalized");
         Ok(())
     }
 

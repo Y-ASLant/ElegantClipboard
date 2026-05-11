@@ -24,6 +24,7 @@ export interface DataSettings {
   data_path: string;
   max_history_count: number;
   max_content_size_kb: number;
+  max_image_size_kb: number;
   auto_cleanup_days: number;
 }
 
@@ -270,8 +271,6 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       await invoke(config.command);
       setCleanDialogAction(null);
       if (config.needsRestart) {
-        // 清除前端持久化设置以免重启后残留
-        localStorage.removeItem("clipboard-ui-settings");
         sessionStorage.removeItem("data-size-cache");
         await invoke("restart_app");
       } else {
@@ -677,6 +676,30 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
               />
               <p className="text-xs text-muted-foreground">
                 仅限制文本/HTML/RTF，图片和文件不受此限制，设为 0 表示无限制
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">单张图片最大大小</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {settings.max_image_size_kb === 0
+                    ? "无限制"
+                    : settings.max_image_size_kb >= 1024
+                      ? `${(settings.max_image_size_kb / 1024).toFixed(0)} MB`
+                      : `${settings.max_image_size_kb} KB`
+                  }
+                </span>
+              </div>
+              <Slider
+                value={[settings.max_image_size_kb]}
+                onValueChange={(value) => onSettingsChange({ ...settings, max_image_size_kb: value[0] })}
+                min={0}
+                max={512000}
+                step={1024}
+              />
+              <p className="text-xs text-muted-foreground">
+                超过该大小的图片不会被记录，可避免从 NAS 等远程位置复制超大图导致卡顿，设为 0 表示无限制
               </p>
             </div>
 

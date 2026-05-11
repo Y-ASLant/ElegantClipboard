@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
 import { logError } from "@/lib/logger";
 
 export type ColorTheme = "default" | "emerald" | "cyan" | "system";
@@ -15,7 +14,11 @@ export type ToolbarButton = "clear" | "pin" | "batch" | "settings";
 export const DEFAULT_TOOLBAR_BUTTONS: ToolbarButton[] = ["clear", "batch", "pin", "settings"];
 export const MAX_TOOLBAR_BUTTONS = 5;
 
-interface UISettings {
+const UI_SETTINGS_DB_KEY = "ui_settings_json";
+const LEGACY_UI_SETTINGS_STORAGE_KEY = "clipboard-ui-settings";
+const SYNC_EVENT = "ui-settings-changed";
+
+interface UISettingsData {
   cardMaxLines: number;
   showTime: boolean;
   showCharCount: boolean;
@@ -36,7 +39,6 @@ interface UISettings {
   keyboardNavigation: boolean;
   searchAutoFocus: boolean;
   searchAutoClear: boolean;
-  // 新增设置
   darkMode: DarkMode;
   cardDensity: CardDensity;
   timeFormat: TimeFormat;
@@ -58,6 +60,53 @@ interface UISettings {
   cardFontSize: number;
   previewFont: string;
   previewFontSize: number;
+}
+
+const DEFAULT_UI_SETTINGS: UISettingsData = {
+  cardMaxLines: 3,
+  showTime: true,
+  showCharCount: true,
+  showByteSize: true,
+  showSourceApp: true,
+  sourceAppDisplay: "both",
+  imagePreviewEnabled: false,
+  textPreviewEnabled: false,
+  previewUnboundedMode: false,
+  previewZoomStep: 15,
+  previewPosition: "auto",
+  imageAutoHeight: true,
+  imageMaxHeight: 512,
+  showImageFileName: true,
+  colorTheme: "system",
+  sharpCorners: false,
+  autoResetState: false,
+  keyboardNavigation: false,
+  searchAutoFocus: false,
+  searchAutoClear: true,
+  darkMode: "auto",
+  cardDensity: "standard",
+  timeFormat: "absolute",
+  hoverPreviewDelay: 500,
+  copySound: false,
+  copySoundTiming: "immediate",
+  pasteSound: false,
+  pasteSoundTiming: "immediate",
+  pasteCloseWindow: true,
+  pasteMoveToTop: false,
+  showCategoryFilter: true,
+  showDragAreaIndicator: true,
+  windowAnimation: false,
+  windowEffect: "none",
+  toolbarButtons: DEFAULT_TOOLBAR_BUTTONS,
+  customFont: "",
+  uiFontSize: 14,
+  cardFont: "",
+  cardFontSize: 14,
+  previewFont: "",
+  previewFontSize: 13,
+};
+
+interface UISettings extends UISettingsData {
   setCardMaxLines: (lines: number) => void;
   setShowTime: (show: boolean) => void;
   setShowCharCount: (show: boolean) => void;
@@ -102,170 +151,252 @@ interface UISettings {
   resetFontSettings: () => void;
 }
 
-const STORAGE_KEY = "clipboard-ui-settings";
-const SYNC_EVENT = "ui-settings-changed";
+const UI_SETTINGS_KEYS = Object.keys(DEFAULT_UI_SETTINGS) as (keyof UISettingsData)[];
+
+function serializeUISettings(state: UISettingsData): string {
+  return JSON.stringify(state);
+}
+
+function pickUISettingsData(state: UISettings): UISettingsData {
+  const next = {} as UISettingsData;
+  for (const key of UI_SETTINGS_KEYS) {
+    (next[key] as UISettingsData[typeof key]) = state[key];
+  }
+  return next;
+}
+
+function mergeUISettings(raw: unknown): UISettingsData {
+  if (!raw || typeof raw !== "object") {
+    return { ...DEFAULT_UI_SETTINGS };
+  }
+
+  const persisted = raw as Partial<UISettingsData>;
+  return {
+    ...DEFAULT_UI_SETTINGS,
+    ...persisted,
+    toolbarButtons: Array.isArray(persisted.toolbarButtons) && persisted.toolbarButtons.length > 0
+      ? persisted.toolbarButtons.filter((button): button is ToolbarButton =>
+        ["clear", "pin", "batch", "settings"].includes(button),
+      )
+      : DEFAULT_TOOLBAR_BUTTONS,
+  };
+}
+
+function readLegacyUISettings(): UISettingsData | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(LEGACY_UI_SETTINGS_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { state?: unknown } | unknown;
+    const state = parsed && typeof parsed === "object" && "state" in parsed
+      ? (parsed as { state?: unknown }).state
+      : parsed;
+    return mergeUISettings(state);
+  } catch (error) {
+    logError("Failed to parse legacy UI settings:", error);
+    return null;
+  }
+}
+
+function clearLegacyUISettings() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(LEGACY_UI_SETTINGS_STORAGE_KEY);
+  } catch (error) {
+    logError("Failed to clear legacy UI settings:", error);
+  }
+}
+
+async function saveUISettings(state: UISettingsData) {
+  await invoke("set_setting", {
+    key: UI_SETTINGS_DB_KEY,
+    value: serializeUISettings(state),
+  });
+}
 
 // 广播设置变更
-const broadcastChange = (state: Partial<UISettings>) => {
+const broadcastChange = (state: Partial<UISettingsData>) => {
   emit(SYNC_EVENT, state).catch((error) => {
     logError("Failed to broadcast UI settings change:", error);
   });
 };
 
-export const useUISettings = create<UISettings>()(
-  persist(
-    (set, get) => {
-      // 工厂方法：创建更新状态并广播变更的 setter
-      const makeSetter = <K extends keyof UISettings>(key: K) =>
-        (value: UISettings[K]) => {
-          set({ [key]: value } as unknown as Partial<UISettings>);
-          broadcastChange({ [key]: value } as unknown as Partial<UISettings>);
-        };
+function updateAndPersist(
+  set: (partial: Partial<UISettings>) => void,
+  get: () => UISettings,
+  patch: Partial<UISettingsData>,
+) {
+  set(patch as Partial<UISettings>);
+  broadcastChange(patch);
+  const snapshot = { ...pickUISettingsData(get()), ...patch };
+  saveUISettings(snapshot).catch((error) => {
+    logError("Failed to save UI settings:", error);
+  });
+}
 
-      return {
-        cardMaxLines: 3,
-        showTime: true,
-        showCharCount: true,
-        showByteSize: true,
-        showSourceApp: true,
-        sourceAppDisplay: "both" as "both" | "name" | "icon",
-        imagePreviewEnabled: false,
-        textPreviewEnabled: false,
-        previewUnboundedMode: false,
-        previewZoomStep: 15,
-        previewPosition: "auto" as "auto" | "left" | "right",
-        imageAutoHeight: true,
-        imageMaxHeight: 512,
-        showImageFileName: true,
-        colorTheme: "system" as ColorTheme,
-        sharpCorners: false,
-        autoResetState: false,
-        keyboardNavigation: false,
-        searchAutoFocus: false,
-        searchAutoClear: true,
-        darkMode: "auto" as DarkMode,
-        cardDensity: "standard" as CardDensity,
-        timeFormat: "absolute" as TimeFormat,
-        hoverPreviewDelay: 500,
-        copySound: false,
-        copySoundTiming: "immediate" as SoundTiming,
-        pasteSound: false,
-        pasteSoundTiming: "immediate" as SoundTiming,
-        pasteCloseWindow: true,
-        pasteMoveToTop: false,
-        showCategoryFilter: true,
-        showDragAreaIndicator: true,
-        windowAnimation: false,
-        windowEffect: "none" as WindowEffect,
-        toolbarButtons: ["clear", "batch", "pin", "settings"] as ToolbarButton[],
+export const useUISettings = create<UISettings>()((set, get) => {
+  const makeSetter = <K extends keyof UISettingsData>(key: K) =>
+    (value: UISettingsData[K]) => {
+      updateAndPersist(set, get, { [key]: value } as Pick<UISettingsData, K>);
+    };
+
+  return {
+    ...DEFAULT_UI_SETTINGS,
+
+    setCardMaxLines: makeSetter("cardMaxLines"),
+    setShowTime: makeSetter("showTime"),
+    setShowCharCount: makeSetter("showCharCount"),
+    setShowByteSize: makeSetter("showByteSize"),
+    setShowSourceApp: makeSetter("showSourceApp"),
+    setSourceAppDisplay: makeSetter("sourceAppDisplay"),
+    setImagePreviewEnabled: makeSetter("imagePreviewEnabled"),
+    setTextPreviewEnabled: makeSetter("textPreviewEnabled"),
+    setPreviewUnboundedMode: makeSetter("previewUnboundedMode"),
+    setPreviewZoomStep: makeSetter("previewZoomStep"),
+    setPreviewPosition: makeSetter("previewPosition"),
+    setImageAutoHeight: makeSetter("imageAutoHeight"),
+    setImageMaxHeight: makeSetter("imageMaxHeight"),
+    setShowImageFileName: makeSetter("showImageFileName"),
+    setColorTheme: makeSetter("colorTheme"),
+    setSharpCorners: makeSetter("sharpCorners"),
+    setAutoResetState: makeSetter("autoResetState"),
+    setSearchAutoFocus: makeSetter("searchAutoFocus"),
+    setSearchAutoClear: makeSetter("searchAutoClear"),
+    setDarkMode: makeSetter("darkMode"),
+    setCardDensity: makeSetter("cardDensity"),
+    setTimeFormat: makeSetter("timeFormat"),
+    setHoverPreviewDelay: makeSetter("hoverPreviewDelay"),
+    setCopySound: makeSetter("copySound"),
+    setCopySoundTiming: makeSetter("copySoundTiming"),
+    setPasteSound: makeSetter("pasteSound"),
+    setPasteSoundTiming: makeSetter("pasteSoundTiming"),
+    setPasteCloseWindow: makeSetter("pasteCloseWindow"),
+    setPasteMoveToTop: makeSetter("pasteMoveToTop"),
+    setShowCategoryFilter: makeSetter("showCategoryFilter"),
+    setShowDragAreaIndicator: makeSetter("showDragAreaIndicator"),
+    setWindowAnimation: makeSetter("windowAnimation"),
+    setToolbarButtons: makeSetter("toolbarButtons"),
+    setCustomFont: makeSetter("customFont"),
+    setUIFontSize: makeSetter("uiFontSize"),
+    setCardFont: makeSetter("cardFont"),
+    setCardFontSize: makeSetter("cardFontSize"),
+    setPreviewFont: makeSetter("previewFont"),
+    setPreviewFontSize: makeSetter("previewFontSize"),
+    resetFontSettings: () => {
+      const defaults = {
         customFont: "",
         uiFontSize: 14,
         cardFont: "",
         cardFontSize: 14,
         previewFont: "",
         previewFontSize: 13,
-
-        setCardMaxLines: makeSetter("cardMaxLines"),
-        setShowTime: makeSetter("showTime"),
-        setShowCharCount: makeSetter("showCharCount"),
-        setShowByteSize: makeSetter("showByteSize"),
-        setShowSourceApp: makeSetter("showSourceApp"),
-        setSourceAppDisplay: makeSetter("sourceAppDisplay"),
-        setImagePreviewEnabled: makeSetter("imagePreviewEnabled"),
-        setTextPreviewEnabled: makeSetter("textPreviewEnabled"),
-        setPreviewUnboundedMode: makeSetter("previewUnboundedMode"),
-        setPreviewZoomStep: makeSetter("previewZoomStep"),
-        setPreviewPosition: makeSetter("previewPosition"),
-        setImageAutoHeight: makeSetter("imageAutoHeight"),
-        setImageMaxHeight: makeSetter("imageMaxHeight"),
-        setShowImageFileName: makeSetter("showImageFileName"),
-        setColorTheme: makeSetter("colorTheme"),
-        setSharpCorners: makeSetter("sharpCorners"),
-        setAutoResetState: makeSetter("autoResetState"),
-        setSearchAutoFocus: makeSetter("searchAutoFocus"),
-        setSearchAutoClear: makeSetter("searchAutoClear"),
-        setDarkMode: makeSetter("darkMode"),
-        setCardDensity: makeSetter("cardDensity"),
-        setTimeFormat: makeSetter("timeFormat"),
-        setHoverPreviewDelay: makeSetter("hoverPreviewDelay"),
-        setCopySound: makeSetter("copySound"),
-        setCopySoundTiming: makeSetter("copySoundTiming"),
-        setPasteSound: makeSetter("pasteSound"),
-        setPasteSoundTiming: makeSetter("pasteSoundTiming"),
-        setPasteCloseWindow: makeSetter("pasteCloseWindow"),
-        setPasteMoveToTop: makeSetter("pasteMoveToTop"),
-        setShowCategoryFilter: makeSetter("showCategoryFilter"),
-        setShowDragAreaIndicator: makeSetter("showDragAreaIndicator"),
-        setWindowAnimation: makeSetter("windowAnimation"),
-        setToolbarButtons: makeSetter("toolbarButtons"),
-        setCustomFont: makeSetter("customFont"),
-        setUIFontSize: makeSetter("uiFontSize"),
-        setCardFont: makeSetter("cardFont"),
-        setCardFontSize: makeSetter("cardFontSize"),
-        setPreviewFont: makeSetter("previewFont"),
-        setPreviewFontSize: makeSetter("previewFontSize"),
-        resetFontSettings: () => {
-          const defaults = { customFont: "", uiFontSize: 14, cardFont: "", cardFontSize: 14, previewFont: "", previewFontSize: 13 };
-          set(defaults);
-          broadcastChange(defaults);
-        },
-
-        // 带额外副作用的 setter
-        setKeyboardNavigation: (enabled) => {
-          const previous = get().keyboardNavigation;
-          set({ keyboardNavigation: enabled });
-          broadcastChange({ keyboardNavigation: enabled });
-          invoke("set_keyboard_nav_enabled", { enabled }).catch((error) => {
-            logError("Failed to set keyboard navigation:", error);
-            set({ keyboardNavigation: previous });
-            broadcastChange({ keyboardNavigation: previous });
-          });
-        },
-        setWindowEffect: (effect) => {
-          const previous = get().windowEffect;
-          set({ windowEffect: effect });
-          broadcastChange({ windowEffect: effect });
-          document.documentElement.setAttribute("data-window-effect", effect);
-          invoke("set_window_effect", { effect }).catch((error) => {
-            logError("Failed to set window effect:", error);
-            set({ windowEffect: previous });
-            broadcastChange({ windowEffect: previous });
-            document.documentElement.setAttribute("data-window-effect", previous);
-          });
-        },
       };
+      updateAndPersist(set, get, defaults);
     },
-    {
-      name: STORAGE_KEY,
-    }
-  )
-);
 
-// 跟踪监听器防止重复注册
+    setKeyboardNavigation: (enabled) => {
+      const previous = get().keyboardNavigation;
+      updateAndPersist(set, get, { keyboardNavigation: enabled });
+      invoke("set_keyboard_nav_enabled", { enabled }).catch((error) => {
+        logError("Failed to set keyboard navigation:", error);
+        updateAndPersist(set, get, { keyboardNavigation: previous });
+      });
+    },
+    setWindowEffect: (effect) => {
+      const previous = get().windowEffect;
+      set({ windowEffect: effect });
+      broadcastChange({ windowEffect: effect });
+      document.documentElement.setAttribute("data-window-effect", effect);
+      saveUISettings({ ...pickUISettingsData(get()), windowEffect: effect }).catch((error) => {
+        logError("Failed to save window effect:", error);
+      });
+      invoke("set_window_effect", { effect }).catch((error) => {
+        logError("Failed to set window effect:", error);
+        updateAndPersist(set, get, { windowEffect: previous });
+        document.documentElement.setAttribute("data-window-effect", previous);
+      });
+    },
+  };
+});
+
+let initPromise: Promise<void> | null = null;
+let initialized = false;
 let unlistenFn: (() => void) | null = null;
 
-// 初始化设置监听器（每个窗口调用一次）
-export async function initUISettingsListener() {
-  if (unlistenFn) return; // 已初始化
-  
-  try {
-    unlistenFn = await listen<Partial<UISettings>>(SYNC_EVENT, (event) => {
-      useUISettings.setState(event.payload);
-    });
-  } catch {
-    // 忽略错误（如非 Tauri 环境）
+export function loadUISettingsFromBackend() {
+  if (typeof window === "undefined") {
+    return Promise.resolve();
   }
+
+  return invoke<string | null>("get_setting", { key: UI_SETTINGS_DB_KEY })
+    .then(async (value) => {
+      if (value) {
+        const parsed = JSON.parse(value);
+        useUISettings.setState(mergeUISettings(parsed));
+        clearLegacyUISettings();
+        return;
+      }
+
+      const legacy = readLegacyUISettings();
+      if (!legacy) {
+        return;
+      }
+
+      useUISettings.setState(legacy);
+      await saveUISettings(legacy);
+      clearLegacyUISettings();
+    })
+    .catch((error) => {
+      logError("Failed to load UI settings:", error);
+    });
 }
 
-// 清理监听器
+// 初始化设置监听器和后端配置加载（每个窗口调用一次）
+export function initUISettingsStore() {
+  if (initPromise) {
+    return initPromise;
+  }
+
+  initPromise = (async () => {
+    if (!unlistenFn) {
+      try {
+        unlistenFn = await listen<Partial<UISettingsData>>(SYNC_EVENT, (event) => {
+          useUISettings.setState(event.payload);
+        });
+      } catch {
+        // ignore in non-tauri environments
+      }
+    }
+
+    await loadUISettingsFromBackend();
+    initialized = true;
+  })();
+
+  return initPromise;
+}
+
+export function isUISettingsInitialized() {
+  return initialized;
+}
+
+export function whenUISettingsReady() {
+  return initUISettingsStore();
+}
+
 export function cleanupUISettingsListener() {
   if (unlistenFn) {
     unlistenFn();
     unlistenFn = null;
   }
-}
-
-// 浏览器环境自动初始化
-if (typeof window !== "undefined") {
-  initUISettingsListener();
+  initPromise = null;
+  initialized = false;
 }

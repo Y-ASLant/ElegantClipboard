@@ -169,7 +169,7 @@ pub async fn reset_all_data(state: State<'_, Arc<AppState>>) -> Result<(), Strin
 pub fn is_portable_mode() -> bool {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| !d.join("unins000.exe").exists()))
+        .and_then(|p| p.parent().map(|d| !d.join("uninstall.exe").exists()))
         .unwrap_or(true)
 }
 
@@ -218,15 +218,15 @@ pub struct RunningAppInfo {
 
 /// 获取当前运行中的可见应用列表（用于应用过滤设置的可视化选择器）
 #[tauri::command]
-pub async fn get_running_apps(_state: State<'_, Arc<AppState>>) -> Result<Vec<RunningAppInfo>, String> {
+pub async fn get_running_apps(
+    _state: State<'_, Arc<AppState>>,
+) -> Result<Vec<RunningAppInfo>, String> {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::{HWND, LPARAM};
+        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
         use windows::Win32::UI::WindowsAndMessaging::{
             EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-        };
-        use windows::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
         use windows_core::BOOL;
 
@@ -260,7 +260,9 @@ pub async fn get_running_apps(_state: State<'_, Arc<AppState>>) -> Result<Vec<Ru
                 }
 
                 if let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-                    use windows::Win32::System::Threading::{QueryFullProcessImageNameW, PROCESS_NAME_FORMAT};
+                    use windows::Win32::System::Threading::{
+                        PROCESS_NAME_FORMAT, QueryFullProcessImageNameW,
+                    };
                     let mut buf = [0u16; 1024];
                     let mut size = buf.len() as u32;
                     if QueryFullProcessImageNameW(
@@ -268,7 +270,10 @@ pub async fn get_running_apps(_state: State<'_, Arc<AppState>>) -> Result<Vec<Ru
                         PROCESS_NAME_FORMAT(0),
                         windows::core::PWSTR::from_raw(buf.as_mut_ptr()),
                         &mut size,
-                    ).is_ok() && size > 0 {
+                    )
+                    .is_ok()
+                        && size > 0
+                    {
                         let path = String::from_utf16_lossy(&buf[..size as usize]);
                         let process = path.split('\\').next_back().unwrap_or(&path).to_string();
                         ctx.apps.push((title, process, path));
@@ -290,18 +295,30 @@ pub async fn get_running_apps(_state: State<'_, Arc<AppState>>) -> Result<Vec<Ru
         }
 
         // 去重（按进程名）并提取图标
-        ctx.apps.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
-        ctx.apps.dedup_by(|a, b| a.1.to_lowercase() == b.1.to_lowercase());
+        ctx.apps
+            .sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        ctx.apps
+            .dedup_by(|a, b| a.1.to_lowercase() == b.1.to_lowercase());
 
         let config = crate::config::AppConfig::load();
         let icons_dir = config.get_data_dir().join("icons");
 
-        let result: Vec<RunningAppInfo> = ctx.apps.into_iter().map(|(_title, process, exe_path)| {
-            let name = crate::clipboard::source_app::get_app_display_name_pub(&exe_path);
-            let cache_key = crate::clipboard::source_app::compute_icon_cache_key_pub(&exe_path);
-            let icon = crate::clipboard::source_app::extract_and_cache_icon(&exe_path, &icons_dir, &cache_key);
-            RunningAppInfo { name, process, icon }
-        }).collect();
+        let result: Vec<RunningAppInfo> = ctx
+            .apps
+            .into_iter()
+            .map(|(_title, process, exe_path)| {
+                let name = crate::clipboard::source_app::get_app_display_name_pub(&exe_path);
+                let cache_key = crate::clipboard::source_app::compute_icon_cache_key_pub(&exe_path);
+                let icon = crate::clipboard::source_app::extract_and_cache_icon(
+                    &exe_path, &icons_dir, &cache_key,
+                );
+                RunningAppInfo {
+                    name,
+                    process,
+                    icon,
+                }
+            })
+            .collect();
 
         Ok(result)
     }
@@ -356,8 +373,8 @@ fn rgb_to_hsl_string(r: f64, g: f64, b: f64) -> String {
 /// 从注册表读取当前强调色
 #[cfg(target_os = "windows")]
 fn read_accent_color_from_registry() -> Option<String> {
-    use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
+    use winreg::enums::HKEY_CURRENT_USER;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let accent_key = hkcu
@@ -396,15 +413,16 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
                 if msg == WM_SETTINGCHANGE {
                     let ptr = lparam.0 as *const u16;
                     if !ptr.is_null() {
-                    // 读取 lParam 中的 null 结尾宽字符串
+                        // 读取 lParam 中的 null 结尾宽字符串
                         let len = (0usize..256).find(|&i| *ptr.add(i) == 0).unwrap_or(0);
                         let slice = std::slice::from_raw_parts(ptr, len);
                         if slice == windows::core::w!("ImmersiveColorSet").as_wide()
-                            && let Some(handle) = WATCHER_APP_HANDLE.get() {
-                                use tauri::Emitter;
-                                let color = read_accent_color_from_registry();
-                                let _ = handle.lock().emit("system-accent-color-changed", color);
-                            }
+                            && let Some(handle) = WATCHER_APP_HANDLE.get()
+                        {
+                            use tauri::Emitter;
+                            let color = read_accent_color_from_registry();
+                            let _ = handle.lock().emit("system-accent-color-changed", color);
+                        }
                     }
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -496,7 +514,7 @@ pub fn get_system_fonts() -> Vec<String> {
         use std::collections::BTreeSet;
         use windows::Win32::Foundation::LPARAM;
         use windows::Win32::Graphics::Gdi::{
-            CreateDCW, DeleteDC, EnumFontFamiliesExW, DEFAULT_CHARSET, LOGFONTW, TEXTMETRICW,
+            CreateDCW, DEFAULT_CHARSET, DeleteDC, EnumFontFamiliesExW, LOGFONTW, TEXTMETRICW,
         };
 
         let mut font_names = BTreeSet::new();
@@ -521,12 +539,7 @@ pub fn get_system_fonts() -> Vec<String> {
         }
 
         unsafe {
-            let hdc = CreateDCW(
-                windows::core::w!("DISPLAY"),
-                None,
-                None,
-                None,
-            );
+            let hdc = CreateDCW(windows::core::w!("DISPLAY"), None, None, None);
             if hdc.is_invalid() {
                 return Vec::new();
             }

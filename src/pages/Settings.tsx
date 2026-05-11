@@ -62,8 +62,9 @@ export function Settings() {
   
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
-    max_history_count: 1000,
+    max_history_count: 10000,
     max_content_size_kb: 1024,
+    max_image_size_kb: 51200,
     auto_cleanup_days: 30,
     auto_start: false,
     admin_launch: false,
@@ -128,6 +129,7 @@ export function Settings() {
   }, [
     settings.max_history_count,
     settings.max_content_size_kb,
+    settings.max_image_size_kb,
     settings.auto_cleanup_days,
     settings.auto_start,
     settings.admin_launch,
@@ -139,6 +141,7 @@ export function Settings() {
         dataPath,
         maxHistoryCount,
         maxContentSize,
+        maxImageSize,
         autoCleanupDays,
         positionMode,
         autoStart,
@@ -153,6 +156,7 @@ export function Settings() {
         invoke<string>("get_default_data_path"),
         invoke<string>("get_setting", { key: "max_history_count" }),
         invoke<string>("get_setting", { key: "max_content_size_kb" }),
+        invoke<string>("get_setting", { key: "max_image_size_kb" }),
         invoke<string>("get_setting", { key: "auto_cleanup_days" }),
         invoke<string | null>("get_setting", { key: "position_mode" }),
         invoke<boolean>("is_autostart_enabled"),
@@ -167,8 +171,9 @@ export function Settings() {
 
       setSettings({
         data_path: dataPath || "",
-        max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 1000,
+        max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 10000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
+        max_image_size_kb: maxImageSize ? parseInt(maxImageSize) : 51200,
         auto_cleanup_days: autoCleanupDays ? parseInt(autoCleanupDays) : 30,
         auto_start: autoStart,
         admin_launch: adminLaunch,
@@ -196,6 +201,10 @@ export function Settings() {
       await invoke("set_setting", {
         key: "max_content_size_kb",
         value: settings.max_content_size_kb.toString(),
+      });
+      await invoke("set_setting", {
+        key: "max_image_size_kb",
+        value: settings.max_image_size_kb.toString(),
       });
       await invoke("set_setting", {
         key: "auto_cleanup_days",

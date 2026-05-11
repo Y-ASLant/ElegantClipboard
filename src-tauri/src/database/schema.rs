@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     image_height INTEGER,
     is_pinned INTEGER DEFAULT 0,
     is_favorite INTEGER DEFAULT 0,
+    favorite_order INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT DEFAULT (datetime('now', 'localtime')),
@@ -64,22 +65,21 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_hash_group ON clipboard_items(group_id,
 CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_default ON clipboard_items(semantic_hash) WHERE group_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash_group ON clipboard_items(group_id, semantic_hash) WHERE group_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES
-    ('hotkey', 'Ctrl+Shift+V'),
+    ('global_shortcut', 'Alt+C'),
     ('max_history_count', '10000'),
     ('max_content_size_kb', '1024'),
+    ('max_image_size_kb', '51200'),
     ('dedup_strategy', 'move_to_top'),
     ('text_dedup_mode', 'semantic'),
-    ('auto_start', 'false'),
+    ('autostart_enabled', 'false'),
     ('theme', 'system'),
     ('language', 'zh-CN'),
-    ('save_images', 'true'),
-    ('save_html', 'true'),
-    ('save_rtf', 'false'),
     ('auto_cleanup_days', '30');
 "#;
 
@@ -103,7 +103,6 @@ impl ContentType {
             ContentType::Files => "files",
         }
     }
-
 }
 
 impl std::fmt::Display for ContentType {

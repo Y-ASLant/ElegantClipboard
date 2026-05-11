@@ -308,6 +308,16 @@ textarea,
 [contenteditable="true"] {
     user-select: text;
     -webkit-user-select: text;
+    caret-color: var(--color-primary);
+}
+
+/* Themed text selection — overrides browser default blue */
+::selection {
+    background-color: hsl(from var(--color-primary) h s l / 0.25);
+    color: inherit;
+}
+.dark ::selection {
+    background-color: hsl(from var(--color-primary) h s l / 0.35);
 }
 
 /* OverlayScrollbars custom styling */
@@ -447,8 +457,8 @@ textarea,
     animation: paste-flash 0.3s ease-out;
 }
 
-/* Dragging cursor - from QuickClipboard optimization */
+/* Dragging cursor - 使用系统 move 光标，避免与自定义 Windows 指针主题不一致 */
 body.dragging-cursor,
 body.dragging-cursor * {
-    cursor: grabbing !important;
+    cursor: move !important;
 }

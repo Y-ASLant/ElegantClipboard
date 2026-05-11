@@ -39,11 +39,7 @@ import { useClipboardStore } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
 import type { Group } from "@/stores/groups";
 import type { ToolbarButton } from "@/stores/ui-settings";
-import { useUISettings } from "@/stores/ui-settings";
-
-
-// 初始化主题
-initTheme();
+import { loadUISettingsFromBackend, useUISettings } from "@/stores/ui-settings";
 
 /** 关闭已打开的弹出层 */
 function dismissOverlays(): boolean {
@@ -97,6 +93,10 @@ function App() {
   // 分组对话框输入框 ref（Tauri WebView 中 autoFocus 不稳定）
   const createInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void initTheme();
+  }, []);
 
   // 初次加载时获取自定义分组
   useEffect(() => {
@@ -242,7 +242,7 @@ function App() {
     const unlisten = listen("window-shown", () => {
       setWindowVisible(true);
       // 重新读取设置（可能在设置窗口中更改）
-      useUISettings.persist.rehydrate();
+      void loadUISettingsFromBackend();
       if (searchAutoClear) {
         setSearchQuery("");
         fetchItems({ search: "" });

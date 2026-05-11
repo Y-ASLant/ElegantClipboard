@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { initUISettingsStore } from "@/stores/ui-settings";
 import App from "./App";
 import { Settings } from "./pages/Settings";
 import { TextEditor } from "./pages/TextEditor";
@@ -22,7 +23,7 @@ document.addEventListener("keydown", (e) => {
     }
   }
   // 拦截 Tab 导航、F5 刷新、F7 光标浏览
-  if (e.key === "Tab" || e.key === "F5" || e.key === "F7") {
+  if (e.key === "Tab" || e.key === "F1" || e.key === "F3" || e.key === "F5" || e.key === "F6" || e.key === "F7" || e.key === "F11" || e.key === "F12") {
     e.preventDefault();
   }
 });
@@ -41,10 +42,16 @@ function Router() {
   return <App />;
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <TooltipProvider delayDuration={300}>
-      <Router />
-    </TooltipProvider>
-  </React.StrictMode>,
-);
+async function bootstrap() {
+  await initUISettingsStore();
+
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <TooltipProvider delayDuration={300}>
+        <Router />
+      </TooltipProvider>
+    </React.StrictMode>,
+  );
+}
+
+void bootstrap();

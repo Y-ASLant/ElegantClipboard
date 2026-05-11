@@ -1,10 +1,10 @@
 use crate::commands::AppState;
 use std::sync::Arc;
 use tauri::{
+    AppHandle, Manager,
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
 };
 use tracing::info;
 
@@ -17,7 +17,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon = Image::new_owned(rgba.into_raw(), width, height);
 
     let pause_item = MenuItem::with_id(app, "toggle_pause", "暂停监控", true, None::<&str>)?;
-    let shortcut_item = MenuItem::with_id(app, "toggle_shortcuts", "禁用快捷键", true, None::<&str>)?;
+    let shortcut_item =
+        MenuItem::with_id(app, "toggle_shortcuts", "禁用快捷键", true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
     let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
     let restart_item = MenuItem::with_id(app, "restart", "重启程序", true, None::<&str>)?;
@@ -26,7 +27,15 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(
         app,
-        &[&pause_item, &shortcut_item, &separator1, &settings_item, &restart_item, &separator2, &quit_item],
+        &[
+            &pause_item,
+            &shortcut_item,
+            &separator1,
+            &settings_item,
+            &restart_item,
+            &separator2,
+            &quit_item,
+        ],
     )?;
 
     let _tray = TrayIconBuilder::with_id("main-tray")
@@ -40,16 +49,28 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 "toggle_pause" => {
                     if let Some(state) = app.try_state::<Arc<AppState>>() {
                         let paused = state.monitor.toggle_user_pause();
-                        let _ = pause_item.set_text(if paused { "恢复监控" } else { "暂停监控" });
+                        let _ = pause_item.set_text(if paused {
+                            "恢复监控"
+                        } else {
+                            "暂停监控"
+                        });
                         if let Some(tray) = app.tray_by_id("main-tray") {
-                            let tip = if paused { "ElegantClipboard (已暂停)" } else { "ElegantClipboard" };
+                            let tip = if paused {
+                                "ElegantClipboard (已暂停)"
+                            } else {
+                                "ElegantClipboard"
+                            };
                             let _ = tray.set_tooltip(Some(tip));
                         }
                     }
                 }
                 "toggle_shortcuts" => {
                     let disabled = crate::toggle_shortcuts_disabled(app);
-                    let _ = shortcut_item.set_text(if disabled { "恢复快捷键" } else { "禁用快捷键" });
+                    let _ = shortcut_item.set_text(if disabled {
+                        "恢复快捷键"
+                    } else {
+                        "禁用快捷键"
+                    });
                 }
                 _ => handle_menu_event(app, id),
             }
@@ -61,32 +82,20 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                // 左键点击：切换窗口可见性
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    if window.is_visible().unwrap_or(false) {
-                        crate::commands::window::save_window_size_if_enabled(tray.app_handle(), &window);
-                        let _ = window.hide();
-                        crate::input_monitor::disable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(
-                            crate::keyboard_hook::WindowState::Hidden,
-                        );
-                        crate::commands::hide_preview_windows(tray.app_handle());
-                        let _ = window.emit("window-hidden", ());
+                    let is_visible = window.is_visible().unwrap_or(false);
+                    let is_minimized = window.is_minimized().unwrap_or(false);
+                    if is_visible && !is_minimized {
+                        crate::commands::window::hide_main_window(tray.app_handle(), &window);
                     } else if !crate::keyboard_hook::was_recently_hidden(300) {
-                        // 窗口刚被隐藏(<300ms)则跳过，避免立即重新显示
-                        let _ = window.show();
-                        crate::input_monitor::enable_mouse_monitoring();
-                        crate::keyboard_hook::set_window_state(
-                            crate::keyboard_hook::WindowState::Visible,
-                        );
-                        let _ = window.emit("window-shown", ());
+                        crate::commands::window::show_main_window(tray.app_handle(), &window);
                     }
                 }
             }
         })
         .build(app)?;
 
-    info!("系统托盘已初始化");
+    info!("System tray initialized");
     Ok(())
 }
 

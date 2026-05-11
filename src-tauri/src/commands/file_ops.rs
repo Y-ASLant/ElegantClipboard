@@ -5,7 +5,7 @@ use tauri::State;
 use tracing::{debug, info};
 
 use super::{
-    clipboard::simulate_paste, hide_main_window_if_not_pinned, with_paused_monitor, AppState,
+    AppState, clipboard::simulate_paste, hide_main_window_if_not_pinned, with_paused_monitor,
 };
 
 // ============ 文件校验命令 ============

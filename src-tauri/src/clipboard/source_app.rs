@@ -47,19 +47,20 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
     unsafe {
         // 主策略: 剪贴板所有者（实际写入剪贴板的应用，对截图工具等更准确）
         if let Ok(owner) = GetClipboardOwner()
-            && let Some(info) = try_resolve(owner, self_pid) {
-                debug!("来源(所有者): {} ({})", info.app_name, info.exe_path);
-                return Some(info);
-            }
+            && let Some(info) = try_resolve(owner, self_pid)
+        {
+            debug!("Source (owner): {} ({})", info.app_name, info.exe_path);
+            return Some(info);
+        }
 
         // 补充策略: 前台窗口（部分应用不设置剪贴板所有者时的兜底）
         let fg = GetForegroundWindow();
         if let Some(info) = try_resolve(fg, self_pid) {
-            debug!("来源(前台): {} ({})", info.app_name, info.exe_path);
+            debug!("Source (foreground): {} ({})", info.app_name, info.exe_path);
             return Some(info);
         }
 
-        debug!("无法识别剪贴板来源");
+        debug!("Unable to identify clipboard source");
         None
     }
 }
@@ -74,8 +75,8 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
 unsafe fn get_exe_path_from_pid(pid: u32) -> Option<String> {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
     };
 
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
@@ -93,11 +94,7 @@ unsafe fn get_exe_path_from_pid(pid: u32) -> Option<String> {
     result.ok()?;
 
     let path = String::from_utf16_lossy(&buf[..size as usize]);
-    if path.is_empty() {
-        None
-    } else {
-        Some(path)
-    }
+    if path.is_empty() { None } else { Some(path) }
 }
 
 /// UWP 应用通过 ApplicationFrameHost 托管，遍历子窗口找到真实进程
@@ -128,14 +125,16 @@ unsafe fn resolve_uwp_app(
             let mut child_pid: u32 = 0;
             GetWindowThreadProcessId(hwnd, Some(&mut child_pid));
 
-            if child_pid != 0 && child_pid != data.host_pid
-                && let Some(path) = get_exe_path_from_pid(child_pid) {
-                    let name = Path::new(&path).file_name().and_then(|n| n.to_str());
-                    if !name.is_some_and(|n| n.eq_ignore_ascii_case("ApplicationFrameHost.exe")) {
-                        data.found_path = Some(path);
-                        return windows_core::BOOL::from(false);
-                    }
+            if child_pid != 0
+                && child_pid != data.host_pid
+                && let Some(path) = get_exe_path_from_pid(child_pid)
+            {
+                let name = Path::new(&path).file_name().and_then(|n| n.to_str());
+                if !name.is_some_and(|n| n.eq_ignore_ascii_case("ApplicationFrameHost.exe")) {
+                    data.found_path = Some(path);
+                    return windows_core::BOOL::from(false);
                 }
+            }
             windows_core::BOOL::from(true)
         }
     }
@@ -199,11 +198,7 @@ fn get_file_description(exe_path: &str) -> Option<String> {
         let slice = unsafe { std::slice::from_raw_parts(ptr as *const u16, len as usize) };
         let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
         let s = String::from_utf16_lossy(&slice[..end]).trim().to_string();
-        if s.is_empty() {
-            None
-        } else {
-            Some(s)
-        }
+        if s.is_empty() { None } else { Some(s) }
     }
 
     unsafe {
@@ -284,7 +279,7 @@ pub fn extract_and_cache_icon(exe_path: &str, icons_dir: &Path, cache_key: &str)
     std::fs::create_dir_all(icons_dir).ok()?;
     let png_data = extract_icon_png(exe_path)?;
     if let Err(e) = std::fs::write(&icon_path, &png_data) {
-        warn!("图标缓存失败 {}: {}", exe_path, e);
+        warn!("Icon cache failed for {}: {}", exe_path, e);
         return None;
     }
     Some(icon_path.to_string_lossy().to_string())
@@ -303,12 +298,12 @@ pub fn extract_and_cache_icon(
 #[cfg(target_os = "windows")]
 fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits,
-        ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC,
+        DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
     };
-    use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON};
+    use windows::Win32::UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGetFileInfoW};
     use windows::Win32::UI::WindowsAndMessaging::{
-        DestroyIcon, DrawIconEx, GetIconInfo, DI_NORMAL, ICONINFO,
+        DI_NORMAL, DestroyIcon, DrawIconEx, GetIconInfo, ICONINFO,
     };
 
     unsafe {

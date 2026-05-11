@@ -126,7 +126,7 @@ export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonP
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          className="w-7 h-5 rounded-md flex items-center justify-center cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors touch-none"
+          className="w-7 h-5 rounded-md flex items-center justify-center cursor-move text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent transition-colors touch-none"
 
         >
           <svg width="10" height="9" viewBox="0 0 10 9" fill="currentColor">

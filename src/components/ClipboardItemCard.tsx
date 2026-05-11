@@ -79,10 +79,15 @@ const fileValidityCache = new Map<string, boolean>();
 let textPreviewLease = 0;
 let textPreviewWanted = false;
 
-function acquireTextPreviewLease(): number {
-  textPreviewLease += 1;
+async function acquireTextPreviewLease(): Promise<number> {
+  // lease 由后端 TEXT_PREVIEW_TOKEN 原子分配，与 invalidate 共享同一原子，
+  // 从结构上保证 invalidate 之后的旧 lease 必然 < 当前 TOKEN，promote 必失败。
+  const lease = await invoke<number>("allocate_text_preview_lease");
+  if (lease > textPreviewLease) {
+    textPreviewLease = lease;
+  }
   textPreviewWanted = true;
-  return textPreviewLease;
+  return lease;
 }
 
 function revokeTextPreviewLease(lease: number): void {
@@ -261,7 +266,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     transform: CSS.Transform.toString(transform),
     transition: transition || undefined,
     opacity: isDragging ? 0 : 1,
-    cursor: isDragging ? "grabbing" : "pointer",
+    cursor: isDragging ? "move" : "pointer",
     zIndex: isDragging ? 1000 : "auto",
   };
 
@@ -380,9 +385,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       document.documentElement.classList.contains("dark") ? "dark" : "light";
 
     try {
-      invoke("hide_image_preview").catch((error) => {
-        logError("Failed to hide image preview:", error);
-      });
       const uiState = useUISettings.getState();
       await invoke("show_text_preview", {
         text: textContent,
@@ -419,12 +421,19 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     textPreviewHoveringRef.current = true;
     textPreviewReqIdRef.current += 1;
     const reqId = textPreviewReqIdRef.current;
-    const lease = acquireTextPreviewLease();
-    textPreviewLeaseRef.current = lease;
     clearTextPreviewTimer();
-    textPreviewTimerRef.current = setTimeout(() => {
-      void showTextPreview(reqId, lease);
-    }, hoverPreviewDelay);
+    void (async () => {
+      const lease = await acquireTextPreviewLease();
+      // 异步分配期间用户可能已离开或触发新悬停，重新校验后再装定时器
+      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) {
+        revokeTextPreviewLease(lease);
+        return;
+      }
+      textPreviewLeaseRef.current = lease;
+      textPreviewTimerRef.current = setTimeout(() => {
+        void showTextPreview(reqId, lease);
+      }, hoverPreviewDelay);
+    })();
   }, [textPreviewEnabled, isTextLikeContent, batchMode, clearTextPreviewTimer, showTextPreview, hoverPreviewDelay]);
 
   const handleTextMouseLeave = useCallback(() => {
@@ -572,7 +581,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       <Card
         className={cn(
         "group relative cursor-pointer overflow-hidden shadow-none dark:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.09),0_2px_8px_-1px_rgba(0,0,0,0.5)] hover:shadow-sm dark:hover:shadow-[inset_0_0.5px_0_0_rgba(255,255,255,0.12),0_4px_12px_-2px_rgba(0,0,0,0.6)] hover:border-primary/30 ring-1 ring-black/4 dark:ring-white/10",
-          isDragOverlay && "shadow-lg border-primary cursor-grabbing",
+          isDragOverlay && "shadow-lg border-primary cursor-move",
           justPasted && "animate-paste-flash",
           isActive && "bg-accent shadow-sm",
           batchMode && isSelected && "bg-primary/5",
@@ -590,7 +599,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               data-drag-handle="true"
               onClick={(e) => e.stopPropagation()}
               className={cn(
-                "absolute inset-y-0 left-0 z-10 flex items-center justify-center rounded-l-lg cursor-grab active:cursor-grabbing",
+                "absolute inset-y-0 left-0 z-10 flex items-center justify-center rounded-l-lg cursor-move",
                 showDragAreaIndicator
                   ? "border-r border-dashed border-primary/40 bg-primary/15 text-primary opacity-0 group-hover:opacity-90 transition-[opacity,colors] duration-150 hover:bg-primary/25 hover:text-primary"
                   : "border-r border-transparent bg-transparent text-transparent opacity-0",
@@ -614,7 +623,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               data-drag-handle="true"
               onClick={(e) => e.stopPropagation()}
               className={cn(
-                "absolute inset-y-0 right-0 z-10 flex items-center justify-center rounded-r-lg cursor-grab active:cursor-grabbing",
+                "absolute inset-y-0 right-0 z-10 flex items-center justify-center rounded-r-lg cursor-move",
                 showDragAreaIndicator
                   ? "border-l border-dashed border-primary/40 bg-primary/15 text-primary opacity-0 group-hover:opacity-90 transition-[opacity,colors] duration-150 hover:bg-primary/25 hover:text-primary"
                   : "border-l border-transparent bg-transparent text-transparent opacity-0",

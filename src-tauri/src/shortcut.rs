@@ -72,22 +72,33 @@ fn parse_key_code(key: &str) -> Option<Code> {
     }
 
     // 功能键 F1-F12
-    if key.starts_with('F') && key.len() <= 3
+    if key.starts_with('F')
+        && key.len() <= 3
         && let Ok(n) = key[1..].parse::<usize>()
-            && (1..=12).contains(&n) {
-                return Some(F_KEYS[n - 1]);
-            }
+        && (1..=12).contains(&n)
+    {
+        return Some(F_KEYS[n - 1]);
+    }
 
     // 小键盘数字 Numpad0-Numpad9
     if let Some(rest) = key.strip_prefix("NUMPAD")
-        && let Ok(n) = rest.parse::<usize>() {
-            const NUMPADS: [Code; 10] = [
-                Code::Numpad0, Code::Numpad1, Code::Numpad2, Code::Numpad3, Code::Numpad4,
-                Code::Numpad5, Code::Numpad6, Code::Numpad7, Code::Numpad8, Code::Numpad9,
-            ];
-            if n <= 9 {
-                return Some(NUMPADS[n]);
-            }
+        && let Ok(n) = rest.parse::<usize>()
+    {
+        const NUMPADS: [Code; 10] = [
+            Code::Numpad0,
+            Code::Numpad1,
+            Code::Numpad2,
+            Code::Numpad3,
+            Code::Numpad4,
+            Code::Numpad5,
+            Code::Numpad6,
+            Code::Numpad7,
+            Code::Numpad8,
+            Code::Numpad9,
+        ];
+        if n <= 9 {
+            return Some(NUMPADS[n]);
+        }
     }
 
     // 特殊键

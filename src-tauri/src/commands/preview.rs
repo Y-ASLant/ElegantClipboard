@@ -20,8 +20,37 @@ fn is_preview_token_current(slot: &AtomicU64, token: u64) -> bool {
 }
 
 #[inline]
-fn invalidate_preview_token(slot: &AtomicU64, token: u64) {
-    slot.fetch_max(token.saturating_add(1), Ordering::AcqRel);
+fn invalidate_all_preview_tokens(slot: &AtomicU64) {
+    slot.fetch_add(1, Ordering::AcqRel);
+}
+
+#[tauri::command]
+pub fn allocate_image_preview_lease() -> u64 {
+    IMAGE_PREVIEW_TOKEN.fetch_add(1, Ordering::AcqRel) + 1
+}
+
+#[tauri::command]
+pub fn allocate_text_preview_lease() -> u64 {
+    TEXT_PREVIEW_TOKEN.fetch_add(1, Ordering::AcqRel) + 1
+}
+
+pub(crate) fn force_hide_image_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    invalidate_all_preview_tokens(&IMAGE_PREVIEW_TOKEN);
+    if let Some(window) = app.get_webview_window("image-preview") {
+        let _ = window.hide();
+        let _ = window.emit("image-preview-clear", ());
+        tracing::debug!("image-preview force hidden");
+    }
+}
+
+pub(crate) fn force_hide_text_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    invalidate_all_preview_tokens(&TEXT_PREVIEW_TOKEN);
+    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, Ordering::AcqRel);
+    if let Some(window) = app.get_webview_window("text-preview") {
+        let _ = window.hide();
+        let _ = window.emit("text-preview-clear", ());
+        tracing::debug!("text-preview force hidden");
+    }
 }
 
 #[tauri::command]
@@ -46,6 +75,18 @@ pub async fn show_image_preview(
 ) -> Result<(), String> {
     let token = token.unwrap_or(0);
     if token != 0 && !promote_preview_token(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    // 守卫：主窗必须可见，否则拒绝显示预览。
+    // 防御悬停倒计时与主窗关闭之间的竞态：即便 token 巧合匹配通过 promote，
+    // 也会在此拦下"孤儿预览"，并顺手 force_hide 清理残留窗口。
+    if !app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+    {
+        force_hide_image_preview(&app);
         return Ok(());
     }
 
@@ -117,7 +158,14 @@ pub async fn show_image_preview(
         return Ok(());
     }
     crate::positioning::force_topmost(&window);
-    tracing::debug!("image-preview shown at ({}, {}), size {}x{}, created={}", win_x, win_y, win_width, win_height, newly_created);
+    tracing::debug!(
+        "image-preview shown at ({}, {}), size {}x{}, created={}",
+        win_x,
+        win_y,
+        win_width,
+        win_height,
+        newly_created
+    );
     Ok(())
 }
 
@@ -126,16 +174,14 @@ pub async fn hide_image_preview(app: tauri::AppHandle, token: Option<u64>) {
     if let Some(t) = token
         && t != 0
     {
-        if !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, t) {
+        // 原子抢占：无论 show 是否已 promote，都把 token 推到 t+1，
+        // 既阻止后续迟到的 show(t)，又保证 prev != t 时不误杀更新的预览。
+        let prev = IMAGE_PREVIEW_TOKEN.fetch_max(t.saturating_add(1), Ordering::AcqRel);
+        if prev != t {
             return;
         }
-        invalidate_preview_token(&IMAGE_PREVIEW_TOKEN, t);
     }
-    if let Some(window) = app.get_webview_window("image-preview") {
-        let _ = window.hide();
-        let _ = window.emit("image-preview-clear", ());
-        tracing::debug!("image-preview hidden");
-    }
+    force_hide_image_preview(&app);
 }
 
 #[tauri::command]
@@ -157,6 +203,17 @@ pub async fn show_text_preview(
 ) -> Result<(), String> {
     let token = token.unwrap_or(0);
     if token != 0 && !promote_preview_token(&TEXT_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    // 守卫：主窗必须可见，否则拒绝显示预览。
+    // 与 show_image_preview 对称，防御悬停倒计时与主窗关闭之间的竞态。
+    if !app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+    {
+        force_hide_text_preview(&app);
         return Ok(());
     }
 
@@ -228,7 +285,14 @@ pub async fn show_text_preview(
         return Ok(());
     }
     crate::positioning::force_topmost(&window);
-    tracing::debug!("text-preview shown at ({}, {}), size {}x{}, created={}", win_x, win_y, win_width, win_height, newly_created);
+    tracing::debug!(
+        "text-preview shown at ({}, {}), size {}x{}, created={}",
+        win_x,
+        win_y,
+        win_width,
+        win_height,
+        newly_created
+    );
 
     if newly_created {
         let window_clone = window.clone();
@@ -251,17 +315,13 @@ pub async fn hide_text_preview(app: tauri::AppHandle, token: Option<u64>) {
     if let Some(t) = token
         && t != 0
     {
-        if !is_preview_token_current(&TEXT_PREVIEW_TOKEN, t) {
+        // 原子抢占：同 hide_image_preview，解决 show/hide 并发调度时的顺序竞态。
+        let prev = TEXT_PREVIEW_TOKEN.fetch_max(t.saturating_add(1), Ordering::AcqRel);
+        if prev != t {
             return;
         }
-        invalidate_preview_token(&TEXT_PREVIEW_TOKEN, t);
     }
-    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-    if let Some(window) = app.get_webview_window("text-preview") {
-        let _ = window.hide();
-        let _ = window.emit("text-preview-clear", ());
-        tracing::debug!("text-preview hidden");
-    }
+    force_hide_text_preview(&app);
 }
 
 #[tauri::command]
@@ -311,8 +371,8 @@ pub fn is_log_to_file_enabled() -> bool {
 fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&str>) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, WS_EX_LAYERED,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_NOZORDER, SetWindowLongW, SetWindowPos, WS_EX_LAYERED,
     };
 
     let effect = match effect {
@@ -327,9 +387,18 @@ fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&st
     unsafe {
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
         if (ex_style as u32) & WS_EX_LAYERED.0 != 0 {
-            SetWindowLongW(hwnd, GWL_EXSTYLE, ((ex_style as u32) & !WS_EX_LAYERED.0) as i32);
+            SetWindowLongW(
+                hwnd,
+                GWL_EXSTYLE,
+                ((ex_style as u32) & !WS_EX_LAYERED.0) as i32,
+            );
             let _ = SetWindowPos(
-                hwnd, None, 0, 0, 0, 0,
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
             );
         }
@@ -359,5 +428,8 @@ pub fn set_log_to_file(enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_log_file_path() -> String {
-    AppConfig::load().get_log_path().to_string_lossy().to_string()
+    AppConfig::load()
+        .get_log_path()
+        .to_string_lossy()
+        .to_string()
 }

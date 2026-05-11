@@ -84,7 +84,7 @@ function SortableToolbarItem({
         <button
           {...attributes}
           {...listeners}
-          className="w-4 h-4 flex items-center justify-center text-muted-foreground cursor-grab active:cursor-grabbing shrink-0 touch-none"
+          className="w-4 h-4 flex items-center justify-center text-muted-foreground cursor-move shrink-0 touch-none"
         >
           <ReOrderDotsVertical16Regular className="w-4 h-4" />
         </button>

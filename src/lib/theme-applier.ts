@@ -13,7 +13,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { logError } from "@/lib/logger";
-import { useUISettings } from "@/stores/ui-settings";
+import { isUISettingsInitialized, useUISettings, whenUISettingsReady } from "@/stores/ui-settings";
 
 const THEME_CLASSES = ["theme-emerald", "theme-cyan", "theme-system"];
 
@@ -201,13 +201,12 @@ export function initTheme(): Promise<void> {
 
   // --- 初始化应用 ---
   applySharpCorners();
-  // 窗口特效和自定义字体依赖持久化值，必须等 hydration 完成后再应用，
-  // 否则会读到默认值导致特效不生效
-  if (useUISettings.persist.hasHydrated()) {
+  // 窗口特效和字体依赖后端设置值，初始化完成后再应用
+  if (isUISettingsInitialized()) {
     applyWindowEffect();
     applyFontSettings();
   }
-  useUISettings.persist.onFinishHydration(() => {
+  void whenUISettingsReady().then(() => {
     applyWindowEffect();
     applyFontSettings();
   });

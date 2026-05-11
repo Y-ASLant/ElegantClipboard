@@ -44,6 +44,29 @@ const ScrollSeekPlaceholder = ({ height }: { height: number }) => (
   </div>
 );
 
+// 模块级静态配置：避免每次渲染重新分配对象，触发 OverlayScrollbars/Virtuoso 内部 effect 重订阅
+const OS_OPTIONS = {
+  scrollbars: {
+    theme: "os-theme-custom",
+    visibility: "auto",
+    autoHide: "scroll",
+    autoHideDelay: 1000,
+  },
+  overflow: {
+    x: "hidden",
+    y: "scroll",
+  },
+} as const;
+
+const VIRTUOSO_INCREASE_VIEWPORT = { top: 400, bottom: 400 } as const;
+
+const VIRTUOSO_SCROLL_SEEK_CONFIG = {
+  enter: (velocity: number) => Math.abs(velocity) > 2000,
+  exit: (velocity: number) => Math.abs(velocity) < 500,
+} as const;
+
+const VIRTUOSO_COMPONENTS = { ScrollSeekPlaceholder } as const;
+
 export function ClipboardList({ searchInputRef }: ClipboardListProps) {
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -62,6 +85,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
     fetchItems,
     setupListener,
     moveItem,
+    moveFavoriteItem,
     togglePin,
     setActiveIndex,
     pasteContent,
@@ -78,6 +102,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       fetchItems: s.fetchItems,
       setupListener: s.setupListener,
       moveItem: s.moveItem,
+      moveFavoriteItem: s.moveFavoriteItem,
       togglePin: s.togglePin,
       setActiveIndex: s.setActiveIndex,
       pasteContent: s.pasteContent,
@@ -137,6 +162,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       const fromItem = currentItems[oldIndex];
       const toItem = currentItems[newIndex];
       if (!fromItem || !toItem) return;
+      const isFavoritesView = selectedGroup === "__favorites__";
 
       const currentPinnedCount = currentItems.filter((item) => item.is_pinned).length;
       const fromIsPinned = oldIndex < currentPinnedCount;
@@ -154,9 +180,11 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       try {
         if (fromIsPinned !== toIsPinned) {
           await togglePin(fromItem.id);
-          await moveItem(fromItem.id, toItem.id);
+          if (isFavoritesView) await moveFavoriteItem(fromItem.id, toItem.id);
+          else await moveItem(fromItem.id, toItem.id);
         } else {
-          await moveItem(fromItem.id, toItem.id);
+          if (isFavoritesView) await moveFavoriteItem(fromItem.id, toItem.id);
+          else await moveItem(fromItem.id, toItem.id);
         }
       } catch {
         // store 内部已记录错误
@@ -164,7 +192,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
         setOptimisticItems(null);
       }
     },
-    [renderedItems, moveItem, togglePin],
+    [renderedItems, selectedGroup, moveItem, moveFavoriteItem, togglePin],
   );
 
   const {
@@ -510,18 +538,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       <div className="h-full relative" style={{ maskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)' }}>
         <OverlayScrollbarsComponent
           element="div"
-          options={{
-            scrollbars: {
-              theme: "os-theme-custom",
-              visibility: "auto",
-              autoHide: "scroll",
-              autoHideDelay: 1000,
-            },
-            overflow: {
-              x: "hidden",
-              y: "scroll",
-            },
-          }}
+          options={OS_OPTIONS}
           events={{
             initialized: (instance: OverlayScrollbars) => {
               osInstanceRef.current = instance;
@@ -543,12 +560,9 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
                 itemContent={itemContent}
                 computeItemKey={computeItemKey}
                 defaultItemHeight={defaultItemHeight}
-                increaseViewportBy={{ top: 400, bottom: 400 }}
-                scrollSeekConfiguration={{
-                  enter: (velocity) => Math.abs(velocity) > 2000,
-                  exit: (velocity) => Math.abs(velocity) < 500,
-                }}
-                components={{ ScrollSeekPlaceholder }}
+                increaseViewportBy={VIRTUOSO_INCREASE_VIEWPORT}
+                scrollSeekConfiguration={VIRTUOSO_SCROLL_SEEK_CONFIG}
+                components={VIRTUOSO_COMPONENTS}
                 customScrollParent={customScrollParent}
                 scrollerRef={(ref) => {
                   if (ref instanceof HTMLElement) {
@@ -584,7 +598,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
             },
           ],
         }}
-        style={{ cursor: "grabbing" }}
+        style={{ cursor: "move" }}
       >
         {activeItemData && (
           <div className="shadow-xl">

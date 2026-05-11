@@ -34,8 +34,7 @@ fn add_dir_to_zip(
         if path.is_file() {
             let name = format!("{}/{}", prefix, entry.file_name().to_string_lossy());
             zip.start_file(&name, options).map_err(|e| e.to_string())?;
-            let buf = std::fs::read(&path)
-                .map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
+            let buf = std::fs::read(&path).map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
             zip.write_all(&buf).map_err(|e| e.to_string())?;
         }
     }
@@ -143,14 +142,12 @@ pub fn cleanup_data_at_path(path: String) -> Result<(), String> {
 
     let images_dir = p.join("images");
     if images_dir.exists() {
-        fs::remove_dir_all(&images_dir)
-            .map_err(|e| format!("删除图片目录失败: {}", e))?;
+        fs::remove_dir_all(&images_dir).map_err(|e| format!("删除图片目录失败: {}", e))?;
     }
 
     let icons_dir = p.join("icons");
     if icons_dir.exists() {
-        fs::remove_dir_all(&icons_dir)
-            .map_err(|e| format!("删除图标目录失败: {}", e))?;
+        fs::remove_dir_all(&icons_dir).map_err(|e| format!("删除图标目录失败: {}", e))?;
     }
 
     Ok(())
@@ -192,8 +189,8 @@ pub async fn export_data(
     use std::fs::{self, File};
     use std::io::Write;
     use tauri_plugin_dialog::DialogExt;
-    use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     let config = AppConfig::load();
     let data_dir = config.get_data_dir();
@@ -232,10 +229,10 @@ pub async fn export_data(
 
     let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {}", e))?;
     let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    zip.start_file("clipboard.db", options).map_err(|e| e.to_string())?;
+    zip.start_file("clipboard.db", options)
+        .map_err(|e| e.to_string())?;
     zip.write_all(&fs::read(&export_db).map_err(|e| format!("读取数据库副本失败: {}", e))?)
         .map_err(|e| e.to_string())?;
     let _ = fs::remove_file(&export_db);
@@ -246,9 +243,7 @@ pub async fn export_data(
 
     zip.finish().map_err(|e| e.to_string())?;
 
-    let size = fs::metadata(&dest_path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let size = fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
     Ok(format!("导出成功 ({})", format_size(size)))
 }
 
@@ -320,13 +315,15 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
             }
             let mut buf = Vec::new();
             entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-            fs::write(&out_path, &buf)
-                .map_err(|e| format!("写入 {} 失败: {}", name, e))?;
+            fs::write(&out_path, &buf).map_err(|e| format!("写入 {} 失败: {}", name, e))?;
             files_extracted += 1;
         }
     }
 
-    Ok(format!("导入成功，共恢复 {} 个文件，应用即将重启", files_extracted))
+    Ok(format!(
+        "导入成功，共恢复 {} 个文件，应用即将重启",
+        files_extracted
+    ))
 }
 
 #[tauri::command]

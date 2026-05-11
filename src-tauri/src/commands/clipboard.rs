@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tauri::State;
 use tracing::{debug, info};
 
-use super::{hide_main_window_if_not_pinned, with_paused_monitor, AppState};
+use super::{AppState, hide_main_window_if_not_pinned, with_paused_monitor};
 
 /// 将 ClipboardItem 内容写入系统剪贴板
 pub(super) fn set_clipboard_content(
@@ -169,14 +169,13 @@ fn build_context_snippet(
     result
 }
 
-
 /// 使用 Windows SendInput API 模拟 Ctrl+V 粘贴。
 /// 先释放用户可能按住的所有修饰键（Alt/Shift/Win），再发送纯净的 Ctrl+V。
 #[cfg(target_os = "windows")]
 pub fn simulate_paste() -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT,
-        KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
+        GetAsyncKeyState, INPUT, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
+        SendInput, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
     };
 
     fn is_key_pressed(vk: u16) -> bool {
@@ -190,13 +189,19 @@ pub fn simulate_paste() -> Result<(), String> {
                 ki: KEYBDINPUT {
                     wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk),
                     wScan: 0,
-                    dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) },
+                    dwFlags: if up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        KEYBD_EVENT_FLAGS(0)
+                    },
                     time: 0,
                     dwExtraInfo: 0,
                 },
             },
         };
-        unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32); }
+        unsafe {
+            SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+        }
     }
 
     /// 若用户正按住修饰键则释放，最多重试 20 次（间隔 5ms）。
@@ -216,7 +221,10 @@ pub fn simulate_paste() -> Result<(), String> {
         let mut buf = [0u16; 256];
         let len = unsafe { GetWindowTextW(fg, &mut buf) } as usize;
         let title = String::from_utf16_lossy(&buf[..len]);
-        info!("simulate_paste: foreground hwnd={:?} title=\"{}\"", fg.0, title);
+        info!(
+            "simulate_paste: foreground hwnd={:?} title=\"{}\"",
+            fg.0, title
+        );
     }
 
     release_if_held(VK_MENU.0);
@@ -391,12 +399,26 @@ pub async fn move_clipboard_item(
     Ok(())
 }
 
+/// 与目标收藏条目交换收藏排序位置
+#[tauri::command]
+pub async fn move_favorite_clipboard_item(
+    state: State<'_, Arc<AppState>>,
+    from_id: i64,
+    to_id: i64,
+) -> Result<(), String> {
+    let repo = ClipboardRepository::new(&state.db);
+    repo.move_favorite_item_by_id(from_id, to_id)
+        .map_err(|e| e.to_string())?;
+    debug!(
+        "Moved favorite clipboard item {} to position of {}",
+        from_id, to_id
+    );
+    Ok(())
+}
+
 /// 粘贴后置顶：将条目移到非置顶区最前面（sort_order 设为全表最大值 + 1）
 #[tauri::command]
-pub async fn bump_item_to_top(
-    state: State<'_, Arc<AppState>>,
-    id: i64,
-) -> Result<(), String> {
+pub async fn bump_item_to_top(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
     let repo = ClipboardRepository::new(&state.db);
     repo.bump_to_top(id).map_err(|e| e.to_string())?;
     debug!("Bumped clipboard item {} to top", id);
@@ -413,7 +435,10 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
         if let Some(ref image_path) = item.image_path {
             crate::clipboard::cleanup_image_files(std::slice::from_ref(image_path));
         }
-        debug!("Deleted clipboard item: id={}, type={}", id, item.content_type);
+        debug!(
+            "Deleted clipboard item: id={}, type={}",
+            id, item.content_type
+        );
     } else {
         repo.delete(id).map_err(|e| e.to_string())?;
         debug!("Deleted clipboard item: id={}", id);
@@ -630,8 +655,8 @@ pub fn quick_paste_by_slot(
     app: &tauri::AppHandle,
     slot: u8,
 ) -> Result<(), String> {
-    if !(1..=9).contains(&slot) {
-        return Err("Quick paste slot must be between 1 and 9".to_string());
+    if !(1..=10).contains(&slot) {
+        return Err("Quick paste slot must be between 1 and 10".to_string());
     }
 
     let repo = ClipboardRepository::new(&state.db);
@@ -652,8 +677,8 @@ pub fn quick_paste_favorite_by_slot(
     app: &tauri::AppHandle,
     slot: u8,
 ) -> Result<(), String> {
-    if !(1..=9).contains(&slot) {
-        return Err("收藏槽位必须在 1-9 之间".to_string());
+    if !(1..=10).contains(&slot) {
+        return Err("收藏槽位必须在 1-10 之间".to_string());
     }
 
     let repo = ClipboardRepository::new(&state.db);
@@ -707,7 +732,11 @@ fn paste_plain_text_to_active_window(
     text: &str,
     close_window: bool,
 ) -> Result<(), String> {
-    info!("paste_plain_text: len={}, close_window={}", text.len(), close_window);
+    info!(
+        "paste_plain_text: len={}, close_window={}",
+        text.len(),
+        close_window
+    );
     with_paused_monitor(state, || {
         let mut clipboard =
             arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
