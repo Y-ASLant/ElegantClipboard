@@ -158,6 +158,99 @@ pub async fn show_image_preview(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn show_video_preview(
+    app: tauri::AppHandle,
+    video_path: String,
+    width: f64,
+    height: f64,
+    offset_y: f64,
+    win_x: f64,
+    win_y: f64,
+    win_width: f64,
+    win_height: f64,
+    align: Option<String>,
+    duration: Option<f64>,
+    token: Option<u64>,
+) -> Result<(), String> {
+    let token = token.unwrap_or(0);
+    if token != 0 && !promote_preview_token(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    let mut newly_created = false;
+    let window = if let Some(w) = app.get_webview_window("image-preview") {
+        w
+    } else {
+        newly_created = true;
+        tauri::WebviewWindowBuilder::new(
+            &app,
+            "image-preview",
+            tauri::WebviewUrl::App("/image-preview.html".into()),
+        )
+        .title("")
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .visible(false)
+        .build()
+        .map_err(|e| format!("创建预览窗口失败: {}", e))?
+    };
+
+    if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: win_width as u32,
+        height: win_height as u32,
+    }));
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+        x: win_x as i32,
+        y: win_y as i32,
+    }));
+
+    if newly_created {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+            return Ok(());
+        }
+    }
+
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_ignore_cursor_events(true);
+
+    let _ = window.emit(
+        "video-preview-update",
+        serde_json::json!({
+            "videoPath": video_path,
+            "width": width,
+            "height": height,
+            "offsetY": offset_y,
+            "align": align.as_deref().unwrap_or("left"),
+            "duration": duration.unwrap_or(5.0),
+        }),
+    );
+
+    if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+        return Ok(());
+    }
+
+    let _ = window.show();
+    if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
+        let _ = window.hide();
+        return Ok(());
+    }
+    crate::positioning::force_topmost(&window);
+    tracing::debug!("video-preview shown at ({}, {}), size {}x{}, created={}", win_x, win_y, win_width, win_height, newly_created);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn hide_image_preview(app: tauri::AppHandle, token: Option<u64>) {
     if let Some(t) = token
         && t != 0

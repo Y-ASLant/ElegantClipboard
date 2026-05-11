@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useState, useRef, useMemo } from "react";
+import { memo, useCallback, useEffect, useState, useRef, useMemo } from "react";
 import {
   Pin16Filled,
   Delete16Regular,
@@ -14,53 +14,29 @@ import {
   ReOrderDotsVertical16Regular,
   Add16Regular,
   Translate16Regular,
-  ArrowSync16Regular,
-  Dismiss16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
-import { emitTo, listen } from "@tauri-apps/api/event";
 import { useShallow } from "zustand/react/shallow";
 import {
   CardFooter,
   FileContent,
-  VideoContent,
-  getPreviewBounds,
   ImageCard,
 } from "@/components/CardContentRenderers";
 import {
   ActionToolbar,
-  FileDetailsDialog,
-  TagAssignSection,
   type FileListItem,
   type ContextMenuItemConfig,
 } from "@/components/CardSubComponents";
+import { ClipboardContextMenu } from "@/components/ClipboardContextMenu";
 import { HighlightText } from "@/components/HighlightText";
-import {
-  type ClipboardItemDetail,
-  sampleTextPreview,
-  getCachedTextPreviewContent,
-  setCachedTextPreviewContent,
-  TEXT_PREVIEW_MIN_W,
-  TEXT_PREVIEW_MAX_W,
-  TEXT_PREVIEW_MIN_H,
-  TEXT_PREVIEW_MAX_H,
-  TEXT_PREVIEW_CHAR_WIDTH,
-  TEXT_PREVIEW_HORIZONTAL_PADDING,
-  TEXT_PREVIEW_MIN_CHARS_PER_LINE,
-} from "@/components/text-preview";
-import { TtsButton } from "@/components/TtsButton";
+import { type ClipboardItemDetail } from "@/components/text-preview";
+import { TranslationResult } from "@/components/TranslationResult";
 import { TtsHighlightText } from "@/components/TtsHighlightText";
 import { Card } from "@/components/ui/card";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { VideoContent } from "@/components/VideoCard";
 import { focusWindowImmediately } from "@/hooks/useInputFocus";
 import { useSortable, CSS } from "@/hooks/useSortableList";
+import { useTextPreview } from "@/hooks/useTextPreview";
 import {
   contentTypeConfig,
   formatTime,
@@ -92,42 +68,44 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 
-let textPreviewLease = 0;
-let textPreviewWanted = false;
+// ============ 文件存在性检查缓存 ============
+const FILE_CHECK_CACHE_TTL = 5000; // 5s
+const fileCheckCache = new Map<string, { data: Record<string, { exists: boolean; is_dir: boolean }>; ts: number }>();
 
-export function acquireTextPreviewLease(): number {
-  textPreviewLease += 1;
-  textPreviewWanted = true;
-  return textPreviewLease;
+function fileCheckCacheKey(paths: string[]): string {
+  return paths.join("\0");
 }
 
-export function revokeTextPreviewLease(lease: number): void {
-  if (textPreviewLease === lease) {
-    textPreviewLease += 1;
-    textPreviewWanted = false;
+async function cachedCheckFilesExist(
+  paths: string[],
+): Promise<Record<string, { exists: boolean; is_dir: boolean }>> {
+  const key = fileCheckCacheKey(paths);
+  const cached = fileCheckCache.get(key);
+  if (cached && Date.now() - cached.ts < FILE_CHECK_CACHE_TTL) {
+    return cached.data;
   }
+  const data = await invoke<Record<string, { exists: boolean; is_dir: boolean }>>(
+    "check_files_exist",
+    { paths },
+  );
+  fileCheckCache.set(key, { data, ts: Date.now() });
+  // 防止缓存无限增长
+  if (fileCheckCache.size > 100) {
+    const oldest = fileCheckCache.keys().next().value;
+    if (oldest !== undefined) fileCheckCache.delete(oldest);
+  }
+  return data;
 }
 
-export function isTextPreviewLeaseCurrent(lease: number): boolean {
-  return textPreviewLease === lease;
-}
-
-export function isTextPreviewWanted(): boolean {
-  return textPreviewWanted;
-}
-
-// ============ 全局 window-hidden 清理注册表 ============
-// 替代每张卡片各自订阅 Tauri 事件，改为单一全局监听 + 回调注册
-export const textPreviewCleanupCallbacks = new Set<() => void>();
-let _windowHiddenListenerInit = false;
-
-export function ensureWindowHiddenListener() {
-  if (_windowHiddenListenerInit) return;
-  _windowHiddenListenerInit = true;
-  listen("window-hidden", () => {
-    textPreviewCleanupCallbacks.forEach((cb) => cb());
-  });
-}
+// 文本预览租约管理和清理回调已提取到 useTextPreview hook
+export {
+  acquireTextPreviewLease,
+  revokeTextPreviewLease,
+  isTextPreviewLeaseCurrent,
+  isTextPreviewWanted,
+  textPreviewCleanupCallbacks,
+  ensureWindowHiddenListener,
+} from "@/hooks/useTextPreview";
 
 // ============ 标签弹出层 ============
 
@@ -280,8 +258,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   } = clipboardActions();
   const {
     cardMaxLines, showTime, showCharCount, showByteSize,
-    showSourceApp, sourceAppDisplay, textPreviewEnabled,
-    hoverPreviewDelay, previewPosition, sharpCorners, timeFormat,
+    showSourceApp, sourceAppDisplay, timeFormat,
   } = useUISettings(useShallow((s) => ({
     cardMaxLines: s.cardMaxLines,
     showTime: s.showTime,
@@ -289,10 +266,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     showByteSize: s.showByteSize,
     showSourceApp: s.showSourceApp,
     sourceAppDisplay: s.sourceAppDisplay,
-    textPreviewEnabled: s.textPreviewEnabled,
-    hoverPreviewDelay: s.hoverPreviewDelay,
-    previewPosition: s.previewPosition,
-    sharpCorners: s.sharpCorners,
     timeFormat: s.timeFormat,
   })));
 
@@ -320,15 +293,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [tagPopoverOpen]);
-
-  const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textPreviewVisibleRef = useRef(false);
-  const textPreviewAnchorRef = useRef<HTMLDivElement | null>(null);
-  const textPreviewHoveringRef = useRef(false);
-  const textPreviewReqIdRef = useRef(0);
-  const textPreviewLeaseRef = useRef<number | null>(null);
-  const textScrollEmitRafRef = useRef<number | null>(null);
-  const textScrollPendingDeltaRef = useRef(0);
 
   const filePaths = useMemo(
     () => (item.content_type === "files" || item.content_type === "video") ? parseFilePaths(item.file_paths) : [],
@@ -385,204 +349,22 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     overflow: "hidden",
   }), [cardMaxLines]);
 
+  // ---- 文本预览（hook） ----
+  const {
+    textPreviewAnchorRef,
+    handleTextMouseEnter,
+    handleTextMouseLeave,
+    handleTextWheel,
+    hideTextPreview,
+  } = useTextPreview({
+    itemId: item.id,
+    textContent: item.text_content,
+    preview: item.preview,
+    isTextLikeContent,
+    isDragging,
+  });
+
   // ---- 事件处理 ----
-  const clearTextPreviewTimer = useCallback(() => {
-    if (textPreviewTimerRef.current) {
-      clearTimeout(textPreviewTimerRef.current);
-      textPreviewTimerRef.current = null;
-    }
-  }, []);
-
-  const hideTextPreview = useCallback(() => {
-    textPreviewReqIdRef.current += 1;
-    const closingLease = textPreviewLeaseRef.current;
-    if (closingLease !== null) {
-      revokeTextPreviewLease(closingLease);
-      textPreviewLeaseRef.current = null;
-    }
-    clearTextPreviewTimer();
-    textPreviewHoveringRef.current = false;
-    if (textScrollEmitRafRef.current !== null) {
-      cancelAnimationFrame(textScrollEmitRafRef.current);
-      textScrollEmitRafRef.current = null;
-    }
-    textScrollPendingDeltaRef.current = 0;
-    if (closingLease !== null) {
-      textPreviewVisibleRef.current = false;
-      invoke("hide_text_preview", { token: closingLease }).catch((error) => {
-        logError("Failed to hide text preview:", error);
-      });
-    } else if (textPreviewVisibleRef.current) {
-      textPreviewVisibleRef.current = false;
-      invoke("hide_text_preview").catch((error) => {
-        logError("Failed to hide text preview:", error);
-      });
-    }
-  }, [clearTextPreviewTimer]);
-
-  const resolveTextPreviewContent = useCallback(async (): Promise<string> => {
-    const inlineText = item.text_content || item.preview || "";
-    if (!isTextLikeContent) return "";
-    if (item.text_content) return item.text_content;
-    const cached = getCachedTextPreviewContent(item.id);
-    if (cached) return cached;
-    try {
-      const detail = await invoke<ClipboardItemDetail | null>("get_clipboard_item", { id: item.id });
-      const resolved = detail?.text_content || detail?.preview || inlineText;
-      if (resolved) {
-        setCachedTextPreviewContent(item.id, resolved);
-      }
-      return resolved;
-    } catch (error) {
-      logError("Failed to load full text content for preview:", error);
-      return inlineText;
-    }
-  }, [isTextLikeContent, item.id, item.preview, item.text_content]);
-
-  const showTextPreview = useCallback(async (reqId: number, lease: number) => {
-    if (!textPreviewEnabled || !isTextLikeContent || !textPreviewAnchorRef.current) {
-      return;
-    }
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
-    const textContent = await resolveTextPreviewContent();
-    if (!textContent) return;
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
-
-    const bounds = await getPreviewBounds(previewPosition, textPreviewAnchorRef.current);
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
-    const availableCssW = Math.max(260, Math.floor(bounds.maxW / bounds.scale));
-    const availableCssH = Math.max(140, Math.floor(bounds.maxH / bounds.scale));
-    const sampled = sampleTextPreview(textContent);
-    const desiredWidth = sampled.longestVisualCols * TEXT_PREVIEW_CHAR_WIDTH + TEXT_PREVIEW_HORIZONTAL_PADDING;
-    const windowCssW = Math.min(
-      availableCssW,
-      Math.min(TEXT_PREVIEW_MAX_W, Math.max(TEXT_PREVIEW_MIN_W, desiredWidth)),
-    );
-    const charsPerLine = Math.max(
-      TEXT_PREVIEW_MIN_CHARS_PER_LINE,
-      Math.floor((windowCssW - 30) / TEXT_PREVIEW_CHAR_WIDTH),
-    );
-    const sampledWrappedLines = sampled.lineColumns.reduce((sum, lineCols) => {
-      return sum + Math.max(1, Math.ceil(lineCols / charsPerLine));
-    }, 0);
-    let estimatedLines = sampledWrappedLines;
-    if (sampled.truncated && sampled.processedCodeUnits < textContent.length) {
-      const remaining = textContent.length - sampled.processedCodeUnits;
-      const linesPerCodeUnit = sampledWrappedLines / Math.max(1, sampled.processedCodeUnits);
-      estimatedLines += Math.max(1, Math.ceil(remaining * linesPerCodeUnit));
-    }
-    const estimatedCssH = Math.min(
-      TEXT_PREVIEW_MAX_H,
-      Math.max(TEXT_PREVIEW_MIN_H, estimatedLines * 21 + 40),
-    );
-    const windowCssH = Math.min(availableCssH, estimatedCssH);
-    const winW = Math.max(1, Math.round(windowCssW * bounds.scale));
-    const winH = Math.max(1, Math.round(windowCssH * bounds.scale));
-    const winX = bounds.side === "left" ? bounds.anchorX - winW : bounds.anchorX;
-    const centeredY = Math.round(bounds.cardCenterY - winH / 2);
-    const winY = Math.max(bounds.monY, Math.min(centeredY, bounds.monBottom - winH));
-    const align = bounds.side === "left" ? "right" : "left";
-    const theme =
-      document.documentElement.classList.contains("dark") ? "dark" : "light";
-
-    try {
-      invoke("hide_image_preview").catch((error) => {
-        logError("Failed to hide image preview:", error);
-      });
-      const uiState = useUISettings.getState();
-      await invoke("show_text_preview", {
-        text: textContent,
-        winX,
-        winY,
-        winWidth: winW,
-        winHeight: winH,
-        align,
-        theme,
-        sharpCorners,
-        windowEffect: uiState.windowEffect,
-        fontFamily: uiState.previewFont || null,
-        fontSize: uiState.previewFontSize,
-        token: lease,
-      });
-      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) {
-        textPreviewVisibleRef.current = false;
-        if (!isTextPreviewWanted()) {
-          invoke("hide_text_preview", { token: lease }).catch((error) => {
-            logError("Failed to hide text preview after stale show:", error);
-          });
-        }
-        return;
-      }
-      textPreviewVisibleRef.current = true;
-    } catch (error) {
-      textPreviewVisibleRef.current = false;
-      logError("Failed to show text preview:", error);
-    }
-  }, [textPreviewEnabled, isTextLikeContent, previewPosition, resolveTextPreviewContent, sharpCorners]);
-
-  const handleTextMouseEnter = useCallback(() => {
-    if (!textPreviewEnabled || !isTextLikeContent || batchMode) return;
-    textPreviewHoveringRef.current = true;
-    textPreviewReqIdRef.current += 1;
-    const reqId = textPreviewReqIdRef.current;
-    const lease = acquireTextPreviewLease();
-    textPreviewLeaseRef.current = lease;
-    clearTextPreviewTimer();
-    textPreviewTimerRef.current = setTimeout(() => {
-      void showTextPreview(reqId, lease);
-    }, hoverPreviewDelay);
-  }, [textPreviewEnabled, isTextLikeContent, batchMode, clearTextPreviewTimer, showTextPreview, hoverPreviewDelay]);
-
-  const handleTextMouseLeave = useCallback(() => {
-    hideTextPreview();
-  }, [hideTextPreview]);
-
-  const handleTextWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
-    // Ctrl+滚轮滚动文本预览，避免误触列表滚动
-    if (!e.ctrlKey || !textPreviewVisibleRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-    textScrollPendingDeltaRef.current += e.deltaY;
-
-    if (textScrollEmitRafRef.current === null) {
-      textScrollEmitRafRef.current = requestAnimationFrame(() => {
-        textScrollEmitRafRef.current = null;
-        const deltaY = textScrollPendingDeltaRef.current;
-        textScrollPendingDeltaRef.current = 0;
-        if (deltaY === 0 || !textPreviewVisibleRef.current) return;
-        emitTo("text-preview", "text-preview-scroll", { deltaY }).catch((error) => {
-          textPreviewVisibleRef.current = false;
-          logError("Failed to emit text preview scroll:", error);
-        });
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!textPreviewEnabled || !isTextLikeContent) {
-      hideTextPreview();
-    }
-  }, [textPreviewEnabled, isTextLikeContent, hideTextPreview]);
-
-  useEffect(() => {
-    if (isDragging) {
-      hideTextPreview();
-    }
-  }, [isDragging, hideTextPreview]);
-
-  useEffect(() => {
-    return () => {
-      hideTextPreview();
-    };
-  }, [hideTextPreview]);
-
-  // 主窗口隐藏时取消文本预览（通过全局清理注册表，避免每张卡片单独订阅 Tauri 事件）
-  useEffect(() => {
-    ensureWindowHiddenListener();
-    textPreviewCleanupCallbacks.add(hideTextPreview);
-    return () => { textPreviewCleanupCallbacks.delete(hideTextPreview); };
-  }, [hideTextPreview]);
-
   const handlePaste = (e: React.MouseEvent) => {
     if (batchMode) {
       toggleSelect(item.id, index ?? 0, e.shiftKey);
@@ -634,9 +416,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const handleShowDetails = async () => {
     if (filePaths.length === 0) return;
     try {
-      const checkResult = await invoke<
-        Record<string, { exists: boolean; is_dir: boolean }>
-      >("check_files_exist", { paths: filePaths });
+      const checkResult = await cachedCheckFilesExist(filePaths);
       const items: FileListItem[] = filePaths.map((path) => {
         const name = getFileNameFromPath(path);
         const info = checkResult[path] ?? { exists: false, is_dir: false };
@@ -886,60 +666,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         />
       )}
       {/* 翻译结果区域 */}
-      {(translating || translatedText || translateError) && (
-        <div
-          className="mt-1 rounded-lg border bg-muted/50 px-3 py-2 text-xs"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {translating && (
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <ArrowSync16Regular className="w-3.5 h-3.5 animate-spin" />
-              <span>翻译中…</span>
-            </div>
-          )}
-          {translateError && !translating && (
-            <div className="text-destructive">{translateError}</div>
-          )}
-          {translatedText && !translating && (
-            <div className="relative group/translate">
-              <pre
-                className="whitespace-pre-wrap break-all text-foreground/90 leading-relaxed m-0"
-                style={{
-                  fontFamily: "var(--card-font-family)",
-                  fontSize: "var(--card-font-size, 14px)",
-                }}
-              >
-                <TtsHighlightText text={translatedText} />
-              </pre>
-              <div className="absolute right-0 bottom-0 flex items-center gap-0.5 bg-background/90 rounded-md px-0.5 shadow-sm border opacity-0 group-hover/translate:opacity-100 transition-opacity">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={handleCopyTranslation}
-                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Copy16Regular className="w-3.5 h-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>复制翻译</TooltipContent>
-                </Tooltip>
-                <TtsButton text={translatedText || ""} />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => { setTranslatedText(null); setTranslateError(null); }}
-                      className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Dismiss16Regular className="w-3.5 h-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>关闭</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+      <TranslationResult
+        translating={translating}
+        translatedText={translatedText}
+        translateError={translateError}
+        onCopy={handleCopyTranslation}
+        onDismiss={() => { setTranslatedText(null); setTranslateError(null); }}
+      />
     </div>
   );
 
@@ -984,55 +717,20 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   if (contextMenuItems) {
     return (
-      <>
-        <ContextMenu onOpenChange={(open) => {
-          if (open) {
-            const tagStore = useTagStore.getState();
-            setLocalTags(tagStore.tags);
-            tagStore.getItemTags(item.id).then((tagList) => {
-              setItemTagIds(new Set(tagList.map((t) => t.id)));
-            });
-          }
-        }}>
-          <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
-          <ContextMenuContent className="w-48">
-            {contextMenuItems.map((mi, idx) => (
-              <Fragment key={idx}>
-                {mi.separator && <ContextMenuSeparator />}
-                <ContextMenuItem
-                  onClick={mi.onClick}
-                  disabled={mi.disabled}
-                  className={mi.destructive ? "text-destructive focus:text-destructive" : undefined}
-                >
-                  <mi.icon className="mr-2 h-4 w-4" />
-                  <span>{mi.label}</span>
-                </ContextMenuItem>
-              </Fragment>
-            ))}
-            {/* 标签管理 */}
-            <TagAssignSection
-              itemId={item.id}
-              allTags={localTags}
-              itemTagIds={itemTagIds}
-              onAddTag={async (itemId, tagId) => {
-                await useTagStore.getState().addTagToItem(itemId, tagId);
-                setItemTagIds((prev) => new Set([...prev, tagId]));
-              }}
-              onRemoveTag={async (itemId, tagId) => {
-                await useTagStore.getState().removeTagFromItem(itemId, tagId);
-                setItemTagIds((prev) => { const next = new Set(prev); next.delete(tagId); return next; });
-              }}
-            />
-          </ContextMenuContent>
-        </ContextMenu>
-        {(item.content_type === "files" || item.content_type === "video") && (
-          <FileDetailsDialog
-            open={detailsOpen}
-            onOpenChange={setDetailsOpen}
-            fileListItems={fileListItems}
-          />
-        )}
-      </>
+      <ClipboardContextMenu
+        contextMenuItems={contextMenuItems}
+        itemId={item.id}
+        contentType={item.content_type}
+        localTags={localTags}
+        itemTagIds={itemTagIds}
+        setLocalTags={setLocalTags}
+        setItemTagIds={setItemTagIds}
+        detailsOpen={detailsOpen}
+        setDetailsOpen={setDetailsOpen}
+        fileListItems={fileListItems}
+      >
+        {cardContent}
+      </ClipboardContextMenu>
     );
   }
 

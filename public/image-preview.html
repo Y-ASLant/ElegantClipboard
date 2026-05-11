@@ -24,7 +24,7 @@
       left: auto;
       right: 0;
     }
-    img {
+    img, video {
       display: block;
       width: 100%;
       height: 100%;
@@ -34,7 +34,10 @@
       border-radius: 4px;
       box-shadow: 0 2px 12px rgba(0,0,0,0.25);
     }
-    img.loaded { opacity: 1; }
+    img.loaded, video.loaded { opacity: 1; }
+    video { display: none; }
+    video.active { display: block; }
+    video.active + img { display: none; }
     #badge {
       position: absolute;
       bottom: 6px;
@@ -56,13 +59,16 @@
 </head>
 <body>
   <div id="wrap">
+    <video id="video-preview" muted playsinline></video>
     <img id="preview" />
     <div id="badge"></div>
   </div>
   <script>
     const wrap = document.getElementById('wrap');
+    const video = document.getElementById('video-preview');
     const img = document.getElementById('preview');
     const badge = document.getElementById('badge');
+    let videoTimer = null;
     let hideTimer = null;
     let animRaf = null;
     const currentRect = { width: 0, height: 0, top: 0 };
@@ -125,8 +131,60 @@
       const { listen } = window.__TAURI__.event;
       const { convertFileSrc } = window.__TAURI__.core;
 
+      listen('video-preview-update', (event) => {
+        const { videoPath, width, height, offsetY, align, duration } = event.payload;
+        // 隐藏图片，显示视频
+        img.classList.remove('loaded');
+        img.removeAttribute('src');
+        clearBadge();
+        document.body.className = align === 'right' ? 'align-right' : '';
+        stopRectAnimation();
+        currentRect.width = width || 0;
+        currentRect.height = height || 0;
+        currentRect.top = offsetY || 0;
+        targetRect.width = currentRect.width;
+        targetRect.height = currentRect.height;
+        targetRect.top = currentRect.top;
+        applyRect(currentRect);
+        video.classList.add('active');
+        video.src = convertFileSrc(videoPath);
+        video.currentTime = 0;
+        video.play().catch(() => {});
+        video.classList.add('loaded');
+        // 播放指定时长后暂停
+        if (videoTimer) clearTimeout(videoTimer);
+        const dur = (duration || 5) * 1000;
+        videoTimer = setTimeout(() => { video.pause(); }, dur);
+      });
+
+      listen('video-preview-clear', () => {
+        if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        video.classList.remove('loaded', 'active');
+        // 同时清理图片状态
+        img.classList.remove('loaded');
+        img.removeAttribute('src');
+        clearBadge();
+        stopRectAnimation();
+        currentRect.width = 0;
+        currentRect.height = 0;
+        currentRect.top = 0;
+        targetRect.width = 0;
+        targetRect.height = 0;
+        targetRect.top = 0;
+        applyRect(currentRect);
+      });
+
       listen('image-preview-update', (event) => {
         const { imagePath, width, height, offsetY, align } = event.payload;
+        // 隐藏视频，显示图片
+        if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        video.classList.remove('loaded', 'active');
         img.classList.remove('loaded');
         clearBadge();
         document.body.className = align === 'right' ? 'align-right' : '';
@@ -152,6 +210,11 @@
       });
 
       listen('image-preview-clear', () => {
+        if (videoTimer) { clearTimeout(videoTimer); videoTimer = null; }
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        video.classList.remove('loaded', 'active');
         img.classList.remove('loaded');
         img.removeAttribute('src');
         clearBadge();

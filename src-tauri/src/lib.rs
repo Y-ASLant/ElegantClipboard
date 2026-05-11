@@ -968,6 +968,7 @@ pub fn run() {
             commands::window::close_window,
             commands::preview::open_settings_window,
             commands::preview::show_image_preview,
+            commands::preview::show_video_preview,
             commands::preview::hide_image_preview,
             commands::preview::show_text_preview,
             commands::preview::hide_text_preview,

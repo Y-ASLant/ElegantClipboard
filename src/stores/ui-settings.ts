@@ -9,7 +9,6 @@ export type DarkMode = "light" | "dark" | "auto";
 export type CardDensity = "compact" | "standard" | "spacious";
 export type TimeFormat = "relative" | "absolute";
 export type WindowEffect = "none" | "mica" | "acrylic" | "tabbed";
-export type SoundTiming = "immediate" | "after_success";
 export type ToolbarButton = "clear" | "pin" | "batch" | "settings";
 
 export const DEFAULT_TOOLBAR_BUTTONS: ToolbarButton[] = ["clear", "batch", "pin", "settings"];
@@ -24,6 +23,8 @@ interface UISettings {
   sourceAppDisplay: "both" | "name" | "icon";
   imagePreviewEnabled: boolean;
   textPreviewEnabled: boolean;
+  videoPreviewEnabled: boolean;
+  videoPreviewDuration: number;
   previewUnboundedMode: boolean;
   previewZoomStep: number;
   previewPosition: "auto" | "left" | "right";
@@ -41,10 +42,6 @@ interface UISettings {
   cardDensity: CardDensity;
   timeFormat: TimeFormat;
   hoverPreviewDelay: number;
-  copySound: boolean;
-  copySoundTiming: SoundTiming;
-  pasteSound: boolean;
-  pasteSoundTiming: SoundTiming;
   pasteCloseWindow: boolean;
   pasteMoveToTop: boolean;
   showCategoryFilter: boolean;
@@ -69,6 +66,8 @@ interface UISettings {
   setSourceAppDisplay: (mode: "both" | "name" | "icon") => void;
   setImagePreviewEnabled: (enabled: boolean) => void;
   setTextPreviewEnabled: (enabled: boolean) => void;
+  setVideoPreviewEnabled: (enabled: boolean) => void;
+  setVideoPreviewDuration: (duration: number) => void;
   setPreviewUnboundedMode: (enabled: boolean) => void;
   setPreviewZoomStep: (step: number) => void;
   setPreviewPosition: (pos: "auto" | "left" | "right") => void;
@@ -85,10 +84,6 @@ interface UISettings {
   setCardDensity: (density: CardDensity) => void;
   setTimeFormat: (format: TimeFormat) => void;
   setHoverPreviewDelay: (delay: number) => void;
-  setCopySound: (enabled: boolean) => void;
-  setCopySoundTiming: (timing: SoundTiming) => void;
-  setPasteSound: (enabled: boolean) => void;
-  setPasteSoundTiming: (timing: SoundTiming) => void;
   setPasteCloseWindow: (enabled: boolean) => void;
   setPasteMoveToTop: (enabled: boolean) => void;
   setShowCategoryFilter: (enabled: boolean) => void;
@@ -118,6 +113,29 @@ const broadcastChange = (state: Partial<UISettings>) => {
   });
 };
 
+// camelCase → snake_case 转换
+const toSnakeCase = (s: string) => s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+
+// 需要同步到数据库的 makeSetter key（排除有独立 setter 的项）
+const SYNCED_UI_KEYS: (keyof UISettings)[] = [
+  "cardMaxLines", "showTime", "showCharCount", "showByteSize",
+  "showSourceApp", "sourceAppDisplay",
+  "imagePreviewEnabled", "textPreviewEnabled",
+  "videoPreviewEnabled", "videoPreviewDuration",
+  "previewUnboundedMode", "previewZoomStep", "previewPosition",
+  "imageAutoHeight", "imageMaxHeight", "showImageFileName",
+  "colorTheme", "sharpCorners", "autoResetState",
+  "searchAutoFocus", "searchAutoClear",
+  "darkMode", "cardDensity", "timeFormat", "hoverPreviewDelay",
+  "pasteCloseWindow", "pasteMoveToTop",
+  "showCategoryFilter", "showDragAreaIndicator", "windowAnimation",
+  "toolbarButtons",
+  "customFont", "uiFontSize", "cardFont", "cardFontSize",
+  "previewFont", "previewFontSize",
+];
+
+const syncedKeySet = new Set<string>(SYNCED_UI_KEYS);
+
 export const useUISettings = create<UISettings>()(
   persist(
     (set, get) => {
@@ -126,6 +144,14 @@ export const useUISettings = create<UISettings>()(
         (value: UISettings[K]) => {
           set({ [key]: value } as unknown as Partial<UISettings>);
           broadcastChange({ [key]: value } as unknown as Partial<UISettings>);
+          // 同步到数据库（供云端备份）
+          if (syncedKeySet.has(key)) {
+            const dbKey = `ui_${toSnakeCase(key)}`;
+            const dbVal = typeof value === "object" ? JSON.stringify(value) : String(value);
+            invoke("set_setting", { key: dbKey, value: dbVal }).catch((e) =>
+              logError(`Failed to persist ${dbKey}:`, e),
+            );
+          }
         };
 
       return {
@@ -137,6 +163,8 @@ export const useUISettings = create<UISettings>()(
         sourceAppDisplay: "both" as "both" | "name" | "icon",
         imagePreviewEnabled: false,
         textPreviewEnabled: false,
+        videoPreviewEnabled: false,
+        videoPreviewDuration: 5,
         previewUnboundedMode: false,
         previewZoomStep: 15,
         previewPosition: "auto" as "auto" | "left" | "right",
@@ -153,10 +181,6 @@ export const useUISettings = create<UISettings>()(
         cardDensity: "standard" as CardDensity,
         timeFormat: "absolute" as TimeFormat,
         hoverPreviewDelay: 500,
-        copySound: false,
-        copySoundTiming: "immediate" as SoundTiming,
-        pasteSound: false,
-        pasteSoundTiming: "immediate" as SoundTiming,
         pasteCloseWindow: true,
         pasteMoveToTop: false,
         showCategoryFilter: true,
@@ -182,6 +206,8 @@ export const useUISettings = create<UISettings>()(
         setSourceAppDisplay: makeSetter("sourceAppDisplay"),
         setImagePreviewEnabled: makeSetter("imagePreviewEnabled"),
         setTextPreviewEnabled: makeSetter("textPreviewEnabled"),
+        setVideoPreviewEnabled: makeSetter("videoPreviewEnabled"),
+        setVideoPreviewDuration: makeSetter("videoPreviewDuration"),
         setPreviewUnboundedMode: makeSetter("previewUnboundedMode"),
         setPreviewZoomStep: makeSetter("previewZoomStep"),
         setPreviewPosition: makeSetter("previewPosition"),
@@ -197,10 +223,6 @@ export const useUISettings = create<UISettings>()(
         setCardDensity: makeSetter("cardDensity"),
         setTimeFormat: makeSetter("timeFormat"),
         setHoverPreviewDelay: makeSetter("hoverPreviewDelay"),
-        setCopySound: makeSetter("copySound"),
-        setCopySoundTiming: makeSetter("copySoundTiming"),
-        setPasteSound: makeSetter("pasteSound"),
-        setPasteSoundTiming: makeSetter("pasteSoundTiming"),
         setPasteCloseWindow: makeSetter("pasteCloseWindow"),
         setPasteMoveToTop: makeSetter("pasteMoveToTop"),
         setShowCategoryFilter: makeSetter("showCategoryFilter"),
@@ -325,15 +347,16 @@ export function cleanupUISettingsListener() {
 // 从后端数据库加载需同步的设置（用于启动初始化和云端同步下载后刷新）
 export async function loadSyncedSettings() {
   try {
-    const keys = ["hide_favorited_from_main", "hide_tagged_from_main", "monitor_types"];
-    const values = await Promise.all(
-      keys.map((key) => invoke<string | null>("get_setting", { key }))
+    // 1. 加载原有的独立设置
+    const legacyKeys = ["hide_favorited_from_main", "hide_tagged_from_main", "monitor_types"];
+    const legacyValues = await Promise.all(
+      legacyKeys.map((key) => invoke<string | null>("get_setting", { key }))
     );
     const patch: Record<string, unknown> = {};
-    if (values[0] !== null && values[0] !== undefined) patch.hideFavoritedFromMain = values[0] === "true";
-    if (values[1] !== null && values[1] !== undefined) patch.hideTaggedFromMain = values[1] === "true";
-    if (values[2] && (values[2] as string).length > 0) {
-      const rawSet = new Set((values[2] as string).split(",").map((t) => t.trim()).filter(Boolean));
+    if (legacyValues[0] !== null && legacyValues[0] !== undefined) patch.hideFavoritedFromMain = legacyValues[0] === "true";
+    if (legacyValues[1] !== null && legacyValues[1] !== undefined) patch.hideTaggedFromMain = legacyValues[1] === "true";
+    if (legacyValues[2] && (legacyValues[2] as string).length > 0) {
+      const rawSet = new Set((legacyValues[2] as string).split(",").map((t) => t.trim()).filter(Boolean));
       const uiTypes: string[] = [];
       if (rawSet.has("text") || rawSet.has("html") || rawSet.has("rtf")) uiTypes.push("text");
       if (rawSet.has("image")) uiTypes.push("image");
@@ -341,6 +364,31 @@ export async function loadSyncedSettings() {
       if (rawSet.has("video")) uiTypes.push("video");
       if (uiTypes.length > 0) patch.enabledMonitorTypes = uiTypes;
     }
+
+    // 2. 加载 makeSetter 同步的 UI 设置
+    const dbKeys = SYNCED_UI_KEYS.map((k) => `ui_${toSnakeCase(k)}`);
+    const dbValues = await Promise.all(
+      dbKeys.map((key) => invoke<string | null>("get_setting", { key }))
+    );
+    const defaults = useUISettings.getState();
+    for (let i = 0; i < SYNCED_UI_KEYS.length; i++) {
+      const raw = dbValues[i];
+      if (raw === null || raw === undefined) continue;
+      const uiKey = SYNCED_UI_KEYS[i];
+      const defVal = defaults[uiKey];
+      // 按默认值类型还原
+      if (typeof defVal === "boolean") {
+        patch[uiKey] = raw === "true";
+      } else if (typeof defVal === "number") {
+        const n = Number(raw);
+        if (!Number.isNaN(n)) patch[uiKey] = n;
+      } else if (Array.isArray(defVal)) {
+        try { patch[uiKey] = JSON.parse(raw); } catch { /* skip */ }
+      } else {
+        patch[uiKey] = raw;
+      }
+    }
+
     if (Object.keys(patch).length > 0) {
       useUISettings.setState(patch);
       broadcastChange(patch as Partial<UISettings>);

@@ -135,6 +135,8 @@ export function DisplayTab() {
     showImageFileName, setShowImageFileName,
     imagePreviewEnabled, setImagePreviewEnabled,
     textPreviewEnabled, setTextPreviewEnabled,
+    videoPreviewEnabled, setVideoPreviewEnabled,
+    videoPreviewDuration, setVideoPreviewDuration,
     previewUnboundedMode, setPreviewUnboundedMode,
     previewZoomStep, setPreviewZoomStep,
     previewPosition, setPreviewPosition,
@@ -151,7 +153,7 @@ export function DisplayTab() {
     hideFavoritedFromMain, setHideFavoritedFromMain,
     hideTaggedFromMain, setHideTaggedFromMain,
   } = useUISettings();
-  const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled;
+  const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled || videoPreviewEnabled;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 3 } })
@@ -344,7 +346,7 @@ export function DisplayTab() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">图片悬浮预览</Label>
-              <p className="text-xs text-muted-foreground">悬停后弹出图片预览窗口，支持 Ctrl+滚轮缩放</p>
+              <p className="text-xs text-muted-foreground">悬停后弹出图片预览窗口，支持 Ctrl+滚轮缩放预览</p>
             </div>
             <Switch checked={imagePreviewEnabled} onCheckedChange={setImagePreviewEnabled} />
           </div>
@@ -352,10 +354,39 @@ export function DisplayTab() {
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <Label className="text-xs">文本悬浮预览</Label>
-              <p className="text-xs text-muted-foreground">悬停后弹出文本预览窗口，支持 Ctrl+滚轮滚动预览，默认关闭</p>
+              <p className="text-xs text-muted-foreground">悬停后弹出文本预览窗口，支持 Ctrl+滚轮滚动预览</p>
             </div>
             <Switch checked={textPreviewEnabled} onCheckedChange={setTextPreviewEnabled} />
           </div>
+
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label className="text-xs">视频悬浮预览</Label>
+              <p className="text-xs text-muted-foreground">悬停后弹出视频预览窗口，自动播放几秒预览</p>
+            </div>
+            <Switch checked={videoPreviewEnabled} onCheckedChange={setVideoPreviewEnabled} />
+          </div>
+
+          {videoPreviewEnabled && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">预览播放时长</Label>
+                <span className="text-xs font-medium tabular-nums">
+                  {videoPreviewDuration} 秒
+                </span>
+              </div>
+              <Slider
+                value={[videoPreviewDuration]}
+                onValueChange={(value) => setVideoPreviewDuration(value[0])}
+                min={2}
+                max={15}
+                step={1}
+              />
+              <p className="text-xs text-muted-foreground">
+                悬浮预览时视频自动播放的时长
+              </p>
+            </div>
+          )}
 
           {imagePreviewEnabled && (
             <>
