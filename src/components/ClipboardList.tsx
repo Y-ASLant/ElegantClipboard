@@ -12,7 +12,8 @@ import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { Separator } from "@/components/ui/separator";
 import { focusWindowImmediately } from "@/hooks/useInputFocus";
 import { useSortableList } from "@/hooks/useSortableList";
-import { GROUPS } from "@/lib/constants";
+import { useI18n } from "@/i18n";
+import { getGroups } from "@/lib/constants";
 import { logError } from "@/lib/logger";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
@@ -68,6 +69,8 @@ const VIRTUOSO_SCROLL_SEEK_CONFIG = {
 const VIRTUOSO_COMPONENTS = { ScrollSeekPlaceholder } as const;
 
 export function ClipboardList({ searchInputRef }: ClipboardListProps) {
+  const { t } = useI18n();
+  const groupsConfig = useMemo(() => getGroups(), [t]);
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -315,16 +318,16 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
           if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
-          const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
-          if (curIdx > 0) setSelectedGroup(GROUPS[curIdx - 1].value);
+          const curIdx = groupsConfig.findIndex((g) => g.value === selectedGroup);
+          if (curIdx > 0) setSelectedGroup(groupsConfig[curIdx - 1].value);
           break;
         }
         case "ArrowRight": {
           if (!useUISettings.getState().showCategoryFilter) break;
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           const { selectedGroup, setSelectedGroup } = useClipboardStore.getState();
-          const curIdx = GROUPS.findIndex((g) => g.value === selectedGroup);
-          if (curIdx < GROUPS.length - 1) setSelectedGroup(GROUPS[curIdx + 1].value);
+          const curIdx = groupsConfig.findIndex((g) => g.value === selectedGroup);
+          if (curIdx < groupsConfig.length - 1) setSelectedGroup(groupsConfig[curIdx + 1].value);
           break;
         }
         case "ArrowUp": {
@@ -476,7 +479,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       <div className="flex-1 flex items-center justify-center h-full">
         <div className="text-center space-y-3">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-sm text-muted-foreground">加载中...</p>
+          <p className="text-sm text-muted-foreground">{t("加载中...")}</p>
         </div>
       </div>
     );
@@ -491,14 +494,14 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
             <Search16Regular className="w-8 h-8 text-muted-foreground" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium">未找到匹配的内容</p>
-            <p className="text-sm text-muted-foreground">试试其他关键词</p>
+             <p className="text-sm font-medium">{t("未找到匹配的内容")}</p>
+             <p className="text-sm text-muted-foreground">{t("试试其他关键词")}</p>
           </div>
           <button
             onClick={() => useClipboardStore.getState().resetView()}
             className="text-xs text-primary hover:text-primary/80 hover:underline transition-colors"
           >
-            清除筛选
+             {t("清除筛选")}
           </button>
         </div>
       </div>
@@ -513,10 +516,10 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
             <ClipboardMultiple16Regular className="w-8 h-8 text-muted-foreground" />
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium">暂无剪贴板历史</p>
-            <p className="text-sm text-muted-foreground">
-              复制任意内容开始记录
-            </p>
+             <p className="text-sm font-medium">{t("暂无剪贴板历史")}</p>
+             <p className="text-sm text-muted-foreground">
+              {t("复制任意内容开始记录")}
+             </p>
           </div>
         </div>
       </div>

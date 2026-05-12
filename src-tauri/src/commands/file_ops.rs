@@ -143,7 +143,10 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
     let dest = app
         .dialog()
         .file()
-        .set_title("另存为")
+        .set_title(crate::i18n::tr(
+            crate::i18n::current_language(&crate::database::SettingsRepository::new(&app.state::<std::sync::Arc<super::AppState>>().db)),
+            "另存为",
+        ))
         .set_file_name(&file_name)
         .blocking_save_file();
 

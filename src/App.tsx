@@ -31,7 +31,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useInputFocus, focusWindowImmediately } from "@/hooks/useInputFocus";
-import { GROUPS } from "@/lib/constants";
+import { useI18n } from "@/i18n";
+import { getGroups } from "@/lib/constants";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,8 @@ function dismissOverlays(): boolean {
 }
 
 function App() {
+  const { t } = useI18n();
+  const groupsConfig = useMemo(() => getGroups(), [t]);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   // 分组对话框状态
@@ -146,12 +149,12 @@ function App() {
 
   // 更新滑动指示器（始终跟踪类型筛选，与分组无关）
   const updateIndicator = useCallback(() => {
-    const idx = GROUPS.findIndex((g) => g.value === selectedGroup);
+    const idx = groupsConfig.findIndex((g) => g.value === selectedGroup);
     const el = segmentRefs.current[idx];
     if (el) {
       setSegmentIndicator({ left: el.offsetLeft, width: el.offsetWidth });
     }
-  }, [selectedGroup]);
+  }, [groupsConfig, selectedGroup]);
 
   // 选中项变化时立即更新
   useLayoutEffect(updateIndicator, [updateIndicator]);
@@ -337,16 +340,16 @@ function App() {
 
   const clearScopeText = useMemo(() => {
     if (selectedGroup === "text,html,rtf") {
-      return "确定要清空当前分组内所有文本历史记录吗？此操作不可撤销。";
+      return t("确定要清空当前分组内所有文本历史记录吗？此操作不可撤销。");
     }
     if (selectedGroup === "image,files") {
-      return "确定要清空当前分组内所有其它历史记录吗？此操作不可撤销。";
+      return t("确定要清空当前分组内所有其它历史记录吗？此操作不可撤销。");
     }
     if (selectedGroup === "__favorites__") {
-      return "收藏视图下不支持清空操作。收藏项受保护，请在设置中使用“删除所有数据”进行全量删除。";
+      return t("收藏视图下不支持清空操作。收藏项受保护，请在设置中使用“删除所有数据”进行全量删除。");
     }
-    return "确定要清空当前分组内所有非置顶、非收藏的历史记录吗？此操作不可撤销。";
-  }, [selectedGroup]);
+    return t("确定要清空当前分组内所有非置顶、非收藏的历史记录吗？此操作不可撤销。");
+  }, [selectedGroup, t]);
 
   const handleClearHistory = async () => {
     if (selectedGroup === "__favorites__") {
@@ -388,7 +391,7 @@ function App() {
                 <Delete16Regular className="w-4 h-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>清空历史</TooltipContent>
+            <TooltipContent>{t("清空历史")}</TooltipContent>
           </Tooltip>
         );
       case "pin":
@@ -410,7 +413,7 @@ function App() {
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>{isPinned ? "解除锁定" : "锁定窗口"}</TooltipContent>
+            <TooltipContent>{isPinned ? t("解除锁定") : t("锁定窗口")}</TooltipContent>
           </Tooltip>
         );
       case "batch":
@@ -428,7 +431,7 @@ function App() {
                 <MultiselectLtr16Regular className="w-4 h-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>{batchMode ? "退出批量选择" : "批量选择"}</TooltipContent>
+            <TooltipContent>{batchMode ? t("退出批量选择") : t("批量选择")}</TooltipContent>
           </Tooltip>
         );
       case "settings":
@@ -442,7 +445,7 @@ function App() {
                 <Settings16Regular className="w-4 h-4" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>设置</TooltipContent>
+            <TooltipContent>{t("设置")}</TooltipContent>
           </Tooltip>
         );
       default:
@@ -463,7 +466,7 @@ function App() {
           <Input
             ref={inputRef}
             type="text"
-            placeholder="搜索剪贴板..."
+            placeholder={t("搜索剪贴板...")}
             value={searchQuery}
             onChange={handleSearchChange}
             className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-8")}
@@ -493,8 +496,8 @@ function App() {
       {batchMode && (
         <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-primary/5 border-b border-primary/20">
           <span className="text-xs text-muted-foreground">
-            已选择 <span className="font-medium text-foreground">{selectedIds.size}</span> 项
-            <span className="ml-1.5 text-muted-foreground/60">Shift 连选</span>
+            {t("已选择 {count} 项", { count: selectedIds.size })}
+            <span className="ml-1.5 text-muted-foreground/60">{t("Shift 连选")}</span>
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -509,20 +512,20 @@ function App() {
               disabled={selectedIds.size < 2}
               className="text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              合并粘贴
+              {t("合并粘贴")}
             </button>
             <button
               onClick={() => setBatchDeleteDialogOpen(true)}
               disabled={selectedIds.size === 0}
               className="text-xs px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              删除
+              {t("删除")}
             </button>
             <button
               onClick={() => setBatchMode(false)}
               className="text-xs px-2 py-1 rounded hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
             >
-              取消
+              {t("取消")}
             </button>
           </div>
         </div>
@@ -552,7 +555,7 @@ function App() {
             />
 
             {/* 类型 tabs */}
-            {GROUPS.map((g, i) => (
+            {groupsConfig.map((g, i) => (
               <button
                 key={g.label}
                 ref={(el) => { segmentRefs.current[i] = el; }}
@@ -579,8 +582,8 @@ function App() {
               >
                 <span className="max-w-[80px] truncate">
                   {selectedGroupId === null
-                    ? '默认'
-                    : (groups.find((g) => g.id === selectedGroupId)?.name ?? '默认')}
+                    ? t("默认")
+                    : (groups.find((g) => g.id === selectedGroupId)?.name ?? t("默认"))}
                 </span>
                 <ChevronDown16Regular
                   className={cn("w-3 h-3 transition-transform duration-150", groupDropdownOpen && "-rotate-180")}
@@ -598,7 +601,7 @@ function App() {
                       selectedGroupId === null && "bg-accent/50 text-foreground"
                     )}
                   >
-                    <span>默认</span>
+                    <span>{t("默认")}</span>
                   </div>
 
                   {/* 自定义分组列表 */}
@@ -645,7 +648,7 @@ function App() {
                     className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs cursor-default hover:bg-accent hover:text-accent-foreground"
                   >
                     <Add16Regular className="w-3.5 h-3.5" />
-                    新建分组
+                    {t("新建分组")}
                   </div>
                 </div>
               )}
@@ -658,14 +661,14 @@ function App() {
       <Dialog open={batchDeleteDialogOpen} onOpenChange={setBatchDeleteDialogOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader className="text-left">
-            <DialogTitle>批量删除</DialogTitle>
+            <DialogTitle>{t("批量删除")}</DialogTitle>
             <DialogDescription className="text-left">
-              确定要删除选中的 {selectedIds.size} 条记录吗？此操作不可撤销。
+              {t("确定要删除选中的 {count} 条记录吗？此操作不可撤销。", { count: selectedIds.size })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBatchDeleteDialogOpen(false)}>
-              取消
+              {t("取消")}
             </Button>
             <Button
               variant="destructive"
@@ -674,7 +677,7 @@ function App() {
                 await batchDelete();
               }}
             >
-              删除
+              {t("删除")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -684,21 +687,21 @@ function App() {
       <Dialog open={clearDialogOpen} onOpenChange={setClearDialogOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader className="text-left">
-            <DialogTitle>清空历史记录</DialogTitle>
+            <DialogTitle>{t("清空历史记录")}</DialogTitle>
             <DialogDescription className="text-left">
               {clearScopeText}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setClearDialogOpen(false)}>
-              取消
+              {t("取消")}
             </Button>
             <Button
               variant="destructive"
               onClick={handleClearHistory}
               disabled={selectedGroup === "__favorites__"}
             >
-              清空
+              {t("清空")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -711,18 +714,18 @@ function App() {
       }}>
         <DialogContent showCloseButton={false}>
           <DialogHeader className="text-left">
-            <DialogTitle>新建分组</DialogTitle>
+            <DialogTitle>{t("新建分组")}</DialogTitle>
           </DialogHeader>
           <Input
             ref={createInputRef}
-            placeholder="分组名称"
+            placeholder={t("分组名称")}
             value={createName}
             onChange={(e) => setCreateName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleCreateGroup(); }}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>取消</Button>
-            <Button onClick={handleCreateGroup} disabled={!createName.trim()}>创建</Button>
+            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>{t("取消")}</Button>
+            <Button onClick={handleCreateGroup} disabled={!createName.trim()}>{t("创建")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -734,18 +737,18 @@ function App() {
       }}>
         <DialogContent showCloseButton={false}>
           <DialogHeader className="text-left">
-            <DialogTitle>编辑分组</DialogTitle>
+            <DialogTitle>{t("编辑分组")}</DialogTitle>
           </DialogHeader>
           <Input
             ref={renameInputRef}
-            placeholder="分组名称"
+            placeholder={t("分组名称")}
             value={renameName}
             onChange={(e) => setRenameName(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') handleRenameGroup(); }}
           />
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>取消</Button>
-            <Button onClick={handleRenameGroup} disabled={!renameName.trim()}>确定</Button>
+            <Button variant="outline" onClick={() => setRenameDialogOpen(false)}>{t("取消")}</Button>
+            <Button onClick={handleRenameGroup} disabled={!renameName.trim()}>{t("确定")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -757,23 +760,25 @@ function App() {
       }}>
         <DialogContent showCloseButton={false}>
           <DialogHeader className="text-left">
-            <DialogTitle>删除分组</DialogTitle>
+            <DialogTitle>{t("删除分组")}</DialogTitle>
             <DialogDescription className="text-left">
-              确定要删除分组“{deleteGroupTarget?.name ?? ""}”吗？该分组下的所有剪贴板记录将被同时删除（不可撤销）。
+              {t("确定要删除分组“{name}”吗？该分组下的所有剪贴板记录将被同时删除（不可撤销）。", {
+                name: deleteGroupTarget?.name ?? "",
+              })}
               {typeof deleteGroupTarget?.item_count === "number" && (
                 <>
                   <br />
-                  当前分组条目数：{deleteGroupTarget.item_count}
+                  {t("当前分组条目数：{count}", { count: deleteGroupTarget.item_count })}
                 </>
               )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteGroupDialogOpen(false)}>
-              取消
+              {t("取消")}
             </Button>
             <Button variant="destructive" onClick={confirmDeleteGroup} disabled={!deleteGroupTarget}>
-              删除
+              {t("删除")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -783,4 +788,3 @@ function App() {
 }
 
 export default App;
-

@@ -1,4 +1,6 @@
 use crate::commands::AppState;
+use crate::database::SettingsRepository;
+use crate::i18n::{current_language, tr};
 use std::sync::Arc;
 use tauri::{
     AppHandle, Manager,
@@ -8,6 +10,17 @@ use tauri::{
 };
 use tracing::info;
 
+#[derive(Clone)]
+struct TrayHandles {
+    pause_item: MenuItem,
+    shortcut_item: MenuItem,
+    settings_item: MenuItem,
+    restart_item: MenuItem,
+    quit_item: MenuItem,
+}
+
+static TRAY_HANDLES: std::sync::OnceLock<TrayHandles> = std::sync::OnceLock::new();
+
 /// 初始化系统托盘图标和菜单
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon_data = include_bytes!("../../icons/icon.png");
@@ -16,14 +29,15 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let (width, height) = rgba.dimensions();
     let icon = Image::new_owned(rgba.into_raw(), width, height);
 
-    let pause_item = MenuItem::with_id(app, "toggle_pause", "暂停监控", true, None::<&str>)?;
+    let language = current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db));
+    let pause_item = MenuItem::with_id(app, "toggle_pause", tr(language, "暂停监控"), true, None::<&str>)?;
     let shortcut_item =
-        MenuItem::with_id(app, "toggle_shortcuts", "禁用快捷键", true, None::<&str>)?;
+        MenuItem::with_id(app, "toggle_shortcuts", tr(language, "禁用快捷键"), true, None::<&str>)?;
     let separator1 = PredefinedMenuItem::separator(app)?;
-    let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
-    let restart_item = MenuItem::with_id(app, "restart", "重启程序", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings", tr(language, "设置"), true, None::<&str>)?;
+    let restart_item = MenuItem::with_id(app, "restart", tr(language, "重启程序"), true, None::<&str>)?;
     let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", tr(language, "退出程序"), true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
@@ -49,14 +63,15 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 "toggle_pause" => {
                     if let Some(state) = app.try_state::<Arc<AppState>>() {
                         let paused = state.monitor.toggle_user_pause();
+                        let current_language = current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db));
                         let _ = pause_item.set_text(if paused {
-                            "恢复监控"
+                            tr(current_language, "恢复监控")
                         } else {
-                            "暂停监控"
+                            tr(current_language, "暂停监控")
                         });
                         if let Some(tray) = app.tray_by_id("main-tray") {
                             let tip = if paused {
-                                "ElegantClipboard (已暂停)"
+                                tr(current_language, "ElegantClipboard (已暂停)")
                             } else {
                                 "ElegantClipboard"
                             };
@@ -66,10 +81,11 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 "toggle_shortcuts" => {
                     let disabled = crate::toggle_shortcuts_disabled(app);
+                    let current_language = current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db));
                     let _ = shortcut_item.set_text(if disabled {
-                        "恢复快捷键"
+                        tr(current_language, "恢复快捷键")
                     } else {
-                        "禁用快捷键"
+                        tr(current_language, "禁用快捷键")
                     });
                 }
                 _ => handle_menu_event(app, id),
@@ -95,8 +111,47 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
+    let _ = TRAY_HANDLES.set(TrayHandles {
+        pause_item,
+        shortcut_item,
+        settings_item,
+        restart_item,
+        quit_item,
+    });
     info!("System tray initialized");
     Ok(())
+}
+
+pub fn refresh_language(app: &AppHandle) {
+    let Some(handles) = TRAY_HANDLES.get() else {
+        return;
+    };
+    let language = current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db));
+    let paused = app
+        .try_state::<Arc<AppState>>()
+        .map(|state| state.monitor.is_paused())
+        .unwrap_or(false);
+    let _ = handles.pause_item.set_text(if paused {
+        tr(language, "恢复监控")
+    } else {
+        tr(language, "暂停监控")
+    });
+    let _ = handles.shortcut_item.set_text(if crate::shortcuts_disabled() {
+        tr(language, "恢复快捷键")
+    } else {
+        tr(language, "禁用快捷键")
+    });
+    let _ = handles.settings_item.set_text(tr(language, "设置"));
+    let _ = handles.restart_item.set_text(tr(language, "重启程序"));
+    let _ = handles.quit_item.set_text(tr(language, "退出程序"));
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let tooltip = if paused {
+            tr(language, "ElegantClipboard (已暂停)")
+        } else {
+            "ElegantClipboard"
+        };
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
 }
 
 /// 处理托盘菜单事件
@@ -138,7 +193,10 @@ pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         "settings",
         tauri::WebviewUrl::App("/settings".into()),
     )
-    .title("设置")
+    .title(tr(
+        current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db)),
+        "设置",
+    ))
     .inner_size(800.0, 560.0)
     .min_inner_size(580.0, 480.0)
     .decorations(false)

@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod database;
 mod input_monitor;
+mod i18n;
 mod keyboard_hook;
 mod positioning;
 mod shortcut;
@@ -52,6 +53,10 @@ static PASTE_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// 快捷键是否已被用户临时禁用（Win+V 除外）
 static SHORTCUTS_DISABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn shortcuts_disabled() -> bool {
+    SHORTCUTS_DISABLED.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 #[derive(Clone, Copy)]
 enum PasteKind {
@@ -254,7 +259,13 @@ fn apply_paste_shortcuts(
             None => {
                 failures.insert(
                     slot,
-                    format!("{} {} 快捷键格式无效: {}", label, slot, normalized),
+                    format!(
+                        "{} {} {}: {}",
+                        crate::i18n::tr(crate::i18n::Language::ZhCn, label),
+                        slot,
+                        crate::i18n::tr(crate::i18n::Language::ZhCn, "快捷键格式无效"),
+                        normalized
+                    ),
                 );
                 continue;
             }

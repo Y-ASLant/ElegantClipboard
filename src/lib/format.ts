@@ -1,12 +1,16 @@
 // 剪贴板条目格式化与解析工具
 
-export const contentTypeConfig: Record<string, { label: string }> = {
-  text: { label: "文本" },
-  html: { label: "HTML" },
-  rtf: { label: "RTF" },
-  image: { label: "图片" },
-  files: { label: "文件" },
-};
+import { getCurrentLocale, translate } from "@/i18n";
+
+export function getContentTypeConfig(): Record<string, { label: string }> {
+  return {
+    text: { label: translate("文本") },
+    html: { label: "HTML" },
+    rtf: { label: "RTF" },
+    image: { label: translate("图片") },
+    files: { label: translate("文件") },
+  };
+}
 
 export function formatTime(dateStr: string, format: "absolute" | "relative" = "absolute"): string {
   const date = new Date(dateStr);
@@ -19,38 +23,41 @@ export function formatTime(dateStr: string, format: "absolute" | "relative" = "a
   const minutes = date.getMinutes().toString().padStart(2, "0");
   const time = `${hours}:${minutes}`;
 
-  if (isToday) return `今天 ${time}`;
+  if (isToday) return translate("今天 {time}", { time });
 
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
-  if (date.toDateString() === yesterday.toDateString()) return `昨天 ${time}`;
+  if (date.toDateString() === yesterday.toDateString()) return translate("昨天 {time}", { time });
 
   const month = (date.getMonth() + 1).toString().padStart(2, "0");
   const day = date.getDate().toString().padStart(2, "0");
-  return `${month}-${day} ${time}`;
+  const locale = getCurrentLocale();
+  return locale === "en-US"
+    ? `${month}/${day} ${time}`
+    : `${month}-${day} ${time}`;
 }
 
 function formatRelativeTime(date: Date): string {
   const now = Date.now();
   const diffMs = now - date.getTime();
   const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return "刚刚";
+  if (diffSec < 60) return translate("刚刚");
   const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin} 分钟前`;
+  if (diffMin < 60) return translate("{count} 分钟前", { count: diffMin });
   const diffHour = Math.floor(diffMin / 60);
-  if (diffHour < 24) return `${diffHour} 小时前`;
+  if (diffHour < 24) return translate("{count} 小时前", { count: diffHour });
   const diffDay = Math.floor(diffHour / 24);
-  if (diffDay < 30) return `${diffDay} 天前`;
+  if (diffDay < 30) return translate("{count} 天前", { count: diffDay });
   const diffMonth = Math.floor(diffDay / 30);
-  if (diffMonth < 12) return `${diffMonth} 个月前`;
-  return `${Math.floor(diffMonth / 12)} 年前`;
+  if (diffMonth < 12) return translate("{count} 个月前", { count: diffMonth });
+  return translate("{count} 年前", { count: Math.floor(diffMonth / 12) });
 }
 
 export function formatCharCount(count: number | null): string {
-  if (!count) return "0 字符";
+  if (!count) return translate("0 字符");
   return count >= 10000
-    ? `${(count / 10000).toFixed(1)}万 字符`
-    : `${count.toLocaleString()} 字符`;
+    ? translate("{count}万 字符", { count: (count / 10000).toFixed(1) })
+    : translate("{count} 字符", { count: count.toLocaleString() });
 }
 
 export function formatSize(bytes: number): string {

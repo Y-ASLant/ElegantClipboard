@@ -28,6 +28,7 @@ import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
+import { useI18n } from "@/i18n";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
@@ -42,22 +43,8 @@ function normalizePositionMode(raw: string | null | undefined): import("@/compon
 
 type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "about";
 
-const navItems: {
-  id: TabType;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { id: "general", label: "常规设置", icon: Options16Regular },
-  { id: "display", label: "显示设置", icon: LayoutColumnTwo16Regular },
-  { id: "theme", label: "外观主题", icon: Color16Regular },
-  { id: "data", label: "数据管理", icon: Database16Regular },
-  { id: "appfilter", label: "监听过滤", icon: Filter16Regular },
-  { id: "audio", label: "音效设置", icon: Speaker216Regular },
-  { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
-  { id: "about", label: "关于软件", icon: Info16Regular },
-];
-
 export function Settings() {
+  const { t } = useI18n();
   const [activeTab, setActiveTab] = useState<TabType>("general");
   
   const [settings, setSettings] = useState<AppSettings>({
@@ -80,6 +67,20 @@ export function Settings() {
   const [themeReady, setThemeReady] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const navItems: {
+    id: TabType;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    { id: "general", label: t("常规设置"), icon: Options16Regular },
+    { id: "display", label: t("显示设置"), icon: LayoutColumnTwo16Regular },
+    { id: "theme", label: t("外观主题"), icon: Color16Regular },
+    { id: "data", label: t("数据管理"), icon: Database16Regular },
+    { id: "appfilter", label: t("监听过滤"), icon: Filter16Regular },
+    { id: "audio", label: t("音效设置"), icon: Speaker216Regular },
+    { id: "shortcuts", label: t("快捷按键"), icon: Keyboard16Regular },
+    { id: "about", label: t("关于软件"), icon: Info16Regular },
+  ];
 
   useEffect(() => {
     invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
@@ -236,7 +237,7 @@ export function Settings() {
     >
       <WindowTitleBar
         icon={<Settings16Regular className="w-5 h-5 text-muted-foreground" />}
-        title="设置"
+        title={t("设置")}
       />
 
       {/* Main Content */}
@@ -268,7 +269,7 @@ export function Settings() {
               <div className="pt-2 mt-2 border-t px-2 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-muted-foreground">
-                    版本号
+                      {t("版本号")}
                   </span>
                   <span className="text-[11px] font-medium text-primary">
                     v{appVersion}
@@ -279,7 +280,7 @@ export function Settings() {
                   className="flex items-center justify-between w-full group"
                 >
                   <span className="text-[11px] text-muted-foreground">
-                    检查更新
+                      {t("检查更新")}
                   </span>
                   <ArrowSync16Regular className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
                 </button>
@@ -344,4 +345,3 @@ export function Settings() {
     </div>
   );
 }
-

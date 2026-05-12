@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useI18n } from "@/i18n";
 import { logError } from "@/lib/logger";
 
 interface AppMeta { name: string; icon: string | null }
@@ -27,6 +28,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export function AppFilterTab() {
+  const { t } = useI18n();
   const [appFilterEnabled, setAppFilterEnabled] = useState(false);
   const [appFilterMode, setAppFilterMode] = useState<"blacklist" | "whitelist">("blacklist");
   const [appFilterList, setAppFilterList] = useState<string[]>([]);
@@ -164,8 +166,8 @@ export function AppFilterTab() {
     <div className="space-y-4">
       {/* 监听内容类型 */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">监听内容类型</h3>
-        <p className="text-xs text-muted-foreground mb-4">选择要监听的剪贴板内容类型，未勾选的类型将不会被记录</p>
+          <h3 className="text-sm font-medium mb-3">{t("监听内容类型")}</h3>
+          <p className="text-xs text-muted-foreground mb-4">{t("选择要监听的剪贴板内容类型，未勾选的类型将不会被记录")}</p>
         <div className="flex flex-wrap gap-2">
           {ALL_MONITOR_TYPES.map((type) => {
             const active = monitorTypes.has(type);
@@ -180,7 +182,7 @@ export function AppFilterTab() {
                     : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
                 }`}
               >
-                {TYPE_LABELS[type]}
+                 {t(TYPE_LABELS[type])}
               </button>
             );
           })}
@@ -191,10 +193,10 @@ export function AppFilterTab() {
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h3 className="text-sm font-medium">应用过滤</h3>
-            <p className="text-xs text-muted-foreground mt-1">
-              根据来源应用决定是否记录剪贴板内容
-            </p>
+              <h3 className="text-sm font-medium">{t("应用过滤")}</h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                {t("根据来源应用决定是否记录剪贴板内容")}
+              </p>
           </div>
           <Switch checked={appFilterEnabled} onCheckedChange={toggleAppFilter} />
         </div>
@@ -211,25 +213,25 @@ export function AppFilterTab() {
                   : "bg-muted/40 text-muted-foreground border-transparent hover:bg-muted"
               }`}
             >
-              {mode === "blacklist" ? "黑名单" : "白名单"}
+               {mode === "blacklist" ? t("黑名单") : t("白名单")}
             </button>
           ))}
         </div>
 
         <p className="text-xs text-muted-foreground mt-3">
           {appFilterMode === "blacklist"
-            ? "黑名单模式：来自以下应用的复制内容将不会被记录"
-            : "白名单模式：仅记录来自以下应用的复制内容"}
+             ? t("黑名单模式：来自以下应用的复制内容将不会被记录")
+             : t("白名单模式：仅记录来自以下应用的复制内容")}
         </p>
       </div>
 
       {/* 规则列表 */}
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium">过滤规则</h3>
-          <Button variant="outline" size="sm" onClick={loadRunningApps} className="h-7 text-xs">
-            选择应用
-          </Button>
+           <h3 className="text-sm font-medium">{t("过滤规则")}</h3>
+           <Button variant="outline" size="sm" onClick={loadRunningApps} className="h-7 text-xs">
+             {t("选择应用")}
+           </Button>
         </div>
 
         <div className="flex gap-2 mb-4">
@@ -242,7 +244,7 @@ export function AppFilterTab() {
                 setExcludeInput("");
               }
             }}
-            placeholder="手动输入进程名或通配符，如 *chrome*"
+            placeholder={t("手动输入进程名或通配符，如 *chrome*")}
             className="flex-1 h-8 text-xs"
           />
           <Button
@@ -252,7 +254,7 @@ export function AppFilterTab() {
             disabled={!excludeInput.trim()}
             className="h-8 text-xs"
           >
-            添加
+            {t("添加")}
           </Button>
         </div>
 
@@ -291,7 +293,7 @@ export function AppFilterTab() {
                     type="button"
                     onClick={() => removeFilterApp(rule)}
                     className="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-destructive transition-all"
-                    aria-label={`移除 ${rule}`}
+                    aria-label={t("移除 {name}", { name: rule })}
                   >
                     <Delete16Regular className="w-3.5 h-3.5" />
                   </button>
@@ -301,9 +303,9 @@ export function AppFilterTab() {
           </div>
         ) : (
           <div className="text-center py-6">
-            <p className="text-xs text-muted-foreground/60">暂无过滤规则</p>
+            <p className="text-xs text-muted-foreground/60">{t("暂无过滤规则")}</p>
             <p className="text-[10px] text-muted-foreground/40 mt-1">
-              点击"选择应用"从运行中的应用添加，或手动输入通配符规则
+              {t('点击"选择应用"从运行中的应用添加，或手动输入通配符规则')}
             </p>
           </div>
         )}
@@ -313,9 +315,11 @@ export function AppFilterTab() {
       <Dialog open={showAppPicker} onOpenChange={setShowAppPicker}>
         <DialogContent className="max-w-md max-h-[70vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle className="text-sm">选择运行中的应用</DialogTitle>
+            <DialogTitle className="text-sm">{t("选择运行中的应用")}</DialogTitle>
             <DialogDescription className="text-xs">
-              点击应用即可添加到{appFilterMode === "blacklist" ? "黑" : "白"}名单
+              {t("点击应用即可添加到{mode}名单", {
+                mode: appFilterMode === "blacklist" ? t("黑") : t("白"),
+              })}
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-0.5">
@@ -352,18 +356,18 @@ export function AppFilterTab() {
                     <div className="text-[10px] text-muted-foreground truncate">{app.process}</div>
                   </div>
                   {alreadyAdded && (
-                    <span className="text-[10px] text-muted-foreground shrink-0">已添加</span>
+                     <span className="text-[10px] text-muted-foreground shrink-0">{t("已添加")}</span>
                   )}
                 </button>
               );
             })}
             {runningApps.length === 0 && (
-              <p className="text-xs text-muted-foreground text-center py-8">加载中...</p>
+               <p className="text-xs text-muted-foreground text-center py-8">{t("加载中...")}</p>
             )}
           </div>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setShowAppPicker(false)} className="text-xs">
-              关闭
+               {t("关闭")}
             </Button>
           </DialogFooter>
         </DialogContent>

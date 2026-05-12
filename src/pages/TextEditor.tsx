@@ -5,11 +5,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
+import { useI18n } from "@/i18n";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 
 export function TextEditor() {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const [originalText, setOriginalText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -105,8 +107,8 @@ export function TextEditor() {
     >
       <WindowTitleBar
         icon={<Edit16Filled className="w-5 h-5 text-muted-foreground" />}
-        title="编辑文本"
-        extra={hasChanges ? <span className="text-xs text-amber-500">● 未保存</span> : undefined}
+        title={t("编辑文本")}
+        extra={hasChanges ? <span className="text-xs text-amber-500">● {t("未保存")}</span> : undefined}
       />
 
       {/* Editor Area */}
@@ -121,7 +123,7 @@ export function TextEditor() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             className="flex-1 w-full resize-none border-0 bg-transparent p-4 text-sm leading-relaxed font-mono focus:outline-none placeholder:text-muted-foreground"
-            placeholder="无内容"
+            placeholder={t("无内容")}
             spellCheck={false}
             autoFocus
           />
@@ -132,7 +134,10 @@ export function TextEditor() {
       <Card className="shrink-0">
         <div className="h-11 flex items-center justify-between px-4">
           <span className="text-xs text-muted-foreground">
-            {text.length} 字符 · {new Blob([text]).size} 字节
+              {t("{chars} 字符 · {bytes} 字节", {
+                chars: text.length,
+                bytes: new Blob([text]).size,
+              })}
           </span>
           <div className="flex gap-2">
             <Button
@@ -140,14 +145,14 @@ export function TextEditor() {
               size="sm"
               onClick={() => getCurrentWindow().close()}
             >
-              取消
+              {t("取消")}
             </Button>
             <Button
               size="sm"
               onClick={handleSaveAndClose}
               disabled={saving}
             >
-              {saving ? "保存中..." : hasChanges ? "保存并关闭" : "关闭"}
+              {saving ? t("保存中...") : hasChanges ? t("保存并关闭") : t("关闭")}
             </Button>
           </div>
         </div>
@@ -155,4 +160,3 @@ export function TextEditor() {
     </div>
   );
 }
-

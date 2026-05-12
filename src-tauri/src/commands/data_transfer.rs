@@ -214,7 +214,10 @@ pub async fn export_data(
     let dest = app
         .dialog()
         .file()
-        .set_title("导出数据")
+        .set_title(crate::i18n::tr(
+            crate::i18n::current_language(&crate::database::SettingsRepository::new(&app.state::<std::sync::Arc<super::AppState>>().db)),
+            "导出数据",
+        ))
         .set_file_name(&default_name)
         .add_filter("ZIP 压缩文件", &["zip"])
         .blocking_save_file();
@@ -259,7 +262,10 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
     let src = app
         .dialog()
         .file()
-        .set_title("导入数据")
+        .set_title(crate::i18n::tr(
+            crate::i18n::current_language(&crate::database::SettingsRepository::new(&app.state::<std::sync::Arc<super::AppState>>().db)),
+            "导入数据",
+        ))
         .add_filter("ZIP 压缩文件", &["zip"])
         .blocking_pick_file();
 
