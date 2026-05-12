@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { logError } from "@/lib/logger";
-import { useClipboardStore } from "@/stores/clipboard";
+import { removeVisibleClipboardItem, upsertVisibleClipboardItem, useClipboardStore, type ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 
 export interface Tag {
@@ -84,11 +84,15 @@ export const useTagStore = create<TagState>((set, get) => ({
     try {
       await invoke("add_tag_to_item", { itemId, tagId });
       await get().fetchTags();
-      // 主页视图下开启了"标记后从主页隐藏"时，刷新列表以隐藏该条目
-      const { selectedCategory, selectedTagId } = useClipboardStore.getState();
+
+      const { selectedCategory, selectedTagId, searchQuery } = useClipboardStore.getState();
       const isMainView = selectedCategory !== "__favorites__" && !selectedTagId;
       if (isMainView && useUISettings.getState().hideTaggedFromMain) {
-        useClipboardStore.getState().fetchItems();
+        if (searchQuery) {
+          await useClipboardStore.getState().fetchItems();
+        } else {
+          removeVisibleClipboardItem(itemId);
+        }
       }
     } catch (error) {
       logError("Failed to add tag to item:", error);
@@ -98,8 +102,26 @@ export const useTagStore = create<TagState>((set, get) => ({
   removeTagFromItem: async (itemId, tagId) => {
     try {
       await invoke("remove_tag_from_item", { itemId, tagId });
-      get().fetchTags();
-      useClipboardStore.getState().fetchItems();
+      await get().fetchTags();
+
+      const { selectedCategory, selectedTagId, searchQuery } = useClipboardStore.getState();
+      const isCurrentTagView = selectedTagId === tagId;
+      const isMainView = selectedCategory !== "__favorites__" && !selectedTagId;
+      const shouldShowInHiddenTaggedMain = isMainView && useUISettings.getState().hideTaggedFromMain;
+
+      if (isCurrentTagView) {
+        removeVisibleClipboardItem(itemId);
+      } else if (shouldShowInHiddenTaggedMain) {
+        if (searchQuery) {
+          await useClipboardStore.getState().fetchItems();
+        } else {
+          const stillTagged = await invoke<boolean>("item_has_tags", { itemId });
+          if (!stillTagged) {
+            const item = await invoke<ClipboardItem | null>("get_clipboard_item", { id: itemId });
+            if (item) upsertVisibleClipboardItem(item);
+          }
+        }
+      }
     } catch (error) {
       logError("Failed to remove tag from item:", error);
     }

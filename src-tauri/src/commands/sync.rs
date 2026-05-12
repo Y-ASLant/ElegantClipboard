@@ -18,6 +18,12 @@ fn load_webdav_config(state: &Arc<AppState>) -> Result<WebDavConfig, String> {
         .unwrap_or_else(|| "/elegant-clipboard".to_string());
     let proxy_mode = repo.get("webdav_proxy_mode").ok().flatten().unwrap_or_else(|| "system".to_string());
     let proxy_url = repo.get("webdav_proxy_url").ok().flatten().unwrap_or_default();
+    let accept_invalid_certs = repo
+        .get("webdav_accept_invalid_certs")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
 
     if url.is_empty() {
         return Err("WebDAV 地址未配置".to_string());
@@ -29,6 +35,7 @@ fn load_webdav_config(state: &Arc<AppState>) -> Result<WebDavConfig, String> {
         remote_dir,
         proxy_mode,
         proxy_url,
+        accept_invalid_certs,
     })
 }
 
@@ -192,6 +199,63 @@ fn build_local_media_map(
     webdav::build_media_map(&items, data_dir, options, device_id)
 }
 
+/// 启动单类媒体上传线程
+fn spawn_media_upload_worker(
+    app: &tauri::AppHandle,
+    config: &webdav::WebDavConfig,
+    data_dir: &std::path::Path,
+    entries: Vec<webdav::MediaEntry>,
+    thread_name: &'static str,
+    label: &'static str,
+) {
+    if entries.is_empty() {
+        return;
+    }
+
+    let cfg = config.clone();
+    let dir = data_dir.to_path_buf();
+    let handle = app.clone();
+    std::thread::Builder::new()
+        .name(thread_name.into())
+        .spawn(move || {
+            let msg = match webdav::upload_media_files(&cfg, &entries, &dir) {
+                Ok((u, s, bytes)) => format!("{}上传完成：{} 新 ({})，{} 已存在跳过", label, u, format_size(bytes), s),
+                Err(e) => format!("{}上传失败: {}", label, e),
+            };
+            emit_media_sync_done(&handle, &msg);
+        })
+        .ok();
+}
+
+/// 启动单类媒体下载线程
+fn spawn_media_download_worker(
+    app: &tauri::AppHandle,
+    config: &webdav::WebDavConfig,
+    data_dir: &std::path::Path,
+    entries: Vec<webdav::MediaEntry>,
+    thread_name: &'static str,
+    label: &'static str,
+) {
+    if entries.is_empty() {
+        return;
+    }
+
+    let cfg = config.clone();
+    let dir = data_dir.to_path_buf();
+    let handle = app.clone();
+    std::thread::Builder::new()
+        .name(thread_name.into())
+        .spawn(move || {
+            let msg = match webdav::download_missing_media(&cfg, &entries, &dir) {
+                Ok(n) if n > 0 => format!("{}下载完成：{} 个文件", label, n),
+                Ok(_) => format!("{}已是最新", label),
+                Err(e) => format!("{}下载失败: {}", label, e),
+            };
+            emit_media_sync_done(&handle, &msg);
+        })
+        .ok();
+}
+
 /// 后台上传实际媒体文件（图片线程 + 文件线程）
 fn spawn_media_upload_files(
     app: &tauri::AppHandle,
@@ -207,53 +271,9 @@ fn spawn_media_upload_files(
     let files: Vec<_> = media_map.iter().filter(|e| e.media_type == "file").cloned().collect();
     let videos: Vec<_> = media_map.iter().filter(|e| e.media_type == "video").cloned().collect();
 
-    if !images.is_empty() {
-        let cfg = config.clone();
-        let dir = data_dir.to_path_buf();
-        let handle = app.clone();
-        std::thread::Builder::new()
-            .name("webdav-upload-images".into())
-            .spawn(move || {
-                let msg = match webdav::upload_media_files(&cfg, &images, &dir) {
-                    Ok((u, s, bytes)) => format!("图片上传完成：{} 新 ({})，{} 已存在跳过", u, format_size(bytes), s),
-                    Err(e) => format!("图片上传失败: {}", e),
-                };
-                emit_media_sync_done(&handle, &msg);
-            })
-            .ok();
-    }
-
-    if !files.is_empty() {
-        let cfg = config.clone();
-        let dir = data_dir.to_path_buf();
-        let handle = app.clone();
-        std::thread::Builder::new()
-            .name("webdav-upload-files".into())
-            .spawn(move || {
-                let msg = match webdav::upload_media_files(&cfg, &files, &dir) {
-                    Ok((u, s, bytes)) => format!("文件上传完成：{} 新 ({})，{} 已存在跳过", u, format_size(bytes), s),
-                    Err(e) => format!("文件上传失败: {}", e),
-                };
-                emit_media_sync_done(&handle, &msg);
-            })
-            .ok();
-    }
-
-    if !videos.is_empty() {
-        let cfg = config.clone();
-        let dir = data_dir.to_path_buf();
-        let handle = app.clone();
-        std::thread::Builder::new()
-            .name("webdav-upload-videos".into())
-            .spawn(move || {
-                let msg = match webdav::upload_media_files(&cfg, &videos, &dir) {
-                    Ok((u, s, bytes)) => format!("视频上传完成：{} 新 ({})，{} 已存在跳过", u, format_size(bytes), s),
-                    Err(e) => format!("视频上传失败: {}", e),
-                };
-                emit_media_sync_done(&handle, &msg);
-            })
-            .ok();
-    }
+    spawn_media_upload_worker(app, config, data_dir, images, "webdav-upload-images", "图片");
+    spawn_media_upload_worker(app, config, data_dir, files, "webdav-upload-files", "文件");
+    spawn_media_upload_worker(app, config, data_dir, videos, "webdav-upload-videos", "视频");
 }
 
 /// 后台下载缺失媒体：检查本地路径，不存在则从 WebDAV 下载到对应位置
@@ -267,56 +287,9 @@ fn spawn_media_download(
     let files: Vec<_> = media_map.iter().filter(|e| e.media_type == "file").cloned().collect();
     let videos: Vec<_> = media_map.iter().filter(|e| e.media_type == "video").cloned().collect();
 
-    if !images.is_empty() {
-        let cfg = config.clone();
-        let dir = data_dir.to_path_buf();
-        let handle = app.clone();
-        std::thread::Builder::new()
-            .name("webdav-download-images".into())
-            .spawn(move || {
-                let msg = match webdav::download_missing_media(&cfg, &images, &dir) {
-                    Ok(n) if n > 0 => format!("图片下载完成：{} 个文件", n),
-                    Ok(_) => "图片已是最新".to_string(),
-                    Err(e) => format!("图片下载失败: {}", e),
-                };
-                emit_media_sync_done(&handle, &msg);
-            })
-            .ok();
-    }
-
-    if !files.is_empty() {
-        let cfg = config.clone();
-        let dir = data_dir.to_path_buf();
-        let handle = app.clone();
-        std::thread::Builder::new()
-            .name("webdav-download-files".into())
-            .spawn(move || {
-                let msg = match webdav::download_missing_media(&cfg, &files, &dir) {
-                    Ok(n) if n > 0 => format!("文件下载完成：{} 个文件", n),
-                    Ok(_) => "文件已是最新".to_string(),
-                    Err(e) => format!("文件下载失败: {}", e),
-                };
-                emit_media_sync_done(&handle, &msg);
-            })
-            .ok();
-    }
-
-    if !videos.is_empty() {
-        let cfg = config.clone();
-        let dir = data_dir.to_path_buf();
-        let handle = app.clone();
-        std::thread::Builder::new()
-            .name("webdav-download-videos".into())
-            .spawn(move || {
-                let msg = match webdav::download_missing_media(&cfg, &videos, &dir) {
-                    Ok(n) if n > 0 => format!("视频下载完成：{} 个文件", n),
-                    Ok(_) => "视频已是最新".to_string(),
-                    Err(e) => format!("视频下载失败: {}", e),
-                };
-                emit_media_sync_done(&handle, &msg);
-            })
-            .ok();
-    }
+    spawn_media_download_worker(app, config, data_dir, images, "webdav-download-images", "图片");
+    spawn_media_download_worker(app, config, data_dir, files, "webdav-download-files", "文件");
+    spawn_media_download_worker(app, config, data_dir, videos, "webdav-download-videos", "视频");
 }
 
 /// 向前端发送媒体同步完成事件

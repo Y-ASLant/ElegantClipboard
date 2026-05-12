@@ -69,6 +69,11 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_items(content_hash);
 CREATE INDEX IF NOT EXISTS idx_clipboard_semantic_hash ON clipboard_items(semantic_hash);
 CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count DESC, last_accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_main_order ON clipboard_items(is_pinned DESC, sort_order DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_type_order ON clipboard_items(content_type, is_pinned DESC, sort_order DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order ON clipboard_items(is_favorite, is_pinned DESC, sort_order DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_clipboard_clearable ON clipboard_items(is_pinned, is_favorite, content_type);
+CREATE INDEX IF NOT EXISTS idx_item_tags_tag_order ON item_tags(tag_id, sort_order ASC, item_id);
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES

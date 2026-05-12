@@ -12,7 +12,6 @@ import {
   CheckmarkCircle16Filled,
   Circle16Regular,
   ReOrderDotsVertical16Regular,
-  Add16Regular,
   Translate16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,6 +26,7 @@ import {
   type FileListItem,
   type ContextMenuItemConfig,
 } from "@/components/CardSubComponents";
+import { TagPopover } from "@/components/clipboard/TagPopover";
 import { ClipboardContextMenu } from "@/components/ClipboardContextMenu";
 import { HighlightText } from "@/components/HighlightText";
 import { type ClipboardItemDetail } from "@/components/text-preview";
@@ -34,9 +34,9 @@ import { TranslationResult } from "@/components/TranslationResult";
 import { TtsHighlightText } from "@/components/TtsHighlightText";
 import { Card } from "@/components/ui/card";
 import { VideoContent } from "@/components/VideoCard";
-import { focusWindowImmediately } from "@/hooks/useInputFocus";
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import { useTextPreview } from "@/hooks/useTextPreview";
+import { cachedCheckFilesExist } from "@/lib/file-check-cache";
 import {
   contentTypeConfig,
   formatTime,
@@ -68,35 +68,6 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 
-// ============ 文件存在性检查缓存 ============
-const FILE_CHECK_CACHE_TTL = 5000; // 5s
-const fileCheckCache = new Map<string, { data: Record<string, { exists: boolean; is_dir: boolean }>; ts: number }>();
-
-function fileCheckCacheKey(paths: string[]): string {
-  return paths.join("\0");
-}
-
-async function cachedCheckFilesExist(
-  paths: string[],
-): Promise<Record<string, { exists: boolean; is_dir: boolean }>> {
-  const key = fileCheckCacheKey(paths);
-  const cached = fileCheckCache.get(key);
-  if (cached && Date.now() - cached.ts < FILE_CHECK_CACHE_TTL) {
-    return cached.data;
-  }
-  const data = await invoke<Record<string, { exists: boolean; is_dir: boolean }>>(
-    "check_files_exist",
-    { paths },
-  );
-  fileCheckCache.set(key, { data, ts: Date.now() });
-  // 防止缓存无限增长
-  if (fileCheckCache.size > 100) {
-    const oldest = fileCheckCache.keys().next().value;
-    if (oldest !== undefined) fileCheckCache.delete(oldest);
-  }
-  return data;
-}
-
 // 文本预览租约管理和清理回调已提取到 useTextPreview hook
 export {
   acquireTextPreviewLease,
@@ -106,99 +77,6 @@ export {
   textPreviewCleanupCallbacks,
   ensureWindowHiddenListener,
 } from "@/hooks/useTextPreview";
-
-// ============ 标签弹出层 ============
-
-function TagPopover({
-  popoverRef,
-  tags,
-  itemTagIds,
-  onToggle,
-  onCreateAndAssign,
-}: {
-  popoverRef: React.RefObject<HTMLDivElement | null>;
-  tags: { id: number; name: string }[];
-  itemTagIds: Set<number>;
-  onToggle: (tagId: number, isAssigned: boolean) => Promise<void>;
-  onCreateAndAssign: (name: string) => Promise<void>;
-}) {
-  const [newName, setNewName] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    // auto-focus input when popover opens, enable OS keyboard focus
-    const t = setTimeout(async () => {
-      await focusWindowImmediately();
-      inputRef.current?.focus();
-    }, 50);
-    return () => clearTimeout(t);
-  }, []);
-
-  const handleCreate = async () => {
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-    await onCreateAndAssign(trimmed);
-    setNewName("");
-  };
-
-  return (
-    <div
-      ref={popoverRef}
-      className="absolute right-1 top-0 z-30 w-[170px] rounded-lg border bg-popover shadow-lg animate-in fade-in-0 zoom-in-95 duration-100"
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {/* existing tags */}
-      {tags.length > 0 && (
-        <div className="max-h-36 overflow-y-auto p-1">
-          {tags.map((t) => {
-            const isAssigned = itemTagIds.has(t.id);
-            return (
-              <div
-                key={t.id}
-                onClick={() => onToggle(t.id, isAssigned)}
-                className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md cursor-default hover:bg-accent hover:text-accent-foreground transition-colors duration-100"
-              >
-                <span className={cn(
-                  "w-3.5 h-3.5 shrink-0 flex items-center justify-center rounded border text-[10px] transition-colors duration-100",
-                  isAssigned
-                    ? "bg-primary border-primary text-primary-foreground"
-                    : "border-muted-foreground/30",
-                )}>
-                  {isAssigned && "✓"}
-                </span>
-                <span className="truncate">{t.name}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {/* new tag input */}
-      <div className={cn("px-1.5 py-1.5 flex items-center gap-1", tags.length > 0 && "border-t")}>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="新建标签…"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onFocus={() => focusWindowImmediately()}
-          onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); e.stopPropagation(); }}
-          onKeyUp={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="flex-1 min-w-0 h-6 px-1.5 text-xs rounded-md border bg-background outline-none focus:ring-1 focus:ring-ring transition-shadow"
-        />
-        <button
-          onClick={handleCreate}
-          onMouseDown={(e) => e.stopPropagation()}
-          disabled={!newName.trim()}
-          className="shrink-0 w-5 h-5 flex items-center justify-center rounded-md hover:bg-accent text-primary disabled:opacity-30 transition-colors"
-        >
-          <Add16Regular className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ============ 主卡片组件 ============
 

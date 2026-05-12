@@ -1058,6 +1058,7 @@ pub fn run() {
             commands::tags::delete_tag,
             commands::tags::add_tag_to_item,
             commands::tags::remove_tag_from_item,
+            commands::tags::item_has_tags,
             commands::tags::get_item_tags,
             commands::tags::reorder_tags,
             commands::tags::reorder_tag_items,

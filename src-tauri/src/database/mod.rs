@@ -1,7 +1,9 @@
 mod repository;
+pub mod repos;
 mod schema;
 
 pub use repository::*;
+pub use repos::*;
 pub use schema::*;
 
 use crate::clipboard::compute_semantic_hash;

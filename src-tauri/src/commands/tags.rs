@@ -41,6 +41,12 @@ pub async fn remove_tag_from_item(state: State<'_, Arc<AppState>>, item_id: i64,
 }
 
 #[tauri::command]
+pub async fn item_has_tags(state: State<'_, Arc<AppState>>, item_id: i64) -> Result<bool, String> {
+    let repo = TagRepository::new(&state.db);
+    repo.has_tags_for_item(item_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn get_item_tags(state: State<'_, Arc<AppState>>, item_id: i64) -> Result<Vec<Tag>, String> {
     let repo = TagRepository::new(&state.db);
     repo.get_tags_for_item(item_id).map_err(|e| e.to_string())

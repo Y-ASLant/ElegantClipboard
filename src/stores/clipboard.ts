@@ -84,7 +84,6 @@ interface ClipboardState {
 }
 
 async function doPaste(
-  get: () => ClipboardState,
   id: number,
   command: "paste_content" | "paste_content_as_plain",
 ) {
@@ -93,7 +92,14 @@ async function doPaste(
     const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
     await invoke(command, { id, closeWindow: pasteCloseWindow });
     if (pasteMoveToTop) {
-      invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
+      invoke("bump_item_to_top", { id })
+        .then(() => moveVisibleItemToTop(id))
+        .catch((e) => {
+          logError("Failed to bump item to top:", e);
+          useClipboardStore.getState().refresh().catch((error) => {
+            logError("Failed to refresh after bump item failure:", error);
+          });
+        });
     }
   } catch (error) {
     logError(`Failed to ${command}:`, error);
@@ -101,6 +107,93 @@ async function doPaste(
 }
 
 const EMPTY_SET: ReadonlySet<number> = new Set<number>();
+
+function asListItem(item: ClipboardItem): ClipboardItem {
+  return {
+    ...item,
+    text_content: null,
+    html_content: null,
+    rtf_content: null,
+  };
+}
+
+function matchesCurrentView(item: ClipboardItem, state: ClipboardState): boolean {
+  if (state.searchQuery) {
+    return false;
+  }
+
+  const category = state.selectedCategory;
+  const isFavoritesView = category === "__favorites__";
+  const isMainView = !isFavoritesView && !state.selectedTagId;
+  const { hideFavoritedFromMain } = useUISettings.getState();
+  if (state.selectedTagId) {
+    return false;
+  }
+  if (isFavoritesView) {
+    return item.is_favorite;
+  }
+  if (isMainView && hideFavoritedFromMain && item.is_favorite) {
+    return false;
+  }
+  if (!category) {
+    return true;
+  }
+
+  const logicalMapping = LOGICAL_TYPE_BACKEND_MAP[category];
+  if (logicalMapping) {
+    return getLogicalContentType(item) === logicalMapping.logicalType;
+  }
+  return item.content_type === category;
+}
+
+export function upsertVisibleClipboardItem(item: ClipboardItem) {
+  useClipboardStore.setState((state) => {
+    if (!matchesCurrentView(item, state)) {
+      return { items: state.items.filter((existing) => existing.id !== item.id) };
+    }
+
+    const nextItem = asListItem(item);
+    const withoutItem = state.items.filter((existing) => existing.id !== item.id);
+    const firstUnpinnedIndex = withoutItem.findIndex((existing) => !existing.is_pinned);
+    const insertIndex = nextItem.is_pinned
+      ? 0
+      : firstUnpinnedIndex === -1
+        ? withoutItem.length
+        : firstUnpinnedIndex;
+    const nextItems = [...withoutItem];
+    nextItems.splice(insertIndex, 0, nextItem);
+    return { items: nextItems, activeIndex: -1 };
+  });
+}
+
+export function removeVisibleClipboardItem(id: number) {
+  useClipboardStore.setState((state) => {
+    const nextItems = state.items.filter((item) => item.id !== id);
+    return {
+      items: nextItems,
+      activeIndex: nextItems.length === 0 ? -1 : Math.min(state.activeIndex, nextItems.length - 1),
+    };
+  });
+}
+
+function moveVisibleItemToTop(id: number) {
+  useClipboardStore.setState((state) => {
+    const index = state.items.findIndex((item) => item.id === id);
+    if (index === -1) return {};
+
+    const item = state.items[index];
+    const withoutItem = state.items.filter((existing) => existing.id !== id);
+    const firstUnpinnedIndex = withoutItem.findIndex((existing) => !existing.is_pinned);
+    const insertIndex = item.is_pinned
+      ? 0
+      : firstUnpinnedIndex === -1
+        ? withoutItem.length
+        : firstUnpinnedIndex;
+    const nextItems = [...withoutItem];
+    nextItems.splice(insertIndex, 0, item);
+    return { items: nextItems };
+  });
+}
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
   items: [],
@@ -195,11 +288,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       // 在收藏视图中取消收藏时，需要刷新列表以移除该条目
       // 在主页视图中收藏且开启了"收藏后从主页隐藏"时，也需要刷新
       const isFavoritesView = get().selectedCategory === "__favorites__";
-      const shouldRefresh =
+      const shouldRemove =
         (!newState && isFavoritesView) ||
         (newState && !isFavoritesView && !get().selectedTagId && useUISettings.getState().hideFavoritedFromMain);
-      if (shouldRefresh) {
-        await get().refresh();
+      if (shouldRemove) {
+        removeVisibleClipboardItem(id);
       } else {
         set((state) => ({
           items: state.items.map((item) =>
@@ -242,11 +335,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   pasteContent: async (id: number) => {
-    await doPaste(get, id, "paste_content");
+    await doPaste(id, "paste_content");
   },
 
   pasteAsPlainText: async (id: number) => {
-    await doPaste(get, id, "paste_content_as_plain");
+    await doPaste(id, "paste_content_as_plain");
   },
 
   clearHistory: async (contentType = null) => {
@@ -278,8 +371,28 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   setupListener: async () => {
-    const unlisten = await listen<number>("clipboard-updated", async () => {
-      await get().refresh();
+    const unlisten = await listen<number | null>("clipboard-updated", async (event) => {
+      const id = event.payload;
+      const { hideTaggedFromMain } = useUISettings.getState();
+      const state = get();
+      const isFavoritesView = state.selectedCategory === "__favorites__";
+      const isMainView = !isFavoritesView && !state.selectedTagId;
+      if (!id || state.searchQuery || state.selectedTagId || (isMainView && hideTaggedFromMain)) {
+        await get().refresh();
+        return;
+      }
+
+      try {
+        const item = await invoke<ClipboardItem | null>("get_clipboard_item", { id });
+        if (item) {
+          upsertVisibleClipboardItem(item);
+        } else {
+          await get().refresh();
+        }
+      } catch (error) {
+        logError("Failed to fetch updated clipboard item:", error);
+        await get().refresh();
+      }
     });
     return unlisten;
   },
@@ -323,9 +436,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     const { selectedIds } = get();
     if (selectedIds.size === 0) return;
     try {
-      await invoke("batch_delete_clipboard_items", { ids: Array.from(selectedIds) });
-      set({ selectedIds: EMPTY_SET as Set<number>, batchMode: false, lastSelectedIndex: -1 });
-      await get().refresh();
+      const ids = Array.from(selectedIds);
+      await invoke("batch_delete_clipboard_items", { ids });
+      const deletedIds = new Set(ids);
+      set((state) => ({
+        items: state.items.filter((item) => !deletedIds.has(item.id)),
+        selectedIds: EMPTY_SET as Set<number>,
+        batchMode: false,
+        lastSelectedIndex: -1,
+      }));
     } catch (error) {
       logError("Failed to batch delete:", error);
     }

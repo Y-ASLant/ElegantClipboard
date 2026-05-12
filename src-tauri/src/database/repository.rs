@@ -90,15 +90,6 @@ pub struct QueryOptions {
     pub offset: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tag {
-    pub id: i64,
-    pub name: String,
-    pub sort_order: i64,
-    pub created_at: String,
-    pub item_count: i64,
-}
-
 /// 剪贴板条目仓库（读写分离）
 pub struct ClipboardRepository {
     write_conn: Arc<Mutex<Connection>>,
@@ -371,10 +362,10 @@ impl ClipboardRepository {
             conditions.push("is_favorite = 1".to_string());
         }
 
-        // 标签过滤：通过 item_tags 关联表筛选
+        // 标签过滤：使用 EXISTS，避免子查询物化并复用 item_tags 主键/组合索引
         if let Some(tag_id) = options.tag_id {
             conditions.push(
-                "id IN (SELECT item_id FROM item_tags WHERE tag_id = ?)".to_string(),
+                "EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id AND item_tags.tag_id = ?)".to_string(),
             );
             params_vec.push(Box::new(tag_id));
         }
@@ -386,7 +377,7 @@ impl ClipboardRepository {
 
         // 排除有标签的条目（主页隐藏已标记）
         if options.exclude_tagged {
-            conditions.push("id NOT IN (SELECT item_id FROM item_tags)".to_string());
+            conditions.push("NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id)".to_string());
         }
 
         (conditions, params_vec)
@@ -611,7 +602,7 @@ impl ClipboardRepository {
             "is_pinned = 0".to_string(),
             "is_favorite = 0".to_string(),
             "image_path IS NOT NULL".to_string(),
-            "id NOT IN (SELECT item_id FROM item_tags)".to_string(),
+            "NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id)".to_string(),
         ];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
@@ -635,7 +626,7 @@ impl ClipboardRepository {
         let mut conditions: Vec<String> = vec![
             "is_pinned = 0".to_string(),
             "is_favorite = 0".to_string(),
-            "id NOT IN (SELECT item_id FROM item_tags)".to_string(),
+            "NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id)".to_string(),
         ];
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         Self::append_content_type_condition(content_type, &mut conditions, &mut params_vec);
@@ -1033,396 +1024,4 @@ impl ClipboardRepository {
 
         Ok(count)
     }
-}
-
-/// 设置仓库
-pub struct SettingsRepository {
-    write_conn: Arc<Mutex<Connection>>,
-    read_conn: Arc<Mutex<Connection>>,
-}
-
-impl SettingsRepository {
-    pub fn new(db: &Database) -> Self {
-        Self {
-            write_conn: db.write_connection(),
-            read_conn: db.read_connection(),
-        }
-    }
-
-    pub fn get(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let result = conn.query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            params![key],
-            |row| row.get(0),
-        );
-
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
-    }
-
-    pub fn set(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, datetime('now', 'localtime'))",
-            params![key, value],
-        )?;
-        Ok(())
-    }
-
-    pub fn get_all(&self) -> Result<std::collections::HashMap<String, String>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
-        let settings = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(settings)
-    }
-
-    /// 批量读取多个设置项，一次查询避免多次加锁和多次 SQL 往返
-    pub fn get_multiple(&self, keys: &[&str]) -> Result<std::collections::HashMap<String, String>, rusqlite::Error> {
-        if keys.is_empty() {
-            return Ok(std::collections::HashMap::new());
-        }
-        let conn = self.read_conn.lock();
-        // 构造 IN (?1, ?2, ...) 占位符
-        let placeholders: Vec<String> = (1..=keys.len()).map(|i| format!("?{}", i)).collect();
-        let sql = format!(
-            "SELECT key, value FROM settings WHERE key IN ({})",
-            placeholders.join(", ")
-        );
-        let mut stmt = conn.prepare_cached(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = keys.iter().map(|k| k as &dyn rusqlite::types::ToSql).collect();
-        let rows = stmt
-            .query_map(params.as_slice(), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(rows)
-    }
-
-    /// 读取设置值，出错或不存在时返回默认值
-    pub fn get_or(&self, key: &str, default: &str) -> String {
-        self.get(key)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| default.to_string())
-    }
-
-    /// 读取布尔设置，出错或不存在时返回默认值
-    pub fn get_bool(&self, key: &str, default: bool) -> bool {
-        self.get(key)
-            .ok()
-            .flatten()
-            .map(|v| v == "true")
-            .unwrap_or(default)
-    }
-
-    /// 清空所有设置
-    pub fn clear_all(&self) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute("DELETE FROM settings", [])?;
-        Ok(())
-    }
-}
-
-/// 标签仓库
-pub struct TagRepository {
-    write_conn: Arc<Mutex<Connection>>,
-    read_conn: Arc<Mutex<Connection>>,
-}
-
-impl TagRepository {
-    pub fn new(db: &Database) -> Self {
-        Self {
-            write_conn: db.write_connection(),
-            read_conn: db.read_connection(),
-        }
-    }
-
-    /// 列出所有标签（含每个标签的条目数）
-    pub fn list_with_count(&self) -> Result<Vec<Tag>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT t.id, t.name, t.sort_order, t.created_at, \
-             COUNT(it.item_id) AS item_count \
-             FROM tags t \
-             LEFT JOIN item_tags it ON it.tag_id = t.id \
-             GROUP BY t.id \
-             ORDER BY t.sort_order ASC, t.created_at ASC",
-        )?;
-        let tags = stmt
-            .query_map([], |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    sort_order: row.get(2)?,
-                    created_at: row.get(3)?,
-                    item_count: row.get(4)?,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(tags)
-    }
-
-    /// 创建新标签，返回完整标签对象
-    pub fn create(&self, name: &str) -> Result<Tag, rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        // Get next sort_order
-        let max_order: i64 = conn.query_row(
-            "SELECT COALESCE(MAX(sort_order), 0) FROM tags",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(0);
-        let sort_order = max_order + 1;
-        conn.execute(
-            "INSERT INTO tags (name, sort_order) VALUES (?1, ?2)",
-            params![name, sort_order],
-        )?;
-        let id = conn.last_insert_rowid();
-        let tag = conn.query_row(
-            "SELECT id, name, sort_order, created_at FROM tags WHERE id = ?1",
-            params![id],
-            |row| Ok(Tag {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                created_at: row.get(3)?,
-                item_count: 0,
-            }),
-        )?;
-        debug!("Created tag: id={}, name={}", id, name);
-        Ok(tag)
-    }
-
-    /// 重命名标签
-    pub fn rename(&self, id: i64, name: &str) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute(
-            "UPDATE tags SET name = ?1 WHERE id = ?2",
-            params![name, id],
-        )?;
-        debug!("Renamed tag {} to {}", id, name);
-        Ok(())
-    }
-
-    /// 删除标签（item_tags 中的关联通过 ON DELETE CASCADE 自动删除）
-    pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute("DELETE FROM tags WHERE id = ?1", params![id])?;
-        debug!("Deleted tag {}", id);
-        Ok(())
-    }
-
-    /// 为条目添加标签
-    pub fn add_tag_to_item(&self, item_id: i64, tag_id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute(
-            "INSERT OR IGNORE INTO item_tags (item_id, tag_id) VALUES (?1, ?2)",
-            params![item_id, tag_id],
-        )?;
-        debug!("Added tag {} to item {}", tag_id, item_id);
-        Ok(())
-    }
-
-    /// 从条目移除标签
-    pub fn remove_tag_from_item(&self, item_id: i64, tag_id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute(
-            "DELETE FROM item_tags WHERE item_id = ?1 AND tag_id = ?2",
-            params![item_id, tag_id],
-        )?;
-        debug!("Removed tag {} from item {}", tag_id, item_id);
-        Ok(())
-    }
-
-    /// 获取条目的所有标签
-    pub fn get_tags_for_item(&self, item_id: i64) -> Result<Vec<Tag>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT t.id, t.name, t.sort_order, t.created_at, 0 AS item_count \
-             FROM tags t \
-             INNER JOIN item_tags it ON it.tag_id = t.id \
-             WHERE it.item_id = ?1 \
-             ORDER BY t.sort_order ASC",
-        )?;
-        let tags = stmt
-            .query_map(params![item_id], |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    sort_order: row.get(2)?,
-                    created_at: row.get(3)?,
-                    item_count: row.get(4)?,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-        Ok(tags)
-    }
-
-    /// 批量更新标签内条目的排序
-    pub fn reorder_tag_items(&self, tag_id: i64, item_ids: &[i64]) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        let mut stmt = conn.prepare(
-            "UPDATE item_tags SET sort_order = ?1 WHERE tag_id = ?2 AND item_id = ?3",
-        )?;
-        for (i, item_id) in item_ids.iter().enumerate() {
-            stmt.execute(params![i as i64, tag_id, item_id])?;
-        }
-        debug!("Reordered {} items in tag {}", item_ids.len(), tag_id);
-        Ok(())
-    }
-
-    /// 批量更新标签排序
-    pub fn reorder_tags(&self, tag_ids: &[i64]) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        let mut stmt = conn.prepare("UPDATE tags SET sort_order = ?1 WHERE id = ?2")?;
-        for (i, id) in tag_ids.iter().enumerate() {
-            stmt.execute(params![i as i64, id])?;
-        }
-        debug!("Reordered {} tags", tag_ids.len());
-        Ok(())
-    }
-
-    /// 导出标签及其条目关联（使用 content_hash 而非 item_id，以便跨设备匹配）
-    pub fn export_tags_sync_data(&self) -> Result<TagsSyncData, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-
-        // 导出所有标签
-        let mut stmt = conn.prepare(
-            "SELECT name, sort_order, created_at FROM tags ORDER BY sort_order ASC",
-        )?;
-        let tags: Vec<TagSyncEntry> = stmt
-            .query_map([], |row| {
-                Ok(TagSyncEntry {
-                    name: row.get(0)?,
-                    sort_order: row.get(1)?,
-                    created_at: row.get(2)?,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // 导出条目-标签关联（用 content_hash 标识条目，含 sort_order）
-        let mut stmt = conn.prepare(
-            "SELECT ci.content_hash, t.name, it.sort_order \
-             FROM item_tags it \
-             INNER JOIN clipboard_items ci ON ci.id = it.item_id \
-             INNER JOIN tags t ON t.id = it.tag_id",
-        )?;
-        let associations: Vec<TagAssocSyncEntry> = stmt
-            .query_map([], |row| {
-                Ok(TagAssocSyncEntry {
-                    content_hash: row.get(0)?,
-                    tag_name: row.get(1)?,
-                    sort_order: row.get(2)?,
-                })
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(TagsSyncData { tags, associations })
-    }
-
-    /// 导入标签及其条目关联
-    pub fn import_tags_sync_data(&self, data: &TagsSyncData) -> Result<usize, rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        let mut count = 0usize;
-
-        // 导入标签（按 name 去重，已有则更新 sort_order）
-        for tag in &data.tags {
-            let exists: bool = conn
-                .query_row(
-                    "SELECT COUNT(*) > 0 FROM tags WHERE name = ?1",
-                    params![tag.name],
-                    |row| row.get(0),
-                )
-                .unwrap_or(true);
-
-            if !exists {
-                conn.execute(
-                    "INSERT INTO tags (name, sort_order, created_at) VALUES (?1, ?2, ?3)",
-                    params![tag.name, tag.sort_order, tag.created_at],
-                )?;
-                count += 1;
-            } else {
-                conn.execute(
-                    "UPDATE tags SET sort_order = ?1 WHERE name = ?2",
-                    params![tag.sort_order, tag.name],
-                )?;
-            }
-        }
-
-        // 导入条目-标签关联
-        let mut assoc_count = 0usize;
-        for assoc in &data.associations {
-            // 查找本地条目 id（通过 content_hash）
-            let item_id: Option<i64> = conn
-                .query_row(
-                    "SELECT id FROM clipboard_items WHERE content_hash = ?1 LIMIT 1",
-                    params![assoc.content_hash],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            // 查找本地标签 id（通过 name）
-            let tag_id: Option<i64> = conn
-                .query_row(
-                    "SELECT id FROM tags WHERE name = ?1",
-                    params![assoc.tag_name],
-                    |row| row.get(0),
-                )
-                .ok();
-
-            if let (Some(item_id), Some(tag_id)) = (item_id, tag_id) {
-                let inserted = conn.execute(
-                    "INSERT OR IGNORE INTO item_tags (item_id, tag_id, sort_order) VALUES (?1, ?2, ?3)",
-                    params![item_id, tag_id, assoc.sort_order],
-                )?;
-                if inserted > 0 {
-                    assoc_count += 1;
-                } else {
-                    // 已存在则更新 sort_order
-                    conn.execute(
-                        "UPDATE item_tags SET sort_order = ?1 WHERE item_id = ?2 AND tag_id = ?3",
-                        params![assoc.sort_order, item_id, tag_id],
-                    )?;
-                }
-            }
-        }
-
-        debug!("Imported {} tags, {} associations", count, assoc_count);
-        Ok(count)
-    }
-}
-
-/// 标签同步数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TagsSyncData {
-    pub tags: Vec<TagSyncEntry>,
-    pub associations: Vec<TagAssocSyncEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TagSyncEntry {
-    pub name: String,
-    pub sort_order: i64,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TagAssocSyncEntry {
-    pub content_hash: String,
-    pub tag_name: String,
-    #[serde(default)]
-    pub sort_order: i64,
 }
