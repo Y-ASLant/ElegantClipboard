@@ -69,8 +69,8 @@ const VIRTUOSO_SCROLL_SEEK_CONFIG = {
 const VIRTUOSO_COMPONENTS = { ScrollSeekPlaceholder } as const;
 
 export function ClipboardList({ searchInputRef }: ClipboardListProps) {
-  const { t } = useI18n();
-  const groupsConfig = useMemo(() => getGroups(), [t]);
+  const { locale, t } = useI18n();
+  const groupsConfig = useMemo(() => getGroups(), [locale]);
   const listenerRef = useRef<(() => void) | null>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
   const virtuosoRef = useRef<VirtuosoHandle>(null);

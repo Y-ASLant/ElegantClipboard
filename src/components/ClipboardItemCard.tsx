@@ -145,7 +145,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   sortId,
   isDragOverlay = false,
 }: ClipboardItemCardProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   // 每张卡片自行订阅 activeIndex，只有选中态变化的卡片才重渲染
   const isActiveIndex = useClipboardStore(
     (s) => index !== undefined && index >= 0 && s.activeIndex === index,
@@ -272,7 +272,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     zIndex: isDragging ? 1000 : "auto",
   };
 
-  const contentTypeConfig = useMemo(() => getContentTypeConfig(), [t]);
+  const contentTypeConfig = useMemo(() => getContentTypeConfig(), [locale]);
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
   const dragHandleWidth = "clamp(40px, 14%, 72px)";
 

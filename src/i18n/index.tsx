@@ -21,6 +21,9 @@ interface I18nContextValue {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 let currentLocale: Locale = DEFAULT_LOCALE;
+const originalTextNodes = new WeakMap<Text, string>();
+const originalAttributes = new WeakMap<Element, Map<string, string>>();
+const TRANSLATABLE_ATTRIBUTES = ["placeholder", "aria-label", "title"] as const;
 
 function normalizeLocale(value: string | null | undefined): Locale {
   return value === "en-US" ? "en-US" : DEFAULT_LOCALE;
@@ -33,8 +36,13 @@ function interpolate(template: string, values?: TranslationValues) {
 
 export function translate(key: string, values?: TranslationValues, locale = currentLocale) {
   const template = locale === "en-US" ? EN_MESSAGES[key] ?? key : key;
-  if (locale === "en-US" && key === "{count} 天前" && Number(values?.count) !== 1) {
-    return interpolate(EN_MESSAGES["{count} 天前__plural"] ?? template, values);
+  if (
+    locale === "en-US"
+    && typeof values?.count === "number"
+    && Number(values.count) !== 1
+    && EN_MESSAGES[`${key}__plural`]
+  ) {
+    return interpolate(EN_MESSAGES[`${key}__plural`], values);
   }
   return interpolate(template, values);
 }
@@ -48,11 +56,88 @@ function applyLocale(locale: Locale) {
   document.documentElement.lang = locale;
 }
 
+function translateDomSubtree(root: ParentNode, locale: Locale) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let textNode = walker.nextNode() as Text | null;
+  while (textNode) {
+    const original = originalTextNodes.get(textNode) ?? textNode.nodeValue ?? "";
+    originalTextNodes.set(textNode, original);
+    const trimmed = original.trim();
+    if (trimmed) {
+      const translated = translate(trimmed, undefined, locale);
+      textNode.nodeValue =
+        locale === "en-US" && translated !== trimmed
+          ? original.replace(trimmed, translated)
+          : original;
+    }
+    textNode = walker.nextNode() as Text | null;
+  }
+
+  const elements = root instanceof Element ? [root, ...root.querySelectorAll("*")] : Array.from(root.childNodes).flatMap((node) =>
+    node instanceof Element ? [node, ...node.querySelectorAll("*")] : [],
+  );
+
+  for (const element of elements) {
+    const originalMap = originalAttributes.get(element) ?? new Map<string, string>();
+    originalAttributes.set(element, originalMap);
+    for (const attr of TRANSLATABLE_ATTRIBUTES) {
+      const value = element.getAttribute(attr);
+      if (!value) continue;
+      if (!originalMap.has(attr)) {
+        originalMap.set(attr, value);
+      }
+      const original = originalMap.get(attr) ?? value;
+      const translated = translate(original, undefined, locale);
+      if (locale === "en-US" && translated !== original) {
+        element.setAttribute(attr, translated);
+      } else if (locale !== "en-US" && element.getAttribute(attr) !== original) {
+        element.setAttribute(attr, original);
+      }
+    }
+  }
+}
+
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
 
   useEffect(() => {
     applyLocale(locale);
+  }, [locale]);
+
+  useEffect(() => {
+    translateDomSubtree(document.body, locale);
+    let frame = 0;
+    const observer = new MutationObserver((mutations) => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        for (const mutation of mutations) {
+          if (mutation.type === "characterData" && mutation.target.parentNode) {
+            translateDomSubtree(mutation.target.parentNode, locale);
+            continue;
+          }
+          if (mutation.target instanceof Element) {
+            translateDomSubtree(mutation.target, locale);
+          }
+          mutation.addedNodes.forEach((node) => {
+            if (node instanceof Element || node instanceof DocumentFragment) {
+              translateDomSubtree(node, locale);
+            }
+          });
+        }
+      });
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: [...TRANSLATABLE_ATTRIBUTES],
+    });
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [locale]);
 
   useEffect(() => {

@@ -55,9 +55,12 @@ function formatRelativeTime(date: Date): string {
 
 export function formatCharCount(count: number | null): string {
   if (!count) return translate("0 字符");
-  return count >= 10000
-    ? translate("{count}万 字符", { count: (count / 10000).toFixed(1) })
-    : translate("{count} 字符", { count: count.toLocaleString() });
+  if (count >= 10000) {
+    return getCurrentLocale() === "en-US"
+      ? `${(count / 1000).toFixed(1)}k chars`
+      : translate("{count}万 字符", { count: (count / 10000).toFixed(1) });
+  }
+  return translate("{count} 字符", { count: count.toLocaleString() });
 }
 
 export function formatSize(bytes: number): string {

@@ -55,8 +55,8 @@ function dismissOverlays(): boolean {
 }
 
 function App() {
-  const { t } = useI18n();
-  const groupsConfig = useMemo(() => getGroups(), [t]);
+  const { locale, t } = useI18n();
+  const groupsConfig = useMemo(() => getGroups(), [locale]);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   // 分组对话框状态

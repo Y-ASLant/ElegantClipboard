@@ -43,6 +43,7 @@ pub fn tr(language: Language, key: &str) -> &'static str {
             "程序已在运行中" => "The app is already running",
             "ElegantClipboard 已启动" => "ElegantClipboard started",
             "发现新版本" => "New version available",
+            "快捷键格式无效" => "has an invalid shortcut format",
             "快捷键至少包含一个修饰键 (Ctrl/Alt/Win)" => "A shortcut must include at least one modifier key (Ctrl/Alt/Win)",
             "快速粘贴不支持 Win 修饰键（Win+数字 是系统任务栏快捷键）" => "Quick paste does not support the Win modifier (Win+number is reserved by the taskbar)",
             "快捷键至少包含一个修饰键 (Ctrl/Alt)" => "A shortcut must include at least one modifier key (Ctrl/Alt)",

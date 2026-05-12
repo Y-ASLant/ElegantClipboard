@@ -241,6 +241,8 @@ fn apply_paste_shortcuts(
     unregister_shortcut_list(app, &old);
 
     let label = kind.label();
+    let language =
+        crate::i18n::current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db));
     let mut failures = HashMap::new();
     let mut applied = vec![String::new(); 10];
 
@@ -261,9 +263,9 @@ fn apply_paste_shortcuts(
                     slot,
                     format!(
                         "{} {} {}: {}",
-                        crate::i18n::tr(crate::i18n::Language::ZhCn, label),
+                        crate::i18n::tr(language, label),
                         slot,
-                        crate::i18n::tr(crate::i18n::Language::ZhCn, "快捷键格式无效"),
+                        crate::i18n::tr(language, "快捷键格式无效"),
                         normalized
                     ),
                 );
