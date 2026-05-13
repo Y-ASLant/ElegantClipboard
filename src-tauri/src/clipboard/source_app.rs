@@ -277,6 +277,15 @@ fn compute_icon_cache_key(exe_path: &str) -> String {
             hasher.update(encoded.as_bytes());
         }
     }
+    // 将文件修改时间纳入 cache key，应用更新后图标自动刷新
+    if let Ok(meta) = std::fs::metadata(exe_path) {
+        if let Ok(modified) = meta.modified() {
+            let duration = modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default();
+            hasher.update(&duration.as_secs().to_le_bytes());
+        }
+    }
     hasher.finalize().to_hex()[..12].to_string()
 }
 

@@ -65,12 +65,13 @@ pub fn set_exclusion_list(list: Vec<String>) {
 
 /// 停止游戏模式检测
 pub fn stop() {
+    // 先递增代际，确保旧线程在退出时看到新代际而不执行恢复
+    // （必须在 GAME_MODE_ENABLED 置 false 之前，防止线程在两者之间退出）
+    GENERATION.fetch_add(1, Ordering::SeqCst);
+
     if !GAME_MODE_ENABLED.swap(false, Ordering::SeqCst) {
         return; // 未在运行
     }
-
-    // 递增代际，使旧线程退出时不再执行恢复
-    GENERATION.fetch_add(1, Ordering::SeqCst);
 
     // 向事件循环线程发送 WM_QUIT 使其退出
     #[cfg(target_os = "windows")]

@@ -347,16 +347,23 @@ export function cleanupUISettingsListener() {
 // 从后端数据库加载需同步的设置（用于启动初始化和云端同步下载后刷新）
 export async function loadSyncedSettings() {
   try {
-    // 1. 加载原有的独立设置
+    // 使用批量命令一次性获取所有需要的设置，减少 IPC 往返
     const legacyKeys = ["hide_favorited_from_main", "hide_tagged_from_main", "monitor_types"];
-    const legacyValues = await Promise.all(
-      legacyKeys.map((key) => invoke<string | null>("get_setting", { key }))
-    );
+    const dbKeys = SYNCED_UI_KEYS.map((k) => `ui_${toSnakeCase(k)}`);
+    const allKeys = [...legacyKeys, ...dbKeys];
+
+    const allValues = await invoke<Record<string, string>>("get_settings_batch", { keys: allKeys });
+
     const patch: Record<string, unknown> = {};
-    if (legacyValues[0] !== null && legacyValues[0] !== undefined) patch.hideFavoritedFromMain = legacyValues[0] === "true";
-    if (legacyValues[1] !== null && legacyValues[1] !== undefined) patch.hideTaggedFromMain = legacyValues[1] === "true";
-    if (legacyValues[2] && (legacyValues[2] as string).length > 0) {
-      const rawSet = new Set((legacyValues[2] as string).split(",").map((t) => t.trim()).filter(Boolean));
+
+    // 1. 处理原有的独立设置
+    const hideFav = allValues["hide_favorited_from_main"];
+    if (hideFav !== undefined) patch.hideFavoritedFromMain = hideFav === "true";
+    const hideTag = allValues["hide_tagged_from_main"];
+    if (hideTag !== undefined) patch.hideTaggedFromMain = hideTag === "true";
+    const monitorTypes = allValues["monitor_types"];
+    if (monitorTypes && monitorTypes.length > 0) {
+      const rawSet = new Set(monitorTypes.split(",").map((t) => t.trim()).filter(Boolean));
       const uiTypes: string[] = [];
       if (rawSet.has("text") || rawSet.has("html") || rawSet.has("rtf")) uiTypes.push("text");
       if (rawSet.has("image")) uiTypes.push("image");
@@ -365,15 +372,11 @@ export async function loadSyncedSettings() {
       if (uiTypes.length > 0) patch.enabledMonitorTypes = uiTypes;
     }
 
-    // 2. 加载 makeSetter 同步的 UI 设置
-    const dbKeys = SYNCED_UI_KEYS.map((k) => `ui_${toSnakeCase(k)}`);
-    const dbValues = await Promise.all(
-      dbKeys.map((key) => invoke<string | null>("get_setting", { key }))
-    );
+    // 2. 处理 makeSetter 同步的 UI 设置
     const defaults = useUISettings.getState();
     for (let i = 0; i < SYNCED_UI_KEYS.length; i++) {
-      const raw = dbValues[i];
-      if (raw === null || raw === undefined) continue;
+      const raw = allValues[dbKeys[i]];
+      if (raw === undefined) continue;
       const uiKey = SYNCED_UI_KEYS[i];
       const defVal = defaults[uiKey];
       // 按默认值类型还原

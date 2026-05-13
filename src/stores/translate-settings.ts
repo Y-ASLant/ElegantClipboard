@@ -107,28 +107,25 @@ export const useTranslateSettings = create<TranslateSettingsStore>((set, get) =>
   loadSettings: async () => {
     try {
       const keys = Object.keys(SETTING_KEYS);
-      const values = await Promise.all(
-        keys.map((key) => invoke<string | null>("get_setting", { key }))
-      );
-      const m = new Map(keys.map((k, i) => [k, values[i]]));
+      const values = await invoke<Record<string, string>>("get_settings_batch", { keys });
       set({
-        enabled: m.get("translate_enabled") === "true",
-        recordTranslation: m.get("translate_record_translation") === "true",
-        provider: (m.get("translate_provider") as TranslateProvider) || "microsoft",
-        languageMode: (m.get("translate_language_mode") as LanguageMode) || "auto",
-        sourceLanguage: m.get("translate_source_language") || "",
-        targetLanguage: m.get("translate_target_language") || "",
-        deeplxEndpoint: m.get("translate_deeplx_endpoint") || "",
-        googleApiKey: m.get("translate_google_api_key") || "",
-        baiduAppId: m.get("translate_baidu_app_id") || "",
-        baiduSecretKey: m.get("translate_baidu_secret_key") || "",
-        openaiEndpoint: m.get("translate_openai_endpoint") || "",
-        openaiApiKey: m.get("translate_openai_api_key") || "",
-        openaiModel: m.get("translate_openai_model") || "",
-        proxyMode: (m.get("translate_proxy_mode") as "system" | "none" | "custom") || "system",
-        proxyUrl: m.get("translate_proxy_url") || "",
-        translateSelectionEnabled: m.get("translate_selection_enabled") === "true",
-        translateSelectionShortcut: m.get("translate_selection_shortcut") || "",
+        enabled: values["translate_enabled"] === "true",
+        recordTranslation: values["translate_record_translation"] === "true",
+        provider: (values["translate_provider"] as TranslateProvider) || "microsoft",
+        languageMode: (values["translate_language_mode"] as LanguageMode) || "auto",
+        sourceLanguage: values["translate_source_language"] || "",
+        targetLanguage: values["translate_target_language"] || "",
+        deeplxEndpoint: values["translate_deeplx_endpoint"] || "",
+        googleApiKey: values["translate_google_api_key"] || "",
+        baiduAppId: values["translate_baidu_app_id"] || "",
+        baiduSecretKey: values["translate_baidu_secret_key"] || "",
+        openaiEndpoint: values["translate_openai_endpoint"] || "",
+        openaiApiKey: values["translate_openai_api_key"] || "",
+        openaiModel: values["translate_openai_model"] || "",
+        proxyMode: (values["translate_proxy_mode"] as "system" | "none" | "custom") || "system",
+        proxyUrl: values["translate_proxy_url"] || "",
+        translateSelectionEnabled: values["translate_selection_enabled"] === "true",
+        translateSelectionShortcut: values["translate_selection_shortcut"] || "",
         loaded: true,
       });
     } catch (error) {

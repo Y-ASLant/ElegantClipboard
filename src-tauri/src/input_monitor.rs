@@ -520,5 +520,10 @@ fn handle_click_outside() {
             disable_mouse_monitoring();
             crate::commands::hide_preview_windows(window.app_handle());
             let _ = window.emit("window-hidden", ());
+            // 延迟释放工作集内存
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                crate::commands::window::trim_working_set();
+            });
         }
 }

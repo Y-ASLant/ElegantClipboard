@@ -1,5 +1,6 @@
 import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import App from "./App";
 
@@ -58,8 +59,10 @@ function Router() {
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <TooltipProvider delayDuration={300} skipDelayDuration={0} disableHoverableContent>
-      <Router />
-    </TooltipProvider>
+    <ErrorBoundary>
+      <TooltipProvider delayDuration={300} skipDelayDuration={0} disableHoverableContent>
+        <Router />
+      </TooltipProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 );

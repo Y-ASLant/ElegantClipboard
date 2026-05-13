@@ -563,7 +563,8 @@ impl ClipboardRepository {
         Ok(())
     }
 
-    /// 批量删除指定 ID 的条目，返回被删除条目的图片路径（用于文件清理）
+    /// 批量删除指定 ID 的条目，返回被删除条目中可安全清理的图片路径
+    /// （排除仍被其他条目引用的图片）
     pub fn batch_delete(&self, ids: &[i64]) -> Result<(i64, Vec<String>), rusqlite::Error> {
         if ids.is_empty() {
             return Ok((0, vec![]));
@@ -579,7 +580,7 @@ impl ClipboardRepository {
         let mut stmt = conn.prepare(&sql)?;
         let params_ref: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
-        let paths: Vec<String> = stmt
+        let candidate_paths: Vec<String> = stmt
             .query_map(params_ref.as_slice(), |row| row.get(0))?
             .filter_map(|r| r.ok())
             .collect();
@@ -588,8 +589,24 @@ impl ClipboardRepository {
         let params_ref2: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let deleted = conn.execute(&del_sql, params_ref2.as_slice())? as i64;
+
+        // 删除后检查哪些图片不再被任何条目引用，仅返回可安全清理的路径
+        let safe_paths = candidate_paths
+            .into_iter()
+            .filter(|path| {
+                let still_referenced: bool = conn
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM clipboard_items WHERE image_path = ?1)",
+                        params![path],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(true);
+                !still_referenced
+            })
+            .collect();
+
         debug!("Batch deleted {} clipboard items", deleted);
-        Ok((deleted, paths))
+        Ok((deleted, safe_paths))
     }
 
     /// 获取可清除条目的图片路径（按类型过滤）
@@ -672,13 +689,14 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
-    /// 删除 N 天前的非置顶/非收藏条目，返回 (删除数, 关联图片路径)
+    /// 删除 N 天前的非置顶/非收藏/无标签条目，返回 (删除数, 关联图片路径)
     pub fn delete_older_than(&self, days: i64) -> Result<(i64, Vec<String>), rusqlite::Error> {
         let conn = self.write_conn.lock();
 
         let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items \
              WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL \
+             AND NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id) \
              AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
         )?;
         let image_paths: Vec<String> = stmt
@@ -689,6 +707,7 @@ impl ClipboardRepository {
         let deleted = conn.execute(
             "DELETE FROM clipboard_items \
              WHERE is_pinned = 0 AND is_favorite = 0 \
+             AND NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id) \
              AND created_at < datetime('now', 'localtime', '-' || ? || ' days')",
             params![days],
         )?;
@@ -706,7 +725,8 @@ impl ClipboardRepository {
         let conn = self.write_conn.lock();
 
         let current_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0",
+            "SELECT COUNT(*) FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 \
+             AND NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id)",
             [],
             |row| row.get(0),
         )?;
@@ -720,6 +740,7 @@ impl ClipboardRepository {
         let mut stmt = conn.prepare(
             "SELECT image_path FROM clipboard_items \
              WHERE is_pinned = 0 AND is_favorite = 0 AND image_path IS NOT NULL \
+             AND NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id) \
              ORDER BY created_at ASC LIMIT ?",
         )?;
         let image_paths: Vec<String> = stmt
@@ -731,6 +752,7 @@ impl ClipboardRepository {
             "DELETE FROM clipboard_items WHERE id IN (\
                 SELECT id FROM clipboard_items \
                 WHERE is_pinned = 0 AND is_favorite = 0 \
+                AND NOT EXISTS (SELECT 1 FROM item_tags WHERE item_tags.item_id = clipboard_items.id) \
                 ORDER BY created_at ASC LIMIT ?\
              )",
             params![to_delete],

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SortableClipboardItem } from "@/components/ClipboardList/VirtualizedList";
 
 type MoveItem = (fromId: number, toId: number) => Promise<void>;
@@ -23,6 +23,10 @@ export function useOptimisticReorder({
   const [optimisticItems, setOptimisticItems] = useState<SortableClipboardItem[] | null>(null);
   const renderedItems = optimisticItems ?? items;
 
+  // 使用 ref 追踪最新的 renderedItems，避免 handleDragEnd 闭包捕获过期数据
+  const renderedItemsRef = useRef(renderedItems);
+  renderedItemsRef.current = renderedItems;
+
   useEffect(() => {
     setOptimisticItems(null);
   }, [items]);
@@ -35,7 +39,7 @@ export function useOptimisticReorder({
   const handleDragEnd = useCallback(
     async (oldIndex: number, newIndex: number) => {
       if (oldIndex === newIndex) return;
-      const currentItems = renderedItems;
+      const currentItems = renderedItemsRef.current;
       const fromItem = currentItems[oldIndex];
       const toItem = currentItems[newIndex];
       if (!fromItem || !toItem) return;
@@ -63,7 +67,7 @@ export function useOptimisticReorder({
         setOptimisticItems(null);
       }
     },
-    [renderedItems, moveItem, togglePin],
+    [moveItem, togglePin],
   );
 
   return {

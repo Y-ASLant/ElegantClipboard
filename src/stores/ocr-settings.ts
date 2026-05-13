@@ -78,22 +78,19 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
   loadSettings: async () => {
     try {
       const keys = Object.keys(SETTING_KEYS);
-      const values = await Promise.all(
-        keys.map((key) => invoke<string | null>("get_setting", { key }))
-      );
-      const m = new Map(keys.map((k, i) => [k, values[i]]));
+      const values = await invoke<Record<string, string>>("get_settings_batch", { keys });
       set({
-        enabled: m.get("ocr_enabled") === "true",
-        recordOcrCopy: m.get("ocr_record_copy") === "true",
-        autoCopy: m.get("ocr_auto_copy") === "true",
-        autoTranslate: m.get("ocr_auto_translate") === "true",
-        provider: (m.get("ocr_provider") as OcrProvider) || "baidu",
-        accuracy: (m.get("ocr_accuracy") as OcrAccuracy) || "high",
-        shortcut: m.get("ocr_shortcut") || "",
-        baiduApiKey: m.get("ocr_baidu_api_key") || "",
-        baiduSecretKey: m.get("ocr_baidu_secret_key") || "",
-        proxyMode: (m.get("ocr_proxy_mode") as "system" | "none" | "custom") || "none",
-        proxyUrl: m.get("ocr_proxy_url") || "",
+        enabled: values["ocr_enabled"] === "true",
+        recordOcrCopy: values["ocr_record_copy"] === "true",
+        autoCopy: values["ocr_auto_copy"] === "true",
+        autoTranslate: values["ocr_auto_translate"] === "true",
+        provider: (values["ocr_provider"] as OcrProvider) || "baidu",
+        accuracy: (values["ocr_accuracy"] as OcrAccuracy) || "high",
+        shortcut: values["ocr_shortcut"] || "",
+        baiduApiKey: values["ocr_baidu_api_key"] || "",
+        baiduSecretKey: values["ocr_baidu_secret_key"] || "",
+        proxyMode: (values["ocr_proxy_mode"] as "system" | "none" | "custom") || "none",
+        proxyUrl: values["ocr_proxy_url"] || "",
         loaded: true,
       });
     } catch (error) {

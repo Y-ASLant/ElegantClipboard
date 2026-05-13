@@ -25,7 +25,10 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), String> {
     let repo = SettingsRepository::new(&state.db);
-    repo.set(&key, &value).map_err(|e| e.to_string())
+    repo.set(&key, &value).map_err(|e| e.to_string())?;
+    // 通知缓存失效
+    crate::clipboard::invalidate_settings_cache();
+    Ok(())
 }
 
 /// 获取所有设置
@@ -35,6 +38,17 @@ pub async fn get_all_settings(
 ) -> Result<HashMap<String, String>, String> {
     let repo = SettingsRepository::new(&state.db);
     repo.get_all().map_err(|e| e.to_string())
+}
+
+/// 批量获取指定 key 的设置值（减少多次 IPC 往返）
+#[tauri::command]
+pub async fn get_settings_batch(
+    state: State<'_, Arc<AppState>>,
+    keys: Vec<String>,
+) -> Result<HashMap<String, String>, String> {
+    let repo = SettingsRepository::new(&state.db);
+    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    repo.get_multiple(&key_refs).map_err(|e| e.to_string())
 }
 
 // ============ 监控命令 ============

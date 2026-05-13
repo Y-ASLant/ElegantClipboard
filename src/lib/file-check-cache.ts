@@ -6,7 +6,9 @@ const FILE_CHECK_CACHE_TTL = 5000;
 const fileCheckCache = new Map<string, { data: Record<string, FileExistInfo>; ts: number }>();
 
 function fileCheckCacheKey(paths: string[]): string {
-  return paths.join("\0");
+  // 排序后生成 key，确保相同文件集合的不同排列顺序命中同一缓存
+  const sorted = [...paths].sort();
+  return sorted.join("\0");
 }
 
 export async function cachedCheckFilesExist(

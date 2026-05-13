@@ -256,7 +256,7 @@ fn spawn_media_download_worker(
         .ok();
 }
 
-/// 后台上传实际媒体文件（图片线程 + 文件线程）
+/// 后台上传实际媒体文件（图片线程 + 文件线程 + 图标线程）
 fn spawn_media_upload_files(
     app: &tauri::AppHandle,
     config: &webdav::WebDavConfig,
@@ -270,10 +270,12 @@ fn spawn_media_upload_files(
     let images: Vec<_> = media_map.iter().filter(|e| e.media_type == "image").cloned().collect();
     let files: Vec<_> = media_map.iter().filter(|e| e.media_type == "file").cloned().collect();
     let videos: Vec<_> = media_map.iter().filter(|e| e.media_type == "video").cloned().collect();
+    let icons: Vec<_> = media_map.iter().filter(|e| e.media_type == "icon").cloned().collect();
 
     spawn_media_upload_worker(app, config, data_dir, images, "webdav-upload-images", "图片");
     spawn_media_upload_worker(app, config, data_dir, files, "webdav-upload-files", "文件");
     spawn_media_upload_worker(app, config, data_dir, videos, "webdav-upload-videos", "视频");
+    spawn_media_upload_worker(app, config, data_dir, icons, "webdav-upload-icons", "图标");
 }
 
 /// 后台下载缺失媒体：检查本地路径，不存在则从 WebDAV 下载到对应位置

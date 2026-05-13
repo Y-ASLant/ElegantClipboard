@@ -273,7 +273,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     deleteItem(item.id);
   }, [item.id, deleteItem]);
 
-  const handleShowInExplorer = async () => {
+  const handleShowInExplorer = useCallback(async () => {
     if (filePaths.length > 0) {
       try {
         await invoke("show_in_explorer", { path: filePaths[0] });
@@ -281,17 +281,17 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         logError("Failed to show in explorer:", error);
       }
     }
-  };
+  }, [filePaths]);
 
-  const handlePasteAsPath = async () => {
+  const handlePasteAsPath = useCallback(async () => {
     try {
       await invoke("paste_as_path", { id: item.id });
     } catch (error) {
       logError("Failed to paste as path:", error);
     }
-  };
+  }, [item.id]);
 
-  const handleShowDetails = async () => {
+  const handleShowDetails = useCallback(async () => {
     if (filePaths.length === 0) return;
     try {
       const checkResult = await cachedCheckFilesExist(filePaths);
@@ -305,9 +305,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     } catch (error) {
       logError("Failed to get file details:", error);
     }
-  };
+  }, [filePaths]);
 
-  const handleSaveAs = async () => {
+  const handleSaveAs = useCallback(async () => {
     // 图片从 image_path 保存，文件取第一个
     const sourcePath =
       item.content_type === "image" ? item.image_path : filePaths[0];
@@ -317,26 +317,26 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     } catch (error) {
       logError("Failed to save file:", error);
     }
-  };
+  }, [item.content_type, item.image_path, filePaths]);
 
-  const handleShowImageInExplorer = async () => {
+  const handleShowImageInExplorer = useCallback(async () => {
     if (!item.image_path) return;
     try {
       await invoke("show_in_explorer", { path: item.image_path });
     } catch (error) {
       logError("Failed to show in explorer:", error);
     }
-  };
+  }, [item.image_path]);
 
-  const handleEdit = async () => {
+  const handleEdit = useCallback(async () => {
     try {
       await invoke("open_text_editor_window", { id: item.id });
     } catch (error) {
       logError("Failed to open editor:", error);
     }
-  };
+  }, [item.id]);
 
-  const handleTranslate = async () => {
+  const handleTranslate = useCallback(async () => {
     if (translating) return;
     const text = item.text_content || item.preview || "";
     if (!text) return;
@@ -350,16 +350,16 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     } finally {
       setTranslating(false);
     }
-  };
+  }, [translating, item.text_content, item.preview]);
 
-  const handleCopyTranslation = async () => {
+  const handleCopyTranslation = useCallback(async () => {
     if (!translatedText) return;
     try {
       await invoke("write_text_to_clipboard", { text: translatedText, record: useTranslateSettings.getState().recordTranslation });
     } catch (error) {
       logError("Failed to copy translation:", error);
     }
-  };
+  }, [translatedText]);
 
   // ---- 卡片内容 ----
 

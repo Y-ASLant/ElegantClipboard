@@ -5,6 +5,8 @@ use crate::database::{
 };
 use blake3::Hasher;
 use image::ImageReader;
+use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
@@ -115,11 +117,119 @@ struct ContentHashes {
     semantic_hash: String,
 }
 
+/// 缓存的内容过滤正则（避免每次剪贴板事件都重新编译）
+struct CachedContentFilter {
+    /// 原始规则文本（用于判断是否需要重新编译）
+    rules_source: String,
+    /// 编译后的 RegexSet（所有模式合法时使用）
+    regex_set: Option<regex::RegexSet>,
+    /// 逐条编译的正则（RegexSet 编译失败时的回退）
+    individual_regexes: Vec<(String, regex::Regex)>,
+}
+
+impl CachedContentFilter {
+    fn new() -> Self {
+        Self {
+            rules_source: String::new(),
+            regex_set: None,
+            individual_regexes: Vec::new(),
+        }
+    }
+
+    /// 若规则文本变化则重新编译，返回是否有有效规则
+    fn update_if_changed(&mut self, rules: &str) -> bool {
+        if rules == self.rules_source {
+            return self.regex_set.is_some() || !self.individual_regexes.is_empty();
+        }
+
+        self.rules_source = rules.to_string();
+        self.regex_set = None;
+        self.individual_regexes.clear();
+
+        let patterns: Vec<&str> = rules
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        if patterns.is_empty() {
+            return false;
+        }
+
+        match regex::RegexSet::new(&patterns) {
+            Ok(set) => {
+                self.regex_set = Some(set);
+            }
+            Err(_) => {
+                // RegexSet 要求所有模式合法；回退逐条编译
+                for pattern in &patterns {
+                    match regex::Regex::new(pattern) {
+                        Ok(re) => {
+                            self.individual_regexes.push((pattern.to_string(), re));
+                        }
+                        Err(e) => {
+                            warn!("无效的内容过滤正则 {:?}: {}", pattern, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        self.regex_set.is_some() || !self.individual_regexes.is_empty()
+    }
+
+    /// 检查文本是否匹配任一规则
+    fn is_match(&self, text: &str) -> Option<&str> {
+        if let Some(ref set) = self.regex_set {
+            if let Some(_idx) = set.matches(text).iter().next() {
+                // 无法从 RegexSet 获取具体模式文本，返回占位
+                return Some("<regex_set_match>");
+            }
+        } else {
+            for (pattern, re) in &self.individual_regexes {
+                if re.is_match(text) {
+                    return Some(pattern.as_str());
+                }
+            }
+        }
+        None
+    }
+}
+
+/// 缓存的处理设置（避免每次剪贴板事件都查询数据库）
+struct CachedProcessSettings {
+    /// 设置值缓存
+    values: HashMap<String, String>,
+    /// 缓存版本号（设置变更时递增以失效）
+    version: u64,
+}
+
+impl CachedProcessSettings {
+    fn new() -> Self {
+        Self {
+            values: HashMap::new(),
+            version: 0,
+        }
+    }
+}
+
+/// 全局设置版本号，前端/后端修改设置时递增以通知缓存失效
+static SETTINGS_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// 外部调用：通知设置已变更，使缓存失效
+pub fn invalidate_settings_cache() {
+    SETTINGS_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub struct ClipboardHandler {
     repository: ClipboardRepository,
     settings_repo: SettingsRepository,
     images_path: PathBuf,
     icons_path: PathBuf,
+    /// 缓存的内容过滤正则
+    content_filter_cache: Mutex<CachedContentFilter>,
+    /// 缓存的处理设置
+    settings_cache: Mutex<CachedProcessSettings>,
 }
 
 impl ClipboardHandler {
@@ -135,6 +245,8 @@ impl ClipboardHandler {
             settings_repo: SettingsRepository::new(db),
             images_path,
             icons_path,
+            content_filter_cache: Mutex::new(CachedContentFilter::new()),
+            settings_cache: Mutex::new(CachedProcessSettings::new()),
         }
     }
 
@@ -267,54 +379,23 @@ impl ClipboardHandler {
             .flatten();
 
         let rules = match rules {
-            Some(ref s) if !s.is_empty() => s,
+            Some(ref s) if !s.is_empty() => s.as_str(),
             _ => return false,
         };
 
-        // 收集有效的正则模式，使用 RegexSet 一次编译 + 一次匹配，
-        // 避免逐条编译和匹配的 O(n) 正则初始化开销
-        let mut patterns = Vec::new();
-        for line in rules.lines() {
-            let pattern = line.trim();
-            if !pattern.is_empty() {
-                patterns.push(pattern);
-            }
-        }
-        if patterns.is_empty() {
+        // 使用缓存的正则，仅在规则变化时重新编译
+        let mut cache = self.content_filter_cache.lock();
+        if !cache.update_if_changed(rules) {
             return false;
         }
 
-        match regex::RegexSet::new(&patterns) {
-            Ok(set) => {
-                if let Some(idx) = set.matches(text).iter().next() {
-                    debug!(
-                        "内容被过滤规则排除: {:?} (文本长度={})",
-                        patterns[idx],
-                        text.len()
-                    );
-                    return true;
-                }
-            }
-            Err(_) => {
-                // RegexSet 要求所有模式都合法；若批量编译失败则回退逐条匹配
-                for pattern in &patterns {
-                    match regex::Regex::new(pattern) {
-                        Ok(re) => {
-                            if re.is_match(text) {
-                                debug!(
-                                    "内容被过滤规则排除: {:?} (文本长度={})",
-                                    pattern,
-                                    text.len()
-                                );
-                                return true;
-                            }
-                        }
-                        Err(e) => {
-                            warn!("无效的内容过滤正则 {:?}: {}", pattern, e);
-                        }
-                    }
-                }
-            }
+        if let Some(matched) = cache.is_match(text) {
+            debug!(
+                "内容被过滤规则排除: {:?} (文本长度={})",
+                matched,
+                text.len()
+            );
+            return true;
         }
 
         false
@@ -326,14 +407,8 @@ impl ClipboardHandler {
         content: ClipboardContent,
         source: Option<SourceAppInfo>,
     ) -> Result<Option<i64>, String> {
-        // 批量读取所有需要的设置，将多次数据库查询合并为一次
-        let settings = self.settings_repo
-            .get_multiple(&[
-                "max_content_size_kb", "max_image_size_kb", "max_file_size_kb",
-                "max_video_size_kb", "dedup_strategy", "text_dedup_mode",
-                "max_history_count", "auto_cleanup_days",
-            ])
-            .unwrap_or_default();
+        // 使用缓存的设置，仅在版本号变化时重新从数据库读取
+        let settings = self.get_cached_settings();
 
         let max_content_size = settings
             .get("max_content_size_kb")
@@ -520,6 +595,28 @@ impl ClipboardHandler {
         }
 
         Ok(Some(id))
+    }
+
+    /// 获取缓存的处理设置（版本号变化时重新从数据库读取）
+    fn get_cached_settings(&self) -> HashMap<String, String> {
+        let current_version = SETTINGS_VERSION.load(std::sync::atomic::Ordering::Relaxed);
+        let mut cache = self.settings_cache.lock();
+        if cache.version == current_version && !cache.values.is_empty() {
+            return cache.values.clone();
+        }
+
+        // 缓存失效，重新从数据库批量读取
+        let values = self.settings_repo
+            .get_multiple(&[
+                "max_content_size_kb", "max_image_size_kb", "max_file_size_kb",
+                "max_video_size_kb", "dedup_strategy", "text_dedup_mode",
+                "max_history_count", "auto_cleanup_days",
+            ])
+            .unwrap_or_default();
+
+        cache.values = values.clone();
+        cache.version = current_version;
+        values
     }
 
     fn get_content_size(&self, content: &ClipboardContent) -> usize {

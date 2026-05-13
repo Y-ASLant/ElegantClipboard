@@ -102,26 +102,23 @@ export const useTtsSettings = create<TtsSettingsStore>((set, get) => ({
   loadSettings: async () => {
     try {
       const keys = Object.keys(SETTING_KEYS);
-      const values = await Promise.all(
-        keys.map((key) => invoke<string | null>("get_setting", { key }))
-      );
-      const m = new Map(keys.map((k, i) => [k, values[i]]));
+      const values = await invoke<Record<string, string>>("get_settings_batch", { keys });
       set({
-        enabled: m.get("tts_enabled") !== "false",
-        engine: (m.get("tts_engine") as TtsEngine) || "edge",
-        edgeVoice: m.get("tts_edge_voice") || "zh-CN-XiaoxiaoNeural",
-        edgeVoiceEn: m.get("tts_edge_voice_en") || "en-US-AriaNeural",
-        edgeVoiceZh: m.get("tts_edge_voice_zh") || "zh-CN-XiaoxiaoNeural",
-        edgeRate: m.get("tts_edge_rate") || "+0%",
-        edgeRateEn: m.get("tts_edge_rate_en") || "+0%",
-        edgeRateZh: m.get("tts_edge_rate_zh") || "+0%",
-        splitVoice: m.get("tts_split_voice") === "true",
-        proxyMode: (m.get("tts_proxy_mode") as "system" | "none" | "custom") || "system",
-        proxyUrl: m.get("tts_proxy_url") || "",
-        browserAccent: m.get("tts_browser_accent") || "en-US",
-        highlightWord: m.get("tts_highlight_word") !== "false",
-        showToolbarTts: m.get("tts_show_toolbar") === "true",
-        volume: m.get("tts_volume") ? parseInt(m.get("tts_volume")!, 10) : 50,
+        enabled: values["tts_enabled"] !== "false",
+        engine: (values["tts_engine"] as TtsEngine) || "edge",
+        edgeVoice: values["tts_edge_voice"] || "zh-CN-XiaoxiaoNeural",
+        edgeVoiceEn: values["tts_edge_voice_en"] || "en-US-AriaNeural",
+        edgeVoiceZh: values["tts_edge_voice_zh"] || "zh-CN-XiaoxiaoNeural",
+        edgeRate: values["tts_edge_rate"] || "+0%",
+        edgeRateEn: values["tts_edge_rate_en"] || "+0%",
+        edgeRateZh: values["tts_edge_rate_zh"] || "+0%",
+        splitVoice: values["tts_split_voice"] === "true",
+        proxyMode: (values["tts_proxy_mode"] as "system" | "none" | "custom") || "system",
+        proxyUrl: values["tts_proxy_url"] || "",
+        browserAccent: values["tts_browser_accent"] || "en-US",
+        highlightWord: values["tts_highlight_word"] !== "false",
+        showToolbarTts: values["tts_show_toolbar"] === "true",
+        volume: values["tts_volume"] ? parseInt(values["tts_volume"], 10) : 50,
         loaded: true,
       });
     } catch (error) {

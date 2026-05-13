@@ -2,6 +2,24 @@ use crate::commands::AppState;
 use crate::database;
 use tauri::{Emitter, Manager};
 
+/// 窗口隐藏后释放进程工作集内存（Windows）。
+/// WebView2 在窗口不可见时会自动降低内存使用，
+/// 此函数额外调用 EmptyWorkingSet 将物理内存页面换出到页面文件，
+/// 降低任务管理器中显示的内存占用。下次显示时按需换回，无感知延迟。
+#[cfg(target_os = "windows")]
+pub(crate) fn trim_working_set() {
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    use windows::Win32::System::ProcessStatus::EmptyWorkingSet;
+
+    unsafe {
+        let _ = EmptyWorkingSet(GetCurrentProcess());
+    }
+    tracing::debug!("Working set trimmed");
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn trim_working_set() {}
+
 /// 若「记住窗口大小」开关启用，将当前窗口逻辑尺寸保存到 settings 表。
 /// 所有隐藏主窗口的路径都应在 hide 前调用此函数。
 pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
@@ -120,6 +138,11 @@ pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle, reposition: bool)
             // 主窗口隐藏后，恢复设置窗口的置顶
             promote_settings_window(app);
             let _ = window.emit("window-hidden", ());
+            // 延迟释放工作集内存
+            tauri::async_runtime::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                trim_working_set();
+            });
         } else {
             let position_mode = app
                 .try_state::<std::sync::Arc<AppState>>()
@@ -230,6 +253,11 @@ pub async fn hide_window(window: tauri::WebviewWindow) {
     crate::input_monitor::disable_mouse_monitoring();
     crate::commands::hide_preview_windows(window.app_handle());
     let _ = window.emit("window-hidden", ());
+    // 延迟释放工作集内存，等待 WebView2 内部清理完成
+    tauri::async_runtime::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        trim_working_set();
+    });
 }
 
 #[tauri::command]
@@ -269,6 +297,11 @@ pub async fn close_window(window: tauri::WebviewWindow) {
     crate::input_monitor::disable_mouse_monitoring();
     crate::commands::hide_preview_windows(window.app_handle());
     let _ = window.emit("window-hidden", ());
+    // 延迟释放工作集内存
+    tauri::async_runtime::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        trim_working_set();
+    });
 }
 
 #[tauri::command]

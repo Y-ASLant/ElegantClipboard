@@ -205,6 +205,16 @@ pub async fn show_video_preview(
     }
     cancel_preview_destroy(&IMAGE_PREVIEW_DESTROY_SEQ);
 
+    // 守卫：主窗必须可见，否则拒绝显示预览（防止孤儿预览窗口）
+    if !app
+        .get_webview_window("main")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+    {
+        force_hide_image_preview(&app);
+        return Ok(());
+    }
+
     let mut newly_created = false;
     let window = if let Some(w) = app.get_webview_window("image-preview") {
         w

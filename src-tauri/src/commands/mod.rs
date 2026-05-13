@@ -82,36 +82,68 @@ pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
 }
 
 /// 隐藏图片预览窗口（若存在）。
+/// 使用 abort 取消之前的延迟关闭任务，避免频繁触发时累积大量 pending task。
 pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::{Emitter, Manager};
+
+    static IMAGE_CLOSE_HANDLE: std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>> =
+        std::sync::Mutex::new(None);
 
     if let Some(preview) = app.get_webview_window("image-preview") {
         let _ = preview.hide();
         let _ = preview.emit("image-preview-clear", ());
+
+        // 取消之前的延迟关闭任务
+        if let Ok(mut guard) = IMAGE_CLOSE_HANDLE.lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
+        }
+
         let preview = preview.clone();
-        tauri::async_runtime::spawn(async move {
+        let task = tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             if !preview.is_visible().unwrap_or(false) {
                 let _ = preview.close();
             }
         });
+
+        if let Ok(mut guard) = IMAGE_CLOSE_HANDLE.lock() {
+            *guard = Some(task);
+        }
     }
 }
 
 /// 隐藏文本预览窗口（若存在）。
+/// 使用 abort 取消之前的延迟关闭任务，避免频繁触发时累积大量 pending task。
 pub(crate) fn hide_text_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::{Emitter, Manager};
+
+    static TEXT_CLOSE_HANDLE: std::sync::Mutex<Option<tauri::async_runtime::JoinHandle<()>>> =
+        std::sync::Mutex::new(None);
 
     if let Some(preview) = app.get_webview_window("text-preview") {
         let _ = preview.hide();
         let _ = preview.emit("text-preview-clear", ());
+
+        // 取消之前的延迟关闭任务
+        if let Ok(mut guard) = TEXT_CLOSE_HANDLE.lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
+        }
+
         let preview = preview.clone();
-        tauri::async_runtime::spawn(async move {
+        let task = tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             if !preview.is_visible().unwrap_or(false) {
                 let _ = preview.close();
             }
         });
+
+        if let Ok(mut guard) = TEXT_CLOSE_HANDLE.lock() {
+            *guard = Some(task);
+        }
     }
 }
 

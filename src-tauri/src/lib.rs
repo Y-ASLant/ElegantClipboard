@@ -1029,6 +1029,7 @@ pub fn run() {
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_all_settings,
+            commands::settings::get_settings_batch,
             commands::settings::pause_monitor,
             commands::settings::resume_monitor,
             commands::settings::get_monitor_status,

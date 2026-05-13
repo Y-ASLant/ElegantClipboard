@@ -34,34 +34,31 @@ export function useWebDAVSettings() {
 
   const loadSettings = useCallback(async () => {
     try {
-      const values = await Promise.all(
-        SETTINGS_KEYS.map((key) => invoke<string | null>("get_setting", { key })),
-      );
-      const m = new Map(SETTINGS_KEYS.map((key, index) => [key, values[index]]));
+      const m = await invoke<Record<string, string>>("get_settings_batch", { keys: SETTINGS_KEYS });
 
-      setEnabled(m.get("webdav_enabled") === "true");
-      setAutoSync(m.get("webdav_auto_sync") === "true");
-      setSyncInterval(m.get("webdav_sync_interval") || "60");
-      setUrl(m.get("webdav_url") || "");
-      setUsername(m.get("webdav_username") || "");
-      setPassword(m.get("webdav_password") || "");
-      setRemoteDir(m.get("webdav_remote_dir") || "/elegant-clipboard");
-      const pm = m.get("webdav_proxy_mode") || "system";
+      setEnabled(m["webdav_enabled"] === "true");
+      setAutoSync(m["webdav_auto_sync"] === "true");
+      setSyncInterval(m["webdav_sync_interval"] || "60");
+      setUrl(m["webdav_url"] || "");
+      setUsername(m["webdav_username"] || "");
+      setPassword(m["webdav_password"] || "");
+      setRemoteDir(m["webdav_remote_dir"] || "/elegant-clipboard");
+      const pm = m["webdav_proxy_mode"] || "system";
       setProxyMode(pm === "none" || pm === "custom" ? pm : "system");
-      setProxyUrl(m.get("webdav_proxy_url") || "");
-      setAcceptInvalidCerts(m.get("webdav_accept_invalid_certs") === "true");
+      setProxyUrl(m["webdav_proxy_url"] || "");
+      setAcceptInvalidCerts(m["webdav_accept_invalid_certs"] === "true");
 
       const types = new Set<string>();
-      if (m.get("webdav_sync_text") !== "false") types.add("text");
-      if (m.get("webdav_sync_image") !== "false") types.add("image");
-      if (m.get("webdav_sync_files") !== "false") types.add("files");
-      if (m.get("webdav_sync_video") === "true") types.add("video");
+      if (m["webdav_sync_text"] !== "false") types.add("text");
+      if (m["webdav_sync_image"] !== "false") types.add("image");
+      if (m["webdav_sync_files"] !== "false") types.add("files");
+      if (m["webdav_sync_video"] === "true") types.add("video");
       setSyncTypes(types);
 
-      setMaxImageSizeKb(m.get("webdav_max_image_size_kb") || "5120");
-      setMaxFileSizeKb(m.get("webdav_max_file_size_kb") || "5120");
-      setMaxVideoSizeKb(m.get("webdav_max_video_size_kb") || "5120");
-      setLastSyncTime(m.get("webdav_last_sync_time") || "");
+      setMaxImageSizeKb(m["webdav_max_image_size_kb"] || "5120");
+      setMaxFileSizeKb(m["webdav_max_file_size_kb"] || "5120");
+      setMaxVideoSizeKb(m["webdav_max_video_size_kb"] || "5120");
+      setLastSyncTime(m["webdav_last_sync_time"] || "");
       setLoaded(true);
     } catch (error) {
       logError("加载同步设置失败:", error);
