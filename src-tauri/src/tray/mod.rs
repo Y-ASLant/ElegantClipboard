@@ -3,7 +3,7 @@ use crate::database::SettingsRepository;
 use crate::i18n::{current_language, tr};
 use std::sync::Arc;
 use tauri::{
-    AppHandle, Manager,
+    AppHandle, Manager, Wry,
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -12,11 +12,11 @@ use tracing::info;
 
 #[derive(Clone)]
 struct TrayHandles {
-    pause_item: MenuItem,
-    shortcut_item: MenuItem,
-    settings_item: MenuItem,
-    restart_item: MenuItem,
-    quit_item: MenuItem,
+    pause_item: MenuItem<Wry>,
+    shortcut_item: MenuItem<Wry>,
+    settings_item: MenuItem<Wry>,
+    restart_item: MenuItem<Wry>,
+    quit_item: MenuItem<Wry>,
 }
 
 static TRAY_HANDLES: std::sync::OnceLock<TrayHandles> = std::sync::OnceLock::new();
