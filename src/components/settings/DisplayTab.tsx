@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -20,6 +21,8 @@ import {
   Settings16Regular,
   MultiselectLtr16Regular,
 } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
@@ -48,6 +51,7 @@ function SortableToolbarItem({
   label,
   description,
   active,
+  disabled,
   onToggle,
 }: {
   id: ToolbarButton;
@@ -55,6 +59,7 @@ function SortableToolbarItem({
   label: string;
   description: string;
   active: boolean;
+  disabled?: boolean;
   onToggle: () => void;
 }) {
   const {
@@ -93,11 +98,15 @@ function SortableToolbarItem({
       )}
       <div className="flex-1 min-w-0">
         <div className="text-xs font-medium">{label}</div>
-        <div className="text-[11px] text-muted-foreground truncate">{description}</div>
+        <div className="text-[11px] text-muted-foreground truncate">
+          {description}
+          {disabled && <span className="ml-1 text-amber-500">（托盘图标关闭时不可禁用）</span>}
+        </div>
       </div>
       <Switch
         checked={active}
         onCheckedChange={onToggle}
+        disabled={disabled}
         className="shrink-0"
       />
     </div>
@@ -155,6 +164,21 @@ export function DisplayTab() {
   } = useUISettings();
   const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled || videoPreviewEnabled;
 
+  // 读取托盘图标状态：托盘关闭时，设置按钮不可禁用（否则用户无法打开设置）
+  const [showTrayIcon, setShowTrayIcon] = useState(true);
+  useEffect(() => {
+    invoke<string | null>("get_setting", { key: "show_tray_icon" })
+      .then((v) => setShowTrayIcon(v !== "false"))
+      .catch(() => {});
+  }, []);
+  // 监听托盘图标变更（从常规设置 Tab 切换时同步）
+  useEffect(() => {
+    const unlisten = listen<string>("tray-visibility-changed", (event) => {
+      setShowTrayIcon(event.payload !== "false");
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, []);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 3 } })
   );
@@ -162,6 +186,10 @@ export function DisplayTab() {
   const isButtonActive = (id: ToolbarButton) => toolbarButtons.includes(id);
 
   const toggleButton = (id: ToolbarButton) => {
+    // 托盘图标关闭时，设置按钮不可禁用（否则用户无法打开设置窗口）
+    if (id === "settings" && isButtonActive(id) && !showTrayIcon) {
+      return;
+    }
     if (isButtonActive(id)) {
       setToolbarButtons(toolbarButtons.filter((b) => b !== id));
     } else if (toolbarButtons.length < MAX_TOOLBAR_BUTTONS) {
@@ -215,6 +243,8 @@ export function DisplayTab() {
                 const active = isButtonActive(id);
                 const meta = TOOLBAR_BUTTON_REGISTRY[id];
                 const Icon = TOOLBAR_BUTTON_ICONS[id];
+                // 托盘图标关闭时，设置按钮不可禁用
+                const isLocked = id === "settings" && active && !showTrayIcon;
                 return (
                   <SortableToolbarItem
                     key={id}
@@ -223,6 +253,7 @@ export function DisplayTab() {
                     label={meta.label}
                     description={meta.description}
                     active={active}
+                    disabled={isLocked}
                     onToggle={() => toggleButton(id)}
                   />
                 );

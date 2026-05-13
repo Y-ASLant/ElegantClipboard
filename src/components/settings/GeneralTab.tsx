@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -73,9 +74,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
 
 
   const toggleTrayIcon = async (visible: boolean) => {
+    // 关闭托盘图标时，确保工具栏中有设置按钮（否则用户无法打开设置）
+    if (!visible) {
+      const { toolbarButtons, setToolbarButtons } = useUISettings.getState();
+      if (!toolbarButtons.includes("settings")) {
+        setToolbarButtons([...toolbarButtons, "settings"]);
+      }
+    }
     setShowTrayIcon(visible);
     try {
       await invoke("set_tray_visible", { visible });
+      // 通知其他 Tab（如显示设置）托盘图标状态变更
+      emit("tray-visibility-changed", String(visible)).catch(() => {});
     } catch (error) {
       logError("Failed to set tray visibility:", error);
     }
