@@ -1,7 +1,7 @@
 use crate::database::SettingsRepository;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Manager, State};
 
 use super::AppState;
 
@@ -20,12 +20,19 @@ pub async fn get_setting(
 /// 设置值
 #[tauri::command]
 pub async fn set_setting(
+    app: tauri::AppHandle,
     state: State<'_, Arc<AppState>>,
     key: String,
     value: String,
 ) -> Result<(), String> {
     let repo = SettingsRepository::new(&state.db);
-    repo.set(&key, &value).map_err(|e| e.to_string())
+    repo.set(&key, &value).map_err(|e| e.to_string())?;
+    if key == crate::i18n::LANGUAGE_SETTING_KEY {
+        use tauri::Emitter;
+        let _ = app.emit("interface-language-changed", value);
+        crate::tray::refresh_language(&app);
+    }
+    Ok(())
 }
 
 /// 获取所有设置
@@ -98,7 +105,10 @@ pub async fn select_folder_for_settings(app: tauri::AppHandle) -> Result<Option<
     let result = app
         .dialog()
         .file()
-        .set_title("选择数据存储文件夹")
+        .set_title(crate::i18n::tr(
+            crate::i18n::current_language(&SettingsRepository::new(&app.state::<Arc<AppState>>().db)),
+            "选择数据存储文件夹",
+        ))
         .blocking_pick_folder();
 
     Ok(result.map(|p| p.to_string()))

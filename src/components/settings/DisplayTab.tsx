@@ -23,7 +23,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import { TOOLBAR_BUTTON_REGISTRY } from "@/lib/constants";
+import { useI18n } from "@/i18n";
+import { getToolbarButtonRegistry } from "@/lib/constants";
 import {
   useUISettings,
   DEFAULT_TOOLBAR_BUTTONS,
@@ -32,15 +33,12 @@ import {
   type TimeFormat,
   type ToolbarButton,
 } from "@/stores/ui-settings";
-
 const TOOLBAR_BUTTON_ICONS: Record<ToolbarButton, React.ComponentType<{ className?: string }>> = {
   clear: Delete16Regular,
   pin: LockClosed16Regular,
   batch: MultiselectLtr16Regular,
   settings: Settings16Regular,
 };
-
-const ALL_TOOLBAR_BUTTONS: ToolbarButton[] = Object.keys(TOOLBAR_BUTTON_REGISTRY) as ToolbarButton[];
 
 function SortableToolbarItem({
   id,
@@ -104,30 +102,8 @@ function SortableToolbarItem({
   );
 }
 
-const positionOptions: { value: "auto" | "left" | "right"; label: string }[] = [
-  { value: "auto", label: "自动" },
-  { value: "left", label: "左侧" },
-  { value: "right", label: "右侧" },
-];
-
-const sourceDisplayOptions: { value: "both" | "name" | "icon"; label: string }[] = [
-  { value: "both", label: "完整" },
-  { value: "name", label: "仅名称" },
-  { value: "icon", label: "仅图标" },
-];
-
-const densityOptions: { value: CardDensity; label: string }[] = [
-  { value: "compact", label: "紧凑" },
-  { value: "standard", label: "标准" },
-  { value: "spacious", label: "宽松" },
-];
-
-const timeFormatOptions: { value: TimeFormat; label: string }[] = [
-  { value: "absolute", label: "绝对时间" },
-  { value: "relative", label: "相对时间" },
-];
-
 export function DisplayTab() {
+  const { t } = useI18n();
   const {
     cardMaxLines, setCardMaxLines,
     imageAutoHeight, setImageAutoHeight,
@@ -151,6 +127,27 @@ export function DisplayTab() {
     showDragAreaIndicator, setShowDragAreaIndicator,
   } = useUISettings();
   const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled;
+  const toolbarButtonRegistry = getToolbarButtonRegistry();
+  const allToolbarButtons: ToolbarButton[] = Object.keys(toolbarButtonRegistry) as ToolbarButton[];
+  const positionOptions: { value: "auto" | "left" | "right"; label: string }[] = [
+    { value: "auto", label: t("自动") },
+    { value: "left", label: t("左侧") },
+    { value: "right", label: t("右侧") },
+  ];
+  const sourceDisplayOptions: { value: "both" | "name" | "icon"; label: string }[] = [
+    { value: "both", label: t("完整") },
+    { value: "name", label: t("仅名称") },
+    { value: "icon", label: t("仅图标") },
+  ];
+  const densityOptions: { value: CardDensity; label: string }[] = [
+    { value: "compact", label: t("紧凑") },
+    { value: "standard", label: t("标准") },
+    { value: "spacious", label: t("宽松") },
+  ];
+  const timeFormatOptions: { value: TimeFormat; label: string }[] = [
+    { value: "absolute", label: t("绝对时间") },
+    { value: "relative", label: t("相对时间") },
+  ];
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 3 } })
@@ -181,7 +178,7 @@ export function DisplayTab() {
   // 排序：激活按钮在前（保持顺序），未激活在后
   const orderedButtons: ToolbarButton[] = [
     ...toolbarButtons,
-    ...ALL_TOOLBAR_BUTTONS.filter((b) => !toolbarButtons.includes(b)),
+    ...allToolbarButtons.filter((b) => !toolbarButtons.includes(b)),
   ];
 
   return (
@@ -189,17 +186,15 @@ export function DisplayTab() {
       {/* Toolbar Buttons Card */}
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium">工具栏</h3>
+          <h3 className="text-sm font-medium">{t("工具栏")}</h3>
           <button
             onClick={() => setToolbarButtons([...DEFAULT_TOOLBAR_BUTTONS])}
             className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
-            重置默认
+            {t("重置默认")}
           </button>
         </div>
-        <p className="text-xs text-muted-foreground mb-4">
-          自定义工具栏显示的按钮及顺序（最多 {MAX_TOOLBAR_BUTTONS} 个）
-        </p>
+          <p className="text-xs text-muted-foreground mb-4">{t("自定义工具栏显示的按钮及顺序（最多 {count} 个）", { count: MAX_TOOLBAR_BUTTONS })}</p>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -210,7 +205,7 @@ export function DisplayTab() {
             <div className="space-y-1">
               {orderedButtons.map((id) => {
                 const active = isButtonActive(id);
-                const meta = TOOLBAR_BUTTON_REGISTRY[id];
+                const meta = toolbarButtonRegistry[id];
                 const Icon = TOOLBAR_BUTTON_ICONS[id];
                 return (
                   <SortableToolbarItem
@@ -226,8 +221,8 @@ export function DisplayTab() {
               })}
               <div className="flex items-center justify-between mt-3 pt-3 border-t">
                 <div className="space-y-0.5">
-                  <Label className="text-xs">底部分类栏</Label>
-                  <p className="text-xs text-muted-foreground">显示底部内容类型分类筛选栏</p>
+                  <Label className="text-xs">{t("底部分类栏")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("显示底部内容类型分类筛选栏")}</p>
                 </div>
                 <Switch checked={showCategoryFilter} onCheckedChange={setShowCategoryFilter} />
               </div>
@@ -238,15 +233,15 @@ export function DisplayTab() {
 
       {/* Content Preview Card */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">内容预览</h3>
-        <p className="text-xs text-muted-foreground mb-4">配置剪贴板卡片的内容显示</p>
+        <h3 className="text-sm font-medium mb-3">{t("内容预览")}</h3>
+        <p className="text-xs text-muted-foreground mb-4">{t("配置剪贴板卡片的内容显示")}</p>
         
         <div className="space-y-4">
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label className="text-xs">预览最大行数</Label>
+              <Label className="text-xs">{t("预览最大行数")}</Label>
               <span className="text-xs font-medium tabular-nums">
-                {cardMaxLines} 行
+                {t("{count} 行", { count: cardMaxLines })}
               </span>
             </div>
             <Slider
@@ -257,14 +252,14 @@ export function DisplayTab() {
               step={1}
             />
             <p className="text-xs text-muted-foreground">
-              超过此行数的内容将被截断显示，内容不足时按实际高度显示
+              {t("超过此行数的内容将被截断显示，内容不足时按实际高度显示")}
             </p>
           </div>
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">卡片间距</Label>
-              <p className="text-xs text-muted-foreground">调整卡片之间的间距大小</p>
+                <Label className="text-xs">{t("卡片间距")}</Label>
+                <p className="text-xs text-muted-foreground">{t("调整卡片之间的间距大小")}</p>
             </div>
             <div className="flex gap-1">
               {densityOptions.map((opt) => (
@@ -285,10 +280,10 @@ export function DisplayTab() {
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示区域提示</Label>
-              <p className="text-xs text-muted-foreground">
-                在卡片左右显示可拖拽区域，中间显示粘贴区域提示，不影响拖拽功能
-              </p>
+                <Label className="text-xs">{t("显示区域提示")}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("在卡片左右显示可拖拽区域，中间显示粘贴区域提示，不影响拖拽功能")}
+                </p>
             </div>
             <Switch
               checked={showDragAreaIndicator}
@@ -298,10 +293,10 @@ export function DisplayTab() {
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">图片自适应高度</Label>
-              <p className="text-xs text-muted-foreground">
-                关闭后图片高度跟随预览最大行数
-              </p>
+                <Label className="text-xs">{t("图片自适应高度")}</Label>
+                <p className="text-xs text-muted-foreground">
+                  {t("关闭后图片高度跟随预览最大行数")}
+                </p>
             </div>
             <Switch checked={imageAutoHeight} onCheckedChange={setImageAutoHeight} />
           </div>
@@ -309,7 +304,7 @@ export function DisplayTab() {
           {imageAutoHeight && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-xs">图片最大高度</Label>
+                <Label className="text-xs">{t("图片最大高度")}</Label>
                 <span className="text-xs font-medium tabular-nums">
                   {imageMaxHeight} px
                 </span>
@@ -322,7 +317,7 @@ export function DisplayTab() {
                 step={32}
               />
               <p className="text-xs text-muted-foreground">
-                自适应模式下图片的最大显示高度
+                {t("自适应模式下图片的最大显示高度")}
               </p>
             </div>
           )}
@@ -332,22 +327,22 @@ export function DisplayTab() {
 
       {/* Hover Preview Card */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">悬浮预览</h3>
-        <p className="text-xs text-muted-foreground mb-4">鼠标悬停时在窗口旁显示内容预览</p>
+        <h3 className="text-sm font-medium mb-3">{t("悬浮预览")}</h3>
+        <p className="text-xs text-muted-foreground mb-4">{t("鼠标悬停时在窗口旁显示内容预览")}</p>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">图片悬浮预览</Label>
-              <p className="text-xs text-muted-foreground">悬停后弹出图片预览窗口，支持 Ctrl+滚轮缩放</p>
+                <Label className="text-xs">{t("图片悬浮预览")}</Label>
+                <p className="text-xs text-muted-foreground">{t("悬停后弹出图片预览窗口，支持 Ctrl+滚轮缩放")}</p>
             </div>
             <Switch checked={imagePreviewEnabled} onCheckedChange={setImagePreviewEnabled} />
           </div>
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">文本悬浮预览</Label>
-              <p className="text-xs text-muted-foreground">悬停后弹出文本预览窗口，支持 Ctrl+滚轮滚动预览，默认关闭</p>
+                <Label className="text-xs">{t("文本悬浮预览")}</Label>
+                <p className="text-xs text-muted-foreground">{t("悬停后弹出文本预览窗口，支持 Ctrl+滚轮滚动预览，默认关闭")}</p>
             </div>
             <Switch checked={textPreviewEnabled} onCheckedChange={setTextPreviewEnabled} />
           </div>
@@ -356,9 +351,9 @@ export function DisplayTab() {
             <>
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label className="text-xs">无界模式</Label>
+                  <Label className="text-xs">{t("无界模式")}</Label>
                   <p className="text-xs text-muted-foreground">
-                    允许预览窗口超出屏幕边界，最高缩放至 500%
+                    {t("允许预览窗口超出屏幕边界，最高缩放至 500%")}
                   </p>
                 </div>
                 <Switch checked={previewUnboundedMode} onCheckedChange={setPreviewUnboundedMode} />
@@ -366,8 +361,8 @@ export function DisplayTab() {
 
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label className="text-xs">预览位置</Label>
-                  <p className="text-xs text-muted-foreground">预览窗口显示在主窗口的哪一侧</p>
+                  <Label className="text-xs">{t("预览位置")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("预览窗口显示在主窗口的哪一侧")}</p>
                 </div>
                 <div className="flex gap-1">
                   {positionOptions.map((opt) => (
@@ -388,7 +383,7 @@ export function DisplayTab() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">缩放步进</Label>
+                  <Label className="text-xs">{t("缩放步进")}</Label>
                   <span className="text-xs font-medium tabular-nums">
                     {previewZoomStep}%
                   </span>
@@ -401,7 +396,7 @@ export function DisplayTab() {
                   step={5}
                 />
                 <p className="text-xs text-muted-foreground">
-                  每次 Ctrl+滚轮缩放的幅度
+                  {t("每次 Ctrl+滚轮缩放的幅度")}
                 </p>
               </div>
             </>
@@ -410,7 +405,7 @@ export function DisplayTab() {
           {anyHoverPreviewEnabled && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-xs">悬浮延迟</Label>
+                 <Label className="text-xs">{t("悬浮延迟")}</Label>
                 <span className="text-xs font-medium tabular-nums">
                   {hoverPreviewDelay} ms
                 </span>
@@ -423,7 +418,7 @@ export function DisplayTab() {
                 step={50}
               />
               <p className="text-xs text-muted-foreground">
-                鼠标悬停多久后弹出预览窗口
+                 {t("鼠标悬停多久后弹出预览窗口")}
               </p>
             </div>
           )}
@@ -432,14 +427,14 @@ export function DisplayTab() {
 
       {/* Info Display Card */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">信息显示</h3>
-        <p className="text-xs text-muted-foreground mb-4">配置卡片底部显示的信息</p>
+        <h3 className="text-sm font-medium mb-3">{t("信息显示")}</h3>
+        <p className="text-xs text-muted-foreground mb-4">{t("配置卡片底部显示的信息")}</p>
         
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示时间</Label>
-              <p className="text-xs text-muted-foreground">显示复制的具体时间</p>
+                <Label className="text-xs">{t("显示时间")}</Label>
+                <p className="text-xs text-muted-foreground">{t("显示复制的具体时间")}</p>
             </div>
             <Switch checked={showTime} onCheckedChange={setShowTime} />
           </div>
@@ -447,8 +442,8 @@ export function DisplayTab() {
           {showTime && (
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="text-xs">时间格式</Label>
-                <p className="text-xs text-muted-foreground">选择时间的显示方式</p>
+                  <Label className="text-xs">{t("时间格式")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("选择时间的显示方式")}</p>
               </div>
               <div className="flex gap-1">
                 {timeFormatOptions.map((opt) => (
@@ -470,32 +465,32 @@ export function DisplayTab() {
           
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示字符数</Label>
-              <p className="text-xs text-muted-foreground">显示文本内容的字符数</p>
+                <Label className="text-xs">{t("显示字符数")}</Label>
+                <p className="text-xs text-muted-foreground">{t("显示文本内容的字符数")}</p>
             </div>
             <Switch checked={showCharCount} onCheckedChange={setShowCharCount} />
           </div>
           
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示大小</Label>
-              <p className="text-xs text-muted-foreground">显示内容的字节大小</p>
+                <Label className="text-xs">{t("显示大小")}</Label>
+                <p className="text-xs text-muted-foreground">{t("显示内容的字节大小")}</p>
             </div>
             <Switch checked={showByteSize} onCheckedChange={setShowByteSize} />
           </div>
           
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示图片文件名</Label>
-              <p className="text-xs text-muted-foreground">在图片预览上显示文件名（如截图工具生成的名称）</p>
+                <Label className="text-xs">{t("显示图片文件名")}</Label>
+                <p className="text-xs text-muted-foreground">{t("在图片预览上显示文件名（如截图工具生成的名称）")}</p>
             </div>
             <Switch checked={showImageFileName} onCheckedChange={setShowImageFileName} />
           </div>
 
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <Label className="text-xs">显示复制来源</Label>
-              <p className="text-xs text-muted-foreground">显示复制内容的来源应用</p>
+                <Label className="text-xs">{t("显示复制来源")}</Label>
+                <p className="text-xs text-muted-foreground">{t("显示复制内容的来源应用")}</p>
             </div>
             <Switch checked={showSourceApp} onCheckedChange={setShowSourceApp} />
           </div>
@@ -503,8 +498,8 @@ export function DisplayTab() {
           {showSourceApp && (
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="text-xs">显示方式</Label>
-                <p className="text-xs text-muted-foreground">选择显示图标、名称或两者都显示</p>
+                  <Label className="text-xs">{t("显示方式")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("选择显示图标、名称或两者都显示")}</p>
               </div>
               <div className="flex gap-1">
                 {sourceDisplayOptions.map((opt) => (

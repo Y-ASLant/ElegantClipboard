@@ -8,15 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import { useI18n } from "@/i18n";
 import { logError } from "@/lib/logger";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
-
-const DARK_MODE_OPTIONS: { value: DarkMode; label: string }[] = [
-  { value: "auto", label: "跟随系统" },
-  { value: "light", label: "浅色" },
-  { value: "dark", label: "深色" },
-];
 
 function FontSettingGroup({ label, fonts, font, onFontChange, fontSize, onFontSizeChange, min, max }: {
   label: string;
@@ -28,6 +23,7 @@ function FontSettingGroup({ label, fonts, font, onFontChange, fontSize, onFontSi
   min: number;
   max: number;
 }) {
+  const { t } = useI18n();
   return (
     <div className="space-y-3">
       <Label className="text-xs font-medium">{label}</Label>
@@ -36,14 +32,14 @@ function FontSettingGroup({ label, fonts, font, onFontChange, fontSize, onFontSi
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="max-h-64 overflow-y-auto">
-          <SelectItem value="__default__" className="text-xs">默认字体</SelectItem>
+          <SelectItem value="__default__" className="text-xs">{t("默认字体")}</SelectItem>
           {fonts.map((f) => (
             <SelectItem key={f} value={f} className="text-xs">{f}</SelectItem>
           ))}
         </SelectContent>
       </Select>
       <div className="flex items-center justify-between">
-        <Label className="text-xs">字号</Label>
+        <Label className="text-xs">{t("字号")}</Label>
         <span className="text-xs font-medium tabular-nums">{fontSize}px</span>
       </div>
       <Slider value={[fontSize]} onValueChange={(v) => onFontSizeChange(v[0])} min={min} max={max} step={1} />
@@ -52,6 +48,7 @@ function FontSettingGroup({ label, fonts, font, onFontChange, fontSize, onFontSi
 }
 
 export function ThemeTab() {
+  const { t } = useI18n();
   const {
     colorTheme, setColorTheme, sharpCorners, setSharpCorners, darkMode, setDarkMode,
     windowEffect, setWindowEffect, customFont, setCustomFont, uiFontSize, setUIFontSize,
@@ -61,6 +58,11 @@ export function ThemeTab() {
   } = useUISettings();
   const [systemAccentColor, setSystemAccentColor] = useState(getAccentColor);
   const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const darkModeOptions: { value: DarkMode; label: string }[] = [
+    { value: "auto", label: t("跟随系统") },
+    { value: "light", label: t("浅色") },
+    { value: "dark", label: t("深色") },
+  ];
 
   // 强调色变化时重新渲染
   useEffect(() => subscribeAccentColor(setSystemAccentColor), []);
@@ -83,10 +85,10 @@ export function ThemeTab() {
   }[] = [
     {
       id: "system",
-      name: "跟随系统",
-      description: systemAccentColor
-        ? "当前系统强调色"
-        : "自动适配系统强调色",
+        name: t("跟随系统"),
+        description: systemAccentColor
+          ? t("当前系统强调色")
+          : t("自动适配系统强调色"),
       icon: Desktop16Regular,
       getPreview: () => {
         if (!systemAccentColor) return { primary: "#0078d4", secondary: "#f0f0f0" };
@@ -99,8 +101,8 @@ export function ThemeTab() {
     },
     {
       id: "default",
-      name: "经典黑白",
-      description: "经典黑白灰配色，简约大气",
+        name: t("经典黑白"),
+        description: t("经典黑白灰配色，简约大气"),
       getPreview: () => ({
         primary: "#1e293b",
         secondary: "#f1f5f9",
@@ -108,8 +110,8 @@ export function ThemeTab() {
     },
     {
       id: "emerald",
-      name: "翡翠绿",
-      description: "清新自然，护眼舒适",
+        name: t("翡翠绿"),
+        description: t("清新自然，护眼舒适"),
       getPreview: () => ({
         primary: "#059669",
         secondary: "#ecfdf5",
@@ -117,8 +119,8 @@ export function ThemeTab() {
     },
     {
       id: "cyan",
-      name: "天空青",
-      description: "清爽明亮，现代科技",
+        name: t("天空青"),
+        description: t("清爽明亮，现代科技"),
       getPreview: () => ({
         primary: "#0891b2",
         secondary: "#ecfeff",
@@ -128,14 +130,14 @@ export function ThemeTab() {
 
   const activeDarkModeIndex = Math.max(
     0,
-    DARK_MODE_OPTIONS.findIndex((opt) => opt.value === darkMode),
+    darkModeOptions.findIndex((opt) => opt.value === darkMode),
   );
 
   return (
     <div className="space-y-4">
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">外观主题</h3>
-        <p className="text-xs text-muted-foreground mb-4">选择应用的配色方案</p>
+        <h3 className="text-sm font-medium mb-3">{t("外观主题")}</h3>
+        <p className="text-xs text-muted-foreground mb-4">{t("选择应用的配色方案")}</p>
 
         <div className="space-y-2">
           {themes.map((theme) => {
@@ -187,11 +189,11 @@ export function ThemeTab() {
 
       {/* Dark Mode */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">深色模式</h3>
-        <p className="text-xs text-muted-foreground mb-4">控制应用的明暗外观</p>
+        <h3 className="text-sm font-medium mb-3">{t("深色模式")}</h3>
+        <p className="text-xs text-muted-foreground mb-4">{t("控制应用的明暗外观")}</p>
         <div
           role="radiogroup"
-          aria-label="深色模式"
+          aria-label={t("深色模式")}
           className="relative rounded-lg border bg-muted/40 p-1"
         >
           <div className="relative grid grid-cols-3">
@@ -200,7 +202,7 @@ export function ThemeTab() {
               className="absolute inset-y-0 left-0 w-1/3 rounded-md bg-primary shadow-sm will-change-transform transition-transform duration-200 ease-out"
               style={{ transform: `translateX(${activeDarkModeIndex * 100}%)` }}
             />
-            {DARK_MODE_OPTIONS.map((opt) => {
+            {darkModeOptions.map((opt) => {
               const isActive = darkMode === opt.value;
               return (
                 <button
@@ -225,12 +227,12 @@ export function ThemeTab() {
 
       {/* Sharp Corners */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">圆角</h3>
+        <h3 className="text-sm font-medium mb-3">{t("圆角")}</h3>
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <Label className="text-xs">直角模式</Label>
+            <Label className="text-xs">{t("直角模式")}</Label>
             <p className="text-xs text-muted-foreground">
-              使用直角样式，类似 Windows 10 风格
+              {t("使用直角样式，类似 Windows 10 风格")}
             </p>
           </div>
           <Switch
@@ -242,16 +244,16 @@ export function ThemeTab() {
 
       {/* Window Effect */}
       <div className="rounded-lg border bg-card p-4">
-        <h3 className="text-sm font-medium mb-3">窗口特效</h3>
+        <h3 className="text-sm font-medium mb-3">{t("窗口特效")}</h3>
         <p className="text-xs text-muted-foreground mb-4">
-          毛玻璃背景效果（需要 Windows 11）
+          {t("毛玻璃背景效果（需要 Windows 11）")}
         </p>
         <div className="grid grid-cols-2 gap-2">
           {([
-            { value: "none" as WindowEffect, label: "无", desc: "默认不透明背景" },
-            { value: "mica" as WindowEffect, label: "Mica", desc: "柔和半透明材质" },
-            { value: "acrylic" as WindowEffect, label: "Acrylic", desc: "模糊透明毛玻璃" },
-            { value: "tabbed" as WindowEffect, label: "Tabbed", desc: "Mica 变体，更深色调" },
+            { value: "none" as WindowEffect, label: t("无"), desc: t("默认不透明背景") },
+            { value: "mica" as WindowEffect, label: "Mica", desc: t("柔和半透明材质") },
+            { value: "acrylic" as WindowEffect, label: "Acrylic", desc: t("模糊透明毛玻璃") },
+            { value: "tabbed" as WindowEffect, label: "Tabbed", desc: t("Mica 变体，更深色调") },
           ]).map((opt) => (
             <button
               key={opt.value}
@@ -279,23 +281,23 @@ export function ThemeTab() {
       <div className="rounded-lg border bg-card p-4 space-y-5">
         <div className="flex items-start justify-between">
           <div>
-            <h3 className="text-sm font-medium mb-1">字体设置</h3>
-            <p className="text-xs text-muted-foreground">分别设置界面、卡片内容和悬浮预览的字体</p>
+            <h3 className="text-sm font-medium mb-1">{t("字体设置")}</h3>
+            <p className="text-xs text-muted-foreground">{t("分别设置界面、卡片内容和悬浮预览的字体")}</p>
           </div>
           <button
             type="button"
             className="text-xs text-muted-foreground hover:text-foreground transition-colors shrink-0"
             onClick={resetFontSettings}
           >
-            重置
+            {t("重置")}
           </button>
         </div>
 
-        <FontSettingGroup label="界面字体" fonts={systemFonts} font={customFont} onFontChange={setCustomFont} fontSize={uiFontSize} onFontSizeChange={setUIFontSize} min={12} max={18} />
+        <FontSettingGroup label={t("界面字体")} fonts={systemFonts} font={customFont} onFontChange={setCustomFont} fontSize={uiFontSize} onFontSizeChange={setUIFontSize} min={12} max={18} />
         <hr className="border-border" />
-        <FontSettingGroup label="卡片内容字体" fonts={systemFonts} font={cardFont} onFontChange={setCardFont} fontSize={cardFontSize} onFontSizeChange={setCardFontSize} min={12} max={18} />
+        <FontSettingGroup label={t("卡片内容字体")} fonts={systemFonts} font={cardFont} onFontChange={setCardFont} fontSize={cardFontSize} onFontSizeChange={setCardFontSize} min={12} max={18} />
         <hr className="border-border" />
-        <FontSettingGroup label="悬浮预览字体" fonts={systemFonts} font={previewFont} onFontChange={setPreviewFont} fontSize={previewFontSize} onFontSizeChange={setPreviewFontSize} min={11} max={18} />
+        <FontSettingGroup label={t("悬浮预览字体")} fonts={systemFonts} font={previewFont} onFontChange={setPreviewFont} fontSize={previewFontSize} onFontSizeChange={setPreviewFontSize} min={11} max={18} />
       </div>
     </div>
   );

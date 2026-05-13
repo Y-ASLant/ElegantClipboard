@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { I18nProvider } from "@/i18n";
 import { initUISettingsStore } from "@/stores/ui-settings";
 import App from "./App";
 import { Settings } from "./pages/Settings";
@@ -47,9 +48,11 @@ async function bootstrap() {
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <TooltipProvider delayDuration={300}>
-        <Router />
-      </TooltipProvider>
+      <I18nProvider>
+        <TooltipProvider delayDuration={300}>
+          <Router />
+        </TooltipProvider>
+      </I18nProvider>
     </React.StrictMode>,
   );
 }

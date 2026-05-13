@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { ArrowUp16Regular } from "@fluentui/react-icons";
+import { useI18n } from "@/i18n";
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ interface ScrollToTopButtonProps {
 }
 
 export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonProps) {
+  const { t } = useI18n();
   const [anchor, setAnchor] = useState<AnchoredPos>(loadAnchor);
   // dragOffset: 拖拽中临时的 right 值，null 表示未在拖拽
   const [dragOffset, setDragOffset] = useState<{ right: number; bottom: number } | null>(null);
@@ -113,6 +115,7 @@ export function ScrollToTopButton({ visible, onScrollToTop }: ScrollToTopButtonP
         {/* 回到顶部 */}
         <button
           onClick={onScrollToTop}
+          aria-label={t("回到顶部")}
           className="w-7 h-7 rounded-md flex items-center justify-center text-primary hover:bg-accent transition-colors"
 
         >

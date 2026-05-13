@@ -340,7 +340,10 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
         &label,
         tauri::WebviewUrl::App(format!("/editor?id={}", id).into()),
     )
-    .title("编辑")
+    .title(crate::i18n::tr(
+        crate::i18n::current_language(&crate::database::SettingsRepository::new(&app.state::<std::sync::Arc<super::AppState>>().db)),
+        "编辑",
+    ))
     .inner_size(600.0, 460.0)
     .min_inner_size(400.0, 300.0)
     .decorations(false)
