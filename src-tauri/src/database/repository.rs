@@ -1,7 +1,7 @@
 use super::{ContentType, Database};
 use crate::clipboard::semantic_hash_from_text;
 use parking_lot::Mutex;
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, Connection, Row, Transaction};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::debug;
@@ -857,6 +857,30 @@ impl ClipboardRepository {
         })
     }
 
+    fn rebuild_sort_order_by_created_at(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+        let ids: Vec<i64> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM clipboard_items
+                 ORDER BY
+                   CASE
+                     WHEN created_at IS NULL OR trim(created_at) = '' OR datetime(created_at) IS NULL THEN 0
+                     ELSE 1
+                   END ASC,
+                   datetime(created_at) ASC,
+                   id ASC",
+            )?;
+            stmt.query_map([], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        let mut update_stmt =
+            tx.prepare_cached("UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2")?;
+        for (index, id) in ids.iter().enumerate() {
+            update_stmt.execute(params![index as i64 + 1, id])?;
+        }
+        Ok(())
+    }
+
     /// 查询符合同步条件的条目（按类型过滤 + 大小限制）
     pub fn query_items_for_sync(
         &self,
@@ -952,16 +976,6 @@ impl ClipboardRepository {
         let mut conn = self.write_conn.lock();
         let mut count = 0usize;
 
-        let max_sort_order: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-
-        let total = items.len() as i64;
-
         // 事务包裹：批量导入时仅在结束时刷盘一次，大幅降低 I/O 开销
         let tx = conn.transaction()?;
         {
@@ -980,7 +994,7 @@ impl ClipboardRepository {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)"
             )?;
 
-            for (i, item) in items.iter().enumerate() {
+            for item in items {
                 // 使用 EXISTS 检查，找到即返回，无需 COUNT 全表扫描
                 let exists = exists_stmt.exists(params![item.content_hash])?;
 
@@ -1007,7 +1021,7 @@ impl ClipboardRepository {
                     item.image_height,
                     item.is_pinned,
                     item.is_favorite,
-                    max_sort_order + total - i as i64,
+                    item.sort_order,
                     item.created_at,
                     item.updated_at,
                     item.access_count,
@@ -1018,6 +1032,10 @@ impl ClipboardRepository {
                     item.files_valid,
                 ])?;
                 count += 1;
+            }
+
+            if count > 0 {
+                Self::rebuild_sort_order_by_created_at(&tx)?;
             }
         }
         tx.commit()?;

@@ -57,6 +57,7 @@ export function useWebDAVActions() {
       await useTranslateSettings.getState().loadSettings();
       await useTtsSettings.getState().loadSettings();
       emit("clipboard-updated").catch(() => {});
+      emit("tags-updated").catch(() => {});
     } catch (error) {
       setStatusMsg(String(error));
       setStatusType("error");

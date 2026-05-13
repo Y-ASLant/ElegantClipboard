@@ -29,6 +29,7 @@ import {
   ReOrderDotsVertical16Filled,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { SortableTagItemRow, TagItemRow } from "@/components/tags/TagItemRows";
 import { Button } from "@/components/ui/button";
 import {
@@ -247,6 +248,14 @@ export function TagsView() {
   useEffect(() => {
     fetchTagItems(selectedTagId, searchQuery);
   }, [selectedTagId, searchQuery, fetchTagItems]);
+
+  useEffect(() => {
+    const unlisten = listen("tags-updated", async () => {
+      await fetchTags();
+      await fetchTagItems(selectedTagId, searchQuery);
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [fetchTags, fetchTagItems, selectedTagId, searchQuery]);
 
   const selectedTag = useMemo(
     () => tags.find((t) => t.id === selectedTagId) ?? null,
