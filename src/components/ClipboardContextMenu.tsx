@@ -48,10 +48,19 @@ export function ClipboardContextMenu({
       <ContextMenu onOpenChange={(open) => {
         if (open) {
           const tagStore = useTagStore.getState();
-          setLocalTags(tagStore.tags);
-          tagStore.getItemTags(itemId).then((tagList) => {
-            setItemTagIds(new Set(tagList.map((t) => t.id)));
-          });
+          const loadAndSet = (tags: { id: number; name: string }[]) => {
+            setLocalTags(tags);
+            tagStore.getItemTags(itemId).then((tagList) => {
+              setItemTagIds(new Set(tagList.map((t) => t.id)));
+            });
+          };
+          if (tagStore.tags.length === 0) {
+            tagStore.fetchTags().then(() => {
+              loadAndSet(useTagStore.getState().tags);
+            });
+          } else {
+            loadAndSet(tagStore.tags);
+          }
         }
       }}>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>

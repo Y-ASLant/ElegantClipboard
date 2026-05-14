@@ -496,10 +496,20 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
                 e.stopPropagation();
                 if (!tagPopoverOpen) {
                   const tagStore = useTagStore.getState();
-                  setLocalTags(tagStore.tags);
-                  tagStore.getItemTags(item.id).then((tagList) => {
-                    setItemTagIds(new Set(tagList.map((t) => t.id)));
-                  });
+                  // 如果标签列表为空（未打开过标签管理），先从后端加载
+                  const loadAndSet = (tags: { id: number; name: string }[]) => {
+                    setLocalTags(tags);
+                    tagStore.getItemTags(item.id).then((tagList) => {
+                      setItemTagIds(new Set(tagList.map((t) => t.id)));
+                    });
+                  };
+                  if (tagStore.tags.length === 0) {
+                    tagStore.fetchTags().then(() => {
+                      loadAndSet(useTagStore.getState().tags);
+                    });
+                  } else {
+                    loadAndSet(tagStore.tags);
+                  }
                 }
                 setTagPopoverOpen((o) => !o);
               }}
