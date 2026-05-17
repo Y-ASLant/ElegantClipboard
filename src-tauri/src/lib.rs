@@ -1025,6 +1025,7 @@ pub fn run() {
             commands::clipboard::paste_text_direct,
             commands::clipboard::merge_paste_content,
             commands::clipboard::update_text_content,
+            commands::clipboard::emit_clipboard_edited,
             commands::settings::get_running_apps,
             commands::settings::get_setting,
             commands::settings::set_setting,

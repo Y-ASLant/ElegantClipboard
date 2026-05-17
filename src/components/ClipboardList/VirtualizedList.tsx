@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo, type RefObject } from "react";
+import { useCallback, useMemo, type RefObject } from "react";
 import type { SortingStrategy } from "@dnd-kit/sortable";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -103,40 +103,27 @@ export function ClipboardVirtualizedList({
     [cardMaxLines],
   );
 
-  // 使用 ref 追踪最新的 props，避免 itemContent 回调因 renderedItems 变化而重建
-  // Virtuoso 内部会在 totalCount 变化时重新调用 itemContent，无需依赖数组触发
-  const renderedItemsRef = useRef(renderedItems);
-  renderedItemsRef.current = renderedItems;
-  const pinnedCountRef = useRef(pinnedCount);
-  pinnedCountRef.current = pinnedCount;
-  const showSlotBadgesRef = useRef(showSlotBadges);
-  showSlotBadgesRef.current = showSlotBadges;
-  const cardDensityRef = useRef(cardDensity);
-  cardDensityRef.current = cardDensity;
-
   const itemContent = useCallback(
     (index: number) => {
-      const item = renderedItemsRef.current[index];
+      const item = renderedItems[index];
       if (!item) return null;
 
-      const pc = pinnedCountRef.current;
-      const showSeparator = index === pc && pc > 0;
-      const density = cardDensityRef.current;
-      const densityPb = density === "compact" ? "pb-1" : density === "spacious" ? "pb-3" : "pb-2";
+      const showSeparator = index === pinnedCount && pinnedCount > 0;
+      const densityPb = cardDensity === "compact" ? "pb-1" : cardDensity === "spacious" ? "pb-3" : "pb-2";
 
       return (
         <div className={`px-2 ${densityPb}${index === 0 ? ' pt-1.5' : ''}`}>
           {showSeparator && <Separator className="mb-2" />}
-          <ClipboardItemCard item={item} index={index} showBadge={showSlotBadgesRef.current} sortId={item._sortId} />
+          <ClipboardItemCard item={item} index={index} showBadge={showSlotBadges} sortId={item._sortId} />
         </div>
       );
     },
-    [], // 稳定回调：通过 ref 读取最新值，Virtuoso 通过 totalCount 变化触发重渲染
+    [renderedItems, pinnedCount, showSlotBadges, cardDensity],
   );
 
   const computeItemKey = useCallback(
-    (index: number) => renderedItemsRef.current[index]?._sortId || `item-${index}`,
-    [],
+    (index: number) => renderedItems[index]?._sortId || `item-${index}`,
+    [renderedItems],
   );
 
   return (

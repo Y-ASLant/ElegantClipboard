@@ -63,10 +63,13 @@ export function TextEditor() {
     try {
       const deleted = await invoke<boolean>("update_text_content", { id, newText: textRef.current });
       if (deleted) {
+        // 通过后端 emit 确保主窗口收到事件
+        await invoke("emit_clipboard_edited", { id });
         getCurrentWindow().close();
         return;
       }
       setOriginalText(textRef.current);
+      await invoke("emit_clipboard_edited", { id });
     } catch (error) {
       logError("Failed to save:", error);
     } finally {
@@ -97,6 +100,7 @@ export function TextEditor() {
       setSaving(true);
       try {
         await invoke<boolean>("update_text_content", { id, newText: text });
+        await invoke("emit_clipboard_edited", { id });
       } catch (error) {
         logError("Failed to save:", error);
         setSaving(false);
@@ -145,16 +149,18 @@ export function TextEditor() {
             {text.length} 字符 · {byteSize} 字节
           </span>
           <div className="flex gap-2">
+            {hasChanges && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => getCurrentWindow().close()}
+              >
+                取消
+              </Button>
+            )}
             <Button
-              variant="outline"
               size="sm"
-              onClick={() => getCurrentWindow().close()}
-            >
-              取消
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleSaveAndClose}
+              onClick={hasChanges ? handleSaveAndClose : () => getCurrentWindow().close()}
               disabled={saving}
             >
               {saving ? "保存中..." : hasChanges ? "保存并关闭" : "关闭"}
