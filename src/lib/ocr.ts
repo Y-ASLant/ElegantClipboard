@@ -2,13 +2,24 @@ import { invoke } from "@tauri-apps/api/core";
 import { logError } from "@/lib/logger";
 import { useOcrSettings } from "@/stores/ocr-settings";
 
-/** 调用百度 OCR识别 */
+/** 调用 OCR 识别（根据当前选择的提供者路由） */
 export async function recognizeText(imageBase64: string): Promise<string> {
   const ocrSettings = useOcrSettings.getState();
   if (!ocrSettings.enabled) throw new Error("OCR 功能未启用");
 
   try {
-    const result = await invoke<string>("ocr_recognize_baidu", {
+    if (ocrSettings.provider === "custom") {
+      if (!ocrSettings.customApiUrl) throw new Error("请先配置自定义 OCR API 地址");
+      return await invoke<string>("ocr_recognize_custom", {
+        imageBase64,
+        apiUrl: ocrSettings.customApiUrl,
+        proxyMode: ocrSettings.proxyMode || "none",
+        proxyUrl: ocrSettings.proxyUrl || "",
+      });
+    }
+
+    // 默认: 百度 OCR
+    return await invoke<string>("ocr_recognize_baidu", {
       imageBase64,
       apiKey: ocrSettings.baiduApiKey,
       secretKey: ocrSettings.baiduSecretKey,
@@ -16,7 +27,6 @@ export async function recognizeText(imageBase64: string): Promise<string> {
       proxyMode: ocrSettings.proxyMode || "none",
       proxyUrl: ocrSettings.proxyUrl || "",
     });
-    return result;
   } catch (error) {
     logError("OCR识别失败:", error);
     throw error;

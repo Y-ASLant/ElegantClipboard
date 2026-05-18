@@ -176,6 +176,17 @@ export function removeVisibleClipboardItem(id: number) {
   });
 }
 
+/** 原地更新条目内容（编辑后刷新，不改变位置） */
+export function updateVisibleClipboardItem(item: ClipboardItem) {
+  useClipboardStore.setState((state) => {
+    const index = state.items.findIndex((existing) => existing.id === item.id);
+    if (index === -1) return {};
+    const nextItems = [...state.items];
+    nextItems[index] = asListItem(item);
+    return { items: nextItems };
+  });
+}
+
 function moveVisibleItemToTop(id: number) {
   useClipboardStore.setState((state) => {
     const index = state.items.findIndex((item) => item.id === id);
@@ -394,7 +405,26 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         await get().refresh();
       }
     });
-    return unlisten;
+
+    // 编辑器保存后的原地更新（不改变条目位置）
+    const unlistenEdit = await listen<number>("clipboard-item-edited", async (event) => {
+      const id = event.payload;
+      if (!id) return;
+      try {
+        const item = await invoke<ClipboardItem | null>("get_clipboard_item", { id });
+        if (item) {
+          updateVisibleClipboardItem(item);
+        } else {
+          // 条目被删除（内容清空时）
+          removeVisibleClipboardItem(id);
+        }
+      } catch (error) {
+        logError("Failed to fetch edited clipboard item:", error);
+        await get().refresh();
+      }
+    });
+
+    return () => { unlisten(); unlistenEdit(); };
   },
 
   // 批量选择

@@ -4,12 +4,13 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Dismiss16Regular,
   Document16Regular,
+  Edit16Regular,
   Folder16Regular,
   ReOrderDotsVertical16Regular,
   Video16Regular,
   Warning16Regular,
 } from "@fluentui/react-icons";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { ImagePreview } from "@/components/CardContentRenderers";
 import { HighlightText } from "@/components/HighlightText";
 import {
@@ -183,6 +184,8 @@ export function SortableTagItemRow({
     opacity: isDragging ? 0.5 : undefined,
   }), [transform, transition, isDragging]);
 
+  const isEditable = item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf";
+
   return (
     <div
       ref={setNodeRef}
@@ -204,7 +207,7 @@ export function SortableTagItemRow({
       <div className="flex-1 min-w-0">
         <TagItemRowContent item={item} timeFormat={timeFormat} />
       </div>
-      <RemoveTagButton onRemove={onRemove} />
+      <ItemActionButtons itemId={item.id} isEditable={isEditable} onRemove={onRemove} />
     </div>
   );
 }
@@ -216,6 +219,8 @@ export function TagItemRow({
   onRemove,
   isLast,
 }: TagItemRowProps) {
+  const isEditable = item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf";
+
   return (
     <div
       className={cn(
@@ -227,23 +232,41 @@ export function TagItemRow({
       <div className="flex-1 min-w-0">
         <TagItemRowContent item={item} timeFormat={timeFormat} />
       </div>
-      <RemoveTagButton onRemove={onRemove} />
+      <ItemActionButtons itemId={item.id} isEditable={isEditable} onRemove={onRemove} />
     </div>
   );
 }
 
-function RemoveTagButton({ onRemove }: { onRemove: () => void }) {
+function ItemActionButtons({ itemId, isEditable, onRemove }: { itemId: number; isEditable: boolean; onRemove: () => void }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          className="shrink-0 mt-0.5 w-5 h-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover/row:opacity-100 transition-all duration-150"
-        >
-          <Dismiss16Regular className="w-3 h-3" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>移除标签</TooltipContent>
-    </Tooltip>
+    <div className="shrink-0 flex flex-col gap-0.5 mt-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="w-5 h-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <Dismiss16Regular className="w-3 h-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>移除标签</TooltipContent>
+      </Tooltip>
+      {isEditable && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                invoke("open_text_editor_window", { id: itemId }).catch(() => {});
+              }}
+              className="w-5 h-5 flex items-center justify-center rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
+            >
+              <Edit16Regular className="w-3 h-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>编辑</TooltipContent>
+        </Tooltip>
+      )}
+    </div>
   );
 }

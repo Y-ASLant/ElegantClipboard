@@ -516,6 +516,13 @@ pub async fn update_text_content(
     }
 }
 
+/// 编辑器保存后通知所有窗口刷新指定条目（通过后端 emit 确保跨窗口送达）
+#[tauri::command]
+pub async fn emit_clipboard_edited(app: tauri::AppHandle, id: i64) {
+    use tauri::Emitter;
+    let _ = app.emit("clipboard-item-edited", id);
+}
+
 /// 将条目复制到系统剪贴板
 #[tauri::command]
 pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {

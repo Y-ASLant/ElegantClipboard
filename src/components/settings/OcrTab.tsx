@@ -29,16 +29,63 @@ const KEY_CODE_MAP: Record<string, string> = {
   Backquote: "`",
 };
 
+/** 可复制的代码块 */
+function CopyBlock({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="relative bg-muted rounded-md px-4 py-3 font-mono text-xs space-y-1 group/code">
+      {text.split("\n").map((line, i) => <p key={i}>{line}</p>)}
+      <button
+        type="button"
+        className="absolute top-2 right-2 px-2 py-1 rounded text-[11px] bg-background border opacity-0 group-hover/code:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+        onClick={handleCopy}
+      >
+        {copied ? "已复制" : "复制"}
+      </button>
+    </div>
+  );
+}
+
+/** 可点击复制的行内代码 */
+function CopyInlineCode({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <code
+      className="px-1.5 py-0.5 bg-muted rounded text-[11px] cursor-pointer hover:bg-muted/80 transition-colors"
+      onClick={handleCopy}
+      title="点击复制"
+    >
+      {copied ? "已复制 ✓" : text}
+    </code>
+  );
+}
+
 export function OcrTab() {
   const {
     enabled, setEnabled,
     recordOcrCopy, setRecordOcrCopy,
     autoCopy, setAutoCopy,
     autoTranslate, setAutoTranslate,
+    provider, setProvider,
     accuracy, setAccuracy,
     shortcut, setShortcut,
     baiduApiKey, setBaiduApiKey,
     baiduSecretKey, setBaiduSecretKey,
+    customApiUrl, setCustomApiUrl,
     proxyMode, setProxyMode,
     proxyUrl, setProxyUrl,
     loaded, loadSettings,
@@ -284,75 +331,150 @@ export function OcrTab() {
           <div className="rounded-lg border bg-card p-4">
             <h3 className="text-sm font-medium mb-3">识别接口</h3>
             <p className="text-xs text-muted-foreground mb-4">
-              配置百度 OCR 识别接口参数
+              选择 OCR 识别服务提供者
             </p>
             <div className="space-y-3">
-              {/* 识别精度 */}
+              {/* 提供者选择 */}
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label className="text-xs">识别精度</Label>
+                  <Label className="text-xs">识别服务</Label>
                   <p className="text-xs text-muted-foreground">
-                    {accuracy === "high" ? "精度更高，速度较慢" : "速度更快，精度略低"}
+                    {provider === "baidu" ? "使用百度智能云 OCR API" : "使用自部署的 OCR 服务（PaddleOCR / RapidOCR 等）"}
                   </p>
                 </div>
-                <Select value={accuracy} onValueChange={(v) => setAccuracy(v as "high" | "standard")}>
+                <Select value={provider} onValueChange={(v) => setProvider(v as "baidu" | "custom")}>
                   <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="high">高精度版</SelectItem>
-                    <SelectItem value="standard">标准版（更快）</SelectItem>
+                    <SelectItem value="baidu">百度 OCR</SelectItem>
+                    <SelectItem value="custom">自定义 API</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">API Key</Label>
-                <Input
-                  className="h-8 text-xs"
-                  placeholder="输入百度 OCR API Key"
-                  value={baiduApiKey}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    useOcrSettings.setState({ baiduApiKey: v });
-                    debounced(setBaiduApiKey, v);
-                  }}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Secret Key</Label>
-                <div className="relative">
-                  <Input
-                    className="h-8 text-xs pr-8"
-                    type={showSecretKey ? "text" : "password"}
-                    placeholder="输入百度 OCR Secret Key"
-                    value={baiduSecretKey}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      useOcrSettings.setState({ baiduSecretKey: v });
-                      debounced(setBaiduSecretKey, v);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                    onClick={() => setShowSecretKey(!showSecretKey)}
-                  >
-                    {showSecretKey ? <EyeOff16Regular className="w-3.5 h-3.5" /> : <Eye16Regular className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                请前往{" "}
-                <a
-                  className="text-primary hover:underline cursor-pointer"
-                  onClick={() => {
-                    import("@tauri-apps/plugin-opener").then(({ openUrl }) => {
-                      openUrl("https://console.bce.baidu.com/ai/#/ai/ocr/overview/index");
-                    });
-                  }}
-                >
-                  百度智能云 OCR 控制台
-                </a>
-                {" "}获取 API Key 和 Secret Key
-              </p>
+
+              {provider === "baidu" && (
+                <>
+                  {/* 识别精度 */}
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="text-xs">识别精度</Label>
+                      <p className="text-xs text-muted-foreground">
+                        {accuracy === "high" ? "精度更高，速度较慢" : "速度更快，精度略低"}
+                      </p>
+                    </div>
+                    <Select value={accuracy} onValueChange={(v) => setAccuracy(v as "high" | "standard")}>
+                      <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="high">高精度版</SelectItem>
+                        <SelectItem value="standard">标准版（更快）</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">API Key</Label>
+                    <Input
+                      className="h-8 text-xs"
+                      placeholder="输入百度 OCR API Key"
+                      value={baiduApiKey}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        useOcrSettings.setState({ baiduApiKey: v });
+                        debounced(setBaiduApiKey, v);
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Secret Key</Label>
+                    <div className="relative">
+                      <Input
+                        className="h-8 text-xs pr-8"
+                        type={showSecretKey ? "text" : "password"}
+                        placeholder="输入百度 OCR Secret Key"
+                        value={baiduSecretKey}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          useOcrSettings.setState({ baiduSecretKey: v });
+                          debounced(setBaiduSecretKey, v);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                        onClick={() => setShowSecretKey(!showSecretKey)}
+                      >
+                        {showSecretKey ? <EyeOff16Regular className="w-3.5 h-3.5" /> : <Eye16Regular className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    请前往{" "}
+                    <a
+                      className="text-primary hover:underline cursor-pointer"
+                      onClick={() => {
+                        import("@tauri-apps/plugin-opener").then(({ openUrl }) => {
+                          openUrl("https://console.bce.baidu.com/ai/#/ai/ocr/overview/index");
+                        });
+                      }}
+                    >
+                      百度智能云 OCR 控制台
+                    </a>
+                    {" "}获取 API Key 和 Secret Key
+                  </p>
+                </>
+              )}
+
+              {provider === "custom" && (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">API 地址</Label>
+                    <Input
+                      className="h-8 text-xs"
+                      placeholder="http://localhost:9003/ocr"
+                      value={customApiUrl}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        useOcrSettings.setState({ customApiUrl: v });
+                        debounced(setCustomApiUrl, v);
+                      }}
+                    />
+                  </div>
+                  <div className="text-xs text-muted-foreground space-y-1.5">
+                    <p>
+                      推荐使用{" "}
+                      <a
+                        className="text-primary font-medium hover:underline cursor-pointer"
+                        onClick={() => {
+                          import("@tauri-apps/plugin-opener").then(({ openUrl }) => {
+                            openUrl("https://rapidai.github.io/RapidOCRDocs/main/install_usage/rapidocr_api/usage/");
+                          });
+                        }}
+                      >
+                        RapidOCR API
+                      </a>
+                      ，安装简单、识别速度快、无需 GPU：
+                    </p>
+                    <CopyBlock text={"pip install rapidocr_api onnxruntime\nrapidocr_api"} />
+                    <p>
+                      启动后默认地址为{" "}
+                      <CopyInlineCode text="http://localhost:9003/ocr" />
+                    </p>
+                    <p className="text-muted-foreground/70">如有 NVIDIA GPU 可将 onnxruntime 替换为 onnxruntime-gpu 以加速推理</p>
+                    <p className="pt-1.5 text-muted-foreground/70">
+                      也兼容{" "}
+                      <a
+                        className="text-primary/80 hover:underline cursor-pointer"
+                        onClick={() => {
+                          import("@tauri-apps/plugin-opener").then(({ openUrl }) => {
+                            openUrl("https://github.com/PaddlePaddle/PaddleOCR");
+                          });
+                        }}
+                      >
+                        PaddleOCR
+                      </a>
+                      {" "}等其他 OCR 服务，只需接口返回包含识别文字的 JSON 即可。
+                    </p>
+                  </div>
+                </>
+              )}
 
               {/* 网络代理 */}
               <div className="flex items-center justify-between pt-4">

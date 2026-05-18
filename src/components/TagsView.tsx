@@ -257,6 +257,26 @@ export function TagsView() {
     return () => { unlisten.then((fn) => fn()); };
   }, [fetchTags, fetchTagItems, selectedTagId, searchQuery]);
 
+  // 编辑器保存后原地刷新标签视图中的条目
+  useEffect(() => {
+    const unlisten = listen<number>("clipboard-item-edited", async (event) => {
+      const id = event.payload;
+      if (!id) return;
+      try {
+        const item = await invoke<ClipboardItem | null>("get_clipboard_item", { id });
+        if (item) {
+          setTagItems((prev) => prev.map((i) => (i.id === id ? { ...item, text_content: null, html_content: null, rtf_content: null } : i)));
+        } else {
+          setTagItems((prev) => prev.filter((i) => i.id !== id));
+        }
+      } catch {
+        // 失败时整体刷新
+        await fetchTagItems(selectedTagId, searchQuery);
+      }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [fetchTagItems, selectedTagId, searchQuery]);
+
   const selectedTag = useMemo(
     () => tags.find((t) => t.id === selectedTagId) ?? null,
     [tags, selectedTagId],

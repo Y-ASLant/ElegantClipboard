@@ -11,7 +11,7 @@ const broadcastChange = (state: Partial<OcrSettings>) => {
   });
 };
 
-export type OcrProvider = "baidu";
+export type OcrProvider = "baidu" | "custom";
 export type OcrAccuracy = "high" | "standard";
 
 export interface OcrSettings {
@@ -25,6 +25,8 @@ export interface OcrSettings {
   // Baidu OCR
   baiduApiKey: string;
   baiduSecretKey: string;
+  // Custom API
+  customApiUrl: string;
   // Proxy
   proxyMode: "system" | "none" | "custom";
   proxyUrl: string;
@@ -43,6 +45,7 @@ interface OcrSettingsStore extends OcrSettings {
   setShortcut: (shortcut: string) => void;
   setBaiduApiKey: (key: string) => void;
   setBaiduSecretKey: (key: string) => void;
+  setCustomApiUrl: (url: string) => void;
   setProxyMode: (mode: "system" | "none" | "custom") => void;
   setProxyUrl: (url: string) => void;
 }
@@ -57,6 +60,7 @@ const SETTING_KEYS: Record<string, keyof OcrSettings> = {
   ocr_shortcut: "shortcut",
   ocr_baidu_api_key: "baiduApiKey",
   ocr_baidu_secret_key: "baiduSecretKey",
+  ocr_custom_api_url: "customApiUrl",
   ocr_proxy_mode: "proxyMode",
   ocr_proxy_url: "proxyUrl",
 };
@@ -71,6 +75,7 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
   shortcut: "",
   baiduApiKey: "",
   baiduSecretKey: "",
+  customApiUrl: "",
   proxyMode: "none",
   proxyUrl: "",
   loaded: false,
@@ -89,6 +94,7 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
         shortcut: values["ocr_shortcut"] || "",
         baiduApiKey: values["ocr_baidu_api_key"] || "",
         baiduSecretKey: values["ocr_baidu_secret_key"] || "",
+        customApiUrl: values["ocr_custom_api_url"] || "",
         proxyMode: (values["ocr_proxy_mode"] as "system" | "none" | "custom") || "none",
         proxyUrl: values["ocr_proxy_url"] || "",
         loaded: true,
@@ -150,6 +156,11 @@ export const useOcrSettings = create<OcrSettingsStore>((set, get) => ({
     set({ baiduSecretKey: key });
     get().saveSetting("ocr_baidu_secret_key", key);
     broadcastChange({ baiduSecretKey: key });
+  },
+  setCustomApiUrl: (url) => {
+    set({ customApiUrl: url });
+    get().saveSetting("ocr_custom_api_url", url);
+    broadcastChange({ customApiUrl: url });
   },
   setProxyMode: (mode) => {
     set({ proxyMode: mode });

@@ -73,7 +73,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # HTTP client for WebDAV sync
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json", "multipart"] }
 base64 = "0.22"
 
 # WebSocket for Edge TTS

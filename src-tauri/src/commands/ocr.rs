@@ -319,6 +319,157 @@ fn urlencoded(s: &str) -> String {
     result
 }
 
+/// 调用自定义 OCR API 识别图片中的文字
+/// 支持两种请求格式（自动尝试）：
+/// 1. form-data: image_data=<base64>（RapidOCR API 原生格式）
+/// 2. JSON: {"image": "<base64>"}（通用格式）
+///
+/// 支持多种响应格式：
+/// - RapidOCR: { "data": [["text", score, [[x,y],...]], ...] }
+/// - PaddleOCR: { "results": [{"text": "..."}, ...] }
+/// - 通用: { "text": "..." } 或 { "result": "..." }
+/// - 纯文本响应
+#[tauri::command]
+pub async fn ocr_recognize_custom(
+    image_base64: String,
+    api_url: String,
+    proxy_mode: String,
+    proxy_url: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let client = build_client(&proxy_mode, &proxy_url)?;
+
+        // 使用 multipart form-data 发送（兼容 RapidOCR API）
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("image_data", image_base64.clone());
+
+        let resp = client
+            .post(&api_url)
+            .multipart(form)
+            .send();
+
+        // 如果 multipart 失败（如 405），回退到 JSON 格式
+        let resp = match resp {
+            Ok(r) if r.status().is_success() || r.status().is_server_error() => r,
+            _ => {
+                // 回退: POST JSON { "image": "<base64>" }
+                let body = serde_json::json!({ "image": image_base64 });
+                client
+                    .post(&api_url)
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .map_err(|e| format!("自定义 OCR 请求失败: {}", e))?
+            }
+        };
+
+        let status = resp.status();
+        let resp_text = resp.text().map_err(|e| format!("读取响应失败: {}", e))?;
+
+        if !status.is_success() {
+            return Err(format!("自定义 OCR 错误 ({}): {}", status, resp_text));
+        }
+
+        // 尝试解析为 JSON
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&resp_text) {
+            // 格式1: { "text": "..." } 或 { "result": "..." }
+            if let Some(text) = val.get("text").and_then(|v| v.as_str()) {
+                return Ok(text.to_string());
+            }
+            if let Some(text) = val.get("result").and_then(|v| v.as_str()) {
+                return Ok(text.to_string());
+            }
+
+            // 格式2: { "0": {"rec_txt": "...", ...}, "1": {...} } (RapidOCR API 实际格式)
+            // 数字 key 的对象，每个值含 rec_txt 字段
+            if let Some(obj) = val.as_object() {
+                let mut indexed_lines: Vec<(usize, &str)> = obj
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        let idx = k.parse::<usize>().ok()?;
+                        let text = v.get("rec_txt").and_then(|t| t.as_str())?;
+                        Some((idx, text))
+                    })
+                    .collect();
+                if !indexed_lines.is_empty() {
+                    indexed_lines.sort_by_key(|(idx, _)| *idx);
+                    let lines: Vec<&str> = indexed_lines.iter().map(|(_, t)| *t).collect();
+                    return Ok(lines.join("\n"));
+                }
+            }
+
+            // 格式3: { "data": [[text, score, box], ...] } (RapidOCR 旧版风格)
+            if let Some(data) = val.get("data").and_then(|v| v.as_array()) {
+                let lines: Vec<&str> = data
+                    .iter()
+                    .filter_map(|item| {
+                        item.as_array()
+                            .and_then(|arr| arr.first())
+                            .and_then(|v| v.as_str())
+                            .or_else(|| item.get("text").and_then(|v| v.as_str()))
+                            .or_else(|| item.get("rec_txt").and_then(|v| v.as_str()))
+                    })
+                    .collect();
+                if !lines.is_empty() {
+                    return Ok(lines.join("\n"));
+                }
+            }
+
+            // 格式4: { "results": [{"text": "..."}, ...] } 或嵌套数组 (PaddleOCR Serving 风格)
+            if let Some(results) = val.get("results").and_then(|v| v.as_array()) {
+                let lines: Vec<String> = results
+                    .iter()
+                    .filter_map(|item| {
+                        // {"text": "..."} 格式
+                        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                            return Some(text.to_string());
+                        }
+                        // [[box], ["text", score]] 或 [[box], ("text", score)] 格式
+                        if let Some(arr) = item.as_array() {
+                            if arr.len() >= 2 {
+                                if let Some(text_part) = arr.get(1) {
+                                    // [text, score]
+                                    if let Some(inner) = text_part.as_array() {
+                                        return inner.first().and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    }
+                                    // 直接是字符串
+                                    if let Some(s) = text_part.as_str() {
+                                        return Some(s.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        // "rec_txt" 字段
+                        item.get("rec_txt").and_then(|v| v.as_str()).map(|s| s.to_string())
+                    })
+                    .collect();
+                if !lines.is_empty() {
+                    return Ok(lines.join("\n"));
+                }
+            }
+
+            // 格式5: { "words_result": [{"words": "..."}, ...] } (百度兼容格式)
+            if let Some(words) = val.get("words_result").and_then(|v| v.as_array()) {
+                let lines: Vec<&str> = words
+                    .iter()
+                    .filter_map(|item| item.get("words").and_then(|v| v.as_str()))
+                    .collect();
+                if !lines.is_empty() {
+                    return Ok(lines.join("\n"));
+                }
+            }
+
+            // 无法识别的 JSON 格式，返回原始内容
+            return Ok(resp_text);
+        }
+
+        // 非 JSON，当作纯文本返回
+        Ok(resp_text)
+    })
+    .await
+    .map_err(|e| format!("OCR 任务失败: {}", e))?
+}
+
 /// 打开 OCR 截图选区窗口（全屏覆盖层）
 /// 如果窗口已存在则复用（通过事件通知前端更新），否则首次创建。
 #[tauri::command]
