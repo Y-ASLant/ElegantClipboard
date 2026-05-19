@@ -323,13 +323,36 @@ export const useUISettings = create<UISettings>()(
 // 跟踪监听器防止重复注册
 let unlistenFn: (() => void) | null = null;
 
+// 浅比较：仅当 payload 中的值实际变化时才更新 store
+function shallowPatchState(payload: Partial<UISettings>) {
+  const current = useUISettings.getState();
+  const patch: Record<string, unknown> = {};
+  let hasChange = false;
+  for (const [key, value] of Object.entries(payload)) {
+    const existing = (current as unknown as Record<string, unknown>)[key];
+    // 数组和对象使用 JSON 比较，原始值直接比较
+    if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+      if (JSON.stringify(existing) !== JSON.stringify(value)) {
+        patch[key] = value;
+        hasChange = true;
+      }
+    } else if (existing !== value) {
+      patch[key] = value;
+      hasChange = true;
+    }
+  }
+  if (hasChange) {
+    useUISettings.setState(patch);
+  }
+}
+
 // 初始化设置监听器（每个窗口调用一次）
 export async function initUISettingsListener() {
   if (unlistenFn) return; // 已初始化
   
   try {
     unlistenFn = await listen<Partial<UISettings>>(SYNC_EVENT, (event) => {
-      useUISettings.setState(event.payload);
+      shallowPatchState(event.payload);
     });
   } catch {
     // 忽略错误（如非 Tauri 环境）

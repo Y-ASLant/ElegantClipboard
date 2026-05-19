@@ -46,6 +46,7 @@ export function useWindowLifecycle({
   const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPinned, setIsPinned] = useState(false);
   const [suppressTooltips, setSuppressTooltips] = useState(false);
+  /** null = initial (no animation), true = shown, false = hidden */
   const [windowVisible, setWindowVisible] = useState<boolean | null>(null);
 
   useEffect(() => {

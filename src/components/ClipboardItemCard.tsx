@@ -47,6 +47,7 @@ import {
   parseFilePaths,
 } from "@/lib/format";
 import { logError } from "@/lib/logger";
+import { loadTagsForItem } from "@/lib/tag-loader";
 import { translateText } from "@/lib/translate";
 import { speak, stopSpeaking, isSpeaking } from "@/lib/tts";
 import { cn } from "@/lib/utils";
@@ -148,8 +149,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   })));
 
   const [justPasted, setJustPasted] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
   const [localTags, setLocalTags] = useState<{ id: number; name: string }[]>([]);
   const [itemTagIds, setItemTagIds] = useState<Set<number>>(new Set());
   const [tagPopoverOpen, setTagPopoverOpen] = useState(false);
@@ -159,6 +158,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [translatedText, setTranslatedText] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  // ref 追踪翻译状态，避免 contextMenuItems 因 translating 变化而重建
+  const translatingRef = useRef(false);
+  // 文件详情状态 — 仅在用户打开时分配内容
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
 
   // close tag popover on click outside
   useEffect(() => {
@@ -337,9 +341,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   }, [item.id]);
 
   const handleTranslate = useCallback(async () => {
-    if (translating) return;
+    if (translatingRef.current) return;
     const text = item.text_content || item.preview || "";
     if (!text) return;
+    translatingRef.current = true;
     setTranslating(true);
     setTranslateError(null);
     try {
@@ -348,9 +353,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     } catch (error) {
       setTranslateError(String(error));
     } finally {
+      translatingRef.current = false;
       setTranslating(false);
     }
-  }, [translating, item.text_content, item.preview]);
+  }, [item.text_content, item.preview]);
 
   const handleCopyTranslation = useCallback(async () => {
     if (!translatedText) return;
@@ -495,21 +501,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onTag={(e) => {
                 e.stopPropagation();
                 if (!tagPopoverOpen) {
-                  const tagStore = useTagStore.getState();
-                  // 如果标签列表为空（未打开过标签管理），先从后端加载
-                  const loadAndSet = (tags: { id: number; name: string }[]) => {
+                  loadTagsForItem(item.id).then(({ tags, itemTagIds }) => {
                     setLocalTags(tags);
-                    tagStore.getItemTags(item.id).then((tagList) => {
-                      setItemTagIds(new Set(tagList.map((t) => t.id)));
-                    });
-                  };
-                  if (tagStore.tags.length === 0) {
-                    tagStore.fetchTags().then(() => {
-                      loadAndSet(useTagStore.getState().tags);
-                    });
-                  } else {
-                    loadAndSet(tagStore.tags);
-                  }
+                    setItemTagIds(itemTagIds);
+                  });
                 }
                 setTagPopoverOpen((o) => !o);
               }}
@@ -576,7 +571,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
       ];
       if (translateEnabled) {
-        items.push({ icon: Translate16Regular, label: translating ? "翻译中…" : "翻译", onClick: handleTranslate, disabled: translating, separator: true });
+        items.push({ icon: Translate16Regular, label: "翻译", onClick: handleTranslate, separator: true });
       }
       items.push({ icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: !translateEnabled });
       return items;
@@ -601,7 +596,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       ];
     }
     return null;
-  }, [isDragOverlay, batchMode, item.content_type, item.id, item.image_path, filesInvalid, translateEnabled, translating]);
+  }, [isDragOverlay, batchMode, item.content_type, item.id, item.image_path, filesInvalid, translateEnabled]);
 
   if (contextMenuItems) {
     return (

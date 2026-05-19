@@ -301,7 +301,11 @@ function App() {
   }, [isPinned, openSettings, togglePinned, batchMode, setBatchMode]);
 
   return (
-    <div className={cn("h-screen flex flex-col bg-muted/40 overflow-hidden", windowAnimation && windowVisible === true && "window-enter", windowAnimation && windowVisible === false && "window-hidden")}>
+    <div className={cn(
+      "h-screen flex flex-col bg-muted/40 overflow-hidden",
+      windowAnimation && windowVisible === true && "window-enter",
+      windowAnimation && windowVisible === false && "window-hidden",
+    )}>
       {/* 顶栏：搜索 + 操作 */}
       <div
         className="flex items-center gap-1 px-2 pt-2 pb-0.5 shrink-0 select-none"

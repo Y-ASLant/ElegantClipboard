@@ -1,4 +1,4 @@
-// 文本悬浮预览 hook（从 ClipboardItemCard.tsx 提取）
+// 文本悬浮预览 hook（统一版本，支持 ClipboardItemCard 和 TagItemRows 两种用法）
 
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -68,7 +68,10 @@ interface UseTextPreviewOptions {
   textContent: string | null | undefined;
   preview: string | null | undefined;
   isTextLikeContent: boolean;
-  isDragging: boolean;
+  /** 是否正在拖拽（仅卡片使用，默认 false） */
+  isDragging?: boolean;
+  /** 是否检查 batchMode（仅卡片使用，默认 true） */
+  checkBatchMode?: boolean;
 }
 
 export function useTextPreview({
@@ -76,7 +79,8 @@ export function useTextPreview({
   textContent,
   preview,
   isTextLikeContent,
-  isDragging,
+  isDragging = false,
+  checkBatchMode = true,
 }: UseTextPreviewOptions) {
   const {
     textPreviewEnabled, hoverPreviewDelay, previewPosition, sharpCorners,
@@ -86,7 +90,7 @@ export function useTextPreview({
     previewPosition: s.previewPosition,
     sharpCorners: s.sharpCorners,
   })));
-  const batchMode = useClipboardStore((s) => s.batchMode);
+  const batchMode = useClipboardStore((s) => checkBatchMode ? s.batchMode : false);
 
   const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textPreviewVisibleRef = useRef(false);

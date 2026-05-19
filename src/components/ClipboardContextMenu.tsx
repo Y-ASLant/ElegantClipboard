@@ -14,6 +14,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { loadTagsForItem } from "@/lib/tag-loader";
 import { useTagStore } from "@/stores/tags";
 
 interface ClipboardContextMenuProps {
@@ -47,20 +48,10 @@ export function ClipboardContextMenu({
     <>
       <ContextMenu onOpenChange={(open) => {
         if (open) {
-          const tagStore = useTagStore.getState();
-          const loadAndSet = (tags: { id: number; name: string }[]) => {
+          loadTagsForItem(itemId).then(({ tags, itemTagIds }) => {
             setLocalTags(tags);
-            tagStore.getItemTags(itemId).then((tagList) => {
-              setItemTagIds(new Set(tagList.map((t) => t.id)));
-            });
-          };
-          if (tagStore.tags.length === 0) {
-            tagStore.fetchTags().then(() => {
-              loadAndSet(useTagStore.getState().tags);
-            });
-          } else {
-            loadAndSet(tagStore.tags);
-          }
+            setItemTagIds(itemTagIds);
+          });
         }
       }}>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
