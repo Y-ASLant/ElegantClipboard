@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,7 +46,12 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const {
     pasteCloseWindow, setPasteCloseWindow,
     pasteMoveToTop, setPasteMoveToTop,
-  } = useUISettings();
+  } = useUISettings(useShallow((s) => ({
+    pasteCloseWindow: s.pasteCloseWindow,
+    setPasteCloseWindow: s.setPasteCloseWindow,
+    pasteMoveToTop: s.pasteMoveToTop,
+    setPasteMoveToTop: s.setPasteMoveToTop,
+  })));
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);

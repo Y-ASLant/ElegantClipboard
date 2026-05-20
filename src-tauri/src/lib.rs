@@ -449,9 +449,13 @@ fn get_current_shortcut() -> String {
 fn reload_paste_shortcuts_from_settings(app: &tauri::AppHandle, kind: PasteKind) -> HashMap<u8, String> {
     let state = app.state::<Arc<AppState>>();
     let settings_repo = SettingsRepository::new(&state.db);
+    reload_paste_shortcuts_with_repo(app, kind, &settings_repo)
+}
+
+fn reload_paste_shortcuts_with_repo(app: &tauri::AppHandle, kind: PasteKind, settings_repo: &SettingsRepository) -> HashMap<u8, String> {
     let shortcuts = match kind {
-        PasteKind::Quick => load_quick_paste_shortcuts(&settings_repo),
-        PasteKind::Favorite => load_favorite_paste_shortcuts(&settings_repo),
+        PasteKind::Quick => load_quick_paste_shortcuts(settings_repo),
+        PasteKind::Favorite => load_favorite_paste_shortcuts(settings_repo),
     };
     apply_paste_shortcuts(app, &shortcuts, kind)
 }
@@ -553,7 +557,7 @@ fn reload_runtime_settings(app: tauri::AppHandle) -> Result<(), String> {
 
     // 2. 重新注册快速粘贴 / 收藏粘贴快捷键
     for kind in [PasteKind::Quick, PasteKind::Favorite] {
-        reload_paste_shortcuts_from_settings(&app, kind);
+        reload_paste_shortcuts_with_repo(&app, kind, &settings_repo);
     }
 
     // 3. 重新注册 OCR 快捷键
