@@ -8,6 +8,7 @@ use image::ImageReader;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{debug, info, warn};
 
 const DEFAULT_MAX_CONTENT_SIZE: usize = 1_048_576;
@@ -198,8 +199,8 @@ impl CachedContentFilter {
 
 /// 缓存的处理设置（避免每次剪贴板事件都查询数据库）
 struct CachedProcessSettings {
-    /// 设置值缓存
-    values: HashMap<String, String>,
+    /// 设置值缓存（Arc 包装避免每次返回时克隆 HashMap）
+    values: Arc<HashMap<String, String>>,
     /// 缓存版本号（设置变更时递增以失效）
     version: u64,
 }
@@ -207,7 +208,7 @@ struct CachedProcessSettings {
 impl CachedProcessSettings {
     fn new() -> Self {
         Self {
-            values: HashMap::new(),
+            values: Arc::new(HashMap::new()),
             version: 0,
         }
     }
@@ -252,19 +253,13 @@ impl ClipboardHandler {
 
     // 以下设置读取方法已被 process() 中的 get_multiple 批量读取取代，不再单独调用
 
-    /// 检查内容类型是否被允许监听
-    /// 读取 `monitor_types` 设置（逗号分隔，如 "text,html,rtf,image,files"）
-    /// 默认全部允许
-    pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
-        let allowed = self
-            .settings_repo
-            .get("monitor_types")
-            .ok()
-            .flatten();
+    /// 检查内容类型是否被允许监听（使用缓存设置）
+    pub fn is_content_type_allowed_cached(&self, content: &ClipboardContent, settings: &HashMap<String, String>) -> bool {
+        let allowed = settings.get("monitor_types");
 
         // 无设置或空字符串 → 全部允许
         let allowed = match allowed {
-            Some(ref s) if !s.is_empty() => s,
+            Some(s) if !s.is_empty() => s,
             _ => return true,
         };
 
@@ -280,50 +275,35 @@ impl ClipboardHandler {
         allowed.split(',').any(|t| t.trim() == content_type)
     }
 
-    /// 检查来源应用是否应被过滤
+    /// 检查来源应用是否应被过滤（使用缓存设置，避免数据库查询）
     /// 设置项：
     ///   - `app_filter_enabled`: "true"/"false"（默认 false）
     ///   - `app_filter_mode`: "blacklist"（默认）/ "whitelist"
     ///   - `app_filter_list`: 逗号分隔的规则列表，支持通配符 * 和 ?
     ///
     /// 黑名单模式：匹配则排除；白名单模式：不匹配则排除
-    pub fn is_source_app_excluded(&self, source: &Option<super::source_app::SourceAppInfo>) -> bool {
+    pub fn is_source_app_excluded_cached(&self, source: &Option<super::source_app::SourceAppInfo>, settings: &HashMap<String, String>) -> bool {
         let source = match source {
             Some(s) => s,
             None => return false,
         };
 
-        // 检查是否启用
-        let enabled = self
-            .settings_repo
-            .get("app_filter_enabled")
-            .ok()
-            .flatten()
+        let enabled = settings.get("app_filter_enabled")
             .map(|v| v == "true")
             .unwrap_or(false);
         if !enabled {
             return false;
         }
 
-        let filter_list = self
-            .settings_repo
-            .get("app_filter_list")
-            .ok()
-            .flatten();
-
-        let filter_list = match filter_list {
-            Some(ref s) if !s.is_empty() => s,
+        let filter_list = match settings.get("app_filter_list") {
+            Some(s) if !s.is_empty() => s,
             _ => return false,
         };
 
-        let mode = self
-            .settings_repo
-            .get("app_filter_mode")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "blacklist".to_string());
+        let mode = settings.get("app_filter_mode")
+            .map(|s| s.as_str())
+            .unwrap_or("blacklist");
 
-        // 提取可执行文件名，预计算小写以避免每条规则重复转换
         let exe_name = std::path::Path::new(&source.exe_path)
             .file_name()
             .and_then(|n| n.to_str())
@@ -339,31 +319,26 @@ impl ClipboardHandler {
             matches_app_filter(entry, &targets_lower)
         });
 
-        match mode.as_str() {
-            "whitelist" => !matches, // 白名单：不在列表中则排除
-            _ => matches,            // 黑名单（默认）：在列表中则排除
+        match mode {
+            "whitelist" => !matches,
+            _ => matches,
         }
     }
 
-    /// 检查文本内容是否匹配内容过滤规则
+    /// 检查文本内容是否匹配内容过滤规则（使用缓存设置，避免数据库查询）
     /// 设置项：
     ///   - `content_filter_enabled`: "true"/"false"（默认 false）
     ///   - `content_filter_rules`: 换行分隔的正则表达式列表
     ///
     /// 任意一条规则匹配即排除该内容
-    pub fn is_content_excluded_by_rules(&self, content: &ClipboardContent) -> bool {
-        let enabled = self
-            .settings_repo
-            .get("content_filter_enabled")
-            .ok()
-            .flatten()
+    pub fn is_content_excluded_by_rules_cached(&self, content: &ClipboardContent, settings: &HashMap<String, String>) -> bool {
+        let enabled = settings.get("content_filter_enabled")
             .map(|v| v == "true")
             .unwrap_or(false);
         if !enabled {
             return false;
         }
 
-        // 仅对文本类内容做正则匹配
         let text = match content {
             ClipboardContent::Text(t) => t.as_str(),
             ClipboardContent::Html { text: Some(t), .. } => t.as_str(),
@@ -372,18 +347,11 @@ impl ClipboardHandler {
             _ => return false,
         };
 
-        let rules = self
-            .settings_repo
-            .get("content_filter_rules")
-            .ok()
-            .flatten();
-
-        let rules = match rules {
-            Some(ref s) if !s.is_empty() => s.as_str(),
+        let rules = match settings.get("content_filter_rules") {
+            Some(s) if !s.is_empty() => s.as_str(),
             _ => return false,
         };
 
-        // 使用缓存的正则，仅在规则变化时重新编译
         let mut cache = self.content_filter_cache.lock();
         if !cache.update_if_changed(rules) {
             return false;
@@ -597,26 +565,35 @@ impl ClipboardHandler {
         Ok(Some(id))
     }
 
+    /// 获取缓存的过滤设置（供 monitor 调用，避免重复数据库查询）
+    pub fn get_filter_settings(&self) -> Arc<HashMap<String, String>> {
+        self.get_cached_settings()
+    }
+
     /// 获取缓存的处理设置（版本号变化时重新从数据库读取）
-    fn get_cached_settings(&self) -> HashMap<String, String> {
+    fn get_cached_settings(&self) -> Arc<HashMap<String, String>> {
         let current_version = SETTINGS_VERSION.load(std::sync::atomic::Ordering::Relaxed);
         let mut cache = self.settings_cache.lock();
         if cache.version == current_version && !cache.values.is_empty() {
-            return cache.values.clone();
+            return cache.values.clone(); // Arc::clone，仅增加引用计数
         }
 
-        // 缓存失效，重新从数据库批量读取
+        // 缓存失效，重新从数据库批量读取（包含过滤设置）
         let values = self.settings_repo
             .get_multiple(&[
                 "max_content_size_kb", "max_image_size_kb", "max_file_size_kb",
                 "max_video_size_kb", "dedup_strategy", "text_dedup_mode",
                 "max_history_count", "auto_cleanup_days",
+                // 过滤相关设置（供 is_source_app_excluded / is_content_type_allowed / is_content_excluded_by_rules 使用）
+                "monitor_types", "app_filter_enabled", "app_filter_mode",
+                "app_filter_list", "content_filter_enabled", "content_filter_rules",
             ])
             .unwrap_or_default();
 
-        cache.values = values.clone();
+        let arc_values = Arc::new(values);
+        cache.values = arc_values.clone();
         cache.version = current_version;
-        values
+        arc_values
     }
 
     fn get_content_size(&self, content: &ClipboardContent) -> usize {

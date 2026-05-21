@@ -172,12 +172,14 @@ impl CMHandler for MonitorHandler {
         // 先获取来源应用（在读取内容之前）
         let source = super::source_app::get_clipboard_source_app();
 
-        // 检查来源应用是否在排除列表中
-        if let Some(ref handler) = *self.handler.lock()
-            && handler.is_source_app_excluded(&source) {
+        // 检查来源应用是否在排除列表中（使用缓存设置，避免数据库查询）
+        if let Some(ref handler) = *self.handler.lock() {
+            let settings = handler.get_filter_settings();
+            if handler.is_source_app_excluded_cached(&source, &settings) {
                 debug!("Clipboard change ignored (source app excluded: {:?})", source.as_ref().map(|s| &s.app_name));
                 return CallbackResult::Next;
             }
+        }
 
         // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
         let content = match read_clipboard_content_with_retry() {
@@ -185,13 +187,14 @@ impl CMHandler for MonitorHandler {
             None => return CallbackResult::Next,
         };
 
-        // 检查内容类型 + 处理内容（单次加锁）
+        // 检查内容类型 + 处理内容（单次加锁，使用缓存设置）
         if let Some(ref handler) = *self.handler.lock() {
-            if !handler.is_content_type_allowed(&content) {
+            let settings = handler.get_filter_settings();
+            if !handler.is_content_type_allowed_cached(&content, &settings) {
                 debug!("Clipboard change ignored (content type not allowed)");
                 return CallbackResult::Next;
             }
-            if handler.is_content_excluded_by_rules(&content) {
+            if handler.is_content_excluded_by_rules_cached(&content, &settings) {
                 debug!("剪贴板变化已忽略（内容被过滤规则排除）");
                 return CallbackResult::Next;
             }

@@ -18,7 +18,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useTextHoverPreview } from "@/hooks/useTextHoverPreview";
+import { useTextPreview } from "@/hooks/useTextPreview";
 import {
   contentTypeConfig,
   formatSize,
@@ -44,7 +44,14 @@ function TagItemRowContent({ item, timeFormat }: TagItemRowContentProps) {
   const filesInvalid = (item.content_type === "files" || item.content_type === "video") && item.files_valid === false;
   const isVideo = item.content_type === "video";
   const logicalLabel = isVideo ? contentTypeConfig.video.label : typeConfig.label;
-  const { anchorRef: textRef, handleMouseEnter: onTextEnter, handleMouseLeave: onTextLeave, handleWheel: onTextWheel } = useTextHoverPreview(item);
+  const isTextLike = item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf";
+  const { textPreviewAnchorRef: textRef, handleTextMouseEnter: onTextEnter, handleTextMouseLeave: onTextLeave, handleTextWheel: onTextWheel } = useTextPreview({
+    itemId: item.id,
+    textContent: item.text_content,
+    preview: item.preview,
+    isTextLikeContent: isTextLike,
+    checkBatchMode: false,
+  });
 
   if (item.content_type === "image" && item.image_path) {
     return (

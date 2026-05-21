@@ -590,20 +590,29 @@ impl ClipboardRepository {
             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let deleted = conn.execute(&del_sql, params_ref2.as_slice())? as i64;
 
-        // 删除后检查哪些图片不再被任何条目引用，仅返回可安全清理的路径
-        let safe_paths = candidate_paths
-            .into_iter()
-            .filter(|path| {
-                let still_referenced: bool = conn
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM clipboard_items WHERE image_path = ?1)",
-                        params![path],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or(true);
-                !still_referenced
-            })
-            .collect();
+        // 删除后一次性查询仍被引用的图片路径，仅返回无引用的路径
+        let safe_paths = if candidate_paths.is_empty() {
+            vec![]
+        } else {
+            let path_placeholders: Vec<String> = candidate_paths.iter().map(|_| "?".to_string()).collect();
+            let path_in_clause = path_placeholders.join(",");
+            let check_sql = format!(
+                "SELECT DISTINCT image_path FROM clipboard_items WHERE image_path IN ({})",
+                path_in_clause
+            );
+            let mut check_stmt = conn.prepare(&check_sql)?;
+            let path_params: Vec<&dyn rusqlite::ToSql> =
+                candidate_paths.iter().map(|p| p as &dyn rusqlite::ToSql).collect();
+            let still_referenced: std::collections::HashSet<String> = check_stmt
+                .query_map(path_params.as_slice(), |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            candidate_paths
+                .into_iter()
+                .filter(|path| !still_referenced.contains(path))
+                .collect()
+        };
 
         debug!("Batch deleted {} clipboard items", deleted);
         Ok((deleted, safe_paths))
