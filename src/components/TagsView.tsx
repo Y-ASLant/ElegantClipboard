@@ -141,6 +141,7 @@ export function TagsView() {
   const [isCreating, setIsCreating] = useState(false);
   const [createName, setCreateName] = useState("");
   const createInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   // Dialogs
   const [renameOpen, setRenameOpen] = useState(false);
@@ -622,14 +623,15 @@ export function TagsView() {
 
       {/* Rename tag dialog */}
       <Dialog open={renameOpen} onOpenChange={(o) => { setRenameOpen(o); if (!o) setRenameTarget(null); }}>
-        <DialogContent showCloseButton={false}>
+        <DialogContent showCloseButton={false} onOpenAutoFocus={(e) => { e.preventDefault(); focusWindowImmediately().then(() => renameInputRef.current?.focus()); }}>
           <DialogHeader className="text-left"><DialogTitle>重命名标签</DialogTitle></DialogHeader>
           <Input
+            ref={renameInputRef}
             placeholder="标签名称"
             value={renameName}
             onChange={(e) => setRenameName(e.target.value)}
+            onFocus={() => focusWindowImmediately()}
             onKeyDown={(e) => { if (e.key === "Enter") handleRename(); }}
-            autoFocus
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameOpen(false)}>取消</Button>
