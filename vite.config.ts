@@ -24,7 +24,7 @@ export default defineConfig(async () => ({
       output: {
         codeSplitting: {
           groups: [
-            { test: /\/react(-dom)?\//, name: 'vendor-react' },
+            { test: /[\\/]react(-dom)?[\\/]/, name: 'vendor-react' },
             { test: /@radix-ui/, name: 'vendor-radix' },
             { test: /@dnd-kit/, name: 'vendor-dnd' },
             { test: /@tauri-apps/, name: 'vendor-tauri' },

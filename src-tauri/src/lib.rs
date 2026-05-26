@@ -742,6 +742,13 @@ pub fn run() {
                     .flatten()
                     .map(|v| v != "false")
                     .unwrap_or(true);
+                // 先确定定位模式，再用目标显示器的 scale 设置尺寸
+                let position_mode = settings_repo
+                    .get("position_mode")
+                    .ok()
+                    .flatten()
+                    .map(|v| crate::positioning::PositionMode::from_str(&v))
+                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
                 if persist {
                     let custom_width = settings_repo
                         .get("window_width")
@@ -754,19 +761,23 @@ pub fn run() {
                         .flatten()
                         .and_then(|v| v.parse::<f64>().ok());
                     if let (Some(w), Some(h)) = (custom_width, custom_height) {
-                        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                            width: w,
-                            height: h,
+                        let scale = match position_mode {
+                            crate::positioning::PositionMode::FixedPosition => {
+                                let x = settings_repo.get_parsed::<i32>("window_x").unwrap_or(0);
+                                let y = settings_repo.get_parsed::<i32>("window_y").unwrap_or(0);
+                                crate::positioning::get_monitor_scale_at(&window, x, y)
+                            }
+                            _ => {
+                                let (cx, cy) = crate::positioning::get_cursor_position();
+                                crate::positioning::get_monitor_scale_at(&window, cx, cy)
+                            }
+                        };
+                        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                            width: (w * scale).round() as u32,
+                            height: (h * scale).round() as u32,
                         }));
                     }
                 }
-                // 启动阶段恢复「上一次位置」，覆盖托盘左键首次显示路径
-                let position_mode = settings_repo
-                    .get("position_mode")
-                    .ok()
-                    .flatten()
-                    .map(|v| crate::positioning::PositionMode::from_str(&v))
-                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
                 if position_mode == crate::positioning::PositionMode::FixedPosition {
                     let x = settings_repo
                         .get("window_x")

@@ -57,24 +57,6 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
         .try_state::<std::sync::Arc<AppState>>()
         .map(|state| {
             let repo = database::SettingsRepository::new(&state.db);
-            let persist = repo
-                .get("persist_window_size")
-                .ok()
-                .flatten()
-                .map(|v| v != "false")
-                .unwrap_or(true);
-            if persist {
-                let w = repo.get_parsed::<f64>("window_width");
-                let h = repo.get_parsed::<f64>("window_height");
-                if let (Some(w), Some(h)) = (w, h) {
-                    let (cx, cy) = crate::positioning::get_cursor_position();
-                    let target_scale = crate::positioning::get_cursor_monitor_scale(window, cx, cy);
-                    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                        width: (w * target_scale).round() as u32,
-                        height: (h * target_scale).round() as u32,
-                    }));
-                }
-            }
             if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
                 crate::positioning::PositionMode::from_str(&mode_str)
             } else {
@@ -92,6 +74,37 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
             }
         })
         .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+
+    if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+        let repo = database::SettingsRepository::new(&state.db);
+        let persist = repo
+            .get("persist_window_size")
+            .ok()
+            .flatten()
+            .map(|v| v != "false")
+            .unwrap_or(true);
+        if persist {
+            let w = repo.get_parsed::<f64>("window_width");
+            let h = repo.get_parsed::<f64>("window_height");
+            if let (Some(w), Some(h)) = (w, h) {
+                let scale = match position_mode {
+                    crate::positioning::PositionMode::FixedPosition => {
+                        let x = repo.get_parsed::<i32>("window_x").unwrap_or(0);
+                        let y = repo.get_parsed::<i32>("window_y").unwrap_or(0);
+                        crate::positioning::get_monitor_scale_at(window, x, y)
+                    }
+                    _ => {
+                        let (cx, cy) = crate::positioning::get_cursor_position();
+                        crate::positioning::get_monitor_scale_at(window, cx, cy)
+                    }
+                };
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: (w * scale).round() as u32,
+                    height: (h * scale).round() as u32,
+                }));
+            }
+        }
+    }
 
     if position_mode == crate::positioning::PositionMode::FixedPosition {
         if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
