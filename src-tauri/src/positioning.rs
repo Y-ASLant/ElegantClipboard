@@ -149,8 +149,10 @@ pub fn get_cursor_monitor_scale(window: &WebviewWindow, cx: i32, cy: i32) -> f64
         for m in monitors {
             let pos = m.position();
             let size = m.size();
-            if cx >= pos.x && cx < pos.x + size.width as i32
-                && cy >= pos.y && cy < pos.y + size.height as i32
+            if cx >= pos.x
+                && cx < pos.x + size.width as i32
+                && cy >= pos.y
+                && cy < pos.y + size.height as i32
             {
                 return m.scale_factor();
             }

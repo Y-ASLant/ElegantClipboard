@@ -122,9 +122,7 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
         tracing::info!("All shortcuts disabled (except Win+V)");
     } else {
         if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
-            let _ = app
-                .global_shortcut()
-                .on_shortcut(sc, on_toggle_shortcut);
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
         apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
@@ -454,9 +452,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
 
     if let Err(e) = win_v_registry::disable_win_v_hotkey(true) {
         if let Some(sc) = saved_shortcut {
-            let _ = app
-                .global_shortcut()
-                .on_shortcut(sc, on_toggle_shortcut);
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         return Err(e);
     }
@@ -467,9 +463,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     {
         let _ = win_v_registry::enable_win_v_hotkey(true);
         if let Some(sc) = saved_shortcut {
-            let _ = app
-                .global_shortcut()
-                .on_shortcut(sc, on_toggle_shortcut);
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         return Err(format!("Failed to register Win+V shortcut: {}", e));
     }
