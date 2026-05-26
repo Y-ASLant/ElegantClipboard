@@ -9,6 +9,7 @@ import {
   ClipboardPaste16Regular,
   ArrowDownload16Regular,
   Edit16Regular,
+  Translate16Regular,
   CheckmarkCircle16Filled,
   Circle16Regular,
 } from "@fluentui/react-icons";
@@ -59,10 +60,12 @@ import {
   parseFilePaths,
 } from "@/lib/format";
 import { logError } from "@/lib/logger";
+import { translateText } from "@/lib/translate";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
 import { useUISettings } from "@/stores/ui-settings";
+import { useTranslateSettings } from "@/stores/translate-settings";
 
 // ============ 类型定义 ============
 
@@ -172,6 +175,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
   const previewPosition = useUISettings((s) => s.previewPosition);
   const sharpCorners = useUISettings((s) => s.sharpCorners);
+
+  const translateEnabled = useTranslateSettings((s) => s.enabled);
+  const [translateStatus, setTranslateStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [translatedText, setTranslatedText] = useState("");
 
   const [justPasted, setJustPasted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -487,6 +494,31 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     return () => { unlisten.then((fn) => fn()); };
   }, [hideTextPreview]);
 
+  const triggerTranslate = useCallback(async (forceRedo = false) => {
+    let shouldTranslate = true;
+    setTranslateStatus((prev) => {
+      if (prev !== "idle" && !forceRedo) { shouldTranslate = false; return "idle"; }
+      return "loading";
+    });
+    setTranslatedText("");
+    if (!shouldTranslate) return;
+    try {
+      const text = await resolveTextPreviewContent();
+      if (!text.trim()) { setTranslateStatus("idle"); return; }
+      const result = await translateText(text);
+      setTranslatedText(result);
+      setTranslateStatus("done");
+    } catch (error) {
+      setTranslatedText(String(error));
+      setTranslateStatus("error");
+    }
+  }, [resolveTextPreviewContent]);
+
+  const handleTranslateClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerTranslate();
+  }, [triggerTranslate]);
+
   const handlePaste = (e: React.MouseEvent) => {
     if (batchMode) {
       toggleSelect(item.id, index ?? 0, e.shiftKey);
@@ -726,6 +758,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onToggleFavorite={handleToggleFavorite}
               onCopy={handleCopy}
               onDelete={handleDelete}
+              onTranslate={translateEnabled && isTextLikeContent ? handleTranslateClick : undefined}
+              translateActive={translateStatus !== "idle"}
             />
           )}
 
@@ -740,6 +774,22 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
           )}
         </div>
       </Card>
+      {translateStatus !== "idle" && (
+        <div
+          className="mt-1 rounded-md border bg-muted/40 px-3 py-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {translateStatus === "loading" && (
+            <span className="text-xs text-muted-foreground">翻译中…</span>
+          )}
+          {(translateStatus === "done" || translateStatus === "error") && (
+            <p className={cn(
+              "text-sm leading-relaxed whitespace-pre-wrap select-text cursor-text",
+              translateStatus === "error" && "text-destructive",
+            )}>{translatedText}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -760,6 +810,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: () => pasteContent(item.id) },
         { icon: TextDescription16Regular, label: "粘贴为纯文本", onClick: () => pasteAsPlainText(item.id) },
         { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
+        ...(translateEnabled ? [{ icon: Translate16Regular, label: "翻译", onClick: () => triggerTranslate(true) }] : []),
         { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
         { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
       ];

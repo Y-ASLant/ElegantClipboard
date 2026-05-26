@@ -85,7 +85,9 @@ pub fn is_running_as_admin() -> bool {
 
 /// 尝试启动一个新的提权实例
 /// 优先使用计划任务（免 UAC 弹窗），失败则回退到 UAC 提示
-/// 返回 `true` 表示新实例已启动（调用方应退出）
+/// 返回 `true` 表示新实例已启动（调用方应立即退出以释放单例锁）
+///
+/// 注意：调用方必须在此函数返回 true 后**立即**退出，否则单例插件会拒绝新实例。
 #[cfg(target_os = "windows")]
 pub fn self_elevate() -> bool {
     use crate::task_scheduler;
@@ -95,91 +97,11 @@ pub fn self_elevate() -> bool {
         && task_scheduler::is_elevation_task_path_valid()
         && task_scheduler::run_elevation_task()
     {
-        // 验证提权进程是否真正启动（防止 Queued 状态导致的假成功）
-        if wait_for_new_instance(5) {
-            return true;
-        }
-        tracing::warn!(
-            "Scheduled task claimed success but elevated process not detected, falling back to UAC"
-        );
+        return true;
     }
 
     // 回退到 UAC 弹窗提权
-    if elevate_with_uac() {
-        // ShellExecuteW "runas" 返回时进程通常已创建，但仍需验证
-        // 避免提权进程在初始化阶段崩溃导致两个实例都退出
-        if wait_for_new_instance(3) {
-            return true;
-        }
-        tracing::warn!("UAC elevation claimed success but elevated process not detected");
-    }
-
-    false
-}
-
-/// 等待另一个同名进程出现（最多 `timeout_secs` 秒）
-/// 用于验证 `schtasks /Run` 是否真正启动了提权实例
-#[cfg(target_os = "windows")]
-fn wait_for_new_instance(timeout_secs: u32) -> bool {
-    let exe_name = match std::env::current_exe() {
-        Ok(p) => match p.file_name() {
-            Some(n) => n.to_string_lossy().to_lowercase(),
-            None => return false,
-        },
-        Err(_) => return false,
-    };
-    let our_pid = std::process::id();
-
-    for _ in 0..timeout_secs * 2 {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        if has_other_instance(&exe_name, our_pid) {
-            return true;
-        }
-    }
-    false
-}
-
-/// 检查是否存在另一个同名进程（排除自身 PID）
-#[cfg(target_os = "windows")]
-fn has_other_instance(exe_name: &str, our_pid: u32) -> bool {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::*;
-
-    unsafe {
-        let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-
-        let mut entry = PROCESSENTRY32W {
-            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-            ..Default::default()
-        };
-
-        if Process32FirstW(snapshot, &mut entry).is_ok() {
-            loop {
-                let null_pos = entry
-                    .szExeFile
-                    .iter()
-                    .position(|&c| c == 0)
-                    .unwrap_or(entry.szExeFile.len());
-                let name = String::from_utf16_lossy(&entry.szExeFile[..null_pos]).to_lowercase();
-
-                if name == *exe_name && entry.th32ProcessID != our_pid {
-                    let _ = CloseHandle(snapshot);
-                    return true;
-                }
-
-                if Process32NextW(snapshot, &mut entry).is_err() {
-                    break;
-                }
-            }
-        }
-
-        let _ = CloseHandle(snapshot);
-        false
-    }
+    elevate_with_uac()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -222,15 +144,21 @@ fn elevate_with_uac() -> bool {
 
 /// 重启应用
 /// 管理员模式：通过计划任务/UAC 提权启动新实例
-/// 普通模式：通过 explorer.exe 确保非提权启动
+/// 已提权但未启用管理员模式：通过 explorer.exe 降权启动
+/// 普通用户：返回 false，由调用方使用 app.restart()
 #[cfg(target_os = "windows")]
 pub fn restart_app() -> bool {
     if is_admin_launch_enabled() {
         return self_elevate();
     }
 
-    // 非管理员：通过 explorer.exe 非提权启动
-    launch_via_explorer()
+    // 仅在当前已提权时才需要通过 explorer.exe 降权启动，
+    // 未提权时直接返回 false，让调用方使用 app.restart()
+    if is_running_as_admin() {
+        return launch_via_explorer();
+    }
+
+    false
 }
 
 #[cfg(not(target_os = "windows"))]

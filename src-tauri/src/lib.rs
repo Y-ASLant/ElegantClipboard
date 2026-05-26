@@ -6,6 +6,7 @@ mod database;
 mod input_monitor;
 mod keyboard_hook;
 mod positioning;
+mod hotkey;
 mod proxy;
 mod shortcut;
 mod task_scheduler;
@@ -856,16 +857,21 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             commands::settings::start_accent_color_watcher(app.handle().clone());
 
+            // 初始化热键系统
+            hotkey::start(app.handle().clone());
+
             // 启动 WebDAV 同步插件（仅在启用时初始化，禁用时零占用）
             {
                 let app_state = app.state::<Arc<AppState>>();
-                let plugin_enabled = SettingsRepository::new(&app_state.db)
-                    .get_bool("plugin_webdav_enabled", false);
-                if plugin_enabled {
+                let settings = SettingsRepository::new(&app_state.db);
+                if settings.get_bool("plugin_webdav_enabled", false) {
                     webdav::start_auto_sync_task(
                         app_state.db.clone(),
                         AppConfig::load().get_data_dir(),
                     );
+                }
+                if settings.get_bool("plugin_translate_enabled", false) {
+                    commands::translate::register_translate_selection_shortcut(app.handle());
                 }
             }
 
@@ -1037,6 +1043,11 @@ pub fn run() {
             commands::sync::webdav_test_connection,
             commands::sync::webdav_upload,
             commands::sync::webdav_download,
+            commands::translate::translate_text,
+            commands::translate::write_text_to_clipboard,
+            commands::translate::get_pending_translate_text,
+            commands::translate::open_translate_result_window,
+            commands::translate::update_translate_selection_shortcut,
             commands::settings::get_settings_batch,
         ])
         .run(tauri::generate_context!());

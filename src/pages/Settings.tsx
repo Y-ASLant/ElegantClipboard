@@ -11,6 +11,7 @@ import {
   Speaker216Regular,
   Filter16Regular,
   PlugConnected16Regular,
+  Translate16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -26,6 +27,7 @@ import {
 } from "@/components/settings/ShortcutsTab";
 import { PluginsTab } from "@/components/settings/PluginsTab";
 import { SyncTab } from "@/components/settings/SyncTab";
+import { TranslateTab } from "@/components/settings/TranslateTab";
 import { ThemeTab } from "@/components/settings/ThemeTab";
 import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,7 +45,7 @@ function normalizePositionMode(raw: string | null | undefined): import("@/compon
   return "follow_cursor";
 }
 
-type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "plugins" | "webdav" | "about";
+type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "plugins" | "webdav" | "translate" | "about";
 
 const BASE_NAV_ITEMS: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "general", label: "常规设置", icon: Options16Regular },
@@ -59,7 +61,7 @@ const BASE_NAV_ITEMS: { id: TabType; label: string; icon: React.ComponentType<{ 
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>("general");
-  const [pluginsEnabled, setPluginsEnabled] = useState<Record<string, boolean>>({ webdav: false });
+  const [pluginsEnabled, setPluginsEnabled] = useState<Record<string, boolean>>({ webdav: false, translate: false });
 
   const handlePluginToggle = useCallback(async (id: string, value: boolean) => {
     setPluginsEnabled((prev) => ({ ...prev, [id]: value }));
@@ -75,6 +77,7 @@ export function Settings() {
     ...BASE_NAV_ITEMS.slice(0, 7),
     BASE_NAV_ITEMS[7],
     ...(pluginsEnabled.webdav ? [{ id: "webdav" as TabType, label: "WebDAV 同步", icon: ArrowSync16Regular }] : []),
+    ...(pluginsEnabled.translate ? [{ id: "translate" as TabType, label: "文本翻译", icon: Translate16Regular }] : []),
     BASE_NAV_ITEMS[8],
   ];
   
@@ -123,8 +126,8 @@ export function Settings() {
 
   // 加载插件启用状态
   useEffect(() => {
-    invoke<Record<string, string>>("get_settings_batch", { keys: ["plugin_webdav_enabled"] })
-      .then((m) => setPluginsEnabled({ webdav: m["plugin_webdav_enabled"] === "true" }))
+    invoke<Record<string, string>>("get_settings_batch", { keys: ["plugin_webdav_enabled", "plugin_translate_enabled"] })
+      .then((m) => setPluginsEnabled({ webdav: m["plugin_webdav_enabled"] === "true", translate: m["plugin_translate_enabled"] === "true" }))
       .catch((e) => logError("加载插件设置失败:", e));
   }, []);
 
@@ -367,6 +370,8 @@ export function Settings() {
               )}
 
               {activeTab === "webdav" && <SyncTab />}
+
+              {activeTab === "translate" && <TranslateTab />}
             </div>
           </ScrollArea>
         )}

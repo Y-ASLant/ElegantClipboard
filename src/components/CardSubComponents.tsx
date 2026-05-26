@@ -6,6 +6,7 @@ import {
   Star16Filled,
   Delete16Regular,
   Copy16Regular,
+  Translate16Regular,
   Document16Regular,
   Folder16Regular,
   Warning16Regular,
@@ -178,6 +179,8 @@ interface ActionToolbarProps {
   onToggleFavorite: (e: React.MouseEvent) => void;
   onCopy: (e: React.MouseEvent) => void;
   onDelete: (e: React.MouseEvent) => void;
+  onTranslate?: (e: React.MouseEvent) => void;
+  translateActive?: boolean;
 }
 
 export const ActionToolbar = ({
@@ -186,6 +189,8 @@ export const ActionToolbar = ({
   onToggleFavorite,
   onCopy,
   onDelete,
+  onTranslate,
+  translateActive,
 }: ActionToolbarProps) => (
   <div
     className="absolute right-1 top-1 z-20 flex items-center gap-0.5 bg-background/95 rounded-md px-0.5 shadow-sm border opacity-0 group-hover:opacity-100 transition-opacity"
@@ -238,6 +243,21 @@ export const ActionToolbar = ({
       </TooltipTrigger>
       <TooltipContent>复制</TooltipContent>
     </Tooltip>
+    {onTranslate && (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onTranslate}
+            className="h-6 w-6"
+          >
+            <Translate16Regular className={`w-3.5 h-3.5 ${translateActive ? "text-primary" : ""}`} />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{translateActive ? "收起翻译" : "翻译"}</TooltipContent>
+      </Tooltip>
+    )}
     <Tooltip>
       <TooltipTrigger asChild>
         <Button

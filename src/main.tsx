@@ -5,6 +5,7 @@ import { initUISettingsStore } from "@/stores/ui-settings";
 import App from "./App";
 import { Settings } from "./pages/Settings";
 import { TextEditor } from "./pages/TextEditor";
+import { TranslateResult } from "./pages/TranslateResult";
 import "overlayscrollbars/overlayscrollbars.css";
 import "./index.css";
 
@@ -37,6 +38,9 @@ function Router() {
   }
   if (path === "/editor" || path === "/editor.html") {
     return <TextEditor />;
+  }
+  if (path === "/translate-result") {
+    return <TranslateResult />;
   }
   
   return <App />;

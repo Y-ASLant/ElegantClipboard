@@ -5,6 +5,7 @@ pub mod groups;
 pub mod preview;
 pub mod settings;
 pub mod sync;
+pub mod translate;
 pub mod window;
 
 use crate::clipboard::ClipboardMonitor;
