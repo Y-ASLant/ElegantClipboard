@@ -198,6 +198,12 @@ function TextDedupModeCard({ dedupStrategy }: { dedupStrategy: DedupStrategy }) 
     </div>
   );
 }
+function formatKB(kb: number, fractionDigits = 1): string {
+  if (kb === 0) return "无限制";
+  if (kb >= 1024) return `${(kb / 1024).toFixed(fractionDigits)} MB`;
+  return `${kb} KB`;
+}
+
 export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [migrationDialogOpen, setMigrationDialogOpen] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -659,12 +665,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
               <div className="flex items-center justify-between">
                 <Label className="text-xs">单条文本最大大小</Label>
                 <span className="text-xs font-medium tabular-nums">
-                  {settings.max_content_size_kb === 0 
-                    ? "无限制"
-                    : settings.max_content_size_kb >= 1024 
-                      ? `${(settings.max_content_size_kb / 1024).toFixed(1)} MB`
-                      : `${settings.max_content_size_kb} KB`
-                  }
+                  {formatKB(settings.max_content_size_kb)}
                 </span>
               </div>
               <Slider
@@ -683,12 +684,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
               <div className="flex items-center justify-between">
                 <Label className="text-xs">单张图片最大大小</Label>
                 <span className="text-xs font-medium tabular-nums">
-                  {settings.max_image_size_kb === 0
-                    ? "无限制"
-                    : settings.max_image_size_kb >= 1024
-                      ? `${(settings.max_image_size_kb / 1024).toFixed(0)} MB`
-                      : `${settings.max_image_size_kb} KB`
-                  }
+                  {formatKB(settings.max_image_size_kb, 0)}
                 </span>
               </div>
               <Slider

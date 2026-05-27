@@ -50,6 +50,8 @@ chrono = "0.4"
 
 # Hashing (fast)
 blake3 = "1"
+md5 = "0.7"
+urlencoding = "2"
 
 # High-performance locks
 parking_lot = "0.12"

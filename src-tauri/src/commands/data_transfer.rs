@@ -1,20 +1,11 @@
 use crate::commands::AppState;
 use crate::config::{self, AppConfig};
 use crate::database;
+use crate::utils::format_size;
 use tauri::Manager;
 
 fn chrono_timestamp() -> String {
     chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
-}
-
-fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
 }
 
 fn add_dir_to_zip(

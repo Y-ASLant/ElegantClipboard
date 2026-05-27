@@ -1139,8 +1139,6 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                     }
                                 }
                             }
-                            let invalid_paths = crate::database::ClipboardRepository::new(&db)
-                                .get_invalid_file_paths_set();
                             let dl_images: Vec<MediaEntry> = merged_map
                                 .iter()
                                 .filter(|e| {
@@ -1162,7 +1160,6 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                 .filter(|e| {
                                     e.media_type == "file"
                                         && local_referenced_paths.contains(&e.local_path)
-                                        && !invalid_paths.contains(&e.local_path)
                                 })
                                 .collect();
 

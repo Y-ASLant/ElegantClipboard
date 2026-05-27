@@ -7,16 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { logError } from "@/lib/logger";
+import { KEY_CODE_MAP } from "@/lib/shortcut-helpers";
 import { PROVIDER_OPTIONS, LANGUAGES, translateText } from "@/lib/translate";
 import { useTranslateSettings, type TranslateProvider, type LanguageMode } from "@/stores/translate-settings";
-
-const KEY_CODE_MAP: Record<string, string> = {
-  Space: "Space", Tab: "Tab", Enter: "Enter", Backspace: "Backspace",
-  Delete: "Delete", Escape: "Esc", Home: "Home", End: "End",
-  PageUp: "PageUp", PageDown: "PageDown",
-  ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
-  Backquote: "`",
-};
 
 export function TranslateTab() {
   const {
@@ -126,9 +119,9 @@ export function TranslateTab() {
   const handleToggleTranslateSelection = async (value: boolean) => {
     setTranslateSelectionEnabled(value);
     if (value && translateSelectionShortcut) {
-      try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch {}
+      try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch (e) { console.error("更新划词翻译快捷键失败:", e); }
     } else if (!value) {
-      try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch {}
+      try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch (e) { console.error("清除划词翻译快捷键失败:", e); }
     }
   };
 
@@ -150,9 +143,9 @@ export function TranslateTab() {
           <Switch checked={enabled} onCheckedChange={async (value) => {
             setEnabled(value);
             if (!value && translateSelectionShortcut) {
-              try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch {}
+              try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch (e) { console.error("清除划词翻译快捷键失败:", e); }
             } else if (value && translateSelectionEnabled && translateSelectionShortcut) {
-              try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch {}
+              try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch (e) { console.error("更新划词翻译快捷键失败:", e); }
             }
           }} />
         </div>

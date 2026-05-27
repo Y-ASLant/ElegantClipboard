@@ -59,6 +59,7 @@ import {
   getFileNameFromPath,
   parseFilePaths,
 } from "@/lib/format";
+import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
 import { translateText } from "@/lib/translate";
 import { cn } from "@/lib/utils";
@@ -79,34 +80,7 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 const fileValidityCache = new Map<string, boolean>();
-let textPreviewLease = 0;
-let textPreviewWanted = false;
-
-async function acquireTextPreviewLease(): Promise<number> {
-  // lease 由后端 TEXT_PREVIEW_TOKEN 原子分配，与 invalidate 共享同一原子，
-  // 从结构上保证 invalidate 之后的旧 lease 必然 < 当前 TOKEN，promote 必失败。
-  const lease = await invoke<number>("allocate_text_preview_lease");
-  if (lease > textPreviewLease) {
-    textPreviewLease = lease;
-  }
-  textPreviewWanted = true;
-  return lease;
-}
-
-function revokeTextPreviewLease(lease: number): void {
-  if (textPreviewLease === lease) {
-    textPreviewLease += 1;
-    textPreviewWanted = false;
-  }
-}
-
-function isTextPreviewLeaseCurrent(lease: number): boolean {
-  return textPreviewLease === lease;
-}
-
-function isTextPreviewWanted(): boolean {
-  return textPreviewWanted;
-}
+const textPreviewLM = createLeaseManager("allocate_text_preview_lease");
 
 // ============ 主卡片组件 ============
 
@@ -303,7 +277,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     textPreviewReqIdRef.current += 1;
     const closingLease = textPreviewLeaseRef.current;
     if (closingLease !== null) {
-      revokeTextPreviewLease(closingLease);
+      textPreviewLM.revoke(closingLease);
       textPreviewLeaseRef.current = null;
     }
     clearTextPreviewTimer();
@@ -349,13 +323,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     if (!textPreviewEnabled || !isTextLikeContent || !textPreviewAnchorRef.current) {
       return;
     }
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) return;
     const textContent = await resolveTextPreviewContent();
     if (!textContent) return;
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) return;
 
     const bounds = await getPreviewBounds(previewPosition, textPreviewAnchorRef.current);
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) return;
     const availableCssW = Math.max(260, Math.floor(bounds.maxW / bounds.scale));
     const availableCssH = Math.max(140, Math.floor(bounds.maxH / bounds.scale));
     const sampled = sampleTextPreview(textContent);
@@ -407,9 +381,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         fontSize: uiState.previewFontSize,
         token: lease,
       });
-      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) {
+      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) {
         textPreviewVisibleRef.current = false;
-        if (!isTextPreviewWanted()) {
+        if (!textPreviewLM.isWanted()) {
           invoke("hide_text_preview", { token: lease }).catch((error) => {
             logError("Failed to hide text preview after stale show:", error);
           });
@@ -430,10 +404,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     const reqId = textPreviewReqIdRef.current;
     clearTextPreviewTimer();
     void (async () => {
-      const lease = await acquireTextPreviewLease();
+      const lease = await textPreviewLM.acquire();
       // 异步分配期间用户可能已离开或触发新悬停，重新校验后再装定时器
       if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) {
-        revokeTextPreviewLease(lease);
+        textPreviewLM.revoke(lease);
         return;
       }
       textPreviewLeaseRef.current = lease;

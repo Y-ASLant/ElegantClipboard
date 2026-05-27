@@ -69,7 +69,7 @@ export function TranslateResult() {
       try {
         const t = await invoke<string>("get_pending_translate_text");
         if (t) { setText(t); doTranslate(t); }
-      } catch {}
+      } catch (e) { console.error("获取待翻译文本失败:", e); }
     };
     load();
   }, [doTranslate]);

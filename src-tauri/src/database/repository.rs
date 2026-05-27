@@ -1061,11 +1061,6 @@ impl ClipboardRepository {
         Ok(items)
     }
 
-    /// 获取所有已失效的 files 类型条目的 file_paths（当前项目不存储 files_valid，始终返回空集）
-    pub fn get_invalid_file_paths_set(&self) -> std::collections::HashSet<String> {
-        std::collections::HashSet::new()
-    }
-
     /// 导入同步条目（基于 content_hash 去重，已存在则跳过）
     pub fn import_sync_items(&self, items: &[ClipboardItem]) -> Result<usize, rusqlite::Error> {
         let mut conn = self.write_conn.lock();

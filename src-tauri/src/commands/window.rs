@@ -234,52 +234,12 @@ pub fn set_window_effect(
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            SWP_NOZORDER, SetWindowLongW, SetWindowPos, WS_EX_LAYERED,
-        };
 
         let raw_hwnd = window.hwnd().map_err(|e| e.to_string())?;
         let hwnd = HWND(raw_hwnd.0 as *mut _);
 
         let is_effect = effect != "none";
-
-        unsafe {
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-            let has_layered = (ex_style as u32) & WS_EX_LAYERED.0 != 0;
-
-            if is_effect && has_layered {
-                SetWindowLongW(
-                    hwnd,
-                    GWL_EXSTYLE,
-                    ((ex_style as u32) & !WS_EX_LAYERED.0) as i32,
-                );
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
-            } else if !is_effect && !has_layered {
-                SetWindowLongW(
-                    hwnd,
-                    GWL_EXSTYLE,
-                    ((ex_style as u32) | WS_EX_LAYERED.0) as i32,
-                );
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
-            }
-        }
+        super::window_utils::set_ws_ex_layered(hwnd, !is_effect);
 
         let _ = window_vibrancy::clear_mica(&window);
         let _ = window_vibrancy::clear_acrylic(&window);
@@ -298,25 +258,7 @@ pub fn set_window_effect(
         if let Err(ref e) = apply_result {
             tracing::warn!("Window effect '{}' not supported on this OS: {}", effect, e);
             // 恢复 WS_EX_LAYERED（应用失败时可能已被移除）
-            unsafe {
-                let cur_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                if (cur_style as u32) & WS_EX_LAYERED.0 == 0 {
-                    SetWindowLongW(
-                        hwnd,
-                        GWL_EXSTYLE,
-                        ((cur_style as u32) | WS_EX_LAYERED.0) as i32,
-                    );
-                    let _ = SetWindowPos(
-                        hwnd,
-                        None,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                    );
-                }
-            }
+            super::window_utils::set_ws_ex_layered(hwnd, true);
         }
 
         apply_result?;

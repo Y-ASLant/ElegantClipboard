@@ -455,7 +455,8 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
 
       const showSeparator = index === pinnedCount && pinnedCount > 0;
 
-      const densityPb = cardDensity === "compact" ? "pb-1" : cardDensity === "spacious" ? "pb-3" : "pb-2";
+      const DENSITY_PADDING: Record<string, string> = { compact: "pb-1", spacious: "pb-3", normal: "pb-2" };
+      const densityPb = DENSITY_PADDING[cardDensity] ?? "pb-2";
       return (
         <div className={`px-2 ${densityPb}${index === 0 ? ' pt-1.5' : ''}`}>
           {showSeparator && <Separator className="mb-2" />}

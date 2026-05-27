@@ -12,6 +12,7 @@ mod shortcut;
 mod task_scheduler;
 mod tray;
 mod updater;
+mod utils;
 mod webdav;
 mod win_v_registry;
 
@@ -808,36 +809,9 @@ pub fn run() {
                     // 启动时设置 WS_EX_LAYERED 确保窗口不透明，防止 Win10 无 DWM 特效时闪烁
                     {
                         use windows::Win32::Foundation::HWND;
-                        use windows::Win32::UI::WindowsAndMessaging::{
-                            GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-                            SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongW, SetWindowPos,
-                            WS_EX_LAYERED,
-                        };
                         if let Ok(raw_hwnd) = window.hwnd() {
                             let hwnd = HWND(raw_hwnd.0 as *mut _);
-                            unsafe {
-                                let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                                if (ex_style as u32) & WS_EX_LAYERED.0 == 0 {
-                                    SetWindowLongW(
-                                        hwnd,
-                                        GWL_EXSTYLE,
-                                        ((ex_style as u32) | WS_EX_LAYERED.0) as i32,
-                                    );
-                                    let _ = SetWindowPos(
-                                        hwnd,
-                                        None,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        SWP_NOMOVE
-                                            | SWP_NOSIZE
-                                            | SWP_NOZORDER
-                                            | SWP_NOACTIVATE
-                                            | SWP_FRAMECHANGED,
-                                    );
-                                }
-                            }
+                            crate::commands::window_utils::set_ws_ex_layered(hwnd, true);
                         }
                     }
 

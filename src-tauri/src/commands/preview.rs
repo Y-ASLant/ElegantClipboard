@@ -370,10 +370,6 @@ pub fn is_log_to_file_enabled() -> bool {
 #[cfg(target_os = "windows")]
 fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&str>) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-        SWP_NOZORDER, SetWindowLongW, SetWindowPos, WS_EX_LAYERED,
-    };
 
     let effect = match effect {
         Some(e) if e != "none" => e,
@@ -384,25 +380,7 @@ fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&st
     let hwnd = HWND(raw_hwnd.0 as *mut _);
 
     // 移除 WS_EX_LAYERED 支持合成特效
-    unsafe {
-        let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-        if (ex_style as u32) & WS_EX_LAYERED.0 != 0 {
-            SetWindowLongW(
-                hwnd,
-                GWL_EXSTYLE,
-                ((ex_style as u32) & !WS_EX_LAYERED.0) as i32,
-            );
-            let _ = SetWindowPos(
-                hwnd,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-            );
-        }
-    }
+    super::window_utils::set_ws_ex_layered(hwnd, false);
 
     let result = match effect {
         "mica" => window_vibrancy::apply_mica(window, None),

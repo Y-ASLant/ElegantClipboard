@@ -1,6 +1,7 @@
 use crate::commands::AppState;
 use crate::config;
 use crate::database::SettingsRepository;
+use crate::utils::format_size;
 use crate::webdav::{self, SyncOptions, WebDavConfig};
 use std::sync::Arc;
 use tauri::State;
@@ -174,20 +175,7 @@ pub async fn webdav_download(
 
         let media_map = webdav::download_media_map(&config).unwrap_or_default();
         if !media_map.is_empty() {
-            let invalid_paths =
-                crate::database::ClipboardRepository::new(&db).get_invalid_file_paths_set();
-            let filtered: Vec<_> = media_map
-                .into_iter()
-                .filter(|e| {
-                    if e.media_type == "file" && invalid_paths.contains(&e.local_path) {
-                        return false;
-                    }
-                    true
-                })
-                .collect();
-            if !filtered.is_empty() {
-                spawn_media_download(&app, &config, &data_dir, filtered);
-            }
+            spawn_media_download(&app, &config, &data_dir, media_map);
         }
 
         Ok(msg)
@@ -362,14 +350,4 @@ fn spawn_media_download(
 fn emit_media_sync_done(app: &tauri::AppHandle, message: &str) {
     use tauri::Emitter;
     let _ = app.emit("media-sync-done", message.to_string());
-}
-
-fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    }
 }
