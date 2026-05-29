@@ -202,9 +202,13 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         .iter()
         .find(|a| a.name.ends_with(arch_suffix));
 
-    let (download_url, file_name, file_size) = setup_asset
-        .map(|a| (a.browser_download_url.clone(), a.name.clone(), a.size))
-        .unwrap_or_default();
+    let setup_asset = setup_asset
+        .ok_or_else(|| format!("未找到适用于当前架构({})的安装包", arch_suffix))?;
+    let (download_url, file_name, file_size) = (
+        setup_asset.browser_download_url.clone(),
+        setup_asset.name.clone(),
+        setup_asset.size,
+    );
 
     // 合并所有新版本的更新日志（最新在前）
     let release_notes = newer_releases
