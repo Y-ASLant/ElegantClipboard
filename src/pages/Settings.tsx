@@ -29,6 +29,7 @@ import {
 import { SyncTab } from "@/components/settings/SyncTab";
 import { ThemeTab } from "@/components/settings/ThemeTab";
 import { TranslateTab } from "@/components/settings/TranslateTab";
+import { ChangelogDialog } from "@/components/settings/ChangelogDialog";
 import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -120,6 +121,7 @@ export function Settings() {
   const [themeReady, setThemeReady] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [changelogDialogOpen, setChangelogDialogOpen] = useState(false);
 
   useEffect(() => {
     invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
@@ -320,9 +322,13 @@ export function Settings() {
                   <span className="text-[11px] text-muted-foreground">
                     版本号
                   </span>
-                  <span className="text-[11px] font-medium text-primary">
+                  <button
+                    type="button"
+                    onClick={() => setChangelogDialogOpen(true)}
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
                     v{appVersion}
-                  </span>
+                  </button>
                 </div>
                 <button
                   onClick={() => setUpdateDialogOpen(true)}
@@ -401,6 +407,11 @@ export function Settings() {
       <UpdateDialog
         open={updateDialogOpen}
         onOpenChange={setUpdateDialogOpen}
+      />
+      <ChangelogDialog
+        open={changelogDialogOpen}
+        onOpenChange={setChangelogDialogOpen}
+        version={appVersion}
       />
     </div>
   );

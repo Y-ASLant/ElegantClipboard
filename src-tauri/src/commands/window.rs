@@ -329,6 +329,17 @@ pub async fn check_for_update() -> Result<crate::updater::UpdateInfo, String> {
 }
 
 #[tauri::command]
+pub async fn get_version_release_notes(
+    version: Option<String>,
+) -> Result<crate::updater::VersionReleaseNotes, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::updater::get_version_release_notes(version.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn download_update(
     app: tauri::AppHandle,
     download_url: String,

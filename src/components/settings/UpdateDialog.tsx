@@ -586,7 +586,7 @@ function parseCommitPrefix(text: string): {
   };
 }
 
-function SimpleMarkdown({ content }: { content: string }) {
+export function SimpleMarkdown({ content }: { content: string }) {
   if (!content) return null;
 
   const lines = content.split(/\r?\n/);
