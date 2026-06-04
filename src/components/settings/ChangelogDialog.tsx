@@ -4,6 +4,7 @@ import {
   ErrorCircle16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
+import { SimpleMarkdown } from "@/components/settings/UpdateDialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { SimpleMarkdown } from "@/components/settings/UpdateDialog";
 
 interface VersionReleaseNotes {
   version: string;

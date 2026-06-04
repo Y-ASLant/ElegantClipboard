@@ -158,9 +158,7 @@ fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
             .body_mut()
             .read_json()
             .map_err(|e| format!("解析响应失败: {}", e)),
-        Err(ureq::Error::StatusCode(403)) => {
-            Err("GitHub API 请求限额已用尽，请稍后再试".into())
-        }
+        Err(ureq::Error::StatusCode(403)) => Err("GitHub API 请求限额已用尽，请稍后再试".into()),
         Err(ureq::Error::StatusCode(404)) => Err("未找到发布版本".into()),
         Err(ureq::Error::StatusCode(code)) => Err(format!("GitHub API 返回错误: {}", code)),
         Err(e) => Err(format!("网络连接失败: {}", e)),
@@ -235,8 +233,8 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         .iter()
         .find(|a| a.name.ends_with(arch_suffix));
 
-    let setup_asset = setup_asset
-        .ok_or_else(|| format!("未找到适用于当前架构({})的安装包", arch_suffix))?;
+    let setup_asset =
+        setup_asset.ok_or_else(|| format!("未找到适用于当前架构({})的安装包", arch_suffix))?;
     let (download_url, file_name, file_size) = (
         setup_asset.browser_download_url.clone(),
         setup_asset.name.clone(),

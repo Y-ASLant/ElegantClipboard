@@ -18,6 +18,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { AppFilterTab } from "@/components/settings/AppFilterTab";
 import { AudioTab } from "@/components/settings/AudioTab";
+import { ChangelogDialog } from "@/components/settings/ChangelogDialog";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
@@ -29,7 +30,6 @@ import {
 import { SyncTab } from "@/components/settings/SyncTab";
 import { ThemeTab } from "@/components/settings/ThemeTab";
 import { TranslateTab } from "@/components/settings/TranslateTab";
-import { ChangelogDialog } from "@/components/settings/ChangelogDialog";
 import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";

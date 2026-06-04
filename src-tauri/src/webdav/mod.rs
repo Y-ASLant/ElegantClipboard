@@ -768,7 +768,12 @@ pub fn upload_media_map(
     }
 
     let json = serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?;
-    upload_sync(config, json.as_bytes(), "media_map.json", "application/json")?;
+    upload_sync(
+        config,
+        json.as_bytes(),
+        "media_map.json",
+        "application/json",
+    )?;
     if added > 0 || removed > 0 {
         info!(
             "上传 media_map.json: {} 条 (新增 {}, 移除 {})",
@@ -912,7 +917,12 @@ pub fn cleanup_orphaned_remote_media(
             map.retain(|e| !orphan_hashes.contains(e.hash.as_str()));
             if map.len() < before {
                 let json = serde_json::to_string_pretty(&map).map_err(|e| e.to_string())?;
-                let _ = upload_sync(config, json.as_bytes(), "media_map.json", "application/json");
+                let _ = upload_sync(
+                    config,
+                    json.as_bytes(),
+                    "media_map.json",
+                    "application/json",
+                );
             }
         }
     }
@@ -1074,7 +1084,12 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                         info!("WebDAV 轻量同步: 开始上传");
                         match export_sync_data(&db, &data_dir, &options) {
                             Ok(zip_data) => {
-                                if let Err(e) = upload_sync(&config, &zip_data, SYNC_FILENAME, "application/zip") {
+                                if let Err(e) = upload_sync(
+                                    &config,
+                                    &zip_data,
+                                    SYNC_FILENAME,
+                                    "application/zip",
+                                ) {
                                     info!("WebDAV 轻量同步上传失败: {}", e);
                                 } else {
                                     let now = chrono::Local::now()
@@ -1228,13 +1243,12 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                     Ok(_) => {}
                                     Err(e) => {
                                         info!("图片同步线程创建失败: {}", e);
-                                        if pending.fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
+                                        if pending
+                                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
                                             == 1
                                         {
-                                            MEDIA_SYNC_RUNNING.store(
-                                                false,
-                                                std::sync::atomic::Ordering::Relaxed,
-                                            );
+                                            MEDIA_SYNC_RUNNING
+                                                .store(false, std::sync::atomic::Ordering::Relaxed);
                                         }
                                     }
                                 }
@@ -1278,13 +1292,12 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                     Ok(_) => {}
                                     Err(e) => {
                                         info!("文件同步线程创建失败: {}", e);
-                                        if pending.fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
+                                        if pending
+                                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
                                             == 1
                                         {
-                                            MEDIA_SYNC_RUNNING.store(
-                                                false,
-                                                std::sync::atomic::Ordering::Relaxed,
-                                            );
+                                            MEDIA_SYNC_RUNNING
+                                                .store(false, std::sync::atomic::Ordering::Relaxed);
                                         }
                                     }
                                 }
@@ -1326,13 +1339,12 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                     Ok(_) => {}
                                     Err(e) => {
                                         info!("图标同步线程创建失败: {}", e);
-                                        if pending.fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
+                                        if pending
+                                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed)
                                             == 1
                                         {
-                                            MEDIA_SYNC_RUNNING.store(
-                                                false,
-                                                std::sync::atomic::Ordering::Relaxed,
-                                            );
+                                            MEDIA_SYNC_RUNNING
+                                                .store(false, std::sync::atomic::Ordering::Relaxed);
                                         }
                                     }
                                 }
