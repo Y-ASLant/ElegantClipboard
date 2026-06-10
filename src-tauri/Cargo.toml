@@ -107,3 +107,9 @@ windows = { version = "0.61", features = [
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"
 windows-core = "0.61"
+
+# Fix: tray-icon doesn't track visibility state, so when Explorer restarts
+# (e.g. after system restart), the icon reappears even if the user hid it.
+# Patch adds a `visible` flag to TrayUserData and checks it on TaskbarCreated.
+[patch.crates-io]
+tray-icon = { path = "patches/tray-icon-0.24.0" }
