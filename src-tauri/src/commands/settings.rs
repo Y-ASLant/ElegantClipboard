@@ -7,6 +7,17 @@ use super::AppState;
 
 // ============ 设置命令 ============
 
+/// 批量获取指定 key 的设置值（减少多次 IPC 往返）
+#[tauri::command]
+pub async fn get_settings_batch(
+    state: State<'_, Arc<AppState>>,
+    keys: Vec<String>,
+) -> Result<HashMap<String, String>, String> {
+    let repo = SettingsRepository::new(&state.db);
+    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    repo.get_multiple(&key_refs).map_err(|e| e.to_string())
+}
+
 /// 获取设置值
 #[tauri::command]
 pub async fn get_setting(
@@ -26,6 +37,19 @@ pub async fn set_setting(
 ) -> Result<(), String> {
     let repo = SettingsRepository::new(&state.db);
     repo.set(&key, &value).map_err(|e| e.to_string())
+}
+
+/// 显示或隐藏系统托盘图标，并持久化设置
+#[tauri::command]
+pub async fn set_tray_icon_visibility(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+    visible: bool,
+) -> Result<(), String> {
+    crate::tray::set_tray_visibility(&app, visible)?;
+    let repo = SettingsRepository::new(&state.db);
+    repo.set("tray_icon_visible", if visible { "true" } else { "false" })
+        .map_err(|e| e.to_string())
 }
 
 /// 获取所有设置

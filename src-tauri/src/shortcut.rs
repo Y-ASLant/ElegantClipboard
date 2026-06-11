@@ -151,3 +151,119 @@ pub fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_shortcut;
+
+    #[test]
+    fn single_letter() {
+        let s = parse_shortcut("V").unwrap();
+        assert_eq!(s.key, tauri_plugin_global_shortcut::Code::KeyV);
+        assert!(s.mods.is_empty());
+    }
+
+    #[test]
+    fn ctrl_shift_v() {
+        let s = parse_shortcut("CTRL+SHIFT+V").unwrap();
+        assert_eq!(s.key, tauri_plugin_global_shortcut::Code::KeyV);
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::CONTROL)
+        );
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::SHIFT)
+        );
+    }
+
+    #[test]
+    fn alt_key() {
+        let s = parse_shortcut("ALT+N").unwrap();
+        assert_eq!(s.key, tauri_plugin_global_shortcut::Code::KeyN);
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::ALT)
+        );
+    }
+
+    #[test]
+    fn win_modifier() {
+        let s = parse_shortcut("WIN+V").unwrap();
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::SUPER)
+        );
+    }
+
+    #[test]
+    fn function_key() {
+        let s = parse_shortcut("CTRL+F12").unwrap();
+        assert_eq!(s.key, tauri_plugin_global_shortcut::Code::F12);
+    }
+
+    #[test]
+    fn special_keys() {
+        assert!(parse_shortcut("SPACE").is_some());
+        assert!(parse_shortcut("ENTER").is_some());
+        assert!(parse_shortcut("RETURN").is_some());
+        assert!(parse_shortcut("ESCAPE").is_some());
+        assert!(parse_shortcut("ESC").is_some());
+        assert!(parse_shortcut("DELETE").is_some());
+        assert!(parse_shortcut("DEL").is_some());
+        assert!(parse_shortcut("TAB").is_some());
+    }
+
+    #[test]
+    fn arrow_keys() {
+        assert!(parse_shortcut("UP").is_some());
+        assert!(parse_shortcut("ARROWUP").is_some());
+        assert!(parse_shortcut("DOWN").is_some());
+        assert!(parse_shortcut("LEFT").is_some());
+        assert!(parse_shortcut("RIGHT").is_some());
+    }
+
+    #[test]
+    fn numpad() {
+        let s = parse_shortcut("NUMPAD5").unwrap();
+        assert_eq!(s.key, tauri_plugin_global_shortcut::Code::Numpad5);
+    }
+
+    #[test]
+    fn digits() {
+        let s = parse_shortcut("CTRL+1").unwrap();
+        assert_eq!(s.key, tauri_plugin_global_shortcut::Code::Digit1);
+    }
+
+    #[test]
+    fn invalid_key_returns_none() {
+        assert!(parse_shortcut("INVALID_KEY").is_none());
+    }
+
+    #[test]
+    fn empty_string_returns_none() {
+        assert!(parse_shortcut("").is_none());
+    }
+
+    #[test]
+    fn case_insensitive() {
+        let s = parse_shortcut("ctrl+shift+v").unwrap();
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::CONTROL)
+        );
+    }
+
+    #[test]
+    fn with_spaces() {
+        let s = parse_shortcut("CTRL + SHIFT + V").unwrap();
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::CONTROL)
+        );
+        assert!(
+            s.mods
+                .contains(tauri_plugin_global_shortcut::Modifiers::SHIFT)
+        );
+    }
+}

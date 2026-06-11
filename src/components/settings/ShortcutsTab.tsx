@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { logError } from "@/lib/logger";
+import { KEY_CODE_MAP } from "@/lib/shortcut-helpers";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
 
@@ -32,25 +33,6 @@ type ShortcutEditTarget =
 
 const QUICK_PASTE_SLOT_COUNT = 10;
 const QUICK_PASTE_EMPTY_LABEL = "点击设置快捷键";
-
-/** KeyboardEvent.code 到快捷键名称的映射 */
-const KEY_CODE_MAP: Record<string, string> = {
-  Space: "Space",
-  Tab: "Tab",
-  Enter: "Enter",
-  Backspace: "Backspace",
-  Delete: "Delete",
-  Escape: "Esc",
-  Home: "Home",
-  End: "End",
-  PageUp: "PageUp",
-  PageDown: "PageDown",
-  ArrowUp: "Up",
-  ArrowDown: "Down",
-  ArrowLeft: "Left",
-  ArrowRight: "Right",
-  Backquote: "`",
-};
 
 interface ShortcutsTabProps {
   settings: ShortcutSettings;

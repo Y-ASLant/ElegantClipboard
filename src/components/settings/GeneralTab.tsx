@@ -51,6 +51,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [pendingLogToFile, setPendingLogToFile] = useState<boolean | null>(null);
   const [persistWindowSize, setPersistWindowSize] = useState(true);
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
+  const [trayIconVisible, setTrayIconVisible] = useState(true);
 
 
   useEffect(() => {
@@ -63,6 +64,11 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       .then((v) => setAutoCheckUpdate(v !== "false"))
       .catch((error) => {
         logError("Failed to load auto_check_update:", error);
+      });
+    invoke<string | null>("get_setting", { key: "tray_icon_visible" })
+      .then((v) => setTrayIconVisible(v !== "false"))
+      .catch((error) => {
+        logError("Failed to load tray_icon_visible:", error);
       });
   }, []);
 
@@ -95,6 +101,16 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       await invoke("set_setting", { key: "auto_check_update", value: String(enabled) });
     } catch (error) {
       logError("Failed to save auto_check_update:", error);
+    }
+  };
+
+  const toggleTrayIconVisible = async (enabled: boolean) => {
+    setTrayIconVisible(enabled);
+    try {
+      await invoke("set_tray_icon_visibility", { visible: enabled });
+    } catch (error) {
+      setTrayIconVisible(!enabled);
+      logError("Failed to set tray icon visibility:", error);
     }
   };
 
@@ -152,6 +168,18 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <Switch
                 checked={autoCheckUpdate}
                 onCheckedChange={toggleAutoCheckUpdate}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="text-xs">显示系统托盘图标</Label>
+                <p className="text-xs text-muted-foreground">
+                  关闭后仍可通过快捷键唤醒主窗口
+                </p>
+              </div>
+              <Switch
+                checked={trayIconVisible}
+                onCheckedChange={toggleTrayIconVisible}
               />
             </div>
           </div>

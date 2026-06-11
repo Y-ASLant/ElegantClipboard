@@ -131,14 +131,16 @@ pub struct UpdateInfo {
     pub published_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct VersionReleaseNotes {
+    pub version: String,
+    pub release_notes: String,
+    pub published_at: String,
+}
+
 // ── 公共 API ─────────────────────────────────────────────────────────────────────
 
-/// 检查 GitHub 最新版本并与当前版本比较。
-/// 若有多个中间版本未更新，会合并所有新版本的更新日志。
-pub fn check_update() -> Result<UpdateInfo, String> {
-    let current_version = env!("CARGO_PKG_VERSION");
-    info!("Checking for updates (current: v{})", current_version);
-
+fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
     let agent = build_agent();
     let mut req = agent
         .get(GITHUB_API_URL)
@@ -151,19 +153,48 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         req = req.header("Authorization", &format!("Bearer {}", token));
     }
 
-    // GitHub 列表已按发布时间倒序
-    let releases: Vec<GitHubRelease> = match req.call() {
+    match req.call() {
         Ok(mut resp) => resp
             .body_mut()
             .read_json()
-            .map_err(|e| format!("解析响应失败: {}", e))?,
-        Err(ureq::Error::StatusCode(403)) => {
-            return Err("GitHub API 请求限额已用尽，请稍后再试".into());
-        }
-        Err(ureq::Error::StatusCode(404)) => return Err("未找到发布版本".into()),
-        Err(ureq::Error::StatusCode(code)) => return Err(format!("GitHub API 返回错误: {}", code)),
-        Err(e) => return Err(format!("网络连接失败: {}", e)),
-    };
+            .map_err(|e| format!("解析响应失败: {}", e)),
+        Err(ureq::Error::StatusCode(403)) => Err("GitHub API 请求限额已用尽，请稍后再试".into()),
+        Err(ureq::Error::StatusCode(404)) => Err("未找到发布版本".into()),
+        Err(ureq::Error::StatusCode(code)) => Err(format!("GitHub API 返回错误: {}", code)),
+        Err(e) => Err(format!("网络连接失败: {}", e)),
+    }
+}
+
+/// 获取指定版本的 GitHub Release 更新日志；未传版本时使用当前应用版本。
+pub fn get_version_release_notes(version: Option<&str>) -> Result<VersionReleaseNotes, String> {
+    let target_version = version
+        .map(normalize_version)
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+
+    info!("Fetching release notes for v{}", target_version);
+
+    let releases = fetch_releases()?;
+    let release = releases
+        .iter()
+        .find(|r| normalize_version(&r.tag_name) == target_version)
+        .ok_or_else(|| format!("未找到 v{} 的发布记录", target_version))?;
+
+    let release_notes = release.body.as_deref().unwrap_or("").trim().to_string();
+
+    Ok(VersionReleaseNotes {
+        version: target_version,
+        release_notes,
+        published_at: release.published_at.clone().unwrap_or_default(),
+    })
+}
+
+/// 检查 GitHub 最新版本并与当前版本比较。
+/// 若有多个中间版本未更新，会合并所有新版本的更新日志。
+pub fn check_update() -> Result<UpdateInfo, String> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    info!("Checking for updates (current: v{})", current_version);
+
+    let releases = fetch_releases()?;
 
     // 取所有比当前版本新的发布（列表已倒序，遇到不更新的即可停止）
     let newer_releases: Vec<&GitHubRelease> = releases
@@ -202,9 +233,13 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         .iter()
         .find(|a| a.name.ends_with(arch_suffix));
 
-    let (download_url, file_name, file_size) = setup_asset
-        .map(|a| (a.browser_download_url.clone(), a.name.clone(), a.size))
-        .unwrap_or_default();
+    let setup_asset =
+        setup_asset.ok_or_else(|| format!("未找到适用于当前架构({})的安装包", arch_suffix))?;
+    let (download_url, file_name, file_size) = (
+        setup_asset.browser_download_url.clone(),
+        setup_asset.name.clone(),
+        setup_asset.size,
+    );
 
     // 合并所有新版本的更新日志（最新在前）
     let release_notes = newer_releases
@@ -331,6 +366,10 @@ pub fn install(installer_path: &str) -> Result<(), String> {
 }
 
 // ── 辅助函数 ────────────────────────────────────────────────────────────────
+
+fn normalize_version(version: &str) -> String {
+    version.trim().trim_start_matches('v').to_string()
+}
 
 /// 比较语义版本：若 latest 严格大于 current 则返回 true。
 fn is_newer(latest: &str, current: &str) -> bool {

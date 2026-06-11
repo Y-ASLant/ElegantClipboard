@@ -1,7 +1,7 @@
 use super::{ContentType, Database};
 use crate::clipboard::semantic_hash_from_text;
 use parking_lot::Mutex;
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, Row, Transaction, params};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::debug;
@@ -1041,6 +1041,106 @@ impl ClipboardRepository {
             files_valid: None, // 查询时计算
         })
     }
+
+    /// 查询符合同步条件的条目（按类型过滤 + 大小限制）
+    pub fn query_items_for_sync(
+        &self,
+        type_filter_sql: &str,
+        max_byte_size: i64,
+    ) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let sql = format!(
+            "SELECT * FROM clipboard_items WHERE content_type IN ({}) AND byte_size <= ?1 ORDER BY created_at DESC",
+            type_filter_sql
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let items = stmt
+            .query_map(params![max_byte_size], Self::row_to_item)?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(items)
+    }
+
+    /// 导入同步条目（基于 content_hash 去重，已存在则跳过）
+    pub fn import_sync_items(&self, items: &[ClipboardItem]) -> Result<usize, rusqlite::Error> {
+        let mut conn = self.write_conn.lock();
+        let mut count = 0usize;
+
+        let tx = conn.transaction()?;
+        {
+            let mut exists_stmt =
+                tx.prepare_cached("SELECT 1 FROM clipboard_items WHERE content_hash = ?1 LIMIT 1")?;
+            let mut insert_stmt = tx.prepare_cached(
+                "INSERT INTO clipboard_items
+                 (content_type, text_content, html_content, rtf_content, image_path, file_paths,
+                  content_hash, semantic_hash, preview, byte_size, image_width, image_height,
+                  is_pinned, is_favorite, sort_order, created_at, updated_at,
+                  access_count, last_accessed_at, char_count, source_app_name, source_app_icon)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)"
+            )?;
+
+            for item in items {
+                let exists = exists_stmt.exists(params![item.content_hash])?;
+                if exists {
+                    continue;
+                }
+                insert_stmt.execute(params![
+                    item.content_type,
+                    item.text_content,
+                    item.html_content,
+                    item.rtf_content,
+                    item.image_path,
+                    item.file_paths,
+                    item.content_hash,
+                    item.semantic_hash,
+                    item.preview,
+                    item.byte_size,
+                    item.image_width,
+                    item.image_height,
+                    item.is_pinned,
+                    item.is_favorite,
+                    item.sort_order,
+                    item.created_at,
+                    item.updated_at,
+                    item.access_count,
+                    item.last_accessed_at,
+                    item.char_count,
+                    item.source_app_name,
+                    item.source_app_icon,
+                ])?;
+                count += 1;
+            }
+
+            if count > 0 {
+                Self::rebuild_sort_order_by_created_at(&tx)?;
+            }
+        }
+        tx.commit()?;
+        Ok(count)
+    }
+
+    fn rebuild_sort_order_by_created_at(tx: &Transaction<'_>) -> Result<(), rusqlite::Error> {
+        let ids: Vec<i64> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM clipboard_items
+                 ORDER BY
+                   CASE
+                     WHEN created_at IS NULL OR trim(created_at) = '' OR datetime(created_at) IS NULL THEN 0
+                     ELSE 1
+                   END ASC,
+                   datetime(created_at) ASC,
+                   id ASC",
+            )?;
+            stmt.query_map([], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let mut update_stmt =
+            tx.prepare_cached("UPDATE clipboard_items SET sort_order = ?1 WHERE id = ?2")?;
+        for (index, id) in ids.iter().enumerate() {
+            update_stmt.execute(params![index as i64 + 1, id])?;
+        }
+        Ok(())
+    }
 }
 
 /// 设置仓库
@@ -1113,6 +1213,35 @@ impl SettingsRepository {
             .filter_map(|r| r.ok())
             .collect();
         Ok(settings)
+    }
+
+    /// 批量获取指定 key 的设置值，缺失的 key 不包含在结果中
+    pub fn get_multiple(
+        &self,
+        keys: &[&str],
+    ) -> Result<std::collections::HashMap<String, String>, rusqlite::Error> {
+        if keys.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let conn = self.read_conn.lock();
+        let placeholders = keys
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "SELECT key, value FROM settings WHERE key IN ({})",
+            placeholders
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let map = stmt
+            .query_map(rusqlite::params_from_iter(keys.iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(map)
     }
 
     /// 清空所有设置

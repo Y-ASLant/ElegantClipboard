@@ -109,38 +109,47 @@ struct MonitorInfo {
     height: i32,
 }
 
-/// 查找光标所在的显示器
-fn get_monitor_at_cursor(window: &WebviewWindow, cx: i32, cy: i32) -> Result<MonitorInfo, String> {
+/// 查找指定坐标所在的显示器，找不到则回退到主显示器，最后回退到 1920×1080 默认值。
+fn find_monitor_at(window: &WebviewWindow, x: i32, y: i32) -> (i32, i32, i32, i32, f64) {
     if let Ok(monitors) = window.available_monitors() {
         for m in monitors {
             let pos = m.position();
             let size = m.size();
             let (mx, my) = (pos.x, pos.y);
             let (mw, mh) = (size.width as i32, size.height as i32);
-            if cx >= mx && cx < mx + mw && cy >= my && cy < my + mh {
-                return Ok(MonitorInfo {
-                    x: mx,
-                    y: my,
-                    width: mw,
-                    height: mh,
-                });
+            if x >= mx && x < mx + mw && y >= my && y < my + mh {
+                return (mx, my, mw, mh, m.scale_factor());
             }
         }
     }
     if let Ok(Some(m)) = window.primary_monitor() {
-        return Ok(MonitorInfo {
-            x: m.position().x,
-            y: m.position().y,
-            width: m.size().width as i32,
-            height: m.size().height as i32,
-        });
+        let pos = m.position();
+        let size = m.size();
+        return (
+            pos.x,
+            pos.y,
+            size.width as i32,
+            size.height as i32,
+            m.scale_factor(),
+        );
     }
+    (0, 0, 1920, 1080, 1.0)
+}
+
+/// 查找光标所在的显示器
+fn get_monitor_at_cursor(window: &WebviewWindow, cx: i32, cy: i32) -> Result<MonitorInfo, String> {
+    let (x, y, w, h, _) = find_monitor_at(window, cx, cy);
     Ok(MonitorInfo {
-        x: 0,
-        y: 0,
-        width: 1920,
-        height: 1080,
+        x,
+        y,
+        width: w,
+        height: h,
     })
+}
+
+/// 获取指定坐标所在显示器的缩放因子。
+pub fn get_monitor_scale_at(window: &WebviewWindow, x: i32, y: i32) -> f64 {
+    find_monitor_at(window, x, y).4
 }
 
 const GAP: i32 = 12;

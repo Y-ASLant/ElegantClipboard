@@ -45,3 +45,6 @@ src-tauri/gen/schemas/
 
 # wingetcreate generated manifests
 manifests/
+
+# Codegraph
+.codegraph/

@@ -762,3 +762,78 @@ fn paste_plain_text_to_active_window(
         Ok(())
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::extract_keyword_context;
+
+    #[test]
+    fn keyword_at_start() {
+        let result = extract_keyword_context("hello world foo bar", "hello", 20);
+        assert!(result.contains("hello"), "result: {}", result);
+    }
+
+    #[test]
+    fn keyword_in_middle() {
+        let result = extract_keyword_context("aaa bbb ccc ddd eee", "ccc", 15);
+        assert!(result.contains("ccc"), "result: {}", result);
+    }
+
+    #[test]
+    fn keyword_at_end() {
+        let result = extract_keyword_context("foo bar baz qux", "qux", 15);
+        assert!(result.contains("qux"), "result: {}", result);
+    }
+
+    #[test]
+    fn keyword_not_found_returns_prefix() {
+        let text = "abcdefghijklmnop";
+        let result = extract_keyword_context(text, "xyz", 5);
+        assert_eq!(result, text.chars().take(5).collect::<String>());
+    }
+
+    #[test]
+    fn case_insensitive() {
+        let result = extract_keyword_context("Hello World", "hello", 20);
+        assert!(result.contains("Hello"), "result: {}", result);
+    }
+
+    #[test]
+    fn cjk_keyword() {
+        let result = extract_keyword_context("这是一段中文文本用于测试", "中文", 10);
+        assert!(result.contains("中文"), "result: {}", result);
+    }
+
+    #[test]
+    fn cjk_text_with_emoji() {
+        let result = extract_keyword_context("测试 🎉 emoji 关键词搜索", "关键词", 15);
+        assert!(result.contains("关键词"), "result: {}", result);
+    }
+
+    #[test]
+    fn empty_keyword_returns_prefix() {
+        let text = "hello world";
+        let result = extract_keyword_context(text, "", 5);
+        // 空关键词视为未找到，返回截断前缀（可能带省略号）
+        assert!(result.starts_with("hell"), "result: {}", result);
+    }
+
+    #[test]
+    fn empty_text() {
+        let result = extract_keyword_context("", "keyword", 10);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn max_len_larger_than_text() {
+        let result = extract_keyword_context("short", "short", 100);
+        assert_eq!(result, "short");
+    }
+
+    #[test]
+    fn unicode_boundary_safety() {
+        // 多字节字符不应 panic
+        let result = extract_keyword_context("émoji 🎉 test", "🎉", 20);
+        assert!(result.contains("🎉"), "result: {}", result);
+    }
+}

@@ -8,6 +8,8 @@ use tauri::{
 };
 use tracing::info;
 
+const MAIN_TRAY_ID: &str = "main-tray";
+
 /// 初始化系统托盘图标和菜单
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon_data = include_bytes!("../../icons/icon.png");
@@ -38,7 +40,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
 
-    let _tray = TrayIconBuilder::with_id("main-tray")
+    let tray = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -54,7 +56,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             "暂停监控"
                         });
-                        if let Some(tray) = app.tray_by_id("main-tray") {
+                        if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
                             let tip = if paused {
                                 "ElegantClipboard (已暂停)"
                             } else {
@@ -95,8 +97,30 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
+    let _ = tray.set_visible(load_tray_visibility(app));
+
     info!("System tray initialized");
     Ok(())
+}
+
+fn load_tray_visibility(app: &AppHandle) -> bool {
+    app.try_state::<Arc<AppState>>()
+        .map(|state| {
+            let repo = crate::database::SettingsRepository::new(&state.db);
+            repo.get("tray_icon_visible")
+                .ok()
+                .flatten()
+                .map(|value| value != "false")
+                .unwrap_or(true)
+        })
+        .unwrap_or(true)
+}
+
+pub(crate) fn set_tray_visibility(app: &AppHandle, visible: bool) -> Result<(), String> {
+    let tray = app
+        .tray_by_id(MAIN_TRAY_ID)
+        .ok_or_else(|| "Tray icon not initialized".to_string())?;
+    tray.set_visible(visible).map_err(|e| e.to_string())
 }
 
 /// 处理托盘菜单事件

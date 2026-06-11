@@ -11,6 +11,7 @@ import { emitTo, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
+import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
@@ -78,35 +79,7 @@ const MAX_SCALE_BOUNDED = 5.0;
 const MAX_SCALE_UNBOUNDED = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
-let imagePreviewLease = 0;
-let imagePreviewWanted = false;
-
-async function acquireImagePreviewLease(): Promise<number> {
-  // lease 由后端 IMAGE_PREVIEW_TOKEN 原子分配（与 invalidate 共享同一原子），
-  // 从结构上保证 invalidate 之后的旧 lease 必然 < 当前 TOKEN，promote 必失败。
-  const lease = await invoke<number>("allocate_image_preview_lease");
-  // 多个并发 invoke 解析顺序不确定，仅在分配值更大时更新本地最大值
-  if (lease > imagePreviewLease) {
-    imagePreviewLease = lease;
-  }
-  imagePreviewWanted = true;
-  return lease;
-}
-
-function revokeImagePreviewLease(lease: number): void {
-  if (imagePreviewLease === lease) {
-    imagePreviewLease += 1;
-    imagePreviewWanted = false;
-  }
-}
-
-function isImagePreviewLeaseCurrent(lease: number): boolean {
-  return imagePreviewLease === lease;
-}
-
-function isImagePreviewWanted(): boolean {
-  return imagePreviewWanted;
-}
+const imagePreviewLM = createLeaseManager("allocate_image_preview_lease");
 
 /** 预览窗口定位边界（物理像素） */
 interface PreviewBounds {
@@ -178,12 +151,14 @@ export async function getPreviewBounds(
   const leftSpace = physWinX - workX - physGap;
   const rightSpace = workX + workW - (physWinX + physMainW) - physGap;
 
-  const useLeft =
-    position === "left"
-      ? true
-      : position === "right"
-        ? false
-        : leftSpace >= rightSpace && leftSpace >= physMinW;
+  let useLeft: boolean;
+  if (position === "left") {
+    useLeft = true;
+  } else if (position === "right") {
+    useLeft = false;
+  } else {
+    useLeft = leftSpace >= rightSpace && leftSpace >= physMinW;
+  }
 
   if (useLeft) {
     return {
@@ -304,7 +279,7 @@ const ImagePreview = memo(function ImagePreview({
     previewReqIdRef.current += 1;
     const closingLease = previewLeaseRef.current;
     if (closingLease !== null) {
-      revokeImagePreviewLease(closingLease);
+      imagePreviewLM.revoke(closingLease);
       previewLeaseRef.current = null;
     }
     clearTimer();
@@ -339,9 +314,9 @@ const ImagePreview = memo(function ImagePreview({
   // 显示预览：有界模式用屏幕工作区，无界模式用固定大窗口
   const showPreview = useCallback(async (reqId: number, lease: number, path: string) => {
     if (!containerRef.current) return;
-    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !imagePreviewLM.isCurrent(lease)) return;
     const bounds = await getPreviewBounds(previewPosition, containerRef.current);
-    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) return;
+    if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !imagePreviewLM.isCurrent(lease)) return;
     const { imgNatural } = ps.current;
     const boundedMaxCssW = bounds.maxW / bounds.scale;
     const boundedMaxCssH = bounds.maxH / bounds.scale;
@@ -383,11 +358,11 @@ const ImagePreview = memo(function ImagePreview({
         align,
         token: lease,
       });
-      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !isImagePreviewLeaseCurrent(lease)) {
+      if (!previewHoveringRef.current || reqId !== previewReqIdRef.current || !imagePreviewLM.isCurrent(lease)) {
         ps.current.visible = false;
         ps.current.bounds = null;
         ps.current.windowCss = null;
-        if (!isImagePreviewWanted()) {
+        if (!imagePreviewLM.isWanted()) {
           invoke("hide_image_preview", { token: lease }).catch((e) =>
             logError("Failed to hide preview:", e),
           );
@@ -414,10 +389,10 @@ const ImagePreview = memo(function ImagePreview({
     ps.current.currentPath = imagePath;
     clearTimer();
     void (async () => {
-      const lease = await acquireImagePreviewLease();
+      const lease = await imagePreviewLM.acquire();
       // 异步分配期间用户可能已经离开或触发新的悬停，重新校验后再装定时器
       if (!previewHoveringRef.current || reqId !== previewReqIdRef.current) {
-        revokeImagePreviewLease(lease);
+        imagePreviewLM.revoke(lease);
         return;
       }
       previewLeaseRef.current = lease;

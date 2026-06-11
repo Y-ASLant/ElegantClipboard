@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Settings16Regular,
   Options16Regular,
@@ -10,20 +10,26 @@ import {
   ArrowSync16Regular,
   Speaker216Regular,
   Filter16Regular,
+  PlugConnected16Regular,
+  Translate16Regular,
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { AppFilterTab } from "@/components/settings/AppFilterTab";
 import { AudioTab } from "@/components/settings/AudioTab";
+import { ChangelogDialog } from "@/components/settings/ChangelogDialog";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
+import { PluginsTab } from "@/components/settings/PluginsTab";
 import {
   ShortcutsTab,
   ShortcutSettings,
 } from "@/components/settings/ShortcutsTab";
+import { SyncTab } from "@/components/settings/SyncTab";
 import { ThemeTab } from "@/components/settings/ThemeTab";
+import { TranslateTab } from "@/components/settings/TranslateTab";
 import { UpdateDialog } from "@/components/settings/UpdateDialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +37,7 @@ import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { logError } from "@/lib/logger";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
+import { useTranslateSettings } from "@/stores/translate-settings";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
@@ -40,13 +47,16 @@ function normalizePositionMode(raw: string | null | undefined): import("@/compon
   return "follow_cursor";
 }
 
-type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "about";
+type TabType = "general" | "display" | "theme" | "data" | "appfilter" | "audio" | "shortcuts" | "plugins" | "webdav" | "translate" | "about";
 
-const navItems: {
+type NavItem = {
   id: TabType;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-}[] = [
+  child?: boolean;
+};
+
+const BASE_NAV_ITEMS: NavItem[] = [
   { id: "general", label: "常规设置", icon: Options16Regular },
   { id: "display", label: "显示设置", icon: LayoutColumnTwo16Regular },
   { id: "theme", label: "外观主题", icon: Color16Regular },
@@ -54,11 +64,42 @@ const navItems: {
   { id: "appfilter", label: "监听过滤", icon: Filter16Regular },
   { id: "audio", label: "音效设置", icon: Speaker216Regular },
   { id: "shortcuts", label: "快捷按键", icon: Keyboard16Regular },
+  { id: "plugins", label: "插件扩展", icon: PlugConnected16Regular },
   { id: "about", label: "关于软件", icon: Info16Regular },
 ];
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>("general");
+  const [pluginsEnabled, setPluginsEnabled] = useState<Record<string, boolean>>({ webdav: false, translate: false });
+
+  const handlePluginToggle = useCallback(async (id: string, value: boolean) => {
+    setPluginsEnabled((prev) => ({ ...prev, [id]: value }));
+    if (!value && activeTab === id) setActiveTab("plugins");
+    try {
+      await invoke("set_setting", { key: `plugin_${id}_enabled`, value: value ? "true" : "false" });
+      if (value) {
+        if (id === "webdav") {
+          await invoke("webdav_enable_plugin");
+        }
+      } else {
+        if (id === "webdav") {
+          await invoke("set_setting", { key: "webdav_enabled", value: "false" });
+        } else if (id === "translate") {
+          useTranslateSettings.getState().setEnabled(false);
+        }
+      }
+    } catch (e) {
+      logError(`保存插件 ${id} 设置失败:`, e);
+    }
+  }, [activeTab]);
+
+  const navItems = [
+    ...BASE_NAV_ITEMS.slice(0, 7),
+    BASE_NAV_ITEMS[7],
+    ...(pluginsEnabled.webdav ? [{ id: "webdav" as TabType, label: "WebDAV 同步", icon: ArrowSync16Regular, child: true }] : []),
+    ...(pluginsEnabled.translate ? [{ id: "translate" as TabType, label: "文本翻译", icon: Translate16Regular, child: true }] : []),
+    BASE_NAV_ITEMS[8],
+  ];
   
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
@@ -80,6 +121,7 @@ export function Settings() {
   const [themeReady, setThemeReady] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [changelogDialogOpen, setChangelogDialogOpen] = useState(false);
 
   useEffect(() => {
     invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
@@ -103,6 +145,13 @@ export function Settings() {
     });
   }, []);
 
+  // 加载插件启用状态
+  useEffect(() => {
+    invoke<Record<string, string>>("get_settings_batch", { keys: ["plugin_webdav_enabled", "plugin_translate_enabled"] })
+      .then((m) => setPluginsEnabled({ webdav: m["plugin_webdav_enabled"] === "true", translate: m["plugin_translate_enabled"] === "true" }))
+      .catch((e) => logError("加载插件设置失败:", e));
+  }, []);
+
   // ESC 关闭设置窗口
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -110,7 +159,7 @@ export function Settings() {
         const hasOverlay = document.querySelector(
           '[role="dialog"], [data-radix-popper-content-wrapper]',
         );
-        if (!hasOverlay) {
+        if (!hasOverlay && !document.body.hasAttribute("data-translate-recording")) {
           getCurrentWindow().close();
         }
       }
@@ -242,10 +291,10 @@ export function Settings() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden gap-3">
         {/* Left Navigation */}
-        <div className="w-44 shrink-0">
-          <Card className="h-full">
-            <CardContent className="p-2 h-full flex flex-col">
-              <nav className="space-y-1 flex-1">
+        <div className="w-44 shrink-0 min-h-0">
+          <Card className="h-full overflow-hidden">
+            <CardContent className="p-2 h-full min-h-0 flex flex-col">
+              <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;
                   return (
@@ -253,26 +302,33 @@ export function Settings() {
                       key={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-                        "w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors duration-200",
+                        "flex items-center rounded-md transition-colors duration-200",
+                        item.child
+                          ? "ml-5 w-[calc(100%-1.25rem)] gap-2 px-2.5 py-1.5 text-xs"
+                          : "w-full gap-3 px-3 py-2 text-sm",
                         activeTab === item.id
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                       )}
                     >
-                      <Icon className="w-4 h-4" />
+                      <Icon className={item.child ? "w-3.5 h-3.5" : "w-4 h-4"} />
                       {item.label}
                     </button>
                   );
                 })}
               </nav>
-              <div className="pt-2 mt-2 border-t px-2 space-y-2">
+              <div className="shrink-0 pt-2 mt-2 border-t px-2 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] text-muted-foreground">
                     版本号
                   </span>
-                  <span className="text-[11px] font-medium text-primary">
+                  <button
+                    type="button"
+                    onClick={() => setChangelogDialogOpen(true)}
+                    className="text-[11px] font-medium text-primary hover:underline"
+                  >
                     v{appVersion}
-                  </span>
+                  </button>
                 </div>
                 <button
                   onClick={() => setUpdateDialogOpen(true)}
@@ -333,6 +389,17 @@ export function Settings() {
                   }
                 />
               )}
+
+              {activeTab === "plugins" && (
+                <PluginsTab
+                  enabledMap={pluginsEnabled}
+                  onToggle={handlePluginToggle}
+                />
+              )}
+
+              {activeTab === "webdav" && <SyncTab />}
+
+              {activeTab === "translate" && <TranslateTab />}
             </div>
           </ScrollArea>
         )}
@@ -340,6 +407,11 @@ export function Settings() {
       <UpdateDialog
         open={updateDialogOpen}
         onOpenChange={setUpdateDialogOpen}
+      />
+      <ChangelogDialog
+        open={changelogDialogOpen}
+        onOpenChange={setChangelogDialogOpen}
+        version={appVersion}
       />
     </div>
   );

@@ -20,34 +20,16 @@ export default defineConfig(async () => ({
   build: {
     // WebView2 is Chromium-based — target esnext to skip all transpilation
     target: 'esnext',
-    // Smaller output
-    minify: 'esbuild',
-    cssMinify: 'esbuild',
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            // React core
-            if (id.includes('/react-dom/') || id.includes('/react/')) {
-              return 'vendor-react';
-            }
-            // Radix UI components
-            if (id.includes('@radix-ui')) {
-              return 'vendor-radix';
-            }
-            // DnD Kit
-            if (id.includes('@dnd-kit')) {
-              return 'vendor-dnd';
-            }
-            // Tauri API
-            if (id.includes('@tauri-apps')) {
-              return 'vendor-tauri';
-            }
-            // Virtual list
-            if (id.includes('react-virtuoso')) {
-              return 'vendor-virtuoso';
-            }
-          }
+        codeSplitting: {
+          groups: [
+            { test: /[\\/]react(-dom)?[\\/]/, name: 'vendor-react' },
+            { test: /@radix-ui/, name: 'vendor-radix' },
+            { test: /@dnd-kit/, name: 'vendor-dnd' },
+            { test: /@tauri-apps/, name: 'vendor-tauri' },
+            { test: /react-virtuoso/, name: 'vendor-virtuoso' },
+          ],
         },
       },
     },

@@ -50,6 +50,8 @@ chrono = "0.4"
 
 # Hashing (fast)
 blake3 = "1"
+md5 = "0.7"
+urlencoding = "2"
 
 # High-performance locks
 parking_lot = "0.12"
@@ -59,6 +61,11 @@ rayon = "1.10"
 
 # HTTP client (for update checker)
 ureq = { version = "3", features = ["json"] }
+
+# HTTP client for WebDAV sync plugin
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
 
 # Image handling (PNG-only for clipboard screenshots)
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -100,3 +107,9 @@ windows = { version = "0.61", features = [
 # Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"
 windows-core = "0.61"
+
+# Fix: tray-icon doesn't track visibility state, so when Explorer restarts
+# (e.g. after system restart), the icon reappears even if the user hid it.
+# Patch adds a `visible` flag to TrayUserData and checks it on TaskbarCreated.
+[patch.crates-io]
+tray-icon = { path = "patches/tray-icon-0.24.0" }

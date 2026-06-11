@@ -67,7 +67,7 @@ pub(crate) fn compute_semantic_hash(
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_semantic_hash, normalize_semantic_text};
+    use super::{compute_semantic_hash, normalize_semantic_text, semantic_hash_from_text};
 
     #[test]
     fn normalize_text_removes_invisible_chars_and_trailing_whitespace() {
@@ -85,5 +85,62 @@ mod tests {
         assert_eq!(text_hash, html_hash);
         assert_eq!(text_hash, rtf_hash);
         assert_ne!(text_hash, "fallback");
+    }
+
+    #[test]
+    fn normalize_empty_string() {
+        assert_eq!(normalize_semantic_text(""), "");
+    }
+
+    #[test]
+    fn normalize_whitespace_only() {
+        assert_eq!(normalize_semantic_text("  \t\n\r\n  "), "");
+    }
+
+    #[test]
+    fn normalize_preserves_cjk() {
+        assert_eq!(normalize_semantic_text("你好世界"), "你好世界");
+    }
+
+    #[test]
+    fn normalize_preserves_emoji() {
+        assert_eq!(normalize_semantic_text("hello 🎉 world"), "hello 🎉 world");
+    }
+
+    #[test]
+    fn normalize_mixed_line_endings() {
+        assert_eq!(normalize_semantic_text("a\r\nb\rc\n"), "a\nb\nc");
+    }
+
+    #[test]
+    fn semantic_hash_empty_returns_none() {
+        assert_eq!(semantic_hash_from_text(""), None);
+        assert_eq!(semantic_hash_from_text("  \t"), None);
+    }
+
+    #[test]
+    fn semantic_hash_same_text_same_hash() {
+        let h1 = semantic_hash_from_text("hello world");
+        let h2 = semantic_hash_from_text("hello world");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_hash_different_text_different_hash() {
+        let h1 = semantic_hash_from_text("hello");
+        let h2 = semantic_hash_from_text("world");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn compute_semantic_hash_non_text_uses_fallback() {
+        let hash = compute_semantic_hash("image", Some("hello"), "fallback_hash");
+        assert_eq!(hash, "fallback_hash");
+    }
+
+    #[test]
+    fn compute_semantic_hash_text_without_content_uses_fallback() {
+        let hash = compute_semantic_hash("text", None, "fallback_hash");
+        assert_eq!(hash, "fallback_hash");
     }
 }

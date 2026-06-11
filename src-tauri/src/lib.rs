@@ -3,13 +3,17 @@ mod clipboard;
 mod commands;
 mod config;
 mod database;
+mod hotkey;
 mod input_monitor;
 mod keyboard_hook;
 mod positioning;
+mod proxy;
 mod shortcut;
 mod task_scheduler;
 mod tray;
 mod updater;
+mod utils;
+mod webdav;
 mod win_v_registry;
 
 use clipboard::ClipboardMonitor;
@@ -119,17 +123,17 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
         }
         unregister_shortcut_list(app, &CURRENT_QUICK_PASTE_SHORTCUTS.read());
         unregister_shortcut_list(app, &CURRENT_FAVORITE_PASTE_SHORTCUTS.read());
+        commands::translate::unregister_translate_selection_shortcut(app);
         tracing::info!("All shortcuts disabled (except Win+V)");
     } else {
         if let Some(sc) = parse_shortcut(&get_current_shortcut()) {
-            let _ = app
-                .global_shortcut()
-                .on_shortcut(sc, on_toggle_shortcut);
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         let shortcuts = CURRENT_QUICK_PASTE_SHORTCUTS.read().clone();
         apply_paste_shortcuts(app, &shortcuts, PasteKind::Quick);
         let fav_shortcuts = CURRENT_FAVORITE_PASTE_SHORTCUTS.read().clone();
         apply_paste_shortcuts(app, &fav_shortcuts, PasteKind::Favorite);
+        commands::translate::register_translate_selection_shortcut(app);
         tracing::info!("All shortcuts re-enabled");
     }
     disabled
@@ -160,7 +164,7 @@ fn on_toggle_shortcut(
     }
 }
 
-fn shortcut_has_modifier(shortcut: &str) -> bool {
+pub(crate) fn shortcut_has_modifier(shortcut: &str) -> bool {
     shortcut
         .split('+')
         .map(|part| part.trim().to_uppercase())
@@ -170,6 +174,46 @@ fn shortcut_has_modifier(shortcut: &str) -> bool {
                 "CTRL" | "CONTROL" | "ALT" | "WIN" | "SUPER" | "META" | "CMD"
             )
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shortcut_has_modifier;
+
+    #[test]
+    fn pure_letter_has_no_modifier() {
+        assert!(!shortcut_has_modifier("A"));
+        assert!(!shortcut_has_modifier("V"));
+    }
+
+    #[test]
+    fn ctrl_modifier() {
+        assert!(shortcut_has_modifier("CTRL+V"));
+        assert!(shortcut_has_modifier("CONTROL+V"));
+    }
+
+    #[test]
+    fn alt_modifier() {
+        assert!(shortcut_has_modifier("ALT+N"));
+    }
+
+    #[test]
+    fn win_modifier() {
+        assert!(shortcut_has_modifier("WIN+V"));
+        assert!(shortcut_has_modifier("SUPER+V"));
+        assert!(shortcut_has_modifier("META+V"));
+        assert!(shortcut_has_modifier("CMD+V"));
+    }
+
+    #[test]
+    fn empty_string() {
+        assert!(!shortcut_has_modifier(""));
+    }
+
+    #[test]
+    fn with_spaces() {
+        assert!(shortcut_has_modifier("CTRL + SHIFT + V"));
+    }
 }
 
 fn load_quick_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
@@ -454,9 +498,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
 
     if let Err(e) = win_v_registry::disable_win_v_hotkey(true) {
         if let Some(sc) = saved_shortcut {
-            let _ = app
-                .global_shortcut()
-                .on_shortcut(sc, on_toggle_shortcut);
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         return Err(e);
     }
@@ -467,9 +509,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
     {
         let _ = win_v_registry::enable_win_v_hotkey(true);
         if let Some(sc) = saved_shortcut {
-            let _ = app
-                .global_shortcut()
-                .on_shortcut(sc, on_toggle_shortcut);
+            let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
         return Err(format!("Failed to register Win+V shortcut: {}", e));
     }
@@ -554,7 +594,7 @@ fn set_paste_shortcut_inner(
     kind: PasteKind,
 ) -> Result<(), String> {
     if !(1..=10).contains(&slot) {
-        return Err("slot must be between 1 and 9".to_string());
+        return Err("slot must be between 1 and 10".to_string());
     }
 
     let normalized = normalize_shortcut_value(&shortcut);
@@ -748,6 +788,13 @@ pub fn run() {
                     .flatten()
                     .map(|v| v != "false")
                     .unwrap_or(true);
+                // 先确定定位模式，再用目标显示器的 scale 设置尺寸
+                let position_mode = settings_repo
+                    .get("position_mode")
+                    .ok()
+                    .flatten()
+                    .map(|v| crate::positioning::PositionMode::from_str(&v))
+                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
                 if persist {
                     let custom_width = settings_repo
                         .get("window_width")
@@ -760,19 +807,23 @@ pub fn run() {
                         .flatten()
                         .and_then(|v| v.parse::<f64>().ok());
                     if let (Some(w), Some(h)) = (custom_width, custom_height) {
-                        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                            width: w,
-                            height: h,
+                        let scale = match position_mode {
+                            crate::positioning::PositionMode::FixedPosition => {
+                                let x = settings_repo.get_parsed::<i32>("window_x").unwrap_or(0);
+                                let y = settings_repo.get_parsed::<i32>("window_y").unwrap_or(0);
+                                crate::positioning::get_monitor_scale_at(&window, x, y)
+                            }
+                            _ => {
+                                let (cx, cy) = crate::positioning::get_cursor_position();
+                                crate::positioning::get_monitor_scale_at(&window, cx, cy)
+                            }
+                        };
+                        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                            width: (w * scale).round() as u32,
+                            height: (h * scale).round() as u32,
                         }));
                     }
                 }
-                // 启动阶段恢复「上一次位置」，覆盖托盘左键首次显示路径
-                let position_mode = settings_repo
-                    .get("position_mode")
-                    .ok()
-                    .flatten()
-                    .map(|v| crate::positioning::PositionMode::from_str(&v))
-                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
                 if position_mode == crate::positioning::PositionMode::FixedPosition {
                     let x = settings_repo
                         .get("window_x")
@@ -798,36 +849,9 @@ pub fn run() {
                     // 启动时设置 WS_EX_LAYERED 确保窗口不透明，防止 Win10 无 DWM 特效时闪烁
                     {
                         use windows::Win32::Foundation::HWND;
-                        use windows::Win32::UI::WindowsAndMessaging::{
-                            GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-                            SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongW, SetWindowPos,
-                            WS_EX_LAYERED,
-                        };
                         if let Ok(raw_hwnd) = window.hwnd() {
                             let hwnd = HWND(raw_hwnd.0 as *mut _);
-                            unsafe {
-                                let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                                if (ex_style as u32) & WS_EX_LAYERED.0 == 0 {
-                                    SetWindowLongW(
-                                        hwnd,
-                                        GWL_EXSTYLE,
-                                        ((ex_style as u32) | WS_EX_LAYERED.0) as i32,
-                                    );
-                                    let _ = SetWindowPos(
-                                        hwnd,
-                                        None,
-                                        0,
-                                        0,
-                                        0,
-                                        0,
-                                        SWP_NOMOVE
-                                            | SWP_NOSIZE
-                                            | SWP_NOZORDER
-                                            | SWP_NOACTIVATE
-                                            | SWP_FRAMECHANGED,
-                                    );
-                                }
-                            }
+                            crate::commands::window_utils::set_ws_ex_layered(hwnd, true);
                         }
                     }
 
@@ -848,6 +872,24 @@ pub fn run() {
 
             #[cfg(target_os = "windows")]
             commands::settings::start_accent_color_watcher(app.handle().clone());
+
+            // 初始化热键系统
+            hotkey::start(app.handle().clone());
+
+            // 启动 WebDAV 同步插件（仅在启用时初始化，禁用时零占用）
+            {
+                let app_state = app.state::<Arc<AppState>>();
+                let settings = SettingsRepository::new(&app_state.db);
+                if settings.get_bool("plugin_webdav_enabled", false) {
+                    webdav::start_auto_sync_task(
+                        app_state.db.clone(),
+                        AppConfig::load().get_data_dir(),
+                    );
+                }
+                if settings.get_bool("plugin_translate_enabled", false) {
+                    commands::translate::register_translate_selection_shortcut(app.handle());
+                }
+            }
 
             {
                 use tauri_plugin_notification::NotificationExt;
@@ -960,6 +1002,7 @@ pub fn run() {
             get_favorite_paste_shortcuts,
             set_favorite_paste_shortcut,
             commands::window::check_for_update,
+            commands::window::get_version_release_notes,
             commands::window::download_update,
             commands::window::cancel_update_download,
             commands::window::install_update,
@@ -984,6 +1027,7 @@ pub fn run() {
             commands::settings::get_running_apps,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::settings::set_tray_icon_visibility,
             commands::settings::get_all_settings,
             commands::settings::pause_monitor,
             commands::settings::resume_monitor,
@@ -1013,6 +1057,16 @@ pub fn run() {
             commands::groups::update_group_color,
             commands::groups::delete_group,
             commands::groups::move_item_to_group,
+            commands::sync::webdav_enable_plugin,
+            commands::sync::webdav_test_connection,
+            commands::sync::webdav_upload,
+            commands::sync::webdav_download,
+            commands::translate::translate_text,
+            commands::translate::write_text_to_clipboard,
+            commands::translate::get_pending_translate_text,
+            commands::translate::open_translate_result_window,
+            commands::translate::update_translate_selection_shortcut,
+            commands::settings::get_settings_batch,
         ])
         .run(tauri::generate_context!());
 

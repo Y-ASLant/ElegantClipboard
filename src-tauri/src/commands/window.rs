@@ -57,22 +57,6 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
         .try_state::<std::sync::Arc<AppState>>()
         .map(|state| {
             let repo = database::SettingsRepository::new(&state.db);
-            let persist = repo
-                .get("persist_window_size")
-                .ok()
-                .flatten()
-                .map(|v| v != "false")
-                .unwrap_or(true);
-            if persist {
-                let w = repo.get_parsed::<f64>("window_width");
-                let h = repo.get_parsed::<f64>("window_height");
-                if let (Some(w), Some(h)) = (w, h) {
-                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                        width: w,
-                        height: h,
-                    }));
-                }
-            }
             if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
                 crate::positioning::PositionMode::from_str(&mode_str)
             } else {
@@ -90,6 +74,37 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
             }
         })
         .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+
+    if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+        let repo = database::SettingsRepository::new(&state.db);
+        let persist = repo
+            .get("persist_window_size")
+            .ok()
+            .flatten()
+            .map(|v| v != "false")
+            .unwrap_or(true);
+        if persist {
+            let w = repo.get_parsed::<f64>("window_width");
+            let h = repo.get_parsed::<f64>("window_height");
+            if let (Some(w), Some(h)) = (w, h) {
+                let scale = match position_mode {
+                    crate::positioning::PositionMode::FixedPosition => {
+                        let x = repo.get_parsed::<i32>("window_x").unwrap_or(0);
+                        let y = repo.get_parsed::<i32>("window_y").unwrap_or(0);
+                        crate::positioning::get_monitor_scale_at(window, x, y)
+                    }
+                    _ => {
+                        let (cx, cy) = crate::positioning::get_cursor_position();
+                        crate::positioning::get_monitor_scale_at(window, cx, cy)
+                    }
+                };
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                    width: (w * scale).round() as u32,
+                    height: (h * scale).round() as u32,
+                }));
+            }
+        }
+    }
 
     if position_mode == crate::positioning::PositionMode::FixedPosition {
         if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
@@ -219,52 +234,12 @@ pub fn set_window_effect(
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{
-            GWL_EXSTYLE, GetWindowLongW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            SWP_NOZORDER, SetWindowLongW, SetWindowPos, WS_EX_LAYERED,
-        };
 
         let raw_hwnd = window.hwnd().map_err(|e| e.to_string())?;
         let hwnd = HWND(raw_hwnd.0 as *mut _);
 
         let is_effect = effect != "none";
-
-        unsafe {
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-            let has_layered = (ex_style as u32) & WS_EX_LAYERED.0 != 0;
-
-            if is_effect && has_layered {
-                SetWindowLongW(
-                    hwnd,
-                    GWL_EXSTYLE,
-                    ((ex_style as u32) & !WS_EX_LAYERED.0) as i32,
-                );
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
-            } else if !is_effect && !has_layered {
-                SetWindowLongW(
-                    hwnd,
-                    GWL_EXSTYLE,
-                    ((ex_style as u32) | WS_EX_LAYERED.0) as i32,
-                );
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                );
-            }
-        }
+        super::window_utils::set_ws_ex_layered(hwnd, !is_effect);
 
         let _ = window_vibrancy::clear_mica(&window);
         let _ = window_vibrancy::clear_acrylic(&window);
@@ -283,25 +258,7 @@ pub fn set_window_effect(
         if let Err(ref e) = apply_result {
             tracing::warn!("Window effect '{}' not supported on this OS: {}", effect, e);
             // 恢复 WS_EX_LAYERED（应用失败时可能已被移除）
-            unsafe {
-                let cur_style = GetWindowLongW(hwnd, GWL_EXSTYLE);
-                if (cur_style as u32) & WS_EX_LAYERED.0 == 0 {
-                    SetWindowLongW(
-                        hwnd,
-                        GWL_EXSTYLE,
-                        ((cur_style as u32) | WS_EX_LAYERED.0) as i32,
-                    );
-                    let _ = SetWindowPos(
-                        hwnd,
-                        None,
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
-                    );
-                }
-            }
+            super::window_utils::set_ws_ex_layered(hwnd, true);
         }
 
         apply_result?;
@@ -369,6 +326,17 @@ pub async fn check_for_update() -> Result<crate::updater::UpdateInfo, String> {
     tokio::task::spawn_blocking(crate::updater::check_update)
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn get_version_release_notes(
+    version: Option<String>,
+) -> Result<crate::updater::VersionReleaseNotes, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::updater::get_version_release_notes(version.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

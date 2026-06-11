@@ -9,6 +9,7 @@ import {
   ClipboardPaste16Regular,
   ArrowDownload16Regular,
   Edit16Regular,
+  Translate16Regular,
   CheckmarkCircle16Filled,
   Circle16Regular,
 } from "@fluentui/react-icons";
@@ -58,10 +59,13 @@ import {
   getFileNameFromPath,
   parseFilePaths,
 } from "@/lib/format";
+import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
+import { translateText } from "@/lib/translate";
 import { cn } from "@/lib/utils";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
+import { useTranslateSettings } from "@/stores/translate-settings";
 import { useUISettings } from "@/stores/ui-settings";
 
 // ============ 类型定义 ============
@@ -76,34 +80,7 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 const fileValidityCache = new Map<string, boolean>();
-let textPreviewLease = 0;
-let textPreviewWanted = false;
-
-async function acquireTextPreviewLease(): Promise<number> {
-  // lease 由后端 TEXT_PREVIEW_TOKEN 原子分配，与 invalidate 共享同一原子，
-  // 从结构上保证 invalidate 之后的旧 lease 必然 < 当前 TOKEN，promote 必失败。
-  const lease = await invoke<number>("allocate_text_preview_lease");
-  if (lease > textPreviewLease) {
-    textPreviewLease = lease;
-  }
-  textPreviewWanted = true;
-  return lease;
-}
-
-function revokeTextPreviewLease(lease: number): void {
-  if (textPreviewLease === lease) {
-    textPreviewLease += 1;
-    textPreviewWanted = false;
-  }
-}
-
-function isTextPreviewLeaseCurrent(lease: number): boolean {
-  return textPreviewLease === lease;
-}
-
-function isTextPreviewWanted(): boolean {
-  return textPreviewWanted;
-}
+const textPreviewLM = createLeaseManager("allocate_text_preview_lease");
 
 // ============ 主卡片组件 ============
 
@@ -172,6 +149,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
   const previewPosition = useUISettings((s) => s.previewPosition);
   const sharpCorners = useUISettings((s) => s.sharpCorners);
+
+  const translateEnabled = useTranslateSettings((s) => s.enabled);
+  const [translateStatus, setTranslateStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [translatedText, setTranslatedText] = useState("");
 
   const [justPasted, setJustPasted] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -296,7 +277,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     textPreviewReqIdRef.current += 1;
     const closingLease = textPreviewLeaseRef.current;
     if (closingLease !== null) {
-      revokeTextPreviewLease(closingLease);
+      textPreviewLM.revoke(closingLease);
       textPreviewLeaseRef.current = null;
     }
     clearTextPreviewTimer();
@@ -342,13 +323,13 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     if (!textPreviewEnabled || !isTextLikeContent || !textPreviewAnchorRef.current) {
       return;
     }
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) return;
     const textContent = await resolveTextPreviewContent();
     if (!textContent) return;
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) return;
 
     const bounds = await getPreviewBounds(previewPosition, textPreviewAnchorRef.current);
-    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) return;
+    if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) return;
     const availableCssW = Math.max(260, Math.floor(bounds.maxW / bounds.scale));
     const availableCssH = Math.max(140, Math.floor(bounds.maxH / bounds.scale));
     const sampled = sampleTextPreview(textContent);
@@ -400,9 +381,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         fontSize: uiState.previewFontSize,
         token: lease,
       });
-      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !isTextPreviewLeaseCurrent(lease)) {
+      if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current || !textPreviewLM.isCurrent(lease)) {
         textPreviewVisibleRef.current = false;
-        if (!isTextPreviewWanted()) {
+        if (!textPreviewLM.isWanted()) {
           invoke("hide_text_preview", { token: lease }).catch((error) => {
             logError("Failed to hide text preview after stale show:", error);
           });
@@ -423,10 +404,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     const reqId = textPreviewReqIdRef.current;
     clearTextPreviewTimer();
     void (async () => {
-      const lease = await acquireTextPreviewLease();
+      const lease = await textPreviewLM.acquire();
       // 异步分配期间用户可能已离开或触发新悬停，重新校验后再装定时器
       if (!textPreviewHoveringRef.current || reqId !== textPreviewReqIdRef.current) {
-        revokeTextPreviewLease(lease);
+        textPreviewLM.revoke(lease);
         return;
       }
       textPreviewLeaseRef.current = lease;
@@ -486,6 +467,31 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     });
     return () => { unlisten.then((fn) => fn()); };
   }, [hideTextPreview]);
+
+  const triggerTranslate = useCallback(async (forceRedo = false) => {
+    let shouldTranslate = true;
+    setTranslateStatus((prev) => {
+      if (prev !== "idle" && !forceRedo) { shouldTranslate = false; return "idle"; }
+      return "loading";
+    });
+    setTranslatedText("");
+    if (!shouldTranslate) return;
+    try {
+      const text = await resolveTextPreviewContent();
+      if (!text.trim()) { setTranslateStatus("idle"); return; }
+      const result = await translateText(text);
+      setTranslatedText(result);
+      setTranslateStatus("done");
+    } catch (error) {
+      setTranslatedText(String(error));
+      setTranslateStatus("error");
+    }
+  }, [resolveTextPreviewContent]);
+
+  const handleTranslateClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    triggerTranslate();
+  }, [triggerTranslate]);
 
   const handlePaste = (e: React.MouseEvent) => {
     if (batchMode) {
@@ -726,6 +732,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               onToggleFavorite={handleToggleFavorite}
               onCopy={handleCopy}
               onDelete={handleDelete}
+              onTranslate={translateEnabled && isTextLikeContent ? handleTranslateClick : undefined}
+              translateActive={translateStatus !== "idle"}
             />
           )}
 
@@ -740,6 +748,22 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
           )}
         </div>
       </Card>
+      {translateStatus !== "idle" && (
+        <div
+          className="mt-1 rounded-md border bg-muted/40 px-3 py-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {translateStatus === "loading" && (
+            <span className="text-xs text-muted-foreground">翻译中…</span>
+          )}
+          {(translateStatus === "done" || translateStatus === "error") && (
+            <p className={cn(
+              "text-sm leading-relaxed whitespace-pre-wrap select-text cursor-text",
+              translateStatus === "error" && "text-destructive",
+            )}>{translatedText}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -760,6 +784,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         { icon: ClipboardPaste16Regular, label: "粘贴", onClick: () => pasteContent(item.id) },
         { icon: TextDescription16Regular, label: "粘贴为纯文本", onClick: () => pasteAsPlainText(item.id) },
         { icon: Copy16Regular, label: "复制", onClick: handleCopyCtxMenu },
+        ...(translateEnabled ? [{ icon: Translate16Regular, label: "翻译", onClick: () => triggerTranslate(true) }] : []),
         { icon: Edit16Regular, label: "编辑", onClick: handleEdit },
         { icon: Delete16Regular, label: "删除", onClick: () => deleteItem(item.id), destructive: true, separator: true },
       ];
