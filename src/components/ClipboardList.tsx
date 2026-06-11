@@ -61,8 +61,8 @@ const OS_OPTIONS = {
 const VIRTUOSO_INCREASE_VIEWPORT = { top: 400, bottom: 400 } as const;
 
 const VIRTUOSO_SCROLL_SEEK_CONFIG = {
-  enter: (velocity: number) => Math.abs(velocity) > 2000,
-  exit: (velocity: number) => Math.abs(velocity) < 500,
+  enter: (velocity: number) => Math.abs(velocity) > 800,
+  exit: (velocity: number) => Math.abs(velocity) < 300,
 } as const;
 
 const VIRTUOSO_COMPONENTS = { ScrollSeekPlaceholder } as const;
@@ -536,7 +536,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       modifiers={modifiers}
       measuring={measuring}
     >
-      <div className="h-full relative" style={{ maskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)', WebkitMaskImage: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4) 2px, rgba(0,0,0,0.8) 4px, black 6px, black calc(100% - 10px), rgba(0,0,0,0.7) calc(100% - 6px), rgba(0,0,0,0.3) calc(100% - 3px), transparent)' }}>
+      <div className="h-full relative scroll-fade-container">
         <OverlayScrollbarsComponent
           element="div"
           options={OS_OPTIONS}

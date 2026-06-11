@@ -497,3 +497,29 @@ body.dragging-cursor,
 body.dragging-cursor * {
     cursor: move !important;
 }
+/* List top/bottom fade — pseudo-elements instead of maskImage for GPU-friendly scrolling */
+.scroll-fade-container::before,
+.scroll-fade-container::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 10px;
+    z-index: 50;
+    pointer-events: none;
+}
+
+.scroll-fade-container::before {
+    top: 0;
+    background: linear-gradient(to bottom,
+        var(--color-background, transparent) 0%,
+        transparent 100%);
+}
+
+.scroll-fade-container::after {
+    bottom: 0;
+    background: linear-gradient(to top,
+        var(--color-background, transparent) 0%,
+        transparent 100%);
+}
+

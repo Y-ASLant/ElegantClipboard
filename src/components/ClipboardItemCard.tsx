@@ -67,6 +67,7 @@ import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
 import { useTranslateSettings } from "@/stores/translate-settings";
 import { useUISettings } from "@/stores/ui-settings";
+import { useShallow } from "zustand/react/shallow";
 
 // ============ 类型定义 ============
 
@@ -130,6 +131,38 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const toggleSelect = useClipboardStore((s) => s.toggleSelect);
   const keyboardNavEnabled = useUISettings((s) => s.keyboardNavigation);
   const isActive = isActiveIndex && keyboardNavEnabled;
+
+  // 合并高频变化的UI设置为单次订阅，避免17个独立selector的开销
+  const uiSettings = useUISettings(
+    useShallow((s) => ({
+      cardMaxLines: s.cardMaxLines,
+      showTime: s.showTime,
+      showCharCount: s.showCharCount,
+      showByteSize: s.showByteSize,
+      showSourceApp: s.showSourceApp,
+      sourceAppDisplay: s.sourceAppDisplay,
+      showDragAreaIndicator: s.showDragAreaIndicator,
+      textPreviewEnabled: s.textPreviewEnabled,
+      hoverPreviewDelay: s.hoverPreviewDelay,
+      previewPosition: s.previewPosition,
+      sharpCorners: s.sharpCorners,
+      timeFormat: s.timeFormat,
+    })),
+  );
+  const {
+    cardMaxLines,
+    showTime,
+    showCharCount,
+    showByteSize,
+    showSourceApp,
+    sourceAppDisplay,
+    showDragAreaIndicator,
+    textPreviewEnabled,
+    hoverPreviewDelay,
+    previewPosition,
+    sharpCorners,
+    timeFormat,
+  } = uiSettings;
   const {
     togglePin,
     toggleFavorite,
@@ -138,17 +171,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     pasteContent,
     pasteAsPlainText,
   } = clipboardActions();
-  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
-  const showTime = useUISettings((s) => s.showTime);
-  const showCharCount = useUISettings((s) => s.showCharCount);
-  const showByteSize = useUISettings((s) => s.showByteSize);
-  const showSourceApp = useUISettings((s) => s.showSourceApp);
-  const sourceAppDisplay = useUISettings((s) => s.sourceAppDisplay);
-  const showDragAreaIndicator = useUISettings((s) => s.showDragAreaIndicator);
-  const textPreviewEnabled = useUISettings((s) => s.textPreviewEnabled);
-  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
-  const previewPosition = useUISettings((s) => s.previewPosition);
-  const sharpCorners = useUISettings((s) => s.sharpCorners);
 
   const translateEnabled = useTranslateSettings((s) => s.enabled);
   const [translateStatus, setTranslateStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
@@ -254,7 +276,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
   const dragHandleWidth = "clamp(40px, 14%, 72px)";
 
-  const timeFormat = useUISettings((s) => s.timeFormat);
 
   const metaItems = useMemo(() => {
     const items: string[] = [];
