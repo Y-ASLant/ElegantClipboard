@@ -464,7 +464,7 @@ textarea,
 }
 
 .window-enter {
-    animation: window-enter 0.15s ease-out both;
+    animation: window-enter 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -526,5 +526,50 @@ body.dragging-cursor * {
     background: linear-gradient(to top,
         var(--color-background, transparent) 0%,
         transparent 100%);
+}
+/* Image skeleton shimmer */
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+.img-skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--color-muted) 25%,
+        color-mix(in srgb, var(--color-muted) 60%, transparent) 37%,
+        var(--color-muted) 63%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Image progressive load fade-in */
+.img-progressive {
+    opacity: 0;
+    transition: opacity 0.2s ease-out;
+}
+
+.img-progressive-loaded {
+    opacity: 1;
+}
+
+/* Search highlight fade-in */
+.search-highlight {
+    animation: highlight-fade-in 0.08s ease-out;
+}
+
+@keyframes highlight-fade-in {
+    from { background-color: transparent; }
+    to { background-color: hsl(from var(--color-primary) h s l / 0.2); }
+}
+
+.dark .search-highlight {
+    animation: highlight-fade-in-dark 0.08s ease-out;
+}
+
+@keyframes highlight-fade-in-dark {
+    from { background-color: transparent; }
+    to { background-color: hsl(from var(--color-primary) h s l / 0.3); }
 }
 

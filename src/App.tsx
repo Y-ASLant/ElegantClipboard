@@ -66,7 +66,7 @@ function App() {
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<Group | null>(null);
 
-  const { searchQuery, selectedGroup, selectedGroupId, setSearchQuery, setSelectedGroup, setSelectedGroupId, fetchItems, clearHistory, refresh, resetView } = useClipboardStore(
+  const { searchQuery, selectedGroup, selectedGroupId, setSearchQuery, setSelectedGroup, setSelectedGroupId, fetchItems, clearHistory, refresh, resetView, itemCount } = useClipboardStore(
     useShallow((s) => ({
       searchQuery: s.searchQuery,
       selectedGroup: s.selectedGroup,
@@ -78,6 +78,7 @@ function App() {
       clearHistory: s.clearHistory,
       refresh: s.refresh,
       resetView: s.resetView,
+      itemCount: s.items.length,
     })),
   );
   const batchMode = useClipboardStore((s) => s.batchMode);
@@ -480,8 +481,13 @@ function App() {
             placeholder="搜索剪贴板..."
             value={searchQuery}
             onChange={handleSearchChange}
-            className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-8")}
+            className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-14")}
           />
+          {searchQuery && (
+            <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-1 z-10 pointer-events-none">
+              <span className="text-xs text-muted-foreground tabular-nums">{itemCount} 条</span>
+            </div>
+          )}
           {searchQuery && (
             <button
               onClick={() => { setSearchQuery(""); fetchItems({ search: "" }); }}
