@@ -12,6 +12,9 @@ import { logError } from "@/lib/logger";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
 
+// 过滤艺术字体的关键词（大小写不敏感）
+const ART_FONT_PATTERNS = /^(Webdings|Wingdings|MT Extra|Symbol|Bookshelf Symbol|MS Outlook|High Tower Text|Pristina|Jokerman|Vivaldi|Kristen IT|French Script|Playbill|Mistral|Papyrus)/i;
+
 const DARK_MODE_OPTIONS: { value: DarkMode; label: string }[] = [
   { value: "auto", label: "跟随系统" },
   { value: "light", label: "浅色" },
@@ -72,9 +75,6 @@ export function ThemeTab() {
 
   // 强调色变化时重新渲染
   useEffect(() => subscribeAccentColor(setSystemAccentColor), []);
-
-  // 过滤艺术字体的关键词（大小写不敏感）
-  const ART_FONT_PATTERNS = /^(Webdings|Wingdings|MT Extra|Symbol|Bookshelf Symbol|MS Outlook|High Tower Text|Pristina|Jokerman|Vivaldi|Kristen IT|French Script|Playbill|Mistral|Papyrus)/i;
 
   // 加载系统字体列表（过滤掉艺术字体）
   useEffect(() => {

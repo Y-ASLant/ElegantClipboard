@@ -131,13 +131,6 @@ pub struct UpdateInfo {
     pub published_at: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct VersionReleaseNotes {
-    pub version: String,
-    pub release_notes: String,
-    pub published_at: String,
-}
-
 // ── 公共 API ─────────────────────────────────────────────────────────────────────
 
 fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
@@ -163,29 +156,6 @@ fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
         Err(ureq::Error::StatusCode(code)) => Err(format!("GitHub API 返回错误: {}", code)),
         Err(e) => Err(format!("网络连接失败: {}", e)),
     }
-}
-
-/// 获取指定版本的 GitHub Release 更新日志；未传版本时使用当前应用版本。
-pub fn get_version_release_notes(version: Option<&str>) -> Result<VersionReleaseNotes, String> {
-    let target_version = version
-        .map(normalize_version)
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
-
-    info!("Fetching release notes for v{}", target_version);
-
-    let releases = fetch_releases()?;
-    let release = releases
-        .iter()
-        .find(|r| normalize_version(&r.tag_name) == target_version)
-        .ok_or_else(|| format!("未找到 v{} 的发布记录", target_version))?;
-
-    let release_notes = release.body.as_deref().unwrap_or("").trim().to_string();
-
-    Ok(VersionReleaseNotes {
-        version: target_version,
-        release_notes,
-        published_at: release.published_at.clone().unwrap_or_default(),
-    })
 }
 
 /// 检查 GitHub 最新版本并与当前版本比较。
@@ -366,10 +336,6 @@ pub fn install(installer_path: &str) -> Result<(), String> {
 }
 
 // ── 辅助函数 ────────────────────────────────────────────────────────────────
-
-fn normalize_version(version: &str) -> String {
-    version.trim().trim_start_matches('v').to_string()
-}
 
 /// 比较语义版本：若 latest 严格大于 current 则返回 true。
 fn is_newer(latest: &str, current: &str) -> bool {

@@ -1003,7 +1003,6 @@ pub fn run() {
             get_favorite_paste_shortcuts,
             set_favorite_paste_shortcut,
             commands::window::check_for_update,
-            commands::window::get_version_release_notes,
             commands::window::download_update,
             commands::window::cancel_update_download,
             commands::window::install_update,

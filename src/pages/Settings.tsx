@@ -109,25 +109,31 @@ export function Settings() {
   }, [activeTab]);
 
   const navItems = useMemo(
-    () => [
-      ...BASE_NAV_ITEMS.slice(0, 7),
-      BASE_NAV_ITEMS[7],
-      ...(pluginsEnabled.webdav
-        ? [{ id: "webdav" as TabType, label: "WebDAV 同步", icon: ArrowSync16Regular, child: true }]
-        : []),
-      ...(pluginsEnabled.translate
-        ? [{ id: "translate" as TabType, label: "文本翻译", icon: Translate16Regular, child: true }]
-        : []),
-      BASE_NAV_ITEMS[8],
-    ],
+    () => {
+      const findNav = (id: TabType) => BASE_NAV_ITEMS.find((item) => item.id === id)!;
+      return [
+        ...BASE_NAV_ITEMS.filter((item) => item.id !== "plugins" && item.id !== "about"),
+        findNav("plugins"),
+        ...(pluginsEnabled.webdav
+          ? [{ id: "webdav" as TabType, label: "WebDAV 同步", icon: ArrowSync16Regular, child: true }]
+          : []),
+        ...(pluginsEnabled.translate
+          ? [{ id: "translate" as TabType, label: "文本翻译", icon: Translate16Regular, child: true }]
+          : []),
+        findNav("about"),
+      ];
+    },
     [pluginsEnabled.webdav, pluginsEnabled.translate],
   );
+
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
 
   const updateNavIndicator = useCallback(() => {
     const nav = navRef.current;
     if (!nav) return;
 
-    const activeEl = nav.querySelector<HTMLElement>(`[data-nav-id="${activeTab}"]`);
+    const activeEl = nav.querySelector<HTMLElement>(`[data-nav-id="${activeTabRef.current}"]`);
     if (!activeEl) {
       setNavIndicator((prev) =>
         prev.visible ? { ...prev, visible: false } : prev,
@@ -152,25 +158,25 @@ export function Settings() {
         ? prev
         : next,
     );
-  }, [activeTab]);
+  }, []);
 
-  useLayoutEffect(() => {
-    updateNavIndicator();
-  }, [updateNavIndicator, pluginsEnabled.webdav, pluginsEnabled.translate]);
-
+  // ResizeObserver 仅在挂载时创建一次，通过 ref 读取最新 activeTab
   useEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
 
-    const observer = new ResizeObserver(() => updateNavIndicator());
+    const observer = new ResizeObserver(updateNavIndicator);
     observer.observe(nav);
-    nav.addEventListener("scroll", updateNavIndicator, { passive: true });
 
     return () => {
       observer.disconnect();
-      nav.removeEventListener("scroll", updateNavIndicator);
     };
   }, [updateNavIndicator]);
+
+  // 切换 Tab 或插件增减时同步更新指示器位置
+  useLayoutEffect(() => {
+    updateNavIndicator();
+  }, [updateNavIndicator, activeTab, pluginsEnabled.webdav, pluginsEnabled.translate]);
   
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
