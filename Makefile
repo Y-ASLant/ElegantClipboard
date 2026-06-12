@@ -17,6 +17,8 @@ help:
 clean:
 	@Write-Host "[clean] remove frontend dist"
 	if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+	@Write-Host "[clean] remove Vite cache"
+	if (Test-Path node_modules/.vite) { Remove-Item -Recurse -Force node_modules/.vite }
 	@Write-Host "[clean] remove Rust target"
 	cargo clean --manifest-path src-tauri/Cargo.toml
 	@Write-Host "[clean] done"

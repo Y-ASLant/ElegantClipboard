@@ -28,76 +28,25 @@ const GITHUB_API_URL: &str =
 /// 编译时嵌入的可选 GitHub API Token
 const GITHUB_TOKEN: Option<&str> = option_env!("UPDATER_GITHUB_TOKEN");
 
-/// 构建带系统代理的 ureq Agent
-fn build_agent() -> ureq::Agent {
-    let mut builder = ureq::Agent::config_builder()
-        .timeout_connect(Some(Duration::from_secs(15)))
-        .timeout_recv_response(Some(Duration::from_secs(30)));
+/// 构建带系统代理的 reqwest 客户端
+fn build_client() -> reqwest::blocking::Client {
+    let mut builder = reqwest::blocking::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30));
 
-    // 优先环境变量，其次 Windows 系统代理
-    if let Some(proxy) = ureq::Proxy::try_from_env() {
-        debug!("Update proxy: using environment variable");
-        builder = builder.proxy(Some(proxy));
-    } else if let Some(proxy) = read_system_proxy() {
-        debug!("Update proxy: using system proxy");
-        builder = builder.proxy(Some(proxy));
+    // 复用 proxy.rs 的系统代理检测逻辑
+    if let Some(sys_proxy) = crate::proxy::get_windows_system_proxy() {
+        debug!("Update proxy: using system proxy ({})", sys_proxy);
+        if let Ok(proxy) = reqwest::Proxy::all(&sys_proxy) {
+            builder = builder.proxy(proxy);
+        }
     } else {
         debug!("Update proxy: direct connection");
     }
 
-    builder.build().into()
-}
-
-/// 从 Windows 注册表读取系统代理设置
-#[cfg(target_os = "windows")]
-fn read_system_proxy() -> Option<ureq::Proxy> {
-    use winreg::RegKey;
-    use winreg::enums::HKEY_CURRENT_USER;
-
-    let inet = RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
-        .ok()?;
-    let enabled: u32 = inet.get_value("ProxyEnable").ok()?;
-    if enabled == 0 {
-        return None;
-    }
-    let server: String = inet.get_value("ProxyServer").ok()?;
-    if server.is_empty() {
-        return None;
-    }
-
-    // 格式可能是 "host:port" 或 "http=h:p;https=h:p;..."
-    let addr = if server.contains('=') {
-        // 提取 https 或 http 代理
-        server.split(';').find_map(|seg| {
-            let seg = seg.trim();
-            if seg.starts_with("https=") {
-                Some(seg.trim_start_matches("https=").to_string())
-            } else if seg.starts_with("http=") {
-                Some(seg.trim_start_matches("http=").to_string())
-            } else {
-                None
-            }
-        })?
-    } else {
-        server
-    };
-
-    let url =
-        if addr.starts_with("http://") || addr.starts_with("https://") || addr.starts_with("socks")
-        {
-            addr
-        } else {
-            format!("http://{}", addr)
-        };
-
-    debug!("System proxy address: {}", url);
-    ureq::Proxy::new(&url).ok()
-}
-
-#[cfg(not(target_os = "windows"))]
-fn read_system_proxy() -> Option<ureq::Proxy> {
-    None
+    builder
+        .build()
+        .expect("Failed to build reqwest client for updater")
 }
 
 // ── GitHub API 响应类型 ──
@@ -134,8 +83,8 @@ pub struct UpdateInfo {
 // ── 公共 API ─────────────────────────────────────────────────────────────────────
 
 fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
-    let agent = build_agent();
-    let mut req = agent
+    let client = build_client();
+    let mut req = client
         .get(GITHUB_API_URL)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "ElegantClipboard");
@@ -146,16 +95,29 @@ fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
         req = req.header("Authorization", &format!("Bearer {}", token));
     }
 
-    match req.call() {
-        Ok(mut resp) => resp
-            .body_mut()
-            .read_json()
-            .map_err(|e| format!("解析响应失败: {}", e)),
-        Err(ureq::Error::StatusCode(403)) => Err("GitHub API 请求限额已用尽，请稍后再试".into()),
-        Err(ureq::Error::StatusCode(404)) => Err("未找到发布版本".into()),
-        Err(ureq::Error::StatusCode(code)) => Err(format!("GitHub API 返回错误: {}", code)),
-        Err(e) => Err(format!("网络连接失败: {}", e)),
+    let resp = req.send().map_err(|e| {
+        if e.is_timeout() {
+            "网络连接超时，请检查网络后重试".into()
+        } else if e.is_connect() {
+            "网络连接失败，请检查网络后重试".into()
+        } else {
+            format!("网络请求失败: {}", e)
+        }
+    })?;
+
+    let status = resp.status();
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Err("GitHub API 请求限额已用尽，请稍后再试".into());
     }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Err("未找到发布版本".into());
+    }
+    if status.is_client_error() || status.is_server_error() {
+        return Err(format!("GitHub API 返回错误: {}", status));
+    }
+
+    resp.json::<Vec<GitHubRelease>>()
+        .map_err(|e| format!("解析响应失败: {}", e))
 }
 
 /// 检查 GitHub 最新版本并与当前版本比较。
@@ -250,20 +212,25 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     info!("Downloading update: {}", file_name);
     reset_cancel();
 
-    let agent = build_agent();
-    let response = match agent
+    let client = build_client();
+    let resp = client
         .get(url)
         .header("User-Agent", "ElegantClipboard")
-        .call()
-    {
-        Ok(resp) => resp,
-        Err(ureq::Error::StatusCode(code)) => {
-            return Err(format!("下载服务器返回错误 (HTTP {})", code));
-        }
-        Err(_) => return Err("网络连接失败，请检查网络后重试".into()),
-    };
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                "网络连接超时，请检查网络后重试".into()
+            } else {
+                format!("网络连接失败: {}", e)
+            }
+        })?;
 
-    let total: u64 = response
+    let status = resp.status();
+    if status.is_client_error() || status.is_server_error() {
+        return Err(format!("下载服务器返回错误 (HTTP {})", status));
+    }
+
+    let total: u64 = resp
         .headers()
         .get("content-length")
         .and_then(|v| v.to_str().ok())
@@ -275,8 +242,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     let file_path = temp_dir.join(file_name);
 
     let mut file = std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {}", e))?;
-    let mut body = response.into_body();
-    let mut reader = body.as_reader();
+    let mut reader = std::io::BufReader::new(resp);
     let mut buf = vec![0u8; 65536]; // 64 KB 读取缓冲
     let mut downloaded = 0u64;
     let mut last_emit = std::time::Instant::now();
