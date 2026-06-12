@@ -2,7 +2,7 @@ SHELL := powershell.exe
 .SHELLFLAGS := -NoProfile -Command
 .DEFAULT_GOAL := help
 
-.PHONY: help clean build run check format
+.PHONY: help clean build run check format test
 
 help:
 	@Write-Host "Usage: make <target>"
@@ -12,6 +12,7 @@ help:
 	@Write-Host "  make build   Build Tauri release installer"
 	@Write-Host "  make run     Build frontend and run backend"
 	@Write-Host "  make check   Run lint, TypeScript, and cargo check"
+	@Write-Host "  make test    Run frontend unit tests, component tests, and perf benchmarks"
 	@Write-Host "  make format  Run frontend autofix and Rust formatter"
 
 clean:
@@ -42,6 +43,11 @@ check:
 	@Write-Host "[check] cargo"
 	cargo check --manifest-path src-tauri/Cargo.toml
 	@Write-Host "[check] done"
+
+test:
+	@Write-Host "[test] unit tests, component tests, and perf benchmarks"
+	npx vitest run --reporter=verbose
+	@Write-Host "[test] done"
 
 format:
 	@Write-Host "[format] eslint autofix"
