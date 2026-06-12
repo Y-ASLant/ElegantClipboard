@@ -317,7 +317,16 @@ fn apply_paste_shortcuts(
                     if any_focused {
                         return;
                     }
-                    if PASTE_IN_PROGRESS.load(std::sync::atomic::Ordering::Acquire) {
+                    // 原子 CAS 设置标志：成功才继续，避免 CHECK-SET 跨线程竞态
+                    if PASTE_IN_PROGRESS
+                        .compare_exchange(
+                            false,
+                            true,
+                            std::sync::atomic::Ordering::Acquire,
+                            std::sync::atomic::Ordering::Relaxed,
+                        )
+                        .is_err()
+                    {
                         return;
                     }
                     let active_slots = match kind {
@@ -329,7 +338,6 @@ fn apply_paste_shortcuts(
                     let app_handle = app.clone();
                     std::thread::spawn(move || {
                         let _guard = QUICK_PASTE_LOCK.lock();
-                        PASTE_IN_PROGRESS.store(true, std::sync::atomic::Ordering::Release);
                         if is_first {
                             let result = match kind {
                                 PasteKind::Quick => commands::clipboard::quick_paste_by_slot(

@@ -191,7 +191,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const [justCopied, setJustCopied] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
-  const { groups, moveItemToGroup } = useGroupStore();
+  const { groups, moveItemToGroup } = useGroupStore(
+    useShallow((s) => ({ groups: s.groups, moveItemToGroup: s.moveItemToGroup })),
+  );
   const selectedGroupId = useClipboardStore((s) => s.selectedGroupId);
   const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textPreviewVisibleRef = useRef(false);

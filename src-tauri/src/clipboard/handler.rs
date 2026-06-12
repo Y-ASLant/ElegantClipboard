@@ -605,9 +605,15 @@ impl ClipboardHandler {
             &hashes.content_hash[..16]
         );
 
-        // 同步写入文件，确保插入数据库前文件已就绪（异步写入会引发竞态）
-        if let Err(e) = std::fs::write(&image_path, &data) {
+        // 先写临时文件再原子 rename，避免其他进程读到写入一半的文件
+        let tmp_path = image_path.with_extension("tmp");
+        if let Err(e) = std::fs::write(&tmp_path, &data) {
+            let _ = std::fs::remove_file(&tmp_path);
             return Err(format!("Failed to save image: {}", e));
+        }
+        if let Err(e) = std::fs::rename(&tmp_path, &image_path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("Failed to rename image: {}", e));
         }
         debug!("Saved image to {:?}", image_path);
 

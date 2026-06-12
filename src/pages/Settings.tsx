@@ -385,6 +385,7 @@ export function Settings() {
       }
     } catch (error) {
       logError("Failed to save settings:", error);
+      alert(`设置保存失败: ${error}`);
     }
   };
 
