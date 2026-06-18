@@ -1,14 +1,28 @@
 import { test, expect } from "@playwright/test";
 
+// Tauri APIs (transformCallback, invoke, metadata) are unavailable outside
+// the Tauri WebView runtime. Filter these expected errors in E2E tests
+// running against a plain Vite dev server.
+const TAURI_API_PATTERNS = [
+  "transformCallback",
+  "reading 'invoke'",
+  "reading 'metadata'",
+];
+
+function isNonTauriError(msg: string): boolean {
+  return !TAURI_API_PATTERNS.some((p) => msg.includes(p));
+}
+
 test.describe("App smoke tests", () => {
   test("page loads without errors", async ({ page }) => {
     const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(err.message));
+    page.on("pageerror", (err) => {
+      if (isNonTauriError(err.message)) errors.push(err.message);
+    });
 
     await page.goto("/");
     await page.waitForTimeout(2000);
 
-    // Should not have unhandled errors
     expect(errors).toEqual([]);
   });
 
@@ -33,12 +47,13 @@ test.describe("App smoke tests", () => {
 test.describe("Settings page smoke tests", () => {
   test("settings page loads", async ({ page }) => {
     const errors: string[] = [];
-    page.on("pageerror", (err) => errors.push(err.message));
+    page.on("pageerror", (err) => {
+      if (isNonTauriError(err.message)) errors.push(err.message);
+    });
 
     await page.goto("/settings");
     await page.waitForTimeout(2000);
 
-    // Should not have unhandled errors
     expect(errors).toEqual([]);
   });
 

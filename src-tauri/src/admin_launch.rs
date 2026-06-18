@@ -137,32 +137,33 @@ fn wait_for_new_instance(secs: u32) -> bool {
                         .position(|&c| c == 0)
                         .unwrap_or(entry.szExeFile.len())],
                 );
-                if name.to_lowercase() == exe_name && entry.th32ProcessID != my_pid {
-                    if let Ok(h) = OpenProcess(
+                if name.to_lowercase() == exe_name
+                    && entry.th32ProcessID != my_pid
+                    && let Ok(h) = OpenProcess(
                         windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION,
                         false,
                         entry.th32ProcessID,
-                    ) {
-                        let mut token = Default::default();
-                        if OpenProcessToken(h, TOKEN_QUERY, &mut token).is_ok() {
-                            let mut elevation = TOKEN_ELEVATION::default();
-                            let mut len = 0u32;
-                            let ok = GetTokenInformation(
-                                token,
-                                TokenElevation,
-                                Some(&mut elevation as *mut _ as *mut _),
-                                std::mem::size_of::<TOKEN_ELEVATION>() as u32,
-                                &mut len,
-                            );
-                            let _ = CloseHandle(token);
-                            if ok.is_ok() && elevation.TokenIsElevated != 0 {
-                                let _ = CloseHandle(h);
-                                let _ = CloseHandle(snapshot);
-                                return true;
-                            }
+                    )
+                {
+                    let mut token = Default::default();
+                    if OpenProcessToken(h, TOKEN_QUERY, &mut token).is_ok() {
+                        let mut elevation = TOKEN_ELEVATION::default();
+                        let mut len = 0u32;
+                        let ok = GetTokenInformation(
+                            token,
+                            TokenElevation,
+                            Some(&mut elevation as *mut _ as *mut _),
+                            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                            &mut len,
+                        );
+                        let _ = CloseHandle(token);
+                        if ok.is_ok() && elevation.TokenIsElevated != 0 {
+                            let _ = CloseHandle(h);
+                            let _ = CloseHandle(snapshot);
+                            return true;
                         }
-                        let _ = CloseHandle(h);
                     }
+                    let _ = CloseHandle(h);
                 }
                 if Process32NextW(snapshot, &mut entry).is_err() {
                     break;

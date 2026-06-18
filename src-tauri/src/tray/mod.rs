@@ -83,15 +83,14 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 button_state: MouseButtonState::Up,
                 ..
             } = event
+                && let Some(window) = tray.app_handle().get_webview_window("main")
             {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let is_visible = window.is_visible().unwrap_or(false);
-                    let is_minimized = window.is_minimized().unwrap_or(false);
-                    if is_visible && !is_minimized {
-                        crate::commands::window::hide_main_window(tray.app_handle(), &window);
-                    } else if !crate::keyboard_hook::was_recently_hidden(300) {
-                        crate::commands::window::show_main_window(tray.app_handle(), &window);
-                    }
+                let is_visible = window.is_visible().unwrap_or(false);
+                let is_minimized = window.is_minimized().unwrap_or(false);
+                if is_visible && !is_minimized {
+                    crate::commands::window::hide_main_window(tray.app_handle(), &window);
+                } else if !crate::keyboard_hook::was_recently_hidden(300) {
+                    crate::commands::window::show_main_window(tray.app_handle(), &window);
                 }
             }
         })

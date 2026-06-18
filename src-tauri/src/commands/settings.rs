@@ -319,8 +319,7 @@ pub async fn get_running_apps(
         }
 
         // 去重（按进程名）并提取图标
-        ctx.apps
-            .sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+        ctx.apps.sort_by_key(|a| a.1.to_lowercase());
         ctx.apps
             .dedup_by(|a, b| a.1.to_lowercase() == b.1.to_lowercase());
 

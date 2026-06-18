@@ -100,15 +100,15 @@ fn translate_deeplx(
         .send()
         .map_err(|e| format!("DeepLX 请求失败: {e}"))?;
     let val = parse_response(resp, "DeepLX")?;
-    if let Some(data) = val["data"].as_str() {
-        if !data.is_empty() {
-            return Ok(data.to_string());
-        }
+    if let Some(data) = val["data"].as_str()
+        && !data.is_empty()
+    {
+        return Ok(data.to_string());
     }
-    if let Some(alternatives) = val["alternatives"].as_array() {
-        if let Some(first) = alternatives.first().and_then(|v| v.as_str()) {
-            return Ok(first.to_string());
-        }
+    if let Some(alternatives) = val["alternatives"].as_array()
+        && let Some(first) = alternatives.first().and_then(|v| v.as_str())
+    {
+        return Ok(first.to_string());
     }
     Err(format!("DeepLX 翻译结果异常: {val}"))
 }
@@ -480,10 +480,10 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
             .unwrap_or_default();
 
         // 恢复剪贴板原始内容
-        if let Some(ref backup_text) = backup {
-            if let Ok(mut cb) = arboard::Clipboard::new() {
-                let _ = cb.set_text(backup_text);
-            }
+        if let Some(ref backup_text) = backup
+            && let Ok(mut cb) = arboard::Clipboard::new()
+        {
+            let _ = cb.set_text(backup_text);
         }
 
         Ok(text)
@@ -600,10 +600,9 @@ pub fn unregister_translate_selection_shortcut(app: &tauri::AppHandle) {
         .get("translate_selection_shortcut")
         .ok()
         .flatten()
+        && !shortcut_str.is_empty()
     {
-        if !shortcut_str.is_empty() {
-            crate::hotkey::unregister(&shortcut_str);
-        }
+        crate::hotkey::unregister(&shortcut_str);
     }
 }
 
