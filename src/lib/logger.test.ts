@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { logError } from "./logger";
 
+vi.mock("@/components/ui/toast", () => ({
+  showToast: vi.fn(),
+}));
+
 describe("logError", () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
 
