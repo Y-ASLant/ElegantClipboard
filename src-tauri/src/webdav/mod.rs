@@ -467,8 +467,7 @@ pub fn upload_media_files(
             .head(&remote_url)
             .header("Authorization", &auth)
             .send()
-            .map(|r| r.status().is_success())
-            .unwrap_or(false);
+            .is_ok_and(|r| r.status().is_success());
 
         if exists {
             skipped += 1;
@@ -716,18 +715,15 @@ pub struct ImportResult {
 
 /// 从 WebDAV 下载独立的 media_map.json（权威媒体映射表）
 pub fn download_media_map(config: &WebDavConfig) -> Result<Vec<MediaEntry>, String> {
-    match download_sync(config, "media_map.json")? {
-        Some(data) => {
-            let json = String::from_utf8(data).map_err(|e| format!("解析 UTF-8 失败: {e}"))?;
-            let map: Vec<MediaEntry> = serde_json::from_str(&json)
-                .map_err(|e| format!("解析 media_map.json 失败: {e}"))?;
-            info!("下载 media_map.json: {} 条", map.len());
-            Ok(map)
-        }
-        None => {
-            info!("远端无 media_map.json");
-            Ok(Vec::new())
-        }
+    if let Some(data) = download_sync(config, "media_map.json")? {
+        let json = String::from_utf8(data).map_err(|e| format!("解析 UTF-8 失败: {e}"))?;
+        let map: Vec<MediaEntry> =
+            serde_json::from_str(&json).map_err(|e| format!("解析 media_map.json 失败: {e}"))?;
+        info!("下载 media_map.json: {} 条", map.len());
+        Ok(map)
+    } else {
+        info!("远端无 media_map.json");
+        Ok(Vec::new())
     }
 }
 
@@ -988,8 +984,7 @@ fn load_config_and_options(db: &crate::database::Database) -> Option<(WebDavConf
         repo.get(key)
             .ok()
             .flatten()
-            .map(|v| v != "false")
-            .unwrap_or(default)
+            .map_or(default, |v| v != "false")
     };
     let get_u64 = |key: &str, default: u64| -> u64 {
         repo.get(key)
@@ -1060,14 +1055,12 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                     .get("webdav_enabled")
                     .ok()
                     .flatten()
-                    .map(|v| v == "true")
-                    .unwrap_or(false);
+                    .is_some_and(|v| v == "true");
                 let auto_sync = settings_repo
                     .get("webdav_auto_sync")
                     .ok()
                     .flatten()
-                    .map(|v| v == "true")
-                    .unwrap_or(false);
+                    .is_some_and(|v| v == "true");
 
                 if enabled && auto_sync {
                     let interval_secs: u64 = settings_repo
@@ -1109,18 +1102,22 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                             let device_id = get_or_create_device_id(&db);
                             let max_bs = calc_max_query_size(&options);
                             let content_types = build_type_filter(&options);
-                            let local_items = if !content_types.is_empty() {
+                            let local_items = if content_types.is_empty() {
+                                Vec::new()
+                            } else {
                                 let tf = content_types.join(",");
                                 crate::database::ClipboardRepository::new(&db)
                                     .query_items_for_sync(&tf, max_bs)
                                     .unwrap_or_default()
-                            } else {
-                                Vec::new()
                             };
                             let local_map =
                                 build_media_map(&local_items, &data_dir, &options, &device_id);
 
-                            let merged_map = if !local_map.is_empty() {
+                            let merged_map = if local_map.is_empty() {
+                                let map = download_media_map(&config).unwrap_or_default();
+                                let _ = cleanup_orphaned_remote_media(&config, &map);
+                                map
+                            } else {
                                 match upload_media_map(&config, &local_map, &device_id) {
                                     Ok(map) => {
                                         let _ = cleanup_orphaned_remote_media(&config, &map);
@@ -1131,10 +1128,6 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                         Vec::new()
                                     }
                                 }
-                            } else {
-                                let map = download_media_map(&config).unwrap_or_default();
-                                let _ = cleanup_orphaned_remote_media(&config, &map);
-                                map
                             };
 
                             let local_images: Vec<MediaEntry> = local_map
@@ -1213,7 +1206,7 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                         if !local_images.is_empty() {
                                             match upload_media_files(&cfg, &local_images, &dir) {
                                                 Ok((u, s, _)) => {
-                                                    info!("图片上传: {} 新, {} 跳过", u, s)
+                                                    info!("图片上传: {} 新, {} 跳过", u, s);
                                                 }
                                                 Err(e) => info!("图片上传失败: {}", e),
                                             }
@@ -1262,7 +1255,7 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                         if !local_files.is_empty() {
                                             match upload_media_files(&cfg, &local_files, &dir) {
                                                 Ok((u, s, _)) => {
-                                                    info!("文件上传: {} 新, {} 跳过", u, s)
+                                                    info!("文件上传: {} 新, {} 跳过", u, s);
                                                 }
                                                 Err(e) => info!("文件上传失败: {}", e),
                                             }
@@ -1309,7 +1302,7 @@ pub fn start_auto_sync_task(db: crate::database::Database, data_dir: std::path::
                                         if !local_icons.is_empty() {
                                             match upload_media_files(&cfg, &local_icons, &dir) {
                                                 Ok((u, s, _)) => {
-                                                    info!("图标上传: {} 新, {} 跳过", u, s)
+                                                    info!("图标上传: {} 新, {} 跳过", u, s);
                                                 }
                                                 Err(e) => info!("图标上传失败: {}", e),
                                             }

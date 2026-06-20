@@ -110,8 +110,7 @@ impl AppConfig {
         }
         crate::database::get_default_db_path()
             .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."))
+            .map_or_else(|| PathBuf::from("."), std::path::Path::to_path_buf)
     }
 }
 

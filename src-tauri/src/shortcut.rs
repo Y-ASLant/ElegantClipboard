@@ -124,7 +124,7 @@ fn parse_key_code(key: &str) -> Option<Code> {
 
 /// 将 "CTRL+SHIFT+V" 格式字符串解析为 Shortcut 对象
 pub fn parse_shortcut(shortcut_str: &str) -> Option<Shortcut> {
-    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    let parts: Vec<&str> = shortcut_str.split('+').map(str::trim).collect();
     if parts.is_empty() {
         return None;
     }

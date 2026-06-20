@@ -197,7 +197,10 @@ impl ConditionBuilder {
 
     /// Get parameter references for query execution.
     fn param_refs(&self) -> Vec<&dyn rusqlite::ToSql> {
-        self.params.iter().map(|p| p.as_ref()).collect()
+        self.params
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect()
     }
 
     /// SELECT single-column string results with optional trailing SQL.
@@ -216,7 +219,7 @@ impl ConditionBuilder {
         let mut stmt = conn.prepare(&sql)?;
         let results = stmt
             .query_map(refs.as_slice(), |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(results)
     }
@@ -559,7 +562,7 @@ impl ClipboardRepository {
         };
         let types: Vec<&str> = raw
             .split(',')
-            .map(|s| s.trim())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect();
         if types.is_empty() {
@@ -588,11 +591,7 @@ impl ClipboardRepository {
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
 
-        let is_searching = options
-            .search
-            .as_ref()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false);
+        let is_searching = options.search.as_ref().is_some_and(|s| !s.is_empty());
         let columns = if is_searching {
             Self::SEARCH_COLUMNS
         } else {
@@ -619,11 +618,11 @@ impl ClipboardRepository {
         }
 
         let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
         let mut stmt = conn.prepare(&sql)?;
         let items = stmt
             .query_map(params_refs.as_slice(), Self::row_to_item)?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         Ok(items)
@@ -637,7 +636,7 @@ impl ClipboardRepository {
         Self::append_where(&mut sql, &conditions);
 
         let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
         let count: i64 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
         Ok(count)
     }
@@ -719,7 +718,7 @@ impl ClipboardRepository {
             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let paths: Vec<String> = stmt
             .query_map(params_ref.as_slice(), |row| row.get(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         let del_sql = format!("DELETE FROM clipboard_items WHERE id IN ({in_clause})");
@@ -766,7 +765,7 @@ impl ClipboardRepository {
             conn.prepare("SELECT image_path FROM clipboard_items WHERE image_path IS NOT NULL")?;
         let paths = stmt
             .query_map([], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(paths)
     }
@@ -780,7 +779,7 @@ impl ClipboardRepository {
         )?;
         let paths = stmt
             .query_map(params![group_id], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(paths)
     }
@@ -1049,7 +1048,7 @@ impl ClipboardRepository {
         let mut stmt = conn.prepare(&sql)?;
         let items = stmt
             .query_map(params![max_byte_size], Self::row_to_item)?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(items)
     }
@@ -1217,8 +1216,7 @@ impl SettingsRepository {
         self.get(key)
             .ok()
             .flatten()
-            .map(|v| v == "true")
-            .unwrap_or(default)
+            .map_or(default, |v| v == "true")
     }
 
     /// 读取并解析为指定类型，缺失/出错/解析失败时返回 None。
@@ -1242,7 +1240,7 @@ impl SettingsRepository {
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(settings)
     }
@@ -1268,7 +1266,7 @@ impl SettingsRepository {
             .query_map(rusqlite::params_from_iter(keys.iter()), |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(map)
     }
@@ -1317,7 +1315,7 @@ impl GroupRepository {
                     item_count: row.get(5)?,
                 })
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(groups)
     }

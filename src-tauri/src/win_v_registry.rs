@@ -43,9 +43,9 @@ pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
 #[cfg(windows)]
 pub fn enable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let reg_key = match hkcu.open_subkey_with_flags(EXPLORER_ADVANCED_PATH, KEY_READ | KEY_WRITE) {
-        Ok(k) => k,
-        Err(_) => return Ok(()), // 注册表项不存在，无需处理
+    let Ok(reg_key) = hkcu.open_subkey_with_flags(EXPLORER_ADVANCED_PATH, KEY_READ | KEY_WRITE)
+    else {
+        return Ok(());
     };
 
     let current_value: String = reg_key
@@ -105,9 +105,8 @@ fn restart_explorer_process() -> Result<(), String> {
 #[cfg(windows)]
 pub fn is_win_v_hotkey_disabled() -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let reg_key = match hkcu.open_subkey(EXPLORER_ADVANCED_PATH) {
-        Ok(k) => k,
-        Err(_) => return false,
+    let Ok(reg_key) = hkcu.open_subkey(EXPLORER_ADVANCED_PATH) else {
+        return false;
     };
 
     let current_value: String = reg_key

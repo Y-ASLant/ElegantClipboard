@@ -384,7 +384,7 @@ impl Database {
                  ORDER BY favorite_order DESC, id DESC",
             )?;
             stmt.query_map([], |row| row.get::<_, i64>(0))?
-                .filter_map(|r| r.ok())
+                .filter_map(std::result::Result::ok)
                 .collect()
         };
 
@@ -504,7 +504,7 @@ impl Clone for Database {
 pub fn get_app_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 

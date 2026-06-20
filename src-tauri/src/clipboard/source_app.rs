@@ -27,7 +27,7 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
             return None;
         }
         let mut pid: u32 = 0;
-        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&raw mut pid)) };
         if pid == 0 || pid == self_pid {
             return None;
         }
@@ -87,7 +87,7 @@ unsafe fn get_exe_path_from_pid(pid: u32) -> Option<String> {
             handle,
             PROCESS_NAME_FORMAT(0),
             windows::core::PWSTR::from_raw(buf.as_mut_ptr()),
-            &mut size,
+            &raw mut size,
         )
     };
     let _ = unsafe { CloseHandle(handle) };
@@ -112,7 +112,7 @@ unsafe fn resolve_uwp_app(
     }
 
     let mut host_pid: u32 = 0;
-    unsafe { GetWindowThreadProcessId(owner_hwnd, Some(&mut host_pid)) };
+    unsafe { GetWindowThreadProcessId(owner_hwnd, Some(&raw mut host_pid)) };
 
     struct CallbackData {
         host_pid: u32,
@@ -123,7 +123,7 @@ unsafe fn resolve_uwp_app(
         unsafe {
             let data = &mut *(lparam.0 as *mut CallbackData);
             let mut child_pid: u32 = 0;
-            GetWindowThreadProcessId(hwnd, Some(&mut child_pid));
+            GetWindowThreadProcessId(hwnd, Some(&raw mut child_pid));
 
             if child_pid != 0
                 && child_pid != data.host_pid
@@ -147,7 +147,7 @@ unsafe fn resolve_uwp_app(
         EnumChildWindows(
             Some(owner_hwnd),
             Some(enum_callback),
-            LPARAM(&mut data as *mut _ as isize),
+            LPARAM(&raw mut data as isize),
         )
     };
     data.found_path
@@ -183,10 +183,10 @@ fn get_file_description(exe_path: &str) -> Option<String> {
         let mut len: u32 = 0;
         if !unsafe {
             VerQueryValueW(
-                buf.as_ptr() as *const c_void,
+                buf.as_ptr().cast::<c_void>(),
                 windows::core::PCWSTR::from_raw(wide.as_ptr()),
-                &mut ptr,
-                &mut len,
+                &raw mut ptr,
+                &raw mut len,
             )
         }
         .as_bool()
@@ -210,17 +210,17 @@ fn get_file_description(exe_path: &str) -> Option<String> {
         }
 
         let mut buf = vec![0u8; size as usize];
-        GetFileVersionInfoW(pcwstr, None, size, buf.as_mut_ptr() as *mut c_void).ok()?;
+        GetFileVersionInfoW(pcwstr, None, size, buf.as_mut_ptr().cast::<c_void>()).ok()?;
 
         // 尝试从翻译表获取本地化语言
         let mut lang_ptr: *mut c_void = std::ptr::null_mut();
         let mut lang_len: u32 = 0;
         let trans: Vec<u16> = "\\VarFileInfo\\Translation\0".encode_utf16().collect();
         if VerQueryValueW(
-            buf.as_ptr() as *const c_void,
+            buf.as_ptr().cast::<c_void>(),
             windows::core::PCWSTR::from_raw(trans.as_ptr()),
-            &mut lang_ptr,
-            &mut lang_len,
+            &raw mut lang_ptr,
+            &raw mut lang_len,
         )
         .as_bool()
             && !lang_ptr.is_null()
@@ -309,7 +309,7 @@ fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
         let result = SHGetFileInfoW(
             windows::core::PCWSTR::from_raw(wide_path.as_ptr()),
             windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
-            Some(&mut shfi),
+            Some(&raw mut shfi),
             std::mem::size_of::<SHFILEINFOW>() as u32,
             SHGFI_ICON | SHGFI_LARGEICON,
         );
@@ -319,7 +319,7 @@ fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
 
         let hicon = shfi.hIcon;
         let mut icon_info = ICONINFO::default();
-        if GetIconInfo(hicon, &mut icon_info).is_err() {
+        if GetIconInfo(hicon, &raw mut icon_info).is_err() {
             let _ = DestroyIcon(hicon);
             return None;
         }
@@ -352,8 +352,8 @@ fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
             mem_bmp,
             0,
             h as u32,
-            Some(pixels.as_mut_ptr() as *mut _),
-            &mut bmi,
+            Some(pixels.as_mut_ptr().cast()),
+            &raw mut bmi,
             DIB_RGB_COLORS,
         );
 

@@ -145,8 +145,7 @@ impl ClipboardHandler {
             .get("max_content_size_kb")
             .and_then(|v| v.as_deref())
             .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb * 1024)
-            .unwrap_or(DEFAULT_MAX_CONTENT_SIZE);
+            .map_or(DEFAULT_MAX_CONTENT_SIZE, |kb| kb * 1024);
 
         let dedup_strategy = batch
             .get("dedup_strategy")
@@ -188,8 +187,7 @@ impl ClipboardHandler {
             .ok()
             .flatten()
             .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb.saturating_mul(1024))
-            .unwrap_or(DEFAULT_MAX_IMAGE_SIZE)
+            .map_or(DEFAULT_MAX_IMAGE_SIZE, |kb| kb.saturating_mul(1024))
     }
 
     /// 检查内容类型是否被允许监听
@@ -226,9 +224,8 @@ impl ClipboardHandler {
         &self,
         source: &Option<super::source_app::SourceAppInfo>,
     ) -> bool {
-        let source = match source {
-            Some(s) => s,
-            None => return false,
+        let Some(source) = source else {
+            return false;
         };
 
         // 检查是否启用
@@ -237,8 +234,7 @@ impl ClipboardHandler {
             .get("app_filter_enabled")
             .ok()
             .flatten()
-            .map(|v| v == "true")
-            .unwrap_or(false);
+            .is_some_and(|v| v == "true");
         if !enabled {
             return false;
         }
@@ -324,30 +320,27 @@ impl ClipboardHandler {
             }
             .map_err(|e| e.to_string())?
         {
-            match dedup.as_str() {
-                "ignore" => {
-                    debug!("Content already exists, ignoring (dedup=ignore)");
-                    return Ok(None);
-                }
-                _ => {
-                    // move_to_top: 更新访问时间并置顶
-                    debug!("Content already exists, updating access time (dedup=move_to_top)");
-                    return if text_like {
-                        if text_use_strict {
-                            self.repository
-                                .touch_by_hash(&hashes.content_hash, group_id)
-                                .map_err(|e| e.to_string())
-                        } else {
-                            self.repository
-                                .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
-                                .map_err(|e| e.to_string())
-                        }
-                    } else {
+            if dedup.as_str() == "ignore" {
+                debug!("Content already exists, ignoring (dedup=ignore)");
+                return Ok(None);
+            } else {
+                // move_to_top: 更新访问时间并置顶
+                debug!("Content already exists, updating access time (dedup=move_to_top)");
+                return if text_like {
+                    if text_use_strict {
                         self.repository
                             .touch_by_hash(&hashes.content_hash, group_id)
                             .map_err(|e| e.to_string())
-                    };
-                }
+                    } else {
+                        self.repository
+                            .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
+                            .map_err(|e| e.to_string())
+                    }
+                } else {
+                    self.repository
+                        .touch_by_hash(&hashes.content_hash, group_id)
+                        .map_err(|e| e.to_string())
+                };
             }
         }
 
@@ -436,7 +429,7 @@ impl ClipboardHandler {
             ClipboardContent::Html { html, .. } => html.len(),
             ClipboardContent::Rtf { rtf, .. } => rtf.len(),
             ClipboardContent::Image(data) => data.len(),
-            ClipboardContent::Files(files) => files.iter().map(|f| f.len()).sum(),
+            ClipboardContent::Files(files) => files.iter().map(std::string::String::len).sum(),
         }
     }
 
@@ -536,8 +529,7 @@ impl ClipboardHandler {
         let byte_size = html.len() as i64;
         let preview = text
             .as_ref()
-            .map(|t| Self::create_preview(t))
-            .unwrap_or_else(|| Self::create_preview(&html));
+            .map_or_else(|| Self::create_preview(&html), |t| Self::create_preview(t));
         let html_content = truncate_content(html, max_size, "HTML");
 
         let char_count = text.as_ref().map(|t| t.chars().count() as i64);
@@ -565,8 +557,7 @@ impl ClipboardHandler {
         let byte_size = rtf.len() as i64;
         let preview = text
             .as_ref()
-            .map(|t| Self::create_preview(t))
-            .unwrap_or_else(|| "[RTF Content]".to_string());
+            .map_or_else(|| "[RTF Content]".to_string(), |t| Self::create_preview(t));
         let rtf_content = truncate_content(rtf, max_size, "RTF");
 
         let char_count = text.as_ref().map(|t| t.chars().count() as i64);
@@ -637,7 +628,7 @@ impl ClipboardHandler {
             .into_dimensions()
             .map_err(|e| format!("Failed to read image dimensions: {e}"))?;
 
-        Ok((w as i64, h as i64))
+        Ok((i64::from(w), i64::from(h)))
     }
 
     fn process_files(

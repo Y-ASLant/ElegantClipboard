@@ -39,8 +39,7 @@ fn load_webdav_config(state: &Arc<AppState>) -> Result<WebDavConfig, String> {
         .get("webdav_accept_invalid_certs")
         .ok()
         .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+        .is_some_and(|v| v == "true");
 
     if url.is_empty() {
         return Err("WebDAV 地址未配置".to_string());
@@ -63,8 +62,7 @@ fn load_sync_options(state: &Arc<AppState>) -> SyncOptions {
         repo.get(key)
             .ok()
             .flatten()
-            .map(|v| v != "false")
-            .unwrap_or(default)
+            .map_or(default, |v| v != "false")
     };
     let get_u64 = |key: &str, default: u64| -> u64 {
         repo.get(key)
@@ -125,7 +123,10 @@ pub async fn webdav_upload(
 
         let device_id = webdav::get_or_create_device_id(&db);
         let local_map = build_local_media_map(&db, &data_dir, &options, &device_id);
-        if !local_map.is_empty() {
+        if local_map.is_empty() {
+            let map = webdav::download_media_map(&config).unwrap_or_default();
+            let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
+        } else {
             match webdav::upload_media_map(&config, &local_map, &device_id) {
                 Ok(map) => {
                     let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
@@ -134,9 +135,6 @@ pub async fn webdav_upload(
                     tracing::warn!("上传 media map 失败，跳过清理: {}", e);
                 }
             }
-        } else {
-            let map = webdav::download_media_map(&config).unwrap_or_default();
-            let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
         }
 
         spawn_media_upload_files(&app, &config, &data_dir, &local_map);

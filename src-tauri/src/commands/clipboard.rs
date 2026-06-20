@@ -81,11 +81,9 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
             let kw_char_len = keyword_lower.chars().count();
             let be = ci
                 .nth(kw_char_len.saturating_sub(1))
-                .map(|(b, _)| b)
-                .unwrap_or(text.len());
+                .map_or(text.len(), |(b, _)| b);
             text.get(bs..be)
-                .map(|s| s.to_lowercase() == keyword_lower)
-                .unwrap_or(false)
+                .is_some_and(|s| s.to_lowercase() == keyword_lower)
         } else {
             false
         };
@@ -99,11 +97,8 @@ fn extract_keyword_context(text: &str, keyword: &str, max_len: usize) -> String 
     };
 
     let keyword_char_len = keyword_lower.chars().count();
-    let keyword_char_pos = match keyword_char_pos {
-        Some(pos) => pos,
-        None => {
-            return text.chars().take(max_len).collect();
-        }
+    let Some(keyword_char_pos) = keyword_char_pos else {
+        return text.chars().take(max_len).collect();
     };
 
     build_context_snippet(text, keyword_char_pos, keyword_char_len, max_len)
@@ -179,7 +174,7 @@ pub fn simulate_paste() -> Result<(), String> {
     };
 
     fn is_key_pressed(vk: u16) -> bool {
-        unsafe { GetAsyncKeyState(vk as i32) < 0 }
+        unsafe { GetAsyncKeyState(i32::from(vk)) < 0 }
     }
 
     fn send_key(vk: u16, up: bool) {
@@ -323,8 +318,7 @@ pub async fn get_clipboard_items(
                 let preview_has_match = item
                     .preview
                     .as_ref()
-                    .map(|p| p.to_lowercase().contains(&keyword_lower))
-                    .unwrap_or(false);
+                    .is_some_and(|p| p.to_lowercase().contains(&keyword_lower));
                 if !preview_has_match {
                     item.preview = Some(extract_keyword_context(text, keyword, 200));
                 }

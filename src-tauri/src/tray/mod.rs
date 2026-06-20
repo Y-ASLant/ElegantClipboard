@@ -103,16 +103,13 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_tray_visibility(app: &AppHandle) -> bool {
-    app.try_state::<Arc<AppState>>()
-        .map(|state| {
-            let repo = crate::database::SettingsRepository::new(&state.db);
-            repo.get("tray_icon_visible")
-                .ok()
-                .flatten()
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        })
-        .unwrap_or(true)
+    app.try_state::<Arc<AppState>>().is_none_or(|state| {
+        let repo = crate::database::SettingsRepository::new(&state.db);
+        repo.get("tray_icon_visible")
+            .ok()
+            .flatten()
+            .is_none_or(|value| value != "false")
+    })
 }
 
 pub(crate) fn set_tray_visibility(app: &AppHandle, visible: bool) -> Result<(), String> {

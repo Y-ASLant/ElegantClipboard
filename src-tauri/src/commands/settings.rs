@@ -14,7 +14,7 @@ pub async fn get_settings_batch(
     keys: Vec<String>,
 ) -> Result<HashMap<String, String>, String> {
     let repo = SettingsRepository::new(&state.db);
-    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+    let key_refs: Vec<&str> = keys.iter().map(std::string::String::as_str).collect();
     repo.get_multiple(&key_refs).map_err(|e| e.to_string())
 }
 
@@ -268,7 +268,7 @@ pub async fn get_running_apps(
                 }
 
                 let mut pid: u32 = 0;
-                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                GetWindowThreadProcessId(hwnd, Some(&raw mut pid));
                 if pid == 0 || pid == ctx.self_pid {
                     return BOOL(1);
                 }
@@ -293,7 +293,7 @@ pub async fn get_running_apps(
                         handle,
                         PROCESS_NAME_FORMAT(0),
                         windows::core::PWSTR::from_raw(buf.as_mut_ptr()),
-                        &mut size,
+                        &raw mut size,
                     )
                     .is_ok()
                         && size > 0
@@ -315,7 +315,7 @@ pub async fn get_running_apps(
         };
 
         unsafe {
-            let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+            let _ = EnumWindows(Some(enum_proc), LPARAM(&raw mut ctx as isize));
         }
 
         // 去重（按进程名）并提取图标
@@ -405,9 +405,9 @@ fn read_accent_color_from_registry() -> Option<String> {
         .ok()?;
     let color_value: u32 = accent_key.get_value("AccentColorMenu").ok()?;
     // ABGR 格式解析
-    let r = (color_value & 0xFF) as f64;
-    let g = ((color_value >> 8) & 0xFF) as f64;
-    let b = ((color_value >> 16) & 0xFF) as f64;
+    let r = f64::from(color_value & 0xFF);
+    let g = f64::from((color_value >> 8) & 0xFF);
+    let b = f64::from((color_value >> 16) & 0xFF);
     Some(rgb_to_hsl_string(r, g, b))
 }
 
@@ -459,7 +459,7 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
                 lpszClassName: class_name,
                 ..Default::default()
             };
-            RegisterClassW(&wc);
+            RegisterClassW(&raw const wc);
 
             // 创建隐藏顶级窗口接收广播消息
             // 不能用 HWND_MESSAGE，纯消息窗口无法收 WM_SETTINGCHANGE
@@ -480,9 +480,9 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
 
             // 消息循环
             let mut msg = MSG::default();
-            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
+            while GetMessageW(&raw mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&raw const msg);
+                DispatchMessageW(&raw const msg);
             }
         }
     });
@@ -506,11 +506,11 @@ pub async fn get_system_accent_color() -> Result<Option<String>, String> {
             let mut colorization: u32 = 0;
             let mut opaque_blend: BOOL = BOOL::from(false);
 
-            if DwmGetColorizationColor(&mut colorization, &mut opaque_blend).is_ok() {
-                let a = ((colorization >> 24) & 0xFF) as f64;
-                let r = ((colorization >> 16) & 0xFF) as f64;
-                let g = ((colorization >> 8) & 0xFF) as f64;
-                let b = (colorization & 0xFF) as f64;
+            if DwmGetColorizationColor(&raw mut colorization, &raw mut opaque_blend).is_ok() {
+                let a = f64::from((colorization >> 24) & 0xFF);
+                let r = f64::from((colorization >> 16) & 0xFF);
+                let g = f64::from((colorization >> 8) & 0xFF);
+                let b = f64::from(colorization & 0xFF);
 
                 if a > 10.0 {
                     return Ok(Some(rgb_to_hsl_string(r, g, b)));
@@ -574,9 +574,9 @@ pub fn get_system_fonts() -> Vec<String> {
 
             EnumFontFamiliesExW(
                 hdc,
-                &logfont,
+                &raw const logfont,
                 Some(callback),
-                LPARAM(&mut font_names as *mut _ as isize),
+                LPARAM(&raw mut font_names as isize),
                 0,
             );
 

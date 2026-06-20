@@ -253,7 +253,7 @@ fn load_favorite_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
 
 /// 若快捷键的主键是数字（0-9），返回对应的小键盘变体字符串，如 "Alt+1" → "Alt+Numpad1"
 fn numpad_variant_str(shortcut_str: &str) -> Option<String> {
-    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    let parts: Vec<&str> = shortcut_str.split('+').map(str::trim).collect();
     let last = *parts.last()?;
     if last.len() == 1 && last.chars().next()?.is_ascii_digit() {
         let mut result = parts[..parts.len() - 1].join("+");
@@ -293,12 +293,9 @@ fn apply_paste_shortcuts(
             continue;
         }
 
-        let parsed = match parse_shortcut(&normalized) {
-            Some(v) => v,
-            None => {
-                failures.insert(slot, format!("{label} {slot} 快捷键格式无效: {normalized}"));
-                continue;
-            }
+        let Some(parsed) = parse_shortcut(&normalized) else {
+            failures.insert(slot, format!("{label} {slot} 快捷键格式无效: {normalized}"));
+            continue;
         };
 
         let make_handler = |slot: u8, kind: PasteKind| {
@@ -791,15 +788,15 @@ pub fn run() {
                     .get("persist_window_size")
                     .ok()
                     .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true);
+                    .is_none_or(|v| v != "false");
                 // 先确定定位模式，再用目标显示器的 scale 设置尺寸
                 let position_mode = settings_repo
                     .get("position_mode")
                     .ok()
                     .flatten()
-                    .map(|v| crate::positioning::PositionMode::from_str(&v))
-                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+                    .map_or(crate::positioning::PositionMode::FollowCursor, |v| {
+                        crate::positioning::PositionMode::from_str(&v)
+                    });
                 if persist {
                     let custom_width = settings_repo
                         .get("window_width")
@@ -812,17 +809,15 @@ pub fn run() {
                         .flatten()
                         .and_then(|v| v.parse::<f64>().ok());
                     if let (Some(w), Some(h)) = (custom_width, custom_height) {
-                        let scale = match position_mode {
-                            crate::positioning::PositionMode::FixedPosition => {
+                        let scale =
+                            if position_mode == crate::positioning::PositionMode::FixedPosition {
                                 let x = settings_repo.get_parsed::<i32>("window_x").unwrap_or(0);
                                 let y = settings_repo.get_parsed::<i32>("window_y").unwrap_or(0);
                                 crate::positioning::get_monitor_scale_at(&window, x, y)
-                            }
-                            _ => {
+                            } else {
                                 let (cx, cy) = crate::positioning::get_cursor_position();
                                 crate::positioning::get_monitor_scale_at(&window, cx, cy)
-                            }
-                        };
+                            };
                         let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
                             width: (w * scale).round() as u32,
                             height: (h * scale).round() as u32,
@@ -855,7 +850,7 @@ pub fn run() {
                     {
                         use windows::Win32::Foundation::HWND;
                         if let Ok(raw_hwnd) = window.hwnd() {
-                            let hwnd = HWND(raw_hwnd.0 as *mut _);
+                            let hwnd = HWND(raw_hwnd.0.cast());
                             crate::commands::window_utils::set_ws_ex_layered(hwnd, true);
                         }
                     }
@@ -919,8 +914,7 @@ pub fn run() {
                     .get("auto_check_update")
                     .ok()
                     .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true); // 默认开启
+                    .is_none_or(|v| v != "false"); // 默认开启
                 if auto_check {
                     let app_handle = app.handle().clone();
                     std::thread::spawn(move || {

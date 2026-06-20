@@ -382,7 +382,7 @@ fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&st
     };
 
     let Ok(raw_hwnd) = window.hwnd() else { return };
-    let hwnd = HWND(raw_hwnd.0 as *mut _);
+    let hwnd = HWND(raw_hwnd.0.cast());
 
     // 移除 WS_EX_LAYERED 支持合成特效
     super::window_utils::set_ws_ex_layered(hwnd, false);

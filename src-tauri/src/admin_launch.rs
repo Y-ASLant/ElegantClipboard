@@ -59,7 +59,7 @@ pub fn is_running_as_admin() -> bool {
 
     unsafe {
         let mut token = Default::default();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw mut token).is_err() {
             return false;
         }
         let mut elevation = TOKEN_ELEVATION::default();
@@ -67,9 +67,9 @@ pub fn is_running_as_admin() -> bool {
         let result = GetTokenInformation(
             token,
             TokenElevation,
-            Some(&mut elevation as *mut _ as *mut _),
+            Some((&raw mut elevation).cast()),
             std::mem::size_of::<TOKEN_ELEVATION>() as u32,
-            &mut len,
+            &raw mut len,
         );
         let _ = CloseHandle(token);
         result.is_ok() && elevation.TokenIsElevated != 0
@@ -108,7 +108,7 @@ fn wait_for_new_instance(secs: u32) -> bool {
 
     let my_pid = std::process::id();
 
-    for _ in 0..(secs as u64 * 5) {
+    for _ in 0..(u64::from(secs) * 5) {
         std::thread::sleep(std::time::Duration::from_millis(200));
 
         unsafe {
@@ -124,7 +124,7 @@ fn wait_for_new_instance(secs: u32) -> bool {
                 ..Default::default()
             };
 
-            if Process32FirstW(snapshot, &mut entry).is_err() {
+            if Process32FirstW(snapshot, &raw mut entry).is_err() {
                 let _ = CloseHandle(snapshot);
                 continue;
             }
@@ -146,15 +146,15 @@ fn wait_for_new_instance(secs: u32) -> bool {
                     )
                 {
                     let mut token = Default::default();
-                    if OpenProcessToken(h, TOKEN_QUERY, &mut token).is_ok() {
+                    if OpenProcessToken(h, TOKEN_QUERY, &raw mut token).is_ok() {
                         let mut elevation = TOKEN_ELEVATION::default();
                         let mut len = 0u32;
                         let ok = GetTokenInformation(
                             token,
                             TokenElevation,
-                            Some(&mut elevation as *mut _ as *mut _),
+                            Some((&raw mut elevation).cast()),
                             std::mem::size_of::<TOKEN_ELEVATION>() as u32,
-                            &mut len,
+                            &raw mut len,
                         );
                         let _ = CloseHandle(token);
                         if ok.is_ok() && elevation.TokenIsElevated != 0 {
@@ -165,7 +165,7 @@ fn wait_for_new_instance(secs: u32) -> bool {
                     }
                     let _ = CloseHandle(h);
                 }
-                if Process32NextW(snapshot, &mut entry).is_err() {
+                if Process32NextW(snapshot, &raw mut entry).is_err() {
                     break;
                 }
             }
@@ -221,9 +221,8 @@ fn elevate_with_uac() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::PCWSTR;
 
-    let exe_path = match get_exe_path() {
-        Ok(p) => p,
-        Err(_) => return false,
+    let Ok(exe_path) = get_exe_path() else {
+        return false;
     };
 
     let op: Vec<u16> = OsStr::new("runas").encode_wide().chain(Some(0)).collect();
@@ -278,9 +277,8 @@ fn launch_via_explorer() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::PCWSTR;
 
-    let exe_path = match get_exe_path() {
-        Ok(p) => p,
-        Err(_) => return false,
+    let Ok(exe_path) = get_exe_path() else {
+        return false;
     };
 
     let explorer: Vec<u16> = OsStr::new("explorer.exe")

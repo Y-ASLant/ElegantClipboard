@@ -71,7 +71,7 @@ fn translate_microsoft(
     let arr = parse_response(resp, "微软翻译")?;
     arr[0]["translations"][0]["text"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| "翻译结果格式异常".to_string())
 }
 
@@ -172,7 +172,7 @@ fn translate_google_api(
     let val = parse_response(resp, "Google API")?;
     val["data"]["translations"][0]["translatedText"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| "翻译结果格式异常".to_string())
 }
 
@@ -543,9 +543,8 @@ static TRANSLATE_IN_PROGRESS: std::sync::atomic::AtomicBool =
 
 /// 注册翻译选中文字快捷键
 pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return,
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
     };
     let settings_repo = database::SettingsRepository::new(&state.db);
 
@@ -553,8 +552,7 @@ pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
         .get("translate_selection_enabled")
         .ok()
         .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+        .is_some_and(|v| v == "true");
     if !enabled {
         return;
     }
@@ -591,9 +589,8 @@ pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
 
 /// 注销翻译选中文字快捷键
 pub fn unregister_translate_selection_shortcut(app: &tauri::AppHandle) {
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return,
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
     };
     let settings_repo = database::SettingsRepository::new(&state.db);
     if let Some(shortcut_str) = settings_repo
@@ -607,9 +604,8 @@ pub fn unregister_translate_selection_shortcut(app: &tauri::AppHandle) {
 }
 
 fn trigger_translate_selection(app: &tauri::AppHandle) {
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return,
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
     };
     match get_selected_text_from_system(&state) {
         Ok(text) if !text.trim().is_empty() => {
@@ -659,8 +655,7 @@ pub async fn update_translate_selection_shortcut(
         .get("translate_selection_enabled")
         .ok()
         .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+        .is_some_and(|v| v == "true");
     if enabled {
         register_translate_selection_shortcut(&app);
     }

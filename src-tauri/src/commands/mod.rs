@@ -104,9 +104,8 @@ static RESUME_TX: std::sync::LazyLock<std::sync::mpsc::Sender<crate::clipboard::
             .name("monitor-resume".into())
             .spawn(move || {
                 loop {
-                    let first = match rx.recv() {
-                        Ok(monitor) => monitor,
-                        Err(_) => return,
+                    let Ok(first) = rx.recv() else {
+                        return;
                     };
                     let mut pending = vec![first];
 

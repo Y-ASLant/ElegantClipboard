@@ -86,11 +86,11 @@ pub fn apply_proxy(
         }
         "custom" => {
             let url = proxy_url.trim();
-            if !url.is_empty() {
+            if url.is_empty() {
+                builder = builder.no_proxy();
+            } else {
                 let proxy = reqwest::Proxy::all(url).map_err(|e| format!("代理配置无效: {e}"))?;
                 builder = builder.proxy(proxy);
-            } else {
-                builder = builder.no_proxy();
             }
         }
         _ => {

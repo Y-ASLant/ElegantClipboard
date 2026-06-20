@@ -135,10 +135,10 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         .collect();
 
     if newer_releases.is_empty() {
-        let latest_version = releases
-            .first()
-            .map(|r| r.tag_name.trim_start_matches('v').to_string())
-            .unwrap_or_else(|| current_version.to_string());
+        let latest_version = releases.first().map_or_else(
+            || current_version.to_string(),
+            |r| r.tag_name.trim_start_matches('v').to_string(),
+        );
         info!("Update check: already at latest v{}", latest_version);
         return Ok(UpdateInfo {
             has_update: false,

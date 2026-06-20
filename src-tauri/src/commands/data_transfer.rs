@@ -69,9 +69,8 @@ pub(crate) fn apply_pending_import(db_path: &std::path::Path) {
     tracing::info!("Detected pending import: {:?}", staging);
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let db_dir = match db_path.parent() {
-        Some(d) => d,
-        None => return,
+    let Some(db_dir) = db_path.parent() else {
+        return;
     };
 
     for attempt in 1..=10 {
@@ -210,12 +209,11 @@ pub async fn export_data(
         .add_filter("ZIP 压缩文件", &["zip"])
         .blocking_save_file();
 
-    let dest_path = match dest {
-        Some(p) => p.to_string(),
-        None => {
-            let _ = fs::remove_file(&export_db);
-            return Err("用户取消了导出".to_string());
-        }
+    let dest_path = if let Some(p) = dest {
+        p.to_string()
+    } else {
+        let _ = fs::remove_file(&export_db);
+        return Err("用户取消了导出".to_string());
     };
 
     let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {e}"))?;
@@ -234,7 +232,7 @@ pub async fn export_data(
 
     zip.finish().map_err(|e| e.to_string())?;
 
-    let size = fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
+    let size = fs::metadata(&dest_path).map_or(0, |m| m.len());
     Ok(format!("导出成功 ({})", format_size(size)))
 }
 
@@ -265,8 +263,7 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
     let has_db = (0..archive.len()).any(|i| {
         archive
             .by_index(i)
-            .map(|f| f.name() == "clipboard.db")
-            .unwrap_or(false)
+            .is_ok_and(|f| f.name() == "clipboard.db")
     });
     if !has_db {
         return Err("ZIP 文件中未找到 clipboard.db，不是有效的备份文件".to_string());
@@ -280,12 +277,9 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
 
-        let rel_path = match sanitize_zip_relative_path(&name) {
-            Some(path) => path,
-            None => {
-                tracing::warn!("Skipping unsafe zip entry path: {}", name);
-                continue;
-            }
+        let Some(rel_path) = sanitize_zip_relative_path(&name) else {
+            tracing::warn!("Skipping unsafe zip entry path: {name}");
+            continue;
         };
 
         // 跳过临时数据库文件，仅导入 clipboard.db 和资产目录
