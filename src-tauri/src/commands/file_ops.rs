@@ -55,7 +55,7 @@ pub async fn show_in_explorer(path: String) -> Result<(), String> {
         std::process::Command::new("explorer.exe")
             .args(["/select,", &path_str])
             .spawn()
-            .map_err(|e| format!("Failed to open explorer: {}", e))?;
+            .map_err(|e| format!("Failed to open explorer: {e}"))?;
     }
     #[cfg(target_os = "macos")]
     {
@@ -98,7 +98,7 @@ pub async fn paste_as_path(
     let paths_text = if item.content_type == "files" {
         if let Some(ref paths_json) = item.file_paths {
             let paths: Vec<String> = serde_json::from_str(paths_json)
-                .map_err(|e| format!("Failed to parse file paths: {}", e))?;
+                .map_err(|e| format!("Failed to parse file paths: {e}"))?;
             paths.join("\n")
         } else {
             return Err("No file paths found".to_string());
@@ -109,10 +109,10 @@ pub async fn paste_as_path(
 
     with_paused_monitor(&state, || {
         let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {}", e))?;
+            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
         clipboard
             .set_text(&paths_text)
-            .map_err(|e| format!("Failed to set clipboard text: {}", e))?;
+            .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
 
         hide_main_window_if_not_pinned(&app);
 
@@ -137,8 +137,7 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
 
     let file_name = src
         .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "file".to_string());
+        .map_or_else(|| "file".to_string(), |n| n.to_string_lossy().to_string());
 
     let dest = app
         .dialog()
@@ -147,17 +146,14 @@ pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<
         .set_file_name(&file_name)
         .blocking_save_file();
 
-    match dest {
-        Some(dest_path) => {
-            let dest_str = dest_path.to_string();
-            std::fs::copy(&source_path, &dest_str).map_err(|e| format!("保存失败: {}", e))?;
-            info!("File saved: {} -> {}", source_path, dest_str);
-            Ok(true)
-        }
-        None => {
-            debug!("save_file_as: user cancelled");
-            Ok(false)
-        }
+    if let Some(dest_path) = dest {
+        let dest_str = dest_path.to_string();
+        std::fs::copy(&source_path, &dest_str).map_err(|e| format!("保存失败: {e}"))?;
+        info!("File saved: {} -> {}", source_path, dest_str);
+        Ok(true)
+    } else {
+        debug!("save_file_as: user cancelled");
+        Ok(false)
     }
 }
 
@@ -169,11 +165,7 @@ pub async fn get_data_size() -> Result<DataSizeInfo, String> {
 
     let db_size = ["clipboard.db", "clipboard.db-wal", "clipboard.db-shm"]
         .iter()
-        .map(|name| {
-            std::fs::metadata(data_dir.join(name))
-                .map(|m| m.len())
-                .unwrap_or(0)
-        })
+        .map(|name| std::fs::metadata(data_dir.join(name)).map_or(0, |m| m.len()))
         .sum::<u64>();
 
     let images_dir = data_dir.join("images");
@@ -183,7 +175,7 @@ pub async fn get_data_size() -> Result<DataSizeInfo, String> {
         if let Ok(entries) = std::fs::read_dir(&images_dir) {
             for entry in entries.flatten() {
                 if entry.path().is_file() {
-                    size += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    size += entry.metadata().map_or(0, |m| m.len());
                     count += 1;
                 }
             }
@@ -216,14 +208,15 @@ pub async fn get_file_details(path: String) -> Result<FileDetails, String> {
     use std::path::Path;
 
     let path = Path::new(&path);
-    let metadata = fs::metadata(path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
+    let metadata = fs::metadata(path).map_err(|e| format!("Failed to get file metadata: {e}"))?;
 
     let file_type = if metadata.is_dir() {
         "folder".to_string()
     } else if metadata.is_file() {
-        path.extension()
-            .map(|e| e.to_string_lossy().to_uppercase())
-            .unwrap_or_else(|| "FILE".to_string())
+        path.extension().map_or_else(
+            || "FILE".to_string(),
+            |e| e.to_string_lossy().to_uppercase(),
+        )
     } else {
         "unknown".to_string()
     };

@@ -88,6 +88,7 @@ unsafe extern "system" fn wndproc_subclass(
     }
     unsafe {
         CallWindowProcW(
+            #[allow(clippy::missing_transmute_annotations)]
             Some(std::mem::transmute(original)),
             hwnd,
             msg,
@@ -101,7 +102,7 @@ pub fn init(window: WebviewWindow) {
     #[cfg(windows)]
     if let Ok(hwnd) = window.hwnd() {
         MAIN_HWND.store(hwnd.0 as isize, Ordering::Relaxed);
-        let raw_hwnd = HWND(hwnd.0 as *mut _);
+        let raw_hwnd = HWND(hwnd.0.cast());
         let original = unsafe {
             SetLastError(WIN32_ERROR(0));
             SetWindowLongPtrW(
@@ -276,7 +277,7 @@ fn run_hook_thread() {
 
     let mut msg = MSG::default();
     loop {
-        let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
+        let ret = unsafe { GetMessageW(&raw mut msg, None, 0, 0) };
         if ret.0 <= 0 {
             break;
         }
@@ -304,8 +305,8 @@ fn run_hook_thread() {
                 });
             }
             _ => unsafe {
-                let _ = TranslateMessage(&msg);
-                let _ = DispatchMessageW(&msg);
+                let _ = TranslateMessage(&raw const msg);
+                let _ = DispatchMessageW(&raw const msg);
             },
         }
     }
@@ -330,15 +331,15 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
                 if MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed)
                     && let Some(info) = unsafe { (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() }
                 {
-                    CURSOR_X.store(info.pt.x as i64, Ordering::Relaxed);
-                    CURSOR_Y.store(info.pt.y as i64, Ordering::Relaxed);
+                    CURSOR_X.store(i64::from(info.pt.x), Ordering::Relaxed);
+                    CURSOR_Y.store(i64::from(info.pt.y), Ordering::Relaxed);
                 }
             }
             v if v == WM_LBUTTONDOWN || v == WM_RBUTTONDOWN => {
                 // 用点击坐标更新光标位置，确保边界检查精确
                 if let Some(info) = unsafe { (lparam.0 as *const MSLLHOOKSTRUCT).as_ref() } {
-                    CURSOR_X.store(info.pt.x as i64, Ordering::Relaxed);
-                    CURSOR_Y.store(info.pt.y as i64, Ordering::Relaxed);
+                    CURSOR_X.store(i64::from(info.pt.x), Ordering::Relaxed);
+                    CURSOR_Y.store(i64::from(info.pt.y), Ordering::Relaxed);
                 }
                 handle_click_outside();
             }
@@ -367,12 +368,12 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 let fg = unsafe { GetForegroundWindow() };
                 if main_raw != 0 && fg.0 as isize != main_raw {
                     let nav_key = match info.vkCode {
-                        v if v == VK_UP.0 as u32 => Some("ArrowUp"),
-                        v if v == VK_DOWN.0 as u32 => Some("ArrowDown"),
-                        v if v == VK_LEFT.0 as u32 => Some("ArrowLeft"),
-                        v if v == VK_RIGHT.0 as u32 => Some("ArrowRight"),
-                        v if v == VK_RETURN.0 as u32 => Some("Enter"),
-                        v if v == VK_DELETE.0 as u32 => Some("Delete"),
+                        v if v == u32::from(VK_UP.0) => Some("ArrowUp"),
+                        v if v == u32::from(VK_DOWN.0) => Some("ArrowDown"),
+                        v if v == u32::from(VK_LEFT.0) => Some("ArrowLeft"),
+                        v if v == u32::from(VK_RIGHT.0) => Some("ArrowRight"),
+                        v if v == u32::from(VK_RETURN.0) => Some("Enter"),
+                        v if v == u32::from(VK_DELETE.0) => Some("Delete"),
                         _ => None,
                     };
                     if let Some(key) = nav_key {
@@ -393,7 +394,7 @@ fn handle_nav_key(key: &str) {
     if let Some(window) = MAIN_WINDOW.lock().as_ref()
         && window.is_visible().unwrap_or(false)
     {
-        let shift = unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) < 0 };
+        let shift = unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) < 0 };
         let _ = window.emit(
             "keyboard-nav",
             serde_json::json!({
@@ -416,7 +417,7 @@ fn is_mouse_outside_window(_window: &WebviewWindow) -> bool {
 
     let hwnd = HWND(raw as *mut _);
     let mut rect = RECT::default();
-    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+    if unsafe { GetWindowRect(hwnd, &raw mut rect) }.is_err() {
         return false;
     }
 

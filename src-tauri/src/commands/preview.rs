@@ -115,7 +115,7 @@ pub async fn show_image_preview(
         .focused(false)
         .visible(false)
         .build()
-        .map_err(|e| format!("创建预览窗口失败: {}", e))?
+        .map_err(|e| format!("创建预览窗口失败: {e}"))?
     };
 
     if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
@@ -247,7 +247,7 @@ pub async fn show_text_preview(
         .focused(false)
         .visible(false)
         .build()
-        .map_err(|e| format!("创建文本预览窗口失败: {}", e))?;
+        .map_err(|e| format!("创建文本预览窗口失败: {e}"))?;
 
         // 应用窗口特效，与主窗口保持一致
         apply_preview_window_effect(&w, window_effect.as_deref());
@@ -331,7 +331,7 @@ pub async fn hide_text_preview(app: tauri::AppHandle, token: Option<u64>) {
 
 #[tauri::command]
 pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(), String> {
-    let label = format!("text-editor-{}", id);
+    let label = format!("text-editor-{id}");
 
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.unminimize();
@@ -343,7 +343,7 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
     let window = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
-        tauri::WebviewUrl::App(format!("/editor?id={}", id).into()),
+        tauri::WebviewUrl::App(format!("/editor?id={id}").into()),
     )
     .title("编辑")
     .inner_size(600.0, 460.0)
@@ -355,7 +355,7 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
     .resizable(true)
     .center()
     .build()
-    .map_err(|e| format!("创建编辑器窗口失败: {}", e))?;
+    .map_err(|e| format!("创建编辑器窗口失败: {e}"))?;
 
     let _ = window;
     Ok(())
@@ -382,7 +382,7 @@ fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&st
     };
 
     let Ok(raw_hwnd) = window.hwnd() else { return };
-    let hwnd = HWND(raw_hwnd.0 as *mut _);
+    let hwnd = HWND(raw_hwnd.0.cast());
 
     // 移除 WS_EX_LAYERED 支持合成特效
     super::window_utils::set_ws_ex_layered(hwnd, false);

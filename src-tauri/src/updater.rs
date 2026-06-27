@@ -92,7 +92,7 @@ fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
     if let Some(token) = GITHUB_TOKEN
         && !token.is_empty()
     {
-        req = req.header("Authorization", &format!("Bearer {}", token));
+        req = req.header("Authorization", &format!("Bearer {token}"));
     }
 
     let resp = req.send().map_err(|e| {
@@ -101,7 +101,7 @@ fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
         } else if e.is_connect() {
             "网络连接失败，请检查网络后重试".into()
         } else {
-            format!("网络请求失败: {}", e)
+            format!("网络请求失败: {e}")
         }
     })?;
 
@@ -113,11 +113,11 @@ fn fetch_releases() -> Result<Vec<GitHubRelease>, String> {
         return Err("未找到发布版本".into());
     }
     if status.is_client_error() || status.is_server_error() {
-        return Err(format!("GitHub API 返回错误: {}", status));
+        return Err(format!("GitHub API 返回错误: {status}"));
     }
 
     resp.json::<Vec<GitHubRelease>>()
-        .map_err(|e| format!("解析响应失败: {}", e))
+        .map_err(|e| format!("解析响应失败: {e}"))
 }
 
 /// 检查 GitHub 最新版本并与当前版本比较。
@@ -135,10 +135,10 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         .collect();
 
     if newer_releases.is_empty() {
-        let latest_version = releases
-            .first()
-            .map(|r| r.tag_name.trim_start_matches('v').to_string())
-            .unwrap_or_else(|| current_version.to_string());
+        let latest_version = releases.first().map_or_else(
+            || current_version.to_string(),
+            |r| r.tag_name.trim_start_matches('v').to_string(),
+        );
         info!("Update check: already at latest v{}", latest_version);
         return Ok(UpdateInfo {
             has_update: false,
@@ -166,7 +166,7 @@ pub fn check_update() -> Result<UpdateInfo, String> {
         .find(|a| a.name.ends_with(arch_suffix));
 
     let setup_asset =
-        setup_asset.ok_or_else(|| format!("未找到适用于当前架构({})的安装包", arch_suffix))?;
+        setup_asset.ok_or_else(|| format!("未找到适用于当前架构({arch_suffix})的安装包"))?;
     let (download_url, file_name, file_size) = (
         setup_asset.browser_download_url.clone(),
         setup_asset.name.clone(),
@@ -180,9 +180,9 @@ pub fn check_update() -> Result<UpdateInfo, String> {
             let ver = r.tag_name.trim_start_matches('v');
             let notes = r.body.as_deref().unwrap_or("").trim();
             if notes.is_empty() {
-                format!("## v{}", ver)
+                format!("## v{ver}")
             } else {
-                format!("## v{}\n{}", ver, notes)
+                format!("## v{ver}\n{notes}")
             }
         })
         .collect::<Vec<_>>()
@@ -221,13 +221,13 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
             if e.is_timeout() {
                 "网络连接超时，请检查网络后重试".into()
             } else {
-                format!("网络连接失败: {}", e)
+                format!("网络连接失败: {e}")
             }
         })?;
 
     let status = resp.status();
     if status.is_client_error() || status.is_server_error() {
-        return Err(format!("下载服务器返回错误 (HTTP {})", status));
+        return Err(format!("下载服务器返回错误 (HTTP {status})"));
     }
 
     let total: u64 = resp
@@ -238,10 +238,10 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
         .unwrap_or(0);
 
     let temp_dir = std::env::temp_dir().join("ElegantClipboard");
-    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
     let file_path = temp_dir.join(file_name);
 
-    let mut file = std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {}", e))?;
+    let mut file = std::fs::File::create(&file_path).map_err(|e| format!("创建文件失败: {e}"))?;
     let mut reader = std::io::BufReader::new(resp);
     let mut buf = vec![0u8; 65536]; // 64 KB 读取缓冲
     let mut downloaded = 0u64;
@@ -250,7 +250,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
     loop {
         let n = reader
             .read(&mut buf)
-            .map_err(|e| format!("读取数据失败: {}", e))?;
+            .map_err(|e| format!("读取数据失败: {e}"))?;
         if n == 0 {
             break;
         }
@@ -260,7 +260,7 @@ pub fn download(app: &tauri::AppHandle, url: &str, file_name: &str) -> Result<St
             return Err("下载已取消".into());
         }
         file.write_all(&buf[..n])
-            .map_err(|e| format!("写入文件失败: {}", e))?;
+            .map_err(|e| format!("写入文件失败: {e}"))?;
         downloaded += n as u64;
 
         // 限流：约 10 次/秒发射进度事件
@@ -296,7 +296,7 @@ pub fn install(installer_path: &str) -> Result<(), String> {
     std::process::Command::new(installer_path)
         .args(["/P", "/R"])
         .spawn()
-        .map_err(|e| format!("启动安装程序失败: {}", e))?;
+        .map_err(|e| format!("启动安装程序失败: {e}"))?;
 
     Ok(())
 }

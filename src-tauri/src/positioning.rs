@@ -36,7 +36,7 @@ use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 pub fn get_cursor_position() -> (i32, i32) {
     let mut point = POINT { x: 0, y: 0 };
     unsafe {
-        if GetCursorPos(&mut point).is_ok() {
+        if GetCursorPos(&raw mut point).is_ok() {
             return (point.x, point.y);
         }
     }
@@ -87,7 +87,7 @@ pub fn force_topmost(window: &WebviewWindow) {
     if let Ok(hwnd) = window.hwnd() {
         unsafe {
             let _ = SetWindowPos(
-                HWND(hwnd.0 as *mut _),
+                HWND(hwnd.0.cast()),
                 Some(HWND_TOPMOST),
                 0,
                 0,

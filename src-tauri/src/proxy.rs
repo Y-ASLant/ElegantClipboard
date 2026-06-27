@@ -46,7 +46,7 @@ pub fn get_windows_system_proxy() -> Option<String> {
             if let Some(addr) = part.strip_prefix("socks=") {
                 let addr = addr.trim();
                 if !addr.is_empty() {
-                    return Some(format!("socks5://{}", addr));
+                    return Some(format!("socks5://{addr}"));
                 }
             }
         }
@@ -65,7 +65,7 @@ fn format_proxy_url(addr: &str) -> String {
     {
         addr.to_string()
     } else {
-        format!("http://{}", addr)
+        format!("http://{addr}")
     }
 }
 
@@ -86,11 +86,11 @@ pub fn apply_proxy(
         }
         "custom" => {
             let url = proxy_url.trim();
-            if !url.is_empty() {
-                let proxy = reqwest::Proxy::all(url).map_err(|e| format!("代理配置无效: {}", e))?;
-                builder = builder.proxy(proxy);
-            } else {
+            if url.is_empty() {
                 builder = builder.no_proxy();
+            } else {
+                let proxy = reqwest::Proxy::all(url).map_err(|e| format!("代理配置无效: {e}"))?;
+                builder = builder.proxy(proxy);
             }
         }
         _ => {
@@ -98,7 +98,7 @@ pub fn apply_proxy(
             if let Some(sys_proxy) = get_windows_system_proxy() {
                 tracing::info!("使用 Windows 系统代理: {}", sys_proxy);
                 let proxy = reqwest::Proxy::all(&sys_proxy)
-                    .map_err(|e| format!("系统代理配置无效: {}", e))?;
+                    .map_err(|e| format!("系统代理配置无效: {e}"))?;
                 builder = builder.proxy(proxy);
             }
             // 否则 reqwest 默认行为（读取 HTTP_PROXY 等环境变量）

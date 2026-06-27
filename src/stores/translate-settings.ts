@@ -5,12 +5,6 @@ import { logError } from "@/lib/logger";
 
 const SYNC_EVENT = "translate-settings-changed";
 
-const broadcastChange = (state: Partial<TranslateSettings>) => {
-  emit(SYNC_EVENT, state).catch((error) => {
-    logError("Failed to broadcast translate settings change:", error);
-  });
-};
-
 export type TranslateProvider = "microsoft" | "google_free" | "google_api" | "baidu" | "deeplx" | "openai";
 export type LanguageMode = "auto" | "manual";
 
@@ -37,7 +31,6 @@ export interface TranslateSettings {
 interface TranslateSettingsStore extends TranslateSettings {
   loaded: boolean;
   loadSettings: () => Promise<void>;
-  saveSetting: (key: string, value: string) => Promise<void>;
   setEnabled: (enabled: boolean) => void;
   setRecordTranslation: (record: boolean) => void;
   setProvider: (provider: TranslateProvider) => void;
@@ -57,17 +50,7 @@ interface TranslateSettingsStore extends TranslateSettings {
   setTranslateSelectionShortcut: (shortcut: string) => void;
 }
 
-const SETTING_KEYS = [
-  "translate_enabled", "translate_record_translation", "translate_provider",
-  "translate_language_mode", "translate_source_language", "translate_target_language",
-  "translate_deeplx_endpoint", "translate_google_api_key",
-  "translate_baidu_app_id", "translate_baidu_secret_key",
-  "translate_openai_endpoint", "translate_openai_api_key", "translate_openai_model",
-  "translate_proxy_mode", "translate_proxy_url",
-  "translate_selection_enabled", "translate_selection_shortcut",
-] as const;
-
-export const useTranslateSettings = create<TranslateSettingsStore>((set, get) => ({
+const DEFAULT_TRANSLATE_SETTINGS: TranslateSettings = {
   enabled: false,
   recordTranslation: false,
   provider: "microsoft",
@@ -85,62 +68,126 @@ export const useTranslateSettings = create<TranslateSettingsStore>((set, get) =>
   proxyUrl: "",
   translateSelectionEnabled: false,
   translateSelectionShortcut: "",
-  loaded: false,
+};
 
-  loadSettings: async () => {
-    try {
-      const values = await invoke<Record<string, string>>("get_settings_batch", { keys: SETTING_KEYS });
-      set({
-        enabled: values["translate_enabled"] === "true",
-        recordTranslation: values["translate_record_translation"] === "true",
-        provider: (values["translate_provider"] as TranslateProvider) || "microsoft",
-        languageMode: (values["translate_language_mode"] as LanguageMode) || "auto",
-        sourceLanguage: values["translate_source_language"] || "",
-        targetLanguage: values["translate_target_language"] || "",
-        deeplxEndpoint: values["translate_deeplx_endpoint"] || "",
-        googleApiKey: values["translate_google_api_key"] || "",
-        baiduAppId: values["translate_baidu_app_id"] || "",
-        baiduSecretKey: values["translate_baidu_secret_key"] || "",
-        openaiEndpoint: values["translate_openai_endpoint"] || "",
-        openaiApiKey: values["translate_openai_api_key"] || "",
-        openaiModel: values["translate_openai_model"] || "",
-        proxyMode: (values["translate_proxy_mode"] as "system" | "none" | "custom") || "system",
-        proxyUrl: values["translate_proxy_url"] || "",
-        translateSelectionEnabled: values["translate_selection_enabled"] === "true",
-        translateSelectionShortcut: values["translate_selection_shortcut"] || "",
-        loaded: true,
-      });
-    } catch (error) {
-      logError("加载翻译设置失败:", error);
-    }
-  },
+const TRANSLATE_SETTINGS_KEYS = Object.keys(DEFAULT_TRANSLATE_SETTINGS) as (keyof TranslateSettings)[];
 
-  saveSetting: async (key: string, value: string) => {
-    try {
-      await invoke("set_setting", { key, value });
-    } catch (error) {
-      logError(`保存 ${key} 失败:`, error);
-    }
-  },
+/**
+ * Maps camelCase field names to their database key equivalents.
+ * This is the single source of truth for the field-to-key mapping,
+ * eliminating the previous pattern of scattering key strings across setters.
+ */
+const FIELD_TO_DB_KEY: Record<keyof TranslateSettings, string> = {
+  enabled: "translate_enabled",
+  recordTranslation: "translate_record_translation",
+  provider: "translate_provider",
+  languageMode: "translate_language_mode",
+  sourceLanguage: "translate_source_language",
+  targetLanguage: "translate_target_language",
+  deeplxEndpoint: "translate_deeplx_endpoint",
+  googleApiKey: "translate_google_api_key",
+  baiduAppId: "translate_baidu_app_id",
+  baiduSecretKey: "translate_baidu_secret_key",
+  openaiEndpoint: "translate_openai_endpoint",
+  openaiApiKey: "translate_openai_api_key",
+  openaiModel: "translate_openai_model",
+  proxyMode: "translate_proxy_mode",
+  proxyUrl: "translate_proxy_url",
+  translateSelectionEnabled: "translate_selection_enabled",
+  translateSelectionShortcut: "translate_selection_shortcut",
+};
 
-  setEnabled: (enabled) => { set({ enabled }); get().saveSetting("translate_enabled", enabled ? "true" : "false"); broadcastChange({ enabled }); },
-  setRecordTranslation: (record) => { set({ recordTranslation: record }); get().saveSetting("translate_record_translation", record ? "true" : "false"); broadcastChange({ recordTranslation: record }); },
-  setProvider: (provider) => { set({ provider }); get().saveSetting("translate_provider", provider); broadcastChange({ provider }); },
-  setLanguageMode: (mode) => { set({ languageMode: mode }); get().saveSetting("translate_language_mode", mode); broadcastChange({ languageMode: mode }); },
-  setSourceLanguage: (lang) => { set({ sourceLanguage: lang }); get().saveSetting("translate_source_language", lang); broadcastChange({ sourceLanguage: lang }); },
-  setTargetLanguage: (lang) => { set({ targetLanguage: lang }); get().saveSetting("translate_target_language", lang); broadcastChange({ targetLanguage: lang }); },
-  setDeeplxEndpoint: (url) => { set({ deeplxEndpoint: url }); get().saveSetting("translate_deeplx_endpoint", url); broadcastChange({ deeplxEndpoint: url }); },
-  setGoogleApiKey: (key) => { set({ googleApiKey: key }); get().saveSetting("translate_google_api_key", key); broadcastChange({ googleApiKey: key }); },
-  setBaiduAppId: (id) => { set({ baiduAppId: id }); get().saveSetting("translate_baidu_app_id", id); broadcastChange({ baiduAppId: id }); },
-  setBaiduSecretKey: (key) => { set({ baiduSecretKey: key }); get().saveSetting("translate_baidu_secret_key", key); broadcastChange({ baiduSecretKey: key }); },
-  setOpenaiEndpoint: (url) => { set({ openaiEndpoint: url }); get().saveSetting("translate_openai_endpoint", url); broadcastChange({ openaiEndpoint: url }); },
-  setOpenaiApiKey: (key) => { set({ openaiApiKey: key }); get().saveSetting("translate_openai_api_key", key); broadcastChange({ openaiApiKey: key }); },
-  setOpenaiModel: (model) => { set({ openaiModel: model }); get().saveSetting("translate_openai_model", model); broadcastChange({ openaiModel: model }); },
-  setProxyMode: (mode) => { set({ proxyMode: mode }); get().saveSetting("translate_proxy_mode", mode); broadcastChange({ proxyMode: mode }); },
-  setProxyUrl: (url) => { set({ proxyUrl: url }); get().saveSetting("translate_proxy_url", url); broadcastChange({ proxyUrl: url }); },
-  setTranslateSelectionEnabled: (enabled) => { set({ translateSelectionEnabled: enabled }); get().saveSetting("translate_selection_enabled", enabled ? "true" : "false"); broadcastChange({ translateSelectionEnabled: enabled }); },
-  setTranslateSelectionShortcut: (shortcut) => { set({ translateSelectionShortcut: shortcut }); get().saveSetting("translate_selection_shortcut", shortcut); broadcastChange({ translateSelectionShortcut: shortcut }); },
-}));
+const DB_KEYS = Object.values(FIELD_TO_DB_KEY);
+
+function serializeValue(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return String(value);
+}
+
+function pickTranslateData(state: TranslateSettingsStore): TranslateSettings {
+  const next = {} as TranslateSettings;
+  for (const key of TRANSLATE_SETTINGS_KEYS) {
+    (next[key] as TranslateSettings[typeof key]) = state[key];
+  }
+  return next;
+}
+
+function updateAndPersist(
+  set: (partial: Partial<TranslateSettingsStore>) => void,
+  get: () => TranslateSettingsStore,
+  patch: Partial<TranslateSettings>,
+) {
+  set(patch as Partial<TranslateSettingsStore>);
+  emit(SYNC_EVENT, patch).catch((error) => {
+    logError("Failed to broadcast translate settings change:", error);
+  });
+  const snapshot = { ...pickTranslateData(get()), ...patch };
+  saveTranslateSettings(snapshot).catch((error) => {
+    logError("Failed to save translate settings:", error);
+  });
+}
+
+async function saveTranslateSettings(state: TranslateSettings) {
+  const entries = Object.entries(FIELD_TO_DB_KEY) as [keyof TranslateSettings, string][];
+  const promises = entries.map(([field, dbKey]) =>
+    invoke("set_setting", { key: dbKey, value: serializeValue(state[field]) }),
+  );
+  await Promise.all(promises);
+}
+
+export const useTranslateSettings = create<TranslateSettingsStore>((set, get) => {
+  const makeSetter = <K extends keyof TranslateSettings>(key: K) =>
+    (value: TranslateSettings[K]) => {
+      updateAndPersist(set, get, { [key]: value } as Pick<TranslateSettings, K>);
+    };
+
+  return {
+    ...DEFAULT_TRANSLATE_SETTINGS,
+    loaded: false,
+
+    loadSettings: async () => {
+      try {
+        const values = await invoke<Record<string, string>>("get_settings_batch", { keys: DB_KEYS });
+        const dbKeyToField = Object.fromEntries(
+          Object.entries(FIELD_TO_DB_KEY).map(([field, dbKey]) => [dbKey, field]),
+        ) as Record<string, keyof TranslateSettings>;
+
+        const parsed: Partial<TranslateSettings> = {};
+        for (const [dbKey, value] of Object.entries(values)) {
+          const field = dbKeyToField[dbKey];
+          if (!field) continue;
+          const def = DEFAULT_TRANSLATE_SETTINGS[field];
+          if (typeof def === "boolean") {
+            (parsed[field] as boolean) = value === "true";
+          } else {
+            (parsed[field] as string) = value || (def as string);
+          }
+        }
+        set({ ...DEFAULT_TRANSLATE_SETTINGS, ...parsed, loaded: true });
+      } catch (error) {
+        logError("Failed to load translate settings:", error);
+      }
+    },
+
+    setEnabled: makeSetter("enabled"),
+    setRecordTranslation: makeSetter("recordTranslation"),
+    setProvider: makeSetter("provider"),
+    setLanguageMode: makeSetter("languageMode"),
+    setSourceLanguage: makeSetter("sourceLanguage"),
+    setTargetLanguage: makeSetter("targetLanguage"),
+    setDeeplxEndpoint: makeSetter("deeplxEndpoint"),
+    setGoogleApiKey: makeSetter("googleApiKey"),
+    setBaiduAppId: makeSetter("baiduAppId"),
+    setBaiduSecretKey: makeSetter("baiduSecretKey"),
+    setOpenaiEndpoint: makeSetter("openaiEndpoint"),
+    setOpenaiApiKey: makeSetter("openaiApiKey"),
+    setOpenaiModel: makeSetter("openaiModel"),
+    setProxyMode: makeSetter("proxyMode"),
+    setProxyUrl: makeSetter("proxyUrl"),
+    setTranslateSelectionEnabled: makeSetter("translateSelectionEnabled"),
+    setTranslateSelectionShortcut: makeSetter("translateSelectionShortcut"),
+  };
+});
 
 let unlistenFn: (() => void) | null = null;
 
@@ -151,7 +198,7 @@ export async function initTranslateSettingsListener() {
       useTranslateSettings.setState(event.payload);
     });
   } catch {
-    // 非 Tauri 环境下忽略
+    // non-Tauri environments
   }
 }
 

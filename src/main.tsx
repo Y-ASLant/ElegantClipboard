@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { Toaster } from "@/components/ui/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { initUISettingsStore } from "@/stores/ui-settings";
 import App from "./App";
@@ -53,6 +54,7 @@ async function bootstrap() {
     <React.StrictMode>
       <TooltipProvider delayDuration={300}>
         <Router />
+        <Toaster />
       </TooltipProvider>
     </React.StrictMode>,
   );

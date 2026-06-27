@@ -25,7 +25,7 @@ fn add_dir_to_zip(
         if path.is_file() {
             let name = format!("{}/{}", prefix, entry.file_name().to_string_lossy());
             zip.start_file(&name, options).map_err(|e| e.to_string())?;
-            let buf = std::fs::read(&path).map_err(|e| format!("读取 {:?} 失败: {}", path, e))?;
+            let buf = std::fs::read(&path).map_err(|e| format!("读取 {path:?} 失败: {e}"))?;
             zip.write_all(&buf).map_err(|e| e.to_string())?;
         }
     }
@@ -69,9 +69,8 @@ pub(crate) fn apply_pending_import(db_path: &std::path::Path) {
     tracing::info!("Detected pending import: {:?}", staging);
     std::thread::sleep(std::time::Duration::from_millis(500));
 
-    let db_dir = match db_path.parent() {
-        Some(d) => d,
-        None => return,
+    let Some(db_dir) = db_path.parent() else {
+        return;
     };
 
     for attempt in 1..=10 {
@@ -125,20 +124,20 @@ pub fn cleanup_data_at_path(path: String) -> Result<(), String> {
     let p = std::path::PathBuf::from(&path);
 
     for ext in &["", "-wal", "-shm"] {
-        let db_file = p.join(format!("clipboard.db{}", ext));
+        let db_file = p.join(format!("clipboard.db{ext}"));
         if db_file.exists() {
-            fs::remove_file(&db_file).map_err(|e| format!("删除 {:?} 失败: {}", db_file, e))?;
+            fs::remove_file(&db_file).map_err(|e| format!("删除 {db_file:?} 失败: {e}"))?;
         }
     }
 
     let images_dir = p.join("images");
     if images_dir.exists() {
-        fs::remove_dir_all(&images_dir).map_err(|e| format!("删除图片目录失败: {}", e))?;
+        fs::remove_dir_all(&images_dir).map_err(|e| format!("删除图片目录失败: {e}"))?;
     }
 
     let icons_dir = p.join("icons");
     if icons_dir.exists() {
-        fs::remove_dir_all(&icons_dir).map_err(|e| format!("删除图标目录失败: {}", e))?;
+        fs::remove_dir_all(&icons_dir).map_err(|e| format!("删除图标目录失败: {e}"))?;
     }
 
     Ok(())
@@ -191,17 +190,17 @@ pub async fn export_data(
         let src_conn = state.db.write_connection();
         let src_conn = src_conn.lock();
         let _ = fs::remove_file(&export_db);
-        let mut dst_conn = rusqlite::Connection::open(&export_db)
-            .map_err(|e| format!("创建备份文件失败: {}", e))?;
+        let mut dst_conn =
+            rusqlite::Connection::open(&export_db).map_err(|e| format!("创建备份文件失败: {e}"))?;
         let backup = rusqlite::backup::Backup::new(&src_conn, &mut dst_conn)
-            .map_err(|e| format!("初始化备份失败: {}", e))?;
+            .map_err(|e| format!("初始化备份失败: {e}"))?;
         backup
             .run_to_completion(100, std::time::Duration::from_millis(0), None)
-            .map_err(|e| format!("执行备份失败: {}", e))?;
+            .map_err(|e| format!("执行备份失败: {e}"))?;
     }
 
     let timestamp = chrono_timestamp();
-    let default_name = format!("ElegantClipboard_backup_{}.zip", timestamp);
+    let default_name = format!("ElegantClipboard_backup_{timestamp}.zip");
     let dest = app
         .dialog()
         .file()
@@ -210,21 +209,20 @@ pub async fn export_data(
         .add_filter("ZIP 压缩文件", &["zip"])
         .blocking_save_file();
 
-    let dest_path = match dest {
-        Some(p) => p.to_string(),
-        None => {
-            let _ = fs::remove_file(&export_db);
-            return Err("用户取消了导出".to_string());
-        }
+    let dest_path = if let Some(p) = dest {
+        p.to_string()
+    } else {
+        let _ = fs::remove_file(&export_db);
+        return Err("用户取消了导出".to_string());
     };
 
-    let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {}", e))?;
+    let file = File::create(&dest_path).map_err(|e| format!("创建文件失败: {e}"))?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
     zip.start_file("clipboard.db", options)
         .map_err(|e| e.to_string())?;
-    zip.write_all(&fs::read(&export_db).map_err(|e| format!("读取数据库副本失败: {}", e))?)
+    zip.write_all(&fs::read(&export_db).map_err(|e| format!("读取数据库副本失败: {e}"))?)
         .map_err(|e| e.to_string())?;
     let _ = fs::remove_file(&export_db);
 
@@ -234,7 +232,7 @@ pub async fn export_data(
 
     zip.finish().map_err(|e| e.to_string())?;
 
-    let size = fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
+    let size = fs::metadata(&dest_path).map_or(0, |m| m.len());
     Ok(format!("导出成功 ({})", format_size(size)))
 }
 
@@ -259,14 +257,13 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
         None => return Err("用户取消了导入".to_string()),
     };
 
-    let file = File::open(&src_path).map_err(|e| format!("打开文件失败: {}", e))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效的 ZIP 文件: {}", e))?;
+    let file = File::open(&src_path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("无效的 ZIP 文件: {e}"))?;
 
     let has_db = (0..archive.len()).any(|i| {
         archive
             .by_index(i)
-            .map(|f| f.name() == "clipboard.db")
-            .unwrap_or(false)
+            .is_ok_and(|f| f.name() == "clipboard.db")
     });
     if !has_db {
         return Err("ZIP 文件中未找到 clipboard.db，不是有效的备份文件".to_string());
@@ -280,12 +277,9 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
 
-        let rel_path = match sanitize_zip_relative_path(&name) {
-            Some(path) => path,
-            None => {
-                tracing::warn!("Skipping unsafe zip entry path: {}", name);
-                continue;
-            }
+        let Some(rel_path) = sanitize_zip_relative_path(&name) else {
+            tracing::warn!("Skipping unsafe zip entry path: {name}");
+            continue;
         };
 
         // 跳过临时数据库文件，仅导入 clipboard.db 和资产目录
@@ -306,14 +300,13 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
             }
             let mut buf = Vec::new();
             entry.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-            fs::write(&out_path, &buf).map_err(|e| format!("写入 {} 失败: {}", name, e))?;
+            fs::write(&out_path, &buf).map_err(|e| format!("写入 {name} 失败: {e}"))?;
             files_extracted += 1;
         }
     }
 
     Ok(format!(
-        "导入成功，共恢复 {} 个文件，应用即将重启",
-        files_extracted
+        "导入成功，共恢复 {files_extracted} 个文件，应用即将重启"
     ))
 }
 

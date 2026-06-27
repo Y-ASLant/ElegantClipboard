@@ -19,16 +19,12 @@ pub fn start(app: tauri::AppHandle) {
 
 /// 注册快捷键
 pub fn register(shortcut_str: &str, callback: ShortcutCallback) -> bool {
-    let app = match APP_HANDLE.get() {
-        Some(a) => a,
-        None => return false,
+    let Some(app) = APP_HANDLE.get() else {
+        return false;
     };
-    let parsed = match crate::shortcut::parse_shortcut(shortcut_str) {
-        Some(s) => s,
-        None => {
-            tracing::warn!("热键: 无法解析快捷键 '{}'", shortcut_str);
-            return false;
-        }
+    let Some(parsed) = crate::shortcut::parse_shortcut(shortcut_str) else {
+        tracing::warn!("热键: 无法解析快捷键 '{shortcut_str}'");
+        return false;
     };
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let cb = callback.clone();
@@ -54,9 +50,8 @@ pub fn register(shortcut_str: &str, callback: ShortcutCallback) -> bool {
 
 /// 注销快捷键
 pub fn unregister(shortcut_str: &str) {
-    let app = match APP_HANDLE.get() {
-        Some(a) => a,
-        None => return,
+    let Some(app) = APP_HANDLE.get() else {
+        return;
     };
     if let Some(parsed) = crate::shortcut::parse_shortcut(shortcut_str) {
         use tauri_plugin_global_shortcut::GlobalShortcutExt;

@@ -197,7 +197,10 @@ impl ConditionBuilder {
 
     /// Get parameter references for query execution.
     fn param_refs(&self) -> Vec<&dyn rusqlite::ToSql> {
-        self.params.iter().map(|p| p.as_ref()).collect()
+        self.params
+            .iter()
+            .map(std::convert::AsRef::as_ref)
+            .collect()
     }
 
     /// SELECT single-column string results with optional trailing SQL.
@@ -216,7 +219,7 @@ impl ConditionBuilder {
         let mut stmt = conn.prepare(&sql)?;
         let results = stmt
             .query_map(refs.as_slice(), |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(results)
     }
@@ -325,16 +328,14 @@ impl ClipboardRepository {
         let count: i64 = match group_id {
             Some(gid) => conn.query_row(
                 &format!(
-                    "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1 AND group_id = ?2",
-                    column
+                    "SELECT COUNT(*) FROM clipboard_items WHERE {column} = ?1 AND group_id = ?2"
                 ),
                 params![hash, gid],
                 |row| row.get(0),
             )?,
             None => conn.query_row(
                 &format!(
-                    "SELECT COUNT(*) FROM clipboard_items WHERE {} = ?1 AND group_id IS NULL",
-                    column
+                    "SELECT COUNT(*) FROM clipboard_items WHERE {column} = ?1 AND group_id IS NULL"
                 ),
                 params![hash],
                 |row| row.get(0),
@@ -381,10 +382,9 @@ impl ClipboardRepository {
         let column = column.as_sql();
         let select_sql = format!(
             "SELECT id FROM clipboard_items \
-             WHERE {} = ? AND {} \
+             WHERE {column} = ? AND {group_cond} \
              ORDER BY sort_order DESC, created_at DESC, id DESC \
-             LIMIT 1",
-            column, group_cond
+             LIMIT 1"
         );
 
         let target_id: Result<i64, _> = if let Some(gid) = group_param {
@@ -437,10 +437,9 @@ impl ClipboardRepository {
         let (group_cond, group_param) = Self::group_condition(group_id);
         let sql = format!(
             "SELECT * FROM clipboard_items \
-             WHERE {} \
+             WHERE {group_cond} \
              ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
-             LIMIT 1 OFFSET ?",
-            group_cond
+             LIMIT 1 OFFSET ?"
         );
         let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
             conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
@@ -465,10 +464,9 @@ impl ClipboardRepository {
         let (group_cond, group_param) = Self::group_condition(group_id);
         let sql = format!(
             "SELECT * FROM clipboard_items \
-             WHERE {} AND is_favorite = 1 \
+             WHERE {group_cond} AND is_favorite = 1 \
              ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC \
-             LIMIT 1 OFFSET ?",
-            group_cond
+             LIMIT 1 OFFSET ?"
         );
         let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
             conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
@@ -564,7 +562,7 @@ impl ClipboardRepository {
         };
         let types: Vec<&str> = raw
             .split(',')
-            .map(|s| s.trim())
+            .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect();
         if types.is_empty() {
@@ -593,18 +591,14 @@ impl ClipboardRepository {
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
 
-        let is_searching = options
-            .search
-            .as_ref()
-            .map(|s| !s.is_empty())
-            .unwrap_or(false);
+        let is_searching = options.search.as_ref().is_some_and(|s| !s.is_empty());
         let columns = if is_searching {
             Self::SEARCH_COLUMNS
         } else {
             Self::LIST_COLUMNS
         };
 
-        let mut sql = format!("SELECT {} FROM clipboard_items", columns);
+        let mut sql = format!("SELECT {columns} FROM clipboard_items");
         let (conditions, mut params_vec) = Self::build_filter_conditions(&options);
         Self::append_where(&mut sql, &conditions);
 
@@ -624,11 +618,11 @@ impl ClipboardRepository {
         }
 
         let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
         let mut stmt = conn.prepare(&sql)?;
         let items = stmt
             .query_map(params_refs.as_slice(), Self::row_to_item)?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
         Ok(items)
@@ -642,7 +636,7 @@ impl ClipboardRepository {
         Self::append_where(&mut sql, &conditions);
 
         let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
         let count: i64 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
         Ok(count)
     }
@@ -717,18 +711,17 @@ impl ClipboardRepository {
         let in_clause = placeholders.join(",");
 
         let sql = format!(
-            "SELECT image_path FROM clipboard_items WHERE id IN ({}) AND image_path IS NOT NULL",
-            in_clause
+            "SELECT image_path FROM clipboard_items WHERE id IN ({in_clause}) AND image_path IS NOT NULL"
         );
         let mut stmt = conn.prepare(&sql)?;
         let params_ref: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let paths: Vec<String> = stmt
             .query_map(params_ref.as_slice(), |row| row.get(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
 
-        let del_sql = format!("DELETE FROM clipboard_items WHERE id IN ({})", in_clause);
+        let del_sql = format!("DELETE FROM clipboard_items WHERE id IN ({in_clause})");
         let params_ref2: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
         let deleted = conn.execute(&del_sql, params_ref2.as_slice())? as i64;
@@ -772,7 +765,7 @@ impl ClipboardRepository {
             conn.prepare("SELECT image_path FROM clipboard_items WHERE image_path IS NOT NULL")?;
         let paths = stmt
             .query_map([], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(paths)
     }
@@ -786,7 +779,7 @@ impl ClipboardRepository {
         )?;
         let paths = stmt
             .query_map(params![group_id], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(paths)
     }
@@ -1050,13 +1043,12 @@ impl ClipboardRepository {
     ) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let sql = format!(
-            "SELECT * FROM clipboard_items WHERE content_type IN ({}) AND byte_size <= ?1 ORDER BY created_at DESC",
-            type_filter_sql
+            "SELECT * FROM clipboard_items WHERE content_type IN ({type_filter_sql}) AND byte_size <= ?1 ORDER BY created_at DESC"
         );
         let mut stmt = conn.prepare(&sql)?;
         let items = stmt
             .query_map(params![max_byte_size], Self::row_to_item)?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(items)
     }
@@ -1224,8 +1216,7 @@ impl SettingsRepository {
         self.get(key)
             .ok()
             .flatten()
-            .map(|v| v == "true")
-            .unwrap_or(default)
+            .map_or(default, |v| v == "true")
     }
 
     /// 读取并解析为指定类型，缺失/出错/解析失败时返回 None。
@@ -1249,7 +1240,7 @@ impl SettingsRepository {
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(settings)
     }
@@ -1269,16 +1260,13 @@ impl SettingsRepository {
             .map(|(i, _)| format!("?{}", i + 1))
             .collect::<Vec<_>>()
             .join(", ");
-        let sql = format!(
-            "SELECT key, value FROM settings WHERE key IN ({})",
-            placeholders
-        );
+        let sql = format!("SELECT key, value FROM settings WHERE key IN ({placeholders})");
         let mut stmt = conn.prepare(&sql)?;
         let map = stmt
             .query_map(rusqlite::params_from_iter(keys.iter()), |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(map)
     }
@@ -1327,7 +1315,7 @@ impl GroupRepository {
                     item_count: row.get(5)?,
                 })
             })?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         Ok(groups)
     }
@@ -1414,5 +1402,617 @@ impl GroupRepository {
         )?;
         debug!("Moved item {} to group {:?}", item_id, group_id);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::Database;
+
+    fn temp_db() -> Database {
+        let dir = std::env::temp_dir().join(format!("ec_repo_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!(
+            "test_{}.db",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        Database::new(path).unwrap()
+    }
+
+    fn make_text_item(text: &str) -> NewClipboardItem {
+        let hash = blake3::hash(format!("text:{text}").as_bytes())
+            .to_hex()
+            .to_string();
+        NewClipboardItem {
+            content_type: ContentType::Text,
+            text_content: Some(text.to_string()),
+            preview: Some(text.chars().take(200).collect()),
+            content_hash: hash.clone(),
+            semantic_hash: hash,
+            byte_size: text.len() as i64,
+            char_count: Some(text.chars().count() as i64),
+            ..Default::default()
+        }
+    }
+
+    // ==================== ClipboardRepository ====================
+
+    #[test]
+    fn insert_and_get_by_id() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("hello")).unwrap();
+        let item = repo.get_by_id(id).unwrap().unwrap();
+        assert_eq!(item.text_content.as_deref(), Some("hello"));
+        assert_eq!(item.content_type, "text");
+    }
+
+    #[test]
+    fn get_nonexistent_returns_none() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        assert!(repo.get_by_id(999).unwrap().is_none());
+    }
+
+    #[test]
+    fn insert_increments_sort_order() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id1 = repo.insert(make_text_item("first")).unwrap();
+        let id2 = repo.insert(make_text_item("second")).unwrap();
+        let item1 = repo.get_by_id(id1).unwrap().unwrap();
+        let item2 = repo.get_by_id(id2).unwrap().unwrap();
+        assert!(item2.sort_order > item1.sort_order);
+    }
+
+    #[test]
+    fn exists_by_hash() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let item = make_text_item("test_exists");
+        let hash = item.content_hash.clone();
+        repo.insert(item).unwrap();
+        assert!(repo.exists_by_hash(&hash, None).unwrap());
+        assert!(!repo.exists_by_hash("nonexistent", None).unwrap());
+    }
+
+    #[test]
+    fn exists_by_hash_respects_group() {
+        let db = temp_db();
+        let group_repo = GroupRepository::new(&db);
+        let group = group_repo.create("test_group", None).unwrap();
+
+        let repo = ClipboardRepository::new(&db);
+        let mut item = make_text_item("grouped");
+        item.group_id = Some(group.id);
+        let hash = item.content_hash.clone();
+        repo.insert(item).unwrap();
+
+        assert!(!repo.exists_by_hash(&hash, None).unwrap());
+        assert!(repo.exists_by_hash(&hash, Some(group.id)).unwrap());
+    }
+
+    #[test]
+    fn touch_by_hash_updates_sort_order() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let item = make_text_item("touchable");
+        let hash = item.content_hash.clone();
+        let id = repo.insert(item).unwrap();
+        let original = repo.get_by_id(id).unwrap().unwrap();
+
+        repo.insert(make_text_item("spacer")).unwrap();
+        let touched_id = repo.touch_by_hash(&hash, None).unwrap();
+        assert_eq!(touched_id, Some(id));
+
+        let updated = repo.get_by_id(id).unwrap().unwrap();
+        assert!(updated.sort_order > original.sort_order);
+        assert!(updated.access_count > original.access_count);
+    }
+
+    #[test]
+    fn touch_nonexistent_returns_none() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        assert!(repo.touch_by_hash("no_such_hash", None).unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_item() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("to_delete")).unwrap();
+        assert!(repo.get_by_id(id).unwrap().is_some());
+        repo.delete(id).unwrap();
+        assert!(repo.get_by_id(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn batch_delete() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id1 = repo.insert(make_text_item("batch1")).unwrap();
+        let id2 = repo.insert(make_text_item("batch2")).unwrap();
+        let id3 = repo.insert(make_text_item("batch3")).unwrap();
+
+        let (deleted, _paths) = repo.batch_delete(&[id1, id3]).unwrap();
+        assert_eq!(deleted, 2);
+        assert!(repo.get_by_id(id1).unwrap().is_none());
+        assert!(repo.get_by_id(id2).unwrap().is_some());
+        assert!(repo.get_by_id(id3).unwrap().is_none());
+    }
+
+    #[test]
+    fn batch_delete_empty_ids() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let (deleted, paths) = repo.batch_delete(&[]).unwrap();
+        assert_eq!(deleted, 0);
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn toggle_pin() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("pin_test")).unwrap();
+        assert!(!repo.get_by_id(id).unwrap().unwrap().is_pinned);
+        let pinned = repo.toggle_pin(id).unwrap();
+        assert!(pinned);
+        assert!(repo.get_by_id(id).unwrap().unwrap().is_pinned);
+        let unpinned = repo.toggle_pin(id).unwrap();
+        assert!(!unpinned);
+    }
+
+    #[test]
+    fn toggle_favorite() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("fav_test")).unwrap();
+        let fav = repo.toggle_favorite(id).unwrap();
+        assert!(fav);
+        let item = repo.get_by_id(id).unwrap().unwrap();
+        assert!(item.is_favorite);
+        assert!(item.favorite_order > 0);
+
+        let unfav = repo.toggle_favorite(id).unwrap();
+        assert!(!unfav);
+        let item = repo.get_by_id(id).unwrap().unwrap();
+        assert!(!item.is_favorite);
+        assert_eq!(item.favorite_order, 0);
+    }
+
+    #[test]
+    fn list_default_ordering() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("older")).unwrap();
+        repo.insert(make_text_item("newer")).unwrap();
+
+        let items = repo.list(QueryOptions::default()).unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items[0].sort_order > items[1].sort_order);
+    }
+
+    #[test]
+    fn list_with_search() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("hello world")).unwrap();
+        repo.insert(make_text_item("goodbye world")).unwrap();
+        repo.insert(make_text_item("hello rust")).unwrap();
+
+        let items = repo
+            .list(QueryOptions {
+                search: Some("hello".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn list_with_content_type_filter() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("text item")).unwrap();
+
+        let img_item = NewClipboardItem {
+            content_type: ContentType::Image,
+            content_hash: "img_hash".to_string(),
+            semantic_hash: "img_hash".to_string(),
+            image_path: Some("/fake/path.png".to_string()),
+            ..Default::default()
+        };
+        repo.insert(img_item).unwrap();
+
+        let text_only = repo
+            .list(QueryOptions {
+                content_type: Some("text".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(text_only.len(), 1);
+    }
+
+    #[test]
+    fn list_with_limit_and_offset() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        for i in 0..5 {
+            repo.insert(make_text_item(&format!("item_{i}"))).unwrap();
+        }
+
+        let items = repo
+            .list(QueryOptions {
+                limit: Some(2),
+                offset: Some(1),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn count_items() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        for i in 0..3 {
+            repo.insert(make_text_item(&format!("count_{i}"))).unwrap();
+        }
+        let count = repo.count(QueryOptions::default()).unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn count_with_filter() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("fav count")).unwrap();
+        let id2 = repo.insert(make_text_item("fav count 2")).unwrap();
+        repo.toggle_favorite(id2).unwrap();
+
+        let fav_count = repo
+            .count(QueryOptions {
+                favorite_only: true,
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(fav_count, 1);
+    }
+
+    #[test]
+    fn clear_history_preserves_pinned_and_favorites() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id1 = repo.insert(make_text_item("normal")).unwrap();
+        let id2 = repo.insert(make_text_item("pinned")).unwrap();
+        let id3 = repo.insert(make_text_item("favorite")).unwrap();
+        repo.toggle_pin(id2).unwrap();
+        repo.toggle_favorite(id3).unwrap();
+
+        let deleted = repo.clear_history(None, None).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(repo.get_by_id(id1).unwrap().is_none());
+        assert!(repo.get_by_id(id2).unwrap().is_some());
+        assert!(repo.get_by_id(id3).unwrap().is_some());
+    }
+
+    #[test]
+    fn clear_all() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("all1")).unwrap();
+        let id2 = repo.insert(make_text_item("all2")).unwrap();
+        repo.toggle_pin(id2).unwrap();
+        repo.clear_all().unwrap();
+        assert_eq!(repo.count(QueryOptions::default()).unwrap(), 0);
+    }
+
+    #[test]
+    fn move_item_by_id_swaps_sort_order() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id1 = repo.insert(make_text_item("move_a")).unwrap();
+        let id2 = repo.insert(make_text_item("move_b")).unwrap();
+        let sort1 = repo.get_by_id(id1).unwrap().unwrap().sort_order;
+        let sort2 = repo.get_by_id(id2).unwrap().unwrap().sort_order;
+
+        repo.move_item_by_id(id1, id2).unwrap();
+        assert_eq!(repo.get_by_id(id1).unwrap().unwrap().sort_order, sort2);
+        assert_eq!(repo.get_by_id(id2).unwrap().unwrap().sort_order, sort1);
+    }
+
+    #[test]
+    fn bump_to_top() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id1 = repo.insert(make_text_item("bump1")).unwrap();
+        let id2 = repo.insert(make_text_item("bump2")).unwrap();
+        let sort2 = repo.get_by_id(id2).unwrap().unwrap().sort_order;
+
+        repo.bump_to_top(id1).unwrap();
+        let new_sort1 = repo.get_by_id(id1).unwrap().unwrap().sort_order;
+        assert!(new_sort1 > sort2);
+    }
+
+    #[test]
+    fn bump_to_top_skips_pinned() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("pinned_bump")).unwrap();
+        repo.toggle_pin(id).unwrap();
+        let original_sort = repo.get_by_id(id).unwrap().unwrap().sort_order;
+        repo.bump_to_top(id).unwrap();
+        assert_eq!(
+            repo.get_by_id(id).unwrap().unwrap().sort_order,
+            original_sort
+        );
+    }
+
+    #[test]
+    fn update_text_content() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("original text")).unwrap();
+        repo.update_text_content(id, "updated text").unwrap();
+        let item = repo.get_by_id(id).unwrap().unwrap();
+        assert_eq!(item.text_content.as_deref(), Some("updated text"));
+        assert_eq!(item.content_type, "text");
+        assert_eq!(item.char_count, Some(12));
+    }
+
+    #[test]
+    fn get_by_position() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("pos0")).unwrap();
+        repo.insert(make_text_item("pos1")).unwrap();
+
+        let first = repo.get_by_position(0, None).unwrap().unwrap();
+        assert_eq!(first.preview.as_deref(), Some("pos1"));
+        let second = repo.get_by_position(1, None).unwrap().unwrap();
+        assert_eq!(second.preview.as_deref(), Some("pos0"));
+    }
+
+    #[test]
+    fn enforce_max_count() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        for i in 0..5 {
+            repo.insert(make_text_item(&format!("enforce_{i}")))
+                .unwrap();
+        }
+        let (deleted, _) = repo.enforce_max_count(3, None).unwrap();
+        assert_eq!(deleted, 2);
+        assert_eq!(repo.count(QueryOptions::default()).unwrap(), 3);
+    }
+
+    #[test]
+    fn enforce_max_count_no_op_when_under_limit() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        repo.insert(make_text_item("under_limit")).unwrap();
+        let (deleted, _) = repo.enforce_max_count(10, None).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    // ==================== SettingsRepository ====================
+
+    #[test]
+    fn settings_get_set() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("my_key", "my_value").unwrap();
+        assert_eq!(repo.get("my_key").unwrap(), Some("my_value".to_string()));
+    }
+
+    #[test]
+    fn settings_get_nonexistent() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        assert_eq!(repo.get("no_such_key").unwrap(), None);
+    }
+
+    #[test]
+    fn settings_get_or_default() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        assert_eq!(repo.get_or("missing", "fallback"), "fallback");
+        repo.set("present", "value").unwrap();
+        assert_eq!(repo.get_or("present", "fallback"), "value");
+    }
+
+    #[test]
+    fn settings_get_bool() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("flag_true", "true").unwrap();
+        repo.set("flag_false", "false").unwrap();
+        assert!(repo.get_bool("flag_true", false));
+        assert!(!repo.get_bool("flag_false", true));
+        assert!(repo.get_bool("missing_flag", true));
+    }
+
+    #[test]
+    fn settings_get_parsed() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("num", "42").unwrap();
+        assert_eq!(repo.get_parsed::<i32>("num"), Some(42));
+        assert_eq!(repo.get_parsed::<i32>("missing"), None);
+    }
+
+    #[test]
+    fn settings_get_batch() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("k1", "v1").unwrap();
+        repo.set("k2", "v2").unwrap();
+        let result = repo.get_batch(&["k1", "k2", "k3"]);
+        assert_eq!(result.get("k1").unwrap(), &Some("v1".to_string()));
+        assert_eq!(result.get("k2").unwrap(), &Some("v2".to_string()));
+        assert_eq!(result.get("k3").unwrap(), &None);
+    }
+
+    #[test]
+    fn settings_get_multiple() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("a", "1").unwrap();
+        repo.set("b", "2").unwrap();
+        let result = repo.get_multiple(&["a", "b", "c"]).unwrap();
+        assert_eq!(result.get("a").unwrap(), "1");
+        assert_eq!(result.get("b").unwrap(), "2");
+        assert!(!result.contains_key("c"));
+    }
+
+    #[test]
+    fn settings_get_all() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        let all = repo.get_all().unwrap();
+        assert!(all.contains_key("global_shortcut"));
+    }
+
+    #[test]
+    fn settings_clear_all() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("extra", "val").unwrap();
+        repo.clear_all().unwrap();
+        assert!(repo.get_all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn settings_upsert() {
+        let db = temp_db();
+        let repo = SettingsRepository::new(&db);
+        repo.set("upsert_key", "first").unwrap();
+        repo.set("upsert_key", "second").unwrap();
+        assert_eq!(repo.get("upsert_key").unwrap(), Some("second".to_string()));
+    }
+
+    // ==================== GroupRepository ====================
+
+    #[test]
+    fn group_create_and_list() {
+        let db = temp_db();
+        let repo = GroupRepository::new(&db);
+        let group = repo.create("Test Group", Some("#ff0000")).unwrap();
+        assert_eq!(group.name, "Test Group");
+        assert_eq!(group.color.as_deref(), Some("#ff0000"));
+        assert_eq!(group.item_count, 0);
+
+        let groups = repo.list_with_count().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Test Group");
+    }
+
+    #[test]
+    fn group_rename() {
+        let db = temp_db();
+        let repo = GroupRepository::new(&db);
+        let group = repo.create("Old Name", None).unwrap();
+        repo.rename(group.id, "New Name").unwrap();
+        let groups = repo.list_with_count().unwrap();
+        assert_eq!(groups[0].name, "New Name");
+    }
+
+    #[test]
+    fn group_update_color() {
+        let db = temp_db();
+        let repo = GroupRepository::new(&db);
+        let group = repo.create("Colored", None).unwrap();
+        assert!(group.color.is_none());
+        repo.update_color(group.id, Some("#00ff00")).unwrap();
+        let groups = repo.list_with_count().unwrap();
+        assert_eq!(groups[0].color.as_deref(), Some("#00ff00"));
+    }
+
+    #[test]
+    fn group_delete() {
+        let db = temp_db();
+        let repo = GroupRepository::new(&db);
+        let group = repo.create("To Delete", None).unwrap();
+        repo.delete(group.id).unwrap();
+        assert!(repo.list_with_count().unwrap().is_empty());
+    }
+
+    #[test]
+    fn group_delete_cascades_items() {
+        let db = temp_db();
+        let group_repo = GroupRepository::new(&db);
+        let group = group_repo.create("Cascade Group", None).unwrap();
+
+        let clip_repo = ClipboardRepository::new(&db);
+        let mut item = make_text_item("grouped_item");
+        item.group_id = Some(group.id);
+        let id = clip_repo.insert(item).unwrap();
+
+        group_repo.delete(group.id).unwrap();
+        assert!(clip_repo.get_by_id(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn group_move_item() {
+        let db = temp_db();
+        let group_repo = GroupRepository::new(&db);
+        let group = group_repo.create("Move Target", None).unwrap();
+
+        let clip_repo = ClipboardRepository::new(&db);
+        let id = clip_repo.insert(make_text_item("movable")).unwrap();
+
+        group_repo.move_item_to_group(id, Some(group.id)).unwrap();
+        assert!(
+            clip_repo
+                .exists_by_hash(
+                    &clip_repo.get_by_id(id).unwrap().unwrap().content_hash,
+                    Some(group.id),
+                )
+                .unwrap()
+        );
+
+        group_repo.move_item_to_group(id, None).unwrap();
+        assert!(
+            clip_repo
+                .exists_by_hash(
+                    &clip_repo.get_by_id(id).unwrap().unwrap().content_hash,
+                    None,
+                )
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn group_delete_all() {
+        let db = temp_db();
+        let repo = GroupRepository::new(&db);
+        repo.create("G1", None).unwrap();
+        repo.create("G2", None).unwrap();
+        repo.delete_all().unwrap();
+        assert!(repo.list_with_count().unwrap().is_empty());
+    }
+
+    #[test]
+    fn group_item_count() {
+        let db = temp_db();
+        let group_repo = GroupRepository::new(&db);
+        let group = group_repo.create("Counting", None).unwrap();
+
+        let clip_repo = ClipboardRepository::new(&db);
+        let mut item1 = make_text_item("count_a");
+        item1.group_id = Some(group.id);
+        let mut item2 = make_text_item("count_b");
+        item2.group_id = Some(group.id);
+        clip_repo.insert(item1).unwrap();
+        clip_repo.insert(item2).unwrap();
+
+        let groups = group_repo.list_with_count().unwrap();
+        assert_eq!(groups[0].item_count, 2);
     }
 }

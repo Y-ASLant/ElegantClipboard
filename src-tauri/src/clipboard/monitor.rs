@@ -117,13 +117,15 @@ impl ClipboardMonitor {
     /// 恢复监控（递减暂停计数，归零时真正恢复）
     pub fn resume(&self) {
         // 原子递减，仅当 > 0 时执行，避免 u32 下溢
-        match self
-            .pause_count
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
-                if current > 0 { Some(current - 1) } else { None }
-            }) {
-            Ok(prev) => debug!("Clipboard monitor resume (count: {})", prev - 1),
-            Err(_) => warn!("Resume called when not paused"),
+        if let Ok(prev) =
+            self.pause_count
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                    if current > 0 { Some(current - 1) } else { None }
+                })
+        {
+            debug!("Clipboard monitor resume (count: {})", prev - 1);
+        } else {
+            warn!("Resume called when not paused");
         }
     }
 
@@ -196,9 +198,8 @@ impl CMHandler for MonitorHandler {
         };
 
         // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
-        let content = match read_clipboard_content_with_retry(max_image_bytes) {
-            Some(c) => c,
-            None => return CallbackResult::Next,
+        let Some(content) = read_clipboard_content_with_retry(max_image_bytes) else {
+            return CallbackResult::Next;
         };
 
         // 读取当前活动分组
@@ -242,7 +243,7 @@ fn read_clipboard_content_with_retry(max_image_bytes: usize) -> Option<Clipboard
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(
-                RETRY_DELAY_MS * attempt as u64,
+                RETRY_DELAY_MS * u64::from(attempt),
             ));
             debug!("Clipboard read retry {}/{}", attempt + 1, MAX_RETRIES);
         }
@@ -298,7 +299,7 @@ fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
             // 经验：PNG 压缩比通常 ≥ 4（截图/纯色更高，摄影/真随机最低），
             // 故按"每像素约 1 字节"作为 PNG 字节数的近似上界——与 UI 上"图片大小"语义一致。
             if max_image_bytes > 0 {
-                let estimated_png_bytes = (width as u64).saturating_mul(height as u64);
+                let estimated_png_bytes = u64::from(width).saturating_mul(u64::from(height));
                 if estimated_png_bytes > max_image_bytes as u64 {
                     warn!(
                         "Clipboard image {}x{} (~{} bytes estimated PNG) exceeds max {} bytes, skipping",

@@ -83,15 +83,14 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 button_state: MouseButtonState::Up,
                 ..
             } = event
+                && let Some(window) = tray.app_handle().get_webview_window("main")
             {
-                if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let is_visible = window.is_visible().unwrap_or(false);
-                    let is_minimized = window.is_minimized().unwrap_or(false);
-                    if is_visible && !is_minimized {
-                        crate::commands::window::hide_main_window(tray.app_handle(), &window);
-                    } else if !crate::keyboard_hook::was_recently_hidden(300) {
-                        crate::commands::window::show_main_window(tray.app_handle(), &window);
-                    }
+                let is_visible = window.is_visible().unwrap_or(false);
+                let is_minimized = window.is_minimized().unwrap_or(false);
+                if is_visible && !is_minimized {
+                    crate::commands::window::hide_main_window(tray.app_handle(), &window);
+                } else if !crate::keyboard_hook::was_recently_hidden(300) {
+                    crate::commands::window::show_main_window(tray.app_handle(), &window);
                 }
             }
         })
@@ -104,16 +103,13 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_tray_visibility(app: &AppHandle) -> bool {
-    app.try_state::<Arc<AppState>>()
-        .map(|state| {
-            let repo = crate::database::SettingsRepository::new(&state.db);
-            repo.get("tray_icon_visible")
-                .ok()
-                .flatten()
-                .map(|value| value != "false")
-                .unwrap_or(true)
-        })
-        .unwrap_or(true)
+    app.try_state::<Arc<AppState>>().is_none_or(|state| {
+        let repo = crate::database::SettingsRepository::new(&state.db);
+        repo.get("tray_icon_visible")
+            .ok()
+            .flatten()
+            .is_none_or(|value| value != "false")
+    })
 }
 
 pub(crate) fn set_tray_visibility(app: &AppHandle, visible: bool) -> Result<(), String> {
@@ -207,7 +203,7 @@ pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
 
     let window = builder
         .build()
-        .map_err(|e| format!("创建设置窗口失败: {}", e))?;
+        .map_err(|e| format!("创建设置窗口失败: {e}"))?;
 
     // 构建后设置物理位置，绕过逻辑→物理坐标换算歧义
     if let Some(pos) = phys_pos {

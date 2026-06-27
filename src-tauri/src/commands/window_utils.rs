@@ -4,7 +4,6 @@
 /// - window.rs: 切换窗口特效时，有特效→移除，无特效→添加
 /// - preview.rs: 预览窗口应用特效前移除
 /// - lib.rs: 主窗口启动时添加（防止 Win10 无 DWM 特效时闪烁）
-
 #[cfg(target_os = "windows")]
 pub(crate) fn set_ws_ex_layered(hwnd: windows::Win32::Foundation::HWND, enable: bool) {
     use windows::Win32::UI::WindowsAndMessaging::{

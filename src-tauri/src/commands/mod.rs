@@ -104,9 +104,8 @@ static RESUME_TX: std::sync::LazyLock<std::sync::mpsc::Sender<crate::clipboard::
             .name("monitor-resume".into())
             .spawn(move || {
                 loop {
-                    let first = match rx.recv() {
-                        Ok(monitor) => monitor,
-                        Err(_) => return,
+                    let Ok(first) = rx.recv() else {
+                        return;
                     };
                     let mut pending = vec![first];
 
@@ -156,7 +155,7 @@ pub(crate) fn open_path_in_explorer(path: &std::path::Path) -> Result<(), String
         Command::new("explorer")
             .arg(path)
             .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
+            .map_err(|e| format!("Failed to open folder: {e}"))?;
     }
     #[cfg(target_os = "macos")]
     {
