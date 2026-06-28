@@ -27,14 +27,13 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
             .get("persist_window_size")
             .ok()
             .flatten()
-            .map(|v| v != "false")
-            .unwrap_or(true);
+            .is_none_or(|v| v != "false");
         if persist
             && let Ok(size) = window.inner_size()
             && let Ok(scale) = window.scale_factor()
         {
-            let w = (size.width as f64 / scale).round() as u32;
-            let h = (size.height as f64 / scale).round() as u32;
+            let w = (f64::from(size.width) / scale).round() as u32;
+            let h = (f64::from(size.height) / scale).round() as u32;
             if let Err(e) = settings_repo.set("window_width", &w.to_string()) {
                 tracing::warn!("Failed to save window_width: {}", e);
             }
@@ -53,9 +52,9 @@ pub(crate) fn save_main_window_placement<R: tauri::Runtime>(app: &tauri::AppHand
 }
 
 fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
-    let position_mode = app
-        .try_state::<std::sync::Arc<AppState>>()
-        .map(|state| {
+    let position_mode = app.try_state::<std::sync::Arc<AppState>>().map_or(
+        crate::positioning::PositionMode::FollowCursor,
+        |state| {
             let repo = database::SettingsRepository::new(&state.db);
             if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
                 crate::positioning::PositionMode::from_str(&mode_str)
@@ -64,16 +63,15 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
                     .get("follow_cursor")
                     .ok()
                     .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true);
+                    .is_none_or(|v| v != "false");
                 if follow {
                     crate::positioning::PositionMode::FollowCursor
                 } else {
                     crate::positioning::PositionMode::FixedPosition
                 }
             }
-        })
-        .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+        },
+    );
 
     if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
         let repo = database::SettingsRepository::new(&state.db);
@@ -81,22 +79,18 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
             .get("persist_window_size")
             .ok()
             .flatten()
-            .map(|v| v != "false")
-            .unwrap_or(true);
+            .is_none_or(|v| v != "false");
         if persist {
             let w = repo.get_parsed::<f64>("window_width");
             let h = repo.get_parsed::<f64>("window_height");
             if let (Some(w), Some(h)) = (w, h) {
-                let scale = match position_mode {
-                    crate::positioning::PositionMode::FixedPosition => {
-                        let x = repo.get_parsed::<i32>("window_x").unwrap_or(0);
-                        let y = repo.get_parsed::<i32>("window_y").unwrap_or(0);
-                        crate::positioning::get_monitor_scale_at(window, x, y)
-                    }
-                    _ => {
-                        let (cx, cy) = crate::positioning::get_cursor_position();
-                        crate::positioning::get_monitor_scale_at(window, cx, cy)
-                    }
+                let scale = if position_mode == crate::positioning::PositionMode::FixedPosition {
+                    let x = repo.get_parsed::<i32>("window_x").unwrap_or(0);
+                    let y = repo.get_parsed::<i32>("window_y").unwrap_or(0);
+                    crate::positioning::get_monitor_scale_at(window, x, y)
+                } else {
+                    let (cx, cy) = crate::positioning::get_cursor_position();
+                    crate::positioning::get_monitor_scale_at(window, cx, cy)
                 };
                 let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
                     width: (w * scale).round() as u32,
@@ -236,7 +230,7 @@ pub fn set_window_effect(
         use windows::Win32::Foundation::HWND;
 
         let raw_hwnd = window.hwnd().map_err(|e| e.to_string())?;
-        let hwnd = HWND(raw_hwnd.0 as *mut _);
+        let hwnd = HWND(raw_hwnd.0.cast());
 
         let is_effect = effect != "none";
         super::window_utils::set_ws_ex_layered(hwnd, !is_effect);
@@ -247,11 +241,11 @@ pub fn set_window_effect(
 
         let apply_result: Result<(), String> = match effect.as_str() {
             "mica" => window_vibrancy::apply_mica(&window, dark)
-                .map_err(|e| format!("Failed to apply mica: {}", e)),
+                .map_err(|e| format!("Failed to apply mica: {e}")),
             "acrylic" => window_vibrancy::apply_acrylic(&window, Some((0, 0, 0, 0)))
-                .map_err(|e| format!("Failed to apply acrylic: {}", e)),
+                .map_err(|e| format!("Failed to apply acrylic: {e}")),
             "tabbed" => window_vibrancy::apply_tabbed(&window, dark)
-                .map_err(|e| format!("Failed to apply tabbed: {}", e)),
+                .map_err(|e| format!("Failed to apply tabbed: {e}")),
             _ => Ok(()),
         };
 
@@ -326,17 +320,6 @@ pub async fn check_for_update() -> Result<crate::updater::UpdateInfo, String> {
     tokio::task::spawn_blocking(crate::updater::check_update)
         .await
         .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn get_version_release_notes(
-    version: Option<String>,
-) -> Result<crate::updater::VersionReleaseNotes, String> {
-    tokio::task::spawn_blocking(move || {
-        crate::updater::get_version_release_notes(version.as_deref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

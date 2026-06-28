@@ -5,12 +5,15 @@ import {
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { logError } from "@/lib/logger";
 import { getAccentColor, subscribeAccentColor } from "@/lib/theme-applier";
 import { useUISettings, ColorTheme, DarkMode, WindowEffect } from "@/stores/ui-settings";
+
+// 过滤艺术字体的关键词（大小写不敏感）
+const ART_FONT_PATTERNS = /^(Webdings|Wingdings|MT Extra|Symbol|Bookshelf Symbol|MS Outlook|High Tower Text|Pristina|Jokerman|Vivaldi|Kristen IT|French Script|Playbill|Mistral|Papyrus)/i;
 
 const DARK_MODE_OPTIONS: { value: DarkMode; label: string }[] = [
   { value: "auto", label: "跟随系统" },
@@ -28,19 +31,27 @@ function FontSettingGroup({ label, fonts, font, onFontChange, fontSize, onFontSi
   min: number;
   max: number;
 }) {
+  const [open, setOpen] = useState(false);
+
   return (
     <div className="space-y-3">
       <Label className="text-xs font-medium">{label}</Label>
-      <Select value={font || "__default__"} onValueChange={(v) => onFontChange(v === "__default__" ? "" : v)}>
+      <Select
+        value={font || "__default__"}
+        onValueChange={(v) => onFontChange(v === "__default__" ? "" : v)}
+        onOpenChange={setOpen}
+      >
         <SelectTrigger className="w-full h-8 text-xs">
-          <SelectValue />
+          <span className="line-clamp-1">{font || "默认字体"}</span>
         </SelectTrigger>
-        <SelectContent className="max-h-64 overflow-y-auto">
-          <SelectItem value="__default__" className="text-xs">默认字体</SelectItem>
-          {fonts.map((f) => (
-            <SelectItem key={f} value={f} className="text-xs">{f}</SelectItem>
-          ))}
-        </SelectContent>
+        {open && (
+          <SelectContent className="max-h-64 overflow-y-auto">
+            <SelectItem value="__default__" className="text-xs">默认字体</SelectItem>
+            {fonts.map((f) => (
+              <SelectItem key={f} value={f} className="text-xs">{f}</SelectItem>
+            ))}
+          </SelectContent>
+        )}
       </Select>
       <div className="flex items-center justify-between">
         <Label className="text-xs">字号</Label>
@@ -65,10 +76,10 @@ export function ThemeTab() {
   // 强调色变化时重新渲染
   useEffect(() => subscribeAccentColor(setSystemAccentColor), []);
 
-  // 加载系统字体列表
+  // 加载系统字体列表（过滤掉艺术字体）
   useEffect(() => {
     invoke<string[]>("get_system_fonts")
-      .then(setSystemFonts)
+      .then((fonts) => setSystemFonts(fonts.filter((f) => !ART_FONT_PATTERNS.test(f))))
       .catch((error) => {
         logError("Failed to load system fonts:", error);
       });

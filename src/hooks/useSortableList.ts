@@ -70,10 +70,10 @@ class CustomMouseSensor extends MouseSensor {
   ];
 }
 
-// 优化的测量配置
+// 优化的测量配置：仅在拖拽期间测量，避免滚动时持续布局计算
 const measuringConfig: MeasuringConfiguration = {
   droppable: {
-    strategy: MeasuringStrategy.Always,
+    strategy: MeasuringStrategy.WhileDragging,
   },
 };
 

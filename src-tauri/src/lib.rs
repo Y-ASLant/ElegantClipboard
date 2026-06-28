@@ -140,13 +140,13 @@ pub fn toggle_shortcuts_disabled(app: &tauri::AppHandle) -> bool {
 }
 
 fn default_quick_paste_shortcuts() -> Vec<String> {
-    let mut defaults: Vec<String> = (1..=9).map(|slot| format!("Alt+{}", slot)).collect();
+    let mut defaults: Vec<String> = (1..=9).map(|slot| format!("Alt+{slot}")).collect();
     defaults.push("Alt+0".to_string());
     defaults
 }
 
 fn quick_paste_setting_key(slot: u8) -> String {
-    format!("quick_paste_shortcut_{}", slot)
+    format!("quick_paste_shortcut_{slot}")
 }
 
 fn normalize_shortcut_value(value: &str) -> String {
@@ -237,7 +237,7 @@ fn default_favorite_paste_shortcuts() -> Vec<String> {
 }
 
 fn favorite_paste_setting_key(slot: u8) -> String {
-    format!("favorite_paste_shortcut_{}", slot)
+    format!("favorite_paste_shortcut_{slot}")
 }
 
 fn load_favorite_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
@@ -253,14 +253,14 @@ fn load_favorite_paste_shortcuts(repo: &SettingsRepository) -> Vec<String> {
 
 /// 若快捷键的主键是数字（0-9），返回对应的小键盘变体字符串，如 "Alt+1" → "Alt+Numpad1"
 fn numpad_variant_str(shortcut_str: &str) -> Option<String> {
-    let parts: Vec<&str> = shortcut_str.split('+').map(|s| s.trim()).collect();
+    let parts: Vec<&str> = shortcut_str.split('+').map(str::trim).collect();
     let last = *parts.last()?;
     if last.len() == 1 && last.chars().next()?.is_ascii_digit() {
         let mut result = parts[..parts.len() - 1].join("+");
         if !result.is_empty() {
             result.push('+');
         }
-        result.push_str(&format!("Numpad{}", last));
+        result.push_str(&format!("Numpad{last}"));
         Some(result)
     } else {
         None
@@ -293,15 +293,9 @@ fn apply_paste_shortcuts(
             continue;
         }
 
-        let parsed = match parse_shortcut(&normalized) {
-            Some(v) => v,
-            None => {
-                failures.insert(
-                    slot,
-                    format!("{} {} 快捷键格式无效: {}", label, slot, normalized),
-                );
-                continue;
-            }
+        let Some(parsed) = parse_shortcut(&normalized) else {
+            failures.insert(slot, format!("{label} {slot} 快捷键格式无效: {normalized}"));
+            continue;
         };
 
         let make_handler = |slot: u8, kind: PasteKind| {
@@ -317,7 +311,16 @@ fn apply_paste_shortcuts(
                     if any_focused {
                         return;
                     }
-                    if PASTE_IN_PROGRESS.load(std::sync::atomic::Ordering::Acquire) {
+                    // 原子 CAS 设置标志：成功才继续，避免 CHECK-SET 跨线程竞态
+                    if PASTE_IN_PROGRESS
+                        .compare_exchange(
+                            false,
+                            true,
+                            std::sync::atomic::Ordering::Acquire,
+                            std::sync::atomic::Ordering::Relaxed,
+                        )
+                        .is_err()
+                    {
                         return;
                     }
                     let active_slots = match kind {
@@ -329,7 +332,6 @@ fn apply_paste_shortcuts(
                     let app_handle = app.clone();
                     std::thread::spawn(move || {
                         let _guard = QUICK_PASTE_LOCK.lock();
-                        PASTE_IN_PROGRESS.store(true, std::sync::atomic::Ordering::Release);
                         if is_first {
                             let result = match kind {
                                 PasteKind::Quick => commands::clipboard::quick_paste_by_slot(
@@ -378,7 +380,7 @@ fn apply_paste_shortcuts(
         if let Err(err) = reg_result {
             failures.insert(
                 slot,
-                format!("{} {} 注册失败（{}）: {}", label, slot, normalized, err),
+                format!("{label} {slot} 注册失败（{normalized}）: {err}"),
             );
         }
 
@@ -511,7 +513,7 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
         if let Some(sc) = saved_shortcut {
             let _ = app.global_shortcut().on_shortcut(sc, on_toggle_shortcut);
         }
-        return Err(format!("Failed to register Win+V shortcut: {}", e));
+        return Err(format!("Failed to register Win+V shortcut: {e}"));
     }
 
     let state = app.state::<Arc<AppState>>();
@@ -546,8 +548,8 @@ async fn is_winv_replacement_enabled(_app: tauri::AppHandle) -> bool {
 
 #[tauri::command]
 async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<String, String> {
-    let new_sc = parse_shortcut(&new_shortcut)
-        .ok_or_else(|| format!("Invalid shortcut: {}", new_shortcut))?;
+    let new_sc =
+        parse_shortcut(&new_shortcut).ok_or_else(|| format!("Invalid shortcut: {new_shortcut}"))?;
 
     if !shortcut_has_modifier(&new_shortcut) {
         return Err("快捷键至少包含一个修饰键 (Ctrl/Alt/Win)".to_string());
@@ -559,7 +561,7 @@ async fn update_shortcut(app: tauri::AppHandle, new_shortcut: String) -> Result<
 
     app.global_shortcut()
         .on_shortcut(new_sc, on_toggle_shortcut)
-        .map_err(|e| format!("Failed to register shortcut: {}", e))?;
+        .map_err(|e| format!("Failed to register shortcut: {e}"))?;
 
     *CURRENT_SHORTCUT.write() = Some(new_shortcut.clone());
 
@@ -606,8 +608,8 @@ fn set_paste_shortcut_inner(
         {
             return Err("快速粘贴不支持 Win 修饰键（Win+数字 是系统任务栏快捷键）".to_string());
         }
-        let parsed = parse_shortcut(&normalized)
-            .ok_or_else(|| format!("Invalid shortcut: {}", normalized))?;
+        let parsed =
+            parse_shortcut(&normalized).ok_or_else(|| format!("Invalid shortcut: {normalized}"))?;
         if !shortcut_has_modifier(&normalized) {
             return Err("快捷键至少包含一个修饰键 (Ctrl/Alt)".to_string());
         }
@@ -615,7 +617,7 @@ fn set_paste_shortcut_inner(
         if let Some(main_parsed) = parse_shortcut(&main_sc)
             && parsed == main_parsed
         {
-            return Err(format!("与呼出快捷键 {} 冲突", main_sc));
+            return Err(format!("与呼出快捷键 {main_sc} 冲突"));
         }
     }
 
@@ -786,15 +788,15 @@ pub fn run() {
                     .get("persist_window_size")
                     .ok()
                     .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true);
+                    .is_none_or(|v| v != "false");
                 // 先确定定位模式，再用目标显示器的 scale 设置尺寸
                 let position_mode = settings_repo
                     .get("position_mode")
                     .ok()
                     .flatten()
-                    .map(|v| crate::positioning::PositionMode::from_str(&v))
-                    .unwrap_or(crate::positioning::PositionMode::FollowCursor);
+                    .map_or(crate::positioning::PositionMode::FollowCursor, |v| {
+                        crate::positioning::PositionMode::from_str(&v)
+                    });
                 if persist {
                     let custom_width = settings_repo
                         .get("window_width")
@@ -807,17 +809,15 @@ pub fn run() {
                         .flatten()
                         .and_then(|v| v.parse::<f64>().ok());
                     if let (Some(w), Some(h)) = (custom_width, custom_height) {
-                        let scale = match position_mode {
-                            crate::positioning::PositionMode::FixedPosition => {
+                        let scale =
+                            if position_mode == crate::positioning::PositionMode::FixedPosition {
                                 let x = settings_repo.get_parsed::<i32>("window_x").unwrap_or(0);
                                 let y = settings_repo.get_parsed::<i32>("window_y").unwrap_or(0);
                                 crate::positioning::get_monitor_scale_at(&window, x, y)
-                            }
-                            _ => {
+                            } else {
                                 let (cx, cy) = crate::positioning::get_cursor_position();
                                 crate::positioning::get_monitor_scale_at(&window, cx, cy)
-                            }
-                        };
+                            };
                         let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
                             width: (w * scale).round() as u32,
                             height: (h * scale).round() as u32,
@@ -850,7 +850,7 @@ pub fn run() {
                     {
                         use windows::Win32::Foundation::HWND;
                         if let Ok(raw_hwnd) = window.hwnd() {
-                            let hwnd = HWND(raw_hwnd.0 as *mut _);
+                            let hwnd = HWND(raw_hwnd.0.cast());
                             crate::commands::window_utils::set_ws_ex_layered(hwnd, true);
                         }
                     }
@@ -903,8 +903,7 @@ pub fn run() {
                     .builder()
                     .title("ElegantClipboard 已启动")
                     .body(format!(
-                        "程序已在后台运行，按 {} 打开剪贴板",
-                        shortcut_display
+                        "程序已在后台运行，按 {shortcut_display} 打开剪贴板"
                     ))
                     .show();
             }
@@ -915,8 +914,7 @@ pub fn run() {
                     .get("auto_check_update")
                     .ok()
                     .flatten()
-                    .map(|v| v != "false")
-                    .unwrap_or(true); // 默认开启
+                    .is_none_or(|v| v != "false"); // 默认开启
                 if auto_check {
                     let app_handle = app.handle().clone();
                     std::thread::spawn(move || {
@@ -955,6 +953,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::preview::get_app_version,
+            commands::preview::get_build_time,
             commands::data_transfer::get_default_data_path,
             commands::data_transfer::get_original_default_path,
             commands::data_transfer::check_path_has_data,
@@ -1002,7 +1001,6 @@ pub fn run() {
             get_favorite_paste_shortcuts,
             set_favorite_paste_shortcut,
             commands::window::check_for_update,
-            commands::window::get_version_release_notes,
             commands::window::download_update,
             commands::window::cancel_update_download,
             commands::window::install_update,

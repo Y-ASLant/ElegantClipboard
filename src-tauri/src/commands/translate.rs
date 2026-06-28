@@ -10,11 +10,11 @@ fn parse_response(
     provider: &str,
 ) -> Result<serde_json::Value, String> {
     let status = resp.status();
-    let text = resp.text().map_err(|e| format!("读取响应失败: {}", e))?;
+    let text = resp.text().map_err(|e| format!("读取响应失败: {e}"))?;
     if !status.is_success() {
-        return Err(format!("{}错误 ({}): {}", provider, status, text));
+        return Err(format!("{provider}错误 ({status}): {text}"));
     }
-    serde_json::from_str(&text).map_err(|e| format!("解析响应失败: {}", e))
+    serde_json::from_str(&text).map_err(|e| format!("解析响应失败: {e}"))
 }
 
 /// 构建 HTTP 客户端（根据代理配置）
@@ -27,7 +27,7 @@ fn build_client(proxy_mode: &str, proxy_url: &str) -> Result<reqwest::blocking::
 
     builder
         .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
 }
 
 /// 微软翻译（通过 Edge 免费接口，无需 API Key）
@@ -41,12 +41,12 @@ fn translate_microsoft(
         .get("https://edge.microsoft.com/translate/auth")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0")
         .send()
-        .map_err(|e| format!("获取微软翻译 token 失败: {}", e))?
+        .map_err(|e| format!("获取微软翻译 token 失败: {e}"))?
         .text()
-        .map_err(|e| format!("读取 token 失败: {}", e))?;
+        .map_err(|e| format!("读取 token 失败: {e}"))?;
 
     if token.is_empty() || token.len() < 20 {
-        return Err(format!("获取微软翻译 token 异常: {}", token));
+        return Err(format!("获取微软翻译 token 异常: {token}"));
     }
 
     let from_param = if from == "auto" { "" } else { from };
@@ -56,22 +56,22 @@ fn translate_microsoft(
         from_part = if from_param.is_empty() {
             String::new()
         } else {
-            format!("&from={}", from_param)
+            format!("&from={from_param}")
         },
     );
     let body = serde_json::json!([{ "Text": text }]);
     let resp = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Content-Type", "application/json")
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0")
         .json(&body)
         .send()
-        .map_err(|e| format!("微软翻译请求失败: {}", e))?;
+        .map_err(|e| format!("微软翻译请求失败: {e}"))?;
     let arr = parse_response(resp, "微软翻译")?;
     arr[0]["translations"][0]["text"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| "翻译结果格式异常".to_string())
 }
 
@@ -98,19 +98,19 @@ fn translate_deeplx(
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
-        .map_err(|e| format!("DeepLX 请求失败: {}", e))?;
+        .map_err(|e| format!("DeepLX 请求失败: {e}"))?;
     let val = parse_response(resp, "DeepLX")?;
-    if let Some(data) = val["data"].as_str() {
-        if !data.is_empty() {
-            return Ok(data.to_string());
-        }
+    if let Some(data) = val["data"].as_str()
+        && !data.is_empty()
+    {
+        return Ok(data.to_string());
     }
-    if let Some(alternatives) = val["alternatives"].as_array() {
-        if let Some(first) = alternatives.first().and_then(|v| v.as_str()) {
-            return Ok(first.to_string());
-        }
+    if let Some(alternatives) = val["alternatives"].as_array()
+        && let Some(first) = alternatives.first().and_then(|v| v.as_str())
+    {
+        return Ok(first.to_string());
     }
-    Err(format!("DeepLX 翻译结果异常: {}", val))
+    Err(format!("DeepLX 翻译结果异常: {val}"))
 }
 
 /// 谷歌翻译（免费接口）
@@ -130,7 +130,7 @@ fn translate_google_free(
     let resp = client
         .get(&url)
         .send()
-        .map_err(|e| format!("谷歌翻译请求失败: {}", e))?;
+        .map_err(|e| format!("谷歌翻译请求失败: {e}"))?;
     let val = parse_response(resp, "谷歌翻译")?;
     let mut result = String::new();
     if let Some(sentences) = val[0].as_array() {
@@ -159,10 +159,7 @@ fn translate_google_api(
         return Err("请在设置中填写 Google API Key".to_string());
     }
     let source = if from == "auto" { "" } else { from };
-    let url = format!(
-        "https://translation.googleapis.com/language/translate/v2?key={}",
-        api_key
-    );
+    let url = format!("https://translation.googleapis.com/language/translate/v2?key={api_key}");
     let mut body = serde_json::json!({ "q": text, "target": to, "format": "text" });
     if !source.is_empty() {
         body["source"] = serde_json::json!(source);
@@ -171,11 +168,11 @@ fn translate_google_api(
         .post(&url)
         .json(&body)
         .send()
-        .map_err(|e| format!("Google API 请求失败: {}", e))?;
+        .map_err(|e| format!("Google API 请求失败: {e}"))?;
     let val = parse_response(resp, "Google API")?;
     val["data"]["translations"][0]["translatedText"]
         .as_str()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .ok_or_else(|| "翻译结果格式异常".to_string())
 }
 
@@ -213,7 +210,7 @@ fn translate_baidu(
     let from_baidu = map_lang(from);
     let to_baidu = map_lang(to);
     let salt = chrono::Utc::now().timestamp_millis().to_string();
-    let sign_str = format!("{}{}{}{}", app_id, text, salt, secret_key);
+    let sign_str = format!("{app_id}{text}{salt}{secret_key}");
     let sign = format!("{:x}", md5::compute(sign_str.as_bytes()));
     let params = [
         ("q", text),
@@ -227,11 +224,11 @@ fn translate_baidu(
         .post("https://fanyi-api.baidu.com/api/trans/vip/translate")
         .form(&params)
         .send()
-        .map_err(|e| format!("百度翻译请求失败: {}", e))?;
+        .map_err(|e| format!("百度翻译请求失败: {e}"))?;
     let val = parse_response(resp, "百度翻译")?;
     if let Some(err_code) = val["error_code"].as_str() {
         let err_msg = val["error_msg"].as_str().unwrap_or("未知错误");
-        return Err(format!("百度翻译错误 ({}): {}", err_code, err_msg));
+        return Err(format!("百度翻译错误 ({err_code}): {err_msg}"));
     }
     let results = val["trans_result"]
         .as_array()
@@ -262,7 +259,7 @@ fn translate_openai(
     } else {
         endpoint.trim_end_matches('/')
     };
-    let url = format!("{}/chat/completions", base);
+    let url = format!("{base}/chat/completions");
     let model_id = if model.is_empty() {
         "gpt-4o-mini"
     } else {
@@ -274,8 +271,7 @@ fn translate_openai(
         from
     };
     let system_prompt = format!(
-        "You are a professional translator. Translate the following text from {} to {}. Only output the translation, no explanations.",
-        from_desc, to,
+        "You are a professional translator. Translate the following text from {from_desc} to {to}. Only output the translation, no explanations.",
     );
     let body = serde_json::json!({
         "model": model_id,
@@ -287,10 +283,10 @@ fn translate_openai(
     });
     let resp = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .json(&body)
         .send()
-        .map_err(|e| format!("AI 翻译请求失败: {}", e))?;
+        .map_err(|e| format!("AI 翻译请求失败: {e}"))?;
     let val = parse_response(resp, "AI 翻译")?;
     val["choices"][0]["message"]["content"]
         .as_str()
@@ -299,6 +295,7 @@ fn translate_openai(
 }
 
 /// 翻译文本（Tauri 命令）
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn translate_text(
     text: String,
@@ -351,11 +348,11 @@ pub async fn translate_text(
                 &openai_api_key.unwrap_or_default(),
                 &openai_model.unwrap_or_default(),
             ),
-            other => Err(format!("不支持的翻译提供者: {}", other)),
+            other => Err(format!("不支持的翻译提供者: {other}")),
         }
     })
     .await
-    .map_err(|e| format!("翻译任务失败: {}", e))?
+    .map_err(|e| format!("翻译任务失败: {e}"))?
 }
 
 /// 将文本写入系统剪贴板
@@ -367,10 +364,10 @@ pub async fn write_text_to_clipboard(
 ) -> Result<(), String> {
     let write_fn = || {
         let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("无法访问剪贴板: {}", e))?;
+            arboard::Clipboard::new().map_err(|e| format!("无法访问剪贴板: {e}"))?;
         clipboard
             .set_text(&text)
-            .map_err(|e| format!("写入剪贴板失败: {}", e))?;
+            .map_err(|e| format!("写入剪贴板失败: {e}"))?;
         Ok(())
     };
     if record.unwrap_or(false) {
@@ -483,10 +480,10 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
             .unwrap_or_default();
 
         // 恢复剪贴板原始内容
-        if let Some(ref backup_text) = backup {
-            if let Ok(mut cb) = arboard::Clipboard::new() {
-                let _ = cb.set_text(backup_text);
-            }
+        if let Some(ref backup_text) = backup
+            && let Ok(mut cb) = arboard::Clipboard::new()
+        {
+            let _ = cb.set_text(backup_text);
         }
 
         Ok(text)
@@ -535,7 +532,7 @@ pub async fn open_translate_result_window(
     .always_on_top(true)
     .center()
     .build()
-    .map_err(|e| format!("创建翻译结果窗口失败: {}", e))?;
+    .map_err(|e| format!("创建翻译结果窗口失败: {e}"))?;
 
     Ok(())
 }
@@ -546,9 +543,8 @@ static TRANSLATE_IN_PROGRESS: std::sync::atomic::AtomicBool =
 
 /// 注册翻译选中文字快捷键
 pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return,
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
     };
     let settings_repo = database::SettingsRepository::new(&state.db);
 
@@ -556,8 +552,7 @@ pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
         .get("translate_selection_enabled")
         .ok()
         .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+        .is_some_and(|v| v == "true");
     if !enabled {
         return;
     }
@@ -594,26 +589,23 @@ pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
 
 /// 注销翻译选中文字快捷键
 pub fn unregister_translate_selection_shortcut(app: &tauri::AppHandle) {
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return,
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
     };
     let settings_repo = database::SettingsRepository::new(&state.db);
     if let Some(shortcut_str) = settings_repo
         .get("translate_selection_shortcut")
         .ok()
         .flatten()
+        && !shortcut_str.is_empty()
     {
-        if !shortcut_str.is_empty() {
-            crate::hotkey::unregister(&shortcut_str);
-        }
+        crate::hotkey::unregister(&shortcut_str);
     }
 }
 
 fn trigger_translate_selection(app: &tauri::AppHandle) {
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return,
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
     };
     match get_selected_text_from_system(&state) {
         Ok(text) if !text.trim().is_empty() => {
@@ -657,14 +649,13 @@ pub async fn update_translate_selection_shortcut(
     let settings_repo = database::SettingsRepository::new(&state.db);
     settings_repo
         .set("translate_selection_shortcut", &new_shortcut)
-        .map_err(|e| format!("保存快捷键失败: {}", e))?;
+        .map_err(|e| format!("保存快捷键失败: {e}"))?;
 
     let enabled = settings_repo
         .get("translate_selection_enabled")
         .ok()
         .flatten()
-        .map(|v| v == "true")
-        .unwrap_or(false);
+        .is_some_and(|v| v == "true");
     if enabled {
         register_translate_selection_shortcut(&app);
     }

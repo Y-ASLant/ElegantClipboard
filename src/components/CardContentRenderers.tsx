@@ -521,6 +521,8 @@ const ImagePreview = memo(function ImagePreview({
     return imageAutoHeight ? { maxHeight: `${imageMaxHeight}px` } : {};
   }, [imageAutoHeight, imageMaxHeight]);
 
+  const [imgLoaded, setImgLoaded] = useState(false);
+
   return (
     <div
       ref={containerRef}
@@ -530,14 +532,20 @@ const ImagePreview = memo(function ImagePreview({
       onMouseLeave={hidePreview}
       onWheel={handleWheel}
     >
+      {!imgLoaded && (
+        <div className="absolute inset-0 img-skeleton rounded-sm" />
+      )}
       <img
         src={src}
         alt={alt}
         loading="lazy"
-        className={imgClass}
+        className={cn(imgClass, "img-progressive", imgLoaded && "img-progressive-loaded")}
         style={imgStyle}
         onError={onError}
-        onLoad={handleImgLoad}
+        onLoad={(e) => {
+          handleImgLoad(e);
+          setImgLoaded(true);
+        }}
       />
       {overlay}
     </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useLayoutEffect, useMemo } from "react";
 import {
   Settings16Regular,
   Options16Regular,
@@ -18,7 +18,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AboutTab } from "@/components/settings/AboutTab";
 import { AppFilterTab } from "@/components/settings/AppFilterTab";
 import { AudioTab } from "@/components/settings/AudioTab";
-import { ChangelogDialog } from "@/components/settings/ChangelogDialog";
 import { DataTab, DataSettings } from "@/components/settings/DataTab";
 import { DisplayTab } from "@/components/settings/DisplayTab";
 import { GeneralTab, GeneralSettings } from "@/components/settings/GeneralTab";
@@ -67,10 +66,25 @@ const BASE_NAV_ITEMS: NavItem[] = [
   { id: "plugins", label: "插件扩展", icon: PlugConnected16Regular },
   { id: "about", label: "关于软件", icon: Info16Regular },
 ];
+type NavIndicator = {
+  visible: boolean;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+};
 
 export function Settings() {
   const [activeTab, setActiveTab] = useState<TabType>("general");
   const [pluginsEnabled, setPluginsEnabled] = useState<Record<string, boolean>>({ webdav: false, translate: false });
+  const navRef = useRef<HTMLElement>(null);
+  const [navIndicator, setNavIndicator] = useState<NavIndicator>({
+    visible: false,
+    top: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+  });
 
   const handlePluginToggle = useCallback(async (id: string, value: boolean) => {
     setPluginsEnabled((prev) => ({ ...prev, [id]: value }));
@@ -92,14 +106,75 @@ export function Settings() {
       logError(`保存插件 ${id} 设置失败:`, e);
     }
   }, [activeTab]);
+  const navItems = useMemo(
+    () => {
+      const findNav = (id: TabType) => BASE_NAV_ITEMS.find((item) => item.id === id)!;
+      return [
+        ...BASE_NAV_ITEMS.filter((item) => item.id !== "plugins" && item.id !== "about"),
+        findNav("plugins"),
+        ...(pluginsEnabled.webdav
+          ? [{ id: "webdav" as TabType, label: "WebDAV 同步", icon: ArrowSync16Regular, child: true }]
+          : []),
+        ...(pluginsEnabled.translate
+          ? [{ id: "translate" as TabType, label: "文本翻译", icon: Translate16Regular, child: true }]
+          : []),
+        findNav("about"),
+      ];
+    },
+    [pluginsEnabled.webdav, pluginsEnabled.translate],
+  );
 
-  const navItems = [
-    ...BASE_NAV_ITEMS.slice(0, 7),
-    BASE_NAV_ITEMS[7],
-    ...(pluginsEnabled.webdav ? [{ id: "webdav" as TabType, label: "WebDAV 同步", icon: ArrowSync16Regular, child: true }] : []),
-    ...(pluginsEnabled.translate ? [{ id: "translate" as TabType, label: "文本翻译", icon: Translate16Regular, child: true }] : []),
-    BASE_NAV_ITEMS[8],
-  ];
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const updateNavIndicator = useCallback(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const activeEl = nav.querySelector<HTMLElement>(`[data-nav-id="${activeTabRef.current}"]`);
+    if (!activeEl) {
+      setNavIndicator((prev) =>
+        prev.visible ? { ...prev, visible: false } : prev,
+      );
+      return;
+    }
+
+    const next: NavIndicator = {
+      visible: true,
+      top: activeEl.offsetTop,
+      left: activeEl.offsetLeft,
+      width: activeEl.offsetWidth,
+      height: activeEl.offsetHeight,
+    };
+
+    setNavIndicator((prev) =>
+      prev.visible === next.visible &&
+      prev.top === next.top &&
+      prev.left === next.left &&
+      prev.width === next.width &&
+      prev.height === next.height
+        ? prev
+        : next,
+    );
+  }, []);
+
+  // ResizeObserver 仅在挂载时创建一次，通过 ref 读取最新 activeTab
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const observer = new ResizeObserver(updateNavIndicator);
+    observer.observe(nav);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [updateNavIndicator]);
+
+  // 切换 Tab 或插件增减时同步更新指示器位置
+  useLayoutEffect(() => {
+    updateNavIndicator();
+  }, [updateNavIndicator, activeTab, pluginsEnabled.webdav, pluginsEnabled.translate]);
   
   const [settings, setSettings] = useState<AppSettings>({
     data_path: "",
@@ -120,11 +195,12 @@ export function Settings() {
   const settingsLoadedRef = useRef(false);
   const [themeReady, setThemeReady] = useState(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
+  const [buildTime, setBuildTime] = useState("—");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
-  const [changelogDialogOpen, setChangelogDialogOpen] = useState(false);
 
   useEffect(() => {
     invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
+    invoke<string>("get_build_time").then(setBuildTime).catch(console.error);
   }, []);
 
   // 主题加载完成后显示窗口（此时过渡被禁用，主题色瞬间就位）
@@ -273,6 +349,7 @@ export function Settings() {
       }
     } catch (error) {
       logError("Failed to save settings:", error);
+      alert(`设置保存失败: ${error}`);
     }
   };
 
@@ -294,67 +371,86 @@ export function Settings() {
         <div className="w-44 shrink-0 min-h-0">
           <Card className="h-full overflow-hidden">
             <CardContent className="p-2 h-full min-h-0 flex flex-col">
-              <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto pr-1">
+              <nav
+                ref={navRef}
+                className="relative space-y-0.5 flex-1 min-h-0 overflow-y-auto pr-1"
+              >
+                <div
+                  aria-hidden
+                  className={cn(
+                    "settings-nav-indicator absolute rounded-md bg-primary shadow-sm pointer-events-none",
+                    navIndicator.visible ? "opacity-100" : "opacity-0",
+                  )}
+                  style={{
+                    top: navIndicator.top,
+                    left: navIndicator.left,
+                    width: navIndicator.width,
+                    height: navIndicator.height,
+                  }}
+                />
                 {navItems.map((item) => {
                   const Icon = item.icon;
+                  const isActive = activeTab === item.id;
                   return (
                     <button
                       key={item.id}
+                      type="button"
+                      data-nav-id={item.id}
                       onClick={() => setActiveTab(item.id)}
                       className={cn(
-                        "flex items-center rounded-md transition-colors duration-200",
+                        "relative z-10 flex items-center rounded-md transition-[color,transform,background-color] duration-200 active:scale-[0.98]",
                         item.child
-                          ? "ml-5 w-[calc(100%-1.25rem)] gap-2 px-2.5 py-1.5 text-xs"
+                          ? "ml-5 w-[calc(100%-1.25rem)] gap-2 px-2.5 py-1.5 text-xs before:absolute before:-left-2.5 before:top-1/2 before:-translate-y-1/2 before:h-3 before:w-px before:rounded-full before:bg-border before:content-['']"
                           : "w-full gap-3 px-3 py-2 text-sm",
-                        activeTab === item.id
-                          ? "bg-primary text-primary-foreground shadow-sm"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        isActive
+                          ? "text-primary-foreground font-medium"
+                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                       )}
                     >
-                      <Icon className={item.child ? "w-3.5 h-3.5" : "w-4 h-4"} />
-                      {item.label}
+                      <Icon
+                        className={cn(
+                          "shrink-0 transition-transform duration-200",
+                          item.child ? "w-3.5 h-3.5" : "w-4 h-4",
+                          isActive && "scale-110",
+                        )}
+                      />
+                      <span className="truncate">{item.label}</span>
                     </button>
                   );
                 })}
               </nav>
               <div className="shrink-0 pt-2 mt-2 border-t px-2 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground">
-                    版本号
-                  </span>
+                  <span className="text-[11px] text-muted-foreground">版本号</span>
                   <button
                     type="button"
-                    onClick={() => setChangelogDialogOpen(true)}
-                    className="text-[11px] font-medium text-primary hover:underline"
+                    onClick={() => setUpdateDialogOpen(true)}
+                    className="text-[11px] text-foreground transition-colors hover:text-primary hover:underline"
                   >
                     v{appVersion}
                   </button>
                 </div>
-                <button
-                  onClick={() => setUpdateDialogOpen(true)}
-                  className="flex items-center justify-between w-full group"
-                >
-                  <span className="text-[11px] text-muted-foreground">
-                    检查更新
-                  </span>
-                  <ArrowSync16Regular className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
-                </button>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">编译时间</span>
+                  <span className="text-[11px] text-foreground">{buildTime}</span>
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Right Content - Full width with scrollbar at edge */}
-        {activeTab === "about" ? (
-          <div
-            key="about"
-            className="flex-1 flex flex-col gap-3 animate-settings-in"
-          >
-            <AboutTab />
-          </div>
-        ) : (
-          <ScrollArea className="flex-1">
-            <div key={activeTab} className="space-y-3 animate-settings-in">
+        {/* Right Content */}
+        <div className="flex-1 min-h-0 min-w-0">
+          {activeTab === "about" ? (
+            <div
+              key="about"
+              className="flex-1 flex flex-col gap-3 animate-settings-in"
+            >
+              <AboutTab />
+            </div>
+          ) : (
+            <ScrollArea key={activeTab} className="flex-1 h-full">
+            <div className="space-y-3 animate-settings-in p-1">
               {activeTab === "general" && (
                 <GeneralTab
                   settings={settings}
@@ -401,17 +497,13 @@ export function Settings() {
 
               {activeTab === "translate" && <TranslateTab />}
             </div>
-          </ScrollArea>
-        )}
+            </ScrollArea>
+          )}
+        </div>
       </div>
       <UpdateDialog
         open={updateDialogOpen}
         onOpenChange={setUpdateDialogOpen}
-      />
-      <ChangelogDialog
-        open={changelogDialogOpen}
-        onOpenChange={setChangelogDialogOpen}
-        version={appVersion}
       />
     </div>
   );

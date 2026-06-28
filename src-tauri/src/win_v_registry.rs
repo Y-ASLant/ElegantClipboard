@@ -18,7 +18,7 @@ pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let (reg_key, _) = hkcu
         .create_subkey(EXPLORER_ADVANCED_PATH)
-        .map_err(|e| format!("无法打开注册表项: {}", e))?;
+        .map_err(|e| format!("无法打开注册表项: {e}"))?;
 
     let current_value: String = reg_key
         .get_value(DISABLED_HOTKEYS_VALUE)
@@ -26,10 +26,10 @@ pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
 
     // 若不存在则追加 'V'
     if !current_value.contains('V') {
-        let new_value = format!("{}V", current_value);
+        let new_value = format!("{current_value}V");
         reg_key
             .set_value(DISABLED_HOTKEYS_VALUE, &new_value)
-            .map_err(|e| format!("无法设置注册表值: {}", e))?;
+            .map_err(|e| format!("无法设置注册表值: {e}"))?;
     }
 
     if restart_explorer {
@@ -43,9 +43,9 @@ pub fn disable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
 #[cfg(windows)]
 pub fn enable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let reg_key = match hkcu.open_subkey_with_flags(EXPLORER_ADVANCED_PATH, KEY_READ | KEY_WRITE) {
-        Ok(k) => k,
-        Err(_) => return Ok(()), // 注册表项不存在，无需处理
+    let Ok(reg_key) = hkcu.open_subkey_with_flags(EXPLORER_ADVANCED_PATH, KEY_READ | KEY_WRITE)
+    else {
+        return Ok(());
     };
 
     let current_value: String = reg_key
@@ -61,7 +61,7 @@ pub fn enable_win_v_hotkey(restart_explorer: bool) -> Result<(), String> {
     } else if new_value != current_value {
         reg_key
             .set_value(DISABLED_HOTKEYS_VALUE, &new_value)
-            .map_err(|e| format!("无法更新注册表值: {}", e))?;
+            .map_err(|e| format!("无法更新注册表值: {e}"))?;
     }
 
     if restart_explorer {
@@ -92,7 +92,7 @@ fn restart_explorer_process() -> Result<(), String> {
     {
         Command::new("explorer.exe")
             .spawn()
-            .map_err(|e| format!("无法启动Explorer进程: {}", e))?;
+            .map_err(|e| format!("无法启动Explorer进程: {e}"))?;
     }
 
     // 等待 Explorer 就绪
@@ -105,9 +105,8 @@ fn restart_explorer_process() -> Result<(), String> {
 #[cfg(windows)]
 pub fn is_win_v_hotkey_disabled() -> bool {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let reg_key = match hkcu.open_subkey(EXPLORER_ADVANCED_PATH) {
-        Ok(k) => k,
-        Err(_) => return false,
+    let Ok(reg_key) = hkcu.open_subkey(EXPLORER_ADVANCED_PATH) else {
+        return false;
     };
 
     let current_value: String = reg_key

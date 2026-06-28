@@ -15,6 +15,7 @@ import {
 } from "@fluentui/react-icons";
 import { invoke } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
+import { useShallow } from "zustand/react/shallow";
 import {
   CardFooter,
   FileContent,
@@ -79,7 +80,18 @@ interface ClipboardItemCardProps {
 }
 
 const clipboardActions = () => useClipboardStore.getState();
+
+// LRU 缓存：文件有效性检查结果，上限 500 条
+const FILE_VALIDITY_CACHE_MAX = 500;
 const fileValidityCache = new Map<string, boolean>();
+function setFileValidityCache(key: string, value: boolean) {
+  if (fileValidityCache.size >= FILE_VALIDITY_CACHE_MAX) {
+    // 删除最早的条目
+    const firstKey = fileValidityCache.keys().next().value;
+    if (firstKey !== undefined) fileValidityCache.delete(firstKey);
+  }
+  fileValidityCache.set(key, value);
+}
 const textPreviewLM = createLeaseManager("allocate_text_preview_lease");
 
 // ============ 主卡片组件 ============
@@ -130,6 +142,38 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const toggleSelect = useClipboardStore((s) => s.toggleSelect);
   const keyboardNavEnabled = useUISettings((s) => s.keyboardNavigation);
   const isActive = isActiveIndex && keyboardNavEnabled;
+
+  // 合并高频变化的UI设置为单次订阅，避免17个独立selector的开销
+  const uiSettings = useUISettings(
+    useShallow((s) => ({
+      cardMaxLines: s.cardMaxLines,
+      showTime: s.showTime,
+      showCharCount: s.showCharCount,
+      showByteSize: s.showByteSize,
+      showSourceApp: s.showSourceApp,
+      sourceAppDisplay: s.sourceAppDisplay,
+      showDragAreaIndicator: s.showDragAreaIndicator,
+      textPreviewEnabled: s.textPreviewEnabled,
+      hoverPreviewDelay: s.hoverPreviewDelay,
+      previewPosition: s.previewPosition,
+      sharpCorners: s.sharpCorners,
+      timeFormat: s.timeFormat,
+    })),
+  );
+  const {
+    cardMaxLines,
+    showTime,
+    showCharCount,
+    showByteSize,
+    showSourceApp,
+    sourceAppDisplay,
+    showDragAreaIndicator,
+    textPreviewEnabled,
+    hoverPreviewDelay,
+    previewPosition,
+    sharpCorners,
+    timeFormat,
+  } = uiSettings;
   const {
     togglePin,
     toggleFavorite,
@@ -138,26 +182,18 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     pasteContent,
     pasteAsPlainText,
   } = clipboardActions();
-  const cardMaxLines = useUISettings((s) => s.cardMaxLines);
-  const showTime = useUISettings((s) => s.showTime);
-  const showCharCount = useUISettings((s) => s.showCharCount);
-  const showByteSize = useUISettings((s) => s.showByteSize);
-  const showSourceApp = useUISettings((s) => s.showSourceApp);
-  const sourceAppDisplay = useUISettings((s) => s.sourceAppDisplay);
-  const showDragAreaIndicator = useUISettings((s) => s.showDragAreaIndicator);
-  const textPreviewEnabled = useUISettings((s) => s.textPreviewEnabled);
-  const hoverPreviewDelay = useUISettings((s) => s.hoverPreviewDelay);
-  const previewPosition = useUISettings((s) => s.previewPosition);
-  const sharpCorners = useUISettings((s) => s.sharpCorners);
 
   const translateEnabled = useTranslateSettings((s) => s.enabled);
   const [translateStatus, setTranslateStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [translatedText, setTranslatedText] = useState("");
 
   const [justPasted, setJustPasted] = useState(false);
+  const [justCopied, setJustCopied] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
-  const { groups, moveItemToGroup } = useGroupStore();
+  const { groups, moveItemToGroup } = useGroupStore(
+    useShallow((s) => ({ groups: s.groups, moveItemToGroup: s.moveItemToGroup })),
+  );
   const selectedGroupId = useClipboardStore((s) => s.selectedGroupId);
   const textPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textPreviewVisibleRef = useRef(false);
@@ -206,7 +242,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     )
       .then((checkResult) => {
         const allExist = filePaths.every((path) => checkResult[path]?.exists);
-        fileValidityCache.set(cacheKey, allExist);
+        setFileValidityCache(cacheKey, allExist);
         if (!cancelled) setRuntimeFilesValid(allExist);
       })
       .catch((error) => {
@@ -254,7 +290,6 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const config = contentTypeConfig[item.content_type] || contentTypeConfig.text;
   const dragHandleWidth = "clamp(40px, 14%, 72px)";
 
-  const timeFormat = useUISettings((s) => s.timeFormat);
 
   const metaItems = useMemo(() => {
     const items: string[] = [];
@@ -508,6 +543,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
     copyToClipboard(item.id);
+    setJustCopied(true);
+    setTimeout(() => setJustCopied(false), 700);
   };
   const handleCopyCtxMenu = () => copyToClipboard(item.id);
   const handleTogglePin = (e: React.MouseEvent) => {
@@ -595,6 +632,12 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         )}
         onClick={handlePaste}
       >
+        {justPasted && <div className="paste-flash-overlay" />}
+        {justCopied && (
+          <div className="copy-success-overlay">
+            <CheckmarkCircle16Filled className="copy-success-icon w-8 h-8 text-primary" />
+          </div>
+        )}
         {!isDragging && !isDragOverlay && !batchMode && (
           <>
             <button

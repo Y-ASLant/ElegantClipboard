@@ -98,6 +98,15 @@ struct ContentHashes {
     semantic_hash: String,
 }
 
+/// 处理剪贴板内容所需的设置，批量读取避免多次数据库查询
+struct ProcessSettings {
+    max_content_size: usize,
+    dedup_strategy: String,
+    text_dedup_mode: String,
+    max_history_count: i64,
+    auto_cleanup_days: i64,
+}
+
 pub struct ClipboardHandler {
     repository: ClipboardRepository,
     settings_repo: SettingsRepository,
@@ -121,14 +130,54 @@ impl ClipboardHandler {
         }
     }
 
-    fn get_max_content_size(&self) -> usize {
-        self.settings_repo
+    /// 批量读取处理所需的全部设置，单次数据库查询
+    fn get_process_settings(&self) -> ProcessSettings {
+        let keys = [
+            "max_content_size_kb",
+            "dedup_strategy",
+            "text_dedup_mode",
+            "max_history_count",
+            "auto_cleanup_days",
+        ];
+        let batch = self.settings_repo.get_batch(&keys);
+
+        let max_content_size = batch
             .get("max_content_size_kb")
-            .ok()
-            .flatten()
+            .and_then(|v| v.as_deref())
             .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb * 1024)
-            .unwrap_or(DEFAULT_MAX_CONTENT_SIZE)
+            .map_or(DEFAULT_MAX_CONTENT_SIZE, |kb| kb * 1024);
+
+        let dedup_strategy = batch
+            .get("dedup_strategy")
+            .and_then(|v| v.as_deref())
+            .unwrap_or("move_to_top")
+            .to_string();
+
+        let text_dedup_mode = batch
+            .get("text_dedup_mode")
+            .and_then(|v| v.as_deref())
+            .unwrap_or("semantic")
+            .to_string();
+
+        let max_history_count = batch
+            .get("max_history_count")
+            .and_then(|v| v.as_deref())
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_MAX_HISTORY_COUNT);
+
+        let auto_cleanup_days = batch
+            .get("auto_cleanup_days")
+            .and_then(|v| v.as_deref())
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS);
+
+        ProcessSettings {
+            max_content_size,
+            dedup_strategy,
+            text_dedup_mode,
+            max_history_count,
+            auto_cleanup_days,
+        }
     }
 
     /// 图片大小上限（字节），0 表示不限制
@@ -138,58 +187,12 @@ impl ClipboardHandler {
             .ok()
             .flatten()
             .and_then(|s| s.parse::<usize>().ok())
-            .map(|kb| kb.saturating_mul(1024))
-            .unwrap_or(DEFAULT_MAX_IMAGE_SIZE)
-    }
-
-    fn get_max_history_count(&self) -> i64 {
-        self.settings_repo
-            .get("max_history_count")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<i64>().ok())
-            .unwrap_or(DEFAULT_MAX_HISTORY_COUNT)
-    }
-
-    fn get_auto_cleanup_days(&self) -> i64 {
-        self.settings_repo
-            .get("auto_cleanup_days")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<i64>().ok())
-            .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS)
-    }
-
-    fn get_dedup_strategy(&self) -> &str {
-        // 每次读取策略（用户可能修改设置）
-        match self
-            .settings_repo
-            .get("dedup_strategy")
-            .ok()
-            .flatten()
-            .as_deref()
-        {
-            Some("ignore") => "ignore",
-            Some("always_new") => "always_new",
-            _ => "move_to_top", // 默认行为
-        }
+            .map_or(DEFAULT_MAX_IMAGE_SIZE, |kb| kb.saturating_mul(1024))
     }
 
     /// 检查内容类型是否被允许监听
     /// 读取 `monitor_types` 设置（逗号分隔，如 "text,html,rtf,image,files"）
     /// 默认全部允许
-    fn get_text_dedup_mode(&self) -> &str {
-        match self
-            .settings_repo
-            .get("text_dedup_mode")
-            .ok()
-            .flatten()
-            .as_deref()
-        {
-            Some("strict") => "strict",
-            _ => "semantic",
-        }
-    }
     pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
         let allowed = self.settings_repo.get("monitor_types").ok().flatten();
 
@@ -221,9 +224,8 @@ impl ClipboardHandler {
         &self,
         source: &Option<super::source_app::SourceAppInfo>,
     ) -> bool {
-        let source = match source {
-            Some(s) => s,
-            None => return false,
+        let Some(source) = source else {
+            return false;
         };
 
         // 检查是否启用
@@ -232,8 +234,7 @@ impl ClipboardHandler {
             .get("app_filter_enabled")
             .ok()
             .flatten()
-            .map(|v| v == "true")
-            .unwrap_or(false);
+            .is_some_and(|v| v == "true");
         if !enabled {
             return false;
         }
@@ -279,7 +280,9 @@ impl ClipboardHandler {
         source: Option<SourceAppInfo>,
         group_id: Option<i64>,
     ) -> Result<Option<i64>, String> {
-        let max_content_size = self.get_max_content_size();
+        // 批量读取所有设置，单次数据库查询替代 5-6 次独立查询
+        let settings = self.get_process_settings();
+        let max_content_size = settings.max_content_size;
 
         // max_content_size 仅限制文本类内容
         if max_content_size > 0 {
@@ -297,9 +300,9 @@ impl ClipboardHandler {
         }
 
         let hashes = self.calculate_hashes(&content);
-        let dedup = self.get_dedup_strategy();
+        let dedup = &settings.dedup_strategy;
         let text_like = Self::is_text_like_content(&content);
-        let text_dedup_mode = self.get_text_dedup_mode();
+        let text_dedup_mode = &settings.text_dedup_mode;
         let text_use_strict = text_like && text_dedup_mode == "strict";
 
         if dedup != "always_new"
@@ -317,30 +320,27 @@ impl ClipboardHandler {
             }
             .map_err(|e| e.to_string())?
         {
-            match dedup {
-                "ignore" => {
-                    debug!("Content already exists, ignoring (dedup=ignore)");
-                    return Ok(None);
-                }
-                _ => {
-                    // move_to_top: 更新访问时间并置顶
-                    debug!("Content already exists, updating access time (dedup=move_to_top)");
-                    return if text_like {
-                        if text_use_strict {
-                            self.repository
-                                .touch_by_hash(&hashes.content_hash, group_id)
-                                .map_err(|e| e.to_string())
-                        } else {
-                            self.repository
-                                .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
-                                .map_err(|e| e.to_string())
-                        }
-                    } else {
+            if dedup.as_str() == "ignore" {
+                debug!("Content already exists, ignoring (dedup=ignore)");
+                return Ok(None);
+            } else {
+                // move_to_top: 更新访问时间并置顶
+                debug!("Content already exists, updating access time (dedup=move_to_top)");
+                return if text_like {
+                    if text_use_strict {
                         self.repository
                             .touch_by_hash(&hashes.content_hash, group_id)
                             .map_err(|e| e.to_string())
-                    };
-                }
+                    } else {
+                        self.repository
+                            .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
+                            .map_err(|e| e.to_string())
+                    }
+                } else {
+                    self.repository
+                        .touch_by_hash(&hashes.content_hash, group_id)
+                        .map_err(|e| e.to_string())
+                };
             }
         }
 
@@ -386,11 +386,10 @@ impl ClipboardHandler {
         );
 
         // 执行最大历史数限制，清理旧图片
-        let max_history_count = self.get_max_history_count();
-        if max_history_count > 0 {
+        if settings.max_history_count > 0 {
             match self
                 .repository
-                .enforce_max_count(max_history_count, group_id)
+                .enforce_max_count(settings.max_history_count, group_id)
             {
                 Ok((deleted, image_paths)) => {
                     super::cleanup_image_files(&image_paths);
@@ -403,18 +402,17 @@ impl ClipboardHandler {
         }
 
         // 自动清理超过指定天数的旧记录
-        let auto_cleanup_days = self.get_auto_cleanup_days();
-        if auto_cleanup_days > 0 {
+        if settings.auto_cleanup_days > 0 {
             match self
                 .repository
-                .delete_older_than(auto_cleanup_days, group_id)
+                .delete_older_than(settings.auto_cleanup_days, group_id)
             {
                 Ok((deleted, image_paths)) => {
                     super::cleanup_image_files(&image_paths);
                     if deleted > 0 {
                         info!(
                             "Auto-cleanup: removed {} items older than {} days",
-                            deleted, auto_cleanup_days
+                            deleted, settings.auto_cleanup_days
                         );
                     }
                 }
@@ -431,7 +429,7 @@ impl ClipboardHandler {
             ClipboardContent::Html { html, .. } => html.len(),
             ClipboardContent::Rtf { rtf, .. } => rtf.len(),
             ClipboardContent::Image(data) => data.len(),
-            ClipboardContent::Files(files) => files.iter().map(|f| f.len()).sum(),
+            ClipboardContent::Files(files) => files.iter().map(std::string::String::len).sum(),
         }
     }
 
@@ -531,8 +529,7 @@ impl ClipboardHandler {
         let byte_size = html.len() as i64;
         let preview = text
             .as_ref()
-            .map(|t| Self::create_preview(t))
-            .unwrap_or_else(|| Self::create_preview(&html));
+            .map_or_else(|| Self::create_preview(&html), |t| Self::create_preview(t));
         let html_content = truncate_content(html, max_size, "HTML");
 
         let char_count = text.as_ref().map(|t| t.chars().count() as i64);
@@ -560,8 +557,7 @@ impl ClipboardHandler {
         let byte_size = rtf.len() as i64;
         let preview = text
             .as_ref()
-            .map(|t| Self::create_preview(t))
-            .unwrap_or_else(|| "[RTF Content]".to_string());
+            .map_or_else(|| "[RTF Content]".to_string(), |t| Self::create_preview(t));
         let rtf_content = truncate_content(rtf, max_size, "RTF");
 
         let char_count = text.as_ref().map(|t| t.chars().count() as i64);
@@ -600,9 +596,15 @@ impl ClipboardHandler {
             &hashes.content_hash[..16]
         );
 
-        // 同步写入文件，确保插入数据库前文件已就绪（异步写入会引发竞态）
-        if let Err(e) = std::fs::write(&image_path, &data) {
-            return Err(format!("Failed to save image: {}", e));
+        // 先写临时文件再原子 rename，避免其他进程读到写入一半的文件
+        let tmp_path = image_path.with_extension("tmp");
+        if let Err(e) = std::fs::write(&tmp_path, &data) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("Failed to save image: {e}"));
+        }
+        if let Err(e) = std::fs::rename(&tmp_path, &image_path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("Failed to rename image: {e}"));
         }
         debug!("Saved image to {:?}", image_path);
 
@@ -622,11 +624,11 @@ impl ClipboardHandler {
     fn extract_image_dimensions(&self, data: &[u8]) -> Result<(i64, i64), String> {
         let (w, h) = ImageReader::new(std::io::Cursor::new(data))
             .with_guessed_format()
-            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .map_err(|e| format!("Failed to guess image format: {e}"))?
             .into_dimensions()
-            .map_err(|e| format!("Failed to read image dimensions: {}", e))?;
+            .map_err(|e| format!("Failed to read image dimensions: {e}"))?;
 
-        Ok((w as i64, h as i64))
+        Ok((i64::from(w), i64::from(h)))
     }
 
     fn process_files(

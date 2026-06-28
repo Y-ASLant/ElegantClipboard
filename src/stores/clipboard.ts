@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import debounce from "lodash.debounce";
 import { create } from "zustand";
 import { cancelPendingFocusRestore } from "@/hooks/useInputFocus";
 import { logError } from "@/lib/logger";
@@ -266,10 +267,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   setupListener: async () => {
-    const unlisten = await listen<number>("clipboard-updated", async () => {
-      playCopySound("immediate");
+    // 防抖合并快速连续的剪贴板变化事件，避免 IPC 风暴
+    const debouncedRefresh = debounce(async () => {
       await get().refresh();
       playCopySound("after_success");
+    }, 150, { leading: true, trailing: true });
+
+    const unlisten = await listen<number>("clipboard-updated", () => {
+      playCopySound("immediate");
+      void debouncedRefresh();
     });
     return unlisten;
   },

@@ -60,6 +60,7 @@ interface UISettingsData {
   cardFontSize: number;
   previewFont: string;
   previewFontSize: number;
+  onboardingCompleted: boolean;
 }
 
 const DEFAULT_UI_SETTINGS: UISettingsData = {
@@ -69,8 +70,8 @@ const DEFAULT_UI_SETTINGS: UISettingsData = {
   showByteSize: true,
   showSourceApp: true,
   sourceAppDisplay: "both",
-  imagePreviewEnabled: false,
-  textPreviewEnabled: false,
+  imagePreviewEnabled: true,
+  textPreviewEnabled: true,
   previewUnboundedMode: false,
   previewZoomStep: 15,
   previewPosition: "auto",
@@ -86,7 +87,7 @@ const DEFAULT_UI_SETTINGS: UISettingsData = {
   darkMode: "auto",
   cardDensity: "standard",
   timeFormat: "absolute",
-  hoverPreviewDelay: 500,
+  hoverPreviewDelay: 150,
   copySound: false,
   copySoundTiming: "immediate",
   pasteSound: false,
@@ -104,6 +105,7 @@ const DEFAULT_UI_SETTINGS: UISettingsData = {
   cardFontSize: 14,
   previewFont: "",
   previewFontSize: 13,
+  onboardingCompleted: false,
 };
 
 interface UISettings extends UISettingsData {
@@ -148,6 +150,7 @@ interface UISettings extends UISettingsData {
   setCardFontSize: (size: number) => void;
   setPreviewFont: (font: string) => void;
   setPreviewFontSize: (size: number) => void;
+  setOnboardingCompleted: (completed: boolean) => void;
   resetFontSettings: () => void;
 }
 
@@ -291,6 +294,7 @@ export const useUISettings = create<UISettings>()((set, get) => {
     setCardFontSize: makeSetter("cardFontSize"),
     setPreviewFont: makeSetter("previewFont"),
     setPreviewFontSize: makeSetter("previewFontSize"),
+    setOnboardingCompleted: makeSetter("onboardingCompleted"),
     resetFontSettings: () => {
       const defaults = {
         customFont: "",

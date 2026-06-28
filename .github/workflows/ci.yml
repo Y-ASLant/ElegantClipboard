@@ -7,7 +7,9 @@ on:
     branches: [main, dev]
 
 jobs:
-  lint-and-check:
+  # ── Frontend: lint + typecheck + unit tests ──
+  frontend:
+    name: Frontend
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,14 +20,6 @@ jobs:
           node-version: lts/*
           cache: npm
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "./src-tauri -> target"
-
       - name: Install dependencies
         run: npm ci
 
@@ -35,10 +29,83 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
-      - name: Cargo check
+      - name: Unit tests
+        run: npm run test
+
+  # ── Backend: clippy + fmt + check + test ──
+  backend:
+    name: Backend
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Cargo fmt
         working-directory: src-tauri
-        run: cargo check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Cargo test
         working-directory: src-tauri
         run: cargo test
+
+  # ── E2E smoke tests (Playwright via Vite dev server) ──
+  e2e:
+    name: E2E
+    runs-on: windows-latest
+    needs: [frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+  # ── Security audit ──
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - name: npm audit
+        run: npm audit --audit-level=critical
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Cargo audit
+        working-directory: src-tauri
+        run: cargo audit

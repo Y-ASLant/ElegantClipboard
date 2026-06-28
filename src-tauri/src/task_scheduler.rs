@@ -141,13 +141,11 @@ pub fn create_elevation_task() -> Result<(), String> {
 #[cfg(target_os = "windows")]
 pub fn run_elevation_task() -> bool {
     unsafe {
-        let (_, root) = match get_task_root() {
-            Ok(v) => v,
-            Err(_) => return false,
+        let Ok((_, root)) = get_task_root() else {
+            return false;
         };
-        let task = match root.GetTask(&BSTR::from(TASK_NAME)) {
-            Ok(t) => t,
-            Err(_) => return false,
+        let Ok(task) = root.GetTask(&BSTR::from(TASK_NAME)) else {
+            return false;
         };
         task.Run(&VARIANT::default()).is_ok()
     }
@@ -180,9 +178,8 @@ pub fn delete_elevation_task() -> Result<(), String> {
 #[cfg(target_os = "windows")]
 pub fn is_elevation_task_exists() -> bool {
     unsafe {
-        let (_, root) = match get_task_root() {
-            Ok(v) => v,
-            Err(_) => return false,
+        let Ok((_, root)) = get_task_root() else {
+            return false;
         };
         root.GetTask(&BSTR::from(TASK_NAME)).is_ok()
     }
@@ -196,43 +193,37 @@ pub fn is_elevation_task_exists() -> bool {
 /// 校验计划任务中的 exe 路径是否与当前进程路径一致
 #[cfg(target_os = "windows")]
 pub fn is_elevation_task_path_valid() -> bool {
-    let current_exe = match std::env::current_exe() {
-        Ok(p) => p.to_string_lossy().to_lowercase(),
-        Err(_) => return false,
+    let Ok(current_exe) = std::env::current_exe() else {
+        return false;
     };
+    let current_exe = current_exe.to_string_lossy().to_lowercase();
 
     unsafe {
-        let (_, root) = match get_task_root() {
-            Ok(v) => v,
-            Err(_) => return false,
+        let Ok((_, root)) = get_task_root() else {
+            return false;
         };
-        let task = match root.GetTask(&BSTR::from(TASK_NAME)) {
-            Ok(t) => t,
-            Err(_) => return false,
+        let Ok(task) = root.GetTask(&BSTR::from(TASK_NAME)) else {
+            return false;
         };
-        let def = match task.Definition() {
-            Ok(d) => d,
-            Err(_) => return false,
+        let Ok(def) = task.Definition() else {
+            return false;
         };
-        let actions = match def.Actions() {
-            Ok(a) => a,
-            Err(_) => return false,
+        let Ok(actions) = def.Actions() else {
+            return false;
         };
         let mut count = 0i32;
-        if actions.Count(&mut count).is_err() || count == 0 {
+        if actions.Count(&raw mut count).is_err() || count == 0 {
             return false;
         }
         // COM 集合是 1-based 索引
-        let action = match actions.get_Item(1) {
-            Ok(a) => a,
-            Err(_) => return false,
+        let Ok(action) = actions.get_Item(1) else {
+            return false;
         };
-        let exec: IExecAction = match action.cast::<IExecAction>() {
-            Ok(e) => e,
-            Err(_) => return false,
+        let Ok(exec) = action.cast::<IExecAction>() else {
+            return false;
         };
         let mut path = BSTR::default();
-        if exec.Path(&mut path).is_err() {
+        if exec.Path(&raw mut path).is_err() {
             return false;
         }
         path.to_string().to_lowercase() == current_exe

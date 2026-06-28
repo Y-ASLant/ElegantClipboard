@@ -14,7 +14,9 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import debounce from "lodash.debounce";
+import { useShallow } from "zustand/react/shallow";
 import { ClipboardList } from "@/components/ClipboardList";
+import { Onboarding } from "@/components/Onboarding";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -65,7 +67,21 @@ function App() {
   const [deleteGroupDialogOpen, setDeleteGroupDialogOpen] = useState(false);
   const [deleteGroupTarget, setDeleteGroupTarget] = useState<Group | null>(null);
 
-  const { searchQuery, selectedGroup, selectedGroupId, setSearchQuery, setSelectedGroup, setSelectedGroupId, fetchItems, clearHistory, refresh, resetView } = useClipboardStore();
+  const { searchQuery, selectedGroup, selectedGroupId, setSearchQuery, setSelectedGroup, setSelectedGroupId, fetchItems, clearHistory, refresh, resetView, itemCount } = useClipboardStore(
+    useShallow((s) => ({
+      searchQuery: s.searchQuery,
+      selectedGroup: s.selectedGroup,
+      selectedGroupId: s.selectedGroupId,
+      setSearchQuery: s.setSearchQuery,
+      setSelectedGroup: s.setSelectedGroup,
+      setSelectedGroupId: s.setSelectedGroupId,
+      fetchItems: s.fetchItems,
+      clearHistory: s.clearHistory,
+      refresh: s.refresh,
+      resetView: s.resetView,
+      itemCount: s.items.length,
+    })),
+  );
   const batchMode = useClipboardStore((s) => s.batchMode);
   const selectedIds = useClipboardStore((s) => s.selectedIds);
   const setBatchMode = useClipboardStore((s) => s.setBatchMode);
@@ -79,6 +95,8 @@ function App() {
   const showCategoryFilter = useUISettings((s) => s.showCategoryFilter);
   const toolbarButtons = useUISettings((s) => s.toolbarButtons);
   const windowAnimation = useUISettings((s) => s.windowAnimation);
+  const onboardingCompleted = useUISettings((s) => s.onboardingCompleted);
+  const setOnboardingCompleted = useUISettings((s) => s.setOnboardingCompleted);
   const inputRef = useInputFocus<HTMLInputElement>();
   // 追踪窗口隐藏期间是否有剪贴板变化
   const clipboardDirtyRef = useRef(false);
@@ -284,6 +302,11 @@ function App() {
 
   // ESC 键处理（后端钩子 + DOM 双通道）
   const handleEscape = useCallback(async () => {
+    // 先关闭新手引导
+    if (!onboardingCompleted) {
+      setOnboardingCompleted(true);
+      return;
+    }
     if (dismissOverlays()) return;
     if (useClipboardStore.getState().batchMode) {
       setBatchMode(false);
@@ -294,7 +317,7 @@ function App() {
     } catch (error) {
       logError("Failed to hide window:", error);
     }
-  }, [setBatchMode]);
+  }, [setBatchMode, onboardingCompleted, setOnboardingCompleted]);
 
   // 通道1：后端键盘钩子
   useEffect(() => {
@@ -466,8 +489,13 @@ function App() {
             placeholder="搜索剪贴板..."
             value={searchQuery}
             onChange={handleSearchChange}
-            className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-8")}
+            className={cn("pl-9 h-9 text-sm bg-background border shadow-sm", searchQuery && "pr-14")}
           />
+          {searchQuery && (
+            <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-1 z-10 pointer-events-none">
+              <span className="text-xs text-muted-foreground tabular-nums">{itemCount} 条</span>
+            </div>
+          )}
           {searchQuery && (
             <button
               onClick={() => { setSearchQuery(""); fetchItems({ search: "" }); }}
@@ -778,6 +806,11 @@ function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* 新手引导 */}
+      {!onboardingCompleted && (
+        <Onboarding onComplete={() => setOnboardingCompleted(true)} />
+      )}
     </div>
   );
 }

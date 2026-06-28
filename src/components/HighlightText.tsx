@@ -11,8 +11,6 @@ export const HighlightText = memo(function HighlightText({ text }: HighlightText
 
   const parts = useMemo(() => {
     if (!searchQuery || searchQuery.trim().length === 0) return null;
-
-    // 转义正则特殊字符
     const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(`(${escaped})`, "gi");
     return text.split(regex);

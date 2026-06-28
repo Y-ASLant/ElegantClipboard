@@ -6,13 +6,14 @@ interface WindowTitleBarProps {
   title: string;
   /** 标题后的额外内容（如未保存指示器） */
   extra?: React.ReactNode;
+  /** 居中区域内容 */
+  center?: React.ReactNode;
 }
-
-export function WindowTitleBar({ icon, title, extra }: WindowTitleBarProps) {
+export function WindowTitleBar({ icon, title, extra, center }: WindowTitleBarProps) {
   return (
     <Card className="shrink-0">
       <div
-        className="h-11 flex items-center justify-between px-4 select-none"
+        className="relative h-11 flex items-center justify-between px-4 select-none"
         data-tauri-drag-region
       >
         <div className="flex items-center gap-3">
@@ -20,6 +21,11 @@ export function WindowTitleBar({ icon, title, extra }: WindowTitleBarProps) {
           <span className="text-sm font-semibold">{title}</span>
           {extra}
         </div>
+        {center && (
+          <div className="absolute left-1/2 -translate-x-1/2" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+            {center}
+          </div>
+        )}
         <div
           className="flex gap-1"
           style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}

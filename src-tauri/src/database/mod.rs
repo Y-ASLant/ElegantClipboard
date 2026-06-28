@@ -384,7 +384,7 @@ impl Database {
                  ORDER BY favorite_order DESC, id DESC",
             )?;
             stmt.query_map([], |row| row.get::<_, i64>(0))?
-                .filter_map(|r| r.ok())
+                .filter_map(std::result::Result::ok)
                 .collect()
         };
 
@@ -504,7 +504,7 @@ impl Clone for Database {
 pub fn get_app_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
@@ -514,4 +514,125 @@ pub fn get_default_db_path() -> PathBuf {
 
 pub fn get_default_images_path() -> PathBuf {
     get_app_dir().join("images")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_db() -> Database {
+        let dir = std::env::temp_dir().join(format!("ec_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("test_{}.db", uuid_simple()));
+        Database::new(path).unwrap()
+    }
+
+    fn uuid_simple() -> u64 {
+        use std::time::SystemTime;
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
+    }
+
+    #[test]
+    fn new_database_creates_schema() {
+        let db = temp_db();
+        let conn = db.read_connection();
+        let conn = conn.lock();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn schema_creates_groups_table() {
+        let db = temp_db();
+        let conn = db.read_connection();
+        let conn = conn.lock();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='groups'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn schema_creates_settings_table_with_defaults() {
+        let db = temp_db();
+        let conn = db.read_connection();
+        let conn = conn.lock();
+        let val: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'global_shortcut'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, "Alt+C");
+    }
+
+    #[test]
+    fn read_write_separation() {
+        let db = temp_db();
+        {
+            let w = db.write_connection();
+            let w = w.lock();
+            w.execute(
+                "INSERT INTO settings (key, value) VALUES ('test_rw', 'hello')",
+                [],
+            )
+            .unwrap();
+        }
+        let r = db.read_connection();
+        let r = r.lock();
+        let val: String = r
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'test_rw'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, "hello");
+    }
+
+    #[test]
+    fn optimize_and_vacuum() {
+        let db = temp_db();
+        assert!(db.optimize().is_ok());
+        assert!(db.vacuum().is_ok());
+    }
+
+    #[test]
+    fn clone_shares_connections() {
+        let db = temp_db();
+        let db2 = db.clone();
+        {
+            let w = db.write_connection();
+            let w = w.lock();
+            w.execute(
+                "INSERT INTO settings (key, value) VALUES ('clone_test', 'shared')",
+                [],
+            )
+            .unwrap();
+        }
+        let r = db2.read_connection();
+        let r = r.lock();
+        let val: String = r
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'clone_test'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(val, "shared");
+    }
 }

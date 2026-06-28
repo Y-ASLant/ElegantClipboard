@@ -288,12 +288,12 @@ html {
        unless <html> declares its own background-color. */
     background-color: var(--color-background);
 }
-body,
-#root {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
+html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color-scheme: light dark;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Disable text selection except for inputs */
@@ -325,11 +325,11 @@ textarea,
     --os-size: 6px;
     --os-padding-perpendicular: 0px;
     --os-padding-axis: 0px;
-    --os-track-border-radius: 2px;
+    --os-track-border-radius: 100px;
     --os-track-bg: transparent;
     --os-track-bg-hover: transparent;
     --os-track-bg-active: transparent;
-    --os-handle-border-radius: 2px;
+    --os-handle-border-radius: 100px;
     --os-handle-bg: hsl(from var(--color-primary) h s l / 0.2);
     --os-handle-bg-hover: hsl(from var(--color-primary) h s l / 0.35);
     --os-handle-bg-active: hsl(from var(--color-primary) h s l / 0.45);
@@ -410,18 +410,42 @@ textarea,
     background-color: hsl(from var(--color-primary) h s l / 0.3);
 }
 
+/* Settings sidebar sliding active indicator */
+.settings-nav-indicator {
+    transition:
+        top 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        left 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        height 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.15s ease-out;
+}
+
 /* Settings page staggered fade-in (reuses tw-animate-css enter keyframe) */
 .animate-settings-in,
 .animate-settings-in > * {
     --tw-enter-opacity: 0;
-    animation: enter 0.2s ease-out both;
+    --tw-enter-translate-y: 8px;
+    animation: enter 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .animate-settings-in > *:nth-child(1) { animation-delay: 0ms; }
-.animate-settings-in > *:nth-child(2) { animation-delay: 30ms; }
-.animate-settings-in > *:nth-child(3) { animation-delay: 60ms; }
-.animate-settings-in > *:nth-child(4) { animation-delay: 90ms; }
-.animate-settings-in > *:nth-child(5) { animation-delay: 120ms; }
+.animate-settings-in > *:nth-child(2) { animation-delay: 40ms; }
+.animate-settings-in > *:nth-child(3) { animation-delay: 80ms; }
+.animate-settings-in > *:nth-child(4) { animation-delay: 120ms; }
+.animate-settings-in > *:nth-child(5) { animation-delay: 160ms; }
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-nav-indicator {
+        transition-duration: 0.01ms !important;
+    }
+
+    .animate-settings-in,
+    .animate-settings-in > * {
+        --tw-enter-translate-y: 0px;
+        animation-duration: 0.01ms !important;
+        animation-delay: 0ms !important;
+    }
+}
 
 /* Window entrance animation (fade + scale) */
 @keyframes window-enter {
@@ -440,7 +464,7 @@ textarea,
 }
 
 .window-enter {
-    animation: window-enter 0.15s ease-out both;
+    animation: window-enter 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -454,18 +478,23 @@ textarea,
     }
 }
 
-/* Paste feedback flash */
-@keyframes paste-flash {
-    0% {
-        background-color: hsl(from var(--color-primary) h s l / 0.15);
-    }
-    100% {
-        background-color: transparent;
-    }
+/* Paste feedback flash — 使用 opacity 动画避免 paint 重绘 */
+.paste-flash-overlay {
+    position: absolute;
+    inset: 0;
+    background-color: hsl(from var(--color-primary) h s l / 0.15);
+    opacity: 0;
+    pointer-events: none;
+    border-radius: inherit;
 }
 
-.animate-paste-flash {
-    animation: paste-flash 0.3s ease-out;
+@keyframes paste-flash {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+.animate-paste-flash .paste-flash-overlay {
+    animation: paste-flash 0.3s ease-out forwards;
 }
 
 /* Dragging cursor - 使用系统 move 光标，避免与自定义 Windows 指针主题不一致 */
@@ -473,3 +502,116 @@ body.dragging-cursor,
 body.dragging-cursor * {
     cursor: move !important;
 }
+/* List top/bottom fade — pseudo-elements instead of maskImage for GPU-friendly scrolling */
+.scroll-fade-container::before,
+.scroll-fade-container::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 10px;
+    z-index: 50;
+    pointer-events: none;
+}
+
+.scroll-fade-container::before {
+    top: 0;
+    background: linear-gradient(to bottom,
+        var(--color-background, transparent) 0%,
+        transparent 100%);
+}
+
+.scroll-fade-container::after {
+    bottom: 0;
+    background: linear-gradient(to top,
+        var(--color-background, transparent) 0%,
+        transparent 100%);
+}
+/* List item entry animation */
+.list-item-enter {
+    animation: list-item-slide-in 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes list-item-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+/* Image skeleton shimmer */
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+.img-skeleton {
+    background: linear-gradient(
+        90deg,
+        var(--color-muted) 25%,
+        color-mix(in srgb, var(--color-muted) 60%, transparent) 37%,
+        var(--color-muted) 63%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+}
+/* Copy success feedback */
+.copy-success-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: hsl(from var(--color-primary) h s l / 0.1);
+    z-index: 40;
+    pointer-events: none;
+    animation: copy-flash 0.3s ease-out forwards;
+}
+
+.copy-success-icon {
+    animation: copy-icon-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes copy-flash {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+@keyframes copy-icon-pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    60% { transform: scale(1.1); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
+/* Image progressive load fade-in */
+.img-progressive {
+    opacity: 0;
+    transition: opacity 0.2s ease-out;
+}
+
+.img-progressive-loaded {
+    opacity: 1;
+}
+
+/* Search highlight fade-in */
+.search-highlight {
+    animation: highlight-fade-in 0.08s ease-out;
+}
+
+@keyframes highlight-fade-in {
+    from { background-color: transparent; }
+    to { background-color: hsl(from var(--color-primary) h s l / 0.2); }
+}
+
+.dark .search-highlight {
+    animation: highlight-fade-in-dark 0.08s ease-out;
+}
+
+@keyframes highlight-fade-in-dark {
+    from { background-color: transparent; }
+    to { background-color: hsl(from var(--color-primary) h s l / 0.3); }
+}
+
