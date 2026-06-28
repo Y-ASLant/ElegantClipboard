@@ -718,7 +718,10 @@ pub fn run() {
 
             commands::data_transfer::apply_pending_import(&db_path);
 
-            let db = Database::new(db_path).map_err(|e| e.to_string())?;
+            let db = Database::new(db_path).map_err(|e| {
+                tracing::error!("Database initialization failed: {}", e);
+                e.to_string()
+            })?;
 
             let monitor = ClipboardMonitor::new();
             monitor.init(&db, images_path);

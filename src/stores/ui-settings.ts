@@ -344,9 +344,13 @@ export function loadUISettingsFromBackend() {
   return invoke<string | null>("get_setting", { key: UI_SETTINGS_DB_KEY })
     .then(async (value) => {
       if (value) {
-        const parsed = JSON.parse(value);
-        useUISettings.setState(mergeUISettings(parsed));
-        clearLegacyUISettings();
+        try {
+          const parsed = JSON.parse(value);
+          useUISettings.setState(mergeUISettings(parsed));
+          clearLegacyUISettings();
+        } catch (error) {
+          logError("Failed to parse UI settings:", error);
+        }
         return;
       }
 

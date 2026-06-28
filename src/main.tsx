@@ -49,8 +49,12 @@ function Router() {
 }
 
 async function bootstrap() {
-  await initLocale();
-  await initUISettingsStore();
+  try {
+    await initLocale();
+    await initUISettingsStore();
+  } catch (error) {
+    console.error("Bootstrap init failed:", error);
+  }
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
