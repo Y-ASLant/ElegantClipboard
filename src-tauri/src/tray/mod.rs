@@ -145,6 +145,12 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
 
 /// 打开或聚焦设置窗口，居中于主窗口所在的显示器
 pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
+    let app = app.clone();
+    crate::main_thread::run_on_ui_thread(&app.clone(), move || open_settings_window_inner(&app))
+        .and_then(|r| r)
+}
+
+fn open_settings_window_inner(app: &AppHandle) -> Result<(), String> {
     // 设置窗口已存在则聚焦
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.unminimize();

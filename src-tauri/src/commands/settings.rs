@@ -442,9 +442,15 @@ pub fn start_accent_color_watcher(app_handle: tauri::AppHandle) {
                         if slice == windows::core::w!("ImmersiveColorSet").as_wide()
                             && let Some(handle) = WATCHER_APP_HANDLE.get()
                         {
-                            use tauri::Emitter;
+                            let app = handle.lock().clone();
                             let color = read_accent_color_from_registry();
-                            let _ = handle.lock().emit("system-accent-color-changed", color);
+                            let _ = crate::main_thread::run_on_ui_thread(&app, {
+                                let app = app.clone();
+                                move || {
+                                    use tauri::Emitter;
+                                    let _ = app.emit("system-accent-color-changed", color);
+                                }
+                            });
                         }
                     }
                 }

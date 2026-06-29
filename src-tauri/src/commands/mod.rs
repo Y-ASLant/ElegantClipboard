@@ -52,48 +52,60 @@ fn restore_prev_foreground_window() {
 
 /// 隐藏主窗口或还原目标窗口焦点（用于粘贴前确保目标应用在前台）。
 pub(crate) fn hide_main_window_if_not_pinned(app: &tauri::AppHandle) {
-    use tauri::{Emitter, Manager};
-
     if crate::input_monitor::is_window_pinned() {
         return;
     }
+    let app = app.clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app.clone(), move || {
+        hide_main_window_if_not_pinned_inner(&app)
+    }) {
+        tracing::warn!("hide_main_window_if_not_pinned dispatch failed: {err}");
+    }
+}
 
-    // 记录是否真正隐藏过主窗，用于区分「刚关闭主窗」与「Alt+N 快捷粘贴主窗本就不可见」两种情形。
+fn hide_main_window_if_not_pinned_inner(app: &tauri::AppHandle) {
+    use tauri::Manager;
+
     let main_was_visible = match app.get_webview_window("main") {
         Some(window) if window.is_visible().unwrap_or(false) => {
-            window::save_window_size_if_enabled(app, &window);
-            let _ = window.set_focusable(false);
-            let _ = window.hide();
-            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-            crate::input_monitor::disable_mouse_monitoring();
-            let _ = window.emit("window-hidden", ());
+            window::hide_main_window_inner(app, &window);
             true
         }
         _ => false,
     };
 
-    // 总是清理预览窗口：避免主窗关闭与悬停倒计时竞态下残留的孤儿预览，
-    // 无法仅靠前端监听 window-hidden 事件兜底。
-    hide_preview_windows(app);
+    hide_preview_windows_inner(app);
 
-    // 仅在刚刚真正隐藏主窗时才恢复目标应用焦点（Alt+N 粘贴无需此操作）。
     #[cfg(target_os = "windows")]
     if main_was_visible {
         restore_prev_foreground_window();
     }
 }
 
+pub(crate) fn hide_preview_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if crate::main_thread::is_main_thread() {
+        hide_preview_windows_inner(app);
+        return;
+    }
+    let app = app.clone();
+    if let Err(err) =
+        crate::main_thread::run_on_ui_thread(&app.clone(), move || hide_preview_windows_inner(&app))
+    {
+        tracing::warn!("hide_preview_windows dispatch failed: {err}");
+    }
+}
+
+pub(crate) fn hide_preview_windows_inner<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    hide_image_preview_window(app);
+    hide_text_preview_window(app);
+}
+
 pub(crate) fn hide_image_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    crate::commands::preview::force_hide_image_preview(app);
+    preview::force_hide_image_preview(app);
 }
 
 pub(crate) fn hide_text_preview_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    crate::commands::preview::force_hide_text_preview(app);
-}
-
-pub(crate) fn hide_preview_windows<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    hide_image_preview_window(app);
-    hide_text_preview_window(app);
+    preview::force_hide_text_preview(app);
 }
 
 /// 延迟恢复监控的发送端（全局单线程处理，避免每次粘贴都 spawn 新线程）

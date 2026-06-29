@@ -35,21 +35,37 @@ pub fn allocate_text_preview_lease() -> u64 {
 }
 
 pub(crate) fn force_hide_image_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    invalidate_all_preview_tokens(&IMAGE_PREVIEW_TOKEN);
-    if let Some(window) = app.get_webview_window("image-preview") {
-        let _ = window.hide();
-        let _ = window.emit("image-preview-clear", ());
-        tracing::debug!("image-preview force hidden");
+    let run = |app: &tauri::AppHandle<R>| {
+        invalidate_all_preview_tokens(&IMAGE_PREVIEW_TOKEN);
+        if let Some(window) = app.get_webview_window("image-preview") {
+            let _ = window.hide();
+            let _ = window.emit("image-preview-clear", ());
+            tracing::debug!("image-preview force hidden");
+        }
+    };
+    if crate::main_thread::is_main_thread() {
+        run(app);
+    } else {
+        let app = app.clone();
+        let _ = crate::main_thread::run_on_ui_thread(&app.clone(), move || run(&app));
     }
 }
 
 pub(crate) fn force_hide_text_preview<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
-    invalidate_all_preview_tokens(&TEXT_PREVIEW_TOKEN);
-    TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, Ordering::AcqRel);
-    if let Some(window) = app.get_webview_window("text-preview") {
-        let _ = window.hide();
-        let _ = window.emit("text-preview-clear", ());
-        tracing::debug!("text-preview force hidden");
+    let run = |app: &tauri::AppHandle<R>| {
+        invalidate_all_preview_tokens(&TEXT_PREVIEW_TOKEN);
+        TEXT_PREVIEW_UPDATE_SEQ.fetch_add(1, Ordering::AcqRel);
+        if let Some(window) = app.get_webview_window("text-preview") {
+            let _ = window.hide();
+            let _ = window.emit("text-preview-clear", ());
+            tracing::debug!("text-preview force hidden");
+        }
+    };
+    if crate::main_thread::is_main_thread() {
+        run(app);
+    } else {
+        let app = app.clone();
+        let _ = crate::main_thread::run_on_ui_thread(&app.clone(), move || run(&app));
     }
 }
 
