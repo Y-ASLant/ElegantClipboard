@@ -46,6 +46,19 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
 
 /// 保存主窗口当前几何信息（位置 + 可选尺寸）。
 pub(crate) fn save_main_window_placement<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if crate::main_thread::is_main_thread() {
+        save_main_window_placement_inner(app);
+        return;
+    }
+    let app = app.clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app.clone(), move || {
+        save_main_window_placement_inner(&app)
+    }) {
+        tracing::warn!("save_main_window_placement dispatch failed: {err}");
+    }
+}
+
+fn save_main_window_placement_inner<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
         save_window_size_if_enabled(app, &window);
     }
@@ -117,6 +130,21 @@ fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
 }
 
 pub(crate) fn show_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    if crate::main_thread::is_main_thread() {
+        show_main_window_inner(app, window);
+        return;
+    }
+    let app = app.clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app.clone(), move || {
+        if let Some(window) = app.get_webview_window("main") {
+            show_main_window_inner(&app, &window);
+        }
+    }) {
+        tracing::warn!("show_main_window dispatch failed: {err}");
+    }
+}
+
+fn show_main_window_inner(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
     position_main_window(app, window);
     crate::input_monitor::save_current_focus();
     let _ = window.set_focusable(false);
@@ -129,23 +157,51 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWi
 }
 
 pub(crate) fn hide_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    if crate::main_thread::is_main_thread() {
+        hide_main_window_inner(app, window);
+        return;
+    }
+    let app = app.clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app.clone(), move || {
+        if let Some(window) = app.get_webview_window("main") {
+            hide_main_window_inner(&app, &window);
+        }
+    }) {
+        tracing::warn!("hide_main_window dispatch failed: {err}");
+    }
+}
+
+pub(crate) fn hide_main_window_inner(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
     save_window_size_if_enabled(app, window);
     let _ = window.set_focusable(false);
     let _ = window.hide();
     crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
     crate::input_monitor::disable_mouse_monitoring();
-    crate::commands::hide_preview_windows(app);
+    super::hide_preview_windows_inner(app);
     let _ = window.emit("window-hidden", ());
 }
 
 pub(crate) fn toggle_window_visibility(app: &tauri::AppHandle) {
+    if crate::main_thread::is_main_thread() {
+        toggle_window_visibility_inner(app);
+        return;
+    }
+    let app = app.clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app.clone(), move || {
+        toggle_window_visibility_inner(&app)
+    }) {
+        tracing::warn!("toggle_window_visibility dispatch failed: {err}");
+    }
+}
+
+fn toggle_window_visibility_inner(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let is_visible = window.is_visible().unwrap_or(false);
         let is_minimized = window.is_minimized().unwrap_or(false);
         if is_visible && !is_minimized {
-            hide_main_window(app, &window);
+            hide_main_window_inner(app, &window);
         } else {
-            show_main_window(app, &window);
+            show_main_window_inner(app, &window);
         }
     }
 }
@@ -176,10 +232,18 @@ pub fn set_window_visibility(visible: bool) {
 
 #[tauri::command]
 pub async fn minimize_window(window: tauri::WebviewWindow) {
-    let _ = window.minimize();
-    crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-    crate::input_monitor::disable_mouse_monitoring();
-    crate::commands::hide_preview_windows(window.app_handle());
+    let app = window.app_handle().clone();
+    let _ = crate::main_thread::run_on_ui_thread(&app, {
+        let app = app.clone();
+        move || {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.minimize();
+            }
+            crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
+            crate::input_monitor::disable_mouse_monitoring();
+            super::hide_preview_windows_inner(&app);
+        }
+    });
 }
 
 #[tauri::command]

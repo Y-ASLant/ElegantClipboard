@@ -6,6 +6,7 @@ mod database;
 mod hotkey;
 mod input_monitor;
 mod keyboard_hook;
+mod main_thread;
 mod positioning;
 mod proxy;
 mod shortcut;
@@ -675,6 +676,24 @@ pub fn run() {
     let config = AppConfig::load();
     init_logging(&config);
 
+    // 捕获 panic 并写入日志；release 使用 panic=abort，panic 信息默认会丢失
+    std::panic::set_hook(Box::new(|info| {
+        let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "unknown panic payload".to_string()
+        };
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        let msg = format!("PANIC at {}: {}", location, payload);
+        tracing::error!("{}", msg);
+        eprintln!("{}", msg);
+    }));
+
     match tauri::webview_version() {
         Ok(ver) => tracing::info!("WebView2 runtime version: {}", ver),
         Err(e) => tracing::warn!("WebView2 version query failed: {}", e),
@@ -713,6 +732,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
+            main_thread::init();
+
             let db_path = config.get_db_path();
             let images_path = config.get_images_path();
 

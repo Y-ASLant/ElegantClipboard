@@ -209,28 +209,57 @@ pub fn save_current_focus() {}
 
 /// 临时启用窗口焦点（供搜索框输入使用）。
 pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
-    save_current_focus();
-    let _ = window.set_focusable(true);
-    let _ = window.set_focus();
+    let app = window.app_handle().clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app, {
+        let app = app.clone();
+        move || {
+            if let Some(window) = app.get_webview_window("main") {
+                save_current_focus();
+                let _ = window.set_focusable(true);
+                let _ = window.set_focus();
+            }
+        }
+    }) {
+        warn!("focus_clipboard_window dispatch failed: {err}");
+    }
 }
 
 /// 恢复非聚焦模式并还原之前的前台窗口（搜索框 blur 时调用）。
 #[cfg(windows)]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
-    let _ = window.set_focusable(false);
-    let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
-    if raw != 0 {
-        let hwnd = HWND(raw as *mut _);
-        unsafe {
-            let _ = SetForegroundWindow(hwnd);
+    let app = window.app_handle().clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app, {
+        let app = app.clone();
+        move || {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focusable(false);
+            }
+            let raw = PREV_FOREGROUND_HWND.load(Ordering::Relaxed);
+            if raw != 0 {
+                let hwnd = HWND(raw as *mut _);
+                unsafe {
+                    let _ = SetForegroundWindow(hwnd);
+                }
+            }
         }
+    }) {
+        warn!("restore_last_focus dispatch failed: {err}");
     }
 }
 
 #[cfg(not(windows))]
 pub fn restore_last_focus(window: &tauri::WebviewWindow) {
-    // 非 Windows 平台回退逻辑
-    let _ = window.set_focusable(false);
+    let app = window.app_handle().clone();
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app, {
+        let app = app.clone();
+        move || {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focusable(false);
+            }
+        }
+    }) {
+        warn!("restore_last_focus dispatch failed: {err}");
+    }
 }
 
 pub fn get_cursor_position() -> (f64, f64) {
@@ -378,7 +407,8 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     };
                     if let Some(key) = nav_key {
                         if is_keydown {
-                            handle_nav_key(key);
+                            let shift = unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) < 0 };
+                            handle_nav_key(key, shift);
                         }
                         return LRESULT(1);
                     }
@@ -390,19 +420,18 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 }
 
 #[cfg(windows)]
-fn handle_nav_key(key: &str) {
-    if let Some(window) = MAIN_WINDOW.lock().as_ref()
-        && window.is_visible().unwrap_or(false)
-    {
-        let shift = unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) < 0 };
-        let _ = window.emit(
-            "keyboard-nav",
-            serde_json::json!({
-                "key": key,
-                "shift": shift,
-            }),
-        );
-    }
+fn handle_nav_key(key: &'static str, shift: bool) {
+    dispatch_on_main_thread(move |_app, window| {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.emit(
+                "keyboard-nav",
+                serde_json::json!({
+                    "key": key,
+                    "shift": shift,
+                }),
+            );
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -461,38 +490,47 @@ fn is_monitoring_active() -> bool {
     MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed) && !WINDOW_PINNED.load(Ordering::Relaxed)
 }
 
+/// 低级钩子回调不在主线程，不能直接操作 WebView 窗口；派发到主线程执行。
+fn dispatch_on_main_thread(f: impl FnOnce(&tauri::AppHandle, &WebviewWindow) + Send + 'static) {
+    let Some(app) = MAIN_WINDOW
+        .lock()
+        .as_ref()
+        .map(|window| window.app_handle().clone())
+    else {
+        return;
+    };
+    if let Err(err) = crate::main_thread::run_on_ui_thread(&app, {
+        let app = app.clone();
+        move || {
+            if let Some(window) = app.get_webview_window("main") {
+                f(&app, &window);
+            }
+        }
+    }) {
+        warn!("Failed to dispatch input monitor action to main thread: {err}");
+    }
+}
+
 fn handle_escape_key() {
     if !is_monitoring_active() {
         return;
     }
-    if let Some(window) = MAIN_WINDOW.lock().as_ref()
-        && window.is_visible().unwrap_or(false)
-    {
-        let _ = window.emit("escape-pressed", ());
-    }
+    dispatch_on_main_thread(|_app, window| {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.emit("escape-pressed", ());
+        }
+    });
 }
 
 fn handle_click_outside() {
-    let mouse_enabled = MOUSE_MONITORING_ENABLED.load(Ordering::Relaxed);
-    let pinned = WINDOW_PINNED.load(Ordering::Relaxed);
-    if !mouse_enabled || pinned {
-        trace!(
-            "handle_click_outside: 跳过 (mouse_enabled={}, pinned={})",
-            mouse_enabled, pinned
-        );
+    if !is_monitoring_active() {
+        trace!("handle_click_outside: skipped (monitoring inactive)");
         return;
     }
-    if let Some(window) = MAIN_WINDOW.lock().as_ref()
-        && window.is_visible().unwrap_or(false)
-        && is_mouse_outside_window(window)
-    {
-        info!("handle_click_outside: window visible and click outside, hiding");
-        crate::commands::window::save_window_size_if_enabled(window.app_handle(), window);
-        let _ = window.set_focusable(false);
-        let _ = window.hide();
-        crate::keyboard_hook::set_window_state(crate::keyboard_hook::WindowState::Hidden);
-        disable_mouse_monitoring();
-        crate::commands::hide_preview_windows(window.app_handle());
-        let _ = window.emit("window-hidden", ());
-    }
+    dispatch_on_main_thread(|app, window| {
+        if window.is_visible().unwrap_or(false) && is_mouse_outside_window(window) {
+            info!("handle_click_outside: window visible and click outside, hiding");
+            crate::commands::window::hide_main_window_inner(app, window);
+        }
+    });
 }

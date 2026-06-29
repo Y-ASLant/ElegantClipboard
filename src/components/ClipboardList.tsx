@@ -420,12 +420,11 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [handleNavKey, searchInputRef]);
 
-  // Tauri 键盘钩子事件（窗口无需聚焦，聚焦时跳过避免重复）
+  // 后端钩子：主窗口非 OS 前台时拦截方向键并 emit（Rust 侧 fg==main 时不 emit，故无需 hasFocus 守卫）
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let disposed = false;
     listen<{ key: string; shift: boolean }>("keyboard-nav", (event) => {
-      if (document.hasFocus()) return;
       handleNavKey(event.payload.key, event.payload.shift);
     }).then((fn) => {
       if (disposed) fn(); else unlisten = fn;

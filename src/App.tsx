@@ -32,7 +32,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useInputFocus, focusWindowImmediately } from "@/hooks/useInputFocus";
+import { useInputFocus, focusWindowImmediately, releaseWebViewFocus } from "@/hooks/useInputFocus";
 import { useTranslation } from "@/i18n";
 import { GROUP_VALUES, getGroups } from "@/lib/constants";
 import { logError } from "@/lib/logger";
@@ -290,6 +290,7 @@ function App() {
   // 窗口隐藏时关闭弹出层并可选重置状态
   useEffect(() => {
     const unlisten = listen("window-hidden", () => {
+      releaseWebViewFocus();
       setWindowVisible(false);
       dismissOverlays();
       setGroupDropdownOpen(false);

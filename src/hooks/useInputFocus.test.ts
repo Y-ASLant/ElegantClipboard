@@ -18,9 +18,17 @@ describe("useInputFocus", () => {
     expect(typeof mod.cancelPendingFocusRestore).toBe("function");
   });
 
-  it("exports focusWindowImmediately", async () => {
+  it("releaseWebViewFocus blurs active element", async () => {
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
     const mod = await import("./useInputFocus");
-    expect(typeof mod.focusWindowImmediately).toBe("function");
+    mod.releaseWebViewFocus();
+    expect(document.activeElement).not.toBe(input);
+
+    document.body.removeChild(input);
   });
 
   it("exports useInputFocus hook", async () => {
