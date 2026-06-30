@@ -503,14 +503,6 @@ fn is_mouse_outside_translate_window() -> bool {
     is_mouse_outside_hwnd(TRANSLATE_HWND.load(Ordering::Relaxed))
 }
 
-#[cfg(not(windows))]
-fn is_mouse_outside_translate_window() -> bool {
-    let Some(window) = TRANSLATE_WINDOW.lock().clone() else {
-        return false;
-    };
-    is_mouse_outside_window(&window)
-}
-
 #[cfg(windows)]
 fn is_mouse_outside_hwnd(raw: isize) -> bool {
     if raw == 0 {
@@ -536,28 +528,6 @@ fn is_mouse_outside_window(_window: &WebviewWindow) -> bool {
         debug!("点击检测: cursor outside main window");
     }
     outside
-}
-
-#[cfg(not(windows))]
-fn is_mouse_outside_window(window: &WebviewWindow) -> bool {
-    let cursor_x = CURSOR_X.load(Ordering::Relaxed) as f64;
-    let cursor_y = CURSOR_Y.load(Ordering::Relaxed) as f64;
-
-    let position = match window.outer_position() {
-        Ok(pos) => pos,
-        Err(_) => return false,
-    };
-    let size = match window.outer_size() {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    let win_x = position.x as f64;
-    let win_y = position.y as f64;
-    cursor_x < win_x
-        || cursor_x > win_x + size.width as f64
-        || cursor_y < win_y
-        || cursor_y > win_y + size.height as f64
 }
 
 fn is_monitoring_active() -> bool {

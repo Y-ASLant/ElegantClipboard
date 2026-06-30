@@ -516,13 +516,16 @@ impl ClipboardHandler {
         hashes: &ContentHashes,
         max_size: usize,
     ) -> Result<NewClipboardItem, String> {
-        let text = canonical_url_text(&text)
-            .map(|canonical| canonical.to_string())
-            .unwrap_or(text);
+        let is_url = canonical_url_text(&text).is_some();
+        let text = if is_url {
+            text.trim().to_string()
+        } else {
+            text
+        };
         let byte_size = text.len() as i64;
         let char_count = Some(text.chars().count() as i64);
         let preview = Self::create_preview(&text);
-        let content_type = if is_url(&text) {
+        let content_type = if is_url {
             ContentType::Url
         } else {
             ContentType::Text

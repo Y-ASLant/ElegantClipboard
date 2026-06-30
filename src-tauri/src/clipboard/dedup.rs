@@ -71,7 +71,14 @@ fn is_valid_ipv4(host: &str) -> bool {
 }
 
 fn is_valid_ipv6(host: &str) -> bool {
-    host.starts_with('[') && host.ends_with(']') && host.len() > 2
+    if !host.starts_with('[') || !host.ends_with(']') || host.len() <= 2 {
+        return false;
+    }
+    let inner = &host[1..host.len() - 1];
+    !inner.is_empty()
+        && inner
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.')
 }
 
 fn is_valid_domain_host(host: &str) -> bool {
