@@ -65,10 +65,6 @@ pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn get_clipboard_source_app() -> Option<SourceAppInfo> {
-    None
-}
 
 /// 通过 PID 获取进程 exe 路径
 #[cfg(target_os = "windows")]
@@ -250,14 +246,6 @@ pub fn get_app_display_name_pub(exe_path: &str) -> String {
     get_app_display_name(exe_path)
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn get_app_display_name_pub(exe_path: &str) -> String {
-    Path::new(exe_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("Unknown")
-        .to_string()
-}
 
 fn compute_icon_cache_key(exe_path: &str) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -282,14 +270,6 @@ pub fn extract_and_cache_icon(exe_path: &str, icons_dir: &Path, cache_key: &str)
     Some(icon_path.to_string_lossy().to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn extract_and_cache_icon(
-    _exe_path: &str,
-    _icons_dir: &Path,
-    _cache_key: &str,
-) -> Option<String> {
-    None
-}
 
 /// 通过 SHGetFileInfoW + GDI 提取 exe 图标为 PNG
 #[cfg(target_os = "windows")]

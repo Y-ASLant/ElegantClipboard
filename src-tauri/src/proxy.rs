@@ -69,10 +69,6 @@ fn format_proxy_url(addr: &str) -> String {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn get_windows_system_proxy() -> Option<String> {
-    None
-}
 
 /// 根据代理模式配置 reqwest 客户端 builder
 pub fn apply_proxy(

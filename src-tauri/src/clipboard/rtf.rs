@@ -59,10 +59,6 @@ pub fn read_rtf_from_clipboard() -> Option<String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn read_rtf_from_clipboard() -> Option<String> {
-    None
-}
 
 /// 将 RTF（及可选纯文本 fallback）写入剪贴板（Windows 专用）
 #[cfg(target_os = "windows")]
@@ -136,7 +132,3 @@ fn set_null_terminated_clipboard_data(format: u32, data: &[u8]) -> Result<(), St
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn write_rtf_to_clipboard(_rtf: &str, _plain_text: Option<&str>) -> Result<(), String> {
-    Err("RTF clipboard write is only supported on Windows".to_string())
-}

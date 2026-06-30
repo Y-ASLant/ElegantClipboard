@@ -352,11 +352,6 @@ pub async fn get_running_apps(
 
         Ok(result)
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Ok(Vec::new())
-    }
 }
 
 // ============ 系统主题命令 ============
@@ -533,11 +528,6 @@ pub async fn get_system_accent_color() -> Result<Option<String>, String> {
 
         Ok(None)
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Ok(None)
-    }
 }
 
 // ============ 系统字体命令 ============
@@ -597,10 +587,5 @@ pub fn get_system_fonts() -> Vec<String> {
         }
 
         font_names.into_iter().collect()
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Vec::new()
     }
 }

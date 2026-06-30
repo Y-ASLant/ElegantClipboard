@@ -415,8 +415,6 @@ fn apply_preview_window_effect(window: &tauri::WebviewWindow, effect: Option<&st
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-fn apply_preview_window_effect(_window: &tauri::WebviewWindow, _effect: Option<&str>) {}
 
 #[tauri::command]
 pub fn set_log_to_file(enabled: bool) -> Result<(), String> {

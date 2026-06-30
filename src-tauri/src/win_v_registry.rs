@@ -116,18 +116,3 @@ pub fn is_win_v_hotkey_disabled() -> bool {
     current_value.contains('V')
 }
 
-// 非 Windows 平台占位
-#[cfg(not(windows))]
-pub fn disable_win_v_hotkey(_restart_explorer: bool) -> Result<(), String> {
-    Err("Win+V registry modification is only available on Windows".to_string())
-}
-
-#[cfg(not(windows))]
-pub fn enable_win_v_hotkey(_restart_explorer: bool) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(not(windows))]
-pub fn is_win_v_hotkey_disabled() -> bool {
-    false
-}

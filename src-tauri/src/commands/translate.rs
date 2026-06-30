@@ -411,12 +411,6 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
             }
             changed
         };
-        #[cfg(not(target_os = "windows"))]
-        {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
-        #[cfg(not(target_os = "windows"))]
-        let clipboard_changed = true;
 
         if !clipboard_changed {
             return Ok(String::new());

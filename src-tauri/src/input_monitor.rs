@@ -140,8 +140,6 @@ pub fn start_monitoring() {
         #[cfg(windows)]
         run_hook_thread();
 
-        #[cfg(not(windows))]
-        warn!("Input monitoring not supported on this platform");
 
         MONITOR_RUNNING.store(false, Ordering::SeqCst);
         #[cfg(windows)]
@@ -268,8 +266,6 @@ pub fn save_current_focus() {
     PREV_FOREGROUND_HWND.store(val, Ordering::Relaxed);
 }
 
-#[cfg(not(windows))]
-pub fn save_current_focus() {}
 
 /// 临时启用窗口焦点（供搜索框输入使用）。
 pub fn focus_clipboard_window(window: &tauri::WebviewWindow) {
@@ -311,20 +307,6 @@ pub fn restore_last_focus(window: &tauri::WebviewWindow) {
     }
 }
 
-#[cfg(not(windows))]
-pub fn restore_last_focus(window: &tauri::WebviewWindow) {
-    let app = window.app_handle().clone();
-    if let Err(err) = crate::main_thread::run_on_ui_thread(&app, {
-        let app = app.clone();
-        move || {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_focusable(false);
-            }
-        }
-    }) {
-        warn!("restore_last_focus dispatch failed: {err}");
-    }
-}
 
 pub fn get_cursor_position() -> (f64, f64) {
     let x = CURSOR_X.load(Ordering::Relaxed) as f64;

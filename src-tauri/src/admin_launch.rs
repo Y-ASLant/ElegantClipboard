@@ -76,10 +76,6 @@ pub fn is_running_as_admin() -> bool {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn is_running_as_admin() -> bool {
-    false
-}
 
 // ─── 自提权 ───────────────────────────────────────────────────────────────────
 
@@ -207,10 +203,6 @@ pub fn self_elevate() -> bool {
     false
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn self_elevate() -> bool {
-    false
-}
 
 /// 通过 ShellExecute "runas" 启动新实例（会弹出 UAC 提示）
 #[cfg(target_os = "windows")]
@@ -263,10 +255,6 @@ pub fn restart_app() -> bool {
     false
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn restart_app() -> bool {
-    false
-}
 
 /// 通过 explorer.exe 启动，确保新进程不继承管理员权限
 #[cfg(target_os = "windows")]
@@ -324,5 +312,3 @@ pub fn cleanup_compat_flags() {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn cleanup_compat_flags() {}

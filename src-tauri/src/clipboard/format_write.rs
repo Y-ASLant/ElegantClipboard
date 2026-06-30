@@ -82,13 +82,6 @@ fn write_rtf_item(item: &ClipboardItem, clipboard: &mut Clipboard) -> Result<(),
         return write_rtf_to_clipboard(rtf, alt.as_deref());
     }
 
-    #[cfg(not(target_os = "windows"))]
-    if item.rtf_content.as_deref().is_some_and(|r| !r.is_empty()) {
-        let text = alt.ok_or_else(|| "Item has no plain text fallback for RTF".to_string())?;
-        return clipboard
-            .set_text(text)
-            .map_err(|e| format!("Failed to set clipboard text: {e}"));
-    }
 
     write_plain_text(item, clipboard)
 }

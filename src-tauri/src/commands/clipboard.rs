@@ -199,55 +199,6 @@ pub fn simulate_copy() -> Result<(), String> {
     simulate_ctrl_combo(VK_C.0, "simulate_copy")
 }
 
-#[cfg(not(target_os = "windows"))]
-fn simulate_ctrl_combo_enigo(key: char) -> Result<(), String> {
-    use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("Failed to create keyboard simulator: {}", e))?;
-
-    for m in [Key::Alt, Key::Shift, Key::Meta, Key::Control] {
-        let _ = enigo.key(m, Direction::Release);
-    }
-
-    #[cfg(target_os = "macos")]
-    let modifier = Key::Meta;
-    #[cfg(not(target_os = "macos"))]
-    let modifier = Key::Control;
-
-    enigo
-        .key(modifier, Direction::Press)
-        .map_err(|e| format!("Failed to press modifier: {}", e))?;
-
-    let click_result = enigo
-        .key(Key::Unicode(key), Direction::Click)
-        .map_err(|e| format!("Failed to press {key}: {}", e));
-
-    let release_result = enigo
-        .key(modifier, Direction::Release)
-        .map_err(|e| format!("Failed to release modifier: {}", e));
-
-    if let Err(click_error) = click_result {
-        if let Err(release_error) = release_result {
-            return Err(format!(
-                "{click_error}; additionally failed to release modifier: {release_error}"
-            ));
-        }
-        return Err(click_error);
-    }
-
-    release_result
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn simulate_paste() -> Result<(), String> {
-    simulate_ctrl_combo_enigo('v')
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn simulate_copy() -> Result<(), String> {
-    simulate_ctrl_combo_enigo('c')
-}
 
 /// 获取剪贴板条目（支持可选过滤）
 #[tauri::command]

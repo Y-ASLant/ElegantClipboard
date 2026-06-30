@@ -132,10 +132,6 @@ pub fn create_elevation_task() -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn create_elevation_task() -> Result<(), String> {
-    Err("仅限 Windows".into())
-}
 
 /// 通过计划任务启动程序（免 UAC 提权）
 #[cfg(target_os = "windows")]
@@ -151,10 +147,6 @@ pub fn run_elevation_task() -> bool {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn run_elevation_task() -> bool {
-    false
-}
 
 /// 删除计划任务
 #[cfg(target_os = "windows")]
@@ -169,10 +161,6 @@ pub fn delete_elevation_task() -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn delete_elevation_task() -> Result<(), String> {
-    Ok(())
-}
 
 /// 检查计划任务是否存在
 #[cfg(target_os = "windows")]
@@ -185,10 +173,6 @@ pub fn is_elevation_task_exists() -> bool {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn is_elevation_task_exists() -> bool {
-    false
-}
 
 /// 校验计划任务中的 exe 路径是否与当前进程路径一致
 #[cfg(target_os = "windows")]
@@ -230,10 +214,6 @@ pub fn is_elevation_task_path_valid() -> bool {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn is_elevation_task_path_valid() -> bool {
-    false
-}
 
 /// 清理旧版 ONLOGON 自启动计划任务（迁移用）
 #[cfg(target_os = "windows")]
@@ -245,5 +225,3 @@ pub fn delete_legacy_autostart_task() {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn delete_legacy_autostart_task() {}

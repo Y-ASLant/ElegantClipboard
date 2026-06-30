@@ -21,10 +21,6 @@ pub fn is_main_thread() -> bool {
         let main = MAIN_THREAD_ID.load(Ordering::SeqCst);
         main != 0 && main == unsafe { GetCurrentThreadId() }
     }
-    #[cfg(not(windows))]
-    {
-        true
-    }
 }
 
 /// 若已在主线程则同步执行，否则阻塞等待主线程完成（粘贴等流程依赖顺序）。
