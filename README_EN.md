@@ -106,7 +106,7 @@ See [FEATURES_EN.md](FEATURES_EN.md) for complete feature list and terminology.
 | **Hash** | BLAKE3 (content deduplication) |
 | **Locking** | parking_lot (high-performance Mutex/RwLock) |
 | **Parallel** | rayon (parallel file checking) |
-| **Clipboard** | clipboard-master + arboard + clipboard-rs |
+| **Clipboard** | arboard (CF_DIB / CF_HDROP / RTF / HTML / text) |
 | **Window Effects** | window-vibrancy (Mica/Acrylic/Tabbed) |
 | **Keyboard Simulation** | enigo |
 | **Input Monitoring** | Win32 LL Hook (WH_MOUSE_LL + WH_KEYBOARD_LL, only when window visible) |
@@ -140,7 +140,7 @@ scoop install elegantclipboard
 #### Requirements
 
 - Node.js 18+ (LTS recommended)
-- Rust 1.85+ (Rust edition 2024)
+- Rust 1.96+ (Rust edition 2024)
 - Windows 10/11
 
 #### Build Steps

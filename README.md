@@ -106,7 +106,7 @@
 | **哈希** | BLAKE3（内容去重） |
 | **锁** | parking_lot（高性能 Mutex/RwLock） |
 | **并行** | rayon（文件检查并行化） |
-| **剪贴板** | clipboard-master + arboard + clipboard-rs |
+| **剪贴板** | arboard（CF_DIB / CF_HDROP / RTF / HTML / 文本） |
 | **窗口特效** | window-vibrancy（Mica/Acrylic/Tabbed） |
 | **键盘模拟** | enigo |
 | **输入监控** | Win32 LL Hook（WH_MOUSE_LL + WH_KEYBOARD_LL，仅窗口可见时启用键盘钩子） |
@@ -140,7 +140,7 @@ scoop install elegantclipboard
 #### 环境要求
 
 - Node.js 18+（推荐 LTS 版本）
-- Rust 1.85+（Rust edition 2024）
+- Rust 1.96+（Rust edition 2024）
 - Windows 10/11
 
 #### 构建步骤
