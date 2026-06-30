@@ -1,4 +1,7 @@
+pub mod tray_i18n;
+
 use crate::commands::AppState;
+use parking_lot::Mutex;
 use std::sync::Arc;
 use tauri::{
     AppHandle, Manager,
@@ -7,8 +10,34 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tracing::info;
+use tray_i18n::TrayI18n;
 
 const MAIN_TRAY_ID: &str = "main-tray";
+
+/// 运行时托盘菜单项引用，用于动态更新文本
+struct TrayMenuItems {
+    pause_item: MenuItem<tauri::Wry>,
+    shortcut_item: MenuItem<tauri::Wry>,
+    settings_item: MenuItem<tauri::Wry>,
+    restart_item: MenuItem<tauri::Wry>,
+    quit_item: MenuItem<tauri::Wry>,
+}
+
+/// 全局托盘菜单项 + 当前语言，用于语言切换时更新菜单文本
+static TRAY_STATE: Mutex<Option<(TrayMenuItems, String)>> = Mutex::new(None);
+
+/// 从数据库读取语言设置（缺失时回退 zh-CN）
+fn read_locale(app: &AppHandle) -> String {
+    app.try_state::<Arc<AppState>>()
+        .map(|state| {
+            crate::database::SettingsRepository::new(&state.db)
+                .get("language")
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| "zh-CN".into())
+        })
+        .unwrap_or_else(|| "zh-CN".into())
+}
 
 /// 初始化系统托盘图标和菜单
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -18,14 +47,23 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let (width, height) = rgba.dimensions();
     let icon = Image::new_owned(rgba.into_raw(), width, height);
 
-    let pause_item = MenuItem::with_id(app, "toggle_pause", "暂停监控", true, None::<&str>)?;
-    let shortcut_item =
-        MenuItem::with_id(app, "toggle_shortcuts", "禁用快捷键", true, None::<&str>)?;
+    let locale = read_locale(app);
+    let i18n = TrayI18n::from_locale(&locale);
+
+    let pause_item =
+        MenuItem::with_id(app, "toggle_pause", &i18n.pause_monitor, true, None::<&str>)?;
+    let shortcut_item = MenuItem::with_id(
+        app,
+        "toggle_shortcuts",
+        &i18n.disable_shortcuts,
+        true,
+        None::<&str>,
+    )?;
     let separator1 = PredefinedMenuItem::separator(app)?;
-    let settings_item = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
-    let restart_item = MenuItem::with_id(app, "restart", "重启程序", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app, "settings", &i18n.settings, true, None::<&str>)?;
+    let restart_item = MenuItem::with_id(app, "restart", &i18n.restart, true, None::<&str>)?;
     let separator2 = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "quit", "退出程序", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", &i18n.quit, true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
@@ -40,6 +78,18 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
 
+    // 保存菜单项引用，供语言切换时更新
+    *TRAY_STATE.lock() = Some((
+        TrayMenuItems {
+            pause_item: pause_item.clone(),
+            shortcut_item: shortcut_item.clone(),
+            settings_item: settings_item.clone(),
+            restart_item: restart_item.clone(),
+            quit_item: quit_item.clone(),
+        },
+        locale.clone(),
+    ));
+
     let tray = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .icon(icon)
         .menu(&menu)
@@ -51,27 +101,41 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 "toggle_pause" => {
                     if let Some(state) = app.try_state::<Arc<AppState>>() {
                         let paused = state.monitor.toggle_user_pause();
-                        let _ = pause_item.set_text(if paused {
-                            "恢复监控"
-                        } else {
-                            "暂停监控"
-                        });
-                        if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
-                            let tip = if paused {
-                                "ElegantClipboard (已暂停)"
+                        // 从全局状态读取当前语言的翻译
+                        let tip;
+                        {
+                            let guard = TRAY_STATE.lock();
+                            let i18n = guard
+                                .as_ref()
+                                .map(|(_, loc)| TrayI18n::from_locale(loc))
+                                .unwrap_or_else(TrayI18n::zh_cn);
+                            let _ = pause_item.set_text(if paused {
+                                &i18n.resume_monitor
                             } else {
-                                "ElegantClipboard"
+                                &i18n.pause_monitor
+                            });
+                            tip = if paused {
+                                i18n.paused_tip
+                            } else {
+                                "ElegantClipboard".into()
                             };
-                            let _ = tray.set_tooltip(Some(tip));
+                        }
+                        if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+                            let _ = tray.set_tooltip(Some(&tip));
                         }
                     }
                 }
                 "toggle_shortcuts" => {
                     let disabled = crate::toggle_shortcuts_disabled(app);
+                    let guard = TRAY_STATE.lock();
+                    let i18n = guard
+                        .as_ref()
+                        .map(|(_, loc)| TrayI18n::from_locale(loc))
+                        .unwrap_or_else(TrayI18n::zh_cn);
                     let _ = shortcut_item.set_text(if disabled {
-                        "恢复快捷键"
+                        &i18n.restore_shortcuts
                     } else {
-                        "禁用快捷键"
+                        &i18n.disable_shortcuts
                     });
                 }
                 _ => handle_menu_event(app, id),
@@ -98,7 +162,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let _ = tray.set_visible(load_tray_visibility(app));
 
-    info!("System tray initialized");
+    info!("System tray initialized (locale: {locale})");
     Ok(())
 }
 
@@ -117,6 +181,26 @@ pub(crate) fn set_tray_visibility(app: &AppHandle, visible: bool) -> Result<(), 
         .tray_by_id(MAIN_TRAY_ID)
         .ok_or_else(|| "Tray icon not initialized".to_string())?;
     tray.set_visible(visible).map_err(|e| e.to_string())
+}
+
+/// 更新托盘菜单语言（供前端语言切换时调用）
+pub(crate) fn update_tray_language(_app: &AppHandle, locale: &str) {
+    let mut guard = TRAY_STATE.lock();
+    let Some((items, current)) = guard.as_mut() else {
+        return;
+    };
+    if current == locale {
+        return;
+    }
+    *current = locale.to_string();
+
+    let i18n = TrayI18n::from_locale(locale);
+    let _ = items.pause_item.set_text(&i18n.pause_monitor);
+    let _ = items.shortcut_item.set_text(&i18n.disable_shortcuts);
+    let _ = items.settings_item.set_text(&i18n.settings);
+    let _ = items.restart_item.set_text(&i18n.restart);
+    let _ = items.quit_item.set_text(&i18n.quit);
+    info!("Tray menu language updated to: {locale}");
 }
 
 /// 处理托盘菜单事件

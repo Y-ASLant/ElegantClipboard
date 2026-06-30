@@ -46,6 +46,8 @@ export const useLocaleStore = create<LocaleState>((set, get) => ({
 
     try {
       await invoke("set_setting", { key: DB_KEY, value: locale });
+      // 同步更新原生托盘菜单语言
+      invoke("update_tray_language", { locale }).catch(() => {});
       await emit(SYNC_EVENT, locale);
     } catch (error) {
       logError("Failed to save language setting:", error);

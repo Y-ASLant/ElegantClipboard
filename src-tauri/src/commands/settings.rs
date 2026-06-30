@@ -52,6 +52,13 @@ pub async fn set_tray_icon_visibility(
         .map_err(|e| e.to_string())
 }
 
+/// 更新托盘菜单语言（前端语言切换时调用）
+#[tauri::command]
+pub async fn update_tray_language(app: tauri::AppHandle, locale: String) -> Result<(), String> {
+    crate::tray::update_tray_language(&app, &locale);
+    Ok(())
+}
+
 /// 获取所有设置
 #[tauri::command]
 pub async fn get_all_settings(
