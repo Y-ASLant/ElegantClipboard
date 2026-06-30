@@ -75,7 +75,6 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # Cross-platform clipboard
 arboard = "3"
 clipboard-master = "4"
-clipboard-rs = "0.2"
 
 # Keyboard simulation for paste
 enigo = "0.6"

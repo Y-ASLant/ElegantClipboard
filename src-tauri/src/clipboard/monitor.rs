@@ -253,10 +253,7 @@ fn read_clipboard_content_with_retry(max_image_bytes: usize) -> Option<Clipboard
 
 /// 读取当前剪贴板内容（单次尝试）
 fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
-    use clipboard_rs::common::RustImage;
-    use clipboard_rs::{Clipboard, ClipboardContext};
-
-    let ctx = match ClipboardContext::new() {
+    let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
         Err(e) => {
             warn!(
@@ -268,24 +265,27 @@ fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
     };
 
     // 优先尝试获取文件
-    match ctx.get_files() {
+    match clipboard.get().file_list() {
         Ok(files) if !files.is_empty() => {
-            debug!("Got {} files from clipboard", files.len());
-            return Some(ClipboardContent::Files(files));
+            let file_strings: Vec<String> = files
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            debug!("Got {} files from clipboard", file_strings.len());
+            return Some(ClipboardContent::Files(file_strings));
         }
         Ok(_) => {} // 空文件列表，继续尝试其他格式
         Err(e) => debug!("Clipboard get_files failed: {}", e),
     }
 
     // 尝试获取图片
-    match ctx.get_image() {
+    match clipboard.get_image() {
         Ok(img) => {
-            let (width, height) = img.get_size();
+            let width = img.width as u32;
+            let height = img.height as u32;
             debug!("Got image from clipboard: {}x{}", width, height);
 
-            // 在 PNG 编码前估算最终字节大小，超限则跳过，避免对超大图进行 CPU 密集的编码。
-            // 经验：PNG 压缩比通常 ≥ 4（截图/纯色更高，摄影/真随机最低），
-            // 故按"每像素约 1 字节"作为 PNG 字节数的近似上界——与 UI 上"图片大小"语义一致。
+            // 在 PNG 编码前估算最终字节大小，超限则跳过
             if max_image_bytes > 0 {
                 let estimated_png_bytes = u64::from(width).saturating_mul(u64::from(height));
                 if estimated_png_bytes > max_image_bytes as u64 {
@@ -297,11 +297,11 @@ fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
                 }
             }
 
-            match img.to_png() {
-                Ok(png_buffer) => {
-                    let bytes: Vec<u8> = png_buffer.get_bytes().to_vec();
-                    debug!("Got PNG image: {} bytes", bytes.len());
-                    return Some(ClipboardContent::Image(bytes));
+            // arboard 返回 RGBA 像素，用 image crate 编码为 PNG
+            match encode_rgba_to_png(&img.bytes, width, height) {
+                Ok(png_bytes) => {
+                    debug!("Got PNG image: {} bytes", png_bytes.len());
+                    return Some(ClipboardContent::Image(png_bytes));
                 }
                 Err(e) => warn!("Failed to convert clipboard image to PNG: {}", e),
             }
@@ -313,43 +313,106 @@ fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
     }
 
     // 尝试获取 HTML
-    if ctx.has(clipboard_rs::ContentFormat::Html) {
-        match ctx.get_html() {
-            Ok(html) if !html.is_empty() => {
-                let text = ctx.get_text().ok().filter(|t| !t.is_empty());
-                debug!("Got HTML from clipboard: {} bytes", html.len());
-                return Some(ClipboardContent::Html { html, text });
-            }
-            Ok(_) => {}
-            Err(e) => debug!("Clipboard get_html failed: {}", e),
+    match clipboard.get().html() {
+        Ok(html) if !html.is_empty() => {
+            let text = clipboard.get_text().ok().filter(|t| !t.is_empty());
+            debug!("Got HTML from clipboard: {} bytes", html.len());
+            return Some(ClipboardContent::Html { html, text });
         }
+        Ok(_) => {}
+        Err(e) => debug!("Clipboard get_html failed: {}", e),
     }
 
-    // 尝试获取 RTF 富文本
-    if ctx.has(clipboard_rs::ContentFormat::Rtf) {
-        match ctx.get_rich_text() {
-            Ok(rtf) if !rtf.is_empty() => {
-                let text = ctx.get_text().ok().filter(|t| !t.is_empty());
-                debug!("Got RTF from clipboard: {} bytes", rtf.len());
-                return Some(ClipboardContent::Rtf { rtf, text });
-            }
-            Ok(_) => {}
-            Err(e) => debug!("Clipboard get_rich_text failed: {}", e),
+    // 尝试获取 RTF 富文本（arboard 不支持，用 Windows API）
+    #[cfg(target_os = "windows")]
+    if let Some(rtf) = read_rtf_from_clipboard() {
+        if !rtf.is_empty() {
+            let text = clipboard.get_text().ok().filter(|t| !t.is_empty());
+            debug!("Got RTF from clipboard: {} bytes", rtf.len());
+            return Some(ClipboardContent::Rtf { rtf, text });
         }
     }
 
     // 尝试获取纯文本
-    match arboard::Clipboard::new() {
-        Ok(mut clipboard) => match clipboard.get_text() {
-            Ok(text) if !text.is_empty() => {
-                return Some(ClipboardContent::Text(text));
-            }
-            Ok(_) => debug!("Clipboard text is empty"),
-            Err(e) => debug!("Clipboard get_text failed: {}", e),
-        },
-        Err(e) => warn!("Failed to create arboard clipboard: {}", e),
+    match clipboard.get_text() {
+        Ok(text) if !text.is_empty() => {
+            return Some(ClipboardContent::Text(text));
+        }
+        Ok(_) => debug!("Clipboard text is empty"),
+        Err(e) => debug!("Clipboard get_text failed: {}", e),
     }
 
     debug!("No recognizable content in clipboard");
     None
+}
+
+/// 将 RGBA 像素数据编码为 PNG 字节
+fn encode_rgba_to_png(rgba: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    use image::{ImageBuffer, Rgba};
+
+    let img = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba.to_vec())
+        .ok_or("Failed to create image buffer from RGBA data")?;
+
+    let mut buf = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| format!("PNG encoding failed: {e}"))?;
+
+    Ok(buf.into_inner())
+}
+
+/// 使用 Windows API 从剪贴板读取 RTF 格式
+#[cfg(target_os = "windows")]
+fn read_rtf_from_clipboard() -> Option<String> {
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatA,
+    };
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    use windows::core::PCSTR;
+
+    unsafe {
+        // CF_RTF 是注册的剪贴板格式，需要先获取其 ID
+        let cf_rtf = RegisterClipboardFormatA(PCSTR(b"Rich Text Format\0".as_ptr()));
+        if cf_rtf == 0 {
+            return None;
+        }
+
+        // 必须先打开剪贴板，否则 GetClipboardData 会失败
+        if OpenClipboard(None).is_err() {
+            return None;
+        }
+
+        let result = (|| -> Option<String> {
+            let handle = GetClipboardData(cf_rtf).ok()?;
+            let hglobal = windows::Win32::Foundation::HGLOBAL(handle.0);
+            if hglobal.is_invalid() {
+                return None;
+            }
+
+            let ptr = GlobalLock(hglobal) as *const u8;
+            if ptr.is_null() {
+                return None;
+            }
+
+            // 读取 null 结尾的 C 字符串
+            let mut len = 0;
+            while *ptr.add(len) != 0 {
+                len += 1;
+                if len > 10_000_000 {
+                    GlobalUnlock(hglobal).ok();
+                    return None;
+                }
+            }
+
+            let slice = std::slice::from_raw_parts(ptr, len);
+            let rtf = String::from_utf8_lossy(slice).to_string();
+
+            GlobalUnlock(hglobal).ok();
+
+            Some(rtf)
+        })();
+
+        CloseClipboard().ok();
+
+        result
+    }
 }

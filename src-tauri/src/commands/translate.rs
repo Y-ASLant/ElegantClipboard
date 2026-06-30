@@ -394,69 +394,13 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
         let seq_before =
             unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
 
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{
-                INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY,
-            };
+        super::clipboard::simulate_copy()?;
 
-            fn key_up(vk: VIRTUAL_KEY) -> INPUT {
-                INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: vk,
-                            dwFlags: KEYEVENTF_KEYUP,
-                            ..Default::default()
-                        },
-                    },
-                }
-            }
-            fn key_down(vk: VIRTUAL_KEY) -> INPUT {
-                INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: vk,
-                            ..Default::default()
-                        },
-                    },
-                }
-            }
-
-            let vk_ctrl = VIRTUAL_KEY(0x11);
-            let vk_alt = VIRTUAL_KEY(0x12);
-            let vk_shift = VIRTUAL_KEY(0x10);
-            let vk_lwin = VIRTUAL_KEY(0x5B);
-            let vk_c = VIRTUAL_KEY(0x43);
-
-            let release_mods = [
-                key_up(vk_ctrl),
-                key_up(vk_alt),
-                key_up(vk_shift),
-                key_up(vk_lwin),
-            ];
-            unsafe {
-                SendInput(&release_mods, std::mem::size_of::<INPUT>() as i32);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(30));
-
-            let copy_inputs = [
-                key_down(vk_ctrl),
-                key_down(vk_c),
-                key_up(vk_c),
-                key_up(vk_ctrl),
-            ];
-            unsafe {
-                SendInput(&copy_inputs, std::mem::size_of::<INPUT>() as i32);
-            }
-        }
-
-        // 轮询剪贴板序列号，最多等待 500ms（替代硬编码 sleep）
+        // 轮询剪贴板序列号，最多等待 600ms
         #[cfg(target_os = "windows")]
         let clipboard_changed = {
             let mut changed = false;
-            for _ in 0..25 {
+            for _ in 0..30 {
                 std::thread::sleep(std::time::Duration::from_millis(20));
                 let seq_after =
                     unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
@@ -467,6 +411,10 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
             }
             changed
         };
+        #[cfg(not(target_os = "windows"))]
+        {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         #[cfg(not(target_os = "windows"))]
         let clipboard_changed = true;
 
@@ -551,9 +499,8 @@ pub fn is_translate_window_pinned() -> bool {
     crate::input_monitor::is_translate_window_pinned()
 }
 
-/// 热键防抖标记，防止快速连按导致多个线程同时操作剪贴板
-static TRANSLATE_IN_PROGRESS: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+/// 串行化划词翻译，避免并发操作剪贴板
+static TRANSLATE_SELECTION_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// 注册翻译选中文字快捷键
 pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
@@ -583,14 +530,12 @@ pub fn register_translate_selection_shortcut(app: &tauri::AppHandle) {
     let registered = crate::hotkey::register(
         &shortcut_str,
         std::sync::Arc::new(|app, key_state| {
-            if key_state == crate::hotkey::KeyState::Pressed {
-                if TRANSLATE_IN_PROGRESS.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    return; // 上一次翻译尚未完成，跳过
-                }
+            // 松键后触发：避免快捷键修饰键仍按住时模拟 Ctrl+C 失败
+            if key_state == crate::hotkey::KeyState::Released {
                 let app = app.clone();
                 std::thread::spawn(move || {
+                    let _guard = TRANSLATE_SELECTION_LOCK.lock();
                     trigger_translate_selection(&app);
-                    TRANSLATE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::SeqCst);
                 });
             }
         }),

@@ -20,14 +20,14 @@ pub(super) fn set_clipboard_content(
         }
         "image" => {
             if let Some(ref path) = item.image_path {
-                set_clipboard_image(path)?;
+                set_clipboard_image(path, clipboard)?;
             }
         }
         "files" => {
             if let Some(ref paths_json) = item.file_paths {
                 let paths: Vec<String> = serde_json::from_str(paths_json)
                     .map_err(|e| format!("Failed to parse file paths: {e}"))?;
-                set_clipboard_files(&paths)?;
+                set_clipboard_files(&paths, clipboard)?;
             }
         }
         _ => {
@@ -37,31 +37,38 @@ pub(super) fn set_clipboard_content(
     Ok(())
 }
 
-/// 使用 clipboard-rs 将图片写入剪贴板（内部处理解码与平台转换）
-fn set_clipboard_image(path: &str) -> Result<(), String> {
-    use clipboard_rs::common::RustImage;
-    use clipboard_rs::{Clipboard, ClipboardContext, RustImageData};
+/// 使用 arboard 将图片写入剪贴板（Windows 上写 CF_DIB，PS 兼容）
+fn set_clipboard_image(path: &str, clipboard: &mut arboard::Clipboard) -> Result<(), String> {
+    use arboard::ImageData;
+    use std::borrow::Cow;
 
-    let image = RustImageData::from_path(path)
-        .map_err(|e| format!("Failed to load image from path: {e}"))?;
+    let img = image::open(path)
+        .map_err(|e| format!("Failed to load image from path: {e}"))?
+        .to_rgba8();
 
-    let ctx =
-        ClipboardContext::new().map_err(|e| format!("Failed to create clipboard context: {e}"))?;
+    let (width, height) = img.dimensions();
+    let image_data = ImageData {
+        width: width as usize,
+        height: height as usize,
+        bytes: Cow::Owned(img.into_raw()),
+    };
 
-    ctx.set_image(image)
+    clipboard
+        .set_image(image_data)
         .map_err(|e| format!("Failed to set clipboard image: {e}"))?;
 
     Ok(())
 }
 
-/// 使用 clipboard-rs 将文件列表写入剪贴板
-fn set_clipboard_files(paths: &[String]) -> Result<(), String> {
-    use clipboard_rs::{Clipboard, ClipboardContext};
+/// 使用 arboard 将文件列表写入剪贴板（Windows 上写 CF_HDROP）
+fn set_clipboard_files(paths: &[String], clipboard: &mut arboard::Clipboard) -> Result<(), String> {
+    use std::path::Path;
 
-    let ctx =
-        ClipboardContext::new().map_err(|e| format!("Failed to create clipboard context: {e}"))?;
+    let path_refs: Vec<&Path> = paths.iter().map(Path::new).collect();
 
-    ctx.set_files(paths.to_vec())
+    clipboard
+        .set()
+        .file_list(&path_refs)
         .map_err(|e| format!("Failed to set clipboard files: {e}"))?;
 
     Ok(())
@@ -164,13 +171,13 @@ fn build_context_snippet(
     result
 }
 
-/// 使用 Windows SendInput API 模拟 Ctrl+V 粘贴。
-/// 先释放用户可能按住的所有修饰键（Alt/Shift/Win），再发送纯净的 Ctrl+V。
+/// 使用 Windows SendInput API 模拟 Ctrl+组合键。
+/// 先释放用户可能按住的所有修饰键（Alt/Shift/Win），再发送纯净的组合键。
 #[cfg(target_os = "windows")]
-pub fn simulate_paste() -> Result<(), String> {
+fn simulate_ctrl_combo(key_vk: u16, action: &str) -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, INPUT, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP,
-        SendInput, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
+        SendInput, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
 
     fn is_key_pressed(vk: u16) -> bool {
@@ -216,10 +223,7 @@ pub fn simulate_paste() -> Result<(), String> {
         let mut buf = [0u16; 256];
         let len = unsafe { GetWindowTextW(fg, &mut buf) } as usize;
         let title = String::from_utf16_lossy(&buf[..len]);
-        info!(
-            "simulate_paste: foreground hwnd={:?} title=\"{}\"",
-            fg.0, title
-        );
+        info!("{action}: foreground hwnd={:?} title=\"{title}\"", fg.0);
     }
 
     release_if_held(VK_MENU.0);
@@ -231,9 +235,9 @@ pub fn simulate_paste() -> Result<(), String> {
     if !user_ctrl {
         send_key(VK_CONTROL.0, false);
     }
-    send_key(VK_V.0, false);
+    send_key(key_vk, false);
     std::thread::sleep(std::time::Duration::from_millis(8));
-    send_key(VK_V.0, true);
+    send_key(key_vk, true);
     if !user_ctrl {
         send_key(VK_CONTROL.0, true);
     }
@@ -241,8 +245,23 @@ pub fn simulate_paste() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+/// 使用 Windows SendInput API 模拟 Ctrl+V 粘贴。
+/// 先释放用户可能按住的所有修饰键（Alt/Shift/Win），再发送纯净的 Ctrl+V。
+#[cfg(target_os = "windows")]
 pub fn simulate_paste() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_V;
+    simulate_ctrl_combo(VK_V.0, "simulate_paste")
+}
+
+/// 使用 Windows SendInput API 模拟 Ctrl+C 复制选中文字。
+#[cfg(target_os = "windows")]
+pub fn simulate_copy() -> Result<(), String> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::VK_C;
+    simulate_ctrl_combo(VK_C.0, "simulate_copy")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn simulate_ctrl_combo_enigo(key: char) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
     let mut enigo = Enigo::new(&Settings::default())
@@ -262,8 +281,8 @@ pub fn simulate_paste() -> Result<(), String> {
         .map_err(|e| format!("Failed to press modifier: {}", e))?;
 
     let click_result = enigo
-        .key(Key::Unicode('v'), Direction::Click)
-        .map_err(|e| format!("Failed to press V: {}", e));
+        .key(Key::Unicode(key), Direction::Click)
+        .map_err(|e| format!("Failed to press {key}: {}", e));
 
     let release_result = enigo
         .key(modifier, Direction::Release)
@@ -272,16 +291,23 @@ pub fn simulate_paste() -> Result<(), String> {
     if let Err(click_error) = click_result {
         if let Err(release_error) = release_result {
             return Err(format!(
-                "{}; additionally failed to release modifier: {}",
-                click_error, release_error
+                "{click_error}; additionally failed to release modifier: {release_error}"
             ));
         }
         return Err(click_error);
     }
 
-    release_result?;
+    release_result
+}
 
-    Ok(())
+#[cfg(not(target_os = "windows"))]
+pub fn simulate_paste() -> Result<(), String> {
+    simulate_ctrl_combo_enigo('v')
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn simulate_copy() -> Result<(), String> {
+    simulate_ctrl_combo_enigo('c')
 }
 
 /// 获取剪贴板条目（支持可选过滤）
