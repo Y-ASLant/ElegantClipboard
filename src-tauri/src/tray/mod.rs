@@ -210,14 +210,10 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             let _ = open_settings_window(app);
         }
         "restart" => {
-            // 使用支持 UAC 提权的重启逻辑
-            // app.restart() 不触发提权，用自定义重启
+            // 先尝试 UAC 提权重启，再由 app.restart() 执行清理并重启
             crate::commands::window::save_main_window_placement(app);
-            if crate::admin_launch::restart_app() {
-                app.exit(0);
-            } else {
-                app.restart();
-            }
+            crate::admin_launch::restart_app();
+            app.restart();
         }
         "quit" => {
             crate::commands::window::save_main_window_placement(app);

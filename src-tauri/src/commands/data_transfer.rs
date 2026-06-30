@@ -2,7 +2,6 @@ use crate::commands::AppState;
 use crate::config::{self, AppConfig};
 use crate::database;
 use crate::utils::format_size;
-use tauri::Manager;
 
 fn chrono_timestamp() -> String {
     chrono::Local::now().format("%Y%m%d_%H%M%S").to_string()
@@ -313,11 +312,8 @@ pub async fn import_data(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn restart_app(app: tauri::AppHandle) {
     crate::commands::window::save_main_window_placement(&app);
-    if crate::admin_launch::restart_app() {
-        app.exit(0);
-    } else {
-        tauri::process::restart(&app.env());
-    }
+    crate::admin_launch::restart_app();
+    app.restart();
 }
 
 #[cfg(test)]
