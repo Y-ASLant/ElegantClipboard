@@ -110,7 +110,7 @@ jobs:
       - name: Download portable artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: "ElegantClipboard_*_portable.exe"
+          pattern: portable-*
           path: ./portables
           merge-multiple: true
 
