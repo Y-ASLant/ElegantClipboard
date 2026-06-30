@@ -319,6 +319,10 @@ export function Settings() {
       });
     } catch (error) {
       logError("Failed to load settings:", error);
+      // 加载失败也要标记 loaded，否则后续用户修改设置不会触发 auto-save
+      requestAnimationFrame(() => {
+        settingsLoadedRef.current = true;
+      });
     }
   };
 
