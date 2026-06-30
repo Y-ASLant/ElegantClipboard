@@ -247,13 +247,9 @@ export function Settings() {
   }, []);
 
   // 设置变更时自动保存（跳过初始加载）
-  // 首次触发来自 loadSettings，标记完成并跳过；后续触发来自用户修改，执行保存
-  const settingsInitRef = useRef(false);
+  // loadSettings 完成后延迟设置 loaded 标志，确保 setSettings 触发的 effect 被跳过
   useEffect(() => {
-    if (!settingsInitRef.current) {
-      settingsInitRef.current = true;
-      return;
-    }
+    if (!settingsLoadedRef.current) return;
     const timer = setTimeout(() => {
       saveSettings();
     }, 500);
@@ -317,7 +313,10 @@ export function Settings() {
         log_to_file: logToFile,
         log_file_path: logFilePath || "",
       });
-      settingsLoadedRef.current = true;
+      // 延迟设置 loaded 标志，确保 setSettings 触发的 effect 先执行（此时 loaded 仍为 false，被跳过）
+      requestAnimationFrame(() => {
+        settingsLoadedRef.current = true;
+      });
     } catch (error) {
       logError("Failed to load settings:", error);
     }

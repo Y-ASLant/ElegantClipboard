@@ -251,8 +251,40 @@ fn read_clipboard_content_with_retry(max_image_bytes: usize) -> Option<Clipboard
     None
 }
 
-/// 读取当前剪贴板内容（单次尝试）
+/// 读取当前剪贴板内容（单次尝试，检测 TOCTOU 并重试）
 fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
+    const MAX_RETRIES: u32 = 2;
+
+    for attempt in 0..=MAX_RETRIES {
+        #[cfg(target_os = "windows")]
+        let seq_before = unsafe {
+            windows::Win32::System::DataExchange::GetClipboardSequenceNumber()
+        };
+
+        let result = read_clipboard_content_inner(max_image_bytes);
+
+        // 检测剪贴板是否在读取过程中被修改（TOCTOU）
+        #[cfg(target_os = "windows")]
+        {
+            let seq_after = unsafe {
+                windows::Win32::System::DataExchange::GetClipboardSequenceNumber()
+            };
+            if seq_before != seq_after && attempt < MAX_RETRIES {
+                debug!(
+                    "Clipboard changed during read (attempt {}/{}), retrying",
+                    attempt + 1, MAX_RETRIES + 1
+                );
+                continue;
+            }
+        }
+
+        return result;
+    }
+    None
+}
+
+/// 实际读取剪贴板内容（内部函数）
+fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardContent> {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
         Err(e) => {
@@ -315,8 +347,6 @@ fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
     }
 
     // 尝试获取 HTML（同时尝试读取伴生 RTF，便于完整回写）
-    // 注意：arboard 每次调用独立 Open/Close 剪贴板，HTML/文本/RTF 可能来自不同的
-    // 剪贴板状态（TOCTOU）。实际风险极低（毫秒级窗口），但架构上并非原子读取。
     match clipboard.get().html() {
         Ok(html) if !html.is_empty() => {
             let text = clipboard.get_text().ok().filter(|t| !t.is_empty());

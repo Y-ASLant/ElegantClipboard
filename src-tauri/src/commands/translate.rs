@@ -382,11 +382,52 @@ pub async fn write_text_to_clipboard(
 static PENDING_TRANSLATE_TEXT: parking_lot::Mutex<String> = parking_lot::Mutex::new(String::new());
 
 /// 获取系统当前选中的文字（通过模拟 Ctrl+C 读取剪贴板）
+/// 剪贴板备份：保存文本、HTML 和图片，确保恢复时不丢失富文本/图片内容
+enum ClipboardBackup {
+    Empty,
+    Text(String),
+    Html { html: String, text: Option<String> },
+    Image(arboard::ImageData<'static>),
+}
+
+fn backup_clipboard() -> ClipboardBackup {
+    let Ok(mut cb) = arboard::Clipboard::new() else {
+        return ClipboardBackup::Empty;
+    };
+    // 优先备份 HTML（包含伴生纯文本）
+    if let Ok(html) = cb.get().html()
+        && !html.is_empty()
+    {
+        let text = cb.get_text().ok();
+        return ClipboardBackup::Html { html, text };
+    }
+    // 其次备份纯文本
+    if let Ok(text) = cb.get_text()
+        && !text.is_empty()
+    {
+        return ClipboardBackup::Text(text);
+    }
+    // 最后备份图片
+    if let Ok(img) = cb.get_image() {
+        return ClipboardBackup::Image(img);
+    }
+    ClipboardBackup::Empty
+}
+
+fn restore_clipboard(backup: &ClipboardBackup) {
+    let Ok(mut cb) = arboard::Clipboard::new() else { return };
+    match backup {
+        ClipboardBackup::Empty => {}
+        ClipboardBackup::Text(text) => { let _ = cb.set_text(text); }
+        ClipboardBackup::Html { html, text } => { let _ = cb.set_html(html.as_str(), text.as_deref()); }
+        ClipboardBackup::Image(img) => { let _ = cb.set_image(img.clone()); }
+    }
+}
+
+/// 获取系统当前选中的文字（通过模拟 Ctrl+C 读取剪贴板）
 fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String> {
-    // 备份剪贴板文本（在暂停监控前完成，避免影响监控状态）
-    let backup = arboard::Clipboard::new()
-        .ok()
-        .and_then(|mut cb| cb.get_text().ok());
+    // 备份剪贴板完整内容（在暂停监控前完成，避免影响监控状态）
+    let backup = backup_clipboard();
 
     // 使用 with_paused_monitor 确保异常安全：无论中间是否出错都会恢复监控
     super::with_paused_monitor(state, || -> Result<String, String> {
@@ -412,21 +453,18 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
             changed
         };
 
-        if !clipboard_changed {
-            return Ok(String::new());
-        }
-
+        // 序列号未变时仍尝试读取剪贴板（某些应用 Ctrl+C 不更新序列号，或选中内容与剪贴板相同）
         let text = arboard::Clipboard::new()
             .ok()
             .and_then(|mut cb| cb.get_text().ok())
             .unwrap_or_default();
 
-        // 恢复剪贴板原始内容
-        if let Some(ref backup_text) = backup
-            && let Ok(mut cb) = arboard::Clipboard::new()
-        {
-            let _ = cb.set_text(backup_text);
+        if !clipboard_changed && text.is_empty() {
+            return Ok(String::new());
         }
+
+        // 恢复剪贴板原始内容（文本/HTML/图片）
+        restore_clipboard(&backup);
 
         Ok(text)
     })
