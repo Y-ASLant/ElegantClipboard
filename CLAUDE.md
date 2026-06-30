@@ -59,7 +59,7 @@ cd src-tauri && cargo test
 
 # Makefile 快捷命令（PowerShell）
 make check   # lint + tsc + cargo check
-make test    # vitest 单元/组件/性能测试
+make test    # vitest 前端测试 + cargo test 后端测试
 make build   # Tauri release 安装包
 make format  # eslint:fix + rustfmt
 ```

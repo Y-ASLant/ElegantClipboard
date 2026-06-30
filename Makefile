@@ -12,7 +12,7 @@ help:
 	@Write-Host "  make build   Build Tauri release installer"
 	@Write-Host "  make run     Build frontend and run backend"
 	@Write-Host "  make check   Run lint, TypeScript, and cargo check"
-	@Write-Host "  make test    Run frontend unit tests, component tests, and perf benchmarks"
+	@Write-Host "  make test    Run frontend (vitest) and backend (cargo test) tests"
 	@Write-Host "  make format  Run frontend autofix and Rust formatter"
 
 clean:
@@ -45,8 +45,10 @@ check:
 	@Write-Host "[check] done"
 
 test:
-	@Write-Host "[test] unit tests, component tests, and perf benchmarks"
+	@Write-Host "[test] frontend: unit, component, perf"
 	npx vitest run --reporter=verbose
+	@Write-Host "[test] backend: cargo test"
+	cargo test --manifest-path src-tauri/Cargo.toml
 	@Write-Host "[test] done"
 
 format:
