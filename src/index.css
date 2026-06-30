@@ -40,7 +40,21 @@
     --radius-lg: 0.5rem;
     --radius-md: calc(0.5rem - 2px);
     --radius-sm: calc(0.5rem - 4px);
+    /* Subtle elevation — surface < floating < modal < lift */
+    --shadow-xs: 0 1px 2px 0 hsl(220 25% 10% / 0.04);
+    --shadow-sm: 0 1px 2px 0 hsl(220 25% 10% / 0.05), 0 1px 1px -1px hsl(220 25% 10% / 0.04);
+    --shadow: 0 1px 3px 0 hsl(220 25% 10% / 0.06), 0 1px 2px -1px hsl(220 25% 10% / 0.05);
+    --shadow-md: 0 2px 8px -2px hsl(220 25% 10% / 0.07), 0 1px 3px -1px hsl(220 25% 10% / 0.05);
+    --shadow-lg: 0 4px 12px -3px hsl(220 25% 10% / 0.08), 0 2px 4px -2px hsl(220 25% 10% / 0.05);
+    --shadow-xl: 0 8px 20px -4px hsl(220 25% 10% / 0.1), 0 4px 8px -4px hsl(220 25% 10% / 0.06);
 }
+
+/*
+ * Shadow elevation (all use @theme tokens above — keep subtle):
+ *   shadow-sm  — cards, inputs, buttons, toolbars
+ *   shadow-md  — popovers, dialogs, toasts, dropdowns
+ *   shadow-lg  — drag overlay, lifted elements
+ */
 
 /* Dark mode — neutral gray tones (low saturation) to avoid blue tint;
    lightness lifted from ~5% to ~10% to reduce eye strain. */
@@ -64,6 +78,12 @@
     --color-border: hsl(220 5% 26%);
     --color-input: hsl(220 5% 26%);
     --color-ring: hsl(220 8% 80%);
+    --shadow-xs: 0 1px 2px 0 hsl(0 0% 0% / 0.18);
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.22), 0 1px 1px -1px hsl(0 0% 0% / 0.16);
+    --shadow: 0 1px 3px 0 hsl(0 0% 0% / 0.24), 0 1px 2px -1px hsl(0 0% 0% / 0.18);
+    --shadow-md: 0 2px 8px -2px hsl(0 0% 0% / 0.28), 0 1px 3px -1px hsl(0 0% 0% / 0.2);
+    --shadow-lg: 0 4px 12px -3px hsl(0 0% 0% / 0.32), 0 2px 4px -2px hsl(0 0% 0% / 0.22);
+    --shadow-xl: 0 8px 20px -4px hsl(0 0% 0% / 0.36), 0 4px 8px -4px hsl(0 0% 0% / 0.24);
 }
 
 /* ========== Theme Color Variants ========== */

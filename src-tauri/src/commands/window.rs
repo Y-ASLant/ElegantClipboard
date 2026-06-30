@@ -9,37 +9,41 @@ pub(crate) fn save_window_size_if_enabled<R: tauri::Runtime>(
     window: &tauri::WebviewWindow<R>,
 ) {
     if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
+        let mut cache = state.position_cache.lock();
         let settings_repo = database::SettingsRepository::new(&state.db);
         // 始终记录窗口位置，供「上一次位置」模式跨重启恢复
         match window.outer_position() {
             Ok(pos) => {
-                if let Err(e) = settings_repo.set("window_x", &pos.x.to_string()) {
+                let x_str = pos.x.to_string();
+                let y_str = pos.y.to_string();
+                if let Err(e) = settings_repo.set("window_x", &x_str) {
                     tracing::warn!("Failed to save window_x: {}", e);
                 }
-                if let Err(e) = settings_repo.set("window_y", &pos.y.to_string()) {
+                if let Err(e) = settings_repo.set("window_y", &y_str) {
                     tracing::warn!("Failed to save window_y: {}", e);
                 }
+                cache.window_x = Some(pos.x);
+                cache.window_y = Some(pos.y);
             }
             Err(e) => tracing::warn!("Failed to read window position: {}", e),
         }
 
-        let persist = settings_repo
-            .get("persist_window_size")
-            .ok()
-            .flatten()
-            .is_none_or(|v| v != "false");
-        if persist
+        if cache.persist_window_size
             && let Ok(size) = window.inner_size()
             && let Ok(scale) = window.scale_factor()
         {
             let w = (f64::from(size.width) / scale).round() as u32;
             let h = (f64::from(size.height) / scale).round() as u32;
-            if let Err(e) = settings_repo.set("window_width", &w.to_string()) {
+            let w_str = w.to_string();
+            let h_str = h.to_string();
+            if let Err(e) = settings_repo.set("window_width", &w_str) {
                 tracing::warn!("Failed to save window_width: {}", e);
             }
-            if let Err(e) = settings_repo.set("window_height", &h.to_string()) {
+            if let Err(e) = settings_repo.set("window_height", &h_str) {
                 tracing::warn!("Failed to save window_height: {}", e);
             }
+            cache.window_width = Some(f64::from(w));
+            cache.window_height = Some(f64::from(h));
         }
     }
 }
@@ -65,64 +69,34 @@ fn save_main_window_placement_inner<R: tauri::Runtime>(app: &tauri::AppHandle<R>
 }
 
 fn position_main_window(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
-    let position_mode = app.try_state::<std::sync::Arc<AppState>>().map_or(
-        crate::positioning::PositionMode::FollowCursor,
-        |state| {
-            let repo = database::SettingsRepository::new(&state.db);
-            if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
-                crate::positioning::PositionMode::from_str(&mode_str)
-            } else {
-                let follow = repo
-                    .get("follow_cursor")
-                    .ok()
-                    .flatten()
-                    .is_none_or(|v| v != "false");
-                if follow {
-                    crate::positioning::PositionMode::FollowCursor
-                } else {
-                    crate::positioning::PositionMode::FixedPosition
-                }
-            }
-        },
-    );
+    let Some(state) = app.try_state::<std::sync::Arc<AppState>>() else {
+        return;
+    };
+    let cache = state.position_cache.lock();
+    let position_mode = cache.position_mode;
 
-    if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
-        let repo = database::SettingsRepository::new(&state.db);
-        let persist = repo
-            .get("persist_window_size")
-            .ok()
-            .flatten()
-            .is_none_or(|v| v != "false");
-        if persist {
-            let w = repo.get_parsed::<f64>("window_width");
-            let h = repo.get_parsed::<f64>("window_height");
-            if let (Some(w), Some(h)) = (w, h) {
-                let scale = if position_mode == crate::positioning::PositionMode::FixedPosition {
-                    let x = repo.get_parsed::<i32>("window_x").unwrap_or(0);
-                    let y = repo.get_parsed::<i32>("window_y").unwrap_or(0);
-                    crate::positioning::get_monitor_scale_at(window, x, y)
-                } else {
-                    let (cx, cy) = crate::positioning::get_cursor_position();
-                    crate::positioning::get_monitor_scale_at(window, cx, cy)
-                };
-                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                    width: (w * scale).round() as u32,
-                    height: (h * scale).round() as u32,
-                }));
-            }
-        }
+    if cache.persist_window_size
+        && let (Some(w), Some(h)) = (cache.window_width, cache.window_height)
+    {
+        let scale = if position_mode == crate::positioning::PositionMode::FixedPosition {
+            let x = cache.window_x.unwrap_or(0);
+            let y = cache.window_y.unwrap_or(0);
+            crate::positioning::get_monitor_scale_at(window, x, y)
+        } else {
+            let (cx, cy) = crate::positioning::get_cursor_position();
+            crate::positioning::get_monitor_scale_at(window, cx, cy)
+        };
+        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: (w * scale).round() as u32,
+            height: (h * scale).round() as u32,
+        }));
     }
 
     if position_mode == crate::positioning::PositionMode::FixedPosition {
-        if let Some(state) = app.try_state::<std::sync::Arc<AppState>>() {
-            let repo = database::SettingsRepository::new(&state.db);
-            let x = repo.get_parsed::<i32>("window_x");
-            let y = repo.get_parsed::<i32>("window_y");
-            if let (Some(x), Some(y)) = (x, y) {
-                let _ = window.set_position(tauri::Position::Physical(
-                    tauri::PhysicalPosition::new(x, y),
-                ));
-            }
+        if let (Some(x), Some(y)) = (cache.window_x, cache.window_y) {
+            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+                x, y,
+            )));
         }
     } else if let Err(e) = crate::positioning::position_window(window, position_mode) {
         tracing::warn!("Failed to position window: {}", e);

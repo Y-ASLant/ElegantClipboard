@@ -27,7 +27,7 @@ const Switch = React.forwardRef<
     <SwitchPrimitives.Thumb
       className={cn(
         "pointer-events-none relative flex items-center justify-center",
-        "h-5 w-5 rounded-full bg-background shadow-md",
+        "h-5 w-5 rounded-full bg-background shadow-sm",
         "ring-0 transition-all duration-200",
         "data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0",
         // 按压反馈：按下缩小，释放恢复

@@ -74,7 +74,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
       <div className="w-full max-w-sm mx-4">
         <div
           className={cn(
-            "rounded-xl border bg-card shadow-lg overflow-hidden transition-all duration-300",
+            "rounded-xl border bg-card shadow-md overflow-hidden transition-all duration-300",
             isAnimating && "scale-95 opacity-90",
           )}
         >

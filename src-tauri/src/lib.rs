@@ -466,6 +466,40 @@ fn init_logging(config: &AppConfig) {
         .init();
 }
 
+fn load_position_cache(repo: &SettingsRepository) -> commands::PositionCache {
+    let position_mode = if let Some(mode_str) = repo.get("position_mode").ok().flatten() {
+        crate::positioning::PositionMode::from_str(&mode_str)
+    } else {
+        let follow = repo
+            .get("follow_cursor")
+            .ok()
+            .flatten()
+            .is_none_or(|v| v != "false");
+        if follow {
+            crate::positioning::PositionMode::FollowCursor
+        } else {
+            crate::positioning::PositionMode::FixedPosition
+        }
+    };
+    let persist_window_size = repo
+        .get("persist_window_size")
+        .ok()
+        .flatten()
+        .is_none_or(|v| v != "false");
+    let window_width = repo.get_parsed::<f64>("window_width");
+    let window_height = repo.get_parsed::<f64>("window_height");
+    let window_x = repo.get_parsed::<i32>("window_x");
+    let window_y = repo.get_parsed::<i32>("window_y");
+    commands::PositionCache {
+        position_mode,
+        persist_window_size,
+        window_width,
+        window_height,
+        window_x,
+        window_y,
+    }
+}
+
 fn migrate_legacy_settings(repo: &SettingsRepository) {
     let migrations = [
         ("hotkey", "global_shortcut"),
@@ -748,10 +782,14 @@ pub fn run() {
             monitor.init(&db, images_path);
 
             let active_group_id = monitor.active_group_id();
+            let settings_repo = database::SettingsRepository::new(&db);
+            let position_cache =
+                Arc::new(parking_lot::Mutex::new(load_position_cache(&settings_repo)));
             let state = Arc::new(AppState {
                 db,
                 monitor,
                 active_group_id,
+                position_cache,
             });
 
             let settings_repo = database::SettingsRepository::new(&state.db);

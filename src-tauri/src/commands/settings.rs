@@ -5,6 +5,36 @@ use tauri::State;
 
 use super::AppState;
 
+/// 当位置相关设置变更时，同步更新 PositionCache
+fn update_position_cache(state: &Arc<AppState>, key: &str, value: &str) {
+    let mut cache = state.position_cache.lock();
+    match key {
+        "position_mode" => {
+            cache.position_mode = crate::positioning::PositionMode::from_str(value);
+        }
+        "follow_cursor" => {
+            // 仅在 position_mode 未显式设置时生效（兼容旧逻辑）
+            // 不覆盖 position_mode，因为 from_str 已处理 follow_cursor 映射
+        }
+        "persist_window_size" => {
+            cache.persist_window_size = value != "false";
+        }
+        "window_width" => {
+            cache.window_width = value.parse().ok();
+        }
+        "window_height" => {
+            cache.window_height = value.parse().ok();
+        }
+        "window_x" => {
+            cache.window_x = value.parse().ok();
+        }
+        "window_y" => {
+            cache.window_y = value.parse().ok();
+        }
+        _ => (), // 非位置相关 key，不更新缓存
+    }
+}
+
 // ============ 设置命令 ============
 
 /// 批量获取指定 key 的设置值（减少多次 IPC 往返）
@@ -36,7 +66,10 @@ pub async fn set_setting(
     value: String,
 ) -> Result<(), String> {
     let repo = SettingsRepository::new(&state.db);
-    repo.set(&key, &value).map_err(|e| e.to_string())
+    repo.set(&key, &value).map_err(|e| e.to_string())?;
+    // 更新定位缓存（仅位置相关 key）
+    update_position_cache(&state, &key, &value);
+    Ok(())
 }
 
 /// 显示或隐藏系统托盘图标，并持久化设置

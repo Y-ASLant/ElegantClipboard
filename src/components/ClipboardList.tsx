@@ -602,7 +602,7 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
         style={{ cursor: "move" }}
       >
         {activeItemData && (
-          <div className="shadow-xl">
+          <div className="shadow-lg">
             <ClipboardItemCard
               item={activeItemData}
               index={-1}

@@ -14,12 +14,24 @@ use crate::database::Database;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
+/// 缓存窗口定位相关设置，避免每次 show 时读 DB
+pub struct PositionCache {
+    pub position_mode: crate::positioning::PositionMode,
+    pub persist_window_size: bool,
+    pub window_width: Option<f64>,
+    pub window_height: Option<f64>,
+    pub window_x: Option<i32>,
+    pub window_y: Option<i32>,
+}
+
 /// 应用状态：包含数据库与剪贴板监控器
 pub struct AppState {
     pub db: Database,
     pub monitor: ClipboardMonitor,
     /// 当前活动分组 ID（None = 默认分组）
     pub active_group_id: Arc<Mutex<Option<i64>>>,
+    /// 窗口定位设置缓存
+    pub position_cache: Arc<Mutex<PositionCache>>,
 }
 
 /// 多屏/高 DPI 下隐藏窗口后系统可能不自动还原前台窗口，导致 Ctrl+V 无接收者。

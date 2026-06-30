@@ -56,7 +56,7 @@ export function Toaster() {
           role="alert"
           onClick={() => dismiss(toast.id)}
           className={cn(
-            "animate-in slide-in-from-bottom-2 fade-in cursor-pointer rounded-md px-3 py-2 text-xs shadow-lg",
+            "animate-in slide-in-from-bottom-2 fade-in cursor-pointer rounded-md px-3 py-2 text-xs shadow-md",
             "max-w-[320px] break-words",
             toast.type === "error" && "bg-destructive text-destructive-foreground",
             toast.type === "success" && "bg-primary text-primary-foreground",
