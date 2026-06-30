@@ -53,6 +53,76 @@ fn starts_with_ignore_ascii_case(text: &str, prefix: &str) -> bool {
         .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
+/// 从 URL 的 authority 部分提取 host（去掉端口、路径、查询串）。
+fn extract_host(authority: &str) -> &str {
+    let authority = authority.split(['/', '?', '#']).next().unwrap_or(authority);
+    if authority.starts_with('[') {
+        if let Some(end) = authority.find(']') {
+            return &authority[..=end];
+        }
+        return authority;
+    }
+    authority.split(':').next().unwrap_or(authority)
+}
+
+fn is_valid_ipv4(host: &str) -> bool {
+    let parts: Vec<&str> = host.split('.').collect();
+    parts.len() == 4 && parts.iter().all(|part| part.parse::<u8>().is_ok())
+}
+
+fn is_valid_ipv6(host: &str) -> bool {
+    host.starts_with('[') && host.ends_with(']') && host.len() > 2
+}
+
+fn is_valid_domain_host(host: &str) -> bool {
+    if host.is_empty() || host.len() > 253 || !host.is_ascii() {
+        return false;
+    }
+
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 {
+        return false;
+    }
+
+    for label in &labels {
+        if label.is_empty() || label.len() > 63 {
+            return false;
+        }
+        if !label
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return false;
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return false;
+        }
+    }
+
+    let tld = labels.last().unwrap();
+    tld.len() >= 2 && tld.bytes().all(|b| b.is_ascii_alphabetic())
+}
+
+fn is_valid_url_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if is_valid_ipv4(host) || is_valid_ipv6(host) {
+        return true;
+    }
+    is_valid_domain_host(host)
+}
+
+fn is_url_remainder(remainder: &str) -> bool {
+    let host = extract_host(remainder);
+    is_valid_url_host(host)
+}
+
+/// 若为 URL 则返回 trim 后的规范文本（用于哈希与入库保持一致）。
+pub(crate) fn canonical_url_text(text: &str) -> Option<&str> {
+    is_url(text).then(|| text.trim())
+}
+
 /// 判断纯文本是否为单行 URL（用于归类到「其它」）
 pub(crate) fn is_url(text: &str) -> bool {
     let trimmed = text.trim();
@@ -63,19 +133,17 @@ pub(crate) fn is_url(text: &str) -> bool {
         return false;
     }
 
-    let has_domain = |host: &str| !host.is_empty() && host.contains('.');
-
     if starts_with_ignore_ascii_case(trimmed, "http://") {
-        return has_domain(&trimmed[7..]);
+        return trimmed.get(7..).is_some_and(is_url_remainder);
     }
     if starts_with_ignore_ascii_case(trimmed, "https://") {
-        return has_domain(&trimmed[8..]);
+        return trimmed.get(8..).is_some_and(is_url_remainder);
     }
     if starts_with_ignore_ascii_case(trimmed, "ftp://") {
-        return has_domain(&trimmed[6..]);
+        return trimmed.get(6..).is_some_and(is_url_remainder);
     }
     if starts_with_ignore_ascii_case(trimmed, "www.") {
-        return trimmed.len() > 4 && has_domain(&trimmed[4..]);
+        return trimmed.get(4..).is_some_and(is_url_remainder);
     }
 
     false
@@ -100,7 +168,10 @@ pub(crate) fn compute_semantic_hash(
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_semantic_hash, is_url, normalize_semantic_text, semantic_hash_from_text};
+    use super::{
+        canonical_url_text, compute_semantic_hash, is_url, normalize_semantic_text,
+        semantic_hash_from_text,
+    };
 
     #[test]
     fn normalize_text_removes_invisible_chars_and_trailing_whitespace() {
@@ -182,6 +253,9 @@ mod tests {
         assert!(is_url("https://example.com/path?q=1"));
         assert!(is_url("http://example.com"));
         assert!(is_url("  https://a.co  "));
+        assert!(is_url("http://127.0.0.1/path"));
+        assert!(is_url("https://localhost:8080"));
+        assert!(is_url("https://xn--fiqs8s.xn--fiqs8s.xn--g6q252g"));
     }
 
     #[test]
@@ -196,6 +270,15 @@ mod tests {
         assert!(!is_url("visit https://example.com"));
         assert!(!is_url("http://"));
         assert!(!is_url("www."));
+        assert!(!is_url("http://example"));
+        assert!(!is_url("https://a"));
+    }
+
+    #[test]
+    fn is_url_rejects_loose_false_positives() {
+        assert!(!is_url("www.这不是网址.测试"));
+        assert!(!is_url("www.a.b"));
+        assert!(!is_url("http://x.y"));
     }
 
     #[test]
@@ -203,5 +286,14 @@ mod tests {
         assert!(!is_url("不等于程序空闲时自己崩"));
         assert!(!is_url("我们"));
         assert!(!is_url("你好世界"));
+    }
+
+    #[test]
+    fn canonical_url_text_trims_whitespace() {
+        assert_eq!(
+            canonical_url_text("  https://example.com  "),
+            Some("https://example.com")
+        );
+        assert_eq!(canonical_url_text("hello"), None);
     }
 }

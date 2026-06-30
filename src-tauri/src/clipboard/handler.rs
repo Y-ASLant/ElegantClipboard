@@ -1,5 +1,5 @@
 use super::source_app::{self, SourceAppInfo};
-use super::{compute_semantic_hash, is_url, semantic_hash_from_text};
+use super::{canonical_url_text, compute_semantic_hash, is_url, semantic_hash_from_text};
 use crate::database::{
     ClipboardRepository, ContentType, Database, NewClipboardItem, SettingsRepository,
 };
@@ -210,10 +210,6 @@ impl ClipboardHandler {
             ClipboardContent::Image(_) => "image",
             ClipboardContent::Files(_) => "files",
         };
-
-        if content_type == "url" && !allowed.split(',').any(|t| t.trim() == "url") {
-            return allowed.split(',').any(|t| t.trim() == "text");
-        }
 
         allowed.split(',').any(|t| t.trim() == content_type)
     }
@@ -478,9 +474,9 @@ impl ClipboardHandler {
 
         match content {
             ClipboardContent::Text(text) => {
-                if is_url(text) {
+                if let Some(canonical) = canonical_url_text(text) {
                     hasher.update(b"url:");
-                    hasher.update(text.trim().as_bytes());
+                    hasher.update(canonical.as_bytes());
                 } else {
                     hasher.update(b"text:");
                     hasher.update(text.as_bytes());
@@ -516,6 +512,9 @@ impl ClipboardHandler {
         hashes: &ContentHashes,
         max_size: usize,
     ) -> Result<NewClipboardItem, String> {
+        let text = canonical_url_text(&text)
+            .map(|canonical| canonical.to_string())
+            .unwrap_or(text);
         let byte_size = text.len() as i64;
         let char_count = Some(text.chars().count() as i64);
         let preview = Self::create_preview(&text);
