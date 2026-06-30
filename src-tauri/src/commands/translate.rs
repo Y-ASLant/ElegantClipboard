@@ -467,18 +467,8 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
             .and_then(|mut cb| cb.get_text().ok())
             .unwrap_or_default();
 
-        // 序列号未变：对比读到的文本与 backup 的纯文本
-        // 若相同，说明 Ctrl+C 很可能未生效（剪贴板内容未变），返回空
-        // 若不同（罕见：序列号不变但内容变了），仍然翻译
-        if !clipboard_changed {
-            let backup_text: Option<&str> = match &backup {
-                ClipboardBackup::Text(t) => Some(t.as_str()),
-                ClipboardBackup::Html { text, .. } => text.as_deref(),
-                _ => None,
-            };
-            if text.is_empty() || backup_text == Some(text.as_str()) {
-                return Ok(String::new());
-            }
+        if !clipboard_changed && text.is_empty() {
+            return Ok(String::new());
         }
 
         // 恢复剪贴板原始内容（文本/HTML/图片）
