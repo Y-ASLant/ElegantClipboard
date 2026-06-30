@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { useClipboardStore } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
 import type { Group } from "@/stores/groups";
+import { useTranslateSettings } from "@/stores/translate-settings";
 import type { ToolbarButton } from "@/stores/ui-settings";
 import { loadUISettingsFromBackend, useUISettings } from "@/stores/ui-settings";
 
@@ -264,6 +265,7 @@ function App() {
       setWindowVisible(true);
       // 重新读取设置（可能在设置窗口中更改）
       void loadUISettingsFromBackend();
+      useTranslateSettings.getState().loadSettings();
       if (searchAutoClear) {
         setSearchQuery("");
         fetchItems({ search: "" });
