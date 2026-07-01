@@ -455,13 +455,17 @@ pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Resu
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Item not found".to_string())?;
 
-    with_paused_monitor(&state, || {
+    let result = with_paused_monitor(&state, || {
         let mut clipboard = clipboard_rs::ClipboardContext::new()
             .map_err(|e| format!("Failed to access clipboard: {e}"))?;
         set_clipboard_content(&item, &mut clipboard)?;
         debug!("Copied item {} to clipboard", id);
         Ok(())
-    })
+    });
+    if let Err(ref e) = result {
+        tracing::warn!(id, error = %e, content_type = %item.content_type, "copy_to_clipboard failed");
+    }
+    result
 }
 
 /// 直接粘贴剪贴板条目（写入系统剪贴板 → 隐藏窗口 → 模拟 Ctrl+V）

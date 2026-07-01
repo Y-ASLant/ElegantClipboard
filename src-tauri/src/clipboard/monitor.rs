@@ -199,18 +199,31 @@ impl ClipboardMonitor {
                 continue;
             }
 
-            let result = h.process(item.content, item.source, item.group_id);
+            // catch_unwind 防止单条异常数据的 panic 杀死整个进程（panic=abort）
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                h.process(item.content, item.source, item.group_id)
+            }));
 
             match result {
-                Ok(Some(id)) => {
+                Ok(Ok(Some(id))) => {
                     debug!("Processed clipboard item: {}", id);
                     let _ = app_handle.emit("clipboard-updated", id);
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     debug!("Clipboard content already exists");
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     error!("Failed to process clipboard: {}", e);
+                }
+                Err(panic_info) => {
+                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    error!("Clipboard worker panic during process(): {}", msg);
                 }
             }
         }

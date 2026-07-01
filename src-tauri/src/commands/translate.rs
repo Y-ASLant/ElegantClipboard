@@ -429,22 +429,25 @@ fn restore_clipboard(backup: &ClipboardBackup) {
     use clipboard_rs::Clipboard as ClipboardTrait;
     use clipboard_rs::RustImageData;
     use clipboard_rs::common::RustImage;
+
     let Ok(ctx) = clipboard_rs::ClipboardContext::new() else {
+        tracing::warn!("restore_clipboard: failed to create clipboard context");
         return;
     };
-    match backup {
-        ClipboardBackup::Empty => {}
-        ClipboardBackup::Text(text) => {
-            let _ = ctx.set_text(text.clone());
-        }
-        ClipboardBackup::Html { html, .. } => {
-            let _ = ctx.set_html(html.clone());
-        }
-        ClipboardBackup::Image(png_bytes) => {
-            if let Ok(img) = RustImageData::from_bytes(png_bytes) {
-                let _ = ctx.set_image(img);
+    let result = match backup {
+        ClipboardBackup::Empty => Ok(()),
+        ClipboardBackup::Text(text) => ctx.set_text(text.clone()),
+        ClipboardBackup::Html { html, .. } => ctx.set_html(html.clone()),
+        ClipboardBackup::Image(png_bytes) => match RustImageData::from_bytes(png_bytes) {
+            Ok(img) => ctx.set_image(img),
+            Err(e) => {
+                tracing::warn!(error = %e, "restore_clipboard: failed to decode image");
+                return;
             }
-        }
+        },
+    };
+    if let Err(e) = result {
+        tracing::warn!(error = %e, "restore_clipboard: failed to write clipboard");
     }
 }
 

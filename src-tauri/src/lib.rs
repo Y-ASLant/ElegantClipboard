@@ -415,12 +415,23 @@ fn rotate_log_if_needed(log_path: &std::path::Path, max_size: u64) {
 }
 
 fn init_logging(config: &AppConfig) {
-    let stdout_layer = fmt::layer()
-        .with_timer(LocalTimer)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_file(true)
-        .with_line_number(true);
+    // stdout 层：debug 构建始终启用（cargo tauri dev 可看日志）；
+    // release 构建仅当环境变量 EC_LOG_STDOUT=1 时启用（用户从终端启动调试）。
+    let stdout_layer = {
+        #[cfg(debug_assertions)]
+        let enable = true;
+        #[cfg(not(debug_assertions))]
+        let enable = std::env::var("EC_LOG_STDOUT").is_ok_and(|v| v == "1");
+
+        enable.then(|| {
+            fmt::layer()
+                .with_timer(LocalTimer)
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_file(true)
+                .with_line_number(true)
+        })
+    };
 
     let file_layer = if config.is_log_to_file() {
         let log_path = config.get_log_path();
@@ -553,7 +564,9 @@ async fn enable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
 
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
-    let _ = settings_repo.set("winv_replacement", "true");
+    if let Err(e) = settings_repo.set("winv_replacement", "true") {
+        tracing::warn!(error = %e, "Failed to save winv_replacement setting");
+    }
     Ok(())
 }
 
@@ -572,7 +585,9 @@ async fn disable_winv_replacement(app: tauri::AppHandle) -> Result<(), String> {
 
     let state = app.state::<Arc<AppState>>();
     let settings_repo = database::SettingsRepository::new(&state.db);
-    let _ = settings_repo.set("winv_replacement", "false");
+    if let Err(e) = settings_repo.set("winv_replacement", "false") {
+        tracing::warn!(error = %e, "Failed to save winv_replacement setting");
+    }
     Ok(())
 }
 
@@ -709,6 +724,15 @@ fn set_favorite_paste_shortcut(
 pub fn run() {
     let config = AppConfig::load();
     init_logging(&config);
+
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        os = std::env::consts::OS,
+        arch = std::env::consts::ARCH,
+        data_dir = %config.get_data_dir().display(),
+        log_to_file = config.is_log_to_file(),
+        "ElegantClipboard starting"
+    );
 
     // 捕获 panic 并写入日志；release 使用 panic=abort，panic 信息默认会丢失
     std::panic::set_hook(Box::new(|info| {
@@ -1133,7 +1157,8 @@ pub fn run() {
         ])
         .run(tauri::generate_context!());
 
-    if let Err(err) = run_result {
-        eprintln!("error while running tauri application: {err}");
+    match run_result {
+        Ok(()) => tracing::info!("ElegantClipboard exited normally"),
+        Err(err) => tracing::error!("ElegantClipboard exited with error: {err}"),
     }
 }

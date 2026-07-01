@@ -42,8 +42,16 @@ fn write_plain_text(item: &ClipboardItem, ctx: &mut ClipboardContext) -> Result<
         .as_deref()
         .filter(|t| !t.is_empty())
         .ok_or_else(|| "Item has no text content".to_string())?;
-    ctx.set_text(text.to_string())
-        .map_err(|e| format!("Failed to set clipboard text: {e}"))
+    match ctx.set_text(text.to_string()) {
+        Ok(()) => {
+            debug!(id = item.id, len = text.len(), "write_plain_text: ok");
+            Ok(())
+        }
+        Err(e) => {
+            warn!(id = item.id, len = text.len(), error = %e, "write_plain_text: failed");
+            Err(format!("Failed to set clipboard text: {e}"))
+        }
+    }
 }
 
 fn write_html_item(item: &ClipboardItem, ctx: &mut ClipboardContext) -> Result<(), String> {
@@ -76,8 +84,13 @@ fn build_rich_contents(item: &ClipboardItem, include_rtf: bool) -> Vec<RsClipboa
         contents.push(RsClipboardContent::Html(html.to_string()));
     }
 
-    if include_rtf && super::rtf_storage::should_write_rtf(item.rtf_content.as_deref()) {
-        let raw = super::rtf_storage::decode_rtf_for_clipboard(item.rtf_content.as_ref().unwrap());
+    if include_rtf
+        && let Some(rtf) = item
+            .rtf_content
+            .as_deref()
+            .filter(|r| super::rtf_storage::should_write_rtf(Some(r)))
+    {
+        let raw = super::rtf_storage::decode_rtf_for_clipboard(rtf);
         if !raw.is_empty() {
             contents.push(RsClipboardContent::Other(
                 "Rich Text Format".to_string(),
@@ -270,18 +283,38 @@ pub fn item_plain_text(item: &ClipboardItem) -> Result<String, String> {
 fn set_clipboard_image(path: &str, ctx: &mut ClipboardContext) -> Result<(), String> {
     use clipboard_rs::RustImageData;
 
-    let img = image::open(path).map_err(|e| format!("Failed to load image from path: {e}"))?;
+    let img = image::open(path).map_err(|e| {
+        warn!(path, error = %e, "set_clipboard_image: failed to load");
+        format!("Failed to load image from path: {e}")
+    })?;
     let rgba_img = img.to_rgba8();
+    let (w, h) = rgba_img.dimensions();
     let dynamic = image::DynamicImage::ImageRgba8(rgba_img);
     let image_data = RustImageData::from_dynamic_image(dynamic);
 
-    ctx.set_image(image_data)
-        .map_err(|e| format!("Failed to set clipboard image: {e}"))
+    match ctx.set_image(image_data) {
+        Ok(()) => {
+            debug!(path, w, h, "set_clipboard_image: ok");
+            Ok(())
+        }
+        Err(e) => {
+            warn!(path, w, h, error = %e, "set_clipboard_image: failed");
+            Err(format!("Failed to set clipboard image: {e}"))
+        }
+    }
 }
 
 fn set_clipboard_files(paths: &[String], ctx: &mut ClipboardContext) -> Result<(), String> {
-    ctx.set_files(paths.to_vec())
-        .map_err(|e| format!("Failed to set clipboard files: {e}"))
+    match ctx.set_files(paths.to_vec()) {
+        Ok(()) => {
+            debug!(count = paths.len(), "set_clipboard_files: ok");
+            Ok(())
+        }
+        Err(e) => {
+            warn!(count = paths.len(), error = %e, "set_clipboard_files: failed");
+            Err(format!("Failed to set clipboard files: {e}"))
+        }
+    }
 }
 
 fn strip_html_tags(html: &str) -> String {

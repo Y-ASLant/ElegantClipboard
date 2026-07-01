@@ -98,7 +98,7 @@ impl AppConfig {
 
     /// 是否启用文件日志
     pub fn is_log_to_file(&self) -> bool {
-        self.log_to_file.unwrap_or(false)
+        self.log_to_file.unwrap_or(true)
     }
 
     /// 获取数据目录路径
