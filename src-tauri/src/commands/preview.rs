@@ -429,3 +429,15 @@ pub fn get_log_file_path() -> String {
         .to_string_lossy()
         .to_string()
 }
+
+#[tauri::command]
+pub fn open_log_file() -> Result<(), String> {
+    let log_path = AppConfig::load().get_log_path();
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if !log_path.exists() {
+        std::fs::File::create(&log_path).map_err(|e| e.to_string())?;
+    }
+    tauri_plugin_opener::open_path(&log_path, None::<&str>).map_err(|e| e.to_string())
+}

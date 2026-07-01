@@ -176,7 +176,7 @@ export const core = {
       logDesc: "Debugging and troubleshooting",
       logToFile: "Save logs to file",
       logToFileDesc: "Log files rotate at 10 MB",
-      logFilePath: "Path: {{path}}",
+      logFilePathLabel: "Path: ",
       adminEnableTitle: "Enable administrator mode",
       adminDisableTitle: "Disable administrator mode",
       logEnableTitle: "Enable log file",

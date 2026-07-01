@@ -116,7 +116,13 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
     }
   };
 
-
+  const openLogFile = async () => {
+    try {
+      await invoke("open_log_file");
+    } catch (error) {
+      logError("Failed to open log file:", error);
+    }
+  };
 
   return (
     <>
@@ -347,7 +353,14 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
             </div>
             {settings.log_to_file && settings.log_file_path && (
               <p className="text-xs text-muted-foreground break-all">
-                {t("settings.general.logFilePath", { path: settings.log_file_path })}
+                {t("settings.general.logFilePathLabel")}
+                <button
+                  type="button"
+                  onClick={openLogFile}
+                  className="text-primary hover:underline cursor-pointer"
+                >
+                  {settings.log_file_path}
+                </button>
               </p>
             )}
           </div>

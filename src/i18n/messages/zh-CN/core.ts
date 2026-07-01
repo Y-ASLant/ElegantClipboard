@@ -176,7 +176,7 @@ export const core = {
       logDesc: "调试与故障排查",
       logToFile: "保存日志到文件",
       logToFileDesc: "日志文件上限 10MB，超出自动轮转",
-      logFilePath: "路径：{{path}}",
+      logFilePathLabel: "路径：",
       adminEnableTitle: "启用管理员模式",
       adminDisableTitle: "关闭管理员模式",
       logEnableTitle: "启用日志保存",

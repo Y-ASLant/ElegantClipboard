@@ -176,7 +176,7 @@ export const core = {
       logDesc: "除錯與故障排除",
       logToFile: "儲存日誌到檔案",
       logToFileDesc: "日誌檔案上限 10MB，超出自動輪替",
-      logFilePath: "路徑：{{path}}",
+      logFilePathLabel: "路徑：",
       adminEnableTitle: "啟用系統管理員模式",
       adminDisableTitle: "關閉系統管理員模式",
       logEnableTitle: "啟用日誌儲存",

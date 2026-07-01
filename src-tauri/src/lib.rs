@@ -1077,6 +1077,7 @@ pub fn run() {
             commands::preview::is_log_to_file_enabled,
             commands::preview::set_log_to_file,
             commands::preview::get_log_file_path,
+            commands::preview::open_log_file,
             enable_winv_replacement,
             disable_winv_replacement,
             is_winv_replacement_enabled,
