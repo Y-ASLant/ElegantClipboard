@@ -356,23 +356,48 @@ impl ClipboardHandler {
                 debug!("Content already exists, ignoring (dedup=ignore)");
                 return Ok(None);
             } else {
-                // move_to_top: 更新访问时间并置顶
+                // move_to_top: 更新访问时间并置顶；HTML/RTF 同时刷新富文本字段
                 debug!("Content already exists, updating access time (dedup=move_to_top)");
-                return if text_like {
+                let id = if text_like {
                     if text_use_strict {
                         self.repository
                             .touch_by_hash(&hashes.content_hash, group_id)
-                            .map_err(|e| e.to_string())
                     } else {
                         self.repository
                             .touch_by_semantic_hash(&hashes.semantic_hash, group_id)
-                            .map_err(|e| e.to_string())
                     }
                 } else {
                     self.repository
                         .touch_by_hash(&hashes.content_hash, group_id)
-                        .map_err(|e| e.to_string())
-                };
+                }
+                .map_err(|e| e.to_string())?;
+
+                if let (Some(id), true) = (
+                    id,
+                    matches!(
+                        content,
+                        ClipboardContent::Html { .. } | ClipboardContent::Rtf { .. }
+                    ),
+                ) {
+                    let refreshed = match &content {
+                        ClipboardContent::Html { html, text, rtf } => self.process_html(
+                            html.clone(),
+                            text.clone(),
+                            rtf.clone(),
+                            &hashes,
+                            max_content_size,
+                        )?,
+                        ClipboardContent::Rtf { rtf, text } => {
+                            self.process_rtf(rtf.clone(), text.clone(), &hashes, max_content_size)?
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.repository
+                        .refresh_rich_fields(id, &refreshed)
+                        .map_err(|e| e.to_string())?;
+                }
+
+                return Ok(id);
             }
         }
 
@@ -584,7 +609,7 @@ impl ClipboardHandler {
             .map_or_else(|| Self::create_preview(&html), |t| Self::create_preview(t));
         let html_content = truncate_content(html, max_size, "HTML");
         let byte_size = html_content.len() as i64;
-        let rtf_content = rtf.map(|r| truncate_content(r, max_size, "RTF"));
+        let rtf_content = rtf.map(|r| super::rtf_storage::truncate_rtf_storage(r, max_size));
 
         let char_count = text.as_ref().map(|t| t.chars().count() as i64);
 
@@ -612,7 +637,7 @@ impl ClipboardHandler {
         let preview = text
             .as_ref()
             .map_or_else(|| "[RTF Content]".to_string(), |t| Self::create_preview(t));
-        let rtf_content = truncate_content(rtf, max_size, "RTF");
+        let rtf_content = super::rtf_storage::truncate_rtf_storage(rtf, max_size);
         let byte_size = rtf_content.len() as i64;
 
         let char_count = text.as_ref().map(|t| t.chars().count() as i64);

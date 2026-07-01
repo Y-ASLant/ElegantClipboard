@@ -364,8 +364,8 @@ pub async fn write_text_to_clipboard(
     record: Option<bool>,
 ) -> Result<(), String> {
     let write_fn = || {
-        let clipboard = clipboard_rs::ClipboardContext::new()
-            .map_err(|e| format!("无法访问剪贴板: {e}"))?;
+        let clipboard =
+            clipboard_rs::ClipboardContext::new().map_err(|e| format!("无法访问剪贴板: {e}"))?;
         clipboard
             .set_text(text.clone())
             .map_err(|e| format!("写入剪贴板失败: {e}"))?;

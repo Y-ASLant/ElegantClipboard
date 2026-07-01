@@ -7,9 +7,9 @@ use clipboard_rs::{
     ClipboardWatcherContext,
 };
 use parking_lot::Mutex;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread::JoinHandle;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
@@ -126,8 +126,7 @@ impl ClipboardMonitor {
                 }
                 // 异常退出 → 重启
                 consecutive_failures += 1;
-                let backoff =
-                    (100 * 2u64.pow(consecutive_failures.min(6))).min(MAX_BACKOFF_MS);
+                let backoff = (100 * 2u64.pow(consecutive_failures.min(6))).min(MAX_BACKOFF_MS);
                 warn!(
                     "Clipboard watcher exited, restarting in {}ms (failure #{})",
                     backoff, consecutive_failures
@@ -268,9 +267,7 @@ impl CRHandler for MonitorHandler {
         }
 
         // 检查是否已暂停（内部计数或用户手动）
-        if self.pause_count.load(Ordering::SeqCst) > 0
-            || self.user_paused.load(Ordering::SeqCst)
-        {
+        if self.pause_count.load(Ordering::SeqCst) > 0 || self.user_paused.load(Ordering::SeqCst) {
             debug!("Clipboard change ignored (paused)");
             return;
         }
@@ -415,7 +412,9 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
 
             // 在 PNG 编码前按 RGBA 字节数预判，超限则跳过
             if max_image_bytes > 0 {
-                let rgba_bytes = (width as u64).saturating_mul(height as u64).saturating_mul(4);
+                let rgba_bytes = (width as u64)
+                    .saturating_mul(height as u64)
+                    .saturating_mul(4);
                 if rgba_bytes > max_image_bytes as u64 {
                     warn!(
                         "Clipboard image {}x{} (~{} bytes RGBA) exceeds max {} bytes, skipping",
@@ -428,13 +427,8 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
             // clipboard-rs 内置 PNG 转换
             match img.to_png() {
                 Ok(png_bytes) => {
-                    debug!(
-                        "Got PNG image: {} bytes",
-                        png_bytes.get_bytes().len()
-                    );
-                    return Some(ClipboardContent::Image(
-                        png_bytes.get_bytes().to_vec(),
-                    ));
+                    debug!("Got PNG image: {} bytes", png_bytes.get_bytes().len());
+                    return Some(ClipboardContent::Image(png_bytes.get_bytes().to_vec()));
                 }
                 Err(e) => warn!("Failed to convert clipboard image to PNG: {}", e),
             }
@@ -481,17 +475,11 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
     None
 }
 
-/// 通过 clipboard-rs 读取 RTF 格式内容
+/// 通过 clipboard-rs 读取 RTF 原始字节并 base64 存库
 fn read_rtf_from_context(ctx: &ClipboardContext) -> Option<String> {
     let bytes = ctx.get_buffer("Rich Text Format").ok()?;
     if bytes.is_empty() {
         return None;
     }
-    // 去掉尾部 null 终止符
-    let trimmed = if bytes.last() == Some(&0) {
-        &bytes[..bytes.len() - 1]
-    } else {
-        &bytes
-    };
-    Some(String::from_utf8_lossy(trimmed).into_owned())
+    Some(super::rtf_storage::encode_rtf_for_storage(&bytes))
 }

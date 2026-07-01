@@ -1,5 +1,5 @@
-use clipboard_rs::Clipboard as ClipboardTrait;
 use crate::database::{ClipboardItem, ClipboardRepository};
+use clipboard_rs::Clipboard as ClipboardTrait;
 use std::sync::Arc;
 use tauri::State;
 use tracing::{debug, info};

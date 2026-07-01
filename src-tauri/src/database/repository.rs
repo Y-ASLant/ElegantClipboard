@@ -872,6 +872,31 @@ impl ClipboardRepository {
         Ok((deleted, image_paths))
     }
 
+    /// 去重置顶时刷新 HTML/RTF 字段（Word 等同内容重拷会更新 base64 RTF）
+    pub fn refresh_rich_fields(
+        &self,
+        id: i64,
+        item: &NewClipboardItem,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.write_conn.lock();
+        conn.execute(
+            "UPDATE clipboard_items SET text_content = ?1, html_content = ?2, rtf_content = ?3, \
+             byte_size = ?4, preview = ?5, char_count = ?6, \
+             updated_at = datetime('now', 'localtime') WHERE id = ?7",
+            params![
+                item.text_content,
+                item.html_content,
+                item.rtf_content,
+                item.byte_size,
+                item.preview,
+                item.char_count,
+                id,
+            ],
+        )?;
+        debug!("Refreshed rich fields for item {}", id);
+        Ok(())
+    }
+
     /// 更新文本内容（编辑功能）
     pub fn update_text_content(&self, id: i64, new_text: &str) -> Result<(), rusqlite::Error> {
         let conn = self.write_conn.lock();
