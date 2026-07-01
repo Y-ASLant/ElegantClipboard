@@ -60,6 +60,7 @@ import {
   formatSize,
   getFileNameFromPath,
   parseFilePaths,
+  isImageFile,
 } from "@/lib/format";
 import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
@@ -82,16 +83,61 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 
-// LRU 缓存：文件有效性检查结果，上限 500 条
+// LRU 缓存：仅缓存已确认失效的非图片文件（false）
+// 图片文件不需要检查，靠预览图加载失败自然反馈
 const FILE_VALIDITY_CACHE_MAX = 500;
-const fileValidityCache = new Map<string, boolean>();
+const fileValidityCache = new Map<string, false>();
 function setFileValidityCache(key: string, value: boolean) {
+  if (value) return; // 不缓存有效的，只缓存失效的
   if (fileValidityCache.size >= FILE_VALIDITY_CACHE_MAX) {
-    // 删除最早的条目
     const firstKey = fileValidityCache.keys().next().value;
     if (firstKey !== undefined) fileValidityCache.delete(firstKey);
   }
-  fileValidityCache.set(key, value);
+  fileValidityCache.set(key, false);
+}
+
+// 批量检查队列：收集检查请求，批量发送
+interface PendingCheck {
+  paths: string[];
+  resolve: (result: Record<string, { exists: boolean; is_dir: boolean }>) => void;
+  reject: (error: unknown) => void;
+}
+let pendingChecks: PendingCheck[] = [];
+let batchTimer: ReturnType<typeof setTimeout> | null = null;
+const BATCH_DELAY_MS = 50; // 50ms 内的请求合并为一批
+
+function flushBatchChecks() {
+  if (pendingChecks.length === 0) return;
+  const batch = pendingChecks;
+  pendingChecks = [];
+
+  // 合并所有路径，去重
+  const allPaths = [...new Set(batch.flatMap((c) => c.paths))];
+  invoke<Record<string, { exists: boolean; is_dir: boolean }>>(
+    "check_files_exist",
+    { paths: allPaths },
+  )
+    .then((result) => {
+      for (const check of batch) {
+        check.resolve(result);
+      }
+    })
+    .catch((error) => {
+      logError("Batch check_files_exist failed:", error);
+      for (const check of batch) {
+        check.reject(error);
+      }
+    });
+}
+
+function batchCheckFilesExist(
+  paths: string[],
+): Promise<Record<string, { exists: boolean; is_dir: boolean }>> {
+  return new Promise((resolve, reject) => {
+    pendingChecks.push({ paths, resolve, reject });
+    if (batchTimer) clearTimeout(batchTimer);
+    batchTimer = setTimeout(flushBatchChecks, BATCH_DELAY_MS);
+  });
 }
 const textPreviewLM = createLeaseManager("allocate_text_preview_lease");
 
@@ -230,18 +276,22 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       return;
     }
 
+    // 图片文件靠预览图加载失败自然反馈，不需要检查存在性
+    const isSingleImageFile = filePaths.length === 1 && isImageFile(filePaths[0]);
+    if (isSingleImageFile) {
+      setRuntimeFilesValid(undefined);
+      return;
+    }
+
     const cacheKey = item.file_paths ?? filePaths.join("\n");
-    const cached = fileValidityCache.get(cacheKey);
-    if (cached !== undefined) {
-      setRuntimeFilesValid(cached);
+    // 检查是否已缓存为失效
+    if (fileValidityCache.has(cacheKey)) {
+      setRuntimeFilesValid(false);
       return;
     }
 
     let cancelled = false;
-    invoke<Record<string, { exists: boolean; is_dir: boolean }>>(
-      "check_files_exist",
-      { paths: filePaths },
-    )
+    batchCheckFilesExist(filePaths)
       .then((checkResult) => {
         const allExist = filePaths.every((path) => checkResult[path]?.exists);
         setFileValidityCache(cacheKey, allExist);

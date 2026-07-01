@@ -651,6 +651,7 @@ const FileImagePreview = memo(function FileImagePreview({
   sourceAppIcon?: string | null;
 }) {
   const [imgError, setImgError] = useState(false);
+  const { t } = useTranslation();
   const showImageFileName = useUISettings((s) => s.showImageFileName);
   const fileName = getFileNameFromPath(filePath);
 
@@ -661,14 +662,15 @@ const FileImagePreview = memo(function FileImagePreview({
     return (
       <div className="flex-1 min-w-0 px-3 py-2.5">
         <div className="flex items-start gap-2.5">
-          <div className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-blue-50 dark:bg-blue-950">
-            <Document16Regular className="w-5 h-5 text-blue-500" />
+          <div className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-red-50 dark:bg-red-950">
+            <Warning16Regular className="w-5 h-5 text-red-500" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-foreground">
+            <p className="text-sm font-medium truncate text-red-500">
               <HighlightText text={fileName} />
+              <span className="ml-1.5 text-xs font-normal">{t("cardContent.invalid")}</span>
             </p>
-            <p className="text-xs truncate mt-0.5 text-muted-foreground">
+            <p className="text-xs truncate mt-0.5 text-red-400 line-through">
               <HighlightText text={filePath} />
             </p>
           </div>
