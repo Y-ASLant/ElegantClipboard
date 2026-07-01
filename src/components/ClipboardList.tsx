@@ -258,12 +258,26 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
 
   // 回到顶部（使用 Virtuoso scrollToIndex API）
   const scrollToTop = useCallback((smooth = false) => {
-    virtuosoRef.current?.scrollToIndex({
-      index: 0,
-      align: "start",
-      behavior: smooth ? "smooth" : "auto",
-    });
-  }, []);
+    if (!smooth) {
+      virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "auto" });
+      return;
+    }
+    // 快速平滑滚动：150ms 内完成，比浏览器原生 smooth 快得多
+    const el = customScrollParent;
+    if (!el) { virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "auto" }); return; }
+    const start = el.scrollTop;
+    if (start <= 0) return;
+    const duration = Math.min(300, start / 10);
+    const startTime = performance.now();
+    const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
+    const tick = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      el.scrollTop = start * (1 - easeOut(progress));
+      if (progress < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [customScrollParent]);
 
   // 窗口重新打开时重置滚动位置
   useEffect(() => {
