@@ -1,10 +1,15 @@
+use super::source_app::SourceAppInfo;
 use super::{ClipboardContent, ClipboardHandler};
 use crate::database::Database;
-use clipboard_rs::{Clipboard as ClipboardTrait, ClipboardContext, ClipboardHandler as CRHandler, ClipboardWatcher, ClipboardWatcherContext};
 use clipboard_rs::common::RustImage;
+use clipboard_rs::{
+    Clipboard as ClipboardTrait, ClipboardContext, ClipboardHandler as CRHandler, ClipboardWatcher,
+    ClipboardWatcherContext,
+};
 use parking_lot::Mutex;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use tauri::{AppHandle, Emitter};
 use tracing::{debug, error, info, warn};
@@ -21,6 +26,13 @@ pub struct ClipboardMonitor {
     thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// 当前活动分组（None = 默认分组），与 AppState 共享
     active_group_id: Arc<Mutex<Option<i64>>>,
+}
+
+/// worker 线程接收的待处理剪贴板内容
+struct CaptureWorkItem {
+    content: ClipboardContent,
+    source: Option<SourceAppInfo>,
+    group_id: Option<i64>,
 }
 
 impl ClipboardMonitor {
@@ -47,7 +59,7 @@ impl ClipboardMonitor {
         info!("Clipboard monitor initialized");
     }
 
-    /// 启动剪贴板监听（带自动重启）
+    /// 启动剪贴板监听（带自动重启 + 异步处理 worker）
     pub fn start(&self, app_handle: AppHandle) {
         // 用 compare_exchange 避免竞态
         if self
@@ -65,6 +77,20 @@ impl ClipboardMonitor {
         let handler = self.handler.clone();
         let active_group_id = self.active_group_id.clone();
 
+        // ── 处理 worker 线程：从 channel 接收内容，串行处理 ──
+        let (tx, rx) = mpsc::channel::<CaptureWorkItem>();
+
+        let worker_handler = handler.clone();
+        let worker_running = running.clone();
+        let worker_app = app_handle.clone();
+        std::thread::Builder::new()
+            .name("clipboard-worker".into())
+            .spawn(move || {
+                Self::run_capture_worker(rx, worker_handler, worker_running, worker_app);
+            })
+            .expect("failed to spawn clipboard-worker thread");
+
+        // ── watcher 线程：OS 事件监听 + 快速校验 → 发送到 channel ──
         let handle = std::thread::spawn(move || {
             info!("Clipboard monitor thread started");
 
@@ -80,6 +106,7 @@ impl ClipboardMonitor {
                     handler: handler.clone(),
                     app_handle: app_handle.clone(),
                     active_group_id: active_group_id.clone(),
+                    work_tx: tx.clone(),
                 };
 
                 let mut watcher = match ClipboardWatcherContext::new() {
@@ -106,17 +133,70 @@ impl ClipboardMonitor {
                     backoff, consecutive_failures
                 );
                 std::thread::sleep(std::time::Duration::from_millis(backoff));
-
-                // 成功运行一段时间后重置失败计数（watcher 至少活了 30 秒算稳定）
-                // 这里简化：每次重启都递增 backoff，不会重置
             }
 
+            // tx drop → worker 线程的 rx.recv() 返回 Err → worker 退出
+            drop(tx);
             running.store(false, Ordering::SeqCst);
             info!("Clipboard monitor thread stopped");
         });
 
         // 保存线程句柄以便清理
         *self.thread_handle.lock() = Some(handle);
+    }
+
+    /// 处理 worker 主循环：串行处理剪贴板内容，快速合并连续事件
+    ///
+    /// 收到一个 work item 后立刻处理；处理期间到达的新事件通过 `try_recv`
+    /// 一次性排空，只保留最后一个（最新内容），避免重复处理。
+    fn run_capture_worker(
+        rx: mpsc::Receiver<CaptureWorkItem>,
+        handler: Arc<Mutex<Option<ClipboardHandler>>>,
+        running: Arc<AtomicBool>,
+        app_handle: AppHandle,
+    ) {
+        info!("Clipboard worker thread started");
+
+        while running.load(Ordering::SeqCst) {
+            // 阻塞等待第一个事件
+            let Ok(mut item) = rx.recv() else {
+                break; // channel 关闭，退出
+            };
+
+            // 排空 channel，只保留最新事件（合并快速连续复制）
+            while let Ok(newer) = rx.try_recv() {
+                item = newer;
+            }
+
+            // 在锁内执行处理（settings 查询 + hash + dedup + DB 写入 + 文件保存）
+            let result = {
+                let guard = handler.lock();
+                if let Some(h) = &*guard {
+                    if !h.is_content_type_allowed(&item.content) {
+                        debug!("Clipboard change ignored (content type not allowed)");
+                        continue;
+                    }
+                    h.process(item.content, item.source, item.group_id)
+                } else {
+                    continue;
+                }
+            };
+
+            match result {
+                Ok(Some(id)) => {
+                    debug!("Processed clipboard item: {}", id);
+                    let _ = app_handle.emit("clipboard-updated", id);
+                }
+                Ok(None) => {
+                    debug!("Clipboard content already exists");
+                }
+                Err(e) => {
+                    error!("Failed to process clipboard: {}", e);
+                }
+            }
+        }
+
+        info!("Clipboard worker thread stopped");
     }
 
     /// 暂停监控（递增暂停计数，支持多个并发暂停）
@@ -165,14 +245,19 @@ impl Default for ClipboardMonitor {
     }
 }
 
-/// clipboard-rs 事件处理器
+/// clipboard-rs 事件处理器（watcher 回调线程）
+///
+/// 职责：快速校验 → 读取剪贴板 → 发送到 worker channel → 返回。
+/// **不做** DB 写入、文件保存等重操作，全部交给 worker 线程。
 struct MonitorHandler {
     running: Arc<AtomicBool>,
     pause_count: Arc<AtomicU32>,
     user_paused: Arc<AtomicBool>,
     handler: Arc<Mutex<Option<ClipboardHandler>>>,
+    #[allow(dead_code)]
     app_handle: AppHandle,
     active_group_id: Arc<Mutex<Option<i64>>>,
+    work_tx: mpsc::Sender<CaptureWorkItem>,
 }
 
 impl CRHandler for MonitorHandler {
@@ -190,10 +275,10 @@ impl CRHandler for MonitorHandler {
             return;
         }
 
-        // 先获取来源应用（在读取内容之前）
+        // 快速获取来源应用（在读取内容之前）
         let source = super::source_app::get_clipboard_source_app();
 
-        // 单次批量查询获取热路径所需设置（替代原先 4 次独立 DB 查询）
+        // 短暂锁：读取 max_image_bytes 设置 + 应用过滤（无 DB 写入）
         let max_image_bytes = {
             let guard = self.handler.lock();
             if let Some(handler) = &*guard {
@@ -212,6 +297,8 @@ impl CRHandler for MonitorHandler {
         };
 
         // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
+        // 这步可能较慢（最多 1400ms），但在 watcher 线程做是合理的——
+        // 剪贴板内容必须在 OS 事件窗口内读取，延迟读可能读到下一次复制的内容。
         let Some(content) = read_clipboard_content_with_retry(max_image_bytes) else {
             return;
         };
@@ -219,24 +306,14 @@ impl CRHandler for MonitorHandler {
         // 读取当前活动分组
         let group_id = *self.active_group_id.lock();
 
-        // 检查内容类型 + 处理内容（单次加锁）
-        if let Some(handler) = &*self.handler.lock() {
-            if !handler.is_content_type_allowed(&content) {
-                debug!("Clipboard change ignored (content type not allowed)");
-                return;
-            }
-            match handler.process(content, source, group_id) {
-                Ok(Some(id)) => {
-                    debug!("Processed clipboard item: {}", id);
-                    let _ = self.app_handle.emit("clipboard-updated", id);
-                }
-                Ok(None) => {
-                    debug!("Clipboard content already exists");
-                }
-                Err(e) => {
-                    error!("Failed to process clipboard: {}", e);
-                }
-            }
+        // 发送到 worker 线程，立即返回（不阻塞 watcher 回调）
+        let item = CaptureWorkItem {
+            content,
+            source,
+            group_id,
+        };
+        if self.work_tx.send(item).is_err() {
+            warn!("Clipboard worker channel closed, dropping event");
         }
     }
 }
@@ -250,7 +327,11 @@ fn read_clipboard_content_with_retry(max_image_bytes: usize) -> Option<Clipboard
     for (attempt, &delay) in RETRY_DELAYS_MS.iter().enumerate() {
         if delay > 0 {
             std::thread::sleep(std::time::Duration::from_millis(delay));
-            debug!("Clipboard read retry {}/{}", attempt + 1, RETRY_DELAYS_MS.len());
+            debug!(
+                "Clipboard read retry {}/{}",
+                attempt + 1,
+                RETRY_DELAYS_MS.len()
+            );
         }
 
         match read_clipboard_content(max_image_bytes) {
@@ -347,8 +428,13 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
             // clipboard-rs 内置 PNG 转换
             match img.to_png() {
                 Ok(png_bytes) => {
-                    debug!("Got PNG image: {} bytes", png_bytes.get_bytes().len());
-                    return Some(ClipboardContent::Image(png_bytes.get_bytes().to_vec()));
+                    debug!(
+                        "Got PNG image: {} bytes",
+                        png_bytes.get_bytes().len()
+                    );
+                    return Some(ClipboardContent::Image(
+                        png_bytes.get_bytes().to_vec(),
+                    ));
                 }
                 Err(e) => warn!("Failed to convert clipboard image to PNG: {}", e),
             }

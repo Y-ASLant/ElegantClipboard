@@ -536,8 +536,8 @@ dependencies = [
 
 [[package]]
 name = "clipboard-rs"
-version = "0.3.2"
-source = "git+https://github.com/ChurchTao/clipboard-rs?tag=v0.3.2#da51c143f451643f06aa66fa453ab7a70e4fd1b5"
+version = "0.3.4"
+source = "git+https://github.com/ChurchTao/clipboard-rs?tag=v0.3.4#7543d9e1fa5f8c9d5d515274d1ad40dfe099ef04"
 dependencies = [
  "clipboard-win",
  "image",

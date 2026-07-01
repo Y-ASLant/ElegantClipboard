@@ -73,7 +73,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 
 
 # Clipboard: unified read/write/listen (replaces arboard + clipboard-master)
-clipboard-rs = { git = "https://github.com/ChurchTao/clipboard-rs", tag = "v0.3.2" }
+clipboard-rs = { git = "https://github.com/ChurchTao/clipboard-rs", tag = "v0.3.4" }
 
 # Keyboard simulation for paste
 enigo = "0.6"
