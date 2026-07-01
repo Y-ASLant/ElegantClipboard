@@ -237,27 +237,24 @@ fn elevate_with_uac() -> bool {
 /// 统一重启入口（托盘 / 设置 / 数据导入等共用）
 ///
 /// - 普通模式，或已启用管理员启动：走 `app.restart()`；若需提权由启动阶段 `self_elevate` 处理
-/// - 当前已提权但关闭了管理员启动：先退出，再延迟经 explorer 降权拉起（避免单实例插件拦截）
+/// - 当前已提权但关闭了管理员启动：同步经 explorer 降权拉起新实例，再退出（避免单实例插件拦截）
 pub fn perform_restart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     crate::commands::window::save_main_window_placement(app);
 
     #[cfg(target_os = "windows")]
     if !is_admin_launch_enabled() && is_running_as_admin() {
-        schedule_deelevated_restart();
+        // 先同步拉起降权实例，再退出当前进程
+        // ShellExecuteW 是异步的（立即返回），新进程需要时间初始化后才尝试获取单例锁
+        // 到那时当前进程已退出并释放锁，不会冲突
+        if !launch_via_explorer() {
+            tracing::error!("降权重启失败：launch_via_explorer 返回 false");
+            return;
+        }
         app.exit(0);
         return;
     }
 
     app.restart();
-}
-
-/// 当前进程退出后再拉起非提权实例，避免与单实例插件冲突
-#[cfg(target_os = "windows")]
-fn schedule_deelevated_restart() {
-    std::thread::spawn(|| {
-        std::thread::sleep(std::time::Duration::from_millis(600));
-        let _ = launch_via_explorer();
-    });
 }
 
 /// 通过 explorer.exe 启动，确保新进程不继承管理员权限
