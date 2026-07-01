@@ -1,3 +1,4 @@
+use clipboard_rs::Clipboard as ClipboardTrait;
 use crate::database::{ClipboardItem, ClipboardRepository};
 use std::sync::Arc;
 use tauri::State;
@@ -8,7 +9,7 @@ use super::{AppState, hide_main_window_if_not_pinned, with_paused_monitor};
 /// 将 ClipboardItem 内容写入系统剪贴板（保留 HTML/RTF 等格式）
 pub(super) fn set_clipboard_content(
     item: &ClipboardItem,
-    clipboard: &mut arboard::Clipboard,
+    clipboard: &mut clipboard_rs::ClipboardContext,
 ) -> Result<(), String> {
     crate::clipboard::format_write::write_item_to_clipboard(item, clipboard)
 }
@@ -455,8 +456,8 @@ pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Resu
         .ok_or_else(|| "Item not found".to_string())?;
 
     with_paused_monitor(&state, || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+        let mut clipboard = clipboard_rs::ClipboardContext::new()
+            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
         set_clipboard_content(&item, &mut clipboard)?;
         debug!("Copied item {} to clipboard", id);
         Ok(())
@@ -608,8 +609,8 @@ fn paste_item_to_active_window(
 ) -> Result<(), String> {
     info!("paste_item: id={}, close_window={}", item.id, close_window);
     with_paused_monitor(state, || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+        let mut clipboard = clipboard_rs::ClipboardContext::new()
+            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
         set_clipboard_content(item, &mut clipboard)?;
         debug!("paste_item: clipboard set ok");
 
@@ -644,10 +645,10 @@ fn paste_plain_text_to_active_window(
         close_window
     );
     with_paused_monitor(state, || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+        let clipboard = clipboard_rs::ClipboardContext::new()
+            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
         clipboard
-            .set_text(text)
+            .set_text(text.to_string())
             .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
         debug!("paste_plain_text: clipboard set ok");
 

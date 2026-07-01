@@ -2,7 +2,6 @@ mod dedup;
 pub(crate) mod format_write;
 mod handler;
 mod monitor;
-mod rtf;
 pub mod source_app;
 
 pub(crate) use dedup::{

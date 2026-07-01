@@ -72,9 +72,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 
-# Cross-platform clipboard
-arboard = "3"
-clipboard-master = "4"
+# Clipboard: unified read/write/listen (replaces arboard + clipboard-master)
+clipboard-rs = { git = "https://github.com/ChurchTao/clipboard-rs", tag = "v0.3.2" }
 
 # Keyboard simulation for paste
 enigo = "0.6"
@@ -97,10 +96,10 @@ windows = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_Graphics_Dwm",
     "Win32_System_DataExchange",
+    "Win32_System_Memory",
     "Win32_Graphics_Gdi",
     "Win32_Storage_FileSystem",
     "Win32_UI_HiDpi",
 ] }
-# Windows registry for disabling system Win+V and admin launch
 winreg = "0.55"
 windows-core = "0.61"

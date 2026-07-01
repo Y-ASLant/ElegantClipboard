@@ -1,3 +1,4 @@
+use clipboard_rs::Clipboard as ClipboardTrait;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 
@@ -363,10 +364,10 @@ pub async fn write_text_to_clipboard(
     record: Option<bool>,
 ) -> Result<(), String> {
     let write_fn = || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("无法访问剪贴板: {e}"))?;
+        let clipboard = clipboard_rs::ClipboardContext::new()
+            .map_err(|e| format!("无法访问剪贴板: {e}"))?;
         clipboard
-            .set_text(&text)
+            .set_text(text.clone())
             .map_err(|e| format!("写入剪贴板失败: {e}"))?;
         Ok(())
     };
@@ -386,48 +387,63 @@ static PENDING_TRANSLATE_TEXT: parking_lot::Mutex<String> = parking_lot::Mutex::
 enum ClipboardBackup {
     Empty,
     Text(String),
-    Html { html: String, text: Option<String> },
-    Image(arboard::ImageData<'static>),
+    Html {
+        html: String,
+        #[allow(dead_code)]
+        text: Option<String>,
+    },
+    /// 图片以 PNG 字节形式保存
+    Image(Vec<u8>),
 }
 
 fn backup_clipboard() -> ClipboardBackup {
-    let Ok(mut cb) = arboard::Clipboard::new() else {
+    use clipboard_rs::Clipboard as ClipboardTrait;
+    use clipboard_rs::common::RustImage;
+
+    let Ok(ctx) = clipboard_rs::ClipboardContext::new() else {
         return ClipboardBackup::Empty;
     };
     // 优先备份 HTML（包含伴生纯文本）
-    if let Ok(html) = cb.get().html()
+    if let Ok(html) = ctx.get_html()
         && !html.is_empty()
     {
-        let text = cb.get_text().ok();
+        let text = ctx.get_text().ok();
         return ClipboardBackup::Html { html, text };
     }
     // 其次备份纯文本
-    if let Ok(text) = cb.get_text()
+    if let Ok(text) = ctx.get_text()
         && !text.is_empty()
     {
         return ClipboardBackup::Text(text);
     }
     // 最后备份图片
-    if let Ok(img) = cb.get_image() {
-        return ClipboardBackup::Image(img);
+    if let Ok(img) = ctx.get_image()
+        && let Ok(png) = img.to_png()
+    {
+        return ClipboardBackup::Image(png.get_bytes().to_vec());
     }
     ClipboardBackup::Empty
 }
 
 fn restore_clipboard(backup: &ClipboardBackup) {
-    let Ok(mut cb) = arboard::Clipboard::new() else {
+    use clipboard_rs::Clipboard as ClipboardTrait;
+    use clipboard_rs::RustImageData;
+    use clipboard_rs::common::RustImage;
+    let Ok(ctx) = clipboard_rs::ClipboardContext::new() else {
         return;
     };
     match backup {
         ClipboardBackup::Empty => {}
         ClipboardBackup::Text(text) => {
-            let _ = cb.set_text(text);
+            let _ = ctx.set_text(text.clone());
         }
-        ClipboardBackup::Html { html, text } => {
-            let _ = cb.set_html(html.as_str(), text.as_deref());
+        ClipboardBackup::Html { html, .. } => {
+            let _ = ctx.set_html(html.clone());
         }
-        ClipboardBackup::Image(img) => {
-            let _ = cb.set_image(img.clone());
+        ClipboardBackup::Image(png_bytes) => {
+            if let Ok(img) = RustImageData::from_bytes(png_bytes) {
+                let _ = ctx.set_image(img);
+            }
         }
     }
 }
@@ -462,9 +478,9 @@ fn get_selected_text_from_system(state: &Arc<AppState>) -> Result<String, String
         };
 
         // 序列号未变时仍尝试读取剪贴板（某些应用 Ctrl+C 不更新序列号，或选中内容与剪贴板相同）
-        let text = arboard::Clipboard::new()
+        let text = clipboard_rs::ClipboardContext::new()
             .ok()
-            .and_then(|mut cb| cb.get_text().ok())
+            .and_then(|ctx| ctx.get_text().ok())
             .unwrap_or_default();
 
         if !clipboard_changed && text.is_empty() {

@@ -1,20 +1,21 @@
 //! 将数据库条目写回系统剪贴板（尽量保留原始格式）
 
 use crate::database::ClipboardItem;
-use arboard::Clipboard;
+use clipboard_rs::{Clipboard as ClipboardTrait, ClipboardContext};
+use clipboard_rs::common::RustImage;
 
 /// 将 ClipboardItem 写入系统剪贴板
 pub fn write_item_to_clipboard(
     item: &ClipboardItem,
-    clipboard: &mut Clipboard,
+    ctx: &mut ClipboardContext,
 ) -> Result<(), String> {
     match item.content_type.as_str() {
-        "text" | "url" => write_plain_text(item, clipboard),
-        "html" => write_html_item(item, clipboard),
-        "rtf" => write_rtf_item(item, clipboard),
+        "text" | "url" => write_plain_text(item, ctx),
+        "html" => write_html_item(item, ctx),
+        "rtf" => write_rtf_item(item, ctx),
         "image" => {
             if let Some(ref path) = item.image_path {
-                set_clipboard_image(path, clipboard)
+                set_clipboard_image(path, ctx)
             } else {
                 Err("Item has no image path".to_string())
             }
@@ -23,7 +24,7 @@ pub fn write_item_to_clipboard(
             if let Some(ref paths_json) = item.file_paths {
                 let paths: Vec<String> = serde_json::from_str(paths_json)
                     .map_err(|e| format!("Failed to parse file paths: {e}"))?;
-                set_clipboard_files(&paths, clipboard)
+                set_clipboard_files(&paths, ctx)
             } else {
                 Err("Item has no file paths".to_string())
             }
@@ -32,18 +33,23 @@ pub fn write_item_to_clipboard(
     }
 }
 
-fn write_plain_text(item: &ClipboardItem, clipboard: &mut Clipboard) -> Result<(), String> {
+fn write_plain_text(
+    item: &ClipboardItem,
+    ctx: &mut ClipboardContext,
+) -> Result<(), String> {
     let text = item
         .text_content
         .as_deref()
         .filter(|t| !t.is_empty())
         .ok_or_else(|| "Item has no text content".to_string())?;
-    clipboard
-        .set_text(text.to_string())
+    ctx.set_text(text.to_string())
         .map_err(|e| format!("Failed to set clipboard text: {e}"))
 }
 
-fn write_html_item(item: &ClipboardItem, clipboard: &mut Clipboard) -> Result<(), String> {
+fn write_html_item(
+    item: &ClipboardItem,
+    ctx: &mut ClipboardContext,
+) -> Result<(), String> {
     let alt = item_alt_text(item);
 
     if let Some(html) = item.html_content.as_deref().filter(|h| !h.is_empty()) {
@@ -56,15 +62,19 @@ fn write_html_item(item: &ClipboardItem, clipboard: &mut Clipboard) -> Result<()
             );
         }
 
-        return clipboard
-            .set_html(html.to_string(), alt)
+        // clipboard-rs 的 set_html 自动处理 CF-HTML 格式包装
+        return ctx
+            .set_html(html.to_string())
             .map_err(|e| format!("Failed to set clipboard HTML: {e}"));
     }
 
-    write_plain_text(item, clipboard)
+    write_plain_text(item, ctx)
 }
 
-fn write_rtf_item(item: &ClipboardItem, clipboard: &mut Clipboard) -> Result<(), String> {
+fn write_rtf_item(
+    item: &ClipboardItem,
+    ctx: &mut ClipboardContext,
+) -> Result<(), String> {
     let alt = item_alt_text(item);
 
     #[cfg(target_os = "windows")]
@@ -73,7 +83,8 @@ fn write_rtf_item(item: &ClipboardItem, clipboard: &mut Clipboard) -> Result<(),
         return write_windows_rich_formats(item.html_content.as_deref(), Some(rtf), alt.as_deref());
     }
 
-    write_plain_text(item, clipboard)
+    // 非 Windows 或无 RTF：回退到纯文本
+    write_plain_text(item, ctx)
 }
 
 /// 提取条目可用的纯文本 fallback（HTML/RTF 写剪贴板时的 Unicode 伴生格式）
@@ -115,36 +126,23 @@ pub fn item_plain_text(item: &ClipboardItem) -> Result<String, String> {
     }
 }
 
-/// 使用 arboard 将图片写入剪贴板（Windows 上写 CF_DIB，PS 兼容）
-fn set_clipboard_image(path: &str, clipboard: &mut Clipboard) -> Result<(), String> {
-    use arboard::ImageData;
-    use std::borrow::Cow;
+/// 将图片写入剪贴板（Windows 上写 CF_DIB，PS 兼容）
+fn set_clipboard_image(path: &str, ctx: &mut ClipboardContext) -> Result<(), String> {
+    use clipboard_rs::RustImageData;
 
     let img = image::open(path)
-        .map_err(|e| format!("Failed to load image from path: {e}"))?
-        .to_rgba8();
+        .map_err(|e| format!("Failed to load image from path: {e}"))?;
+    let rgba_img = img.to_rgba8();
+    let dynamic = image::DynamicImage::ImageRgba8(rgba_img);
+    let image_data = RustImageData::from_dynamic_image(dynamic);
 
-    let (width, height) = img.dimensions();
-    let image_data = ImageData {
-        width: width as usize,
-        height: height as usize,
-        bytes: Cow::Owned(img.into_raw()),
-    };
-
-    clipboard
-        .set_image(image_data)
+    ctx.set_image(image_data)
         .map_err(|e| format!("Failed to set clipboard image: {e}"))
 }
 
-/// 使用 arboard 将文件列表写入剪贴板（Windows 上写 CF_HDROP）
-fn set_clipboard_files(paths: &[String], clipboard: &mut Clipboard) -> Result<(), String> {
-    use std::path::Path;
-
-    let path_refs: Vec<&Path> = paths.iter().map(Path::new).collect();
-
-    clipboard
-        .set()
-        .file_list(&path_refs)
+/// 将文件列表写入剪贴板（Windows 上写 CF_HDROP）
+fn set_clipboard_files(paths: &[String], ctx: &mut ClipboardContext) -> Result<(), String> {
+    ctx.set_files(paths.to_vec())
         .map_err(|e| format!("Failed to set clipboard files: {e}"))
 }
 

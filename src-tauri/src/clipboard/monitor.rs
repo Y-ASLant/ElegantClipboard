@@ -1,6 +1,7 @@
 use super::{ClipboardContent, ClipboardHandler};
 use crate::database::Database;
-use clipboard_master::{CallbackResult, ClipboardHandler as CMHandler, Master};
+use clipboard_rs::{Clipboard as ClipboardTrait, ClipboardContext, ClipboardHandler as CRHandler, ClipboardWatcher, ClipboardWatcherContext};
+use clipboard_rs::common::RustImage;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -46,7 +47,7 @@ impl ClipboardMonitor {
         info!("Clipboard monitor initialized");
     }
 
-    /// 启动剪贴板监听
+    /// 启动剪贴板监听（带自动重启）
     pub fn start(&self, app_handle: AppHandle) {
         // 用 compare_exchange 避免竞态
         if self
@@ -67,25 +68,47 @@ impl ClipboardMonitor {
         let handle = std::thread::spawn(move || {
             info!("Clipboard monitor thread started");
 
-            let clipboard_handler = MonitorHandler {
-                running: running.clone(),
-                pause_count,
-                user_paused,
-                handler,
-                app_handle,
-                active_group_id,
-            };
+            // 带自动重启的监听循环
+            let mut consecutive_failures: u32 = 0;
+            const MAX_BACKOFF_MS: u64 = 5_000;
 
-            // 启动剪贴板监听
-            match Master::new(clipboard_handler) {
-                Ok(mut master) => {
-                    if let Err(e) = master.run() {
-                        error!("Clipboard monitor error: {}", e);
+            while running.load(Ordering::SeqCst) {
+                let clipboard_handler = MonitorHandler {
+                    running: running.clone(),
+                    pause_count: pause_count.clone(),
+                    user_paused: user_paused.clone(),
+                    handler: handler.clone(),
+                    app_handle: app_handle.clone(),
+                    active_group_id: active_group_id.clone(),
+                };
+
+                let mut watcher = match ClipboardWatcherContext::new() {
+                    Ok(w) => w,
+                    Err(e) => {
+                        error!("Failed to create clipboard watcher: {}", e);
+                        break;
                     }
+                };
+                watcher.add_handler(clipboard_handler);
+
+                info!("Clipboard watcher started");
+                // start_watch() 阻塞直到 Stop 回调或内部错误
+                watcher.start_watch();
+                if !running.load(Ordering::SeqCst) {
+                    break;
                 }
-                Err(e) => {
-                    error!("Failed to create clipboard master: {}", e);
-                }
+                // 异常退出 → 重启
+                consecutive_failures += 1;
+                let backoff =
+                    (100 * 2u64.pow(consecutive_failures.min(6))).min(MAX_BACKOFF_MS);
+                warn!(
+                    "Clipboard watcher exited, restarting in {}ms (failure #{})",
+                    backoff, consecutive_failures
+                );
+                std::thread::sleep(std::time::Duration::from_millis(backoff));
+
+                // 成功运行一段时间后重置失败计数（watcher 至少活了 30 秒算稳定）
+                // 这里简化：每次重启都递增 backoff，不会重置
             }
 
             running.store(false, Ordering::SeqCst);
@@ -142,7 +165,7 @@ impl Default for ClipboardMonitor {
     }
 }
 
-/// clipboard-master 事件处理器
+/// clipboard-rs 事件处理器
 struct MonitorHandler {
     running: Arc<AtomicBool>,
     pause_count: Arc<AtomicU32>,
@@ -152,17 +175,19 @@ struct MonitorHandler {
     active_group_id: Arc<Mutex<Option<i64>>>,
 }
 
-impl CMHandler for MonitorHandler {
-    fn on_clipboard_change(&mut self) -> CallbackResult {
+impl CRHandler for MonitorHandler {
+    fn on_clipboard_change(&mut self) {
         // 检查是否应停止
         if !self.running.load(Ordering::SeqCst) {
-            return CallbackResult::Stop;
+            return;
         }
 
         // 检查是否已暂停（内部计数或用户手动）
-        if self.pause_count.load(Ordering::SeqCst) > 0 || self.user_paused.load(Ordering::SeqCst) {
+        if self.pause_count.load(Ordering::SeqCst) > 0
+            || self.user_paused.load(Ordering::SeqCst)
+        {
             debug!("Clipboard change ignored (paused)");
-            return CallbackResult::Next;
+            return;
         }
 
         // 先获取来源应用（在读取内容之前）
@@ -171,14 +196,14 @@ impl CMHandler for MonitorHandler {
         // 单次批量查询获取热路径所需设置（替代原先 4 次独立 DB 查询）
         let max_image_bytes = {
             let guard = self.handler.lock();
-            if let Some(ref handler) = *guard {
+            if let Some(handler) = &*guard {
                 let settings = handler.get_clip_change_settings();
                 if handler.is_source_app_excluded(&source, &settings) {
                     debug!(
                         "Clipboard change ignored (source app excluded: {:?})",
                         source.as_ref().map(|s| &s.app_name)
                     );
-                    return CallbackResult::Next;
+                    return;
                 }
                 settings.max_image_bytes
             } else {
@@ -188,17 +213,17 @@ impl CMHandler for MonitorHandler {
 
         // 读取剪贴板内容（带重试，应对剪贴板锁竞争）
         let Some(content) = read_clipboard_content_with_retry(max_image_bytes) else {
-            return CallbackResult::Next;
+            return;
         };
 
         // 读取当前活动分组
         let group_id = *self.active_group_id.lock();
 
         // 检查内容类型 + 处理内容（单次加锁）
-        if let Some(ref handler) = *self.handler.lock() {
+        if let Some(handler) = &*self.handler.lock() {
             if !handler.is_content_type_allowed(&content) {
                 debug!("Clipboard change ignored (content type not allowed)");
-                return CallbackResult::Next;
+                return;
             }
             match handler.process(content, source, group_id) {
                 Ok(Some(id)) => {
@@ -213,38 +238,32 @@ impl CMHandler for MonitorHandler {
                 }
             }
         }
-
-        CallbackResult::Next
-    }
-
-    fn on_clipboard_error(&mut self, error: std::io::Error) -> CallbackResult {
-        error!("Clipboard error: {}", error);
-        CallbackResult::Next
     }
 }
 
 /// 带重试的剪贴板读取，应对剪贴板锁竞争（如截图工具延迟渲染）
 /// `max_image_bytes` 为 0 时不限制；非零时先按原始像素尺寸预判，避免对超大图进行 PNG 编码
 fn read_clipboard_content_with_retry(max_image_bytes: usize) -> Option<ClipboardContent> {
-    const MAX_RETRIES: u32 = 3;
-    const RETRY_DELAY_MS: u64 = 50;
+    // 渐进退避：[0, 40, 80, 140, 220, 360, 560]ms，总计最多 1400ms
+    const RETRY_DELAYS_MS: [u64; 7] = [0, 40, 80, 140, 220, 360, 560];
 
-    for attempt in 0..MAX_RETRIES {
-        if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(
-                RETRY_DELAY_MS * u64::from(attempt),
-            ));
-            debug!("Clipboard read retry {}/{}", attempt + 1, MAX_RETRIES);
+    for (attempt, &delay) in RETRY_DELAYS_MS.iter().enumerate() {
+        if delay > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            debug!("Clipboard read retry {}/{}", attempt + 1, RETRY_DELAYS_MS.len());
         }
 
         match read_clipboard_content(max_image_bytes) {
             Some(content) => return Some(content),
-            None if attempt + 1 < MAX_RETRIES => {
+            None if attempt + 1 < RETRY_DELAYS_MS.len() => {
                 debug!("Clipboard read returned nothing, will retry");
                 continue;
             }
             None => {
-                warn!("Clipboard read failed after {} attempts", MAX_RETRIES);
+                warn!(
+                    "Clipboard read failed after {} attempts",
+                    RETRY_DELAYS_MS.len()
+                );
                 return None;
             }
         }
@@ -284,8 +303,9 @@ fn read_clipboard_content(max_image_bytes: usize) -> Option<ClipboardContent> {
 }
 
 /// 实际读取剪贴板内容（内部函数）
+/// 使用 clipboard-rs 的 ClipboardContext，支持格式探测和 RTF 原生读取
 fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardContent> {
-    let mut clipboard = match arboard::Clipboard::new() {
+    let ctx = match ClipboardContext::new() {
         Ok(c) => c,
         Err(e) => {
             warn!(
@@ -297,31 +317,24 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
     };
 
     // 优先尝试获取文件
-    match clipboard.get().file_list() {
+    match ctx.get_files() {
         Ok(files) if !files.is_empty() => {
-            let file_strings: Vec<String> = files
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-            debug!("Got {} files from clipboard", file_strings.len());
-            return Some(ClipboardContent::Files(file_strings));
+            debug!("Got {} files from clipboard", files.len());
+            return Some(ClipboardContent::Files(files));
         }
         Ok(_) => {} // 空文件列表，继续尝试其他格式
         Err(e) => debug!("Clipboard get_files failed: {}", e),
     }
 
-    // 尝试获取图片
-    match clipboard.get_image() {
+    // 尝试获取图片（clipboard-rs 返回 RustImageData，可直接转 PNG）
+    match ctx.get_image() {
         Ok(img) => {
-            let width = img.width as u32;
-            let height = img.height as u32;
+            let (width, height) = img.get_size();
             debug!("Got image from clipboard: {}x{}", width, height);
 
             // 在 PNG 编码前按 RGBA 字节数预判，超限则跳过
             if max_image_bytes > 0 {
-                let rgba_bytes = u64::from(width)
-                    .saturating_mul(u64::from(height))
-                    .saturating_mul(4);
+                let rgba_bytes = (width as u64).saturating_mul(height as u64).saturating_mul(4);
                 if rgba_bytes > max_image_bytes as u64 {
                     warn!(
                         "Clipboard image {}x{} (~{} bytes RGBA) exceeds max {} bytes, skipping",
@@ -331,11 +344,11 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
                 }
             }
 
-            // arboard 返回 RGBA 像素，用 image crate 编码为 PNG
-            match encode_rgba_to_png(img.bytes.into_owned(), width, height) {
+            // clipboard-rs 内置 PNG 转换
+            match img.to_png() {
                 Ok(png_bytes) => {
-                    debug!("Got PNG image: {} bytes", png_bytes.len());
-                    return Some(ClipboardContent::Image(png_bytes));
+                    debug!("Got PNG image: {} bytes", png_bytes.get_bytes().len());
+                    return Some(ClipboardContent::Image(png_bytes.get_bytes().to_vec()));
                 }
                 Err(e) => warn!("Failed to convert clipboard image to PNG: {}", e),
             }
@@ -347,10 +360,10 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
     }
 
     // 尝试获取 HTML（同时尝试读取伴生 RTF，便于完整回写）
-    match clipboard.get().html() {
+    match ctx.get_html() {
         Ok(html) if !html.is_empty() => {
-            let text = clipboard.get_text().ok().filter(|t| !t.is_empty());
-            let rtf = read_rtf_as_string().filter(|r| !r.is_empty());
+            let text = ctx.get_text().ok().filter(|t| !t.is_empty());
+            let rtf = read_rtf_from_context(&ctx);
             debug!(
                 "Got HTML from clipboard: {} bytes, rtf={}",
                 html.len(),
@@ -362,17 +375,15 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
         Err(e) => debug!("Clipboard get_html failed: {}", e),
     }
 
-    // 尝试获取 RTF 富文本（arboard 不支持，用 Windows API）
-    if let Some(rtf) = read_rtf_as_string()
-        && !rtf.is_empty()
-    {
-        let text = clipboard.get_text().ok().filter(|t| !t.is_empty());
+    // 尝试获取 RTF 富文本（clipboard-rs 原生支持通过 get_buffer）
+    if let Some(rtf) = read_rtf_from_context(&ctx) {
+        let text = ctx.get_text().ok().filter(|t| !t.is_empty());
         debug!("Got RTF from clipboard: {} bytes", rtf.len());
         return Some(ClipboardContent::Rtf { rtf, text });
     }
 
     // 尝试获取纯文本
-    match clipboard.get_text() {
+    match ctx.get_text() {
         Ok(text) if !text.is_empty() => {
             return Some(ClipboardContent::Text(text));
         }
@@ -384,28 +395,17 @@ fn read_clipboard_content_inner(max_image_bytes: usize) -> Option<ClipboardConte
     None
 }
 
-/// 将 RGBA 像素数据编码为 PNG 字节（接收所有权，避免额外克隆）
-fn encode_rgba_to_png(rgba: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>, String> {
-    use image::{ImageBuffer, Rgba};
-
-    let img = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba)
-        .ok_or("Failed to create image buffer from RGBA data")?;
-
-    let mut buf = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut buf, image::ImageFormat::Png)
-        .map_err(|e| format!("PNG encoding failed: {e}"))?;
-
-    Ok(buf.into_inner())
-}
-
-/// 从剪贴板读取 RTF 并转为 String（在边界处做一次 lossy 转换）
-///
-/// RTF 通常为纯文本（ASCII），但 `\binN` 段可能含非 UTF-8 二进制数据。
-/// 此处使用 `from_utf8_lossy` 做单次转换，避免在底层读取时截断或损坏数据。
-fn read_rtf_as_string() -> Option<String> {
-    let bytes = super::rtf::read_rtf_from_clipboard()?;
+/// 通过 clipboard-rs 读取 RTF 格式内容
+fn read_rtf_from_context(ctx: &ClipboardContext) -> Option<String> {
+    let bytes = ctx.get_buffer("Rich Text Format").ok()?;
     if bytes.is_empty() {
         return None;
     }
-    Some(String::from_utf8_lossy(&bytes).into_owned())
+    // 去掉尾部 null 终止符
+    let trimmed = if bytes.last() == Some(&0) {
+        &bytes[..bytes.len() - 1]
+    } else {
+        &bytes
+    };
+    Some(String::from_utf8_lossy(trimmed).into_owned())
 }

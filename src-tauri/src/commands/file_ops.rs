@@ -1,3 +1,4 @@
+use clipboard_rs::Clipboard as ClipboardTrait;
 use crate::database::ClipboardRepository;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,10 +109,10 @@ pub async fn paste_as_path(
     };
 
     with_paused_monitor(&state, || {
-        let mut clipboard =
-            arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
+        let clipboard = clipboard_rs::ClipboardContext::new()
+            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
         clipboard
-            .set_text(&paths_text)
+            .set_text(paths_text)
             .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
 
         hide_main_window_if_not_pinned(&app);
