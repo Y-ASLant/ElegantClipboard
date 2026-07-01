@@ -15,7 +15,7 @@ beforeEach(() => {
     previewUnboundedMode: false,
     previewZoomStep: 15,
     previewPosition: "auto",
-    imageAutoHeight: true,
+    imageAutoHeight: false,
     imageMaxHeight: 512,
     showImageFileName: true,
     colorTheme: "system",
