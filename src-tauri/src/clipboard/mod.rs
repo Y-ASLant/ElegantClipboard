@@ -8,7 +8,8 @@ pub(crate) mod rtf_storage;
 pub mod source_app;
 
 pub(crate) use dedup::{
-    canonical_url_text, compute_semantic_hash, is_url, semantic_hash_from_text,
+    canonical_url_text, compute_semantic_hash, is_url, normalize_rtf_for_hash,
+    semantic_hash_from_text,
 };
 pub use handler::*;
 pub use monitor::*;

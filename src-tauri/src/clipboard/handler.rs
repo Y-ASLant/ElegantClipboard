@@ -1,6 +1,9 @@
 use super::file_clipboard::{self, FileCaptureData};
 use super::source_app::{self, SourceAppInfo};
-use super::{canonical_url_text, compute_semantic_hash, is_url, semantic_hash_from_text};
+use super::{
+    canonical_url_text, compute_semantic_hash, is_url, normalize_rtf_for_hash,
+    semantic_hash_from_text,
+};
 use crate::database::{
     ClipboardRepository, ContentType, Database, NewClipboardItem, SettingsRepository,
 };
@@ -617,7 +620,21 @@ impl ClipboardHandler {
             }
             ClipboardContent::Rtf { rtf, .. } => {
                 hasher.update(b"rtf:");
-                hasher.update(rtf.as_bytes());
+                // Decode b64 payload, strip volatile RTF fields (rsid, datastore…),
+                // then hash the cleaned bytes so identical user content matches.
+                use base64::Engine;
+                if let Some(b64) = rtf.strip_prefix("b64:") {
+                    if let Ok(raw) =
+                        base64::engine::general_purpose::STANDARD.decode(b64.as_bytes())
+                    {
+                        let cleaned = normalize_rtf_for_hash(&raw);
+                        hasher.update(&cleaned);
+                    } else {
+                        hasher.update(rtf.as_bytes());
+                    }
+                } else {
+                    hasher.update(rtf.as_bytes());
+                }
             }
             ClipboardContent::ImageFile(capture) => {
                 hasher.update(b"image:");

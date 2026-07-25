@@ -157,6 +157,94 @@ pub(crate) fn is_url(text: &str) -> bool {
     false
 }
 
+/// Strip volatile fields from RTF that Word/Outlook regenerate on every copy,
+/// so identical user-visible content produces the same hash.
+///
+/// Removed (matching Ditto's `GenerateCRC` logic):
+/// - `{\*\datastore{...}}` block (Word's rich-data XML, changes per document instance)
+/// - `\rsid`, `\insrsid` control words with trailing decimal digits
+/// - `\mdispDef1` control word (no numeric arg)
+pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(rtf_bytes) else {
+        return rtf_bytes.to_vec();
+    };
+
+    let mut out = String::with_capacity(text.len());
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Match {\*\datastore{...}} — the RTF destination control word form.
+        // Start from the opening brace before \* and find the matching close.
+        if text[i..].starts_with("\\*\\datastore") {
+            // Find the opening brace that starts this group
+            let open = text[..i].rfind('{').unwrap_or(i);
+            let mut depth = 0u32;
+            let mut j = open;
+            while j < len {
+                match chars[j] {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i = j + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            if depth == 0 {
+                continue;
+            }
+        }
+
+        // Match \rsidXXXXX / \insrsidXXXXX — strip control word + trailing digits.
+        // Only strip when digits actually follow, so \rsidtbl, \rsidroot etc. are untouched.
+        let remaining = &text[i..];
+        let cmd_len = if remaining.starts_with("\\insrsid") {
+            Some("\\insrsid".len())
+        } else if remaining.starts_with("\\rsid") {
+            Some("\\rsid".len())
+        } else if remaining.starts_with("\\mdispDef1") {
+            // \mdispDef1 has no numeric arg — always strip
+            let j = i + "\\mdispDef1".len();
+            i = j + if j < len && chars[j] == ' ' { 1 } else { 0 };
+            continue;
+        } else {
+            None
+        };
+
+        if let Some(cmd_len) = cmd_len {
+            let after_cmd = i + cmd_len;
+            // Skip optional space between control word and digits
+            let digit_start = if after_cmd < len && chars[after_cmd] == ' ' {
+                after_cmd + 1
+            } else {
+                after_cmd
+            };
+            // Scan trailing digits (Word RSID is decimal, not hex)
+            let mut j = digit_start;
+            while j < len && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            if j > digit_start {
+                // Found digits — strip the whole thing
+                i = j;
+                continue;
+            }
+            // No digits found — don't strip (e.g. \rsidtbl, \rsidroot)
+        }
+
+        out.push(chars[i]);
+        i += 1;
+    }
+
+    out.into_bytes()
+}
+
 pub(crate) fn compute_semantic_hash(
     content_type: &str,
     text_content: Option<&str>,
@@ -177,8 +265,8 @@ pub(crate) fn compute_semantic_hash(
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_url_text, compute_semantic_hash, is_url, normalize_semantic_text,
-        semantic_hash_from_text,
+        canonical_url_text, compute_semantic_hash, is_url, normalize_rtf_for_hash,
+        normalize_semantic_text, semantic_hash_from_text,
     };
 
     #[test]
@@ -303,5 +391,82 @@ mod tests {
             Some("https://example.com")
         );
         assert_eq!(canonical_url_text("hello"), None);
+    }
+
+    #[test]
+    fn rtf_strips_datastore_block() {
+        // Standard RTF form: {\*\datastore {...}}
+        let rtf = br"{\rtf1\ansi hello {\*\datastore {some xml {nested}}}\par}";
+        let cleaned = normalize_rtf_for_hash(rtf);
+        let s = String::from_utf8(cleaned).unwrap();
+        assert!(!s.contains("datastore"));
+        assert!(s.contains("hello"));
+        assert!(s.contains("\\par"));
+    }
+
+    #[test]
+    fn rtf_strips_rsid_and_inrsid() {
+        let rtf = br"{\rtf1\ansi hello\rsid12345 \insrsid67890 world}";
+        let cleaned = normalize_rtf_for_hash(rtf);
+        let s = String::from_utf8(cleaned).unwrap();
+        assert!(!s.contains("rsid12345"));
+        assert!(!s.contains("insrsid67890"));
+        assert!(s.contains("hello"));
+        assert!(s.contains("world"));
+    }
+
+    #[test]
+    fn rtf_preserves_rsid_without_digits() {
+        // \rsidroot, \rsidtbl etc. have no trailing digits — must be preserved
+        let rtf = br"{\rtf1\ansi {\rsidtbl {\rsid12345}}\rsidroot hello}";
+        let cleaned = normalize_rtf_for_hash(rtf);
+        let s = String::from_utf8(cleaned).unwrap();
+        assert!(s.contains("rsidtbl"), "rsidtbl should be preserved");
+        assert!(s.contains("rsidroot"), "rsidroot should be preserved");
+        assert!(!s.contains("rsid12345"), "rsid12345 should be stripped");
+    }
+
+    #[test]
+    fn rtf_strips_mdispdef1() {
+        let rtf = br"{\rtf1\ansi hello\mdispDef1 world}";
+        let cleaned = normalize_rtf_for_hash(rtf);
+        let s = String::from_utf8(cleaned).unwrap();
+        assert!(!s.contains("mdispDef1"));
+        assert!(s.contains("hello"));
+        assert!(s.contains("world"));
+    }
+
+    #[test]
+    fn rtf_preserves_rsidtbl() {
+        let rtf = br"{\rtf1\ansi {\rsidtbl \rsid12345}}";
+        let cleaned = normalize_rtf_for_hash(rtf);
+        let s = String::from_utf8(cleaned).unwrap();
+        // \rsidtbl should be preserved; only standalone \rsid is stripped
+        assert!(s.contains("rsidtbl"));
+    }
+
+    #[test]
+    fn rtf_same_content_different_rsid_same_hash() {
+        let rtf_a = br"{\rtf1\ansi hello\rsid11111 world}";
+        let rtf_b = br"{\rtf1\ansi hello\rsid99999 world}";
+        let a = normalize_rtf_for_hash(rtf_a);
+        let b = normalize_rtf_for_hash(rtf_b);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn rtf_different_content_still_differs() {
+        let rtf_a = br"{\rtf1\ansi hello}";
+        let rtf_b = br"{\rtf1\ansi world}";
+        let a = normalize_rtf_for_hash(rtf_a);
+        let b = normalize_rtf_for_hash(rtf_b);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn rtf_invalid_utf8_returns_original() {
+        let rtf: &[u8] = &[0xFF, 0xFE, 0x00];
+        let cleaned = normalize_rtf_for_hash(rtf);
+        assert_eq!(cleaned, rtf);
     }
 }
