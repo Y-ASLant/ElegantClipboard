@@ -3,6 +3,7 @@ import {
   DEFAULT_MAX_IMAGE_SIZE_KB,
   isUncPath,
   isFileTooLargeForPreview,
+  isKnownTooLargeForPreview,
   previewLimitBytes,
   setMaxLocalPreviewBytesFromKb,
   shouldSkipFileImagePreview,
@@ -103,5 +104,27 @@ describe("shouldSkipFileImagePreview", () => {
 
   it("returns false for small local file", () => {
     expect(shouldSkipFileImagePreview("C:\\small.png", 1 * MB, false)).toBe(false);
+  });
+});
+
+describe("isKnownTooLargeForPreview", () => {
+  const MB = 1024 * 1024;
+  const GB = 1024 * MB;
+
+  beforeEach(() => {
+    setMaxLocalPreviewBytesFromKb(DEFAULT_MAX_IMAGE_SIZE_KB);
+  });
+
+  it("returns true when byte_size exceeds limit (skip batch IPC)", () => {
+    expect(
+      isKnownTooLargeForPreview("\\\\nas\\share\\photo.jpg", 2 * GB),
+    ).toBe(true);
+    expect(isKnownTooLargeForPreview("C:\\big.jpg", 60 * MB)).toBe(true);
+  });
+
+  it("returns false when byte_size unknown or within limit", () => {
+    expect(isKnownTooLargeForPreview("C:\\small.jpg", 1 * MB)).toBe(false);
+    expect(isKnownTooLargeForPreview("C:\\small.jpg", 0)).toBe(false);
+    expect(isKnownTooLargeForPreview("\\\\nas\\a.jpg", 5 * MB)).toBe(false);
   });
 });

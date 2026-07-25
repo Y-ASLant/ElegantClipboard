@@ -80,8 +80,7 @@ export const CardFooter = ({
 
 const PREVIEW_GAP = 12;
 const MIN_SCALE = 0.3;
-const MAX_SCALE_BOUNDED = 5.0;
-const MAX_SCALE_UNBOUNDED = 5.0;
+const MAX_SCALE = 5.0;
 const BASE_PREVIEW_W = 600;
 const BASE_PREVIEW_H = 500;
 const imagePreviewLM = createLeaseManager("allocate_image_preview_lease");
@@ -336,7 +335,7 @@ const ImagePreview = memo(function ImagePreview({
       ? calcImageSize(imgNatural.w, imgNatural.h, 1.0)
       : calcImageSize(imgNatural.w, imgNatural.h, 1.0, boundedMaxCssW, boundedMaxCssH);
 
-    const maxUnbounded = calcImageSize(imgNatural.w, imgNatural.h, MAX_SCALE_UNBOUNDED);
+    const maxUnbounded = calcImageSize(imgNatural.w, imgNatural.h, MAX_SCALE);
     const windowCssW = previewUnboundedMode ? maxUnbounded.width : boundedMaxCssW;
     const windowCssH = previewUnboundedMode ? maxUnbounded.height : boundedMaxCssH;
     const winW = Math.max(1, Math.round(windowCssW * bounds.scale));
@@ -450,8 +449,8 @@ const ImagePreview = memo(function ImagePreview({
         baseH *= r;
       }
       const maxEffective = previewUnboundedMode
-        ? MAX_SCALE_UNBOUNDED
-        : Math.min(maxCssW / baseW, maxCssH / baseH, MAX_SCALE_BOUNDED);
+        ? MAX_SCALE
+        : Math.min(maxCssW / baseW, maxCssH / baseH, MAX_SCALE);
 
       ps.current.scale = Math.max(
         MIN_SCALE,
@@ -503,7 +502,7 @@ const ImagePreview = memo(function ImagePreview({
         });
       }
     },
-    [previewZoomStep, previewUnboundedMode, sharpCorners],
+    [previewZoomStep, previewUnboundedMode],
   );
 
   const handleImgLoad = useCallback(
@@ -786,15 +785,13 @@ export const FileContent = memo(function FileContent({
 }: FileContentProps) {
   const { t } = useTranslation();
   const isMultiple = filePaths.length > 1;
-  const tooLarge =
-    !isMultiple &&
+  const skipImagePreview =
     filePaths.length === 1 &&
     shouldSkipFileImagePreview(filePaths[0], byteSize, backendTooLarge ?? false);
   const isSingleImage =
-    !isMultiple &&
-    filePaths.length === 1 &&
     !filesInvalid &&
-    !tooLarge &&
+    !skipImagePreview &&
+    filePaths.length === 1 &&
     isImageFile(filePaths[0]);
 
   if (isSingleImage) {
@@ -824,7 +821,7 @@ export const FileContent = memo(function FileContent({
         >
           {filesInvalid ? (
             <Warning16Regular className="w-5 h-5 text-destructive" />
-          ) : tooLarge ? (
+          ) : skipImagePreview ? (
             <Document16Regular className="w-5 h-5 text-muted-foreground/60" />
           ) : isMultiple ? (
             <Folder16Regular className="w-5 h-5 text-primary" />
@@ -876,7 +873,7 @@ export const FileContent = memo(function FileContent({
                 {filesInvalid && (
                   <span className="ml-1.5 text-xs font-normal">{t("cardContent.invalid")}</span>
                 )}
-                {tooLarge && !filesInvalid && (
+                {skipImagePreview && !filesInvalid && (
                   <span className="ml-1.5 text-xs font-normal text-muted-foreground/70">{t("cardContent.fileTooLarge")}</span>
                 )}
               </p>

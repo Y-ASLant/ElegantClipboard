@@ -1,5 +1,20 @@
 # ElegantClipboard 更新日志
 
+## v1.2.5
+**发布日期：** 2026年7月26日
+
+- fix: 修复复制 NAS/UNC 超大图片文件（`files` 类型）后，每次启动重读整文件生成预览导致网络占用暴涨与闪退 https://github.com/Y-ASLant/ElegantClipboard/issues/143
+- feat: `files` 类型单张图片预览统一应用大小限制——本地路径遵循设置「单张图片最大大小」（默认 50MB），UNC/网络路径固定 10MB
+- perf: 超大文件已确认超限时跳过 batch 文件状态 IPC，避免对 NAS 发起多余存在性检查
+- fix: 修复 images 目录长期累积 `.dib` 伴侣文件、清空历史后仍占用磁盘的问题 https://github.com/Y-ASLant/ElegantClipboard/issues/142
+- fix(ui): 子菜单改用 Portal 渲染并增加碰撞内边距；视口变窄时自动关闭右键菜单，缓解菜单位置异常
+- feat: 文件图片预览加载失败时会话内缓存，避免同会话重复尝试
+- feat: RTF 哈希规范化，去除易变字段，提升富文本去重稳定性
+- refactor: 移除 CF_DIB 伴侣文件遗留支持，启动时清理旧版 `.dib`
+- refactor: 剪贴板内容类型过滤逻辑移至 `ClipChangeSettings`，热路径单次批量读取设置
+- refactor: 清理冗余代码并统一部分错误消息为中文
+- chore: 依赖安全更新（`crossbeam-epoch`）
+
 ## v1.2.4
 **发布日期：** 2026年7月18日
 

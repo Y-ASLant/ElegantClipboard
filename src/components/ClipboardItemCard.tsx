@@ -54,7 +54,7 @@ import {
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import { useTranslateAvailable } from "@/hooks/useTranslateAvailable";
 import { useTranslation } from "@/i18n";
-import { shouldSkipFileImagePreview } from "@/lib/file-preview-limits";
+import { shouldSkipFileImagePreview, isKnownTooLargeForPreview } from "@/lib/file-preview-limits";
 import { resolvePreviewFontFamilyCss } from "@/lib/fonts";
 import {
   contentTypeConfig,
@@ -102,6 +102,7 @@ interface PendingCheck {
 let pendingItemChecks: PendingCheck[] = [];
 let itemBatchTimer: ReturnType<typeof setTimeout> | null = null;
 const ITEM_BATCH_DELAY_MS = 50;
+const TEXT_LIKE_TYPES = new Set(["text", "html", "rtf", "url"]);
 
 function flushItemFileStatusBatch() {
   if (pendingItemChecks.length === 0) return;
@@ -265,10 +266,11 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   );
 
   useEffect(() => {
+    setBackendTooLarge(undefined);
+
     if (item.content_type !== "files") {
       setRuntimeFilesValid(undefined);
       setResolvedFilePaths([]);
-      setBackendTooLarge(undefined);
       return;
     }
 
@@ -279,14 +281,22 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     if (!needsBatchForExistence && !needsBatchForSize) {
       setRuntimeFilesValid(item.files_valid);
       setResolvedFilePaths(filePaths);
-      setBackendTooLarge(undefined);
       return;
     }
 
     if (filePaths.length === 0) {
       setRuntimeFilesValid(false);
       setResolvedFilePaths([]);
-      setBackendTooLarge(undefined);
+      return;
+    }
+
+    // byte_size 已确认超限：同步判定即可，跳过 batch IPC（避免 NAS exists/metadata）
+    if (
+      filePaths.length === 1 &&
+      isKnownTooLargeForPreview(filePaths[0], item.byte_size)
+    ) {
+      setRuntimeFilesValid(item.files_valid);
+      setResolvedFilePaths(filePaths);
       return;
     }
 
@@ -344,8 +354,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   ]);
   const filesInvalid =
     item.content_type === "files" && effectiveFilesValid === false;
-  const isTextLikeContent =
-    item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf" || item.content_type === "url";
+  const isTextLikeContent = TEXT_LIKE_TYPES.has(item.content_type);
 
   const {
     attributes,
@@ -915,7 +924,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
     if (isDragOverlay || batchMode) return null;
     // 文本类内容（text/html/rtf/url）可编辑
-    if (item.content_type === "text" || item.content_type === "html" || item.content_type === "rtf" || item.content_type === "url") {
+    if (TEXT_LIKE_TYPES.has(item.content_type)) {
       return [
         { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: () => pasteContent(item.id) },
         { icon: TextDescription16Regular, label: t("clipboard.contextMenu.pastePlainText"), onClick: () => pasteAsPlainText(item.id) },
