@@ -7,6 +7,7 @@ use super::{
 use crate::database::{
     ClipboardRepository, ContentType, Database, NewClipboardItem, SettingsRepository,
 };
+use base64::Engine;
 use blake3::Hasher;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -620,9 +621,7 @@ impl ClipboardHandler {
             }
             ClipboardContent::Rtf { rtf, .. } => {
                 hasher.update(b"rtf:");
-                // Decode b64 payload, strip volatile RTF fields (rsid, datastore…),
-                // then hash the cleaned bytes so identical user content matches.
-                use base64::Engine;
+                // Decode b64, strip volatile fields (rsid, datastore…), hash cleaned bytes.
                 if let Some(b64) = rtf.strip_prefix("b64:") {
                     if let Ok(raw) =
                         base64::engine::general_purpose::STANDARD.decode(b64.as_bytes())
