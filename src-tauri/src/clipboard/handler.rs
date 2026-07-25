@@ -146,6 +146,7 @@ pub struct ClipChangeSettings {
     app_filter_list: Option<String>,
     app_filter_mode: String,
     pub max_image_bytes: usize,
+    monitor_types: Option<String>,
 }
 
 impl Default for ClipChangeSettings {
@@ -155,6 +156,7 @@ impl Default for ClipChangeSettings {
             app_filter_list: None,
             app_filter_mode: "blacklist".to_string(),
             max_image_bytes: DEFAULT_MAX_IMAGE_SIZE,
+            monitor_types: None,
         }
     }
 }
@@ -192,6 +194,29 @@ impl ClipChangeSettings {
             "whitelist" => !matches,
             _ => matches,
         }
+    }
+
+    /// 检查内容类型是否被允许监听（无 DB 查询）
+    pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
+        let allowed = match self.monitor_types.as_deref() {
+            Some(s) if !s.is_empty() => s,
+            _ => return true,
+        };
+
+        let content_type = match content {
+            ClipboardContent::Text(text) if is_url(text) => "url",
+            ClipboardContent::Text(_) => "text",
+            ClipboardContent::Html { .. } => "html",
+            ClipboardContent::Rtf { .. } => "rtf",
+            ClipboardContent::ImageFile(_) => "image",
+            ClipboardContent::Files(_) => "files",
+        };
+
+        if content_type == "url" && !allowed.split(',').any(|t| t.trim() == "url") {
+            return false;
+        }
+
+        allowed.split(',').any(|t| t.trim() == content_type)
     }
 }
 
@@ -278,6 +303,7 @@ impl ClipboardHandler {
             "app_filter_list",
             "app_filter_mode",
             "max_image_size_kb",
+            "monitor_types",
         ];
         let batch = self.settings_repo.get_batch(&keys);
 
@@ -304,40 +330,19 @@ impl ClipboardHandler {
             .and_then(|s| s.parse::<usize>().ok())
             .map_or(DEFAULT_MAX_IMAGE_SIZE, |kb| kb.saturating_mul(1024));
 
+        let monitor_types = batch
+            .get("monitor_types")
+            .and_then(|v| v.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+
         ClipChangeSettings {
             app_filter_enabled,
             app_filter_list,
             app_filter_mode,
             max_image_bytes,
+            monitor_types,
         }
-    }
-
-    /// 检查内容类型是否被允许监听
-    /// 读取 `monitor_types` 设置（逗号分隔，如 "text,html,rtf,image,files,url"）
-    /// 默认全部允许
-    pub fn is_content_type_allowed(&self, content: &ClipboardContent) -> bool {
-        let allowed = self.settings_repo.get("monitor_types").ok().flatten();
-
-        // 无设置或空字符串 → 全部允许
-        let allowed = match allowed {
-            Some(ref s) if !s.is_empty() => s,
-            _ => return true,
-        };
-
-        let content_type = match content {
-            ClipboardContent::Text(text) if is_url(text) => "url",
-            ClipboardContent::Text(_) => "text",
-            ClipboardContent::Html { .. } => "html",
-            ClipboardContent::Rtf { .. } => "rtf",
-            ClipboardContent::ImageFile(_) => "image",
-            ClipboardContent::Files(_) => "files",
-        };
-
-        if content_type == "url" && !allowed.split(',').any(|t| t.trim() == "url") {
-            return false;
-        }
-
-        allowed.split(',').any(|t| t.trim() == content_type)
     }
 
     /// 处理剪贴板内容，去重后存入数据库

@@ -108,12 +108,19 @@ impl ClipboardMonitor {
         let (tx, rx) = mpsc::channel::<CaptureWorkItem>();
 
         let worker_handler = handler.clone();
+        let worker_clip_settings = clip_change_settings.clone();
         let worker_running = running.clone();
         let worker_app = app_handle.clone();
         if let Err(e) = std::thread::Builder::new()
             .name("clipboard-worker".into())
             .spawn(move || {
-                Self::run_capture_worker(rx, worker_handler, worker_running, worker_app);
+                Self::run_capture_worker(
+                    rx,
+                    worker_handler,
+                    worker_clip_settings,
+                    worker_running,
+                    worker_app,
+                );
             })
         {
             error!("Failed to spawn clipboard-worker thread: {e}");
@@ -178,6 +185,7 @@ impl ClipboardMonitor {
     fn run_capture_worker(
         rx: mpsc::Receiver<CaptureWorkItem>,
         handler: Arc<RwLock<Option<Arc<ClipboardHandler>>>>,
+        clip_change_settings: Arc<RwLock<ClipChangeSettings>>,
         running: Arc<AtomicBool>,
         app_handle: AppHandle,
     ) {
@@ -196,17 +204,20 @@ impl ClipboardMonitor {
                 item = newer;
             }
 
+            if !clip_change_settings
+                .read()
+                .is_content_type_allowed(&item.content)
+            {
+                cleanup_capture_content(&item.content);
+                debug!("Clipboard change ignored (content type not allowed)");
+                continue;
+            }
+
             let handler = handler.read().clone();
             let Some(h) = handler else {
                 cleanup_capture_content(&item.content);
                 continue;
             };
-
-            if !h.is_content_type_allowed(&item.content) {
-                cleanup_capture_content(&item.content);
-                debug!("Clipboard change ignored (content type not allowed)");
-                continue;
-            }
 
             // catch_unwind 防止单条异常数据的 panic 杀死整个进程（panic=abort）
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
