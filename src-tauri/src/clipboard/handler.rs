@@ -13,8 +13,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
+use crate::file_preview_limits::{
+    DEFAULT_MAX_IMAGE_SIZE_KB, is_too_large_for_preview, preview_limit_bytes,
+};
 const DEFAULT_MAX_CONTENT_SIZE: usize = 1_048_576;
-const DEFAULT_MAX_IMAGE_SIZE: usize = 50 * 1024 * 1024;
 const MAX_PREVIEW_LENGTH: usize = 200;
 const DEFAULT_MAX_HISTORY_COUNT: i64 = 0;
 const DEFAULT_AUTO_CLEANUP_DAYS: i64 = 30;
@@ -88,6 +90,18 @@ fn truncate_content(content: String, max_size: usize, content_type: &str) -> Str
     }
 }
 
+/// 判断文件路径是否为常见图片格式
+fn is_image_file(path: &str) -> bool {
+    matches!(
+        Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" | "ico" | "tiff" | "tif")
+    )
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ImageCapture {
     pub temp_path: PathBuf,
@@ -141,6 +155,7 @@ struct ProcessSettings {
     text_dedup_mode: String,
     max_history_count: i64,
     auto_cleanup_days: i64,
+    max_image_size_kb: u64,
 }
 
 /// 剪贴板变更热路径所需的设置，单次批量查询
@@ -159,7 +174,7 @@ impl Default for ClipChangeSettings {
             app_filter_enabled: false,
             app_filter_list: None,
             app_filter_mode: "blacklist".to_string(),
-            max_image_bytes: DEFAULT_MAX_IMAGE_SIZE,
+            max_image_bytes: (DEFAULT_MAX_IMAGE_SIZE_KB * 1024) as usize,
             monitor_types: None,
         }
     }
@@ -258,6 +273,7 @@ impl ClipboardHandler {
             "text_dedup_mode",
             "max_history_count",
             "auto_cleanup_days",
+            "max_image_size_kb",
         ];
         let batch = self.settings_repo.get_batch(&keys);
 
@@ -291,12 +307,19 @@ impl ClipboardHandler {
             .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(DEFAULT_AUTO_CLEANUP_DAYS);
 
+        let max_image_size_kb = batch
+            .get("max_image_size_kb")
+            .and_then(|v| v.as_deref())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_MAX_IMAGE_SIZE_KB);
+
         ProcessSettings {
             max_content_size,
             dedup_strategy,
             text_dedup_mode,
             max_history_count,
             auto_cleanup_days,
+            max_image_size_kb,
         }
     }
 
@@ -332,7 +355,9 @@ impl ClipboardHandler {
             .get("max_image_size_kb")
             .and_then(|v| v.as_deref())
             .and_then(|s| s.parse::<usize>().ok())
-            .map_or(DEFAULT_MAX_IMAGE_SIZE, |kb| kb.saturating_mul(1024));
+            .map_or((DEFAULT_MAX_IMAGE_SIZE_KB * 1024) as usize, |kb| {
+                kb.saturating_mul(1024)
+            });
 
         let monitor_types = batch
             .get("monitor_types")
@@ -495,7 +520,7 @@ impl ClipboardHandler {
                 ClipboardContent::Files(files) => {
                     let files = std::mem::take(files);
                     // staging 使用 file_clipboard 内置 50MB 上限，与文本长度限制无关
-                    self.process_files(files, &hashes, 0)?
+                    self.process_files(files, &hashes, 0, settings.max_image_size_kb)?
                 }
             }
         };
@@ -796,6 +821,7 @@ impl ClipboardHandler {
         capture: FileCaptureData,
         hashes: &ContentHashes,
         max_stage_bytes: usize,
+        max_image_size_kb: u64,
     ) -> Result<NewClipboardItem, String> {
         debug!("Processing {} file(s)", capture.paths.len());
 
@@ -811,6 +837,17 @@ impl ClipboardHandler {
                 }
             })
             .sum();
+
+        if capture.paths.len() == 1
+            && is_image_file(&capture.paths[0])
+            && is_too_large_for_preview(&capture.paths[0], byte_size, max_image_size_kb, false)
+        {
+            let limit = preview_limit_bytes(&capture.paths[0], max_image_size_kb);
+            warn!(
+                "Single image file {} ({} bytes) exceeds preview limit {} bytes, storing as file entry without image preview",
+                capture.paths[0], byte_size, limit
+            );
+        }
 
         let preview = if capture.paths.len() == 1 {
             capture.paths[0].clone()

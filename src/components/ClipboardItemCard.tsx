@@ -54,6 +54,7 @@ import {
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import { useTranslateAvailable } from "@/hooks/useTranslateAvailable";
 import { useTranslation } from "@/i18n";
+import { shouldSkipFileImagePreview } from "@/lib/file-preview-limits";
 import { resolvePreviewFontFamilyCss } from "@/lib/fonts";
 import {
   contentTypeConfig,
@@ -62,7 +63,6 @@ import {
   formatSize,
   getFileNameFromPath,
   parseFilePaths,
-  isImageFile,
 } from "@/lib/format";
 import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
@@ -90,6 +90,8 @@ interface ItemFileStatus {
   all_exist: boolean;
   resolved_paths: string[];
   checks: Record<string, { exists: boolean; is_dir: boolean }>;
+  /** 文件超过阈值时为 true，前端据此跳过图片预览 */
+  too_large?: boolean;
 }
 
 interface PendingCheck {
@@ -258,31 +260,33 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     boolean | undefined
   >(undefined);
   const [resolvedFilePaths, setResolvedFilePaths] = useState<string[]>([]);
+  const [backendTooLarge, setBackendTooLarge] = useState<boolean | undefined>(
+    undefined,
+  );
 
   useEffect(() => {
     if (item.content_type !== "files") {
       setRuntimeFilesValid(undefined);
       setResolvedFilePaths([]);
+      setBackendTooLarge(undefined);
       return;
     }
 
-    if (item.files_valid !== undefined) {
+    const needsBatchForExistence = item.files_valid === undefined;
+    const needsBatchForSize =
+      filePaths.length === 1 && (!item.byte_size || item.byte_size <= 0);
+
+    if (!needsBatchForExistence && !needsBatchForSize) {
       setRuntimeFilesValid(item.files_valid);
       setResolvedFilePaths(filePaths);
+      setBackendTooLarge(undefined);
       return;
     }
 
     if (filePaths.length === 0) {
       setRuntimeFilesValid(false);
       setResolvedFilePaths([]);
-      return;
-    }
-
-    // 图片文件靠预览图加载失败自然反馈，不需要检查存在性
-    const isSingleImageFile = filePaths.length === 1 && isImageFile(filePaths[0]);
-    if (isSingleImageFile) {
-      setRuntimeFilesValid(undefined);
-      setResolvedFilePaths(filePaths);
+      setBackendTooLarge(undefined);
       return;
     }
 
@@ -290,25 +294,54 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     batchGetItemFileStatus(item.id)
       .then((status) => {
         if (!cancelled) {
-          setRuntimeFilesValid(status.all_exist);
-          setResolvedFilePaths(status.resolved_paths);
+          if (needsBatchForExistence) {
+            setRuntimeFilesValid(status.all_exist);
+            setResolvedFilePaths(status.resolved_paths);
+          } else {
+            setRuntimeFilesValid(item.files_valid);
+            setResolvedFilePaths(filePaths);
+          }
+          setBackendTooLarge(status.too_large ?? false);
         }
       })
       .catch((error) => {
         logError("Failed to check item file status:", error);
         if (!cancelled) {
-          setRuntimeFilesValid(undefined);
+          setRuntimeFilesValid(item.files_valid ?? undefined);
           setResolvedFilePaths(filePaths);
+          setBackendTooLarge(undefined);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [item.content_type, item.files_valid, item.file_paths, item.id, filePaths]);
+  }, [
+    item.content_type,
+    item.files_valid,
+    item.file_paths,
+    item.id,
+    item.byte_size,
+    filePaths,
+  ]);
 
   const effectiveFilesValid = item.files_valid ?? runtimeFilesValid;
   const effectiveFilePaths = resolvedFilePaths.length > 0 ? resolvedFilePaths : filePaths;
+  const previewTooLarge = useMemo(() => {
+    if (item.content_type !== "files" || effectiveFilePaths.length !== 1) {
+      return false;
+    }
+    return shouldSkipFileImagePreview(
+      effectiveFilePaths[0],
+      item.byte_size,
+      backendTooLarge ?? false,
+    );
+  }, [
+    item.content_type,
+    item.byte_size,
+    effectiveFilePaths,
+    backendTooLarge,
+  ]);
   const filesInvalid =
     item.content_type === "files" && effectiveFilesValid === false;
   const isTextLikeContent =
@@ -786,7 +819,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             />
           ) : item.content_type === "files" ? (
             <FileContent
-              filePaths={filePaths}
+              filePaths={effectiveFilePaths}
               filesInvalid={filesInvalid}
               preview={item.preview}
               metaItems={metaItems}
@@ -795,6 +828,8 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               isDragOverlay={isDragOverlay}
               sourceAppName={effectiveSourceName}
               sourceAppIcon={effectiveSourceIcon}
+              byteSize={item.byte_size}
+              tooLarge={previewTooLarge}
             />
           ) : (
             <div

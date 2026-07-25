@@ -47,6 +47,7 @@ export const extended = {
     imageLoadFailed: "圖片載入失敗",
     fileCount: "{{count}} 個檔案",
     invalid: "(已失效)",
+    fileTooLarge: "(檔案過大)",
   },
   textEditor: {
     title: "編輯文字",

@@ -3,6 +3,7 @@ mod clipboard;
 mod commands;
 mod config;
 mod database;
+mod file_preview_limits;
 mod hotkey;
 mod input_monitor;
 mod keyboard_hook;

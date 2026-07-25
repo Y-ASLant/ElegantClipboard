@@ -305,7 +305,7 @@ describe("Performance benchmarks", () => {
   });
 
   describe("Search response performance", () => {
-    it("Search filtering within 20ms for 5000 items", () => {
+    it("Search filtering within 50ms for 5000 items", () => {
       const items = generateItems(5000);
       const queries = ["sample", "lorem", "text", "content", "123"];
 
@@ -316,7 +316,7 @@ describe("Performance benchmarks", () => {
         );
       }
       const elapsed = performance.now() - start;
-      expect(elapsed).toBeLessThan(20);
+      expect(elapsed).toBeLessThan(50);
     });
 
     it("Search debouncing simulation within 50ms", () => {

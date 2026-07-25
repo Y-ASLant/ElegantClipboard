@@ -59,6 +59,7 @@ parking_lot = "0.12"
 
 # Parallel processing
 rayon = "1.10"
+crossbeam-epoch = "0.9.20"
 
 # HTTP client (updater + WebDAV sync + translate)
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking", "json"] }

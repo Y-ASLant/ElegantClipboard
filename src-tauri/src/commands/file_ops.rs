@@ -2,6 +2,9 @@ use crate::clipboard::file_clipboard::{
     item_files_all_exist, parse_file_paths, resolve_item_paths,
 };
 use crate::database::ClipboardRepository;
+use crate::file_preview_limits::{
+    DEFAULT_MAX_IMAGE_SIZE_KB, is_too_large_for_preview, is_unc_path, preview_limit_bytes,
+};
 use clipboard_rs::Clipboard as ClipboardTrait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -75,9 +78,46 @@ pub struct ItemFileStatus {
     pub all_exist: bool,
     pub resolved_paths: Vec<String>,
     pub checks: HashMap<String, FileCheckResult>,
+    /// 单文件图片超过预览阈值时为 true，前端据此跳过图片预览
+    #[serde(default)]
+    pub too_large: bool,
 }
 
-fn build_item_file_status(item: &crate::database::ClipboardItem) -> Result<ItemFileStatus, String> {
+fn read_max_image_size_kb(db: &crate::database::Database) -> u64 {
+    use crate::database::SettingsRepository;
+    SettingsRepository::new(db)
+        .get("max_image_size_kb")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_MAX_IMAGE_SIZE_KB)
+}
+
+fn compute_too_large_for_preview(
+    item: &crate::database::ClipboardItem,
+    resolved: &[String],
+    max_image_size_kb: u64,
+) -> bool {
+    if resolved.len() != 1 {
+        return false;
+    }
+    let path = &resolved[0];
+    if is_too_large_for_preview(path, item.byte_size, max_image_size_kb, true) {
+        return true;
+    }
+    if item.byte_size > 0 {
+        return false;
+    }
+    match std::fs::metadata(path) {
+        Ok(meta) => meta.len() > preview_limit_bytes(path, max_image_size_kb),
+        Err(_) => is_unc_path(path),
+    }
+}
+
+fn build_item_file_status(
+    item: &crate::database::ClipboardItem,
+    max_image_size_kb: u64,
+) -> Result<ItemFileStatus, String> {
     use rayon::prelude::*;
     use std::path::Path;
 
@@ -120,10 +160,13 @@ fn build_item_file_status(item: &crate::database::ClipboardItem) -> Result<ItemF
         })
         .collect();
 
+    let too_large = compute_too_large_for_preview(item, &resolved, max_image_size_kb);
+
     Ok(ItemFileStatus {
         all_exist,
         resolved_paths: resolved,
         checks,
+        too_large,
     })
 }
 
@@ -137,7 +180,8 @@ pub async fn get_item_file_status(
         .get_by_id(id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "条目未找到".to_string())?;
-    build_item_file_status(&item)
+    let max_image_size_kb = read_max_image_size_kb(&state.db);
+    build_item_file_status(&item, max_image_size_kb)
 }
 
 #[tauri::command]
@@ -146,10 +190,11 @@ pub async fn batch_get_item_file_status(
     ids: Vec<i64>,
 ) -> Result<HashMap<i64, ItemFileStatus>, String> {
     let repo = ClipboardRepository::new(&state.db);
+    let max_image_size_kb = read_max_image_size_kb(&state.db);
     let mut out = HashMap::new();
     for id in ids {
         if let Ok(Some(item)) = repo.get_by_id(id)
-            && let Ok(status) = build_item_file_status(&item)
+            && let Ok(status) = build_item_file_status(&item, max_image_size_kb)
         {
             out.insert(id, status);
         }

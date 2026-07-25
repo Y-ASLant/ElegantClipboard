@@ -47,6 +47,7 @@ export const extended = {
     imageLoadFailed: "Failed to load image",
     fileCount: "{{count}} files",
     invalid: "(invalid)",
+    fileTooLarge: "(file too large)",
   },
   textEditor: {
     title: "Edit text",

@@ -11,6 +11,9 @@ import { emitTo, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
 import { useTranslation } from "@/i18n";
+import {
+  shouldSkipFileImagePreview,
+} from "@/lib/file-preview-limits";
 import { getFileNameFromPath, isImageFile } from "@/lib/format";
 import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
@@ -646,6 +649,24 @@ export const ImageCard = memo(function ImageCard({
 
 // ============ 文件图片预览（单图片文件，失败回退） ============
 
+const PREVIEW_FAIL_PREFIX = "preview_fail:";
+
+function wasPreviewFailed(filePath: string): boolean {
+  try {
+    return sessionStorage.getItem(PREVIEW_FAIL_PREFIX + filePath) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markPreviewFailed(filePath: string): void {
+  try {
+    sessionStorage.setItem(PREVIEW_FAIL_PREFIX + filePath, "1");
+  } catch {
+    // ignore
+  }
+}
+
 const FileImagePreview = memo(function FileImagePreview({
   filePath,
   metaItems,
@@ -663,13 +684,18 @@ const FileImagePreview = memo(function FileImagePreview({
   sourceAppName?: string | null;
   sourceAppIcon?: string | null;
 }) {
-  const [imgError, setImgError] = useState(false);
+  const [imgError, setImgError] = useState(() => wasPreviewFailed(filePath));
   const { t } = useTranslation();
   const showImageFileName = useUISettings((s) => s.showImageFileName);
   const fileName = getFileNameFromPath(filePath);
 
-  // 虚拟列表复用组件时，filePath 变化需重置错误状态
-  useEffect(() => setImgError(false), [filePath]);
+  // 虚拟列表复用组件时，filePath 变化需重置错误状态（检查 sessionStorage 缓存）
+  useEffect(() => setImgError(wasPreviewFailed(filePath)), [filePath]);
+
+  const handleError = useCallback(() => {
+    markPreviewFailed(filePath);
+    setImgError(true);
+  }, [filePath]);
 
   if (imgError) {
     return (
@@ -705,7 +731,7 @@ const FileImagePreview = memo(function FileImagePreview({
       <ImagePreview
         src={convertFileSrc(filePath)}
         alt={fileName}
-        onError={() => setImgError(true)}
+        onError={handleError}
         imagePath={filePath}
         overlay={
           showImageFileName ? (
@@ -739,6 +765,10 @@ interface FileContentProps {
   isDragOverlay?: boolean;
   sourceAppName?: string | null;
   sourceAppIcon?: string | null;
+  /** 文件字节数（来自 ClipboardItem.byte_size），用于超大文件预览拦截 */
+  byteSize?: number;
+  /** 后端标记文件超过阈值，前端据此跳过图片预览 */
+  tooLarge?: boolean;
 }
 
 export const FileContent = memo(function FileContent({
@@ -751,13 +781,20 @@ export const FileContent = memo(function FileContent({
   isDragOverlay,
   sourceAppName,
   sourceAppIcon,
+  byteSize,
+  tooLarge: backendTooLarge,
 }: FileContentProps) {
   const { t } = useTranslation();
   const isMultiple = filePaths.length > 1;
+  const tooLarge =
+    !isMultiple &&
+    filePaths.length === 1 &&
+    shouldSkipFileImagePreview(filePaths[0], byteSize, backendTooLarge ?? false);
   const isSingleImage =
     !isMultiple &&
     filePaths.length === 1 &&
     !filesInvalid &&
+    !tooLarge &&
     isImageFile(filePaths[0]);
 
   if (isSingleImage) {
@@ -787,6 +824,8 @@ export const FileContent = memo(function FileContent({
         >
           {filesInvalid ? (
             <Warning16Regular className="w-5 h-5 text-destructive" />
+          ) : tooLarge ? (
+            <Document16Regular className="w-5 h-5 text-muted-foreground/60" />
           ) : isMultiple ? (
             <Folder16Regular className="w-5 h-5 text-primary" />
           ) : (
@@ -836,6 +875,9 @@ export const FileContent = memo(function FileContent({
                 />
                 {filesInvalid && (
                   <span className="ml-1.5 text-xs font-normal">{t("cardContent.invalid")}</span>
+                )}
+                {tooLarge && !filesInvalid && (
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground/70">{t("cardContent.fileTooLarge")}</span>
                 )}
               </p>
               <p

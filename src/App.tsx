@@ -40,6 +40,7 @@ import { useInputFocus, focusWindowImmediately, releaseWebViewFocus } from "@/ho
 import { useWebDAVAvailable } from "@/hooks/useWebDAVAvailable";
 import { useTranslation } from "@/i18n";
 import { GROUP_VALUES, getGroups } from "@/lib/constants";
+import { syncFilePreviewLimitsFromSettings } from "@/lib/file-preview-limits";
 import { logError } from "@/lib/logger";
 import { cn } from "@/lib/utils";
 import { filterToolbarButtonsForWebDAV } from "@/lib/webdav-availability";
@@ -138,6 +139,11 @@ function App() {
   // 初次加载时获取自定义分组
   useEffect(() => {
     fetchGroups();
+  }, []);
+
+  // 同步文件预览大小限制（与 settings max_image_size_kb 一致）
+  useEffect(() => {
+    void syncFilePreviewLimitsFromSettings();
   }, []);
 
   // 对话框打开后恢复窗口焦点并聚焦输入框
@@ -275,6 +281,7 @@ function App() {
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
       setWindowVisible(true);
+      void syncFilePreviewLimitsFromSettings();
       // loadUISettingsFromBackend 和 loadSettings 已通过 SYNC_EVENT 自动同步，
       // 不需要在 window-shown 时重复 IPC 调用
       if (searchAutoClear) {
