@@ -1,5 +1,7 @@
 use super::file_clipboard;
-use super::handler::{cleanup_capture_content, cleanup_stale_capture_files};
+use super::handler::{
+    cleanup_capture_content, cleanup_legacy_dib_companions, cleanup_stale_capture_files,
+};
 use super::source_app::SourceAppInfo;
 use super::{ClipChangeSettings, ClipboardContent, ClipboardHandler, ImageCapture};
 use crate::database::Database;
@@ -66,6 +68,7 @@ impl ClipboardMonitor {
         let capture_dir = images_path.join("captures");
         std::fs::create_dir_all(&capture_dir).ok();
         cleanup_stale_capture_files(&capture_dir);
+        cleanup_legacy_dib_companions(&images_path);
 
         let handler = Arc::new(ClipboardHandler::new(db, images_path));
         *self.clip_change_settings.write() = handler.get_clip_change_settings();
@@ -438,7 +441,7 @@ fn read_clipboard_content_inner(
     let has_text = html.is_some() || rtf.is_some() || text.is_some();
 
     // ── 3. 探测图片格式 ──
-    let image_result = ctx.get_image_dib().ok();
+    let image_result = ctx.get_image().ok();
 
     // ── 4. 按语义决定类型 ──
     // Word/WPS/浏览器等复制富文本时会同时放 CF_DIB（文字位图预览），
@@ -464,8 +467,8 @@ fn read_clipboard_content_inner(
     }
 
     // ── 5. 纯图片（无文本格式） ──
-    if let Some((img, dib_bytes)) = image_result
-        && let Some(content) = write_image_capture(img, dib_bytes, max_image_bytes, capture_dir)
+    if let Some(img) = image_result
+        && let Some(content) = write_image_capture(img, max_image_bytes, capture_dir)
     {
         return Some(content);
     }
@@ -475,10 +478,8 @@ fn read_clipboard_content_inner(
 }
 
 /// 将剪贴板图片编码为 PNG 写入临时文件，避免大 Vec 在 channel/worker 间传递
-/// 如果有原始 CF_DIB 数据，同时写入 .dib 伴侣文件
 fn write_image_capture(
     img: impl RustImage,
-    dib_bytes: Option<Vec<u8>>,
     max_image_bytes: usize,
     capture_dir: &std::path::Path,
 ) -> Option<ClipboardContent> {
@@ -523,27 +524,11 @@ fn write_image_capture(
         byte_size, temp_path
     );
 
-    // 写入 DIB 伴侣文件（如果有的话）
-    let dib_path = dib_bytes.and_then(|dib| {
-        let dib_path = temp_path.with_extension("dib");
-        if std::fs::write(&dib_path, &dib).is_ok() {
-            debug!(
-                "Wrote capture temp DIB: {} bytes -> {:?}",
-                dib.len(),
-                dib_path
-            );
-            Some(dib_path)
-        } else {
-            None
-        }
-    });
-
     Some(ClipboardContent::ImageFile(ImageCapture {
         temp_path,
         width,
         height,
         byte_size,
-        dib_path,
     }))
 }
 

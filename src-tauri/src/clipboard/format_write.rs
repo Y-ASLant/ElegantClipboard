@@ -285,19 +285,9 @@ fn set_clipboard_image(path: &str, ctx: &mut ClipboardContext) -> Result<(), Str
     let dynamic = image::DynamicImage::ImageRgba8(rgba_img);
     let image_data = RustImageData::from_dynamic_image(dynamic);
 
-    // 尝试加载伴侣 DIB 文件（Photoshop 等专业软件需要 CF_DIB 格式）
-    let dib_path = std::path::Path::new(path).with_extension("dib");
-    let dib_bytes = std::fs::read(&dib_path).ok();
-
-    match ctx.set_image_with_dib(image_data, dib_bytes.as_deref()) {
+    match ctx.set_image(image_data) {
         Ok(()) => {
-            debug!(
-                path,
-                w,
-                h,
-                has_dib = dib_bytes.is_some(),
-                "set_clipboard_image: ok"
-            );
+            debug!(path, w, h, "set_clipboard_image: ok");
             Ok(())
         }
         Err(e) => {

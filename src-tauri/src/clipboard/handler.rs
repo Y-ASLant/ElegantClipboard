@@ -90,8 +90,6 @@ pub struct ImageCapture {
     pub width: u32,
     pub height: u32,
     pub byte_size: usize,
-    /// 伴侣文件：原始 CF_DIB 数据（用于 Photoshop 等专业软件粘贴兼容）
-    pub dib_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,16 +108,13 @@ pub enum ClipboardContent {
     Files(FileCaptureData),
 }
 pub(crate) fn cleanup_capture_content(content: &ClipboardContent) {
-    if let ClipboardContent::ImageFile(capture) = content {
-        if let Err(e) = std::fs::remove_file(&capture.temp_path) {
-            debug!(
-                "Failed to remove capture temp file {:?}: {}",
-                capture.temp_path, e
-            );
-        }
-        if let Some(ref dib_path) = capture.dib_path {
-            let _ = std::fs::remove_file(dib_path);
-        }
+    if let ClipboardContent::ImageFile(capture) = content
+        && let Err(e) = std::fs::remove_file(&capture.temp_path)
+    {
+        debug!(
+            "Failed to remove capture temp file {:?}: {}",
+            capture.temp_path, e
+        );
     }
 }
 
@@ -732,7 +727,7 @@ impl ClipboardHandler {
         })
     }
 
-    /// 处理图片：将 watcher 写入的临时 PNG rename 到 hash 命名路径，同时处理 DIB 伴侣文件
+    /// 处理图片：将 watcher 写入的临时 PNG rename 到 hash 命名路径
     fn process_image_file(
         &self,
         capture: ImageCapture,
@@ -761,17 +756,6 @@ impl ClipboardHandler {
             return Err(format!("Failed to save image: {e}"));
         }
         debug!("Saved image to {:?}", image_path);
-
-        // 处理 DIB 伴侣文件
-        if let Some(ref dib_temp) = capture.dib_path {
-            let dib_filename = format!("{}.dib", &hashes.content_hash[..32]);
-            let dib_target = self.images_path.join(&dib_filename);
-            if dib_target.exists() {
-                let _ = std::fs::remove_file(dib_temp);
-            } else if std::fs::rename(dib_temp, &dib_target).is_ok() {
-                debug!("Saved DIB companion to {:?}", dib_target);
-            }
-        }
 
         Ok(NewClipboardItem {
             content_type: ContentType::Image,
@@ -870,8 +854,29 @@ pub fn cleanup_stale_capture_files(capture_dir: &Path) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "tmp") {
+        if path
+            .extension()
+            .is_some_and(|ext| ext == "tmp" || ext == "dib")
+        {
             std::fs::remove_file(path).ok();
         }
+    }
+}
+
+/// 清理旧版遗留的 `.dib` 伴侣文件（现已不再存储）
+pub fn cleanup_legacy_dib_companions(images_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(images_dir) else {
+        return;
+    };
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "dib") && std::fs::remove_file(&path).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    if removed > 0 {
+        tracing::info!("Removed {} legacy .dib companion file(s)", removed);
     }
 }
