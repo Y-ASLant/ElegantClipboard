@@ -526,7 +526,7 @@ pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Resu
     let item = repo
         .get_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Item not found".to_string())?;
+        .ok_or_else(|| "条目未找到".to_string())?;
 
     let result = with_paused_monitor(&state, || {
         let mut clipboard = clipboard_rs::ClipboardContext::new()
@@ -553,7 +553,7 @@ pub async fn paste_content(
     let item = repo
         .get_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Item not found".to_string())?;
+        .ok_or_else(|| "条目未找到".to_string())?;
 
     paste_item_to_active_window(&state, &app, &item, close_window.unwrap_or(true))?;
     debug!("Pasted item {} to active window", id);
@@ -572,7 +572,7 @@ pub async fn paste_content_as_plain(
     let item = repo
         .get_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Item not found".to_string())?;
+        .ok_or_else(|| "条目未找到".to_string())?;
 
     let text = crate::clipboard::format_write::item_plain_text(&item)?;
 
@@ -602,7 +602,7 @@ pub async fn merge_paste_content(
     separator: Option<String>,
 ) -> Result<(), String> {
     if ids.is_empty() {
-        return Err("No items selected".to_string());
+        return Err("未选择条目".to_string());
     }
 
     let repo = ClipboardRepository::new(&state.db);
@@ -613,7 +613,7 @@ pub async fn merge_paste_content(
         let item = repo
             .get_by_id(*id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Item {id} not found"))?;
+            .ok_or_else(|| format!("条目 {id} 未找到"))?;
         items.push(item);
     }
 

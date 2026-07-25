@@ -2,7 +2,7 @@ use crate::commands::AppState;
 use crate::config;
 use crate::database::SettingsRepository;
 use crate::utils::format_size;
-use crate::webdav::{self, SyncOptions, WebDavConfig};
+use crate::webdav::{self, SyncOptions};
 use std::sync::Arc;
 use tauri::State;
 
@@ -14,82 +14,11 @@ pub struct WebdavManualSyncResponse {
     pub pending_media_workers: u8,
 }
 
-/// 从数据库读取 WebDAV 配置
-fn load_webdav_config(state: &Arc<AppState>) -> Result<WebDavConfig, String> {
-    let repo = SettingsRepository::new(&state.db);
-    let url = repo.get("webdav_url").ok().flatten().unwrap_or_default();
-    let username = repo
-        .get("webdav_username")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let password = repo
-        .get("webdav_password")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let remote_dir = repo
-        .get("webdav_remote_dir")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "/elegant-clipboard".to_string());
-    let proxy_mode = repo
-        .get("webdav_proxy_mode")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "system".to_string());
-    let proxy_url = repo
-        .get("webdav_proxy_url")
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-    let accept_invalid_certs = repo
-        .get("webdav_accept_invalid_certs")
-        .ok()
-        .flatten()
-        .is_some_and(|v| v == "true");
-
-    if url.is_empty() {
-        return Err("WebDAV 地址未配置".to_string());
-    }
-    Ok(WebDavConfig {
-        url,
-        username,
-        password,
-        remote_dir,
-        proxy_mode,
-        proxy_url,
-        accept_invalid_certs,
-    })
-}
-
-/// 从数据库读取同步选项
-fn load_sync_options(state: &Arc<AppState>) -> SyncOptions {
-    let repo = SettingsRepository::new(&state.db);
-    let get_bool = |key: &str, default: bool| -> bool {
-        repo.get(key)
-            .ok()
-            .flatten()
-            .map_or(default, |v| v != "false")
-    };
-    let get_u64 = |key: &str, default: u64| -> u64 {
-        repo.get(key)
-            .ok()
-            .flatten()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(default)
-    };
-
-    SyncOptions {
-        sync_text: get_bool("webdav_sync_text", true),
-        sync_image: get_bool("webdav_sync_image", true),
-        sync_files: get_bool("webdav_sync_files", true),
-        sync_video: false,
-        sync_settings: true,
-        max_image_size_kb: get_u64("webdav_max_image_size_kb", 5120),
-        max_file_size_kb: get_u64("webdav_max_file_size_kb", 5120),
-        max_video_size_kb: get_u64("webdav_max_video_size_kb", 5120),
-    }
+/// 从数据库加载 WebDAV 配置，URL 为空时返回错误
+fn load_webdav_config(
+    db: &crate::database::Database,
+) -> Result<(webdav::WebDavConfig, webdav::SyncOptions), String> {
+    webdav::load_config_and_options(db).ok_or_else(|| "WebDAV 地址未配置".to_string())
 }
 
 /// 获取数据目录
@@ -125,12 +54,11 @@ pub async fn webdav_enable_plugin(
     webdav::start_auto_sync_task(state.db.clone(), get_data_dir(), app);
     Ok(())
 }
-
 /// 测试 WebDAV 连接
 #[tauri::command]
 pub async fn webdav_test_connection(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     ensure_webdav_plugin_enabled(&state)?;
-    let config = load_webdav_config(&state)?;
+    let (config, _) = load_webdav_config(&state.db)?;
     tokio::task::spawn_blocking(move || webdav::test_connection(&config))
         .await
         .map_err(|e| format!("任务失败: {e}"))?
@@ -143,8 +71,7 @@ pub async fn webdav_upload(
     state: State<'_, Arc<AppState>>,
 ) -> Result<WebdavManualSyncResponse, String> {
     ensure_webdav_available(&state)?;
-    let config = load_webdav_config(&state)?;
-    let options = load_sync_options(&state);
+    let (config, options) = load_webdav_config(&state.db)?;
     let data_dir = get_data_dir();
     let db = state.db.clone();
     let app_handle = app.clone();
@@ -195,8 +122,7 @@ pub async fn webdav_download(
     state: State<'_, Arc<AppState>>,
 ) -> Result<WebdavManualSyncResponse, String> {
     ensure_webdav_available(&state)?;
-    let config = load_webdav_config(&state)?;
-    let options = load_sync_options(&state);
+    let (config, options) = load_webdav_config(&state.db)?;
     let data_dir = get_data_dir();
     let db = state.db.clone();
     let app_handle = app.clone();

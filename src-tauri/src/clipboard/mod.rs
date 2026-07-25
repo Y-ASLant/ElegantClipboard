@@ -12,31 +12,32 @@ pub(crate) use dedup::{
 };
 pub use handler::*;
 pub use monitor::*;
+use tracing::debug;
 
 /// 从磁盘删除图片文件，失败时记录日志，返回成功删除数。
 /// 同时清理历史遗留的同名 `.dib` 伴侣文件。
-pub fn cleanup_image_files(paths: &[String]) -> usize {
+fn cleanup_image_files(paths: &[String]) -> usize {
     let mut deleted = 0;
     for path in paths {
         match std::fs::remove_file(path) {
             Ok(()) => {
-                tracing::debug!("Deleted image file: {}", path);
+                debug!("Deleted image file: {}", path);
                 deleted += 1;
             }
             Err(e) => {
-                tracing::debug!("Failed to delete image file {}: {}", path, e);
+                debug!("Failed to delete image file {}: {}", path, e);
             }
         }
         // 旧版本可能残留同名 .dib；忽略不存在的情况
         let dib_path = std::path::Path::new(path).with_extension("dib");
         match std::fs::remove_file(&dib_path) {
             Ok(()) => {
-                tracing::debug!("Deleted companion DIB: {:?}", dib_path);
+                debug!("Deleted companion DIB: {:?}", dib_path);
                 deleted += 1;
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => {
-                tracing::debug!("Failed to delete companion DIB {:?}: {}", dib_path, e);
+                debug!("Failed to delete companion DIB {:?}: {}", dib_path, e);
             }
         }
     }
@@ -44,7 +45,7 @@ pub fn cleanup_image_files(paths: &[String]) -> usize {
 }
 
 /// 从磁盘删除 staging 文件，并尝试清理空的 staging 子目录。
-pub fn cleanup_staged_files(paths: &[String]) -> usize {
+fn cleanup_staged_files(paths: &[String]) -> usize {
     let mut deleted = 0;
     let mut dirs: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
     for path in paths {
@@ -54,11 +55,11 @@ pub fn cleanup_staged_files(paths: &[String]) -> usize {
         }
         match std::fs::remove_file(path) {
             Ok(()) => {
-                tracing::debug!("Deleted staged file: {}", path);
+                debug!("Deleted staged file: {}", path);
                 deleted += 1;
             }
             Err(e) => {
-                tracing::debug!("Failed to delete staged file {}: {}", path, e);
+                debug!("Failed to delete staged file {}: {}", path, e);
             }
         }
     }

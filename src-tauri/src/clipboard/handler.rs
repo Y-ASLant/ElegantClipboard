@@ -776,7 +776,6 @@ impl ClipboardHandler {
         hashes: &ContentHashes,
         max_stage_bytes: usize,
     ) -> Result<NewClipboardItem, String> {
-        use std::path::Path;
         debug!("Processing {} file(s)", capture.paths.len());
 
         let byte_size: i64 = capture
@@ -871,12 +870,11 @@ pub fn cleanup_legacy_dib_companions(images_dir: &Path) {
     let mut removed = 0usize;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "dib") && std::fs::remove_file(&path).is_ok()
-        {
+        if path.extension().is_some_and(|ext| ext == "dib") && std::fs::remove_file(&path).is_ok() {
             removed += 1;
         }
     }
     if removed > 0 {
-        tracing::info!("Removed {} legacy .dib companion file(s)", removed);
+        info!("Removed {} legacy .dib companion file(s)", removed);
     }
 }

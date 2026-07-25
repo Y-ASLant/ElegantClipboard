@@ -96,19 +96,19 @@
 - **状态**: ✅ 已验证，注释明确写"始终返回空集"
 - **修复**: 删除函数及所有调用点
 
-### 12. 错误消息中英文混用
+### 12. 错误消息中英文混用 ✅ 已修复
 - **状态**: ✅ 已验证
 - **示例**: `"Item not found"` vs `"收藏槽位 {} 没有可用的收藏条目"`、`"导出成功 ({})"` vs `"Failed to access clipboard: {}"`
-- **修复**: 统一为中文（面向中文用户）
+- **修复**: 用户面向的错误消息统一为中文（`clipboard.rs`、`file_ops.rs`、`merge_paste.rs`、`translate.rs`）；内部日志保留英文
 
-### 13. `DataTab.tsx` 状态过多（16 个 useState）
+### 13. `DataTab.tsx` 状态过多（16 个 useState） ⏭️ 不修
 - **位置**: `src/components/settings/DataTab.tsx:202-223`
-- **修复**: 将相关状态合并，或提取为自定义 hooks
+- **评估**: 状态间耦合度低，重构回归风险高，收益有限
 
-### 14. WebDAV 配置加载逻辑重复
-- **文件 A**: `src-tauri/src/commands/sync.rs:9-56`（`load_webdav_config`）
-- **文件 B**: `src-tauri/src/webdav/mod.rs:942-1013`（`load_config_and_options`）
-- **修复**: 统一为一个配置加载入口
+### 14. WebDAV 配置加载逻辑重复 ✅ 已修复
+- **文件 A**: `src-tauri/src/commands/sync.rs`（原 `load_webdav_config` + `load_sync_options`）
+- **文件 B**: `src-tauri/src/webdav/mod.rs`（`load_config_and_options`）
+- **修复**: 统一为 `webdav::load_config_and_options` 唯一入口，`sync.rs` 调用共享函数；同时修复 `accept_invalid_certs` 解析不一致（`== "true"` vs `!= "false"`）
 
 ---
 
@@ -146,6 +146,6 @@
 |--------|--------|--------|
 | P0 | 4/4 | 0 |
 | P1 | 3/4 | 1（#6 函数过长需大重构） |
-| P2 | 3/6 | 3（#12-14 需更大范围重构） |
+| P2 | 5/6 | 1（#13 跳过） |
 | P3 | 3/3 | 0 |
-| **合计** | **13/17** | **4** |
+| **合计** | **15/17** | **1 跳过 + 1 待重构** |

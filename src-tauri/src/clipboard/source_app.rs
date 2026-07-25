@@ -150,7 +150,7 @@ unsafe fn resolve_uwp_app(
 
 /// 从 exe 版本信息读取 FileDescription，失败则用文件名
 #[cfg(target_os = "windows")]
-fn get_app_display_name(exe_path: &str) -> String {
+pub fn get_app_display_name(exe_path: &str) -> String {
     get_file_description(exe_path)
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
@@ -234,18 +234,8 @@ fn get_file_description(exe_path: &str) -> Option<String> {
     }
 }
 
-/// 公开版本供其他模块调用
-pub fn compute_icon_cache_key_pub(exe_path: &str) -> String {
-    compute_icon_cache_key(exe_path)
-}
-
-/// 获取应用显示名称（从 exe 版本信息读取 FileDescription，失败则用文件名）
-#[cfg(target_os = "windows")]
-pub fn get_app_display_name_pub(exe_path: &str) -> String {
-    get_app_display_name(exe_path)
-}
-
-fn compute_icon_cache_key(exe_path: &str) -> String {
+/// 计算图标缓存键（BLAKE3 前 12 字符）
+pub fn compute_icon_cache_key(exe_path: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(exe_path.to_lowercase().as_bytes());
     hasher.finalize().to_hex()[..12].to_string()

@@ -383,8 +383,8 @@ pub async fn get_running_apps(
             .apps
             .into_iter()
             .map(|(_title, process, exe_path)| {
-                let name = crate::clipboard::source_app::get_app_display_name_pub(&exe_path);
-                let cache_key = crate::clipboard::source_app::compute_icon_cache_key_pub(&exe_path);
+                let name = crate::clipboard::source_app::get_app_display_name(&exe_path);
+                let cache_key = crate::clipboard::source_app::compute_icon_cache_key(&exe_path);
                 let icon = crate::clipboard::source_app::extract_and_cache_icon(
                     &exe_path, &icons_dir, &cache_key,
                 );

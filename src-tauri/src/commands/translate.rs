@@ -805,8 +805,8 @@ fn trigger_translate_selection(app: &tauri::AppHandle) {
             let _ = app
                 .notification()
                 .builder()
-                .title("Translate Selection")
-                .body("No text detected")
+                .title("翻译选中文本")
+                .body("未检测到文本")
                 .show();
         }
         Err(e) => {
@@ -815,8 +815,8 @@ fn trigger_translate_selection(app: &tauri::AppHandle) {
             let _ = app
                 .notification()
                 .builder()
-                .title("Translate Selection")
-                .body(format!("Failed to get selected text: {}", e))
+                .title("翻译选中文本")
+                .body(format!("获取选中文本失败: {}", e))
                 .show();
         }
     }

@@ -18,7 +18,7 @@ pub fn merge_items_to_clipboard(
     ctx: &mut ClipboardContext,
 ) -> Result<(), String> {
     if items.is_empty() {
-        return Err("No items selected".to_string());
+        return Err("未选择条目".to_string());
     }
 
     let mut contents: Vec<RsClipboardContent> = Vec::new();

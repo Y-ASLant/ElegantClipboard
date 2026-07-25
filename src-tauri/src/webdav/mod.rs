@@ -1199,7 +1199,9 @@ pub fn upload_sync(
 }
 
 /// 从数据库加载 WebDAV 配置和同步选项
-fn load_config_and_options(db: &crate::database::Database) -> Option<(WebDavConfig, SyncOptions)> {
+pub(crate) fn load_config_and_options(
+    db: &crate::database::Database,
+) -> Option<(WebDavConfig, SyncOptions)> {
     let repo = crate::database::SettingsRepository::new(db);
     let url = repo.get("webdav_url").ok().flatten().unwrap_or_default();
     if url.is_empty() {

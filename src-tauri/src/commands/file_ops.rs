@@ -136,7 +136,7 @@ pub async fn get_item_file_status(
     let item = repo
         .get_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Item not found".to_string())?;
+        .ok_or_else(|| "条目未找到".to_string())?;
     build_item_file_status(&item)
 }
 
@@ -212,12 +212,12 @@ pub async fn paste_as_path(
     let item = repo
         .get_by_id(id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Item not found".to_string())?;
+        .ok_or_else(|| "条目未找到".to_string())?;
 
     let paths_text = if item.content_type == "files" {
         let resolved = resolve_item_paths(item.file_paths.as_deref(), item.file_payload.as_deref());
         if resolved.is_empty() {
-            return Err("No file paths found".to_string());
+            return Err("未找到文件路径".to_string());
         }
         resolved.join("\n")
     } else {

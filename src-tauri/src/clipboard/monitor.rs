@@ -116,7 +116,7 @@ impl ClipboardMonitor {
                 Self::run_capture_worker(rx, worker_handler, worker_running, worker_app);
             })
         {
-            tracing::error!("Failed to spawn clipboard-worker thread: {e}");
+            error!("Failed to spawn clipboard-worker thread: {e}");
             return;
         }
 
@@ -133,7 +133,6 @@ impl ClipboardMonitor {
                     running: running.clone(),
                     pause_count: pause_count.clone(),
                     user_paused: user_paused.clone(),
-                    app_handle: app_handle.clone(),
                     active_group_id: active_group_id.clone(),
                     work_tx: tx.clone(),
                     capture_dir: capture_dir.clone(),
@@ -287,8 +286,6 @@ struct MonitorHandler {
     running: Arc<AtomicBool>,
     pause_count: Arc<AtomicU32>,
     user_paused: Arc<AtomicBool>,
-    #[allow(dead_code)]
-    app_handle: AppHandle,
     active_group_id: Arc<Mutex<Option<i64>>>,
     work_tx: mpsc::Sender<CaptureWorkItem>,
     capture_dir: Arc<RwLock<PathBuf>>,
