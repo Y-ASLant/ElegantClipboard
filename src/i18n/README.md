@@ -76,8 +76,16 @@ import { t } from "@/i18n";
 
 ## 未国际化
 
-- Rust 系统托盘菜单（`src-tauri/src/tray/mod.rs`）
 - 部分后端错误信息 / 日志（仅开发者可见）
+- 原生窗口标题（翻译窗口、文本编辑器等）仍由 Rust 侧硬编码，与 React 内文案可能不一致
+
+## 托盘菜单
+
+Rust 原生托盘菜单使用 `src-tauri/src/tray/tray_i18n.rs` 独立翻译表（zh-CN / en / zh-TW），与 `settings.language` 联动：
+
+- 启动时从数据库读取语言
+- 设置页切换语言 → `update_tray_language` command
+- 多窗口 `locale-changed` 事件同步托盘文案
 
 ## 添加新语言
 

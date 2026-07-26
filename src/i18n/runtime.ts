@@ -31,6 +31,7 @@ export const useLocaleStore = create<LocaleState>((set, get) => ({
       const locale = normalizeLocale(raw);
       applyDocumentLocale(locale);
       set({ locale, loaded: true });
+      invoke("update_tray_language", { locale }).catch(() => {});
     } catch {
       applyDocumentLocale(DEFAULT_LOCALE);
       set({ locale: DEFAULT_LOCALE, loaded: true });
@@ -66,6 +67,7 @@ export async function initLocaleListener() {
       const locale = normalizeLocale(event.payload);
       useLocaleStore.setState({ locale });
       applyDocumentLocale(locale);
+      invoke("update_tray_language", { locale }).catch(() => {});
     });
   } catch {
     // non-Tauri environments

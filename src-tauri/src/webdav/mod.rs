@@ -460,9 +460,11 @@ pub fn item_importable_for_sync(
                     continue;
                 }
                 if let Some(ref payload) = payload {
-                    if payload.staged.iter().any(|s| {
-                        s.original == *path && Path::new(&s.staged).is_file()
-                    }) {
+                    if payload
+                        .staged
+                        .iter()
+                        .any(|s| s.original == *path && Path::new(&s.staged).is_file())
+                    {
                         continue;
                     }
                 }
@@ -630,8 +632,7 @@ pub fn build_media_map(
                         Err(e) => {
                             debug!(
                                 "跳过 files 条目 {}: 无法哈希 {} ({e})",
-                                item.id,
-                                resolved_path
+                                item.id, resolved_path
                             );
                             all_hashed = false;
                             break;
@@ -2251,13 +2252,15 @@ mod tests {
 
         let (map, included) = super::build_media_map(&items, &dir, &opts, "dev1");
         assert!(map.is_empty(), "含超大文件的条目不应产生 media entry");
-        assert!(!included.contains(&30), "含超大文件的条目不应在 included_ids 中");
+        assert!(
+            !included.contains(&30),
+            "含超大文件的条目不应在 included_ids 中"
+        );
 
         // 全部文件在限制内 → 应被包含
         let mut item_ok = make_item(31, "files");
-        item_ok.file_paths = Some(
-            serde_json::to_string(&vec![f_small.to_string_lossy().to_string()]).unwrap(),
-        );
+        item_ok.file_paths =
+            Some(serde_json::to_string(&vec![f_small.to_string_lossy().to_string()]).unwrap());
         let items2 = vec![item_ok];
         let (map2, included2) = super::build_media_map(&items2, &dir, &opts, "dev1");
         assert_eq!(map2.len(), 1);

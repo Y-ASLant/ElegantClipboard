@@ -58,3 +58,30 @@ impl TrayI18n {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TrayI18n;
+
+    #[test]
+    fn from_locale_en() {
+        let i18n = TrayI18n::from_locale("en");
+        assert_eq!(i18n.settings, "Settings");
+        assert_eq!(i18n.pause_monitor, "Pause Monitoring");
+    }
+
+    #[test]
+    fn from_locale_zh_tw() {
+        let i18n = TrayI18n::from_locale("zh-TW");
+        assert_eq!(i18n.settings, "設定");
+        assert_eq!(i18n.quit, "結束程式");
+    }
+
+    #[test]
+    fn from_locale_unknown_falls_back_to_zh_cn() {
+        let i18n = TrayI18n::from_locale("fr");
+        let zh = TrayI18n::zh_cn();
+        assert_eq!(i18n.settings, zh.settings);
+        assert_eq!(i18n.check_update, zh.check_update);
+    }
+}

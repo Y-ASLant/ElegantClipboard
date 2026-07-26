@@ -3,13 +3,11 @@
 ## v1.2.6
 **发布日期：** 2026年7月26日
 
-- fix: 修复 WebDAV 跨设备同步图片/文件时 metadata 与媒体不一致——导出仅包含实际上传成功的条目，导入按大小限制过滤并 reconcile 本地路径 https://github.com/Y-ASLant/ElegantClipboard/issues/132
-- fix: WebDAV 媒体后台下载/自动同步完成后推送 `webdav-media-ready`，主窗口自动刷新列表以显示预览与路径
-- fix: RDP 等无真实路径的文件复制场景，从 `FileGroupDescriptorW` / `FileGroupDescriptor` 解析虚拟文件名用于展示与去重哈希
-- fix: 多文件同步时要求全部文件通过大小校验且哈希成功才纳入导出；空 `file_paths` 不再误计入媒体清单
-- fix: 导出端裁剪未被条目引用的孤儿 media_map；导入端校验 media_map 完整性，拒绝无 blob backing 的 ghost 条目
-- fix: 同内容多路径文件各自保留 media 映射；部分文件哈希失败时不写入任何 media
-- fix: 自动/手动同步 reconcile 后若无待下载媒体也会通知前端刷新
+- fix: 修复 WebDAV 同步设置大小限制后，其他设备仍能看到无内容的破损条目 https://github.com/Y-ASLant/ElegantClipboard/issues/132
+- fix: WebDAV 同步媒体下载完成后自动刷新列表，无需重启即可看到图片预览
+- fix: 远程桌面（mstsc/RustDesk 等）复制文件时正确显示文件名
+- fix: WebDAV 同步媒体完整性校验，拒绝无对应文件的孤立记录
+- fix(i18n): 系统托盘菜单与设置窗口标题支持多语言，语言切换不再丢失暂停/快捷键状态
 
 ## v1.2.5
 **发布日期：** 2026年7月26日

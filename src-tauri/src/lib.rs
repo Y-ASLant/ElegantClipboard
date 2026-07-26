@@ -59,6 +59,12 @@ static PASTE_IN_PROGRESS: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 static SHORTCUTS_DISABLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// 当前是否已临时禁用快捷键（供托盘菜单等读取）
+pub fn shortcuts_are_disabled() -> bool {
+    use std::sync::atomic::Ordering;
+    SHORTCUTS_DISABLED.load(Ordering::Relaxed)
+}
+
 #[derive(Clone, Copy)]
 enum PasteKind {
     Quick,

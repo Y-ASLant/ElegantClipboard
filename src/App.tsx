@@ -48,8 +48,8 @@ import { useClipboardStore } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
 import type { Group } from "@/stores/groups";
 import type { ToolbarButton } from "@/stores/ui-settings";
-import { initWebDAVSyncListeners } from "@/stores/webdav-sync";
 import { isUISettingsInitialized, useUISettings, whenUISettingsReady } from "@/stores/ui-settings";
+import { initWebDAVSyncListeners } from "@/stores/webdav-sync";
 
 /** 关闭已打开的弹出层 */
 function dismissOverlays(): boolean {

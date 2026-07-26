@@ -44,6 +44,38 @@ fn read_locale(app: &AppHandle) -> String {
         .unwrap_or_else(|| "zh-CN".into())
 }
 
+/// 根据当前监控/快捷键状态刷新托盘菜单文案
+fn apply_tray_menu_labels(app: &AppHandle, items: &TrayMenuItems, i18n: &TrayI18n) {
+    let paused = app
+        .try_state::<Arc<AppState>>()
+        .is_some_and(|state| state.monitor.is_paused());
+    let shortcuts_off = crate::shortcuts_are_disabled();
+
+    let _ = items.pause_item.set_text(if paused {
+        &i18n.resume_monitor
+    } else {
+        &i18n.pause_monitor
+    });
+    let _ = items.shortcut_item.set_text(if shortcuts_off {
+        &i18n.restore_shortcuts
+    } else {
+        &i18n.disable_shortcuts
+    });
+    let _ = items.settings_item.set_text(&i18n.settings);
+    let _ = items.check_update_item.set_text(&i18n.check_update);
+    let _ = items.restart_item.set_text(&i18n.restart);
+    let _ = items.quit_item.set_text(&i18n.quit);
+
+    if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+        let tip = if paused {
+            i18n.paused_tip.as_str()
+        } else {
+            "ElegantClipboard"
+        };
+        let _ = tray.set_tooltip(Some(tip));
+    }
+}
+
 /// 初始化系统托盘图标和菜单
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let icon_data = include_bytes!("../../icons/icon.png");
@@ -110,42 +142,36 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 "toggle_pause" => {
                     if let Some(state) = app.try_state::<Arc<AppState>>() {
                         let paused = state.monitor.toggle_user_pause();
-                        // 从全局状态读取当前语言的翻译
-                        let tip;
-                        {
-                            let guard = TRAY_STATE.lock();
-                            let i18n = guard
-                                .as_ref()
-                                .map(|(_, loc)| TrayI18n::from_locale(loc))
-                                .unwrap_or_else(TrayI18n::zh_cn);
-                            let _ = pause_item.set_text(if paused {
+                        let guard = TRAY_STATE.lock();
+                        if let Some((items, loc)) = guard.as_ref() {
+                            let i18n = TrayI18n::from_locale(loc);
+                            let _ = items.pause_item.set_text(if paused {
                                 &i18n.resume_monitor
                             } else {
                                 &i18n.pause_monitor
                             });
-                            tip = if paused {
-                                i18n.paused_tip
-                            } else {
-                                "ElegantClipboard".into()
-                            };
-                        }
-                        if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
-                            let _ = tray.set_tooltip(Some(&tip));
+                            if let Some(tray) = app.tray_by_id(MAIN_TRAY_ID) {
+                                let tip = if paused {
+                                    i18n.paused_tip.as_str()
+                                } else {
+                                    "ElegantClipboard"
+                                };
+                                let _ = tray.set_tooltip(Some(tip));
+                            }
                         }
                     }
                 }
                 "toggle_shortcuts" => {
                     let disabled = crate::toggle_shortcuts_disabled(app);
                     let guard = TRAY_STATE.lock();
-                    let i18n = guard
-                        .as_ref()
-                        .map(|(_, loc)| TrayI18n::from_locale(loc))
-                        .unwrap_or_else(TrayI18n::zh_cn);
-                    let _ = shortcut_item.set_text(if disabled {
-                        &i18n.restore_shortcuts
-                    } else {
-                        &i18n.disable_shortcuts
-                    });
+                    if let Some((items, loc)) = guard.as_ref() {
+                        let i18n = TrayI18n::from_locale(loc);
+                        let _ = items.shortcut_item.set_text(if disabled {
+                            &i18n.restore_shortcuts
+                        } else {
+                            &i18n.disable_shortcuts
+                        });
+                    }
                 }
                 _ => handle_menu_event(app, id),
             }
@@ -193,7 +219,7 @@ pub(crate) fn set_tray_visibility(app: &AppHandle, visible: bool) -> Result<(), 
 }
 
 /// 更新托盘菜单语言（供前端语言切换时调用）
-pub(crate) fn update_tray_language(_app: &AppHandle, locale: &str) {
+pub(crate) fn update_tray_language(app: &AppHandle, locale: &str) {
     let mut guard = TRAY_STATE.lock();
     let Some((items, current)) = guard.as_mut() else {
         return;
@@ -204,12 +230,7 @@ pub(crate) fn update_tray_language(_app: &AppHandle, locale: &str) {
     *current = locale.to_string();
 
     let i18n = TrayI18n::from_locale(locale);
-    let _ = items.pause_item.set_text(&i18n.pause_monitor);
-    let _ = items.shortcut_item.set_text(&i18n.disable_shortcuts);
-    let _ = items.settings_item.set_text(&i18n.settings);
-    let _ = items.check_update_item.set_text(&i18n.check_update);
-    let _ = items.restart_item.set_text(&i18n.restart);
-    let _ = items.quit_item.set_text(&i18n.quit);
+    apply_tray_menu_labels(app, items, &i18n);
     info!("Tray menu language updated to: {locale}");
 }
 
@@ -265,12 +286,15 @@ fn open_settings_window_inner(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    let locale = read_locale(&app);
+    let window_title = TrayI18n::from_locale(&locale).settings;
+
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "settings",
         tauri::WebviewUrl::App("/settings.html".into()),
     )
-    .title("设置")
+    .title(&window_title)
     .inner_size(800.0, 560.0)
     .min_inner_size(580.0, 480.0)
     .decorations(false)

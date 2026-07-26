@@ -248,7 +248,7 @@ t("groups.all", { count: 3 });
 
 **测试**：`src/test/setup.ts` 每个用例前重置 locale 为 `zh-CN`；组件测试应用 `t("key")` 断言，勿硬编码中文
 
-**未覆盖**：系统托盘菜单（`src-tauri/src/tray/mod.rs`）仍为硬编码中文
+**托盘菜单**：Rust 原生渲染，文案见 `src-tauri/src/tray/tray_i18n.rs`，随 `settings.language` 与 `update_tray_language` 同步（zh-CN / en / zh-TW）
 
 ## 窗口配置
 

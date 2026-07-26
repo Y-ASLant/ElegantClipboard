@@ -857,8 +857,7 @@ impl ClipboardHandler {
             );
         }
 
-        let preview =
-            file_clipboard::file_entry_preview(&capture.paths, &capture.extra_formats);
+        let preview = file_clipboard::file_entry_preview(&capture.paths, &capture.extra_formats);
 
         let staged_dir = self
             .images_path

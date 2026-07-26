@@ -510,7 +510,10 @@ mod tests {
             extra_formats: vec![("FileGroupDescriptorW".into(), vec![1, 0, 0, 0])],
             hdrop_raw: None,
         };
-        assert_eq!(effective_file_paths(&capture), vec!["C:\\a.txt".to_string()]);
+        assert_eq!(
+            effective_file_paths(&capture),
+            vec!["C:\\a.txt".to_string()]
+        );
     }
 
     #[test]
