@@ -153,10 +153,19 @@ pub async fn webdav_download(
         let media_map = webdav::download_media_map(&config).unwrap_or_default();
         let mut pending_media_workers = 0u8;
         if !media_map.is_empty() {
-            let _ = webdav::reconcile_local_media(&db, &media_map, &data_dir);
+            let fixed = webdav::reconcile_local_media(&db, &media_map, &data_dir);
             let needed = webdav::plan_media_downloads(&db, &media_map, &data_dir);
-            if !needed.is_empty() {
-                pending_media_workers = spawn_media_download(&app, &config, &data_dir, needed);
+            if needed.is_empty() {
+                tracing::debug!(
+                    "media_map 含 {} 条目，当前无需下载（可能已落地或未引用）",
+                    media_map.len()
+                );
+                if fixed > 0 {
+                    webdav::emit_webdav_media_ready(&app);
+                }
+            } else {
+                pending_media_workers =
+                    spawn_media_download(&app, &config, &data_dir, &db, &media_map, needed);
             }
         }
 
@@ -183,7 +192,15 @@ fn build_local_media_map(
     device_id: &str,
 ) -> Vec<webdav::MediaEntry> {
     let items = webdav::query_sync_items(db, options).unwrap_or_default();
-    webdav::build_media_map(&items, data_dir, options, device_id)
+    let (map, _) = webdav::build_media_map(&items, data_dir, options, device_id);
+    map
+}
+
+struct MediaSyncComplete {
+    db: crate::database::Database,
+    data_dir: std::path::PathBuf,
+    media_map: Vec<webdav::MediaEntry>,
+    app: tauri::AppHandle,
 }
 
 fn spawn_media_upload_worker(
@@ -230,6 +247,8 @@ fn spawn_media_download_worker(
     entries: Vec<webdav::MediaEntry>,
     thread_name: &'static str,
     label: &'static str,
+    pending: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    on_complete: std::sync::Arc<MediaSyncComplete>,
 ) -> bool {
     if entries.is_empty() {
         return false;
@@ -237,6 +256,8 @@ fn spawn_media_download_worker(
     let cfg = config.clone();
     let dir = data_dir.to_path_buf();
     let handle = app.clone();
+    let pending_worker = pending.clone();
+    let on_complete_worker = on_complete.clone();
     match std::thread::Builder::new()
         .name(thread_name.into())
         .spawn(move || {
@@ -245,10 +266,26 @@ fn spawn_media_download_worker(
                 Ok(_) => format!("{label}已是最新"),
                 Err(e) => format!("{label}下载失败: {e}"),
             };
+            if pending_worker.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1 {
+                let _ = webdav::reconcile_local_media(
+                    &on_complete_worker.db,
+                    &on_complete_worker.media_map,
+                    &on_complete_worker.data_dir,
+                );
+                webdav::emit_webdav_media_ready(&on_complete_worker.app);
+            }
             emit_media_sync_done(&handle, &msg);
         }) {
         Ok(_) => true,
         Err(e) => {
+            if pending.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1 {
+                let _ = webdav::reconcile_local_media(
+                    &on_complete.db,
+                    &on_complete.media_map,
+                    &on_complete.data_dir,
+                );
+                webdav::emit_webdav_media_ready(&on_complete.app);
+            }
             emit_media_sync_done(app, &format!("{label}下载线程启动失败: {e}"));
             true
         }
@@ -304,6 +341,8 @@ fn spawn_media_download(
     app: &tauri::AppHandle,
     config: &webdav::WebDavConfig,
     data_dir: &std::path::Path,
+    db: &crate::database::Database,
+    full_media_map: &[webdav::MediaEntry],
     media_map: Vec<webdav::MediaEntry>,
 ) -> u8 {
     let images: Vec<_> = media_map
@@ -322,6 +361,28 @@ fn spawn_media_download(
         .cloned()
         .collect();
 
+    let mut batch = 0usize;
+    if !images.is_empty() {
+        batch += 1;
+    }
+    if !files.is_empty() {
+        batch += 1;
+    }
+    if !icons.is_empty() {
+        batch += 1;
+    }
+    if batch == 0 {
+        return 0;
+    }
+
+    let pending = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(batch));
+    let on_complete = std::sync::Arc::new(MediaSyncComplete {
+        db: db.clone(),
+        data_dir: data_dir.to_path_buf(),
+        media_map: full_media_map.to_vec(),
+        app: app.clone(),
+    });
+
     let mut workers = 0u8;
     if spawn_media_download_worker(
         app,
@@ -330,6 +391,8 @@ fn spawn_media_download(
         images,
         "webdav-download-images",
         "图片",
+        pending.clone(),
+        on_complete.clone(),
     ) {
         workers += 1;
     }
@@ -340,6 +403,8 @@ fn spawn_media_download(
         files,
         "webdav-download-files",
         "文件",
+        pending.clone(),
+        on_complete.clone(),
     ) {
         workers += 1;
     }
@@ -350,6 +415,8 @@ fn spawn_media_download(
         icons,
         "webdav-download-icons",
         "图标",
+        pending,
+        on_complete,
     ) {
         workers += 1;
     }

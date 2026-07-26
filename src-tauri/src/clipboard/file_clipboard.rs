@@ -222,6 +222,114 @@ pub fn parse_file_paths(raw: Option<&str>) -> Vec<String> {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
+const FILEDESCRIPTORW_SIZE: usize = 592;
+const FILEDESCRIPTORW_NAME_OFFSET: usize = 72;
+const FILEDESCRIPTORA_SIZE: usize = 332;
+const FILEDESCRIPTORA_NAME_OFFSET: usize = 72;
+
+fn decode_utf16_null_terminated(bytes: &[u8]) -> String {
+    let mut units = Vec::new();
+    for chunk in bytes.chunks(2) {
+        if chunk.len() < 2 {
+            break;
+        }
+        let u = u16::from_le_bytes([chunk[0], chunk[1]]);
+        if u == 0 {
+            break;
+        }
+        units.push(u);
+    }
+    String::from_utf16_lossy(&units)
+}
+
+/// 从 FileGroupDescriptor(W) 伴生格式解析虚拟文件名（RDP 等场景）
+pub fn parse_file_group_descriptor_w(data: &[u8]) -> Vec<String> {
+    if data.len() < 4 {
+        return Vec::new();
+    }
+    let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let mut names = Vec::new();
+    for i in 0..count.min(32) {
+        let base = 4 + i * FILEDESCRIPTORW_SIZE;
+        if base + FILEDESCRIPTORW_SIZE > data.len() {
+            break;
+        }
+        let name_start = base + FILEDESCRIPTORW_NAME_OFFSET;
+        let name_end = base + FILEDESCRIPTORW_SIZE;
+        let name = decode_utf16_null_terminated(&data[name_start..name_end]);
+        if !name.is_empty() {
+            names.push(name);
+        }
+    }
+    names
+}
+
+fn decode_ascii_null_terminated(bytes: &[u8]) -> String {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
+}
+
+/// 从 FileGroupDescriptor（ANSI）伴生格式解析虚拟文件名
+pub fn parse_file_group_descriptor_a(data: &[u8]) -> Vec<String> {
+    if data.len() < 4 {
+        return Vec::new();
+    }
+    let count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let mut names = Vec::new();
+    for i in 0..count.min(32) {
+        let base = 4 + i * FILEDESCRIPTORA_SIZE;
+        if base + FILEDESCRIPTORA_SIZE > data.len() {
+            break;
+        }
+        let name_start = base + FILEDESCRIPTORA_NAME_OFFSET;
+        let name_end = base + FILEDESCRIPTORA_SIZE;
+        let name = decode_ascii_null_terminated(&data[name_start..name_end]);
+        if !name.is_empty() {
+            names.push(name);
+        }
+    }
+    names
+}
+
+pub fn descriptor_file_names(extra: &[(String, Vec<u8>)]) -> Vec<String> {
+    for (name, data) in extra {
+        if name.contains("FileGroupDescriptorW") {
+            return parse_file_group_descriptor_w(data);
+        }
+    }
+    for (name, data) in extra {
+        if name.contains("FileGroupDescriptor") {
+            return parse_file_group_descriptor_a(data);
+        }
+    }
+    Vec::new()
+}
+
+/// 用于入库展示的路径列表：优先真实路径，否则用虚拟文件名
+pub fn effective_file_paths(capture: &FileCaptureData) -> Vec<String> {
+    if !capture.paths.is_empty() {
+        return capture.paths.clone();
+    }
+    descriptor_file_names(&capture.extra_formats)
+}
+
+/// 文件条目卡片 preview 文案（仅文件名，不含完整路径）
+pub fn file_entry_preview(paths: &[String], extra: &[(String, Vec<u8>)]) -> String {
+    let display = if !paths.is_empty() {
+        paths.to_vec()
+    } else {
+        descriptor_file_names(extra)
+    };
+    match display.len() {
+        0 => "[文件]".to_string(),
+        1 => Path::new(&display[0])
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| display[0].clone()),
+        n => format!("{n} files"),
+    }
+}
+
 pub fn resolve_paths(paths: &[String], payload: Option<&FilePayload>) -> Vec<String> {
     let staged_map: std::collections::HashMap<&str, &str> = payload
         .map(|p| {
@@ -347,6 +455,62 @@ mod tests {
         };
         let json = encode_payload(&payload);
         assert_eq!(decode_payload(Some(&json)), Some(payload));
+    }
+
+    #[test]
+    fn parse_file_group_descriptor_a_extracts_name() {
+        let mut data = vec![1u8, 0, 0, 0];
+        data.resize(4 + FILEDESCRIPTORA_SIZE, 0);
+        let name = b"legacy.txt";
+        let name_start = 4 + FILEDESCRIPTORA_NAME_OFFSET;
+        data[name_start..name_start + name.len()].copy_from_slice(name);
+
+        let names = parse_file_group_descriptor_a(&data);
+        assert_eq!(names, vec!["legacy.txt".to_string()]);
+    }
+
+    #[test]
+    fn parse_file_group_descriptor_w_extracts_name() {
+        let mut data = vec![1u8, 0, 0, 0]; // count = 1
+        data.resize(4 + FILEDESCRIPTORW_SIZE, 0);
+        let name = "photo.png";
+        let name_bytes: Vec<u8> = name
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .chain(std::iter::once(0).flat_map(|_| [0u8, 0u8]))
+            .collect();
+        let name_start = 4 + FILEDESCRIPTORW_NAME_OFFSET;
+        data[name_start..name_start + name_bytes.len()].copy_from_slice(&name_bytes);
+
+        let names = parse_file_group_descriptor_w(&data);
+        assert_eq!(names, vec!["photo.png".to_string()]);
+    }
+
+    #[test]
+    fn file_entry_preview_uses_descriptor_when_paths_empty() {
+        let mut data = vec![1u8, 0, 0, 0];
+        data.resize(4 + FILEDESCRIPTORW_SIZE, 0);
+        let name = "report.docx";
+        let name_bytes: Vec<u8> = name
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .chain(std::iter::once(0).flat_map(|_| [0u8, 0u8]))
+            .collect();
+        let name_start = 4 + FILEDESCRIPTORW_NAME_OFFSET;
+        data[name_start..name_start + name_bytes.len()].copy_from_slice(&name_bytes);
+
+        let extra = vec![("FileGroupDescriptorW".into(), data)];
+        assert_eq!(file_entry_preview(&[], &extra), "report.docx");
+    }
+
+    #[test]
+    fn effective_file_paths_prefers_real_paths() {
+        let capture = FileCaptureData {
+            paths: vec!["C:\\a.txt".into()],
+            extra_formats: vec![("FileGroupDescriptorW".into(), vec![1, 0, 0, 0])],
+            hdrop_raw: None,
+        };
+        assert_eq!(effective_file_paths(&capture), vec!["C:\\a.txt".to_string()]);
     }
 
     #[test]

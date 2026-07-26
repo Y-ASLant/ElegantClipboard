@@ -147,6 +147,15 @@ export async function initWebDAVSyncListeners() {
 
   try {
     unlistenFns.push(
+      await listen("webdav-media-ready", async () => {
+        try {
+          await useClipboardStore.getState().refresh();
+        } catch (error) {
+          logError("WebDAV 媒体就绪后刷新列表失败:", error);
+        }
+      }),
+    );
+    unlistenFns.push(
       await listen<string>("media-sync-done", (event) => {
         const { statusMsg, pendingMediaWorkers } =
           useWebDAVSyncStore.getState();

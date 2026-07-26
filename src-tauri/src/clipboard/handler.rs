@@ -670,6 +670,12 @@ impl ClipboardHandler {
                     hasher.update(file.as_bytes());
                     hasher.update(b"|");
                 }
+                if files.paths.is_empty() {
+                    for name in file_clipboard::descriptor_file_names(&files.extra_formats) {
+                        hasher.update(name.as_bytes());
+                        hasher.update(b"|");
+                    }
+                }
                 if let Some(ref raw) = files.hdrop_raw {
                     hasher.update(b"hdrop:");
                     hasher.update(raw);
@@ -825,6 +831,8 @@ impl ClipboardHandler {
     ) -> Result<NewClipboardItem, String> {
         debug!("Processing {} file(s)", capture.paths.len());
 
+        let stored_paths = file_clipboard::effective_file_paths(&capture);
+
         let byte_size: i64 = capture
             .paths
             .iter()
@@ -849,13 +857,8 @@ impl ClipboardHandler {
             );
         }
 
-        let preview = if capture.paths.len() == 1 {
-            capture.paths[0].clone()
-        } else if capture.paths.is_empty() {
-            "[文件]".to_string()
-        } else {
-            format!("{} files", capture.paths.len())
-        };
+        let preview =
+            file_clipboard::file_entry_preview(&capture.paths, &capture.extra_formats);
 
         let staged_dir = self
             .images_path
@@ -868,7 +871,7 @@ impl ClipboardHandler {
 
         Ok(NewClipboardItem {
             content_type: ContentType::Files,
-            file_paths: Some(capture.paths),
+            file_paths: Some(stored_paths),
             file_payload,
             content_hash: hashes.content_hash.clone(),
             semantic_hash: hashes.semantic_hash.clone(),

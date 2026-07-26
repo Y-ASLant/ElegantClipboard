@@ -48,6 +48,7 @@ import { useClipboardStore } from "@/stores/clipboard";
 import { useGroupStore } from "@/stores/groups";
 import type { Group } from "@/stores/groups";
 import type { ToolbarButton } from "@/stores/ui-settings";
+import { initWebDAVSyncListeners } from "@/stores/webdav-sync";
 import { isUISettingsInitialized, useUISettings, whenUISettingsReady } from "@/stores/ui-settings";
 
 /** 关闭已打开的弹出层 */
@@ -144,6 +145,7 @@ function App() {
   // 同步文件预览大小限制（与 settings max_image_size_kb 一致）
   useEffect(() => {
     void syncFilePreviewLimitsFromSettings();
+    void initWebDAVSyncListeners();
   }, []);
 
   // 对话框打开后恢复窗口焦点并聚焦输入框
