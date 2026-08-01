@@ -51,6 +51,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { useNonPassiveWheel } from "@/hooks/useNonPassiveWheel";
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import { useTranslateAvailable } from "@/hooks/useTranslateAvailable";
 import { useTranslation } from "@/i18n";
@@ -557,7 +558,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     hideTextPreview();
   }, [hideTextPreview]);
 
-  const handleTextWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+  const handleTextWheel = useCallback((e: WheelEvent) => {
     // Ctrl+滚轮滚动文本预览，避免误触列表滚动
     if (!e.ctrlKey || !textPreviewVisibleRef.current) return;
     e.preventDefault();
@@ -577,6 +578,12 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       });
     }
   }, []);
+
+  const textPreviewWheelRef = useNonPassiveWheel(handleTextWheel);
+  const setTextPreviewAnchorRef = useCallback((node: HTMLDivElement | null) => {
+    textPreviewAnchorRef.current = node;
+    textPreviewWheelRef(node);
+  }, [textPreviewWheelRef]);
 
   useEffect(() => {
     if (!textPreviewEnabled || !isTextLikeContent) {
@@ -842,11 +849,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
             />
           ) : (
             <div
-              ref={textPreviewAnchorRef}
+              ref={setTextPreviewAnchorRef}
               className="flex-1 min-w-0 px-3 py-2.5"
               onMouseEnter={handleTextMouseEnter}
               onMouseLeave={handleTextMouseLeave}
-              onWheel={handleTextWheel}
             >
               <div
                 className="clipboard-content leading-relaxed text-foreground/90 whitespace-pre-wrap break-all m-0"

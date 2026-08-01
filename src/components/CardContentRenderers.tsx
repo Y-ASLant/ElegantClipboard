@@ -10,6 +10,7 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
+import { useNonPassiveWheel } from "@/hooks/useNonPassiveWheel";
 import { useTranslation } from "@/i18n";
 import {
   shouldSkipFileImagePreview,
@@ -426,7 +427,7 @@ const ImagePreview = memo(function ImagePreview({
 
   // Ctrl+滚轮缩放，合并跨窗口事件为每帧一次
   const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+    (e: WheelEvent) => {
       if (!e.ctrlKey || !ps.current.visible || !ps.current.bounds) return;
       e.preventDefault();
       e.stopPropagation();
@@ -505,6 +506,12 @@ const ImagePreview = memo(function ImagePreview({
     [previewZoomStep, previewUnboundedMode],
   );
 
+  const imagePreviewWheelRef = useNonPassiveWheel(handleWheel);
+  const setImagePreviewContainerRef = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node;
+    imagePreviewWheelRef(node);
+  }, [imagePreviewWheelRef]);
+
   const handleImgLoad = useCallback(
     (e: React.SyntheticEvent<HTMLImageElement>) => {
       const img = e.currentTarget;
@@ -554,12 +561,11 @@ const ImagePreview = memo(function ImagePreview({
 
   return (
     <div
-      ref={containerRef}
+      ref={setImagePreviewContainerRef}
       className="relative w-full rounded-md overflow-hidden bg-muted-surface-faint flex items-center justify-center"
       style={containerStyle}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={hidePreview}
-      onWheel={handleWheel}
     >
       {!imgLoaded && (
         <div className="absolute inset-0 img-skeleton rounded-md" />
