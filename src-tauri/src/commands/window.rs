@@ -378,6 +378,7 @@ pub fn cancel_update_download() {
 
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
+    crate::webview_runtime::mark_intentional_exit();
     save_main_window_placement(&app);
     crate::updater::install(&installer_path)?;
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;

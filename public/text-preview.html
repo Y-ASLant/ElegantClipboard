@@ -114,37 +114,39 @@
     if (window.__TAURI__) {
       const { listen } = window.__TAURI__.event;
 
-      listen('text-preview-update', (event) => {
-        const payload = event.payload || {};
-        applyPreviewPresentation(root, payload);
-        document.body.dataset.align = payload.align === 'right' ? 'right' : 'left';
-        if (payload.fontFamily) {
-          content.style.fontFamily = payload.fontFamily;
-        } else {
-          content.style.removeProperty('font-family');
-        }
-        if (payload.fontSize && typeof payload.fontSize === 'number') {
-          content.style.fontSize = payload.fontSize + 'px';
-        } else {
-          content.style.fontSize = '';
-        }
-        content.textContent = typeof payload.text === 'string' ? payload.text : '';
-        panel.classList.add('visible');
-      });
-
-      listen('text-preview-clear', () => {
-        clearPreview();
-      });
-
-      listen('text-preview-scroll', (event) => {
-        const deltaY = Number(event?.payload?.deltaY ?? 0);
-        if (!Number.isFinite(deltaY) || deltaY === 0) return;
-        content.scrollTop += deltaY;
-      });
-
-      listen('text-preview-theme', (event) => {
-        applyPreviewPresentation(root, event?.payload || {});
-      });
+      const listenersReady = Promise.all([
+        listen('text-preview-update', (event) => {
+          const payload = event.payload || {};
+          applyPreviewPresentation(root, payload);
+          document.body.dataset.align = payload.align === 'right' ? 'right' : 'left';
+          if (payload.fontFamily) {
+            content.style.fontFamily = payload.fontFamily;
+          } else {
+            content.style.removeProperty('font-family');
+          }
+          if (payload.fontSize && typeof payload.fontSize === 'number') {
+            content.style.fontSize = payload.fontSize + 'px';
+          } else {
+            content.style.fontSize = '';
+          }
+          content.textContent = typeof payload.text === 'string' ? payload.text : '';
+          panel.classList.add('visible');
+        }),
+        listen('text-preview-clear', () => {
+          clearPreview();
+        }),
+        listen('text-preview-scroll', (event) => {
+          const deltaY = Number(event?.payload?.deltaY ?? 0);
+          if (!Number.isFinite(deltaY) || deltaY === 0) return;
+          content.scrollTop += deltaY;
+        }),
+        listen('text-preview-theme', (event) => {
+          applyPreviewPresentation(root, event?.payload || {});
+        }),
+      ]);
+      void listenersReady
+        .then(() => window.__TAURI__.core.invoke('managed_window_ready'))
+        .catch((error) => console.error('Failed to confirm text preview readiness:', error));
     }
   </script>
 </body>

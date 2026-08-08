@@ -148,53 +148,55 @@
       const { listen } = window.__TAURI__.event;
       const { convertFileSrc } = window.__TAURI__.core;
 
-      listen('image-preview-update', (event) => {
-        const payload = event.payload || {};
-        const { imagePath, width, height, offsetY, align } = payload;
-        applyPreviewPresentation(root, payload);
-        img.classList.remove('loaded');
-        clearBadge();
-        document.body.className = align === 'right' ? 'align-right' : '';
-        stopRectAnimation();
-        currentRect.width = width || 0;
-        currentRect.height = height || 0;
-        currentRect.top = offsetY || 0;
-        targetRect.width = currentRect.width;
-        targetRect.height = currentRect.height;
-        targetRect.top = currentRect.top;
-        applyRect(currentRect);
-        img.src = convertFileSrc(imagePath);
-      });
-
-      listen('image-preview-zoom', (event) => {
-        const payload = event.payload || {};
-        const { width, height, offsetY, percent, active, align } = payload;
-        applyPreviewPresentation(root, payload);
-        if (align) document.body.className = align === 'right' ? 'align-right' : '';
-        targetRect.width = width || 0;
-        targetRect.height = height || 0;
-        targetRect.top = offsetY || 0;
-        startRectAnimation();
-        if (active) showBadge(percent + '%');
-      });
-
-      listen('image-preview-clear', () => {
-        img.classList.remove('loaded');
-        img.removeAttribute('src');
-        clearBadge();
-        stopRectAnimation();
-        currentRect.width = 0;
-        currentRect.height = 0;
-        currentRect.top = 0;
-        targetRect.width = 0;
-        targetRect.height = 0;
-        targetRect.top = 0;
-        applyRect(currentRect);
-      });
-
-      listen('image-preview-theme', (event) => {
-        applyPreviewPresentation(root, event?.payload || {});
-      });
+      const listenersReady = Promise.all([
+        listen('image-preview-update', (event) => {
+          const payload = event.payload || {};
+          const { imagePath, width, height, offsetY, align } = payload;
+          applyPreviewPresentation(root, payload);
+          img.classList.remove('loaded');
+          clearBadge();
+          document.body.className = align === 'right' ? 'align-right' : '';
+          stopRectAnimation();
+          currentRect.width = width || 0;
+          currentRect.height = height || 0;
+          currentRect.top = offsetY || 0;
+          targetRect.width = currentRect.width;
+          targetRect.height = currentRect.height;
+          targetRect.top = currentRect.top;
+          applyRect(currentRect);
+          img.src = convertFileSrc(imagePath);
+        }),
+        listen('image-preview-zoom', (event) => {
+          const payload = event.payload || {};
+          const { width, height, offsetY, percent, active, align } = payload;
+          applyPreviewPresentation(root, payload);
+          if (align) document.body.className = align === 'right' ? 'align-right' : '';
+          targetRect.width = width || 0;
+          targetRect.height = height || 0;
+          targetRect.top = offsetY || 0;
+          startRectAnimation();
+          if (active) showBadge(percent + '%');
+        }),
+        listen('image-preview-clear', () => {
+          img.classList.remove('loaded');
+          img.removeAttribute('src');
+          clearBadge();
+          stopRectAnimation();
+          currentRect.width = 0;
+          currentRect.height = 0;
+          currentRect.top = 0;
+          targetRect.width = 0;
+          targetRect.height = 0;
+          targetRect.top = 0;
+          applyRect(currentRect);
+        }),
+        listen('image-preview-theme', (event) => {
+          applyPreviewPresentation(root, event?.payload || {});
+        }),
+      ]);
+      void listenersReady
+        .then(() => window.__TAURI__.core.invoke('managed_window_ready'))
+        .catch((error) => console.error('Failed to confirm image preview readiness:', error));
 
       img.addEventListener('load', () => img.classList.add('loaded'));
       img.addEventListener('error', () => img.classList.remove('loaded'));

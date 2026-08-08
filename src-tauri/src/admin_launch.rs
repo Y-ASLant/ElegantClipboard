@@ -252,6 +252,7 @@ fn elevate_with_uac() -> bool {
 /// - 普通模式，或已启用管理员启动：走 `app.restart()`；若需提权由启动阶段 `self_elevate` 处理
 /// - 当前已提权但关闭了管理员启动：同步经 explorer 降权拉起新实例，再退出（避免单实例插件拦截）
 pub fn perform_restart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    crate::webview_runtime::mark_intentional_exit();
     crate::commands::window::save_main_window_placement(app);
 
     #[cfg(target_os = "windows")]

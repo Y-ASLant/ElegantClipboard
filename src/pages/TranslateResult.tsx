@@ -94,6 +94,12 @@ export function TranslateResult() {
   }, [doTranslate]);
 
   useEffect(() => {
+    void invoke("translate_window_ready").catch((error) => {
+      logError("Failed to confirm translate window readiness:", error);
+    });
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !isPinned) {
         getCurrentWindow().close();

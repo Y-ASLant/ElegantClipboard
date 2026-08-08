@@ -621,20 +621,44 @@ pub async fn open_translate_result_window(
 
     if let Some(window) = app.get_webview_window(label) {
         tracing::info!("[TRANSLATE] window already exists, showing + focusing");
-        let _ = window.emit("translate-result-update", &text);
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_always_on_top(true);
-        let _ = window.set_focus();
+        crate::webview_runtime::wait_for_window_ready(label).await?;
+        window.emit("translate-result-update", &text).map_err(|e| {
+            crate::webview_runtime::window_operation_error(&app, label, "TRANSLATE:EMIT_FAILED", e)
+        })?;
+        window.unminimize().map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                label,
+                "TRANSLATE:UNMINIMIZE_FAILED",
+                e,
+            )
+        })?;
+        window.show().map_err(|e| {
+            crate::webview_runtime::window_operation_error(&app, label, "TRANSLATE:SHOW_FAILED", e)
+        })?;
+        window.set_always_on_top(true).map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                label,
+                "TRANSLATE:TOPMOST_FAILED",
+                e,
+            )
+        })?;
+        window.set_focus().map_err(|e| {
+            crate::webview_runtime::window_operation_error(&app, label, "TRANSLATE:FOCUS_FAILED", e)
+        })?;
         crate::input_monitor::translate_window_shown();
         tracing::info!("[TRANSLATE] existing window shown + focused done");
         return Ok(());
     }
 
+    crate::webview_runtime::ensure_runtime_current(&app)?;
+    let creation_guard = crate::webview_runtime::WindowCreationGuard::start(&app, label);
+    let page_load_guard = creation_guard.clone();
     tracing::info!("[TRANSLATE] window does not exist, creating new");
     *PENDING_TRANSLATE_TEXT.lock() = text;
 
-    let window = tauri::WebviewWindowBuilder::new(
+    let build_result = tauri::WebviewWindowBuilder::new(
         &app,
         label,
         tauri::WebviewUrl::App("/translate-result".into()),
@@ -649,28 +673,48 @@ pub async fn open_translate_result_window(
     .resizable(true)
     .always_on_top(true)
     .center()
-    .build()
-    .map_err(|e| format!("TRANSLATE:CREATE_WINDOW_FAILED:{e}"))?;
+    .on_page_load(move |window, payload| {
+        page_load_guard.on_page_load(&window, &payload);
+    })
+    .build();
+    let window = match build_result {
+        Ok(window) => window,
+        Err(error) => {
+            creation_guard.cancel();
+            return Err(crate::webview_runtime::window_operation_error(
+                &app,
+                label,
+                "TRANSLATE:CREATE_WINDOW_FAILED",
+                error,
+            ));
+        }
+    };
 
     tracing::info!("[TRANSLATE] window built, calling setup_translate_window");
     crate::input_monitor::setup_translate_window(&window);
+    crate::webview_runtime::wait_for_window_ready(label).await?;
 
     // 立即显示窗口（与原 commit 行为一致，保证响应速度）
     tracing::info!("[TRANSLATE] showing + focusing new window from Rust");
-    let _ = window.show();
-    let _ = window.set_focus();
+    window.show().map_err(|e| {
+        crate::webview_runtime::window_operation_error(&app, label, "TRANSLATE:SHOW_FAILED", e)
+    })?;
+    window.set_focus().map_err(|e| {
+        crate::webview_runtime::window_operation_error(&app, label, "TRANSLATE:FOCUS_FAILED", e)
+    })?;
     crate::input_monitor::translate_window_shown();
     tracing::info!("[TRANSLATE] new window shown + focused done");
 
     Ok(())
 }
 
-/// 前端窗口完成 show + setFocus 后调用，通知后端启用输入监控
+/// 前端完成挂载后调用，确认窗口可操作。
 #[tauri::command]
-pub fn translate_window_ready() {
-    tracing::info!("[TRANSLATE] translate_window_ready called from frontend");
-    crate::input_monitor::translate_window_shown();
-    tracing::info!("[TRANSLATE] translate_window_shown() done");
+pub fn translate_window_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    if crate::webview_runtime::managed_window_ready(window)? {
+        tracing::info!("[TRANSLATE] translate window frontend ready");
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -766,6 +810,10 @@ pub fn unregister_translate_selection_shortcut(app: &tauri::AppHandle) {
 
 fn trigger_translate_selection(app: &tauri::AppHandle) {
     tracing::info!("[TRANSLATE] trigger_translate_selection called");
+    if let Err(error) = crate::webview_runtime::ensure_runtime_current(app) {
+        tracing::warn!(%error, "[TRANSLATE] WebView2 restart required, skipping selection capture");
+        return;
+    }
     let Some(state) = app.try_state::<Arc<AppState>>() else {
         tracing::error!("[TRANSLATE] no AppState");
         return;

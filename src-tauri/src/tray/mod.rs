@@ -10,6 +10,7 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
+use tauri_plugin_notification::NotificationExt;
 use tracing::info;
 use tray_i18n::TrayI18n;
 
@@ -242,19 +243,36 @@ pub(crate) fn take_pending_update_dialog() -> bool {
 /// 打开设置窗口并触发更新检查对话框
 pub(crate) fn open_update_dialog(app: &AppHandle) {
     let settings_exists = app.get_webview_window("settings").is_some();
-    let _ = open_settings_window(app);
+    if let Err(error) = open_settings_window(app) {
+        report_settings_window_error(app, &error);
+        return;
+    }
     if settings_exists {
-        let _ = app.emit("open-update-dialog", ());
+        if let Err(error) = app.emit("open-update-dialog", ()) {
+            report_settings_window_error(app, &format!("打开更新对话框失败: {error}"));
+        }
     } else {
         PENDING_UPDATE_DIALOG.store(true, Ordering::SeqCst);
     }
+}
+
+fn report_settings_window_error(app: &AppHandle, error: &str) {
+    tracing::error!(error, "Failed to open settings window");
+    let _ = app
+        .notification()
+        .builder()
+        .title("ElegantClipboard")
+        .body(error)
+        .show();
 }
 
 /// 处理托盘菜单事件
 fn handle_menu_event(app: &AppHandle, id: &str) {
     match id {
         "settings" => {
-            let _ = open_settings_window(app);
+            if let Err(error) = open_settings_window(app) {
+                report_settings_window_error(app, &error);
+            }
         }
         "check_update" => {
             open_update_dialog(app);
@@ -263,6 +281,7 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             crate::admin_launch::perform_restart(app);
         }
         "quit" => {
+            crate::webview_runtime::mark_intentional_exit();
             crate::commands::window::save_main_window_placement(app);
             app.exit(0);
         }
@@ -280,13 +299,22 @@ pub(crate) fn open_settings_window(app: &AppHandle) -> Result<(), String> {
 fn open_settings_window_inner(app: &AppHandle) -> Result<(), String> {
     // 设置窗口已存在则聚焦
     if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        window.unminimize().map_err(|e| {
+            crate::webview_runtime::window_operation_error(app, "settings", "恢复设置窗口失败", e)
+        })?;
+        window.show().map_err(|e| {
+            crate::webview_runtime::window_operation_error(app, "settings", "显示设置窗口失败", e)
+        })?;
+        window.set_focus().map_err(|e| {
+            crate::webview_runtime::window_operation_error(app, "settings", "聚焦设置窗口失败", e)
+        })?;
         return Ok(());
     }
+    crate::webview_runtime::ensure_runtime_current(app)?;
+    let creation_guard = crate::webview_runtime::WindowCreationGuard::start(app, "settings");
+    let page_load_guard = creation_guard.clone();
 
-    let locale = read_locale(&app);
+    let locale = read_locale(app);
     let window_title = TrayI18n::from_locale(&locale).settings;
 
     let mut builder = tauri::WebviewWindowBuilder::new(
@@ -301,7 +329,10 @@ fn open_settings_window_inner(app: &AppHandle) -> Result<(), String> {
     .transparent(true)
     .shadow(true)
     .visible(false)
-    .resizable(true);
+    .resizable(true)
+    .on_page_load(move |window, payload| {
+        page_load_guard.on_page_load(&window, &payload);
+    });
 
     // 居中于主窗口所在显示器（使用物理像素避免 DPI 换算误差）
     let mut phys_pos: Option<tauri::PhysicalPosition<i32>> = None;
@@ -337,13 +368,30 @@ fn open_settings_window_inner(app: &AppHandle) -> Result<(), String> {
         builder = builder.center();
     }
 
-    let window = builder
-        .build()
-        .map_err(|e| format!("创建设置窗口失败: {e}"))?;
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(error) => {
+            creation_guard.cancel();
+            return Err(crate::webview_runtime::window_operation_error(
+                app,
+                "settings",
+                "创建设置窗口失败",
+                error,
+            ));
+        }
+    };
 
     // 构建后设置物理位置，绕过逻辑→物理坐标换算歧义
     if let Some(pos) = phys_pos {
-        let _ = window.set_position(tauri::Position::Physical(pos));
+        if let Err(error) = window.set_position(tauri::Position::Physical(pos)) {
+            let detail = crate::webview_runtime::window_operation_error(
+                app,
+                "settings",
+                "定位设置窗口失败",
+                error,
+            );
+            tracing::warn!(%detail, "Failed to position settings window");
+        }
     }
 
     Ok(())

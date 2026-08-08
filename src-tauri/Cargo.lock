@@ -1037,6 +1037,7 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "webview2-com",
  "window-vibrancy 0.5.3",
  "windows 0.61.3",
  "windows-core 0.61.2",

@@ -339,12 +339,19 @@ export function Settings() {
     }
   }, []);
 
-  // settings-main 已在 render 前 initTheme；首帧即 show，避免 hidden 窗口内长时间无样式
+  // settings-main 已在 render 前 initTheme；确认 Tauri 窗口已可操作后再解除后端创建守卫。
   useLayoutEffect(() => {
     if ("__TAURI_INTERNALS__" in window) {
       const win = getCurrentWindow();
-      void win.show();
-      void win.setFocus();
+      void (async () => {
+        try {
+          await win.show();
+          await win.setFocus();
+          await invoke("managed_window_ready");
+        } catch (error) {
+          logError("Failed to initialize settings window:", error);
+        }
+      })();
     }
     void loadSettings();
   }, [loadSettings]);

@@ -16,6 +16,7 @@ mod tray;
 mod updater;
 mod utils;
 mod webdav;
+mod webview_runtime;
 mod win_v_registry;
 
 use clipboard::ClipboardMonitor;
@@ -962,6 +963,7 @@ pub fn run() {
                         tracing::info!("Window scale factor: {}", dpi);
                     }
                 }
+                webview_runtime::initialize(app.handle(), &window);
 
                 input_monitor::init(window);
                 input_monitor::start_monitoring();
@@ -1076,6 +1078,7 @@ pub fn run() {
             commands::preview::allocate_text_preview_lease,
             commands::preview::sync_preview_window_effects,
             commands::preview::open_text_editor_window,
+            webview_runtime::managed_window_ready,
             commands::window::set_window_pinned,
             commands::window::is_window_pinned,
             commands::window::set_window_effect,

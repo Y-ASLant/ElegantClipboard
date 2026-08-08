@@ -121,8 +121,12 @@ pub async fn show_image_preview(
     let window = if let Some(w) = app.get_webview_window("image-preview") {
         w
     } else {
+        crate::webview_runtime::ensure_runtime_current(&app)?;
+        let creation_guard =
+            crate::webview_runtime::WindowCreationGuard::start(&app, "image-preview");
+        let page_load_guard = creation_guard.clone();
         newly_created = true;
-        let w = tauri::WebviewWindowBuilder::new(
+        let build_result = tauri::WebviewWindowBuilder::new(
             &app,
             "image-preview",
             tauri::WebviewUrl::App("/image-preview.html".into()),
@@ -136,8 +140,22 @@ pub async fn show_image_preview(
         .skip_taskbar(true)
         .focused(false)
         .visible(false)
-        .build()
-        .map_err(|e| format!("创建预览窗口失败: {e}"))?;
+        .on_page_load(move |window, payload| {
+            page_load_guard.on_page_load(&window, &payload);
+        })
+        .build();
+        let w = match build_result {
+            Ok(window) => window,
+            Err(error) => {
+                creation_guard.cancel();
+                return Err(crate::webview_runtime::window_operation_error(
+                    &app,
+                    "image-preview",
+                    "创建预览窗口失败",
+                    error,
+                ));
+            }
+        };
 
         apply_preview_window_effect(&w, window_effect.as_deref());
 
@@ -147,49 +165,91 @@ pub async fn show_image_preview(
     if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
         return Ok(());
     }
+    crate::webview_runtime::wait_for_window_ready("image-preview").await?;
 
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-        width: win_width as u32,
-        height: win_height as u32,
-    }));
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-        x: win_x as i32,
-        y: win_y as i32,
-    }));
+    window
+        .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: win_width as u32,
+            height: win_height as u32,
+        }))
+        .map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                "image-preview",
+                "调整图片预览窗口大小失败",
+                e,
+            )
+        })?;
+    window
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: win_x as i32,
+            y: win_y as i32,
+        }))
+        .map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                "image-preview",
+                "定位图片预览窗口失败",
+                e,
+            )
+        })?;
 
-    if newly_created {
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
-            return Ok(());
-        }
-    }
-
-    let _ = window.set_always_on_top(true);
+    window.set_always_on_top(true).map_err(|e| {
+        crate::webview_runtime::window_operation_error(
+            &app,
+            "image-preview",
+            "设置图片预览置顶失败",
+            e,
+        )
+    })?;
     // 透明区域点击穿透，避免截图工具捕获
-    let _ = window.set_ignore_cursor_events(true);
+    window.set_ignore_cursor_events(true).map_err(|e| {
+        crate::webview_runtime::window_operation_error(
+            &app,
+            "image-preview",
+            "设置图片预览点击穿透失败",
+            e,
+        )
+    })?;
 
-    let _ = window.emit(
-        "image-preview-update",
-        serde_json::json!({
-            "imagePath": image_path,
-            "width": img_width,
-            "height": img_height,
-            "offsetY": offset_y,
-            "align": align.as_deref().unwrap_or("left"),
-            "theme": theme.as_deref().unwrap_or("light"),
-            "sharpCorners": sharp_corners.unwrap_or(false),
-            "colorTheme": color_theme.as_deref().unwrap_or("default"),
-            "systemAccent": system_accent,
-            "windowEffect": window_effect.as_deref().unwrap_or("none"),
-            "uiFontFamily": ui_font_family,
-        }),
-    );
+    window
+        .emit(
+            "image-preview-update",
+            serde_json::json!({
+                "imagePath": image_path,
+                "width": img_width,
+                "height": img_height,
+                "offsetY": offset_y,
+                "align": align.as_deref().unwrap_or("left"),
+                "theme": theme.as_deref().unwrap_or("light"),
+                "sharpCorners": sharp_corners.unwrap_or(false),
+                "colorTheme": color_theme.as_deref().unwrap_or("default"),
+                "systemAccent": system_accent,
+                "windowEffect": window_effect.as_deref().unwrap_or("none"),
+                "uiFontFamily": ui_font_family,
+            }),
+        )
+        .map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                "image-preview",
+                "更新图片预览内容失败",
+                e,
+            )
+        })?;
 
     if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
         return Ok(());
     }
 
-    let _ = window.show();
+    window.show().map_err(|e| {
+        crate::webview_runtime::window_operation_error(
+            &app,
+            "image-preview",
+            "显示图片预览窗口失败",
+            e,
+        )
+    })?;
     if token != 0 && !is_preview_token_current(&IMAGE_PREVIEW_TOKEN, token) {
         let _ = window.hide();
         return Ok(());
@@ -266,8 +326,12 @@ pub async fn show_text_preview(
     let window = if let Some(w) = app.get_webview_window("text-preview") {
         w
     } else {
+        crate::webview_runtime::ensure_runtime_current(&app)?;
+        let creation_guard =
+            crate::webview_runtime::WindowCreationGuard::start(&app, "text-preview");
+        let page_load_guard = creation_guard.clone();
         newly_created = true;
-        let w = tauri::WebviewWindowBuilder::new(
+        let build_result = tauri::WebviewWindowBuilder::new(
             &app,
             "text-preview",
             tauri::WebviewUrl::App("/text-preview.html".into()),
@@ -281,8 +345,22 @@ pub async fn show_text_preview(
         .skip_taskbar(true)
         .focused(false)
         .visible(false)
-        .build()
-        .map_err(|e| format!("创建文本预览窗口失败: {e}"))?;
+        .on_page_load(move |window, payload| {
+            page_load_guard.on_page_load(&window, &payload);
+        })
+        .build();
+        let w = match build_result {
+            Ok(window) => window,
+            Err(error) => {
+                creation_guard.cancel();
+                return Err(crate::webview_runtime::window_operation_error(
+                    &app,
+                    "text-preview",
+                    "创建文本预览窗口失败",
+                    error,
+                ));
+            }
+        };
 
         // 应用窗口特效，与主窗口保持一致
         apply_preview_window_effect(&w, window_effect.as_deref());
@@ -293,19 +371,52 @@ pub async fn show_text_preview(
     if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
         return Ok(());
     }
+    crate::webview_runtime::wait_for_window_ready("text-preview").await?;
 
-    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-        width: win_width as u32,
-        height: win_height as u32,
-    }));
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-        x: win_x as i32,
-        y: win_y as i32,
-    }));
+    window
+        .set_size(tauri::Size::Physical(tauri::PhysicalSize {
+            width: win_width as u32,
+            height: win_height as u32,
+        }))
+        .map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                "text-preview",
+                "调整文本预览窗口大小失败",
+                e,
+            )
+        })?;
+    window
+        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: win_x as i32,
+            y: win_y as i32,
+        }))
+        .map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                "text-preview",
+                "定位文本预览窗口失败",
+                e,
+            )
+        })?;
 
-    let _ = window.set_always_on_top(true);
+    window.set_always_on_top(true).map_err(|e| {
+        crate::webview_runtime::window_operation_error(
+            &app,
+            "text-preview",
+            "设置文本预览置顶失败",
+            e,
+        )
+    })?;
     // 点击穿透，滚动由主窗口 Ctrl+滚轮驱动
-    let _ = window.set_ignore_cursor_events(true);
+    window.set_ignore_cursor_events(true).map_err(|e| {
+        crate::webview_runtime::window_operation_error(
+            &app,
+            "text-preview",
+            "设置文本预览点击穿透失败",
+            e,
+        )
+    })?;
 
     let update_payload = serde_json::json!({
         "text": text,
@@ -319,11 +430,27 @@ pub async fn show_text_preview(
         "fontFamily": font_family,
         "fontSize": font_size,
     });
-    let _ = window.emit("text-preview-update", update_payload.clone());
+    window
+        .emit("text-preview-update", update_payload.clone())
+        .map_err(|e| {
+            crate::webview_runtime::window_operation_error(
+                &app,
+                "text-preview",
+                "更新文本预览内容失败",
+                e,
+            )
+        })?;
     if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
         return Ok(());
     }
-    let _ = window.show();
+    window.show().map_err(|e| {
+        crate::webview_runtime::window_operation_error(
+            &app,
+            "text-preview",
+            "显示文本预览窗口失败",
+            e,
+        )
+    })?;
     if token != 0 && !is_preview_token_current(&TEXT_PREVIEW_TOKEN, token) {
         let _ = window.hide();
         return Ok(());
@@ -340,13 +467,23 @@ pub async fn show_text_preview(
 
     if newly_created {
         let window_clone = window.clone();
+        let app = app.clone();
         tauri::async_runtime::spawn(async move {
             for delay_ms in [120_u64, 260, 420, 680] {
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
                 if TEXT_PREVIEW_UPDATE_SEQ.load(std::sync::atomic::Ordering::Acquire) != seq {
                     return;
                 }
-                let _ = window_clone.emit("text-preview-update", update_payload.clone());
+                if let Err(error) = window_clone.emit("text-preview-update", update_payload.clone())
+                {
+                    let _ = crate::webview_runtime::window_operation_error(
+                        &app,
+                        "text-preview",
+                        "更新文本预览内容失败",
+                        error,
+                    );
+                    return;
+                }
             }
         });
     }
@@ -373,13 +510,23 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
     let label = format!("text-editor-{id}");
 
     if let Some(window) = app.get_webview_window(&label) {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
+        crate::webview_runtime::wait_for_window_ready(&label).await?;
+        window.unminimize().map_err(|e| {
+            crate::webview_runtime::window_operation_error(&app, &label, "恢复编辑器窗口失败", e)
+        })?;
+        window.show().map_err(|e| {
+            crate::webview_runtime::window_operation_error(&app, &label, "显示编辑器窗口失败", e)
+        })?;
+        window.set_focus().map_err(|e| {
+            crate::webview_runtime::window_operation_error(&app, &label, "聚焦编辑器窗口失败", e)
+        })?;
         return Ok(());
     }
+    crate::webview_runtime::ensure_runtime_current(&app)?;
+    let creation_guard = crate::webview_runtime::WindowCreationGuard::start(&app, label.clone());
+    let page_load_guard = creation_guard.clone();
 
-    let window = tauri::WebviewWindowBuilder::new(
+    let build_result = tauri::WebviewWindowBuilder::new(
         &app,
         &label,
         tauri::WebviewUrl::App(format!("/editor?id={id}").into()),
@@ -393,10 +540,25 @@ pub async fn open_text_editor_window(app: tauri::AppHandle, id: i64) -> Result<(
     .visible(false)
     .resizable(true)
     .center()
-    .build()
-    .map_err(|e| format!("创建编辑器窗口失败: {e}"))?;
+    .on_page_load(move |window, payload| {
+        page_load_guard.on_page_load(&window, &payload);
+    })
+    .build();
+    let window = match build_result {
+        Ok(window) => window,
+        Err(error) => {
+            creation_guard.cancel();
+            return Err(crate::webview_runtime::window_operation_error(
+                &app,
+                &label,
+                "创建编辑器窗口失败",
+                error,
+            ));
+        }
+    };
 
     let _ = window;
+    crate::webview_runtime::wait_for_window_ready(&label).await?;
     Ok(())
 }
 

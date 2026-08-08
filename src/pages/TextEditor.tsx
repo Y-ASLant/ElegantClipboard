@@ -22,16 +22,26 @@ export function TextEditor() {
   const params = new URLSearchParams(window.location.search);
   const id = Number(params.get("id"));
 
-  // 加载主题后显示窗口
+  // 加载主题后显示窗口，并确认后端可将此 WebView 视为可用。
   useEffect(() => {
-    void initTheme().then(() => {
-      const win = getCurrentWindow();
-      requestAnimationFrame(() => {
-        void win.show();
-        void win.setFocus();
-        setThemeReady(true);
-      });
-    });
+    void initTheme()
+      .then(() => {
+        const win = getCurrentWindow();
+        requestAnimationFrame(() => {
+          void (async () => {
+            try {
+              await win.show();
+              await win.setFocus();
+              await invoke("managed_window_ready");
+            } catch (error) {
+              logError("Failed to initialize editor window:", error);
+            } finally {
+              setThemeReady(true);
+            }
+          })();
+        });
+      })
+      .catch((error) => logError("Failed to initialize editor theme:", error));
   }, []);
 
   // 加载条目内容

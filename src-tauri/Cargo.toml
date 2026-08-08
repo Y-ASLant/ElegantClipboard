@@ -107,3 +107,4 @@ windows = { version = "0.61", features = [
 ] }
 winreg = "0.55"
 windows-core = "0.61"
+webview2-com = "0.38"
