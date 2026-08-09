@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { LOCALE_OPTIONS, useTranslation, type Locale } from "@/i18n";
 import { logError } from "@/lib/logger";
-import { useUISettings } from "@/stores/ui-settings";
+import { resolveSettingsAccess, useUISettings } from "@/stores/ui-settings";
 
 export type PositionMode = "follow_cursor" | "screen_center" | "fixed_position";
 
@@ -50,6 +50,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
     pasteCloseWindow, setPasteCloseWindow,
     pasteMoveToTop, setPasteMoveToTop,
   } = useUISettings();
+  const toolbarButtons = useUISettings((state) => state.toolbarButtons);
   const [adminRestartDialogOpen, setAdminRestartDialogOpen] = useState(false);
   const [pendingAdminLaunch, setPendingAdminLaunch] = useState<boolean | null>(null);
   const [logRestartDialogOpen, setLogRestartDialogOpen] = useState(false);
@@ -57,6 +58,10 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   const [persistWindowSize, setPersistWindowSize] = useState(true);
   const [autoCheckUpdate, setAutoCheckUpdate] = useState(true);
   const [trayIconVisible, setTrayIconVisible] = useState(true);
+  const { trayIconCanBeHidden } = resolveSettingsAccess(
+    toolbarButtons,
+    trayIconVisible,
+  );
 
 
   useEffect(() => {
@@ -110,6 +115,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
   };
 
   const toggleTrayIconVisible = async (enabled: boolean) => {
+    if (!enabled && !trayIconCanBeHidden) return;
     setTrayIconVisible(enabled);
     try {
       await invoke("set_tray_icon_visibility", { visible: enabled });
@@ -206,12 +212,15 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <div className="space-y-0.5">
                 <Label className="text-xs">{t("settings.general.trayIcon")}</Label>
                 <p className="text-xs text-muted-foreground">
-                  {t("settings.general.trayIconDesc")}
+                  {trayIconCanBeHidden
+                    ? t("settings.general.trayIconDesc")
+                    : t("settings.general.trayIconRequired")}
                 </p>
               </div>
               <Switch
                 checked={trayIconVisible}
                 onCheckedChange={toggleTrayIconVisible}
+                disabled={!trayIconCanBeHidden}
               />
             </div>
           </div>

@@ -82,6 +82,7 @@ export const extended = {
         desc: "Customize toolbar buttons and order (max {{max}})",
         categoryFilter: "Bottom category bar",
         categoryFilterDesc: "Show content type filter at the bottom",
+        settingsRequired: "Required while the tray icon is hidden",
       },
       preview: {
         title: "Content preview",

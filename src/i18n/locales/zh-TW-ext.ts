@@ -82,6 +82,7 @@ export const extended = {
         desc: "自訂工具列顯示的按鈕及順序（最多 {{max}} 個）",
         categoryFilter: "底部分類列",
         categoryFilterDesc: "顯示底部內容類型分類篩選列",
+        settingsRequired: "隱藏系統匣時必須顯示此按鈕",
       },
       preview: {
         title: "內容預覽",

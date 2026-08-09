@@ -24,6 +24,23 @@ export const VALID_TOOLBAR_BUTTONS = [
 export const DEFAULT_TOOLBAR_BUTTONS: ToolbarButton[] = ["clear", "batch", "pin", "settings"];
 export const MAX_TOOLBAR_BUTTONS = 6;
 
+export function resolveSettingsAccess(
+  toolbarButtons: ToolbarButton[],
+  trayIconVisible: boolean,
+) {
+  const settingsButtonCanBeHidden = trayIconVisible;
+  const reconciledToolbarButtons: ToolbarButton[] =
+    trayIconVisible || toolbarButtons.includes("settings")
+      ? toolbarButtons
+      : [...toolbarButtons, "settings"];
+
+  return {
+    toolbarButtons: reconciledToolbarButtons,
+    trayIconCanBeHidden: reconciledToolbarButtons.includes("settings"),
+    settingsButtonCanBeHidden,
+  };
+}
+
 const UI_SETTINGS_DB_KEY = "ui_settings_json";
 const LEGACY_UI_SETTINGS_STORAGE_KEY = "clipboard-ui-settings";
 const SYNC_EVENT = "ui-settings-changed";
@@ -360,6 +377,25 @@ export const useUISettings = create<UISettings>()((set, get) => {
   };
 });
 
+async function repairSettingsAccess() {
+  try {
+    const trayIconVisible =
+      (await invoke<string | null>("get_setting", {
+        key: "tray_icon_visible",
+      })) !== "false";
+    const { toolbarButtons, setToolbarButtons } = useUISettings.getState();
+    const repairedToolbarButtons = resolveSettingsAccess(
+      toolbarButtons,
+      trayIconVisible,
+    ).toolbarButtons;
+    if (repairedToolbarButtons !== toolbarButtons) {
+      setToolbarButtons(repairedToolbarButtons);
+    }
+  } catch (error) {
+    logError("Failed to repair settings access:", error);
+  }
+}
+
 let initPromise: Promise<void> | null = null;
 let initialized = false;
 let unlistenFn: (() => void) | null = null;
@@ -374,7 +410,9 @@ export function loadUISettingsFromBackend() {
       if (value) {
         try {
           const parsed = JSON.parse(value);
-          useUISettings.setState(mergeUISettings(parsed));
+          const settings = mergeUISettings(parsed);
+          useUISettings.setState(settings);
+          await repairSettingsAccess();
           clearLegacyUISettings();
         } catch (error) {
           logError("Failed to parse UI settings:", error);
@@ -389,6 +427,7 @@ export function loadUISettingsFromBackend() {
 
       useUISettings.setState(legacy);
       await saveUISettings(legacy);
+      await repairSettingsAccess();
       clearLegacyUISettings();
     })
     .catch((error) => {

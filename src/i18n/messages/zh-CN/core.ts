@@ -153,6 +153,7 @@ export const core = {
       autoCheckUpdateDesc: "仅在程序启动时自动检查更新",
       trayIcon: "显示系统托盘图标",
       trayIconDesc: "关闭后仍可通过快捷键唤醒主窗口",
+      trayIconRequired: "要隐藏托盘，需先显示工具栏中的设置按钮",
       windowTitle: "窗口",
       windowDesc: "配置窗口显示行为",
       positionMode: "唤醒位置",

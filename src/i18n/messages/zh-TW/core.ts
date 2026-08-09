@@ -153,6 +153,7 @@ export const core = {
       autoCheckUpdateDesc: "僅在程式啟動時自動檢查更新",
       trayIcon: "顯示系統匣圖示",
       trayIconDesc: "關閉後仍可透過快捷鍵喚醒主視窗",
+      trayIconRequired: "要隱藏系統匣，需先顯示工具列中的設定按鈕",
       windowTitle: "視窗",
       windowDesc: "設定視窗顯示行為",
       positionMode: "喚醒位置",

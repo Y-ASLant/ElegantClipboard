@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { useUISettings } from "./ui-settings";
+import { invoke } from "@tauri-apps/api/core";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  loadUISettingsFromBackend,
+  resolveSettingsAccess,
+  useUISettings,
+} from "./ui-settings";
 
 // Reset store before each test
 beforeEach(() => {
@@ -105,6 +110,47 @@ describe("ui-settings store", () => {
       const newButtons = ["clear", "settings"] as const;
       useUISettings.getState().setToolbarButtons([...newButtons]);
       expect(useUISettings.getState().toolbarButtons).toEqual([...newButtons]);
+    });
+  });
+
+  describe("settings access", () => {
+    it("allows hiding the tray only when the Settings button is visible", () => {
+      expect(
+        resolveSettingsAccess(["clear", "settings"], true).trayIconCanBeHidden,
+      ).toBe(true);
+      expect(
+        resolveSettingsAccess(["clear", "batch"], true).trayIconCanBeHidden,
+      ).toBe(false);
+    });
+
+    it("allows hiding the Settings button only when the tray is visible", () => {
+      expect(
+        resolveSettingsAccess(["clear", "settings"], true).settingsButtonCanBeHidden,
+      ).toBe(true);
+      expect(
+        resolveSettingsAccess(["clear", "settings"], false).settingsButtonCanBeHidden,
+      ).toBe(false);
+    });
+
+    it("restores the Settings button for a legacy locked-out configuration", () => {
+      expect(
+        resolveSettingsAccess(["clear", "batch"], false).toolbarButtons,
+      ).toEqual(["clear", "batch", "settings"]);
+    });
+
+    it("repairs persisted settings that would hide every entry point", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(JSON.stringify({ toolbarButtons: ["clear", "batch"] }))
+        .mockResolvedValueOnce("false")
+        .mockResolvedValueOnce(undefined);
+
+      await loadUISettingsFromBackend();
+
+      expect(useUISettings.getState().toolbarButtons).toEqual([
+        "clear",
+        "batch",
+        "settings",
+      ]);
     });
   });
 

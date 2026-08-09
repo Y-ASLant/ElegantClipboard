@@ -153,6 +153,7 @@ export const core = {
       autoCheckUpdateDesc: "Check for updates only when the app starts",
       trayIcon: "Show tray icon",
       trayIconDesc: "Wake the main window via shortcut after closing",
+      trayIconRequired: "Show the Settings button in the toolbar before hiding the tray icon",
       windowTitle: "Window",
       windowDesc: "Configure window behavior",
       positionMode: "Wake position",

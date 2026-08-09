@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import {
   DndContext,
   closestCenter,
@@ -23,6 +23,7 @@ import {
   CloudArrowUp16Regular,
   CloudArrowDown16Regular,
 } from "@fluentui/react-icons";
+import { invoke } from "@tauri-apps/api/core";
 import { SettingsCard, SettingsCardHeader } from "@/components/settings/SettingSection";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -30,8 +31,10 @@ import { Switch } from "@/components/ui/switch";
 import { useWebDAVAvailable } from "@/hooks/useWebDAVAvailable";
 import { useTranslation } from "@/i18n";
 import { getToolbarButtonRegistry } from "@/lib/constants";
+import { logError } from "@/lib/logger";
 import { isWebDAVToolbarButton } from "@/lib/webdav-availability";
 import {
+  resolveSettingsAccess,
   useUISettings,
   DEFAULT_TOOLBAR_BUTTONS,
   MAX_TOOLBAR_BUTTONS,
@@ -57,6 +60,7 @@ function SortableToolbarItem({
   description,
   active,
   onToggle,
+  disabled = false,
 }: {
   id: ToolbarButton;
   icon: React.ComponentType<{ className?: string }>;
@@ -64,6 +68,7 @@ function SortableToolbarItem({
   description: string;
   active: boolean;
   onToggle: () => void;
+  disabled?: boolean;
 }) {
   const {
     attributes,
@@ -106,6 +111,7 @@ function SortableToolbarItem({
       <Switch
         checked={active}
         onCheckedChange={onToggle}
+        disabled={disabled}
         className="shrink-0"
       />
     </div>
@@ -115,6 +121,7 @@ function SortableToolbarItem({
 export function DisplayTab() {
   const { t, locale } = useTranslation();
   const webdavAvailable = useWebDAVAvailable();
+  const [trayIconVisible, setTrayIconVisible] = useState<boolean | null>(null);
   const toolbarButtonRegistry = useMemo(() => getToolbarButtonRegistry(), [locale]);
   const allToolbarButtons = useMemo(
     () => (webdavAvailable ? [...BASE_TOOLBAR_BUTTONS, ...WEBDAV_TOOLBAR_BUTTONS] : BASE_TOOLBAR_BUTTONS),
@@ -182,6 +189,10 @@ export function DisplayTab() {
     showCategoryFilter, setShowCategoryFilter,
     showDragAreaIndicator, setShowDragAreaIndicator,
   } = useUISettings();
+  const { settingsButtonCanBeHidden } = resolveSettingsAccess(
+    toolbarButtons,
+    trayIconVisible === true,
+  );
   const anyHoverPreviewEnabled = imagePreviewEnabled || textPreviewEnabled;
 
   useEffect(() => {
@@ -192,6 +203,20 @@ export function DisplayTab() {
     }
   }, [webdavAvailable, toolbarButtons, setToolbarButtons]);
 
+  useEffect(() => {
+    let cancelled = false;
+    invoke<string | null>("get_setting", { key: "tray_icon_visible" })
+      .then((value) => {
+        if (!cancelled) setTrayIconVisible(value !== "false");
+      })
+      .catch((error) => {
+        logError("Failed to load tray_icon_visible:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 3 } })
   );
@@ -199,8 +224,11 @@ export function DisplayTab() {
   const isButtonActive = (id: ToolbarButton) => toolbarButtons.includes(id);
 
   const toggleButton = (id: ToolbarButton) => {
+    if (id === "settings" && !settingsButtonCanBeHidden) {
+      return;
+    }
     if (isButtonActive(id)) {
-      setToolbarButtons(toolbarButtons.filter((b) => b !== id));
+      setToolbarButtons(toolbarButtons.filter((button) => button !== id));
     } else if (toolbarButtons.length < MAX_TOOLBAR_BUTTONS) {
       setToolbarButtons([...toolbarButtons, id]);
     }
@@ -252,15 +280,22 @@ export function DisplayTab() {
                 const active = isButtonActive(id);
                 const meta = toolbarButtonRegistry[id];
                 const Icon = TOOLBAR_BUTTON_ICONS[id];
+                const toggleDisabled =
+                  id === "settings" && !settingsButtonCanBeHidden;
                 return (
                   <SortableToolbarItem
                     key={id}
                     id={id}
                     icon={Icon}
                     label={meta.label}
-                    description={meta.description}
+                    description={
+                      toggleDisabled
+                        ? t("settings.display.toolbar.settingsRequired")
+                        : meta.description
+                    }
                     active={active}
                     onToggle={() => toggleButton(id)}
+                    disabled={toggleDisabled}
                   />
                 );
               })}

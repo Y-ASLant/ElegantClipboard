@@ -82,6 +82,7 @@ export const extended = {
         desc: "自定义工具栏显示的按钮及顺序（最多 {{max}} 个）",
         categoryFilter: "底部分类栏",
         categoryFilterDesc: "显示底部内容类型分类筛选栏",
+        settingsRequired: "隐藏系统托盘时必须显示此按钮",
       },
       preview: {
         title: "内容预览",
