@@ -393,6 +393,10 @@ async function repairSettingsAccess() {
     }
   } catch (error) {
     logError("Failed to repair settings access:", error);
+    const { toolbarButtons, setToolbarButtons } = useUISettings.getState();
+    if (!toolbarButtons.includes("settings")) {
+      setToolbarButtons([...toolbarButtons, "settings"]);
+    }
   }
 }
 

@@ -8,6 +8,7 @@ import {
 
 // Reset store before each test
 beforeEach(() => {
+  vi.clearAllMocks();
   useUISettings.setState({
     cardMaxLines: 3,
     showTime: true,
@@ -151,6 +152,25 @@ describe("ui-settings store", () => {
         "batch",
         "settings",
       ]);
+    });
+
+    it("keeps a Settings button when tray visibility cannot be loaded", async () => {
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(JSON.stringify({ toolbarButtons: ["clear", "batch"] }))
+        .mockRejectedValueOnce(new Error("tray visibility unavailable"))
+        .mockResolvedValueOnce(undefined);
+
+      await loadUISettingsFromBackend();
+
+      expect(useUISettings.getState().toolbarButtons).toEqual([
+        "clear",
+        "batch",
+        "settings",
+      ]);
+      expect(vi.mocked(invoke)).toHaveBeenLastCalledWith("set_setting", {
+        key: "ui_settings_json",
+        value: expect.stringContaining("\"settings\""),
+      });
     });
   });
 

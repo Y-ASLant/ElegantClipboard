@@ -1,5 +1,12 @@
 # ElegantClipboard 更新日志
 
+## v1.2.7
+**发布日期：** 2026年8月9日
+
+- fix: 处理 WebView2 运行时更新或断连导致的动态窗口创建失败；设置、翻译、预览和编辑窗口失联时会触发限流自动重启以恢复 https://github.com/Y-ASLant/ElegantClipboard/issues/147
+- fix: 修复悬停预览中 Ctrl+滚动同时滚动剪贴板列表；文本滚动和图片缩放仅作用于预览内容 https://github.com/Y-ASLant/ElegantClipboard/issues/138
+- fix: 修复 #150 中设置入口丢失的问题——防止同时隐藏系统托盘和工具栏设置入口；旧版锁死配置会在启动时自动恢复设置按钮 https://github.com/Y-ASLant/ElegantClipboard/issues/150
+
 ## v1.2.6
 **发布日期：** 2026年7月26日
 
