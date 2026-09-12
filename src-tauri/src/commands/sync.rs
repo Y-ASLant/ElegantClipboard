@@ -82,23 +82,26 @@ pub async fn webdav_upload(
         let size = zip_data.len();
         webdav::upload_sync(&config, &zip_data, "clipboard_sync.zip", "application/zip")?;
 
-        let device_id = webdav::get_or_create_device_id(&db);
-        let local_map = build_local_media_map(&db, &data_dir, &options, &device_id);
-        if local_map.is_empty() {
-            let map = webdav::download_media_map(&config).unwrap_or_default();
-            let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
-        } else {
-            match webdav::upload_media_map(&config, &local_map, &device_id) {
-                Ok(map) => {
-                    let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
-                }
-                Err(e) => {
-                    tracing::warn!("上传 media map 失败，跳过清理: {}", e);
+        let pending_media_workers = if options.sync_image || options.sync_files {
+            let device_id = webdav::get_or_create_device_id(&db);
+            let local_map = build_local_media_map(&db, &data_dir, &options, &device_id);
+            if local_map.is_empty() {
+                let map = webdav::download_media_map(&config).unwrap_or_default();
+                let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
+            } else {
+                match webdav::upload_media_map(&config, &local_map, &device_id) {
+                    Ok(map) => {
+                        let _ = webdav::cleanup_orphaned_remote_media(&config, &map);
+                    }
+                    Err(e) => {
+                        tracing::warn!("上传 media map 失败，跳过清理: {}", e);
+                    }
                 }
             }
+            spawn_media_upload_files(&app, &config, &data_dir, &local_map)
+        } else {
+            0
         }
-
-        let pending_media_workers = spawn_media_upload_files(&app, &config, &data_dir, &local_map);
 
         webdav::record_and_notify_last_sync(&db, &app_handle)?;
 

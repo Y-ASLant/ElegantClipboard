@@ -532,8 +532,8 @@ pub fn build_media_map(
         }
     }
 
-    // 应用图标（始终同步，体积极小）
-    {
+    // 应用图标（随媒体同步选项传输；纯文本模式不携带）
+    if options.sync_image || options.sync_files {
         let mut seen_icon_paths = std::collections::HashSet::new();
         for item in items {
             if let Some(ref icon_path) = item.source_app_icon {
