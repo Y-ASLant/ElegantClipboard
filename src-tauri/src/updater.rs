@@ -323,6 +323,43 @@ pub fn install(installer_path: &str) -> Result<(), String> {
         installer_path
     );
 
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use windows::core::PCWSTR;
+
+        let to_wide = |value: &std::ffi::OsStr| {
+            value
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>()
+        };
+        let operation = to_wide(std::ffi::OsStr::new("runas"));
+        let file = to_wide(canonical_path.as_os_str());
+        let parameters = to_wide(std::ffi::OsStr::new("/P /R"));
+
+        // NSIS 安装包通常要求管理员权限。ShellExecuteW 的 runas 动作会
+        // 触发标准 UAC，而普通 Command::spawn 会直接失败并返回错误 740。
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                PCWSTR(operation.as_ptr()),
+                PCWSTR(file.as_ptr()),
+                PCWSTR(parameters.as_ptr()),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as usize <= 32 {
+            return Err(
+                "启动安装程序失败：用户取消了管理员权限请求或 Windows 拒绝启动".to_string(),
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
     std::process::Command::new(installer_path)
         .args(["/P", "/R"])
         .spawn()

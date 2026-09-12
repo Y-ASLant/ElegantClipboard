@@ -378,9 +378,10 @@ pub fn cancel_update_download() {
 
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle, installer_path: String) -> Result<(), String> {
-    crate::webview_runtime::mark_intentional_exit();
     save_main_window_placement(&app);
     crate::updater::install(&installer_path)?;
+    // 只有安装器已成功启动后才标记主动退出；UAC 取消或启动失败时保留当前会话。
+    crate::webview_runtime::mark_intentional_exit();
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     app.exit(0);
     Ok(())
