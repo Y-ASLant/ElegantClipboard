@@ -101,7 +101,7 @@ pub async fn webdav_upload(
             spawn_media_upload_files(&app, &config, &data_dir, &local_map)
         } else {
             0
-        }
+        };
 
         webdav::record_and_notify_last_sync(&db, &app_handle)?;
 

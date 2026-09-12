@@ -13,7 +13,18 @@
       "hash": "d8c00a0669e4913ee74f2dfd812a254e1f6a3f9232736e9784e478a993fa5635"
     }
   },
-  "pre_install": "Remove-Item \"$dir\\`$*\", \"$dir\\uninst*\" -Force -Recurse",
+  "pre_install": [
+    "Remove-Item \"$dir\\`$*\", \"$dir\\uninst*\" -Force -Recurse",
+    "New-Item \"$dir\\config.json\", \"$dir\\clipboard.db\", \"$dir\\app.log\" -ItemType File -Force | Out-Null"
+  ],
+  "persist": [
+    "config.json",
+    "clipboard.db",
+    "images",
+    "icons",
+    "staged",
+    "app.log"
+  ],
   "shortcuts": [
     [
       "elegant-clipboard.exe",
