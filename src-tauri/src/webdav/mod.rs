@@ -399,10 +399,10 @@ fn collect_item_media_local_paths(item: &crate::database::ClipboardItem) -> Vec<
     if let Some(ref p) = item.source_app_icon {
         paths.push(p.clone());
     }
-    if let Some(ref json) = item.file_paths {
-        if let Ok(file_paths) = serde_json::from_str::<Vec<String>>(json) {
-            paths.extend(file_paths);
-        }
+    if let Some(ref json) = item.file_paths
+        && let Ok(file_paths) = serde_json::from_str::<Vec<String>>(json)
+    {
+        paths.extend(file_paths);
     }
     paths
 }
@@ -459,14 +459,13 @@ pub fn item_importable_for_sync(
                 if Path::new(path).is_file() {
                     continue;
                 }
-                if let Some(ref payload) = payload {
-                    if payload
+                if let Some(ref payload) = payload
+                    && payload
                         .staged
                         .iter()
                         .any(|s| s.original == *path && Path::new(&s.staged).is_file())
-                    {
-                        continue;
-                    }
+                {
+                    continue;
                 }
                 if !media_index.contains_key(path.as_str()) {
                     return false;

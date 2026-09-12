@@ -243,28 +243,38 @@ fn spawn_media_upload_worker(
     }
 }
 
-fn spawn_media_download_worker(
-    app: &tauri::AppHandle,
-    config: &webdav::WebDavConfig,
-    data_dir: &std::path::Path,
+struct MediaDownloadWorker {
+    app: tauri::AppHandle,
+    config: webdav::WebDavConfig,
+    data_dir: std::path::PathBuf,
     entries: Vec<webdav::MediaEntry>,
     thread_name: &'static str,
     label: &'static str,
     pending: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     on_complete: std::sync::Arc<MediaSyncComplete>,
-) -> bool {
-    if entries.is_empty() {
+}
+
+fn spawn_media_download_worker(worker: MediaDownloadWorker) -> bool {
+    if worker.entries.is_empty() {
         return false;
     }
-    let cfg = config.clone();
-    let dir = data_dir.to_path_buf();
+    let MediaDownloadWorker {
+        app,
+        config,
+        data_dir,
+        entries,
+        thread_name,
+        label,
+        pending,
+        on_complete,
+    } = worker;
     let handle = app.clone();
     let pending_worker = pending.clone();
     let on_complete_worker = on_complete.clone();
     match std::thread::Builder::new()
         .name(thread_name.into())
         .spawn(move || {
-            let msg = match webdav::download_missing_media(&cfg, &entries, &dir) {
+            let msg = match webdav::download_missing_media(&config, &entries, &data_dir) {
                 Ok(n) if n > 0 => format!("{label}下载完成：{n} 个文件"),
                 Ok(_) => format!("{label}已是最新"),
                 Err(e) => format!("{label}下载失败: {e}"),
@@ -289,7 +299,7 @@ fn spawn_media_download_worker(
                 );
                 webdav::emit_webdav_media_ready(&on_complete.app);
             }
-            emit_media_sync_done(app, &format!("{label}下载线程启动失败: {e}"));
+            emit_media_sync_done(&app, &format!("{label}下载线程启动失败: {e}"));
             true
         }
     }
@@ -387,40 +397,40 @@ fn spawn_media_download(
     });
 
     let mut workers = 0u8;
-    if spawn_media_download_worker(
-        app,
-        config,
-        data_dir,
-        images,
-        "webdav-download-images",
-        "图片",
-        pending.clone(),
-        on_complete.clone(),
-    ) {
+    if spawn_media_download_worker(MediaDownloadWorker {
+        app: app.clone(),
+        config: config.clone(),
+        data_dir: data_dir.to_path_buf(),
+        entries: images,
+        thread_name: "webdav-download-images",
+        label: "图片",
+        pending: pending.clone(),
+        on_complete: on_complete.clone(),
+    }) {
         workers += 1;
     }
-    if spawn_media_download_worker(
-        app,
-        config,
-        data_dir,
-        files,
-        "webdav-download-files",
-        "文件",
-        pending.clone(),
-        on_complete.clone(),
-    ) {
+    if spawn_media_download_worker(MediaDownloadWorker {
+        app: app.clone(),
+        config: config.clone(),
+        data_dir: data_dir.to_path_buf(),
+        entries: files,
+        thread_name: "webdav-download-files",
+        label: "文件",
+        pending: pending.clone(),
+        on_complete: on_complete.clone(),
+    }) {
         workers += 1;
     }
-    if spawn_media_download_worker(
-        app,
-        config,
-        data_dir,
-        icons,
-        "webdav-download-icons",
-        "图标",
+    if spawn_media_download_worker(MediaDownloadWorker {
+        app: app.clone(),
+        config: config.clone(),
+        data_dir: data_dir.to_path_buf(),
+        entries: icons,
+        thread_name: "webdav-download-icons",
+        label: "图标",
         pending,
         on_complete,
-    ) {
+    }) {
         workers += 1;
     }
     workers

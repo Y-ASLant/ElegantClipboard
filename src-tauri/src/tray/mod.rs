@@ -382,16 +382,16 @@ fn open_settings_window_inner(app: &AppHandle) -> Result<(), String> {
     };
 
     // 构建后设置物理位置，绕过逻辑→物理坐标换算歧义
-    if let Some(pos) = phys_pos {
-        if let Err(error) = window.set_position(tauri::Position::Physical(pos)) {
-            let detail = crate::webview_runtime::window_operation_error(
-                app,
-                "settings",
-                "定位设置窗口失败",
-                error,
-            );
-            tracing::warn!(%detail, "Failed to position settings window");
-        }
+    if let Some(pos) = phys_pos
+        && let Err(error) = window.set_position(tauri::Position::Physical(pos))
+    {
+        let detail = crate::webview_runtime::window_operation_error(
+            app,
+            "settings",
+            "定位设置窗口失败",
+            error,
+        );
+        tracing::warn!(%detail, "Failed to position settings window");
     }
 
     Ok(())

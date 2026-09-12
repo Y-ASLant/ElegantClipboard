@@ -342,7 +342,8 @@ fn extract_icon_png(exe_path: &str) -> Option<Vec<u8>> {
         }
 
         // BGRA → RGBA 转换
-        for chunk in pixels.chunks_exact_mut(4) {
+        let (chunks, _) = pixels.as_chunks_mut::<4>();
+        for chunk in chunks {
             chunk.swap(0, 2);
         }
         let img = image::RgbaImage::from_raw(w as u32, h as u32, pixels)?;
