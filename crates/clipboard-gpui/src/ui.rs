@@ -141,22 +141,53 @@ struct HistoryDrag {
     favorite_only: bool,
     group_id: Option<i64>,
     generation: u64,
+    kind: &'static str,
     preview: String,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DropTarget {
+    id: i64,
+    after: bool,
+    allowed: bool,
+}
+
 impl Render for HistoryDrag {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         visual::reveal(
             div()
-                .w(px(260.))
+                .w(px(280.))
                 .p_3()
                 .rounded_md()
                 .border_1()
                 .border_color(cx.theme().primary)
                 .bg(cx.theme().background)
                 .text_color(cx.theme().foreground)
-                .text_sm()
                 .shadow_md()
-                .child(div().text_ellipsis().child(self.preview.clone())),
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(format!(
+                            "⠿  {}{}",
+                            if self.pinned { "置顶 · " } else { "" },
+                            self.kind
+                        )),
+                )
+                .child(
+                    div()
+                        .rounded_sm()
+                        .bg(cx.theme().muted)
+                        .px_2()
+                        .py_1()
+                        .text_sm()
+                        .line_clamp(2)
+                        .text_ellipsis()
+                        .child(self.preview.clone()),
+                ),
             ("drag-preview", self.id as usize),
             cx,
         )
@@ -192,6 +223,7 @@ struct ClipboardView {
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
+    settings_open: bool,
     theme: ThemePreference,
     theme_pending: bool,
     hotkey_choice: HotkeyPreference,
@@ -200,7 +232,7 @@ struct ClipboardView {
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
-    drop_target: Option<(i64, bool)>,
+    drop_target: Option<DropTarget>,
     reordered: Option<(i64, usize)>,
     feedback_revision: usize,
     last_drag_scroll: Instant,
@@ -345,6 +377,7 @@ impl ClipboardView {
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring,
+            settings_open: false,
             theme,
             theme_pending: false,
             hotkey_choice,
@@ -1272,7 +1305,8 @@ impl ClipboardView {
             favorite_only: self.history.favorite_only,
             group_id: self.history.group_id,
             generation: self.history.generation,
-            preview: item.preview.clone().unwrap_or_default(),
+            kind,
+            preview: item.preview.clone().unwrap_or_else(|| kind.to_owned()),
         };
         let entity = cx.entity();
         let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
@@ -1298,16 +1332,18 @@ impl ClipboardView {
             .on_drag_move(
                 cx.listener(move |this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
                     if !event.bounds.contains(&event.event.position) {
-                        if this.drop_target.is_some_and(|(target, _)| target == id) {
+                        if this.drop_target.is_some_and(|target| target.id == id) {
                             this.drop_target = None;
                             cx.notify();
                         }
                         return;
                     }
                     let after = event.event.position.y > event.bounds.center().y;
-                    let target = (this.valid_drag(event.drag(cx), pinned)
-                        && event.drag(cx).id != id)
-                        .then_some((id, after));
+                    let target = (event.drag(cx).id != id).then_some(DropTarget {
+                        id,
+                        after,
+                        allowed: this.valid_drag(event.drag(cx), pinned),
+                    });
                     if this.drop_target != target {
                         this.drop_target = target;
                         cx.notify();
@@ -1324,14 +1360,14 @@ impl ClipboardView {
                     cx.notify();
                     return;
                 }
-                let Some((_, after)) = this.drop_target.filter(|(target, _)| *target == id) else {
+                let Some(target) = this.drop_target.filter(|target| target.id == id) else {
                     return;
                 };
                 if this.send(
                     Command::Reorder {
                         from: drag.id,
                         to: id,
-                        after,
+                        after: target.after,
                         favorite_only: drag.favorite_only,
                         group_id: drag.group_id,
                         generation: drag.generation,
@@ -1357,39 +1393,47 @@ impl ClipboardView {
                     .py_2()
                     .rounded_md()
                     .border_1()
-                    .border_color(if selected {
-                        cx.theme().primary
-                    } else {
-                        cx.theme().border
+                    .border_color(match active_drop.filter(|target| target.id == id) {
+                        Some(target) if target.allowed => cx.theme().primary,
+                        Some(_) => cx.theme().danger,
+                        None if selected => cx.theme().primary,
+                        None => cx.theme().border,
                     })
                     .bg(color)
                     .relative()
-                    .when(
-                        active_drop.is_some_and(|(target, _)| target == id),
-                        |card| {
-                            card.child(visual::reveal(
-                                div()
-                                    .absolute()
-                                    .left_0()
-                                    .right_0()
-                                    .h(px(visual::DROP_MARKER_HEIGHT))
-                                    .bg(cx.theme().primary)
-                                    .when(active_drop == Some((id, true)), |line| line.bottom_0())
-                                    .when(active_drop == Some((id, false)), |line| line.top_0()),
-                                (
-                                    "drop-marker",
-                                    id as usize * 2 + usize::from(active_drop == Some((id, true))),
-                                ),
-                                cx,
-                            ))
-                        },
-                    )
+                    .when(active_drop.is_some_and(|target| target.id == id), |card| {
+                        card.child(visual::reveal(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .h(px(visual::DROP_MARKER_HEIGHT))
+                                .bg(if active_drop.is_some_and(|target| target.allowed) {
+                                    cx.theme().primary
+                                } else {
+                                    cx.theme().danger
+                                })
+                                .when(active_drop.is_some_and(|target| target.after), |line| {
+                                    line.bottom_0()
+                                })
+                                .when(active_drop.is_some_and(|target| !target.after), |line| {
+                                    line.top_0()
+                                }),
+                            (
+                                "drop-marker",
+                                id as usize * 2
+                                    + usize::from(active_drop.is_some_and(|target| target.after)),
+                            ),
+                            cx,
+                        ))
+                    })
                     .flex()
                     .flex_col()
                     .gap_2()
                     .child(
                         div()
                             .flex()
+                            .flex_none()
                             .items_center()
                             .justify_between()
                             .child(
@@ -1414,52 +1458,53 @@ impl ClipboardView {
                                     .child(item.created_at.clone()),
                             ),
                     )
-                    .child(if is_image {
+                    .child(
                         div()
                             .flex_1()
                             .min_h_0()
                             .overflow_hidden()
+                            .rounded_sm()
+                            .bg(cx.theme().muted)
+                            .px_3()
+                            .py_2()
                             .flex()
                             .items_center()
                             .gap_3()
+                            .when(is_image, |body| {
+                                body.child(
+                                    div()
+                                        .w(px(visual::THUMBNAIL_WIDTH))
+                                        .h(px(visual::THUMBNAIL_HEIGHT))
+                                        .flex_none()
+                                        .rounded_sm()
+                                        .overflow_hidden()
+                                        .when_some(item.image_path.as_ref(), |box_, path| {
+                                            box_.child(
+                                                img(std::path::PathBuf::from(path))
+                                                    .size_full()
+                                                    .object_fit(ObjectFit::Contain)
+                                                    .with_fallback(|| {
+                                                        div().child("无法显示").into_any_element()
+                                                    }),
+                                            )
+                                        }),
+                                )
+                            })
                             .child(
                                 div()
-                                    .w(px(64.))
-                                    .h(px(48.))
-                                    .flex_none()
-                                    .rounded_sm()
-                                    .overflow_hidden()
-                                    .bg(cx.theme().muted)
-                                    .when_some(item.image_path.as_ref(), |box_, path| {
-                                        box_.child(
-                                            img(std::path::PathBuf::from(path))
-                                                .size_full()
-                                                .object_fit(ObjectFit::Contain)
-                                                .with_fallback(|| {
-                                                    div().child("无法显示").into_any_element()
-                                                }),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
+                                    .flex_1()
+                                    .min_w_0()
                                     .text_sm()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(item.preview.clone().unwrap_or_else(|| "图片".into())),
-                            )
-                    } else {
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .text_sm()
-                            .line_height(px(20.))
-                            .line_clamp(2)
-                            .text_ellipsis()
-                            .child(item.preview.clone().unwrap_or_default())
-                    })
+                                    .line_height(px(20.))
+                                    .line_clamp(2)
+                                    .text_ellipsis()
+                                    .child(item.preview.clone().unwrap_or_else(|| kind.into())),
+                            ),
+                    )
                     .child(
                         div()
                             .flex()
+                            .flex_none()
                             .flex_wrap()
                             .items_center()
                             .gap_1()
@@ -1560,7 +1605,7 @@ impl ClipboardView {
         if let Some((moved, revision)) = self.reordered
             && moved == id
         {
-            visual::reveal(row, ("reorder-feedback", revision), cx)
+            visual::settle(row, ("reorder-feedback", revision), cx)
         } else {
             row.into_any_element()
         }
@@ -1583,8 +1628,9 @@ impl Render for ClipboardView {
             )
             .child(
                 div()
+                    .h(px(32.))
+                    .flex_none()
                     .px(px(PAGE_PADDING))
-                    .py_1()
                     .flex()
                     .items_center()
                     .justify_between()
@@ -1594,73 +1640,118 @@ impl Render for ClipboardView {
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child("外观"),
+                            .child("窗口设置"),
                     )
                     .child(
-                        div().flex().gap_1().children(
-                            [
-                                ("theme-system", "跟随系统", ThemePreference::System),
-                                ("theme-light", "浅色", ThemePreference::Light),
-                                ("theme-dark", "深色", ThemePreference::Dark),
-                            ]
-                            .map(|(id, label, theme)| {
-                                Button::new(id)
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(label)
-                                    .selected(self.theme == theme)
-                                    .disabled(self.theme_pending)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if this.theme != theme
-                                            && this.send(Command::SetTheme(theme), cx)
-                                        {
-                                            this.theme_pending = true;
-                                            cx.notify();
-                                        }
-                                    }))
-                            }),
-                        ),
+                        Button::new("settings-toggle")
+                            .ghost()
+                            .xsmall()
+                            .h(px(CONTROL_HEIGHT))
+                            .label(if self.settings_open {
+                                "收起"
+                            } else {
+                                "展开"
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.settings_open = !this.settings_open;
+                                cx.notify();
+                            })),
                     ),
             )
-            .child(
-                div()
-                    .px(px(PAGE_PADDING))
-                    .py_1()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("唤出"),
-                    )
-                    .child(
-                        div().flex().gap_1().children(
-                            [
-                                ("hotkey-ctrl-shift-v", HotkeyPreference::CtrlShiftV),
-                                ("hotkey-alt-c", HotkeyPreference::AltC),
-                                ("hotkey-ctrl-alt-v", HotkeyPreference::CtrlAltV),
-                                ("hotkey-disabled", HotkeyPreference::Disabled),
-                            ]
-                            .map(|(id, choice)| {
-                                Button::new(id)
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(choice.label())
-                                    .selected(self.hotkey_choice == choice)
-                                    .disabled(self.hotkey_pending)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.select_hotkey(choice, cx);
-                                    }))
-                            }),
+            .when(self.settings_open, |view| {
+                view.child(visual::reveal(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .px(px(PAGE_PADDING))
+                                .py_1()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("外观"),
+                                )
+                                .child(
+                                    div().flex().gap_1().children(
+                                        [
+                                            ("theme-system", "跟随系统", ThemePreference::System),
+                                            ("theme-light", "浅色", ThemePreference::Light),
+                                            ("theme-dark", "深色", ThemePreference::Dark),
+                                        ]
+                                        .map(
+                                            |(id, label, theme)| {
+                                                Button::new(id)
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .h(px(CONTROL_HEIGHT))
+                                                    .label(label)
+                                                    .selected(self.theme == theme)
+                                                    .disabled(self.theme_pending)
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        if this.theme != theme
+                                                            && this
+                                                                .send(Command::SetTheme(theme), cx)
+                                                        {
+                                                            this.theme_pending = true;
+                                                            cx.notify();
+                                                        }
+                                                    }))
+                                            },
+                                        ),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .px(px(PAGE_PADDING))
+                                .py_1()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("唤出"),
+                                )
+                                .child(
+                                    div().flex().gap_1().children(
+                                        [
+                                            ("hotkey-ctrl-shift-v", HotkeyPreference::CtrlShiftV),
+                                            ("hotkey-alt-c", HotkeyPreference::AltC),
+                                            ("hotkey-ctrl-alt-v", HotkeyPreference::CtrlAltV),
+                                            ("hotkey-disabled", HotkeyPreference::Disabled),
+                                        ]
+                                        .map(
+                                            |(id, choice)| {
+                                                Button::new(id)
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .h(px(CONTROL_HEIGHT))
+                                                    .label(choice.label())
+                                                    .selected(self.hotkey_choice == choice)
+                                                    .disabled(self.hotkey_pending)
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.select_hotkey(choice, cx);
+                                                    }))
+                                            },
+                                        ),
+                                    ),
+                                ),
                         ),
-                    ),
-            )
+                    "window-settings",
+                    cx,
+                ))
+            })
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
             .child(self.render_status(cx))
     }
@@ -1729,8 +1820,8 @@ impl ClipboardView {
             .child(
                 div()
                     .px(px(PAGE_PADDING))
-                    .pt_5()
-                    .pb_3()
+                    .pt_3()
+                    .pb_2()
                     .flex()
                     .items_center()
                     .justify_between()
@@ -1744,7 +1835,7 @@ impl ClipboardView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("拖动卡片调整顺序 · 置顶项单独排序"),
+                                    .child("拖动卡片排序 · 红线不可放置"),
                             ),
                     )
                     .child(
@@ -1787,7 +1878,7 @@ impl ClipboardView {
             .child(
                 div()
                     .px(px(PAGE_PADDING))
-                    .pb_3()
+                    .pb_2()
                     .child(Input::new(&self.search).cleanable(true)),
             )
             .child(div().px(px(PAGE_PADDING)).pb_2().flex().gap_2().children(
