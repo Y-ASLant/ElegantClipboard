@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/clipboard-core", "crates/clipboard-platform"]
+members = ["crates/clipboard-core", "crates/clipboard-platform", "crates/clipboard-gpui"]
 exclude = ["src-tauri", "clipboard-rs"]
 resolver = "3"
 
@@ -17,6 +17,7 @@ async-channel = "2.5.0"
 blake3 = "1.8.7"
 clipboard-rs = { version = "0.3.5", default-features = false }
 directories = "6.0.0"
+gpui-kit = "0.6.2"
 parking_lot = "0.12.5"
 rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
 serde = { version = "1.0.229", features = ["derive"] }

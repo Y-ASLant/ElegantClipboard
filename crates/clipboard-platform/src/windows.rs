@@ -38,6 +38,7 @@ pub enum Event {
         generation: u64,
     },
     Status(String),
+    Paused(bool),
     Error(String),
 }
 
@@ -282,14 +283,10 @@ impl Worker {
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
                 state.paused = paused;
                 state.last_sequence = unsafe { GetClipboardSequenceNumber() };
-                let _ = self.events.try_send(Event::Status(
-                    if paused {
-                        "已暂停记录"
-                    } else {
-                        "已恢复记录"
-                    }
-                    .into(),
-                ));
+                drop(state);
+                self.events
+                    .send_blocking(Event::Paused(paused))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
         }
@@ -369,6 +366,39 @@ mod tests {
         drop(service);
         let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
         drop(service);
+        Ok(())
+    }
+
+    #[test]
+    fn pause_acknowledgement_is_ordered_and_does_not_change_history() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        for paused in [true, false] {
+            service.send(Command::Pause(paused))?;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match events.try_recv() {
+                    Ok(Event::Paused(actual)) => {
+                        assert_eq!(actual, paused);
+                        break;
+                    }
+                    Ok(Event::Error(message)) => panic!("{message}"),
+                    _ => {}
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "pause was not acknowledged"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        service.send(Command::Query {
+            search: String::new(),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert!(next_snapshot(&events, 1).is_empty());
         Ok(())
     }
 }

@@ -1,0 +1,18 @@
+[package]
+name = "elegant-clipboard-gpui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clipboard-core = { path = "../clipboard-core" }
+
+[target.'cfg(windows)'.dependencies]
+async-channel.workspace = true
+clipboard-platform = { path = "../clipboard-platform" }
+gpui-kit.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

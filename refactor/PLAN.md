@@ -4,7 +4,7 @@
 >
 > 分支：`gpui`；代码基线：`d486df4`
 >
-> 状态：Windows 基础核心与后端已开始实现，阶段完成情况见 WINDOWS_MVP.md；下文未勾选任务仍为目标方案。
+> 状态：Windows 基础核心、后端与 GPUI 主窗口已接入，阶段完成情况见 WINDOWS_MVP.md；下文未勾选任务仍为目标方案。
 >
 > 目标：使用 GPUI + gpui-kit 重构桌面应用，支持 Windows、Linux、macOS。
 
@@ -17,7 +17,7 @@
 - 暂不实现：自动向其他窗口粘贴、全局快捷键、托盘、富文本/图片/文件保真、旧数据自动迁移、同步、翻译和安装更新。
 - Windows MVP 使用独立用户数据目录；保留旧 Tauri 入口。
 - 新 workspace 的直接依赖按 crates.io 最新非撤回稳定版选取，提交 Cargo.lock；每批开发开始检查更新并做回归，不使用浮动 Git 主分支。
-- 框架间接依赖的预发布版本存在待确认例外：gpui-kit 0.6.2 通过 gpui-base/gpui-component 使用 ropey 2.0.0-beta.1。未确认前不宣称整个依赖树均为稳定版。
+- 按后续“继续完善 GPUI 重构”的指示，接入稳定版 gpui-kit 0.6.2，并保留其上游锁定的间接依赖。Windows 依赖链包含 ropey 2.0.0-beta.1，属于明确记录的框架例外，不能宣称整个依赖树均为稳定版；详见 [技术决策](decisions/0001-windows-gpui.md)。
 - 本轮详细状态和运行方法记录于 [Windows 基础版](WINDOWS_MVP.md)。
 
 ## 1. 目标与边界
@@ -83,7 +83,7 @@
 
 ### 3.1 gpui-kit 候选
 
-暂以 [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) 为候选；用户尚未给出具体仓库，S0 将仓库和依赖版本写入决策记录。
+Windows 首批实现已采用 [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) 0.6.2；依赖范围与平台边界见 [技术决策](decisions/0001-windows-gpui.md)。其他平台可行性仍待验证。
 
 截至本次查阅，[官方安装文档](https://gpui-kit.com/docs/installation/) 给出 `gpui-kit = "0.6"` 示例，由 Kit 配套 GPUI 依赖，并列出 macOS 15+、Windows 10+ 和 Linux 开发环境。它们只是当前文档信息，不等于本项目最终最低运行要求；S0 必须结合锁定版本、实际构建与运行结果确认。
 

@@ -10,7 +10,7 @@ Windows 优先，其他平台保留为后续目标。基础版使用新的根 Ca
 
 - `crates/clipboard-core`：复用原有数据库 schema、迁移、仓储和去重源码，提供 UI 无关的文本历史用例。
 - `crates/clipboard-platform`：Windows 原生剪贴板事件监听；独立 worker 串行处理历史操作；请求代次、实例锁、有界队列和关闭清理。
-- GPUI 应用入口：待框架依赖例外确认后接入，当前 workspace 不包含空程序或该预发布依赖链。
+- `crates/clipboard-gpui`：Windows 原生主窗口、搜索、虚拟历史列表、复制/删除/置顶、暂停确认、加载更多与错误反馈。
 
 共享源码暂通过 `#[path]` 编译原有文件，避免复制一套数据库。旧壳接入共享 crate 时再物理移动源码；当前新核心不依赖 Tauri。
 
@@ -24,7 +24,7 @@ Windows 优先，其他平台保留为后续目标。基础版使用新的根 Ca
 
 | 直接依赖 | 最新稳定版 |
 |---|---|
-| gpui-kit（候选，尚未接入） | 0.6.2 |
+| gpui-kit | 0.6.2 |
 | rusqlite | 0.40.2 |
 | clipboard-rs | 0.3.5（注册表版；文本阶段不需要本地图片补丁） |
 | windows | 0.62.2 |
@@ -40,18 +40,41 @@ Windows 优先，其他平台保留为后续目标。基础版使用新的根 Ca
 
 工具链要求 Rust 1.98+；本机已使用 1.98.0。Cargo.lock 固定实际解析结果。依赖升级流程：查询最新稳定版本 → 更新 workspace requirements → `cargo update` → fmt/clippy/test/build → 原生交互验收。存在上游兼容约束的间接依赖不能强行替换为不同主版本。
 
-**待确认**：最新稳定 gpui-kit 仍引用 ropey 2.0.0-beta.1。需要决定“最新稳定版”是否只约束直接依赖并允许此上游例外；严格禁止任何预发布包将阻塞当前 Kit 版本。曾在临时入口解析后用 `cargo tree -p elegant-clipboard-gpui -i ropey` 确认依赖路径为 `gpui-kit → gpui-base/gpui-component → ropey`；确认前已撤去该入口和依赖，当前锁文件仅包含核心与平台后端。
+**上游例外**：本轮继续接入最新稳定 gpui-kit，其 Windows 依赖路径 `gpui-kit → gpui-base/gpui-component → ropey` 使用 ropey 2.0.0-beta.1。详见 [技术决策](decisions/0001-windows-gpui.md)，不宣称整个依赖树均为稳定版。
+
+## 启动与操作
+
+```powershell
+# 正常使用：启动原生窗口并记录后续复制的文本
+cargo run -p elegant-clipboard-gpui --locked
+
+# 隔离检查：禁用采集，只浏览指定目录中的历史
+cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
+
+# 窗口冒烟：禁用采集，约 3 秒后自动退出
+cargo run -p elegant-clipboard-gpui --locked -- --smoke-test --data-dir .\target\gpui-smoke
+```
+
+- 搜索支持中文与字面 `%`/`_`，等待 150ms 后查询；回车复制当前选中结果。
+- 列表支持 ↑/↓ 选择、Enter 复制、Delete 删除；Ctrl+F 聚焦搜索。
+- 置顶、删除与复制按钮直接调用后台服务；复制使用完整正文，不是卡片预览。
+- 默认加载 100 条，点击“加载更多”继续；仅渲染可见行。
+- 关闭窗口即退出；当前未提供托盘、全局快捷键或自动粘贴。
+- 请勿将开发版的 `--data-dir` 指向正在使用的旧版数据目录；正式迁移尚未实现。
 
 ## 验证命令
 
 在仓库根目录运行：
 
 ```powershell
-cargo test -p clipboard-core -p clipboard-platform
-cargo clippy -p clipboard-core -p clipboard-platform --all-targets -- -D warnings
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all -- --check
+cargo build -p elegant-clipboard-gpui --locked
 ```
 
-目前核心与后端 84 项测试通过，包括继承的数据库/去重测试和新增的持久化、Unicode 内容、字面搜索、worker 顺序、实例排他和背压关闭测试。原生剪贴板往返和界面操作尚未验收；单元测试未读写实际剪贴板内容。
+本轮 87 项测试通过（核心 82、Windows 后端 3、应用状态/参数 2），新增暂停确认、搜索代次与选中 ID 保持、键盘边界以及冒烟参数隔离测试。fmt、Clippy（warnings 视为错误）和 Windows debug 构建通过。
 
-根 workspace 的 fmt、Clippy（warnings 视为错误）与 locked 测试已通过；解析的 126 个包中没有预发布版本。Windows CI 配置已添加，尚未在远端运行。CI 使用已核验的 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
+原生窗口已通过启动/退出、中文路径、重复实例拦截，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查。所有交互使用隔离目录并禁用实际采集；没有覆盖系统剪贴板读写、真实中文 IME、长时间运行、release 打包或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)。
+
+Windows CI 包含 fmt、Clippy、locked 测试和应用构建，尚未在远端运行。CI 使用已核验的 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。

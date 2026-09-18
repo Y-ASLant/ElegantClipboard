@@ -1,0 +1,100 @@
+use clipboard_core::{PAGE_SIZE, database::ClipboardItem};
+
+/// View state kept independent of GPUI so asynchronous ordering can be tested.
+pub struct HistoryState {
+    pub items: Vec<ClipboardItem>,
+    pub total: i64,
+    pub generation: u64,
+    pub limit: i64,
+    pub selected: Option<i64>,
+    pub loading: bool,
+}
+
+impl Default for HistoryState {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            total: 0,
+            generation: 0,
+            limit: PAGE_SIZE,
+            selected: None,
+            loading: true,
+        }
+    }
+}
+
+impl HistoryState {
+    pub fn begin_search(&mut self) {
+        self.generation += 1;
+        self.limit = PAGE_SIZE;
+        self.loading = true;
+        self.items.clear();
+        self.selected = None;
+        self.total = 0;
+    }
+
+    pub fn apply(&mut self, items: Vec<ClipboardItem>, total: i64, generation: u64) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        if !items.iter().any(|item| Some(item.id) == self.selected) {
+            self.selected = items.first().map(|item| item.id);
+        }
+        self.items = items;
+        self.total = total;
+        self.loading = false;
+        true
+    }
+
+    pub fn select_relative(&mut self, direction: isize) -> Option<usize> {
+        if self.items.is_empty() {
+            self.selected = None;
+            return None;
+        }
+        let current = self
+            .items
+            .iter()
+            .position(|item| Some(item.id) == self.selected)
+            .unwrap_or(0);
+        let next = current
+            .saturating_add_signed(direction)
+            .min(self.items.len() - 1);
+        self.selected = Some(self.items[next].id);
+        Some(next)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clipboard_core::History;
+
+    #[test]
+    fn late_search_results_are_rejected_and_selection_follows_ids() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("history.db"))?;
+        let a = history.capture("alpha")?.unwrap();
+        let b = history.capture("beta")?.unwrap();
+        let mut state = HistoryState::default();
+        state.apply(history.list("", PAGE_SIZE)?, 2, 0);
+        state.selected = Some(a);
+        history.capture("alpha")?;
+        state.apply(history.list("", PAGE_SIZE)?, 2, 0);
+        assert_eq!(state.selected, Some(a));
+        assert_eq!(state.select_relative(1), Some(1));
+        assert_eq!(state.selected, Some(b));
+        assert_eq!(state.select_relative(1), Some(1));
+        assert_eq!(state.select_relative(-1), Some(0));
+        assert_eq!(state.select_relative(-1), Some(0));
+        state.begin_search();
+        assert!(!state.apply(history.list("", PAGE_SIZE)?, 2, 0));
+        assert!(state.items.is_empty());
+        assert!(state.apply(history.list("beta", PAGE_SIZE)?, 1, 1));
+        assert_eq!(state.selected, Some(b));
+        history.delete(b)?;
+        state.apply(vec![], 0, 1);
+        assert_eq!(state.select_relative(1), None);
+        assert_eq!(state.selected, None);
+        Ok(())
+    }
+}

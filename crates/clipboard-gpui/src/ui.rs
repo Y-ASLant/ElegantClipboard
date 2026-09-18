@@ -1,0 +1,485 @@
+use crate::{options::Options, state::HistoryState};
+use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE};
+use clipboard_platform::{Command, Event, Service};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::{
+    component::{
+        button::*,
+        input::{Input, InputEvent, InputState},
+        *,
+    },
+    *,
+};
+use std::time::Duration;
+
+gpui_kit::actions!(
+    history,
+    [Next, Previous, CopySelected, DeleteSelected, FocusSearch]
+);
+
+pub fn run(options: Options) -> anyhow::Result<()> {
+    let (service, events) = Service::start(options.data_dir, options.monitor)?;
+    let monitoring = options.monitor;
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::Assets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            cx.bind_keys([
+                KeyBinding::new("down", Next, Some("HistoryList")),
+                KeyBinding::new("up", Previous, Some("HistoryList")),
+                KeyBinding::new("enter", CopySelected, Some("HistoryList")),
+                KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
+                KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
+            ]);
+            cx.on_window_closed(|cx, _| {
+                if cx.windows().is_empty() {
+                    cx.quit();
+                }
+            })
+            .detach();
+            let bounds = Bounds::centered(None, size(px(560.), px(760.)), cx);
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("ElegantClipboard".into()),
+                        ..Default::default()
+                    }),
+                    window_min_size: Some(size(px(420.), px(420.))),
+                    app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    let view =
+                        cx.new(|cx| ClipboardView::new(service, events, monitoring, window, cx));
+                    cx.new(|cx| Root::new(view, window, cx))
+                },
+            )
+            .expect("无法创建 ElegantClipboard 窗口");
+            cx.activate(true);
+            if options.smoke_test {
+                cx.spawn(async move |cx| {
+                    cx.background_executor().timer(Duration::from_secs(3)).await;
+                    cx.update(|cx| cx.quit());
+                })
+                .detach();
+            }
+        });
+    Ok(())
+}
+
+struct ClipboardView {
+    service: Service,
+    history: HistoryState,
+    search: Entity<InputState>,
+    list_focus: FocusHandle,
+    scroll: UniformListScrollHandle,
+    monitoring: bool,
+    paused: bool,
+    pause_pending: bool,
+    message: String,
+    is_error: bool,
+    _subscriptions: Vec<Subscription>,
+    _events: Task<()>,
+    search_task: Option<Task<()>>,
+}
+
+impl ClipboardView {
+    fn new(
+        service: Service,
+        events: async_channel::Receiver<Event>,
+        monitoring: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史…"));
+        let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.history.begin_search();
+                this.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                this.search_task = Some(cx.spawn(async move |view, cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(150))
+                        .await;
+                    let _ = view.update(cx, |this, cx| this.query(cx));
+                }));
+                cx.notify();
+            } else if matches!(event, InputEvent::PressEnter { .. })
+                && let Some(id) = this.history.selected
+            {
+                this.send(Command::Copy(id), cx);
+            }
+        });
+        let event_task = cx.spawn(async move |view, cx| {
+            while let Ok(event) = events.recv().await {
+                if view
+                    .update(cx, |this, cx| this.apply_event(event, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let list_focus = cx.focus_handle();
+        window.focus(&list_focus, cx);
+        Self {
+            service,
+            history: HistoryState::default(),
+            search,
+            list_focus,
+            scroll: UniformListScrollHandle::new(),
+            monitoring,
+            paused: false,
+            pause_pending: false,
+            message: if monitoring {
+                "正在记录文本，内容仅保存在此设备"
+            } else {
+                "采集已禁用，可浏览已有历史"
+            }
+            .into(),
+            is_error: false,
+            _subscriptions: vec![subscription],
+            _events: event_task,
+            search_task: None,
+        }
+    }
+
+    fn send(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
+        if let Err(error) = self.service.send(command) {
+            self.message = error.to_string();
+            self.is_error = true;
+            self.history.loading = false;
+            cx.notify();
+            return false;
+        }
+        true
+    }
+
+    fn query(&mut self, cx: &mut Context<Self>) {
+        self.send(
+            Command::Query {
+                search: self.search.read(cx).value().to_string(),
+                limit: self.history.limit,
+                generation: self.history.generation,
+            },
+            cx,
+        );
+    }
+
+    fn apply_event(&mut self, event: Event, cx: &mut Context<Self>) {
+        match event {
+            Event::Snapshot {
+                items,
+                total,
+                generation,
+            } => {
+                self.history.apply(items, total, generation);
+            }
+            Event::Status(message) => {
+                self.message = message;
+                self.is_error = false;
+            }
+            Event::Paused(paused) => {
+                self.paused = paused;
+                self.pause_pending = false;
+                self.is_error = false;
+                self.message = if paused {
+                    "已暂停记录，已有历史仍可使用"
+                } else {
+                    "已恢复记录文本"
+                }
+                .into();
+            }
+            Event::Error(message) => {
+                self.message = message;
+                self.is_error = true;
+                self.history.loading = false;
+                self.pause_pending = false;
+            }
+        }
+        cx.notify();
+    }
+
+    fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
+        if let Some(index) = self.history.select_relative(direction) {
+            self.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+        }
+        cx.notify();
+    }
+
+    fn render_row(&self, index: usize, cx: &mut Context<Self>) -> Stateful<Div> {
+        let item = &self.history.items[index];
+        let id = item.id;
+        let selected = self.history.selected == Some(id);
+        let pinned = item.is_pinned;
+        let color = if selected {
+            cx.theme().accent
+        } else {
+            cx.theme().background
+        };
+        div()
+            .id(("history-row", id as usize))
+            .h(px(144.))
+            .px_4()
+            .py_2()
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.history.selected = Some(id);
+                window.focus(&this.list_focus, cx);
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .h_full()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if selected {
+                        cx.theme().primary
+                    } else {
+                        cx.theme().border
+                    })
+                    .bg(color)
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(format!(
+                                        "{} · {} 字符",
+                                        if pinned { "置顶文本" } else { "文本" },
+                                        item.char_count.unwrap_or(0)
+                                    )),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(item.created_at.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .text_sm()
+                            .line_height(px(20.))
+                            .line_clamp(2)
+                            .text_ellipsis()
+                            .child(item.preview.clone().unwrap_or_default()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .justify_end()
+                            .child(
+                                Button::new(("pin", id as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .label(if pinned { "取消置顶" } else { "置顶" })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.send(Command::TogglePin(id), cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(("delete", id as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .label("删除")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.send(Command::Delete(id), cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(("copy", id as usize))
+                                    .outline()
+                                    .xsmall()
+                                    .label("复制")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.send(Command::Copy(id), cx);
+                                    })),
+                            ),
+                    ),
+            )
+    }
+}
+
+impl Render for ClipboardView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let view = cx.entity();
+        let empty_message = if self.history.loading {
+            "正在加载…"
+        } else if self.search.read(cx).value().is_empty() {
+            "复制一段文本，它会出现在这里"
+        } else {
+            "没有匹配的记录，试试其他关键词"
+        };
+        div()
+            .key_context("ClipboardApp")
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .font_family("Microsoft YaHei UI")
+            .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
+                this.search
+                    .update(cx, |search, cx| search.focus(window, cx));
+            }))
+            .child(
+                div()
+                    .px_5()
+                    .pt_5()
+                    .pb_3()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_lg().font_semibold().child("剪贴板历史"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("ElegantClipboard"),
+                            ),
+                    )
+                    .child(
+                        Button::new("pause")
+                            .outline()
+                            .small()
+                            .label(if !self.monitoring {
+                                "采集未启用"
+                            } else if self.paused {
+                                "恢复记录"
+                            } else {
+                                "暂停记录"
+                            })
+                            .disabled(!self.monitoring || self.pause_pending)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if this.send(Command::Pause(!this.paused), cx) {
+                                    this.pause_pending = true;
+                                    cx.notify();
+                                }
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .px_5()
+                    .pb_3()
+                    .child(Input::new(&self.search).cleanable(true)),
+            )
+            .child(
+                div()
+                    .px_5()
+                    .pb_2()
+                    .flex()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(format!("{} 条记录", self.history.total))
+                    .child("↑ ↓ 选择 · Enter 复制 · Ctrl+F 搜索"),
+            )
+            .child(
+                div()
+                    .key_context("HistoryList")
+                    .track_focus(&self.list_focus)
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
+                    .on_action(cx.listener(|this, _: &Previous, _, cx| this.select(-1, cx)))
+                    .on_action(cx.listener(|this, _: &CopySelected, _, cx| {
+                        if let Some(id) = this.history.selected {
+                            this.send(Command::Copy(id), cx);
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &DeleteSelected, _, cx| {
+                        if let Some(id) = this.history.selected {
+                            this.send(Command::Delete(id), cx);
+                        }
+                    }))
+                    .when(self.history.items.is_empty(), |container| {
+                        container.child(
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(empty_message),
+                        )
+                    })
+                    .when(!self.history.items.is_empty(), |container| {
+                        container.child(
+                            uniform_list(
+                                "history",
+                                self.history.items.len(),
+                                move |range, _, cx| {
+                                    view.update(cx, |this, cx| {
+                                        range.map(|index| this.render_row(index, cx)).collect()
+                                    })
+                                },
+                            )
+                            .size_full()
+                            .track_scroll(&self.scroll),
+                        )
+                    }),
+            )
+            .when(
+                (self.history.items.len() as i64) < self.history.total
+                    && self.history.limit < HISTORY_LIMIT,
+                |container| {
+                    container.child(
+                        div().px_5().py_2().child(
+                            Button::new("more")
+                                .ghost()
+                                .small()
+                                .label("加载更多")
+                                .disabled(self.history.loading)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.history.limit =
+                                        (this.history.limit + PAGE_SIZE).min(HISTORY_LIMIT);
+                                    this.history.generation += 1;
+                                    this.history.loading = true;
+                                    this.query(cx);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                },
+            )
+            .child(
+                div()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .px_5()
+                    .py_3()
+                    .text_xs()
+                    .text_color(if self.is_error {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(self.message.clone()),
+            )
+    }
+}
