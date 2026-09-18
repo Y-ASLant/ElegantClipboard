@@ -517,7 +517,6 @@ impl ClipboardView {
         if let Err(error) = self.service.send(command) {
             self.message = error.to_string();
             self.is_error = true;
-            self.history.loading = false;
             cx.notify();
             return false;
         }
@@ -612,16 +611,19 @@ impl ClipboardView {
     }
 
     fn query(&mut self, cx: &mut Context<Self>) {
-        self.send(
+        let generation = self.history.generation;
+        if !self.send(
             Command::Query {
                 search: self.search.read(cx).value().to_string(),
                 limit: self.history.limit,
                 favorite_only: self.history.favorite_only,
                 group_id: self.history.group_id,
-                generation: self.history.generation,
+                generation,
             },
             cx,
-        );
+        ) {
+            self.history.fail_query(generation);
+        }
     }
 
     fn select_group(&mut self, group_id: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
