@@ -42,6 +42,11 @@ pub enum Command {
     CopyPlainText(i64),
     CopyForPaste(i64),
     CreateGroup(String),
+    ReorderGroup {
+        from: i64,
+        to: i64,
+        after: bool,
+    },
     RenameGroup {
         id: i64,
         name: String,
@@ -129,6 +134,7 @@ impl Command {
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
             Self::CopyForPaste(id) => Some(FailureKind::Paste(*id)),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
+            Self::ReorderGroup { .. } => Some(FailureKind::Other),
             Self::DeleteGroup { .. } => Some(FailureKind::GroupDelete),
             Self::MoveToGroup { .. } => Some(FailureKind::GroupMove),
             Self::ClearHistory { .. } => Some(FailureKind::ClearHistory),
@@ -157,6 +163,10 @@ pub enum Event {
     ShowWindow,
     Groups(Vec<Group>),
     GroupCreated(Result<Group, String>),
+    GroupReordered {
+        from: i64,
+        result: Result<(), String>,
+    },
     GroupRenamed(Result<Group, String>),
     GroupDeleted(Result<usize, String>),
     ItemMoved {
@@ -929,6 +939,19 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::ReorderGroup { from, to, after } => {
+                let result = self.history.reorder_group(from, to, after).and_then(|_| {
+                    self.send_groups()
+                        .context("分组顺序已保存，但列表刷新失败，请重启应用后查看")
+                });
+                self.events
+                    .send_blocking(Event::GroupReordered {
+                        from,
+                        result: result.map_err(|error| error.to_string()),
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::RenameGroup { id, name } => {
                 let result = self
                     .history
@@ -1238,6 +1261,52 @@ mod tests {
             events.recv_blocking()?,
             Event::GroupCreated(Err(_))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn group_reorder_acknowledges_saved_order_and_rejects_missing_target() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let first = history.create_group("工作")?.id;
+        let second = history.create_group("归档")?.id;
+        drop(history);
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        next_snapshot(&events, 0);
+        service.send(Command::ReorderGroup {
+            from: first,
+            to: second,
+            after: true,
+        })?;
+        let Event::Groups(groups) = events.recv_blocking()? else {
+            bail!("排序后没有刷新分组列表");
+        };
+        assert_eq!(
+            groups.iter().map(|group| group.id).collect::<Vec<_>>(),
+            vec![second, first]
+        );
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::GroupReordered { result: Ok(()), .. }
+        ));
+        service.send(Command::ReorderGroup {
+            from: first,
+            to: -1,
+            after: false,
+        })?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::GroupReordered { result: Err(_), .. }
+        ));
+        assert_eq!(
+            History::open(directory.path().join("clipboard.db"))?
+                .groups()?
+                .iter()
+                .map(|group| group.id)
+                .collect::<Vec<_>>(),
+            vec![second, first]
+        );
         Ok(())
     }
 

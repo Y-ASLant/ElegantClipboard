@@ -77,6 +77,10 @@ impl History {
         Ok(GroupRepository::new(&self.db).list_with_count()?)
     }
 
+    pub fn reorder_group(&self, from: i64, to: i64, after: bool) -> Result<()> {
+        groups::reorder(&self.db, from, to, after)
+    }
+
     pub fn create_group(&self, name: &str) -> Result<Group> {
         let name = Self::checked_group_name(name)?;
         if self.groups()?.iter().any(|group| group.name == name) {

@@ -163,6 +163,13 @@ struct HistoryDrag {
     preview: String,
 }
 
+#[derive(Clone)]
+struct GroupDrag {
+    id: i64,
+    name: String,
+    group_ids: Vec<i64>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct DropTarget {
     id: i64,
@@ -212,6 +219,25 @@ impl Render for HistoryDrag {
     }
 }
 
+impl Render for GroupDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        visual::reveal(
+            div()
+                .px_3()
+                .py_2()
+                .rounded_md()
+                .border_1()
+                .border_color(cx.theme().primary)
+                .bg(cx.theme().background)
+                .shadow_md()
+                .text_sm()
+                .child(format!("⠿  {}", self.name)),
+            ("group-drag-preview", self.id as usize),
+            cx,
+        )
+    }
+}
+
 struct ClipboardView {
     service: Service,
     _tray: Option<TrayIcon>,
@@ -227,6 +253,10 @@ struct ClipboardView {
     group_editor_open: bool,
     group_rename_id: Option<i64>,
     group_save_pending: bool,
+    group_reorder_pending: bool,
+    group_drop_target: Option<DropTarget>,
+    group_feedback_id: Option<i64>,
+    group_feedback_revision: usize,
     group_delete_id: Option<i64>,
     group_delete_pending: bool,
     clear_confirm_open: bool,
@@ -268,6 +298,7 @@ struct ClipboardView {
     _events: Task<()>,
     search_task: Option<Task<()>>,
     feedback_task: Option<Task<()>>,
+    group_feedback_task: Option<Task<()>>,
 }
 
 impl ClipboardView {
@@ -395,6 +426,10 @@ impl ClipboardView {
             group_editor_open: false,
             group_rename_id: None,
             group_save_pending: false,
+            group_reorder_pending: false,
+            group_drop_target: None,
+            group_feedback_id: None,
+            group_feedback_revision: 0,
             group_delete_id: None,
             group_delete_pending: false,
             clear_confirm_open: false,
@@ -451,6 +486,7 @@ impl ClipboardView {
             _events: event_task,
             search_task: None,
             feedback_task: None,
+            group_feedback_task: None,
         }
     }
 
@@ -708,6 +744,31 @@ impl ClipboardView {
                     self.query(cx);
                 }
                 self.groups = groups;
+            }
+            Event::GroupReordered { from, result } => {
+                self.group_reorder_pending = false;
+                self.group_drop_target = None;
+                match result {
+                    Ok(()) => {
+                        self.group_feedback_revision += 1;
+                        self.group_feedback_id = Some(from);
+                        self.group_feedback_task = Some(cx.spawn(async move |view, cx| {
+                            cx.background_executor()
+                                .timer(visual::MOTION_DURATION)
+                                .await;
+                            let _ = view.update(cx, |this, cx| {
+                                this.group_feedback_id = None;
+                                cx.notify();
+                            });
+                        }));
+                        self.message = "分组顺序已保存".into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("分组排序失败：{error}");
+                        self.is_error = true;
+                    }
+                }
             }
             Event::GroupCreated(result) => {
                 self.group_save_pending = false;
@@ -1432,6 +1493,153 @@ impl ClipboardView {
                 .any(|item| item.id == drag.id && item.is_pinned == pinned)
     }
 
+    fn valid_group_drag(&self, drag: &GroupDrag) -> bool {
+        !self.group_reorder_pending
+            && !self.group_delete_pending
+            && !self.group_save_pending
+            && !self.clear_pending
+            && drag.group_ids == self.groups.iter().map(|group| group.id).collect::<Vec<_>>()
+    }
+
+    fn render_group(&self, group: &Group, cx: &mut Context<Self>) -> AnyElement {
+        let id = group.id;
+        let drag = GroupDrag {
+            id,
+            name: group.name.clone(),
+            group_ids: self.groups.iter().map(|group| group.id).collect(),
+        };
+        let entity = cx.entity();
+        let active_drop = cx
+            .has_active_drag()
+            .then_some(self.group_drop_target)
+            .flatten();
+        let target = active_drop.filter(|target| target.id == id);
+        let group_id = Some(id);
+        let pill = div()
+            .id(("group-drag", id as usize))
+            .relative()
+            .flex()
+            .items_center()
+            .flex_none()
+            .on_drag_move(
+                cx.listener(move |this, event: &DragMoveEvent<GroupDrag>, _, cx| {
+                    if !event.bounds.contains(&event.event.position) {
+                        if this.group_drop_target.is_some_and(|target| target.id == id) {
+                            this.group_drop_target = None;
+                            cx.notify();
+                        }
+                        return;
+                    }
+                    let target = (event.drag(cx).id != id).then_some(DropTarget {
+                        id,
+                        after: event.event.position.x > event.bounds.center().x,
+                        allowed: this.valid_group_drag(event.drag(cx)),
+                    });
+                    if this.group_drop_target != target {
+                        this.group_drop_target = target;
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_drop(cx.listener(move |this, drag: &GroupDrag, _, cx| {
+                if drag.id == id {
+                    return;
+                }
+                if !this.valid_group_drag(drag) {
+                    this.group_drop_target = None;
+                    this.message = "分组列表已变化，请重新拖动".into();
+                    this.is_error = true;
+                    cx.notify();
+                    return;
+                }
+                let Some(target) = this.group_drop_target.filter(|target| target.id == id) else {
+                    return;
+                };
+                if this.send(
+                    Command::ReorderGroup {
+                        from: drag.id,
+                        to: id,
+                        after: target.after,
+                    },
+                    cx,
+                ) {
+                    this.group_reorder_pending = true;
+                }
+                this.group_drop_target = None;
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id(("group-handle", id as usize))
+                    .w(px(22.))
+                    .h(px(CONTROL_HEIGHT))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(cx.theme().muted_foreground)
+                    .cursor_grab()
+                    .child("⠿")
+                    .when(self.valid_group_drag(&drag), |handle| {
+                        handle.on_drag(drag.clone(), move |drag, _, _, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.group_drop_target = None;
+                                cx.notify();
+                            });
+                            cx.new(|_| drag.clone())
+                        })
+                    }),
+            )
+            .child(
+                Button::new(("group", id as usize))
+                    .small()
+                    .outline()
+                    .label(group.name.clone())
+                    .selected(self.history.group_id == group_id)
+                    .disabled(
+                        self.group_delete_pending
+                            || self.clear_pending
+                            || self.group_reorder_pending,
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_group(group_id, window, cx);
+                    })),
+            )
+            .when_some(target, |pill, target| {
+                pill.child(visual::reveal(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(visual::DROP_MARKER_HEIGHT))
+                        .bg(if target.allowed {
+                            cx.theme().primary
+                        } else {
+                            cx.theme().danger
+                        })
+                        .when(target.after, |line| line.right_0())
+                        .when(!target.after, |line| line.left_0()),
+                    (
+                        "group-drop-marker",
+                        id as usize * 2 + usize::from(target.after),
+                    ),
+                    cx,
+                ))
+            });
+        if self.group_feedback_id == Some(id) {
+            visual::reveal(
+                div().child(pill),
+                format!(
+                    "group-reorder-feedback-{}-{id}",
+                    self.group_feedback_revision
+                ),
+                cx,
+            )
+        } else {
+            pill.into_any_element()
+        }
+    }
+
     fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let item = &self.history.items[index];
         let id = item.id;
@@ -2063,6 +2271,7 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &CancelDrag, window, cx| {
                 cx.stop_active_drag(window);
                 this.drop_target = None;
+                this.group_drop_target = None;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
@@ -2087,7 +2296,7 @@ impl ClipboardView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("拖动卡片排序 · 红线不可放置"),
+                                    .child("卡片/分组可拖动 · 红线不可放置"),
                             ),
                     )
                     .child(
@@ -2278,18 +2487,7 @@ impl ClipboardView {
                                 this.select_group(None, window, cx);
                             })),
                     )
-                    .children(self.groups.iter().map(|group| {
-                        let group_id = Some(group.id);
-                        Button::new(("group", group.id as usize))
-                            .small()
-                            .outline()
-                            .label(group.name.clone())
-                            .selected(self.history.group_id == group_id)
-                            .disabled(self.group_delete_pending || self.clear_pending)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.select_group(group_id, window, cx);
-                            }))
-                    })),
+                    .children(self.groups.iter().map(|group| self.render_group(group, cx))),
             )
             .when(self.group_editor_open, |container| {
                 container.child(visual::reveal(

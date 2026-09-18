@@ -2,6 +2,37 @@ use crate::database::Database;
 use anyhow::{Result, bail};
 use rusqlite::params;
 
+/// Persist an insertion in the existing group sort_order column.
+pub fn reorder(db: &Database, from: i64, to: i64, after: bool) -> Result<()> {
+    let connection = db.write_connection();
+    let mut connection = connection.lock();
+    let tx = connection.transaction()?;
+    let mut ids: Vec<i64> = {
+        let mut query =
+            tx.prepare("SELECT id FROM groups ORDER BY sort_order ASC, created_at ASC, id ASC")?;
+        query
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<_, _>>()?
+    };
+    if !ids.contains(&from) || !ids.contains(&to) {
+        bail!("分组已变化，请重新拖动");
+    }
+    if from == to {
+        return Ok(());
+    }
+    ids.retain(|id| *id != from);
+    let index = ids.iter().position(|id| *id == to).unwrap() + usize::from(after);
+    ids.insert(index, from);
+    {
+        let mut update = tx.prepare("UPDATE groups SET sort_order = ?1 WHERE id = ?2")?;
+        for (index, id) in ids.iter().enumerate() {
+            update.execute(params![i64::try_from(index)?, id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Move records to the default group before deleting the group, avoiding the
 /// legacy schema's ON DELETE CASCADE behavior.
 pub fn delete_preserving_items(db: &Database, group_id: i64) -> Result<usize> {
@@ -79,6 +110,34 @@ pub fn delete_preserving_items(db: &Database, group_id: i64) -> Result<usize> {
 mod tests {
     use super::*;
     use crate::{History, database::NewClipboardItem};
+
+    #[test]
+    fn group_reorder_persists_and_rolls_back_failed_writes() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("history.db");
+        let history = History::open(path.clone())?;
+        let a = history.create_group("甲")?.id;
+        let b = history.create_group("乙")?.id;
+        let c = history.create_group("丙")?.id;
+        let ids = |history: &History| -> Result<Vec<i64>> {
+            Ok(history.groups()?.iter().map(|group| group.id).collect())
+        };
+        history.reorder_group(a, c, true)?;
+        assert_eq!(ids(&history)?, vec![b, c, a]);
+        assert!(history.reorder_group(a, -1, false).is_err());
+        assert_eq!(ids(&history)?, vec![b, c, a]);
+        let connection = history.db.write_connection();
+        connection.lock().execute_batch(&format!(
+            "CREATE TRIGGER reject_group_reorder BEFORE UPDATE OF sort_order ON groups
+             WHEN OLD.id = {c} BEGIN SELECT RAISE(ABORT, 'test write failure'); END;"
+        ))?;
+        assert!(history.reorder_group(a, b, false).is_err());
+        assert_eq!(ids(&history)?, vec![b, c, a]);
+        drop(connection);
+        drop(history);
+        assert_eq!(ids(&History::open(path)?)?, vec![b, c, a]);
+        Ok(())
+    }
 
     #[test]
     fn group_deletion_preserves_items_duplicates_and_order() -> Result<()> {
