@@ -91,11 +91,14 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all -- --check
 cargo build -p elegant-clipboard-gpui --locked
 cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
+.\scripts\package-gpui-windows.ps1
 ```
+
+打包脚本仅接受 Windows x64 MSVC 构建，使用锁定依赖生成 `target/packages/elegant-clipboard-gpui-v<版本>-windows-x64.zip` 与 `.zip.sha256`。压缩包含 exe、许可证和运行说明，程序默认在 LocalAppData 保存数据；这是未经签名的独立压缩包，不是安装器或自动更新制品。
 
 当前 152 项测试通过（核心 124、Windows 后端 23、应用状态/参数 5），覆盖暂停确认与重启恢复、搜索代次与选中 ID 保持、自定义分组浏览、创建、重命名、安全删除、批量删除的事务回滚与媒体清理、记录移动与组内排序、文本编辑与过期内容拒绝、HTML/RTF 二进制存储与混排拖动及纯文本复制判定、图片存储、文本/图片/文件路径预览、容量淘汰清理、文件源缺失、键盘边界、冒烟参数隔离，以及在线旧库导入、GPUI v1/v2 备份导出恢复、网址兼容、拒绝无效来源、实例唤出和快捷键设置。fmt、Clippy（warnings 视为错误）、Windows debug/release 构建及 release 窗口冒烟通过；分组栏、整卡拖动和最小尺寸布局已在隔离窗口验收。
 
-原生窗口已通过启动/退出、中文路径、重复启动唤回，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查；10,000 条合成文本的启动与末尾搜索也已验收。HTML/RTF、图片、文件卡片和对应预览均在隔离目录中截图核验；富文本卡片之间的真实鼠标拖动也已核对 SQLite 顺序。窗口交互使用隔离目录并禁用实际采集；另在非交互式窗口站中完成文本、HTML/RTF、图片和文件路径的真实系统剪贴板采集与写回，交互桌面的剪贴板序列号未变。仍未覆盖常见应用之间的真实复制粘贴、中文 IME、长时间运行、release 打包或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)、[规模验证](evidence/windows-scale-2026-09-19.md)和[隔离剪贴板记录](evidence/windows-private-clipboard-2026-09-19.md)。
+原生窗口已通过启动/退出、中文路径、重复启动唤回，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查；10,000 条合成文本的启动与末尾搜索也已验收。HTML/RTF、图片、文件卡片和对应预览均在隔离目录中截图核验；富文本卡片之间的真实鼠标拖动也已核对 SQLite 顺序。窗口交互使用隔离目录并禁用实际采集；另在非交互式窗口站中完成文本、HTML/RTF、图片和文件路径的真实系统剪贴板采集与写回，交互桌面的剪贴板序列号未变。Windows x64 独立压缩包已完成 SHA-256 核对和解压运行冒烟。仍未覆盖常见应用之间的真实复制粘贴、中文 IME、长时间运行、安装升级或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)、[规模验证](evidence/windows-scale-2026-09-19.md)、[隔离剪贴板记录](evidence/windows-private-clipboard-2026-09-19.md)和[独立包验收](evidence/windows-package-2026-09-19.md)。
 
 Windows CI 包含 fmt、Clippy、locked 测试和应用构建，尚未在远端运行。CI 使用已核验的 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
 
