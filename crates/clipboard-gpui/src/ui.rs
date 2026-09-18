@@ -1,3 +1,4 @@
+use crate::visual::{self, CONTROL_HEIGHT, PAGE_PADDING, ROW_HEIGHT};
 use crate::{
     options::Options,
     state::{HistoryState, PreviewState},
@@ -13,7 +14,7 @@ use gpui_kit::{
     },
     *,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 gpui_kit::actions!(
     history,
@@ -24,7 +25,8 @@ gpui_kit::actions!(
         DeleteSelected,
         FocusSearch,
         PreviewSelected,
-        ClosePreview
+        ClosePreview,
+        CancelDrag
     ]
 );
 
@@ -43,6 +45,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("space", PreviewSelected, Some("HistoryList")),
                 KeyBinding::new("escape", ClosePreview, Some("Preview")),
                 KeyBinding::new("escape", ClosePreview, Some("Preview > Input")),
+                KeyBinding::new("escape", CancelDrag, Some("ClipboardApp")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
             ]);
             cx.on_window_closed(|cx, _| {
@@ -59,7 +62,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         title: Some("ElegantClipboard".into()),
                         ..TitleBar::title_bar_options()
                     }),
-                    window_min_size: Some(size(px(420.), px(420.))),
+                    window_min_size: Some(size(px(420.), px(520.))),
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
                     ..TitleBar::window_options()
                 },
@@ -82,6 +85,30 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Clone)]
+struct HistoryDrag {
+    id: i64,
+    pinned: bool,
+    favorite_only: bool,
+    generation: u64,
+    preview: String,
+}
+impl Render for HistoryDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(260.))
+            .p_3()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().primary)
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .text_sm()
+            .shadow_md()
+            .child(div().text_ellipsis().child(self.preview.clone()))
+    }
+}
+
 struct ClipboardView {
     service: Service,
     history: HistoryState,
@@ -93,6 +120,11 @@ struct ClipboardView {
     monitoring: bool,
     theme: ThemePreference,
     theme_pending: bool,
+    reorder_pending: bool,
+    drop_target: Option<(i64, bool)>,
+    reordered: Option<(i64, usize)>,
+    feedback_revision: usize,
+    last_drag_scroll: Instant,
     paused: bool,
     pause_pending: bool,
     message: String,
@@ -100,6 +132,7 @@ struct ClipboardView {
     _subscriptions: Vec<Subscription>,
     _events: Task<()>,
     search_task: Option<Task<()>>,
+    feedback_task: Option<Task<()>>,
 }
 
 impl ClipboardView {
@@ -158,6 +191,11 @@ impl ClipboardView {
             monitoring,
             theme,
             theme_pending: false,
+            reorder_pending: false,
+            drop_target: None,
+            reordered: None,
+            feedback_revision: 0,
+            last_drag_scroll: Instant::now(),
             paused: false,
             pause_pending: false,
             message: if monitoring {
@@ -170,6 +208,7 @@ impl ClipboardView {
             _subscriptions: vec![subscription, appearance],
             _events: event_task,
             search_task: None,
+            feedback_task: None,
         }
     }
 
@@ -217,6 +256,39 @@ impl ClipboardView {
                         input.set_value(text.clone(), window, cx);
                         input.focus(window, cx);
                     });
+                }
+            }
+            Event::Reordered {
+                from,
+                generation,
+                result,
+            } => {
+                self.reorder_pending = false;
+                self.drop_target = None;
+                match result {
+                    Ok(()) if generation == self.history.generation => {
+                        self.feedback_revision += 1;
+                        self.reordered = Some((from, self.feedback_revision));
+                        if self.history.items.iter().any(|item| item.id == from) {
+                            self.history.selected = Some(from);
+                        }
+                        self.feedback_task = Some(cx.spawn(async move |view, cx| {
+                            cx.background_executor()
+                                .timer(visual::FEEDBACK_DURATION)
+                                .await;
+                            let _ = view.update(cx, |this, cx| {
+                                this.reordered = None;
+                                cx.notify();
+                            });
+                        }));
+                        self.message = "顺序已保存".into();
+                        self.is_error = false;
+                    }
+                    Ok(()) => {}
+                    Err(error) => {
+                        self.message = error;
+                        self.is_error = true;
+                    }
                 }
             }
             Event::Status(message) => {
@@ -293,7 +365,7 @@ impl ClipboardView {
             .flex()
             .flex_col()
             .size_full()
-            .p_5()
+            .p(px(PAGE_PADDING))
             .gap_3()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -341,16 +413,6 @@ impl ClipboardView {
                         })),
                 ),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(if self.is_error {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(self.message.clone()),
-            )
     }
 
     fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -360,21 +422,91 @@ impl ClipboardView {
         cx.notify();
     }
 
-    fn render_row(&self, index: usize, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn valid_drag(&self, drag: &HistoryDrag, pinned: bool) -> bool {
+        !self.reorder_pending
+            && !self.history.loading
+            && drag.generation == self.history.generation
+            && drag.favorite_only == self.history.favorite_only
+            && drag.pinned == pinned
+            && self
+                .history
+                .items
+                .iter()
+                .any(|item| item.id == drag.id && item.is_pinned == pinned)
+    }
+
+    fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let item = &self.history.items[index];
         let id = item.id;
         let selected = self.history.selected == Some(id);
         let pinned = item.is_pinned;
         let favorite = item.is_favorite;
+        let drag = HistoryDrag {
+            id,
+            pinned,
+            favorite_only: self.history.favorite_only,
+            generation: self.history.generation,
+            preview: item.preview.clone().unwrap_or_default(),
+        };
+        let entity = cx.entity();
+        let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
         let color = if selected {
             cx.theme().accent
         } else {
             cx.theme().background
         };
-        div()
+        let row = div()
             .id(("history-row", id as usize))
-            .h(px(144.))
-            .px_4()
+            .h(px(ROW_HEIGHT))
+            .px(px(PAGE_PADDING))
+            .on_drag_move(
+                cx.listener(move |this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
+                    if !event.bounds.contains(&event.event.position) {
+                        if this.drop_target.is_some_and(|(target, _)| target == id) {
+                            this.drop_target = None;
+                            cx.notify();
+                        }
+                        return;
+                    }
+                    let after = event.event.position.y > event.bounds.center().y;
+                    let target = (this.valid_drag(event.drag(cx), pinned)
+                        && event.drag(cx).id != id)
+                        .then_some((id, after));
+                    if this.drop_target != target {
+                        this.drop_target = target;
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_drop(cx.listener(move |this, drag: &HistoryDrag, _, cx| {
+                if drag.id == id {
+                    return;
+                }
+                if !this.valid_drag(drag, pinned) {
+                    this.message = "列表已变化，或跨越了置顶区域，请重新拖动".into();
+                    this.is_error = true;
+                    cx.notify();
+                    return;
+                }
+                let after = this
+                    .drop_target
+                    .filter(|(target, _)| *target == id)
+                    .is_some_and(|(_, after)| after);
+                if this.send(
+                    Command::Reorder {
+                        from: drag.id,
+                        to: id,
+                        after,
+                        favorite_only: drag.favorite_only,
+                        generation: drag.generation,
+                    },
+                    cx,
+                ) {
+                    this.reorder_pending = true;
+                }
+                this.drop_target = None;
+                cx.notify();
+            }))
             .py_2()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -395,6 +527,22 @@ impl ClipboardView {
                         cx.theme().border
                     })
                     .bg(color)
+                    .relative()
+                    .when(
+                        active_drop.is_some_and(|(target, _)| target == id),
+                        |card| {
+                            card.child(
+                                div()
+                                    .absolute()
+                                    .left_0()
+                                    .right_0()
+                                    .h(px(3.))
+                                    .bg(cx.theme().primary)
+                                    .when(active_drop == Some((id, true)), |line| line.bottom_0())
+                                    .when(active_drop == Some((id, false)), |line| line.top_0()),
+                            )
+                        },
+                    )
                     .flex()
                     .flex_col()
                     .gap_2()
@@ -407,6 +555,33 @@ impl ClipboardView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .id(("drag-handle", id as usize))
+                                            .px_1()
+                                            .cursor_pointer()
+                                            .child("⠿")
+                                            .when(
+                                                !self.reorder_pending && !self.history.loading,
+                                                |handle| {
+                                                    handle.on_drag(
+                                                        drag.clone(),
+                                                        move |drag, _, _, cx| {
+                                                            entity.update(cx, |this, cx| {
+                                                                this.history.selected =
+                                                                    Some(drag.id);
+                                                                this.drop_target = None;
+                                                                cx.notify();
+                                                            });
+                                                            cx.new(|_| drag.clone())
+                                                        },
+                                                    )
+                                                },
+                                            ),
+                                    )
                                     .child(format!(
                                         "{} · {} 字符",
                                         if pinned { "置顶文本" } else { "文本" },
@@ -440,6 +615,7 @@ impl ClipboardView {
                                 Button::new(("preview", id as usize))
                                     .ghost()
                                     .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
                                     .label("查看")
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         cx.stop_propagation();
@@ -450,6 +626,7 @@ impl ClipboardView {
                                 Button::new(("favorite", id as usize))
                                     .ghost()
                                     .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
                                     .label(if favorite { "取消收藏" } else { "收藏" })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -460,6 +637,7 @@ impl ClipboardView {
                                 Button::new(("pin", id as usize))
                                     .ghost()
                                     .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
                                     .label(if pinned { "取消置顶" } else { "置顶" })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -470,6 +648,7 @@ impl ClipboardView {
                                 Button::new(("delete", id as usize))
                                     .ghost()
                                     .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
                                     .label("删除")
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -480,6 +659,7 @@ impl ClipboardView {
                                 Button::new(("copy", id as usize))
                                     .outline()
                                     .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
                                     .label("复制")
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
@@ -487,7 +667,15 @@ impl ClipboardView {
                                     })),
                             ),
                     ),
-            )
+            );
+        let row = div().child(row);
+        if let Some((moved, revision)) = self.reordered
+            && moved == id
+        {
+            visual::reveal(row, ("reorder-feedback", revision), cx)
+        } else {
+            row.into_any_element()
+        }
     }
 }
 
@@ -507,7 +695,7 @@ impl Render for ClipboardView {
             )
             .child(
                 div()
-                    .px_4()
+                    .px(px(PAGE_PADDING))
                     .py_1()
                     .flex()
                     .items_center()
@@ -531,6 +719,7 @@ impl Render for ClipboardView {
                                 Button::new(id)
                                     .ghost()
                                     .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
                                     .label(label)
                                     .selected(self.theme == theme)
                                     .disabled(self.theme_pending)
@@ -547,13 +736,38 @@ impl Render for ClipboardView {
                     ),
             )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
+            .child(self.render_status(cx))
     }
 }
 
 impl ClipboardView {
-    fn render_content(&mut self, cx: &mut Context<Self>) -> Div {
+    fn render_status(&self, cx: &Context<Self>) -> Div {
+        div()
+            .flex_shrink_0()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .px(px(PAGE_PADDING))
+            .py_3()
+            .text_xs()
+            .text_color(if self.is_error {
+                cx.theme().danger
+            } else {
+                cx.theme().muted_foreground
+            })
+            .child(if self.reorder_pending {
+                "正在保存顺序…".to_owned()
+            } else {
+                self.message.clone()
+            })
+    }
+
+    fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         if self.preview.id.is_some() {
-            return self.render_preview(cx);
+            return visual::reveal(
+                self.render_preview(cx),
+                ("preview-enter", self.preview.generation as usize),
+                cx,
+            );
         }
         let view = cx.entity();
         let empty_message = if self.history.loading {
@@ -575,13 +789,18 @@ impl ClipboardView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .font_family("Microsoft YaHei UI")
+            .on_action(cx.listener(|this, _: &CancelDrag, window, cx| {
+                cx.stop_active_drag(window);
+                this.drop_target = None;
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.search
                     .update(cx, |search, cx| search.focus(window, cx));
             }))
             .child(
                 div()
-                    .px_5()
+                    .px(px(PAGE_PADDING))
                     .pt_5()
                     .pb_3()
                     .flex()
@@ -597,7 +816,7 @@ impl ClipboardView {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child("ElegantClipboard"),
+                                    .child("拖动 ⠿ 调整顺序 · 置顶项单独排序"),
                             ),
                     )
                     .child(
@@ -622,11 +841,11 @@ impl ClipboardView {
             )
             .child(
                 div()
-                    .px_5()
+                    .px(px(PAGE_PADDING))
                     .pb_3()
                     .child(Input::new(&self.search).cleanable(true)),
             )
-            .child(div().px_5().pb_2().flex().gap_2().children(
+            .child(div().px(px(PAGE_PADDING)).pb_2().flex().gap_2().children(
                 [(false, "全部"), (true, "收藏记录")].map(|(favorite_only, label)| {
                     Button::new(if favorite_only {
                         "filter-favorites"
@@ -651,14 +870,14 @@ impl ClipboardView {
             ))
             .child(
                 div()
-                    .px_5()
+                    .px(px(PAGE_PADDING))
                     .pb_2()
                     .flex()
                     .justify_between()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("{} 条记录", self.history.total))
-                    .child("↑ ↓ 选择 · Enter 复制 · Ctrl+F 搜索"),
+                    .child("↑↓ 选择 · Enter 复制"),
             )
             .child(
                 div()
@@ -672,6 +891,27 @@ impl ClipboardView {
                             this.open_preview(id, window, cx);
                         }
                     }))
+                    .on_drag_move(
+                        cx.listener(|this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
+                            if !event.bounds.contains(&event.event.position) {
+                                return;
+                            }
+                            if this.last_drag_scroll.elapsed() < Duration::from_millis(120) {
+                                return;
+                            }
+                            let top = this.scroll.0.borrow().base_handle.logical_scroll_top().0;
+                            let next = if event.event.position.y < event.bounds.top() + px(36.) {
+                                top.saturating_sub(1)
+                            } else if event.event.position.y > event.bounds.bottom() - px(36.) {
+                                (top + 1).min(this.history.items.len().saturating_sub(1))
+                            } else {
+                                return;
+                            };
+                            this.last_drag_scroll = Instant::now();
+                            this.scroll.scroll_to_item_strict(next, ScrollStrategy::Top);
+                            cx.notify();
+                        }),
+                    )
                     .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
                     .on_action(cx.listener(|this, _: &Previous, _, cx| this.select(-1, cx)))
                     .on_action(cx.listener(|this, _: &CopySelected, _, cx| {
@@ -717,7 +957,7 @@ impl ClipboardView {
                     && self.history.limit < HISTORY_LIMIT,
                 |container| {
                     container.child(
-                        div().px_5().py_2().child(
+                        div().px(px(PAGE_PADDING)).py_2().child(
                             Button::new("more")
                                 .ghost()
                                 .small()
@@ -735,20 +975,7 @@ impl ClipboardView {
                     )
                 },
             )
-            .child(
-                div()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
-                    .px_5()
-                    .py_3()
-                    .text_xs()
-                    .text_color(if self.is_error {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(self.message.clone()),
-            )
+            .into_any_element()
     }
 }
 

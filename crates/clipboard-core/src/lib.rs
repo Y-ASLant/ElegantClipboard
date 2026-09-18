@@ -9,6 +9,7 @@ pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
 pub mod preferences;
+mod reorder;
 
 use anyhow::{Result, bail};
 use database::{
@@ -22,6 +23,7 @@ pub const PAGE_SIZE: i64 = 100;
 
 pub struct History {
     repo: ClipboardRepository,
+    db: Database,
 }
 
 impl History {
@@ -33,7 +35,12 @@ impl History {
     pub fn new(db: &Database) -> Self {
         Self {
             repo: ClipboardRepository::new(db),
+            db: db.clone(),
         }
+    }
+
+    pub fn reorder(&self, from: i64, to: i64, after: bool, favorite_only: bool) -> Result<()> {
+        reorder::move_item(&self.db, from, to, after, favorite_only)
     }
 
     pub fn capture(&self, text: &str) -> Result<Option<i64>> {

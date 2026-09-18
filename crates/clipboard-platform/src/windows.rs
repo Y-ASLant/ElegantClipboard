@@ -39,6 +39,13 @@ pub enum Command {
     ToggleFavorite(i64),
     Pause(bool),
     SetTheme(ThemePreference),
+    Reorder {
+        from: i64,
+        to: i64,
+        after: bool,
+        favorite_only: bool,
+        generation: u64,
+    },
     Capture(String),
 }
 
@@ -49,6 +56,11 @@ pub enum Event {
         generation: u64,
     },
     Status(String),
+    Reordered {
+        from: i64,
+        generation: u64,
+        result: Result<(), String>,
+    },
     Preview {
         id: i64,
         generation: u64,
@@ -322,6 +334,31 @@ impl Worker {
             Command::TogglePin(id) => {
                 self.history.toggle_pin(id)?;
             }
+            Command::Reorder {
+                from,
+                to,
+                after,
+                favorite_only,
+                generation,
+            } => {
+                let result = if generation != self.generation || favorite_only != self.favorite_only
+                {
+                    Err(anyhow!("列表已切换，请重新拖动"))
+                } else {
+                    self.history.reorder(from, to, after, favorite_only)
+                };
+                if result.is_ok() {
+                    self.snapshot()?;
+                }
+                self.events
+                    .send_blocking(Event::Reordered {
+                        from,
+                        generation,
+                        result: result.map_err(|error| error.to_string()),
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::SetTheme(theme) => {
                 let result = self
                     .preferences
@@ -402,6 +439,48 @@ mod tests {
         let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
         assert_eq!(next_snapshot(&events, 0).len(), 1);
         drop(reopened);
+        Ok(())
+    }
+
+    #[test]
+    fn reorder_acknowledges_success_and_rejects_stale_view() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Capture("first".into()))?;
+        let first = next_snapshot(&events, 0)[0].id;
+        service.send(Command::Capture("second".into()))?;
+        let second = next_snapshot(&events, 0)[0].id;
+        for generation in [0, 99] {
+            service.send(Command::Reorder {
+                from: first,
+                to: second,
+                after: false,
+                favorite_only: false,
+                generation,
+            })?;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match events.try_recv() {
+                    Ok(Event::Reordered {
+                        from,
+                        generation: actual,
+                        result,
+                    }) => {
+                        assert_eq!((from, actual), (first, generation));
+                        assert_eq!(result.is_ok(), generation == 0);
+                        break;
+                    }
+                    Ok(Event::Error(message)) => panic!("{message}"),
+                    _ => {}
+                }
+                assert!(std::time::Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        drop(service);
+        let (_service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(next_snapshot(&events, 0)[0].id, first);
         Ok(())
     }
 

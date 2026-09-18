@@ -3,6 +3,8 @@ mod options;
 mod state;
 #[cfg(windows)]
 mod ui;
+#[cfg(windows)]
+mod visual;
 
 fn main() -> anyhow::Result<()> {
     let Some(options) = options::Options::parse(std::env::args_os().skip(1))? else {
