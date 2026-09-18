@@ -1,0 +1,35 @@
+[workspace]
+members = ["crates/clipboard-core", "crates/clipboard-platform"]
+exclude = ["src-tauri", "clipboard-rs"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT"
+
+# Latest stable direct dependencies verified against crates.io on 2026-09-18.
+# Commit Cargo.lock; review `cargo update` at the start of each development batch.
+[workspace.dependencies]
+anyhow = "1.0.104"
+async-channel = "2.5.0"
+blake3 = "1.8.7"
+clipboard-rs = { version = "0.3.5", default-features = false }
+directories = "6.0.0"
+parking_lot = "0.12.5"
+rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+tracing = "0.1.44"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Threading"] }
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "unwind"

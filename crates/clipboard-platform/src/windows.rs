@@ -1,0 +1,374 @@
+use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+use anyhow::{Context, Result, anyhow, bail};
+use clipboard_core::{History, MAX_TEXT_BYTES, PAGE_SIZE, database::ClipboardItem};
+use clipboard_rs::{
+    Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
+    ContentFormat, WatcherShutdown,
+};
+use directories::ProjectDirs;
+use std::{
+    fs::{File, OpenOptions},
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, SyncSender},
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
+};
+
+pub enum Command {
+    Query {
+        search: String,
+        limit: i64,
+        generation: u64,
+    },
+    Copy(i64),
+    Delete(i64),
+    TogglePin(i64),
+    Pause(bool),
+    Capture(String),
+}
+
+pub enum Event {
+    Snapshot {
+        items: Vec<ClipboardItem>,
+        total: i64,
+        generation: u64,
+    },
+    Status(String),
+    Error(String),
+}
+
+#[derive(Default)]
+struct CaptureState {
+    paused: bool,
+    ignored_sequence: u32,
+    last_sequence: u32,
+}
+
+struct WatchHandler {
+    clipboard: ClipboardContext,
+    state: Arc<Mutex<CaptureState>>,
+    commands: SyncSender<Command>,
+    events: async_channel::Sender<Event>,
+}
+
+impl ClipboardHandler for WatchHandler {
+    fn on_clipboard_change(&mut self) {
+        let result = self.read_change();
+        if let Err(error) = result {
+            let _ = self.events.try_send(Event::Error(error.to_string()));
+        }
+    }
+}
+
+impl WatchHandler {
+    fn read_change(&mut self) -> Result<()> {
+        // Serialize our writes with capture so their sequence is suppressed before
+        // a delayed WM_CLIPBOARDUPDATE callback can observe the new text.
+        let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+        let sequence = unsafe { GetClipboardSequenceNumber() };
+        if state.paused || sequence == state.ignored_sequence || sequence == state.last_sequence {
+            return Ok(());
+        }
+        if !self.clipboard.has(ContentFormat::Text) {
+            state.last_sequence = sequence;
+            return Ok(());
+        }
+        let text = self
+            .clipboard
+            .get_text()
+            .map_err(|error| anyhow!("读取剪贴板失败：{error}"))?;
+        if text.len() > MAX_TEXT_BYTES {
+            state.last_sequence = sequence;
+            bail!("文本超过 1 MiB，未保存");
+        }
+        // Do not silently replace different rapid copy operations with the last one.
+        self.commands
+            .try_send(Command::Capture(text))
+            .map_err(|_| anyhow!("采集队列已满或已停止，本次复制未保存"))?;
+        state.last_sequence = sequence;
+        Ok(())
+    }
+}
+
+pub struct Service {
+    commands: SyncSender<Command>,
+    stop: Arc<AtomicBool>,
+    shutdown: Option<WatcherShutdown>,
+    watcher: Option<JoinHandle<()>>,
+    worker: Option<JoinHandle<()>>,
+    events: async_channel::Sender<Event>,
+    _instance_lock: File,
+    pub data_dir: PathBuf,
+}
+
+impl Service {
+    pub fn start(
+        data_dir: Option<PathBuf>,
+        monitor: bool,
+    ) -> Result<(Self, async_channel::Receiver<Event>)> {
+        let data_dir = match data_dir {
+            Some(path) => path,
+            None => ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")
+                .context("无法确定用户数据目录")?
+                .data_local_dir()
+                .to_owned(),
+        };
+        std::fs::create_dir_all(&data_dir).context("无法创建数据目录")?;
+        let instance_lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(data_dir.join("instance.lock"))?;
+        instance_lock
+            .try_lock()
+            .context("该数据目录已由另一个基础版实例使用")?;
+        // Startup happens before entering the GUI event loop; subsequent DB work is
+        // exclusively owned by the worker thread.
+        let history = History::open(data_dir.join("clipboard.db"))?;
+        let writer =
+            ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
+        let (commands, incoming) = mpsc::sync_channel(64);
+        let (events, outgoing) = async_channel::bounded(64);
+        let state = Arc::new(Mutex::new(CaptureState::default()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut service = Self {
+            commands: commands.clone(),
+            stop: stop.clone(),
+            shutdown: None,
+            watcher: None,
+            worker: None,
+            events: events.clone(),
+            _instance_lock: instance_lock,
+            data_dir,
+        };
+        let worker_state = state.clone();
+        let worker_events = events.clone();
+        service.worker = Some(thread::Builder::new().name("history-worker".into()).spawn(
+            move || {
+                let mut worker = Worker {
+                    history,
+                    clipboard: writer,
+                    state: worker_state,
+                    search: String::new(),
+                    limit: PAGE_SIZE,
+                    generation: 0,
+                    events: worker_events,
+                };
+                if let Err(error) = worker.snapshot() {
+                    let _ = worker.events.try_send(Event::Error(error.to_string()));
+                }
+                while !stop.load(Ordering::Acquire) {
+                    match incoming.recv_timeout(Duration::from_millis(250)) {
+                        Ok(command) => {
+                            if let Err(error) = worker.handle(command) {
+                                let _ = worker.events.try_send(Event::Error(error.to_string()));
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                }
+            },
+        )?);
+        if monitor {
+            let clipboard =
+                ClipboardContext::new().map_err(|error| anyhow!("初始化监听失败：{error}"))?;
+            let mut watcher = ClipboardWatcherContext::new()
+                .map_err(|error| anyhow!("初始化监听失败：{error}"))?;
+            watcher.add_handler(WatchHandler {
+                clipboard,
+                state,
+                commands,
+                events: events.clone(),
+            });
+            service.shutdown = Some(watcher.get_shutdown_channel());
+            let stop = service.stop.clone();
+            service.watcher = Some(
+                thread::Builder::new()
+                    .name("clipboard-watcher".into())
+                    .spawn(move || {
+                        watcher.start_watch();
+                        if !stop.load(Ordering::Acquire) {
+                            let _ = events
+                                .try_send(Event::Error("剪贴板监听已停止，请重启应用".into()));
+                        }
+                    })?,
+            );
+        }
+        Ok((service, outgoing))
+    }
+
+    pub fn send(&self, command: Command) -> Result<()> {
+        self.commands
+            .try_send(command)
+            .map_err(|_| anyhow!("后台任务繁忙或已停止，请稍后重试"))
+    }
+}
+
+impl Drop for Service {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        // Release a worker waiting for a slow/closed UI before joining it.
+        self.events.close();
+        if let Some(shutdown) = self.shutdown.take() {
+            shutdown.stop();
+        }
+        if let Some(watcher) = self.watcher.take() {
+            let _ = watcher.join();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+struct Worker {
+    history: History,
+    clipboard: ClipboardContext,
+    state: Arc<Mutex<CaptureState>>,
+    search: String,
+    limit: i64,
+    generation: u64,
+    events: async_channel::Sender<Event>,
+}
+
+impl Worker {
+    fn snapshot(&self) -> Result<()> {
+        self.events
+            .send_blocking(Event::Snapshot {
+                items: self.history.list(&self.search, self.limit)?,
+                total: self.history.count(&self.search)?,
+                generation: self.generation,
+            })
+            .map_err(|_| anyhow!("窗口已关闭"))
+    }
+
+    fn handle(&mut self, command: Command) -> Result<()> {
+        match command {
+            Command::Query {
+                search,
+                limit,
+                generation,
+            } => {
+                self.search = search;
+                self.limit = limit;
+                self.generation = generation;
+            }
+            Command::Capture(text) => {
+                self.history.capture(&text)?;
+            }
+            Command::Copy(id) => {
+                let text = self.history.text(id)?;
+                let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                self.clipboard
+                    .set_text(text)
+                    .map_err(|error| anyhow!("复制失败：{error}"))?;
+                state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+                let _ = self.events.try_send(Event::Status(
+                    "已复制，可切换到目标应用按 Ctrl+V 粘贴".into(),
+                ));
+                return Ok(());
+            }
+            Command::Delete(id) => self.history.delete(id)?,
+            Command::TogglePin(id) => {
+                self.history.toggle_pin(id)?;
+            }
+            Command::Pause(paused) => {
+                let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                state.paused = paused;
+                state.last_sequence = unsafe { GetClipboardSequenceNumber() };
+                let _ = self.events.try_send(Event::Status(
+                    if paused {
+                        "已暂停记录"
+                    } else {
+                        "已恢复记录"
+                    }
+                    .into(),
+                ));
+                return Ok(());
+            }
+        }
+        self.snapshot()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn next_snapshot(
+        events: &async_channel::Receiver<Event>,
+        generation: u64,
+    ) -> Vec<ClipboardItem> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::Snapshot {
+                    items,
+                    generation: actual,
+                    ..
+                }) if actual == generation => return items,
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker did not respond"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn worker_serializes_capture_search_and_delete_without_touching_clipboard() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Capture("中文%_ test".into()))?;
+        service.send(Command::Capture("another record".into()))?;
+        service.send(Command::Query {
+            search: "%_".into(),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        let rows = next_snapshot(&events, 1);
+        assert_eq!(rows.len(), 1);
+        service.send(Command::Delete(rows[0].id))?;
+        service.send(Command::Query {
+            search: "".into(),
+            limit: PAGE_SIZE,
+            generation: 2,
+        })?;
+        assert_eq!(next_snapshot(&events, 2).len(), 1);
+        drop(service);
+        let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(next_snapshot(&events, 0).len(), 1);
+        drop(reopened);
+        Ok(())
+    }
+
+    #[test]
+    fn instance_lock_and_shutdown_work_even_with_a_full_event_queue() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, _events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(Service::start(Some(directory.path().to_owned()), false).is_err());
+        for generation in 1..=160 {
+            // Deliberately create UI backpressure. A full command queue is expected.
+            let _ = service.send(Command::Query {
+                search: "".into(),
+                limit: PAGE_SIZE,
+                generation,
+            });
+            thread::sleep(Duration::from_millis(1));
+        }
+        drop(service);
+        let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        drop(service);
+        Ok(())
+    }
+}
