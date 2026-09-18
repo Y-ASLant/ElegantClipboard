@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
         if let Some(source) = &options.import_db {
             let (path, report) = clipboard_platform::import_legacy_data(source, options.data_dir)?;
             println!(
-                "导入完成：{} 条记录，其中 {} 条默认分组文本目前可在 GPUI 版查看。新数据库：{}",
+                "导入完成：{} 条记录，其中 {} 条默认分组文本/网址目前可在 GPUI 版查看。新数据库：{}",
                 report.total_items,
                 report.visible_text_items,
                 path.display()

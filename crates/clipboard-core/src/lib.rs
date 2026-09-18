@@ -51,15 +51,21 @@ impl History {
         if text.len() > MAX_TEXT_BYTES {
             bail!("文本超过 1 MiB，未保存");
         }
-        let hash = blake3::hash(format!("text:{text}").as_bytes())
+        let (content_type, text, hash_prefix) =
+            if let Some(url) = clipboard::canonical_url_text(text) {
+                (ContentType::Url, url, "url:")
+            } else {
+                (ContentType::Text, text, "text:")
+            };
+        let hash = blake3::hash(format!("{hash_prefix}{text}").as_bytes())
             .to_hex()
             .to_string();
-        // Exact dedup preserves different Unicode and whitespace content in this MVP.
+        // URL trimming matches the legacy database; other text keeps exact bytes.
         if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
             return Ok(Some(id));
         }
         let id = self.repo.insert(NewClipboardItem {
-            content_type: ContentType::Text,
+            content_type,
             text_content: Some(text.to_owned()),
             content_hash: hash.clone(),
             semantic_hash: clipboard::semantic_hash_from_text(text).unwrap_or(hash),
@@ -80,7 +86,7 @@ impl History {
     ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text".into()),
+            content_type: Some("text,url".into()),
             favorite_only,
             limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
             ..Default::default()
@@ -90,7 +96,7 @@ impl History {
     pub fn count(&self, search: &str, favorite_only: bool) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text".into()),
+            content_type: Some("text,url".into()),
             favorite_only,
             ..Default::default()
         })?)
@@ -161,6 +167,31 @@ mod tests {
         let history = History::open(path)?;
         assert_eq!(history.text(id)?, text);
         assert_eq!(history.count("中文😀", false)?, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn imported_urls_are_visible_and_keep_legacy_dedup_identity() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let url = "https://example.com/旧记录";
+        let hash = blake3::hash(format!("url:{url}").as_bytes())
+            .to_hex()
+            .to_string();
+        let id = ClipboardRepository::new(&db).insert(NewClipboardItem {
+            content_type: ContentType::Url,
+            text_content: Some(url.into()),
+            content_hash: hash.clone(),
+            semantic_hash: hash,
+            preview: Some(url.into()),
+            ..Default::default()
+        })?;
+        let history = History::new(&db);
+        assert_eq!(history.count("example.com", false)?, 1);
+        assert_eq!(history.list("旧记录", PAGE_SIZE, false)?[0].id, id);
+        assert_eq!(history.capture(&format!("  {url}  "))?, Some(id));
+        assert_eq!(history.count("", false)?, 1);
+        assert_eq!(history.text(id)?, url);
         Ok(())
     }
 

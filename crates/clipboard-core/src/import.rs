@@ -73,7 +73,7 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
                 row.get(0)
             })?,
             visible_text_items: connection.query_row(
-                "SELECT COUNT(*) FROM clipboard_items WHERE content_type = 'text' AND group_id IS NULL",
+                "SELECT COUNT(*) FROM clipboard_items WHERE content_type IN ('text', 'url') AND group_id IS NULL",
                 [],
                 |row| row.get(0),
             )?,
