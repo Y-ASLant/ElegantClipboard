@@ -6,3 +6,7 @@
 - 真实 GPUI 窗口在 `target/qa/backup-ui/` 隔离目录下以 `--no-monitor` 打开，“导出备份”成功打开 Windows 保存对话框并生成 ZIP。检查 ZIP 内含格式说明和数据库，`--import-backup` 恢复后 SQLite `quick_check=ok`，原自定义分组仍在；再次恢复报“目标数据目录已有数据库或图片”。该窗口样本有 0 条记录，含记录与图片的验证由自动化测试覆盖。
 - Windows release 构建与 `--smoke-test --data-dir target/qa/backup-release-smoke` 通过；fmt 检查通过。
 - 本次未触碰默认用户数据目录或交互桌面剪贴板。保存对话框默认定位用户文档目录；验收时创建的 ZIP 已移入隔离 QA 目录。
+
+后续加固：构造包含虚构旧凭据的 GPUI v1 ZIP，先确认归档数据库内确有该设置；修复前恢复目标仍保留凭据，修复后被筛除，记录仍可读取。导出、单库导入及 v1/v2、旧版 ZIP 恢复的暂存数据库统一在复制或安装主 `.db` 文件前检查 WAL checkpoint；有未结束读取事务导致日志不能合并时，检查返回错误。对应回归覆盖于 `clipboard-core` 测试。
+
+Release 命令行验收使用忽略的 `target/qa/restore-secret-v1-20260919/`：v1 ZIP 中的数据库与合成源库字节一致，源库含 116 条记录及一项虚构 `secret_token`；`--import-backup` 恢复后仍有 116 条记录和 GPUI 深色外观，`secret_token` 数量为 0，SQLite `quick_check=ok`。隔离目录的常驻测试进程未受影响。

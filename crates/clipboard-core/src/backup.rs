@@ -217,6 +217,7 @@ impl History {
         }
         let total_items: i64 =
             snapshot.query_row("SELECT COUNT(*) FROM clipboard_items", [], |row| row.get(0))?;
+        crate::import::checkpoint_staged_database(&snapshot)?;
         drop(snapshot);
 
         let manifest = Manifest {
@@ -360,6 +361,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
 
     let mut restored_db = Connection::open(&staged_db)?;
     let tx = restored_db.transaction()?;
+    tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
     let media_rows: Vec<BackupMediaRow> = {
         let mut query = tx
             .prepare("SELECT id, image_path, source_app_icon, file_payload FROM clipboard_items")?;
@@ -433,6 +435,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     if total_items != manifest.total_items {
         bail!("备份记录数量与格式说明不一致");
     }
+    crate::import::checkpoint_staged_database(&restored_db)?;
     drop(restored_db);
 
     let mut installed = Vec::new();
@@ -633,11 +636,23 @@ mod tests {
     #[test]
     fn restores_previous_gpui_v1_backup() -> Result<()> {
         let dir = tempfile::tempdir()?;
-        let history = History::open(dir.path().join("source.db"))?;
+        let source_path = dir.path().join("source.db");
+        let history = History::open(source_path.clone())?;
         let id = history.capture("v1 text")?.unwrap();
-        let current = dir.path().join("current.zip");
-        history.export_backup(&current)?;
-        let mut input = ZipArchive::new(File::open(current)?)?;
+        history.db.write_connection().lock().execute(
+            "INSERT INTO settings (key, value) VALUES ('secret_token', 'legacy-secret')",
+            [],
+        )?;
+        drop(history);
+        let source_db = Connection::open(&source_path)?;
+        source_db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        let source_secret_count: i64 = source_db.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(source_secret_count, 1);
+        drop(source_db);
         let previous = dir.path().join("previous.zip");
         let mut output = ZipWriter::new(File::create(&previous)?);
         output.start_file("manifest.json", SimpleFileOptions::default())?;
@@ -645,7 +660,7 @@ mod tests {
             br#"{"format":"elegantclipboard-gpui","version":1,"total_items":1,"missing_images":0}"#,
         )?;
         output.start_file("clipboard.db", SimpleFileOptions::default())?;
-        io::copy(&mut input.by_name("clipboard.db")?, &mut output)?;
+        io::copy(&mut File::open(&source_path)?, &mut output)?;
         output.finish()?;
         let target = dir.path().join("restored");
         fs::create_dir_all(&target)?;
@@ -656,6 +671,13 @@ mod tests {
             History::open(target.join("clipboard.db"))?.text(id)?,
             "v1 text"
         );
+        let restored_db = Connection::open(target.join("clipboard.db"))?;
+        let secret_count: i64 = restored_db.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(secret_count, 0);
         Ok(())
     }
 

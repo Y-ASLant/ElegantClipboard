@@ -190,6 +190,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
     if integrity != "ok" {
         bail!("旧版备份导入校验失败：{integrity}");
     }
+    crate::import::checkpoint_staged_database(&connection)?;
     drop(connection);
 
     let mut installed = Vec::new();

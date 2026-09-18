@@ -15,6 +15,16 @@ pub struct ImportReport {
     pub visible_text_items: i64,
 }
 
+/// Staged databases are installed as a single file, without their WAL sidecars.
+pub(crate) fn checkpoint_staged_database(connection: &Connection) -> Result<()> {
+    let busy: i64 =
+        connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+    if busy != 0 {
+        bail!("暂存数据库仍有未合并的日志");
+    }
+    Ok(())
+}
+
 /// Import a consistent snapshot without changing the legacy database.
 /// The caller must hold the destination instance lock throughout this call.
 pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<ImportReport> {
@@ -85,16 +95,7 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
                 )?,
             }
         };
-        // Only the main database file is installed, so every WAL write must be
-        // checkpointed before moving it out of the temporary directory.
-        let busy: i64 = database.write_connection().lock().query_row(
-            "PRAGMA wal_checkpoint(TRUNCATE)",
-            [],
-            |row| row.get(0),
-        )?;
-        if busy != 0 {
-            bail!("导入副本仍有未合并的数据库日志");
-        }
+        checkpoint_staged_database(&database.write_connection().lock())?;
         report
     };
     std::fs::rename(&staged, destination).context("无法将导入副本移入 GPUI 数据目录")?;
@@ -169,6 +170,26 @@ mod tests {
         Connection::open(&source)?;
         assert!(import_legacy_database(&source, &destination).is_err());
         assert!(!destination.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoint_rejects_locked_wal_and_recovers_after_reader_exits() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("staged.db");
+        let writer = Connection::open(&path)?;
+        writer.busy_timeout(Duration::from_millis(50))?;
+        writer.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE records (id INTEGER);
+             INSERT INTO records VALUES (1);",
+        )?;
+        let reader = Connection::open(&path)?;
+        reader.execute_batch("BEGIN; SELECT id FROM records")?;
+        writer.execute("INSERT INTO records VALUES (2)", [])?;
+        assert!(checkpoint_staged_database(&writer).is_err());
+        reader.execute_batch("ROLLBACK")?;
+        checkpoint_staged_database(&writer)?;
         Ok(())
     }
 }
