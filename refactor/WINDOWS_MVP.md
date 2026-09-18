@@ -86,7 +86,7 @@ cargo build -p elegant-clipboard-gpui --locked
 
 当前 103 项测试通过（核心 90、Windows 后端 9、应用状态/参数 4），覆盖暂停确认、搜索代次与选中 ID 保持、键盘边界、冒烟参数隔离，以及在线旧库导入、网址兼容、拒绝无效来源、实例唤出和快捷键设置。fmt、Clippy（warnings 视为错误）、Windows debug/release 构建及 release 窗口冒烟通过。
 
-原生窗口已通过启动/退出、中文路径、重复实例拦截，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查。所有交互使用隔离目录并禁用实际采集；没有覆盖系统剪贴板读写、真实中文 IME、长时间运行、release 打包或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)。
+原生窗口已通过启动/退出、中文路径、重复启动唤回，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查；10,000 条合成文本的启动与末尾搜索也已验收。所有交互使用隔离目录并禁用实际采集；没有覆盖系统剪贴板读写、真实中文 IME、长时间运行、release 打包或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)和[规模验证](evidence/windows-scale-2026-09-19.md)。
 
 Windows CI 包含 fmt、Clippy、locked 测试和应用构建，尚未在远端运行。CI 使用已核验的 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
 
