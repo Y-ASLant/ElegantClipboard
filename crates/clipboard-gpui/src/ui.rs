@@ -5,6 +5,7 @@ use crate::{
     state::{HistoryState, PreviewState},
 };
 use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE, preferences::ThemePreference};
+use clipboard_platform::hotkey::Hotkey;
 use clipboard_platform::{Command, Event, Service};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -134,6 +135,8 @@ struct ClipboardView {
     service: Service,
     _tray: Option<TrayIcon>,
     _tray_events: Task<()>,
+    _hotkey: Option<Hotkey>,
+    _hotkey_events: Task<()>,
     exiting: Rc<Cell<bool>>,
     history: HistoryState,
     search: Entity<InputState>,
@@ -217,6 +220,26 @@ impl ClipboardView {
             }
         });
         let tray_error = tray.as_ref().err().map(ToString::to_string);
+        let (hotkey_sender, hotkey_receiver) = async_channel::bounded(1);
+        let hotkey = Hotkey::start(hotkey_sender);
+        let hotkey_events = cx.spawn_in(window, async move |view, cx| {
+            while hotkey_receiver.recv().await.is_ok() {
+                if view
+                    .update_in(cx, |_, window, _| tray::set_window_visible(window, true))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let hotkey_error = hotkey.as_ref().err().map(ToString::to_string);
+        let mut startup_errors = Vec::new();
+        if let Some(error) = tray_error {
+            startup_errors.push(format!("托盘不可用：{error}；关闭窗口将退出"));
+        }
+        if let Some(error) = hotkey_error {
+            startup_errors.push(error);
+        }
         let theme = service.initial_theme;
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
@@ -230,6 +253,8 @@ impl ClipboardView {
             service,
             _tray: tray.ok(),
             _tray_events: tray_events,
+            _hotkey: hotkey.ok(),
+            _hotkey_events: hotkey_events,
             exiting,
             history: HistoryState::default(),
             search,
@@ -247,18 +272,17 @@ impl ClipboardView {
             last_drag_scroll: Instant::now(),
             paused: false,
             pause_pending: false,
-            message: tray_error.clone().map_or_else(
-                || {
-                    if monitoring {
-                        "正在记录文本；关闭窗口后可从托盘重新打开"
-                    } else {
-                        "采集已禁用；关闭窗口后可从托盘重新打开"
-                    }
-                    .into()
-                },
-                |error| format!("托盘不可用：{error}；关闭窗口将退出"),
-            ),
-            is_error: tray_error.is_some(),
+            message: if startup_errors.is_empty() {
+                if monitoring {
+                    "正在记录文本；Ctrl+Shift+V 可唤出窗口"
+                } else {
+                    "采集已禁用；Ctrl+Shift+V 可唤出窗口"
+                }
+                .into()
+            } else {
+                startup_errors.join("；")
+            },
+            is_error: !startup_errors.is_empty(),
             _subscriptions: vec![subscription, appearance],
             _events: event_task,
             search_task: None,
