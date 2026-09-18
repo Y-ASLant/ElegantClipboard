@@ -180,6 +180,8 @@ struct ClipboardView {
     group_save_pending: bool,
     group_delete_id: Option<i64>,
     group_delete_pending: bool,
+    clear_confirm_open: bool,
+    clear_pending: bool,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -225,6 +227,7 @@ impl ClipboardView {
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史…"));
         let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::Change) {
+                this.clear_confirm_open = false;
                 this.history.begin_search();
                 this.scroll.scroll_to_item(0, ScrollStrategy::Top);
                 this.search_task = Some(cx.spawn(async move |view, cx| {
@@ -330,6 +333,8 @@ impl ClipboardView {
             group_save_pending: false,
             group_delete_id: None,
             group_delete_pending: false,
+            clear_confirm_open: false,
+            clear_pending: false,
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -496,6 +501,7 @@ impl ClipboardView {
         self.search_task = None;
         self.group_move_id = None;
         self.group_delete_id = None;
+        self.clear_confirm_open = false;
         self.history.set_group(group_id);
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.query(cx);
@@ -536,6 +542,22 @@ impl ClipboardView {
             cx,
         ) {
             self.group_delete_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn clear_history(&mut self, cx: &mut Context<Self>) {
+        if !self.clear_confirm_open || self.clear_pending {
+            return;
+        }
+        if self.send(
+            Command::ClearHistory {
+                group_id: self.history.group_id,
+                generation: self.history.generation,
+            },
+            cx,
+        ) {
+            self.clear_pending = true;
             cx.notify();
         }
     }
@@ -625,6 +647,20 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         self.message = format!("删除分组失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::HistoryCleared(result) => {
+                self.clear_pending = false;
+                self.clear_confirm_open = false;
+                match result {
+                    Ok(count) => {
+                        self.message = format!("已清理 {count} 条未置顶且未收藏的记录");
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("清理历史失败：{error}");
                         self.is_error = true;
                     }
                 }
@@ -864,6 +900,7 @@ impl ClipboardView {
                 self.group_move_pending = false;
                 self.group_save_pending = false;
                 self.group_delete_pending = false;
+                self.clear_pending = false;
                 self.group_delete_id = None;
                 self.preview_save_pending = false;
                 self.message = message;
@@ -1762,6 +1799,7 @@ impl ClipboardView {
                     .selected(self.history.favorite_only == favorite_only)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if this.history.favorite_only != favorite_only {
+                            this.clear_confirm_open = false;
                             this.search_task = None;
                             this.history.set_favorite_filter(favorite_only);
                             this.scroll.scroll_to_item(0, ScrollStrategy::Top);
@@ -1786,7 +1824,11 @@ impl ClipboardView {
                             .small()
                             .ghost()
                             .label("＋ 新建")
-                            .disabled(self.group_save_pending || self.group_delete_pending)
+                            .disabled(
+                                self.group_save_pending
+                                    || self.group_delete_pending
+                                    || self.clear_pending,
+                            )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.group_editor_open =
                                     !this.group_editor_open || this.group_rename_id.is_some();
@@ -1810,7 +1852,8 @@ impl ClipboardView {
                             .disabled(
                                 self.history.group_id.is_none()
                                     || self.group_save_pending
-                                    || self.group_delete_pending,
+                                    || self.group_delete_pending
+                                    || self.clear_pending,
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let Some(id) = this.history.group_id else {
@@ -1841,10 +1884,32 @@ impl ClipboardView {
                             .disabled(
                                 self.history.group_id.is_none()
                                     || self.group_save_pending
-                                    || self.group_delete_pending,
+                                    || self.group_delete_pending
+                                    || self.clear_pending,
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.group_delete_id = this.history.group_id;
+                                this.clear_confirm_open = false;
+                                this.group_editor_open = false;
+                                this.group_rename_id = None;
+                                this.group_move_id = None;
+                                window.focus(&this.list_focus, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("clear-history-toggle")
+                            .small()
+                            .ghost()
+                            .label("清理历史")
+                            .disabled(
+                                self.group_save_pending
+                                    || self.group_delete_pending
+                                    || self.clear_pending,
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.clear_confirm_open = true;
+                                this.group_delete_id = None;
                                 this.group_editor_open = false;
                                 this.group_rename_id = None;
                                 this.group_move_id = None;
@@ -1858,7 +1923,7 @@ impl ClipboardView {
                             .outline()
                             .label("默认分组")
                             .selected(self.history.group_id.is_none())
-                            .disabled(self.group_delete_pending)
+                            .disabled(self.group_delete_pending || self.clear_pending)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.select_group(None, window, cx);
                             })),
@@ -1870,7 +1935,7 @@ impl ClipboardView {
                             .outline()
                             .label(group.name.clone())
                             .selected(self.history.group_id == group_id)
-                            .disabled(self.group_delete_pending)
+                            .disabled(self.group_delete_pending || self.clear_pending)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.select_group(group_id, window, cx);
                             }))
@@ -1967,6 +2032,65 @@ impl ClipboardView {
                                 ),
                         ),
                     ("group-delete", id as usize),
+                    cx,
+                ))
+            })
+            .when(self.clear_confirm_open, |container| {
+                let name = self
+                    .history
+                    .group_id
+                    .and_then(|id| self.groups.iter().find(|group| group.id == id))
+                    .map(|group| group.name.as_str())
+                    .unwrap_or("默认分组");
+                container.child(visual::reveal(
+                    div()
+                        .px(px(PAGE_PADDING))
+                        .pb_2()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(div().text_sm().child(format!(
+                            "清理「{name}」中未置顶且未收藏的记录？搜索和收藏筛选不影响清理范围。"
+                        )))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child("此操作无法撤销；可先导出备份。"),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap_2()
+                                .child(
+                                    Button::new("clear-history-cancel")
+                                        .small()
+                                        .ghost()
+                                        .label("取消")
+                                        .disabled(self.clear_pending)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.clear_confirm_open = false;
+                                            window.focus(&this.list_focus, cx);
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("clear-history-confirm")
+                                        .small()
+                                        .danger()
+                                        .label(if self.clear_pending {
+                                            "正在清理…"
+                                        } else {
+                                            "确认清理"
+                                        })
+                                        .disabled(self.clear_pending)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.clear_history(cx)),
+                                        ),
+                                ),
+                        ),
+                    ("clear-history", self.history.group_id.unwrap_or(0) as usize),
                     cx,
                 ))
             })

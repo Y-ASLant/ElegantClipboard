@@ -62,6 +62,10 @@ pub enum Command {
         generation: u64,
     },
     Delete(i64),
+    ClearHistory {
+        group_id: Option<i64>,
+        generation: u64,
+    },
     TogglePin(i64),
     ToggleFavorite(i64),
     Pause(bool),
@@ -126,6 +130,7 @@ pub enum Event {
         generation: u64,
         result: Result<bool, String>,
     },
+    HistoryCleared(Result<i64, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
@@ -720,6 +725,27 @@ impl Worker {
                 return Ok(());
             }
             Command::Delete(id) => self.history.delete_with_media(id, &self.images_dir)?,
+            Command::ClearHistory {
+                group_id,
+                generation,
+            } => {
+                let result = if group_id != self.group_id || generation != self.generation {
+                    Err(anyhow!("列表已切换，请重新选择要清理的分组"))
+                } else {
+                    self.history
+                        .clear_history_with_media(group_id, &self.images_dir)
+                };
+                if result.is_ok() {
+                    self.send_groups()?;
+                    self.snapshot()?;
+                }
+                self.events
+                    .send_blocking(Event::HistoryCleared(
+                        result.map_err(|error| error.to_string()),
+                    ))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::ToggleFavorite(id) => {
                 self.history.toggle_favorite(id)?;
             }
@@ -1583,6 +1609,54 @@ mod tests {
         let (database, report) = restore_backup_data(&backup, restored)?;
         assert_eq!(report.total_items, 1);
         assert_eq!(History::open(database)?.text(original)?, "worker backup");
+        Ok(())
+    }
+
+    #[test]
+    fn clear_history_preserves_favorites_and_rejects_stale_group_view() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let group = history.create_group("Work")?;
+        let removed = history.capture("remove")?.unwrap();
+        history.move_to_group(removed, None, Some(group.id))?;
+        let favorite = history.capture("favorite")?.unwrap();
+        history.move_to_group(favorite, None, Some(group.id))?;
+        history.toggle_favorite(favorite)?;
+        let default = history.capture("default")?.unwrap();
+        drop(history);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Query {
+            search: "favorite".into(),
+            favorite_only: true,
+            group_id: Some(group.id),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1).len(), 1);
+        service.send(Command::ClearHistory {
+            group_id: Some(group.id),
+            generation: 0,
+        })?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::HistoryCleared(Err(_))
+        ));
+        service.send(Command::ClearHistory {
+            group_id: Some(group.id),
+            generation: 1,
+        })?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        assert_eq!(next_snapshot(&events, 1).len(), 1);
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::HistoryCleared(Ok(1))
+        ));
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        assert!(history.item(removed).is_err());
+        assert!(history.item(favorite)?.is_favorite);
+        assert_eq!(history.text(default)?, "default");
         Ok(())
     }
 }

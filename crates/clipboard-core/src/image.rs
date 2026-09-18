@@ -85,6 +85,19 @@ impl History {
         Ok(())
     }
 
+    /// Clear non-pinned, non-favorite records in one group and remove only
+    /// unreferenced images owned by this data directory.
+    pub fn clear_history_with_media(
+        &self,
+        group_id: Option<i64>,
+        images_dir: &Path,
+    ) -> Result<i64> {
+        let candidates = self.repo.get_clearable_image_paths(group_id, None)?;
+        let deleted = self.repo.clear_history(group_id, None)?;
+        self.cleanup_images(candidates, images_dir);
+        Ok(deleted)
+    }
+
     pub(crate) fn cleanup_images(&self, candidates: Vec<String>, images_dir: &Path) {
         if candidates.is_empty() {
             return;
@@ -215,6 +228,41 @@ mod tests {
         assert!(external.exists());
         history.delete_with_media(id, &images)?;
         assert!(!managed.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn clear_history_is_group_scoped_and_preserves_protected_items() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let group = history.create_group("工作")?;
+        let group_image = history.capture_image(PNG, 3, 2, &images)?;
+        let group_image_path = PathBuf::from(history.item(group_image)?.image_path.unwrap());
+        history.move_to_group(group_image, None, Some(group.id))?;
+        let group_text = history.capture("remove in group")?.unwrap();
+        history.move_to_group(group_text, None, Some(group.id))?;
+        let favorite = history.capture("keep favorite")?.unwrap();
+        history.move_to_group(favorite, None, Some(group.id))?;
+        history.toggle_favorite(favorite)?;
+        let pinned = history.capture("keep pinned")?.unwrap();
+        history.move_to_group(pinned, None, Some(group.id))?;
+        history.toggle_pin(pinned)?;
+        let default_text = history.capture("keep default")?.unwrap();
+
+        assert_eq!(
+            history.clear_history_with_media(Some(group.id), &images)?,
+            2
+        );
+        assert!(history.item(group_image).is_err());
+        assert!(history.item(group_text).is_err());
+        assert!(!group_image_path.exists());
+        assert!(history.item(favorite)?.is_favorite);
+        assert!(history.item(pinned)?.is_pinned);
+        assert_eq!(history.text(default_text)?, "keep default");
+        assert_eq!(history.clear_history_with_media(None, &images)?, 1);
+        assert!(history.item(default_text).is_err());
+        assert_eq!(history.groups()?[0].item_count, 2);
         Ok(())
     }
 
