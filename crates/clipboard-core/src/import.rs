@@ -12,7 +12,6 @@ use std::{
 #[derive(Debug, PartialEq, Eq)]
 pub struct ImportReport {
     pub total_items: i64,
-    pub visible_text_items: i64,
 }
 
 /// Staged databases are installed as a single file, without their WAL sidecars.
@@ -85,11 +84,8 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
                 bail!("导入副本校验失败：{integrity}");
             }
             ImportReport {
-                total_items: connection.query_row("SELECT COUNT(*) FROM clipboard_items", [], |row| {
-                    row.get(0)
-                })?,
-                visible_text_items: connection.query_row(
-                    "SELECT COUNT(*) FROM clipboard_items WHERE content_type IN ('text', 'url') AND group_id IS NULL",
+                total_items: connection.query_row(
+                    "SELECT COUNT(*) FROM clipboard_items",
                     [],
                     |row| row.get(0),
                 )?,
@@ -128,7 +124,6 @@ mod tests {
         )?;
         let report = import_legacy_database(&source_path, &destination)?;
         assert_eq!(report.total_items, 2);
-        assert_eq!(report.visible_text_items, 1);
         assert_eq!(history.count("", false)?, 2);
         let imported = History::open(destination.clone())?;
         assert_eq!(imported.text(id)?, "原来的收藏文本");
