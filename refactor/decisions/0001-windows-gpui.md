@@ -2,9 +2,11 @@
 
 日期：2026-09-18。范围：Windows 文本历史基础版。
 
+2026-09-19 更新：首批选择的 0.6.2 已升级为[稳定补丁版 0.6.4](https://github.com/longbridge/gpui-kit/releases/tag/v0.6.4)；下文关于首批实现的描述保留原决策背景。应用仍由 Kit 配套 GPUI 依赖。
+
 ## 栈与依赖
 
-- 使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。
+- 首批使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。
 - 直接依赖均已在本轮重新查询最新稳定版；Cargo.lock 固定实际解析结果。
 - 用户在依赖差异已说明后要求继续完善 GPUI，本轮据此继续使用 Kit 的官方依赖链。Windows 链中的 `ropey 2.0.0-beta.1` 是间接例外，未私自将其替换成不兼容的 ropey 1.x。
 - `gpui-pre-*` 是上游包名，本轮使用的版本号为 0.3.5；包名包含 pre 与版本号带 beta 后缀是两种不同情况。

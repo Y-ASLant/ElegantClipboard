@@ -17,7 +17,7 @@
 - 首批暂缓的全局唤出快捷键与托盘现已在 Windows 基础版实现；旧版数据库支持显式只读导入，自动迁移仍未实现。HTML/RTF、PNG 图片和普通文件路径基础能力已接入；经快捷键唤出后可受控向原窗口发送粘贴快捷键，但跨应用最终效果仍待验收。虚拟文件保真、其他图片格式保真、同步、翻译和安装更新仍未实现。
 - Windows MVP 使用独立用户数据目录；保留旧 Tauri 入口。
 - 新 workspace 的直接依赖按 crates.io 最新非撤回稳定版选取，提交 Cargo.lock；每批开发开始检查更新并做回归，不使用浮动 Git 主分支。
-- 按后续“继续完善 GPUI 重构”的指示，接入稳定版 gpui-kit 0.6.2，并保留其上游锁定的间接依赖。Windows 依赖链包含 ropey 2.0.0-beta.1，属于明确记录的框架例外，不能宣称整个依赖树均为稳定版；详见 [技术决策](decisions/0001-windows-gpui.md)。
+- 按后续“继续完善 GPUI 重构”的指示，接入稳定版 gpui-kit 0.6.4，并保留其上游锁定的间接依赖。Windows 依赖链包含 ropey 2.0.0-beta.1，属于明确记录的框架例外，不能宣称整个依赖树均为稳定版；详见 [技术决策](decisions/0001-windows-gpui.md)。
 - Windows 主窗口已补充全文预览：按需读取、Space 打开、Esc 返回、复制全文及过期响应保护；文本、网址与 HTML/RTF 可在预览中编辑，修改后的富文本明确转为纯文本。
 - Windows 主界面已增加收藏/取消收藏和收藏视图，与搜索、分页及请求代次校验联动。
 - Windows 主界面已接入跟随系统/浅色/深色主题，复用 SQLite 设置存储并支持重启恢复；系统动态通知已接入，真实系统切换验收待完成。
@@ -100,7 +100,7 @@
 
 ### 3.1 gpui-kit 候选
 
-Windows 首批实现已采用 [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) 0.6.2；依赖范围与平台边界见 [技术决策](decisions/0001-windows-gpui.md)。其他平台可行性仍待验证。
+Windows 当前实现采用 [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit) 0.6.4；依赖范围与平台边界见 [技术决策](decisions/0001-windows-gpui.md)。其他平台可行性仍待验证。
 
 截至本次查阅，[官方安装文档](https://gpui-kit.com/docs/installation/) 给出 `gpui-kit = "0.6"` 示例，由 Kit 配套 GPUI 依赖，并列出 macOS 15+、Windows 10+ 和 Linux 开发环境。它们只是当前文档信息，不等于本项目最终最低运行要求；S0 必须结合锁定版本、实际构建与运行结果确认。
 

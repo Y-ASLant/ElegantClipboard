@@ -24,7 +24,7 @@ Windows 优先，其他平台保留为后续目标。基础版使用新的根 Ca
 
 | 直接依赖 | 最新稳定版 |
 |---|---|
-| gpui-kit | 0.6.2 |
+| gpui-kit | 0.6.4 |
 | tray-icon | 0.25.1 |
 | raw-window-handle | 0.6.2 |
 | rusqlite | 0.40.2 |
