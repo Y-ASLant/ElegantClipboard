@@ -2,7 +2,7 @@ use crate::{
     options::Options,
     state::{HistoryState, PreviewState},
 };
-use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE};
+use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE, preferences::ThemePreference};
 use clipboard_platform::{Command, Event, Service};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -91,6 +91,8 @@ struct ClipboardView {
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
+    theme: ThemePreference,
+    theme_pending: bool,
     paused: bool,
     pause_pending: bool,
     message: String,
@@ -136,6 +138,13 @@ impl ClipboardView {
                 }
             }
         });
+        let theme = service.initial_theme;
+        apply_theme(theme, window, cx);
+        let appearance = cx.observe_window_appearance(window, |this, window, cx| {
+            if this.theme == ThemePreference::System {
+                apply_theme(this.theme, window, cx);
+            }
+        });
         let list_focus = cx.focus_handle();
         window.focus(&list_focus, cx);
         Self {
@@ -147,6 +156,8 @@ impl ClipboardView {
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring,
+            theme,
+            theme_pending: false,
             paused: false,
             pause_pending: false,
             message: if monitoring {
@@ -156,7 +167,7 @@ impl ClipboardView {
             }
             .into(),
             is_error: false,
-            _subscriptions: vec![subscription],
+            _subscriptions: vec![subscription, appearance],
             _events: event_task,
             search_task: None,
         }
@@ -178,6 +189,7 @@ impl ClipboardView {
             Command::Query {
                 search: self.search.read(cx).value().to_string(),
                 limit: self.history.limit,
+                favorite_only: self.history.favorite_only,
                 generation: self.history.generation,
             },
             cx,
@@ -210,6 +222,21 @@ impl ClipboardView {
             Event::Status(message) => {
                 self.message = message;
                 self.is_error = false;
+            }
+            Event::ThemeSaved(result) => {
+                self.theme_pending = false;
+                match result {
+                    Ok(theme) => {
+                        self.theme = theme;
+                        apply_theme(theme, window, cx);
+                        self.message = "外观设置已保存".into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("外观保存失败：{error}");
+                        self.is_error = true;
+                    }
+                }
             }
             Event::Paused(paused) => {
                 self.paused = paused;
@@ -338,6 +365,7 @@ impl ClipboardView {
         let id = item.id;
         let selected = self.history.selected == Some(id);
         let pinned = item.is_pinned;
+        let favorite = item.is_favorite;
         let color = if selected {
             cx.theme().accent
         } else {
@@ -419,6 +447,16 @@ impl ClipboardView {
                                     })),
                             )
                             .child(
+                                Button::new(("favorite", id as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .label(if favorite { "取消收藏" } else { "收藏" })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.send(Command::ToggleFavorite(id), cx);
+                                    })),
+                            )
+                            .child(
                                 Button::new(("pin", id as usize))
                                     .ghost()
                                     .xsmall()
@@ -467,6 +505,47 @@ impl Render for ClipboardView {
                     .bg(cx.theme().background)
                     .child(div().text_sm().font_semibold().child("ElegantClipboard")),
             )
+            .child(
+                div()
+                    .px_4()
+                    .py_1()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("外观"),
+                    )
+                    .child(
+                        div().flex().gap_1().children(
+                            [
+                                ("theme-system", "跟随系统", ThemePreference::System),
+                                ("theme-light", "浅色", ThemePreference::Light),
+                                ("theme-dark", "深色", ThemePreference::Dark),
+                            ]
+                            .map(|(id, label, theme)| {
+                                Button::new(id)
+                                    .ghost()
+                                    .xsmall()
+                                    .label(label)
+                                    .selected(self.theme == theme)
+                                    .disabled(self.theme_pending)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if this.theme != theme
+                                            && this.send(Command::SetTheme(theme), cx)
+                                        {
+                                            this.theme_pending = true;
+                                            cx.notify();
+                                        }
+                                    }))
+                            }),
+                        ),
+                    ),
+            )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
     }
 }
@@ -480,7 +559,11 @@ impl ClipboardView {
         let empty_message = if self.history.loading {
             "正在加载…"
         } else if self.search.read(cx).value().is_empty() {
-            "复制一段文本，它会出现在这里"
+            if self.history.favorite_only {
+                "还没有收藏，点击记录上的“收藏”保留常用文本"
+            } else {
+                "复制一段文本，它会出现在这里"
+            }
         } else {
             "没有匹配的记录，试试其他关键词"
         };
@@ -543,6 +626,29 @@ impl ClipboardView {
                     .pb_3()
                     .child(Input::new(&self.search).cleanable(true)),
             )
+            .child(div().px_5().pb_2().flex().gap_2().children(
+                [(false, "全部"), (true, "收藏记录")].map(|(favorite_only, label)| {
+                    Button::new(if favorite_only {
+                        "filter-favorites"
+                    } else {
+                        "filter-all"
+                    })
+                    .small()
+                    .outline()
+                    .label(label)
+                    .selected(self.history.favorite_only == favorite_only)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.history.favorite_only != favorite_only {
+                            this.search_task = None;
+                            this.history.set_favorite_filter(favorite_only);
+                            this.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                            this.query(cx);
+                            window.focus(&this.list_focus, cx);
+                            cx.notify();
+                        }
+                    }))
+                }),
+            ))
             .child(
                 div()
                     .px_5()
@@ -643,5 +749,13 @@ impl ClipboardView {
                     })
                     .child(self.message.clone()),
             )
+    }
+}
+
+fn apply_theme(preference: ThemePreference, window: &mut Window, cx: &mut App) {
+    match preference {
+        ThemePreference::System => Theme::sync_system_appearance(Some(window), cx),
+        ThemePreference::Light => Theme::change(ThemeMode::Light, Some(window), cx),
+        ThemePreference::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
     }
 }

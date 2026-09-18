@@ -1,6 +1,10 @@
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
-use clipboard_core::{History, MAX_TEXT_BYTES, PAGE_SIZE, database::ClipboardItem};
+use clipboard_core::{
+    History, MAX_TEXT_BYTES, PAGE_SIZE,
+    database::{ClipboardItem, Database},
+    preferences::{Preferences, ThemePreference},
+};
 use clipboard_rs::{
     Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
     ContentFormat, WatcherShutdown,
@@ -21,6 +25,7 @@ use std::{
 pub enum Command {
     Query {
         search: String,
+        favorite_only: bool,
         limit: i64,
         generation: u64,
     },
@@ -31,7 +36,9 @@ pub enum Command {
     },
     Delete(i64),
     TogglePin(i64),
+    ToggleFavorite(i64),
     Pause(bool),
+    SetTheme(ThemePreference),
     Capture(String),
 }
 
@@ -48,6 +55,7 @@ pub enum Event {
         result: Result<String, String>,
     },
     Paused(bool),
+    ThemeSaved(Result<ThemePreference, String>),
     Error(String),
 }
 
@@ -113,6 +121,7 @@ pub struct Service {
     events: async_channel::Sender<Event>,
     _instance_lock: File,
     pub data_dir: PathBuf,
+    pub initial_theme: ThemePreference,
 }
 
 impl Service {
@@ -139,7 +148,10 @@ impl Service {
             .context("该数据目录已由另一个基础版实例使用")?;
         // Startup happens before entering the GUI event loop; subsequent DB work is
         // exclusively owned by the worker thread.
-        let history = History::open(data_dir.join("clipboard.db"))?;
+        let db = Database::new(data_dir.join("clipboard.db"))?;
+        let history = History::new(&db);
+        let preferences = Preferences::new(&db);
+        let initial_theme = preferences.theme()?;
         let writer =
             ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
         let (commands, incoming) = mpsc::sync_channel(64);
@@ -154,6 +166,7 @@ impl Service {
             worker: None,
             events: events.clone(),
             _instance_lock: instance_lock,
+            initial_theme,
             data_dir,
         };
         let worker_state = state.clone();
@@ -162,9 +175,11 @@ impl Service {
             move || {
                 let mut worker = Worker {
                     history,
+                    preferences,
                     clipboard: writer,
                     state: worker_state,
                     search: String::new(),
+                    favorite_only: false,
                     limit: PAGE_SIZE,
                     generation: 0,
                     events: worker_events,
@@ -239,9 +254,11 @@ impl Drop for Service {
 
 struct Worker {
     history: History,
+    preferences: Preferences,
     clipboard: ClipboardContext,
     state: Arc<Mutex<CaptureState>>,
     search: String,
+    favorite_only: bool,
     limit: i64,
     generation: u64,
     events: async_channel::Sender<Event>,
@@ -251,8 +268,10 @@ impl Worker {
     fn snapshot(&self) -> Result<()> {
         self.events
             .send_blocking(Event::Snapshot {
-                items: self.history.list(&self.search, self.limit)?,
-                total: self.history.count(&self.search)?,
+                items: self
+                    .history
+                    .list(&self.search, self.limit, self.favorite_only)?,
+                total: self.history.count(&self.search, self.favorite_only)?,
                 generation: self.generation,
             })
             .map_err(|_| anyhow!("窗口已关闭"))
@@ -262,10 +281,12 @@ impl Worker {
         match command {
             Command::Query {
                 search,
+                favorite_only,
                 limit,
                 generation,
             } => {
                 self.search = search;
+                self.favorite_only = favorite_only;
                 self.limit = limit;
                 self.generation = generation;
             }
@@ -295,8 +316,22 @@ impl Worker {
                 return Ok(());
             }
             Command::Delete(id) => self.history.delete(id)?,
+            Command::ToggleFavorite(id) => {
+                self.history.toggle_favorite(id)?;
+            }
             Command::TogglePin(id) => {
                 self.history.toggle_pin(id)?;
+            }
+            Command::SetTheme(theme) => {
+                let result = self
+                    .preferences
+                    .set_theme(theme)
+                    .map(|_| theme)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::ThemeSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
             }
             Command::Pause(paused) => {
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
@@ -349,6 +384,7 @@ mod tests {
         service.send(Command::Capture("another record".into()))?;
         service.send(Command::Query {
             search: "%_".into(),
+            favorite_only: false,
             limit: PAGE_SIZE,
             generation: 1,
         })?;
@@ -357,6 +393,7 @@ mod tests {
         service.send(Command::Delete(rows[0].id))?;
         service.send(Command::Query {
             search: "".into(),
+            favorite_only: false,
             limit: PAGE_SIZE,
             generation: 2,
         })?;
@@ -369,6 +406,69 @@ mod tests {
     }
 
     #[test]
+    fn theme_acknowledgement_is_persisted_before_reopening() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_theme, ThemePreference::System);
+        next_snapshot(&events, 0);
+        for theme in [
+            ThemePreference::Light,
+            ThemePreference::System,
+            ThemePreference::Dark,
+        ] {
+            service.send(Command::SetTheme(theme))?;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match events.try_recv() {
+                    Ok(Event::ThemeSaved(result)) => {
+                        assert_eq!(result.unwrap(), theme);
+                        break;
+                    }
+                    Ok(Event::Error(message)) => panic!("{message}"),
+                    _ => {}
+                }
+                assert!(std::time::Instant::now() < deadline, "theme timed out");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+        drop(service);
+        let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_theme, ThemePreference::Dark);
+        assert!(next_snapshot(&events, 0).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn worker_keeps_favorite_filter_during_capture_and_toggle() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Capture("favorite %_".into()))?;
+        let id = next_snapshot(&events, 0)[0].id;
+        service.send(Command::ToggleFavorite(id))?;
+        assert!(next_snapshot(&events, 0)[0].is_favorite);
+        service.send(Command::Query {
+            search: "%_".into(),
+            favorite_only: true,
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1).len(), 1);
+        service.send(Command::Capture("ordinary %_".into()))?;
+        assert_eq!(next_snapshot(&events, 1)[0].id, id);
+        service.send(Command::ToggleFavorite(id))?;
+        assert!(next_snapshot(&events, 1).is_empty());
+        service.send(Command::Query {
+            search: "%_".into(),
+            favorite_only: false,
+            limit: PAGE_SIZE,
+            generation: 2,
+        })?;
+        assert_eq!(next_snapshot(&events, 2).len(), 2);
+        Ok(())
+    }
+
+    #[test]
     fn instance_lock_and_shutdown_work_even_with_a_full_event_queue() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let (service, _events) = Service::start(Some(directory.path().to_owned()), false)?;
@@ -377,6 +477,7 @@ mod tests {
             // Deliberately create UI backpressure. A full command queue is expected.
             let _ = service.send(Command::Query {
                 search: "".into(),
+                favorite_only: false,
                 limit: PAGE_SIZE,
                 generation,
             });
@@ -456,6 +557,7 @@ mod tests {
         }
         service.send(Command::Query {
             search: String::new(),
+            favorite_only: false,
             limit: PAGE_SIZE,
             generation: 1,
         })?;

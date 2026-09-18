@@ -10,7 +10,7 @@ Windows 优先，其他平台保留为后续目标。基础版使用新的根 Ca
 
 - `crates/clipboard-core`：复用原有数据库 schema、迁移、仓储和去重源码，提供 UI 无关的文本历史用例。
 - `crates/clipboard-platform`：Windows 原生剪贴板事件监听；独立 worker 串行处理历史操作；请求代次、实例锁、有界队列和关闭清理。
-- `crates/clipboard-gpui`：Windows 原生主窗口、搜索、虚拟历史列表、复制/删除/置顶、暂停确认、加载更多、全文只读预览与错误反馈。
+- `crates/clipboard-gpui`：Windows 原生主窗口、搜索、虚拟历史列表、复制/删除/置顶、暂停确认、加载更多、全文只读预览、收藏及收藏筛选与错误反馈。
 
 共享源码暂通过 `#[path]` 编译原有文件，避免复制一套数据库。旧壳接入共享 crate 时再物理移动源码；当前新核心不依赖 Tauri。
 
@@ -59,7 +59,9 @@ cargo run -p elegant-clipboard-gpui --locked -- --smoke-test --data-dir .\target
 - 列表支持 ↑/↓ 选择、Enter 复制、Delete 删除；Ctrl+F 聚焦搜索。
 - 置顶、删除与复制按钮直接调用后台服务；复制使用完整正文，不是卡片预览。
 - 点击“查看”或在列表按 Space 打开完整文本；正文可滚动、选取，点击“复制全文”复制原始内容；Esc 返回列表并恢复键盘焦点。预览按需从后台读取，关闭后的旧响应不会重新打开预览。
+- 点击条目“收藏 / 取消收藏”保存常用文本；“全部 / 收藏记录”切换视图。搜索、数量与加载更多均作用于当前视图，取消收藏不会删除记录。收藏状态持久化，启动默认显示全部。
 - 默认加载 100 条，点击“加载更多”继续；仅渲染可见行。
+- 顶部“外观”提供跟随系统、浅色和深色；保存成功后生效，重启恢复选择。设置存于同一 SQLite 数据库，手动主题不随系统通知改变；未知设置值回退为跟随系统。
 - 窗口使用 gpui-kit `TitleBar` 自定义标题栏，列表与全文预览共用；支持拖动、双击最大化/还原、最小化、边缘缩放和关闭。
 - 关闭窗口即退出；当前未提供托盘、全局快捷键或自动粘贴。
 - 请勿将开发版的 `--data-dir` 指向正在使用的旧版数据目录；正式迁移尚未实现。
@@ -75,8 +77,12 @@ cargo fmt --all -- --check
 cargo build -p elegant-clipboard-gpui --locked
 ```
 
-当前 89 项测试通过（核心 82、Windows 后端 4、应用状态/参数 3），新增暂停确认、搜索代次与选中 ID 保持、键盘边界以及冒烟参数隔离测试。全文预览新增长文本原样返回、已删除记录错误及关闭/重开后旧响应拒收测试。fmt、Clippy（warnings 视为错误）和 Windows debug 构建通过。
+当前 94 项测试通过（核心 84、Windows 后端 6、应用状态/参数 4），新增暂停确认、搜索代次与选中 ID 保持、键盘边界以及冒烟参数隔离测试。全文预览新增长文本原样返回、已删除记录错误及关闭/重开后旧响应拒收测试。fmt、Clippy（warnings 视为错误）和 Windows debug 构建通过。
 
 原生窗口已通过启动/退出、中文路径、重复实例拦截，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查。所有交互使用隔离目录并禁用实际采集；没有覆盖系统剪贴板读写、真实中文 IME、长时间运行、release 打包或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)。
 
 Windows CI 包含 fmt、Clippy、locked 测试和应用构建，尚未在远端运行。CI 使用已核验的 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
+
+收藏增量验证见 [2026-09-19 验证记录](evidence/windows-favorites-2026-09-19.md)。
+
+主题增量验证见 [2026-09-19 主题验证记录](evidence/windows-theme-2026-09-19.md)。

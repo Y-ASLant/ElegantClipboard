@@ -8,6 +8,7 @@
 pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
+pub mod preferences;
 
 use anyhow::{Result, bail};
 use database::{
@@ -26,9 +27,13 @@ pub struct History {
 impl History {
     pub fn open(path: PathBuf) -> Result<Self> {
         let db = Database::new(path)?;
-        Ok(Self {
-            repo: ClipboardRepository::new(&db),
-        })
+        Ok(Self::new(&db))
+    }
+
+    pub fn new(db: &Database) -> Self {
+        Self {
+            repo: ClipboardRepository::new(db),
+        }
     }
 
     pub fn capture(&self, text: &str) -> Result<Option<i64>> {
@@ -59,19 +64,26 @@ impl History {
         Ok(Some(id))
     }
 
-    pub fn list(&self, search: &str, limit: i64) -> Result<Vec<ClipboardItem>> {
+    pub fn list(
+        &self,
+        search: &str,
+        limit: i64,
+        favorite_only: bool,
+    ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
             content_type: Some("text".into()),
+            favorite_only,
             limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
             ..Default::default()
         })?)
     }
 
-    pub fn count(&self, search: &str) -> Result<i64> {
+    pub fn count(&self, search: &str, favorite_only: bool) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
             content_type: Some("text".into()),
+            favorite_only,
             ..Default::default()
         })?)
     }
@@ -87,6 +99,10 @@ impl History {
         Ok(self.repo.delete(id)?)
     }
 
+    pub fn toggle_favorite(&self, id: i64) -> Result<bool> {
+        Ok(self.repo.toggle_favorite(id)?)
+    }
+
     pub fn toggle_pin(&self, id: i64) -> Result<bool> {
         Ok(self.repo.toggle_pin(id)?)
     }
@@ -95,6 +111,30 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn favorites_persist_filter_search_and_keep_full_history() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        let id = history.capture("收藏中文%_😀")?.unwrap();
+        history.capture("普通中文%_😀")?;
+        assert!(history.toggle_favorite(id)?);
+        assert_eq!(history.count("%_", true)?, 1);
+        assert_eq!(history.list("%_", PAGE_SIZE, true)?[0].id, id);
+        assert_eq!(history.count("%_", false)?, 2);
+        assert!(history.list("不存在", PAGE_SIZE, true)?.is_empty());
+        drop(history);
+        let history = History::open(path)?;
+        assert_eq!(history.count("", true)?, 1);
+        assert_eq!(history.capture("收藏中文%_😀")?, Some(id));
+        assert_eq!(history.count("", true)?, 1);
+        assert!(!history.toggle_favorite(id)?);
+        assert!(history.list("", PAGE_SIZE, true)?.is_empty());
+        assert_eq!(history.count("", false)?, 2);
+        assert!(history.toggle_favorite(-1).is_err());
+        Ok(())
+    }
 
     #[test]
     fn history_persists_deduplicates_and_preserves_full_text() -> Result<()> {
@@ -107,12 +147,12 @@ mod tests {
             id = history.capture(&text)?.unwrap();
             history.capture("second")?;
             assert_eq!(history.capture(&text)?, Some(id));
-            assert_eq!(history.count("")?, 2);
-            assert_eq!(history.list("", PAGE_SIZE)?[0].id, id);
+            assert_eq!(history.count("", false)?, 2);
+            assert_eq!(history.list("", PAGE_SIZE, false)?[0].id, id);
         }
         let history = History::open(path)?;
         assert_eq!(history.text(id)?, text);
-        assert_eq!(history.count("中文😀")?, 1);
+        assert_eq!(history.count("中文😀", false)?, 1);
         Ok(())
     }
 
@@ -122,14 +162,14 @@ mod tests {
         let history = History::open(directory.path().join("clipboard.db"))?;
         let id = history.capture("100%_done")?.unwrap();
         history.capture("plain text")?;
-        assert_eq!(history.count("%_")?, 1);
+        assert_eq!(history.count("%_", false)?, 1);
         history.toggle_pin(id)?;
-        assert_eq!(history.list("", PAGE_SIZE)?[0].id, id);
+        assert_eq!(history.list("", PAGE_SIZE, false)?[0].id, id);
         assert_eq!(history.capture(" \r\n")?, None);
         assert!(history.capture(&"x".repeat(MAX_TEXT_BYTES + 1)).is_err());
         history.delete(id)?;
         assert!(history.text(id).is_err());
-        assert_eq!(history.count("")?, 1);
+        assert_eq!(history.count("", false)?, 1);
         Ok(())
     }
 }

@@ -37,6 +37,7 @@ pub struct HistoryState {
     pub limit: i64,
     pub selected: Option<i64>,
     pub loading: bool,
+    pub favorite_only: bool,
 }
 
 impl Default for HistoryState {
@@ -48,11 +49,17 @@ impl Default for HistoryState {
             limit: PAGE_SIZE,
             selected: None,
             loading: true,
+            favorite_only: false,
         }
     }
 }
 
 impl HistoryState {
+    pub fn set_favorite_filter(&mut self, favorite_only: bool) {
+        self.favorite_only = favorite_only;
+        self.begin_search();
+    }
+
     pub fn begin_search(&mut self) {
         self.generation += 1;
         self.limit = PAGE_SIZE;
@@ -99,6 +106,27 @@ mod tests {
     use clipboard_core::History;
 
     #[test]
+    fn filter_change_resets_paging_and_rejects_previous_results() {
+        let mut state = HistoryState {
+            limit: PAGE_SIZE * 3,
+            selected: Some(42),
+            ..Default::default()
+        };
+        let old = state.generation;
+        state.set_favorite_filter(true);
+        assert!(state.favorite_only);
+        assert_eq!(state.limit, PAGE_SIZE);
+        assert_eq!(state.selected, None);
+        assert!(!state.apply(vec![], 100, old));
+        state.begin_search();
+        assert!(state.favorite_only);
+        assert!(state.apply(vec![], 0, state.generation));
+        state.set_favorite_filter(false);
+        assert!(!state.favorite_only);
+        assert!(state.loading);
+    }
+
+    #[test]
     fn preview_rejects_closed_switched_and_reopened_requests() {
         let mut preview = PreviewState::default();
         let first = preview.open(1);
@@ -121,10 +149,10 @@ mod tests {
         let a = history.capture("alpha")?.unwrap();
         let b = history.capture("beta")?.unwrap();
         let mut state = HistoryState::default();
-        state.apply(history.list("", PAGE_SIZE)?, 2, 0);
+        state.apply(history.list("", PAGE_SIZE, false)?, 2, 0);
         state.selected = Some(a);
         history.capture("alpha")?;
-        state.apply(history.list("", PAGE_SIZE)?, 2, 0);
+        state.apply(history.list("", PAGE_SIZE, false)?, 2, 0);
         assert_eq!(state.selected, Some(a));
         assert_eq!(state.select_relative(1), Some(1));
         assert_eq!(state.selected, Some(b));
@@ -132,9 +160,9 @@ mod tests {
         assert_eq!(state.select_relative(-1), Some(0));
         assert_eq!(state.select_relative(-1), Some(0));
         state.begin_search();
-        assert!(!state.apply(history.list("", PAGE_SIZE)?, 2, 0));
+        assert!(!state.apply(history.list("", PAGE_SIZE, false)?, 2, 0));
         assert!(state.items.is_empty());
-        assert!(state.apply(history.list("beta", PAGE_SIZE)?, 1, 1));
+        assert!(state.apply(history.list("beta", PAGE_SIZE, false)?, 1, 1));
         assert_eq!(state.selected, Some(b));
         history.delete(b)?;
         state.apply(vec![], 0, 1);
