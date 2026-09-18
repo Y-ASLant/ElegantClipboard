@@ -35,6 +35,7 @@ pub enum Command {
     },
     Copy(i64),
     CopyForPaste(i64),
+    CreateGroup(String),
     Preview {
         id: i64,
         generation: u64,
@@ -70,6 +71,7 @@ pub enum Command {
 pub enum Event {
     ShowWindow,
     Groups(Vec<Group>),
+    GroupCreated(Result<Group, String>),
     Snapshot {
         items: Vec<ClipboardItem>,
         total: i64,
@@ -690,6 +692,19 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::CreateGroup(name) => {
+                let result = self
+                    .history
+                    .create_group(&name)
+                    .map_err(|error| error.to_string());
+                if result.is_ok() {
+                    self.send_groups()?;
+                }
+                self.events
+                    .send_blocking(Event::GroupCreated(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::SetTheme(theme) => {
                 let result = self
                     .preferences
@@ -812,6 +827,29 @@ mod tests {
             generation: 2,
         })?;
         assert_eq!(next_snapshot(&events, 2)[0].id, default_item);
+        Ok(())
+    }
+
+    #[test]
+    fn create_group_acknowledges_only_persisted_names() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        next_snapshot(&events, 0);
+        service.send(Command::CreateGroup("  工作  ".into()))?;
+        let Event::Groups(groups) = events.recv_blocking()? else {
+            bail!("创建后没有刷新分组列表");
+        };
+        assert_eq!(groups[0].name, "工作");
+        let Event::GroupCreated(Ok(group)) = events.recv_blocking()? else {
+            bail!("创建后没有成功确认");
+        };
+        assert_eq!(group.id, groups[0].id);
+        service.send(Command::CreateGroup("工作".into()))?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::GroupCreated(Err(_))
+        ));
         Ok(())
     }
 

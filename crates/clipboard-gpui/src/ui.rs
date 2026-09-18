@@ -169,6 +169,9 @@ struct ClipboardView {
     history: HistoryState,
     groups: Vec<Group>,
     search: Entity<InputState>,
+    group_name_input: Entity<InputState>,
+    group_editor_open: bool,
+    group_create_pending: bool,
     preview: PreviewState,
     preview_input: Entity<TextareaState>,
     list_focus: FocusHandle,
@@ -307,6 +310,9 @@ impl ClipboardView {
             history: HistoryState::default(),
             groups: Vec::new(),
             search,
+            group_name_input: cx.new(|cx| InputState::new(window, cx).placeholder("新分组名称")),
+            group_editor_open: false,
+            group_create_pending: false,
             preview: PreviewState::default(),
             preview_input: cx.new(|cx| TextareaState::new(window, cx)),
             list_focus,
@@ -435,6 +441,17 @@ impl ClipboardView {
         cx.notify();
     }
 
+    fn create_group(&mut self, cx: &mut Context<Self>) {
+        if self.group_create_pending {
+            return;
+        }
+        let name = self.group_name_input.read(cx).value().to_string();
+        if self.send(Command::CreateGroup(name), cx) {
+            self.group_create_pending = true;
+            cx.notify();
+        }
+    }
+
     fn apply_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             Event::ShowWindow => {
@@ -451,6 +468,24 @@ impl ClipboardView {
                     self.query(cx);
                 }
                 self.groups = groups;
+            }
+            Event::GroupCreated(result) => {
+                self.group_create_pending = false;
+                match result {
+                    Ok(group) => {
+                        self.group_editor_open = false;
+                        self.group_name_input.update(cx, |input, cx| {
+                            input.set_value("", window, cx);
+                        });
+                        self.select_group(Some(group.id), window, cx);
+                        self.message = format!("已创建分组：{}", group.name);
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("创建分组失败：{error}");
+                        self.is_error = true;
+                    }
+                }
             }
             Event::Snapshot {
                 items,
@@ -1363,37 +1398,88 @@ impl ClipboardView {
                     }))
                 }),
             ))
-            .when(!self.groups.is_empty(), |container| {
+            .child(
+                div()
+                    .px(px(PAGE_PADDING))
+                    .pb_2()
+                    .h(px(42.))
+                    .flex_none()
+                    .flex()
+                    .gap_2()
+                    .overflow_x_scrollbar()
+                    .child(
+                        Button::new("group-create-toggle")
+                            .small()
+                            .ghost()
+                            .label("＋ 新建")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.group_editor_open = !this.group_editor_open;
+                                if this.group_editor_open {
+                                    this.group_name_input.update(cx, |input, cx| {
+                                        input.focus(window, cx);
+                                    });
+                                } else {
+                                    window.focus(&this.list_focus, cx);
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("group-default")
+                            .small()
+                            .outline()
+                            .label("默认分组")
+                            .selected(self.history.group_id.is_none())
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.select_group(None, window, cx);
+                            })),
+                    )
+                    .children(self.groups.iter().map(|group| {
+                        let group_id = Some(group.id);
+                        Button::new(("group", group.id as usize))
+                            .small()
+                            .outline()
+                            .label(group.name.clone())
+                            .selected(self.history.group_id == group_id)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.select_group(group_id, window, cx);
+                            }))
+                    })),
+            )
+            .when(self.group_editor_open, |container| {
                 container.child(
                     div()
                         .px(px(PAGE_PADDING))
                         .pb_2()
-                        .h(px(42.))
-                        .flex_none()
                         .flex()
+                        .items_center()
                         .gap_2()
-                        .overflow_x_scrollbar()
                         .child(
-                            Button::new("group-default")
-                                .small()
-                                .outline()
-                                .label("默认分组")
-                                .selected(self.history.group_id.is_none())
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.select_group(None, window, cx);
-                                })),
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(Input::new(&self.group_name_input)),
                         )
-                        .children(self.groups.iter().map(|group| {
-                            let group_id = Some(group.id);
-                            Button::new(("group", group.id as usize))
+                        .child(
+                            Button::new("group-create-submit")
                                 .small()
                                 .outline()
-                                .label(group.name.clone())
-                                .selected(self.history.group_id == group_id)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.select_group(group_id, window, cx);
-                                }))
-                        })),
+                                .label("创建")
+                                .disabled(self.group_create_pending)
+                                .on_click(cx.listener(|this, _, _, cx| this.create_group(cx))),
+                        )
+                        .child(
+                            Button::new("group-create-cancel")
+                                .small()
+                                .ghost()
+                                .label("取消")
+                                .disabled(self.group_create_pending)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.group_editor_open = false;
+                                    window.focus(&this.list_focus, cx);
+                                    cx.notify();
+                                })),
+                        ),
                 )
             })
             .child(

@@ -73,6 +73,20 @@ impl History {
         Ok(GroupRepository::new(&self.db).list_with_count()?)
     }
 
+    pub fn create_group(&self, name: &str) -> Result<Group> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("请输入分组名称");
+        }
+        if name.chars().count() > 40 || name.len() > 160 {
+            bail!("分组名称不能超过 40 个字符或 160 字节");
+        }
+        if self.groups()?.iter().any(|group| group.name == name) {
+            bail!("分组名称已存在");
+        }
+        Ok(GroupRepository::new(&self.db).create(name, None)?)
+    }
+
     pub fn capture(&self, text: &str) -> Result<Option<i64>> {
         self.capture_inner(text, None)
     }
@@ -223,6 +237,21 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_creation_validates_names_and_persists() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        assert!(history.create_group(" \n ").is_err());
+        assert!(history.create_group(&"名".repeat(41)).is_err());
+        let group = history.create_group("  工作  ")?;
+        assert_eq!(group.name, "工作");
+        assert!(history.create_group("工作").is_err());
+        drop(history);
+        assert_eq!(History::open(path)?.groups()?[0].id, group.id);
+        Ok(())
+    }
 
     #[test]
     fn favorites_persist_filter_search_and_keep_full_history() -> Result<()> {
