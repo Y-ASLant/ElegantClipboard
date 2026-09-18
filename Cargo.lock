@@ -1613,6 +1613,7 @@ dependencies = [
  "clipboard-platform",
  "gpui-kit",
  "raw-window-handle",
+ "serde_json",
  "tempfile",
  "tray-icon",
  "windows 0.62.2",

@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 clipboard-core = { path = "../clipboard-core" }
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 async-channel.workspace = true

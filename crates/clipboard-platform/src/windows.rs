@@ -2,7 +2,8 @@ use crate::instance::{self, InstanceSignal};
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
-    History, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
+    History, MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES,
+    MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
     database::{ClipboardItem, Database},
     import::{ImportReport, import_legacy_database},
     preferences::{HotkeyPreference, Preferences, ThemePreference},
@@ -50,6 +51,7 @@ pub enum Command {
         generation: u64,
     },
     Capture(String),
+    CaptureFiles(Vec<String>),
     CaptureImage {
         png: Vec<u8>,
         width: u32,
@@ -125,6 +127,24 @@ impl WatchHandler {
         let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
         let sequence = unsafe { GetClipboardSequenceNumber() };
         if state.paused || sequence == state.ignored_sequence || sequence == state.last_sequence {
+            return Ok(());
+        }
+        if self.clipboard.has(ContentFormat::Files) {
+            let paths = self
+                .clipboard
+                .get_files()
+                .map_err(|error| anyhow!("读取剪贴板文件失败：{error}"))?;
+            if paths.is_empty()
+                || paths.len() > MAX_FILE_PATHS
+                || paths.iter().map(String::len).sum::<usize>() > MAX_PATH_LIST_BYTES
+            {
+                state.last_sequence = sequence;
+                bail!("文件路径列表为空或超过限制，本次复制未保存");
+            }
+            self.commands
+                .try_send(Command::CaptureFiles(paths))
+                .map_err(|_| anyhow!("采集队列已满或已停止，本次文件未保存"))?;
+            state.last_sequence = sequence;
             return Ok(());
         }
         if self.clipboard.has(ContentFormat::Image) {
@@ -412,6 +432,9 @@ impl Worker {
             Command::Capture(text) => {
                 self.history.capture_with_media(&text, &self.images_dir)?;
             }
+            Command::CaptureFiles(paths) => {
+                self.history.capture_files(&paths, &self.images_dir)?;
+            }
             Command::CaptureImage { png, width, height } => {
                 let result = self
                     .history
@@ -423,6 +446,15 @@ impl Worker {
             }
             Command::Copy(id) => {
                 let item = self.history.item(id)?;
+                let files = if item.content_type == "files" {
+                    let paths = self.history.files(id)?;
+                    if paths.iter().any(|path| !Path::new(path).exists()) {
+                        bail!("源文件或文件夹已不存在，无法复制");
+                    }
+                    Some(paths)
+                } else {
+                    None
+                };
                 let image = if item.content_type == "image" {
                     let path = item.image_path.as_deref().context("图片文件路径缺失")?;
                     if !Path::new(path).is_file() {
@@ -443,7 +475,11 @@ impl Worker {
                     None
                 };
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
-                if let Some(image) = image {
+                if let Some(files) = files {
+                    self.clipboard
+                        .set_files(files)
+                        .map_err(|error| anyhow!("复制文件失败：{error}"))?;
+                } else if let Some(image) = image {
                     self.clipboard
                         .set_image(image)
                         .map_err(|error| anyhow!("复制图片失败：{error}"))?;
@@ -455,10 +491,10 @@ impl Worker {
                 }
                 state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
                 let _ = self.events.try_send(Event::Status(
-                    if item.content_type == "image" {
-                        "图片已复制，可切换到目标应用按 Ctrl+V 粘贴"
-                    } else {
-                        "已复制，可切换到目标应用按 Ctrl+V 粘贴"
+                    match item.content_type.as_str() {
+                        "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                        "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                        _ => "已复制，可切换到目标应用按 Ctrl+V 粘贴",
                     }
                     .into(),
                 ));
@@ -762,6 +798,47 @@ mod tests {
         service.send(Command::Delete(rows[0].id))?;
         assert!(next_snapshot(&events, 0).is_empty());
         assert!(!image_path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn file_paths_are_saved_and_missing_sources_do_not_touch_clipboard() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("sample.txt");
+        std::fs::write(&path, "sample")?;
+        let path = path.to_string_lossy().into_owned();
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::CaptureFiles(vec![path.clone()]))?;
+        let rows = next_snapshot(&events, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].content_type, "files");
+        let id = rows[0].id;
+        service.send(Command::Preview { id, generation: 1 })?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::Preview { result, .. }) => {
+                    assert_eq!(result.unwrap(), PreviewContent::Files(vec![path.clone()]));
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline, "preview timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+        std::fs::remove_file(path)?;
+        service.send(Command::Copy(id))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(Event::Error(message)) = events.try_recv() {
+                assert!(message.contains("已不存在"));
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "copy error timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
         Ok(())
     }
 

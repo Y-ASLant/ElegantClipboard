@@ -8,10 +8,12 @@
 pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
+mod files;
 mod image;
 pub mod import;
 pub mod preferences;
 mod reorder;
+pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
 pub use image::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 
 use anyhow::{Result, bail};
@@ -33,6 +35,7 @@ pub struct History {
 pub enum PreviewContent {
     Text(String),
     Image(PathBuf),
+    Files(Vec<String>),
 }
 
 impl History {
@@ -105,7 +108,7 @@ impl History {
     ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text,url,image".into()),
+            content_type: Some("text,url,image,files".into()),
             favorite_only,
             limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
             ..Default::default()
@@ -115,7 +118,7 @@ impl History {
     pub fn count(&self, search: &str, favorite_only: bool) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text,url,image".into()),
+            content_type: Some("text,url,image,files".into()),
             favorite_only,
             ..Default::default()
         })?)
@@ -136,6 +139,11 @@ impl History {
 
     pub fn preview_content(&self, id: i64) -> Result<PreviewContent> {
         let item = self.item(id)?;
+        if item.content_type == "files" {
+            return Ok(PreviewContent::Files(files::parse_file_paths(
+                item.file_paths.as_deref(),
+            )?));
+        }
         if item.content_type == "image" {
             let path = PathBuf::from(
                 item.image_path

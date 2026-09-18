@@ -417,13 +417,18 @@ impl ClipboardView {
                 generation,
                 result,
             } => {
-                if self.preview.apply(id, generation, result)
-                    && let Some(Ok(PreviewContent::Text(text))) = &self.preview.result
-                {
-                    self.preview_input.update(cx, |input, cx| {
-                        input.set_value(text.clone(), window, cx);
-                        input.focus(window, cx);
-                    });
+                if self.preview.apply(id, generation, result) {
+                    let text = match &self.preview.result {
+                        Some(Ok(PreviewContent::Text(text))) => Some(text.clone()),
+                        Some(Ok(PreviewContent::Files(paths))) => Some(paths.join("\n")),
+                        _ => None,
+                    };
+                    if let Some(text) = text {
+                        self.preview_input.update(cx, |input, cx| {
+                            input.set_value(text, window, cx);
+                            input.focus(window, cx);
+                        });
+                    }
                 }
             }
             Event::Reordered {
@@ -546,6 +551,7 @@ impl ClipboardView {
         let id = self.preview.id.expect("preview is open");
         let ready = matches!(self.preview.result, Some(Ok(_)));
         let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
+        let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
         let message = match &self.preview.result {
             None => "正在加载完整内容…".to_owned(),
             Some(Err(error)) => error.clone(),
@@ -553,13 +559,22 @@ impl ClipboardView {
                 format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len())
             }
             Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
+            Some(Ok(PreviewContent::Files(paths))) => {
+                format!("{} 个文件或文件夹 · 仅保存原始路径", paths.len())
+            }
         };
         let body: AnyElement = match &self.preview.result {
-            Some(Ok(PreviewContent::Text(_))) => Textarea::new(&self.preview_input)
-                .readonly(true)
-                .h_full()
-                .aria_label("完整文本内容")
-                .into_any_element(),
+            Some(Ok(PreviewContent::Text(_) | PreviewContent::Files(_))) => {
+                Textarea::new(&self.preview_input)
+                    .readonly(true)
+                    .h_full()
+                    .aria_label(if files {
+                        "文件路径"
+                    } else {
+                        "完整文本内容"
+                    })
+                    .into_any_element()
+            }
             Some(Ok(PreviewContent::Image(path))) => div()
                 .flex()
                 .items_center()
@@ -596,6 +611,8 @@ impl ClipboardView {
                     .justify_between()
                     .child(div().text_lg().font_semibold().child(if image {
                         "图片预览"
+                    } else if files {
+                        "文件路径"
                     } else {
                         "完整内容"
                     }))
@@ -621,6 +638,8 @@ impl ClipboardView {
                         .primary()
                         .label(if image {
                             "复制图片"
+                        } else if files {
+                            "复制文件"
                         } else {
                             "复制全文"
                         })
@@ -658,6 +677,7 @@ impl ClipboardView {
         let is_image = item.content_type == "image";
         let kind = match item.content_type.as_str() {
             "image" => "图片",
+            "files" => "文件",
             "url" => "网址",
             _ => "文本",
         };
@@ -665,6 +685,17 @@ impl ClipboardView {
             match (item.image_width, item.image_height) {
                 (Some(width), Some(height)) => format!("{width} × {height}"),
                 _ => "尺寸未知".into(),
+            }
+        } else if item.content_type == "files" {
+            let count = item
+                .file_paths
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                .map_or(0, |paths| paths.len());
+            if count == 0 {
+                "路径不可用".into()
+            } else {
+                format!("{count} 项")
             }
         } else {
             format!("{} 字符", item.char_count.unwrap_or(0))
