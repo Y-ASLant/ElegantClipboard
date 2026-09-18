@@ -1,3 +1,4 @@
+use crate::tray::{self, TrayCommand};
 use crate::visual::{self, CONTROL_HEIGHT, PAGE_PADDING, ROW_HEIGHT};
 use crate::{
     options::Options,
@@ -15,6 +16,8 @@ use gpui_kit::{
     *,
 };
 use std::time::{Duration, Instant};
+use std::{cell::Cell, rc::Rc};
+use tray_icon::TrayIcon;
 
 gpui_kit::actions!(
     history,
@@ -55,6 +58,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             })
             .detach();
             let bounds = Bounds::centered(None, size(px(560.), px(760.)), cx);
+            let tray_enabled = Rc::new(Cell::new(false));
+            let exiting = Rc::new(Cell::new(false));
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -67,8 +72,24 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     ..TitleBar::window_options()
                 },
                 |window, cx| {
-                    let view =
-                        cx.new(|cx| ClipboardView::new(service, events, monitoring, window, cx));
+                    let view = cx.new(|cx| {
+                        ClipboardView::new(
+                            service,
+                            events,
+                            monitoring,
+                            tray_enabled.clone(),
+                            exiting.clone(),
+                            window,
+                            cx,
+                        )
+                    });
+                    window.on_window_should_close(cx, move |window, _| {
+                        if exiting.get() || !tray_enabled.get() {
+                            return true;
+                        }
+                        tray::set_window_visible(window, false);
+                        false
+                    });
                     cx.new(|cx| Root::new(view, window, cx))
                 },
             )
@@ -111,6 +132,9 @@ impl Render for HistoryDrag {
 
 struct ClipboardView {
     service: Service,
+    _tray: Option<TrayIcon>,
+    _tray_events: Task<()>,
+    exiting: Rc<Cell<bool>>,
     history: HistoryState,
     search: Entity<InputState>,
     preview: PreviewState,
@@ -140,6 +164,8 @@ impl ClipboardView {
         service: Service,
         events: async_channel::Receiver<Event>,
         monitoring: bool,
+        tray_enabled: Rc<Cell<bool>>,
+        exiting: Rc<Cell<bool>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -171,6 +197,26 @@ impl ClipboardView {
                 }
             }
         });
+        let (tray_sender, tray_receiver) = async_channel::bounded(8);
+        let tray = tray::create(tray_sender);
+        tray_enabled.set(tray.is_ok());
+        let tray_events = cx.spawn_in(window, async move |view, cx| {
+            while let Ok(command) = tray_receiver.recv().await {
+                if view
+                    .update_in(cx, |this, window, cx| match command {
+                        TrayCommand::Show => tray::set_window_visible(window, true),
+                        TrayCommand::Quit => {
+                            this.exiting.set(true);
+                            cx.quit();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let tray_error = tray.as_ref().err().map(ToString::to_string);
         let theme = service.initial_theme;
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
@@ -182,6 +228,9 @@ impl ClipboardView {
         window.focus(&list_focus, cx);
         Self {
             service,
+            _tray: tray.ok(),
+            _tray_events: tray_events,
+            exiting,
             history: HistoryState::default(),
             search,
             preview: PreviewState::default(),
@@ -198,13 +247,18 @@ impl ClipboardView {
             last_drag_scroll: Instant::now(),
             paused: false,
             pause_pending: false,
-            message: if monitoring {
-                "正在记录文本，内容仅保存在此设备"
-            } else {
-                "采集已禁用，可浏览已有历史"
-            }
-            .into(),
-            is_error: false,
+            message: tray_error.clone().map_or_else(
+                || {
+                    if monitoring {
+                        "正在记录文本；关闭窗口后可从托盘重新打开"
+                    } else {
+                        "采集已禁用；关闭窗口后可从托盘重新打开"
+                    }
+                    .into()
+                },
+                |error| format!("托盘不可用：{error}；关闭窗口将退出"),
+            ),
+            is_error: tray_error.is_some(),
             _subscriptions: vec![subscription, appearance],
             _events: event_task,
             search_task: None,
