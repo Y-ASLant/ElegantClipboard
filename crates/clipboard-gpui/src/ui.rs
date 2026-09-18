@@ -172,6 +172,8 @@ struct ClipboardView {
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
     group_create_pending: bool,
+    group_move_id: Option<i64>,
+    group_move_pending: bool,
     preview: PreviewState,
     preview_input: Entity<TextareaState>,
     list_focus: FocusHandle,
@@ -313,6 +315,8 @@ impl ClipboardView {
             group_name_input: cx.new(|cx| InputState::new(window, cx).placeholder("新分组名称")),
             group_editor_open: false,
             group_create_pending: false,
+            group_move_id: None,
+            group_move_pending: false,
             preview: PreviewState::default(),
             preview_input: cx.new(|cx| TextareaState::new(window, cx)),
             list_focus,
@@ -434,6 +438,7 @@ impl ClipboardView {
             return;
         }
         self.search_task = None;
+        self.group_move_id = None;
         self.history.set_group(group_id);
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.query(cx);
@@ -448,6 +453,24 @@ impl ClipboardView {
         let name = self.group_name_input.read(cx).value().to_string();
         if self.send(Command::CreateGroup(name), cx) {
             self.group_create_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn move_to_group(&mut self, id: i64, target_group_id: Option<i64>, cx: &mut Context<Self>) {
+        if self.group_move_pending || target_group_id == self.history.group_id {
+            return;
+        }
+        if self.send(
+            Command::MoveToGroup {
+                id,
+                source_group_id: self.history.group_id,
+                target_group_id,
+                generation: self.history.generation,
+            },
+            cx,
+        ) {
+            self.group_move_pending = true;
             cx.notify();
         }
     }
@@ -487,12 +510,34 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::ItemMoved { result, .. } => {
+                self.group_move_pending = false;
+                match result {
+                    Ok(()) => {
+                        self.group_move_id = None;
+                        self.message = "已移动到目标分组".into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("移动分组失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::Snapshot {
                 items,
                 total,
                 generation,
             } => {
-                self.history.apply(items, total, generation);
+                let applied = self.history.apply(items, total, generation);
+                if applied
+                    && !self.group_move_pending
+                    && self
+                        .group_move_id
+                        .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+                {
+                    self.group_move_id = None;
+                }
             }
             Event::Preview {
                 id,
@@ -643,6 +688,7 @@ impl ClipboardView {
             }
             Event::Error(message) => {
                 self.paste_pending = None;
+                self.group_move_pending = false;
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
@@ -1119,6 +1165,24 @@ impl ClipboardView {
                                     })),
                             )
                             .child(
+                                Button::new(("move-group", id as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
+                                    .label("分组")
+                                    .disabled(
+                                        self.group_move_pending
+                                            || (self.groups.is_empty()
+                                                && self.history.group_id.is_none()),
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.group_move_id = Some(id);
+                                        this.history.selected = Some(id);
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
                                 Button::new(("delete", id as usize))
                                     .ghost()
                                     .xsmall()
@@ -1480,6 +1544,56 @@ impl ClipboardView {
                                     cx.notify();
                                 })),
                         ),
+                )
+            })
+            .when_some(self.group_move_id, |container, id| {
+                container.child(
+                    div()
+                        .px(px(PAGE_PADDING))
+                        .pb_2()
+                        .h(px(42.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .overflow_x_scrollbar()
+                        .child(
+                            Button::new("move-group-cancel")
+                                .small()
+                                .ghost()
+                                .label("取消移动")
+                                .disabled(self.group_move_pending)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.group_move_id = None;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(div().text_xs().child("移至"))
+                        .child(
+                            Button::new("move-group-default")
+                                .small()
+                                .outline()
+                                .label("默认分组")
+                                .disabled(
+                                    self.group_move_pending || self.history.group_id.is_none(),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.move_to_group(id, None, cx);
+                                })),
+                        )
+                        .children(self.groups.iter().map(|group| {
+                            let target = Some(group.id);
+                            Button::new(("move-group", group.id as usize))
+                                .small()
+                                .outline()
+                                .label(group.name.clone())
+                                .disabled(
+                                    self.group_move_pending || self.history.group_id == target,
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.move_to_group(id, target, cx);
+                                }))
+                        })),
                 )
             })
             .child(

@@ -36,6 +36,12 @@ pub enum Command {
     Copy(i64),
     CopyForPaste(i64),
     CreateGroup(String),
+    MoveToGroup {
+        id: i64,
+        source_group_id: Option<i64>,
+        target_group_id: Option<i64>,
+        generation: u64,
+    },
     Preview {
         id: i64,
         generation: u64,
@@ -72,6 +78,10 @@ pub enum Event {
     ShowWindow,
     Groups(Vec<Group>),
     GroupCreated(Result<Group, String>),
+    ItemMoved {
+        id: i64,
+        result: Result<(), String>,
+    },
     Snapshot {
         items: Vec<ClipboardItem>,
         total: i64,
@@ -705,6 +715,30 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::MoveToGroup {
+                id,
+                source_group_id,
+                target_group_id,
+                generation,
+            } => {
+                let result = if generation != self.generation || source_group_id != self.group_id {
+                    Err(anyhow!("列表已切换，请重新选择记录"))
+                } else {
+                    self.history
+                        .move_to_group(id, source_group_id, target_group_id)
+                };
+                if result.is_ok() {
+                    self.send_groups()?;
+                    self.snapshot()?;
+                }
+                self.events
+                    .send_blocking(Event::ItemMoved {
+                        id,
+                        result: result.map_err(|error| error.to_string()),
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::SetTheme(theme) => {
                 let result = self
                     .preferences
@@ -850,6 +884,56 @@ mod tests {
             events.recv_blocking()?,
             Event::GroupCreated(Err(_))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn move_to_group_updates_visible_history_and_rejects_stale_view() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let id = history.capture("move me")?.unwrap();
+        let group = history.create_group("工作")?;
+        drop(history);
+        drop(db);
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        assert_eq!(next_snapshot(&events, 0)[0].id, id);
+        service.send(Command::MoveToGroup {
+            id,
+            source_group_id: None,
+            target_group_id: Some(group.id),
+            generation: 0,
+        })?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        assert!(next_snapshot(&events, 0).is_empty());
+        assert!(
+            matches!(events.recv_blocking()?, Event::ItemMoved { id: moved, result: Ok(()) } if moved == id)
+        );
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: Some(group.id),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1)[0].id, id);
+        service.send(Command::MoveToGroup {
+            id,
+            source_group_id: Some(group.id),
+            target_group_id: None,
+            generation: 0,
+        })?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::ItemMoved { result: Err(_), .. }
+        ));
+        assert_eq!(
+            History::open(directory.path().join("clipboard.db"))?
+                .item(id)?
+                .group_id,
+            Some(group.id)
+        );
         Ok(())
     }
 

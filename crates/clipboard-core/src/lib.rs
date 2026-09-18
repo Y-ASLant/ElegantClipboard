@@ -87,6 +87,28 @@ impl History {
         Ok(GroupRepository::new(&self.db).create(name, None)?)
     }
 
+    pub fn move_to_group(
+        &self,
+        id: i64,
+        source_group_id: Option<i64>,
+        target_group_id: Option<i64>,
+    ) -> Result<()> {
+        let item = self.item(id)?;
+        if item.group_id != source_group_id {
+            bail!("记录已经移动，请刷新列表后重试");
+        }
+        if source_group_id == target_group_id {
+            return Ok(());
+        }
+        if let Some(target) = target_group_id
+            && !self.groups()?.iter().any(|group| group.id == target)
+        {
+            bail!("目标分组已不存在");
+        }
+        GroupRepository::new(&self.db).move_item_to_group(id, target_group_id)?;
+        Ok(())
+    }
+
     pub fn capture(&self, text: &str) -> Result<Option<i64>> {
         self.capture_inner(text, None)
     }
@@ -250,6 +272,33 @@ mod tests {
         assert!(history.create_group("工作").is_err());
         drop(history);
         assert_eq!(History::open(path)?.groups()?[0].id, group.id);
+        Ok(())
+    }
+
+    #[test]
+    fn moving_items_between_groups_preserves_history_and_rejects_stale_source() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("clipboard.db"))?;
+        let id = history.capture("important text")?.unwrap();
+        history.toggle_favorite(id)?;
+        history.toggle_pin(id)?;
+        let work = history.create_group("工作")?;
+        let archive = history.create_group("归档")?;
+        assert!(history.move_to_group(id, None, Some(-1)).is_err());
+        history.move_to_group(id, None, Some(work.id))?;
+        assert!(history.list("", PAGE_SIZE, false)?.is_empty());
+        assert_eq!(
+            history.list_in_group("", PAGE_SIZE, false, Some(work.id))?[0].id,
+            id
+        );
+        assert!(history.move_to_group(id, None, Some(archive.id)).is_err());
+        history.move_to_group(id, Some(work.id), Some(archive.id))?;
+        assert_eq!(history.count_in_group("", false, Some(work.id))?, 0);
+        let item = history.item(id)?;
+        assert_eq!(item.group_id, Some(archive.id));
+        assert!(item.is_pinned && item.is_favorite);
+        history.move_to_group(id, Some(archive.id), None)?;
+        assert_eq!(history.list("", PAGE_SIZE, false)?[0].id, id);
         Ok(())
     }
 
