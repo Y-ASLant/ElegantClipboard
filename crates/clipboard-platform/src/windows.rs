@@ -149,6 +149,7 @@ pub enum Event {
     HotkeySaved(Result<HotkeyPreference, String>),
     AutostartSaved(Result<bool, String>),
     BackupExported(Result<BackupReport, String>),
+    BackgroundError(String),
     Error(String),
 }
 
@@ -184,7 +185,9 @@ impl ClipboardHandler for WatchHandler {
     fn on_clipboard_change(&mut self) {
         let result = self.read_change();
         if let Err(error) = result {
-            let _ = self.events.try_send(Event::Error(error.to_string()));
+            let _ = self
+                .events
+                .try_send(Event::BackgroundError(error.to_string()));
         }
     }
 }
@@ -443,8 +446,20 @@ impl Service {
                 while !stop.load(Ordering::Acquire) {
                     match incoming.recv_timeout(Duration::from_millis(250)) {
                         Ok(command) => {
+                            let background_capture = matches!(
+                                command,
+                                Command::Capture(_)
+                                    | Command::CaptureRich { .. }
+                                    | Command::CaptureImage { .. }
+                                    | Command::CaptureFiles(_)
+                            );
                             if let Err(error) = worker.handle(command) {
-                                let _ = worker.events.try_send(Event::Error(error.to_string()));
+                                let event = if background_capture {
+                                    Event::BackgroundError(error.to_string())
+                                } else {
+                                    Event::Error(error.to_string())
+                                };
+                                let _ = worker.events.try_send(event);
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -473,8 +488,9 @@ impl Service {
                     .spawn(move || {
                         watcher.start_watch();
                         if !stop.load(Ordering::Acquire) {
-                            let _ = watcher_events
-                                .try_send(Event::Error("剪贴板监听已停止，请重启应用".into()));
+                            let _ = watcher_events.try_send(Event::BackgroundError(
+                                "剪贴板监听已停止，请重启应用".into(),
+                            ));
                         }
                     })?,
             );
@@ -482,7 +498,9 @@ impl Service {
         match InstanceSignal::start(&service.data_dir, events.clone()) {
             Ok(signal) => service.instance_signal = Some(signal),
             Err(error) => {
-                let _ = events.try_send(Event::Error(format!("重复启动唤出不可用：{error}")));
+                let _ = events.try_send(Event::BackgroundError(format!(
+                    "重复启动唤出不可用：{error}"
+                )));
             }
         }
         Ok((service, outgoing))
@@ -1325,6 +1343,22 @@ mod tests {
         let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
         assert_eq!(next_snapshot(&events, 0).len(), 1);
         drop(reopened);
+        Ok(())
+    }
+
+    #[test]
+    fn capture_error_does_not_replace_an_unrelated_settings_acknowledgement() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+
+        service.send(Command::Capture("x".repeat(MAX_TEXT_BYTES + 1)))?;
+        service.send(Command::SetTheme(ThemePreference::Dark))?;
+        assert!(matches!(events.recv_blocking()?, Event::BackgroundError(_)));
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::ThemeSaved(Ok(ThemePreference::Dark))
+        ));
         Ok(())
     }
 

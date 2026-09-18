@@ -1076,6 +1076,10 @@ impl ClipboardView {
                 self.pause_pending = false;
                 self.export_pending = false;
             }
+            Event::BackgroundError(message) => {
+                self.message = message;
+                self.is_error = true;
+            }
         }
         cx.notify();
     }

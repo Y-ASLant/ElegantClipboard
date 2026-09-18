@@ -226,6 +226,26 @@ fn main() -> anyhow::Result<()> {
     );
     println!("files capture/copy ok");
 
+    clipboard
+        .set_text("x".repeat(clipboard_core::MAX_TEXT_BYTES + 1))
+        .map_err(|error| anyhow!("写入超限测试文本失败：{error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        match events.try_recv() {
+            Ok(Event::BackgroundError(message)) => {
+                assert!(message.contains("文本超过 1 MiB"), "{message}");
+                break;
+            }
+            Ok(Event::Error(message)) => bail!("超限采集被报告为操作错误：{message}"),
+            _ => {}
+        }
+        if Instant::now() >= deadline {
+            bail!("等待超限采集错误超时");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    println!("capture error isolation ok");
+
     drop(service);
     println!("isolated clipboard roundtrip passed");
     Ok(())
