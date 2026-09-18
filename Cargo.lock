@@ -948,6 +948,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "blake3",
  "clipboard-core",
  "clipboard-rs",
  "directories",

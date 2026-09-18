@@ -1,3 +1,4 @@
+use crate::instance::{self, InstanceSignal};
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
@@ -51,6 +52,7 @@ pub enum Command {
 }
 
 pub enum Event {
+    ShowWindow,
     Snapshot {
         items: Vec<ClipboardItem>,
         total: i64,
@@ -71,6 +73,17 @@ pub enum Event {
     ThemeSaved(Result<ThemePreference, String>),
     Error(String),
 }
+
+#[derive(Debug)]
+pub struct InstanceBusy;
+
+impl std::fmt::Display for InstanceBusy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("该数据目录已由另一个基础版实例使用")
+    }
+}
+
+impl std::error::Error for InstanceBusy {}
 
 #[derive(Default)]
 struct CaptureState {
@@ -131,6 +144,7 @@ pub struct Service {
     shutdown: Option<WatcherShutdown>,
     watcher: Option<JoinHandle<()>>,
     worker: Option<JoinHandle<()>>,
+    instance_signal: Option<InstanceSignal>,
     events: async_channel::Sender<Event>,
     _instance_lock: File,
     pub data_dir: PathBuf,
@@ -155,9 +169,12 @@ fn lock_instance(data_dir: &Path) -> Result<File> {
         .read(true)
         .write(true)
         .open(data_dir.join("instance.lock"))?;
-    file.try_lock()
-        .context("该数据目录已由另一个基础版实例使用")?;
+    file.try_lock().map_err(|_| InstanceBusy)?;
     Ok(file)
+}
+
+pub fn show_existing_instance(data_dir: Option<PathBuf>) -> Result<bool> {
+    instance::show_existing(&resolve_data_dir(data_dir)?)
 }
 
 pub fn import_legacy_data(
@@ -196,6 +213,7 @@ impl Service {
             shutdown: None,
             watcher: None,
             worker: None,
+            instance_signal: None,
             events: events.clone(),
             _instance_lock: instance_lock,
             initial_theme,
@@ -245,17 +263,24 @@ impl Service {
             });
             service.shutdown = Some(watcher.get_shutdown_channel());
             let stop = service.stop.clone();
+            let watcher_events = events.clone();
             service.watcher = Some(
                 thread::Builder::new()
                     .name("clipboard-watcher".into())
                     .spawn(move || {
                         watcher.start_watch();
                         if !stop.load(Ordering::Acquire) {
-                            let _ = events
+                            let _ = watcher_events
                                 .try_send(Event::Error("剪贴板监听已停止，请重启应用".into()));
                         }
                     })?,
             );
+        }
+        match InstanceSignal::start(&service.data_dir, events.clone()) {
+            Ok(signal) => service.instance_signal = Some(signal),
+            Err(error) => {
+                let _ = events.try_send(Event::Error(format!("重复启动唤出不可用：{error}")));
+            }
         }
         Ok((service, outgoing))
     }
@@ -269,6 +294,7 @@ impl Service {
 
 impl Drop for Service {
     fn drop(&mut self) {
+        self.instance_signal = None;
         self.stop.store(true, Ordering::Release);
         // Release a worker waiting for a slow/closed UI before joining it.
         self.events.close();
@@ -585,6 +611,29 @@ mod tests {
         drop(service);
         let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
         drop(service);
+        Ok(())
+    }
+
+    #[test]
+    fn second_launch_signal_is_scoped_to_data_directory() -> Result<()> {
+        let first = tempfile::tempdir()?;
+        let second = tempfile::tempdir()?;
+        assert!(!show_existing_instance(Some(first.path().to_owned()))?);
+        let (service, events) = Service::start(Some(first.path().to_owned()), false)?;
+        assert!(show_existing_instance(Some(first.path().to_owned()))?);
+        assert!(!show_existing_instance(Some(second.path().to_owned()))?);
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut received = false;
+        while std::time::Instant::now() < deadline {
+            if let Ok(Event::ShowWindow) = events.try_recv() {
+                received = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(received);
+        drop(service);
+        assert!(!show_existing_instance(Some(first.path().to_owned()))?);
         Ok(())
     }
 

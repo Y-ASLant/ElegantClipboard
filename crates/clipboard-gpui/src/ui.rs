@@ -6,7 +6,7 @@ use crate::{
 };
 use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE, preferences::ThemePreference};
 use clipboard_platform::hotkey::Hotkey;
-use clipboard_platform::{Command, Event, Service};
+use clipboard_platform::{Command, Event, InstanceBusy, Service};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
@@ -35,7 +35,23 @@ gpui_kit::actions!(
 );
 
 pub fn run(options: Options) -> anyhow::Result<()> {
-    let (service, events) = Service::start(options.data_dir, options.monitor)?;
+    let data_dir = options.data_dir.clone();
+    if clipboard_platform::show_existing_instance(data_dir.clone())? {
+        return Ok(());
+    }
+    let (service, events) = match Service::start(options.data_dir, options.monitor) {
+        Ok(started) => started,
+        Err(error) if error.is::<InstanceBusy>() => {
+            for _ in 0..10 {
+                if clipboard_platform::show_existing_instance(data_dir.clone())? {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    };
     let monitoring = options.monitor;
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
@@ -61,6 +77,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             let bounds = Bounds::centered(None, size(px(560.), px(760.)), cx);
             let tray_enabled = Rc::new(Cell::new(false));
             let exiting = Rc::new(Cell::new(false));
+            let smoke_exiting = exiting.clone();
             cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -99,6 +116,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             if options.smoke_test {
                 cx.spawn(async move |cx| {
                     cx.background_executor().timer(Duration::from_secs(3)).await;
+                    smoke_exiting.set(true);
                     cx.update(|cx| cx.quit());
                 })
                 .detach();
@@ -315,6 +333,7 @@ impl ClipboardView {
 
     fn apply_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
         match event {
+            Event::ShowWindow => tray::set_window_visible(window, true),
             Event::Snapshot {
                 items,
                 total,
