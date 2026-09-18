@@ -1151,6 +1151,7 @@ impl ClipboardView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .justify_end()
                     .gap_2()
                     .when(!self.preview_editing && editable, |bar| {
@@ -1160,6 +1161,17 @@ impl ClipboardView {
                                 .label("编辑")
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.begin_preview_edit(window, cx);
+                                })),
+                        )
+                    })
+                    .when(!self.preview_editing && rich, |bar| {
+                        bar.child(
+                            Button::new("preview-copy-plain")
+                                .outline()
+                                .label("复制纯文本")
+                                .disabled(!ready)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.send(Command::CopyPlainText(id), cx);
                                 })),
                         )
                     })
@@ -1587,6 +1599,22 @@ impl ClipboardView {
                                         cx.stop_propagation();
                                         this.paste_selected(id, window, cx);
                                     })),
+                            )
+                            .when(
+                                matches!(item.content_type.as_str(), "html" | "rtf"),
+                                |bar| {
+                                    bar.child(
+                                        Button::new(("copy-plain", id as usize))
+                                            .outline()
+                                            .xsmall()
+                                            .h(px(CONTROL_HEIGHT))
+                                            .label("纯文本")
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                cx.stop_propagation();
+                                                this.send(Command::CopyPlainText(id), cx);
+                                            })),
+                                    )
+                                },
                             )
                             .child(
                                 Button::new(("copy", id as usize))

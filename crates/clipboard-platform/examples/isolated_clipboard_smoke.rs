@@ -9,7 +9,8 @@ fn main() -> anyhow::Result<()> {
     use clipboard_core::PreviewContent;
     use clipboard_platform::{Command, Event, Service};
     use clipboard_rs::{
-        Clipboard, ClipboardContent, ClipboardContext, RustImageData, common::RustImage,
+        Clipboard, ClipboardContent, ClipboardContext, ContentFormat, RustImageData,
+        common::RustImage,
     };
     use std::{
         thread,
@@ -168,6 +169,18 @@ fn main() -> anyhow::Result<()> {
             .starts_with(b"{\\rtf1")
     );
     println!("rich capture/copy ok");
+
+    service.send(Command::CopyPlainText(rich_id))?;
+    status(false)?;
+    assert_eq!(
+        clipboard
+            .get_text()
+            .map_err(|error| anyhow!("读回纯文本失败：{error}"))?,
+        "rich smoke"
+    );
+    assert!(!clipboard.has(ContentFormat::Html));
+    assert!(!clipboard.has(ContentFormat::Rtf));
+    println!("rich plain-text copy ok");
 
     let image_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../clipboard-rs/tests/test.png");

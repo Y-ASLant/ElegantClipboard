@@ -36,6 +36,7 @@ pub enum Command {
         generation: u64,
     },
     Copy(i64),
+    CopyPlainText(i64),
     CopyForPaste(i64),
     CreateGroup(String),
     RenameGroup {
@@ -498,6 +499,16 @@ impl Drop for Service {
     }
 }
 
+fn plain_text_for_copy(item: &ClipboardItem) -> Result<&str> {
+    if !matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf") {
+        bail!("该记录不支持纯文本复制");
+    }
+    item.text_content
+        .as_deref()
+        .filter(|text| !text.is_empty())
+        .context("记录没有可复制的纯文本")
+}
+
 struct Worker {
     history: History,
     preferences: Preferences,
@@ -541,6 +552,7 @@ impl Worker {
 
     fn handle(&mut self, command: Command) -> Result<()> {
         let for_paste = matches!(&command, Command::CopyForPaste(_));
+        let plain_only = matches!(&command, Command::CopyPlainText(_));
         match command {
             Command::Query {
                 search,
@@ -578,9 +590,12 @@ impl Worker {
                 drop(state);
                 result?;
             }
-            Command::Copy(id) | Command::CopyForPaste(id) => {
+            Command::Copy(id) | Command::CopyPlainText(id) | Command::CopyForPaste(id) => {
                 let item = self.history.item(id)?;
-                let is_rich = matches!(item.content_type.as_str(), "html" | "rtf");
+                let plain_text = plain_only
+                    .then(|| plain_text_for_copy(&item).map(str::to_owned))
+                    .transpose()?;
+                let is_rich = !plain_only && matches!(item.content_type.as_str(), "html" | "rtf");
                 let mut rich_contents = Vec::new();
                 if is_rich {
                     if let Some(text) = item
@@ -679,7 +694,9 @@ impl Worker {
                         bail!("富文本写回后未检测到可用格式");
                     }
                 } else {
-                    let text = item.text_content.context("记录没有可复制的文本")?;
+                    let text = plain_text
+                        .or(item.text_content)
+                        .context("记录没有可复制的文本")?;
                     self.clipboard
                         .set_text(text)
                         .map_err(|error| anyhow!("复制失败：{error}"))?;
@@ -690,6 +707,7 @@ impl Worker {
                         id,
                         for_paste,
                         message: match item.content_type.as_str() {
+                            _ if plain_only => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "html" | "rtf" if rich_preserved => {
@@ -915,6 +933,20 @@ impl Worker {
 mod tests {
     use super::*;
     use clipboard_core::database::GroupRepository;
+
+    #[test]
+    fn plain_text_copy_uses_only_stored_text_and_rejects_missing_representation() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let rich = history.capture_rich(Some("<b>格式</b>"), None, Some("格式"), &images)?;
+        assert_eq!(plain_text_for_copy(&history.item(rich)?)?, "格式");
+        let no_text = history.capture_rich(Some("<i>only html</i>"), None, None, &images)?;
+        assert!(plain_text_for_copy(&history.item(no_text)?).is_err());
+        let file = history.capture_files(&["C:\\example.txt".into()], &images)?;
+        assert!(plain_text_for_copy(&history.item(file)?).is_err());
+        Ok(())
+    }
 
     fn next_snapshot(
         events: &async_channel::Receiver<Event>,
