@@ -7,10 +7,12 @@ use crate::{
 };
 use clipboard_core::{
     HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
+    database::Group,
     preferences::{HotkeyPreference, ThemePreference},
 };
 use clipboard_platform::hotkey::Hotkey;
 use clipboard_platform::{Command, Event, InstanceBusy, Service};
+use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
@@ -136,6 +138,7 @@ struct HistoryDrag {
     id: i64,
     pinned: bool,
     favorite_only: bool,
+    group_id: Option<i64>,
     generation: u64,
     preview: String,
 }
@@ -164,6 +167,7 @@ struct ClipboardView {
     _hotkey_events: Task<()>,
     exiting: Rc<Cell<bool>>,
     history: HistoryState,
+    groups: Vec<Group>,
     search: Entity<InputState>,
     preview: PreviewState,
     preview_input: Entity<TextareaState>,
@@ -301,6 +305,7 @@ impl ClipboardView {
             _hotkey_events: hotkey_events,
             exiting,
             history: HistoryState::default(),
+            groups: Vec::new(),
             search,
             preview: PreviewState::default(),
             preview_input: cx.new(|cx| TextareaState::new(window, cx)),
@@ -411,10 +416,23 @@ impl ClipboardView {
                 search: self.search.read(cx).value().to_string(),
                 limit: self.history.limit,
                 favorite_only: self.history.favorite_only,
+                group_id: self.history.group_id,
                 generation: self.history.generation,
             },
             cx,
         );
+    }
+
+    fn select_group(&mut self, group_id: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.group_id == group_id {
+            return;
+        }
+        self.search_task = None;
+        self.history.set_group(group_id);
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.query(cx);
+        window.focus(&self.list_focus, cx);
+        cx.notify();
     }
 
     fn apply_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
@@ -422,6 +440,17 @@ impl ClipboardView {
             Event::ShowWindow => {
                 self.paste_target = None;
                 tray::set_window_visible(window, true);
+            }
+            Event::Groups(groups) => {
+                if self.history.group_id.is_some()
+                    && !groups
+                        .iter()
+                        .any(|group| Some(group.id) == self.history.group_id)
+                {
+                    self.history.set_group(None);
+                    self.query(cx);
+                }
+                self.groups = groups;
             }
             Event::Snapshot {
                 items,
@@ -770,6 +799,7 @@ impl ClipboardView {
             && !self.history.loading
             && drag.generation == self.history.generation
             && drag.favorite_only == self.history.favorite_only
+            && drag.group_id == self.history.group_id
             && drag.pinned == pinned
             && self
                 .history
@@ -819,6 +849,7 @@ impl ClipboardView {
             id,
             pinned,
             favorite_only: self.history.favorite_only,
+            group_id: self.history.group_id,
             generation: self.history.generation,
             preview: item.preview.clone().unwrap_or_default(),
         };
@@ -871,6 +902,7 @@ impl ClipboardView {
                         to: id,
                         after,
                         favorite_only: drag.favorite_only,
+                        group_id: drag.group_id,
                         generation: drag.generation,
                     },
                     cx,
@@ -1236,6 +1268,8 @@ impl ClipboardView {
         } else if self.search.read(cx).value().is_empty() {
             if self.history.favorite_only {
                 "还没有收藏，点击记录上的“收藏”保留常用文本"
+            } else if self.history.group_id.is_some() {
+                "该分组暂无可显示的记录"
             } else {
                 "复制一段文本，它会出现在这里"
             }
@@ -1329,6 +1363,39 @@ impl ClipboardView {
                     }))
                 }),
             ))
+            .when(!self.groups.is_empty(), |container| {
+                container.child(
+                    div()
+                        .px(px(PAGE_PADDING))
+                        .pb_2()
+                        .h(px(42.))
+                        .flex_none()
+                        .flex()
+                        .gap_2()
+                        .overflow_x_scrollbar()
+                        .child(
+                            Button::new("group-default")
+                                .small()
+                                .outline()
+                                .label("默认分组")
+                                .selected(self.history.group_id.is_none())
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.select_group(None, window, cx);
+                                })),
+                        )
+                        .children(self.groups.iter().map(|group| {
+                            let group_id = Some(group.id);
+                            Button::new(("group", group.id as usize))
+                                .small()
+                                .outline()
+                                .label(group.name.clone())
+                                .selected(self.history.group_id == group_id)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.select_group(group_id, window, cx);
+                                }))
+                        })),
+                )
+            })
             .child(
                 div()
                     .px(px(PAGE_PADDING))

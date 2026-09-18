@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
     History, MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES,
     MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
-    database::{ClipboardItem, Database},
+    database::{ClipboardItem, Database, Group},
     import::{ImportReport, import_legacy_database},
     preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
@@ -29,6 +29,7 @@ pub enum Command {
     Query {
         search: String,
         favorite_only: bool,
+        group_id: Option<i64>,
         limit: i64,
         generation: u64,
     },
@@ -49,6 +50,7 @@ pub enum Command {
         to: i64,
         after: bool,
         favorite_only: bool,
+        group_id: Option<i64>,
         generation: u64,
     },
     Capture(String),
@@ -67,6 +69,7 @@ pub enum Command {
 
 pub enum Event {
     ShowWindow,
+    Groups(Vec<Group>),
     Snapshot {
         items: Vec<ClipboardItem>,
         total: i64,
@@ -353,11 +356,12 @@ impl Service {
                     state: worker_state,
                     search: String::new(),
                     favorite_only: false,
+                    group_id: None,
                     limit: PAGE_SIZE,
                     generation: 0,
                     events: worker_events,
                 };
-                if let Err(error) = worker.snapshot() {
+                if let Err(error) = worker.send_groups().and_then(|_| worker.snapshot()) {
                     let _ = worker.events.try_send(Event::Error(error.to_string()));
                 }
                 while !stop.load(Ordering::Acquire) {
@@ -441,19 +445,33 @@ struct Worker {
     state: Arc<Mutex<CaptureState>>,
     search: String,
     favorite_only: bool,
+    group_id: Option<i64>,
     limit: i64,
     generation: u64,
     events: async_channel::Sender<Event>,
 }
 
 impl Worker {
+    fn send_groups(&self) -> Result<()> {
+        self.events
+            .send_blocking(Event::Groups(self.history.groups()?))
+            .map_err(|_| anyhow!("窗口已关闭"))
+    }
+
     fn snapshot(&self) -> Result<()> {
         self.events
             .send_blocking(Event::Snapshot {
-                items: self
-                    .history
-                    .list(&self.search, self.limit, self.favorite_only)?,
-                total: self.history.count(&self.search, self.favorite_only)?,
+                items: self.history.list_in_group(
+                    &self.search,
+                    self.limit,
+                    self.favorite_only,
+                    self.group_id,
+                )?,
+                total: self.history.count_in_group(
+                    &self.search,
+                    self.favorite_only,
+                    self.group_id,
+                )?,
                 generation: self.generation,
             })
             .map_err(|_| anyhow!("窗口已关闭"))
@@ -465,11 +483,13 @@ impl Worker {
             Command::Query {
                 search,
                 favorite_only,
+                group_id,
                 limit,
                 generation,
             } => {
                 self.search = search;
                 self.favorite_only = favorite_only;
+                self.group_id = group_id;
                 self.limit = limit;
                 self.generation = generation;
             }
@@ -646,13 +666,17 @@ impl Worker {
                 to,
                 after,
                 favorite_only,
+                group_id,
                 generation,
             } => {
-                let result = if generation != self.generation || favorite_only != self.favorite_only
+                let result = if generation != self.generation
+                    || favorite_only != self.favorite_only
+                    || group_id != self.group_id
                 {
                     Err(anyhow!("列表已切换，请重新拖动"))
                 } else {
-                    self.history.reorder(from, to, after, favorite_only)
+                    self.history
+                        .reorder_in_group(from, to, after, favorite_only, group_id)
                 };
                 if result.is_ok() {
                     self.snapshot()?;
@@ -709,6 +733,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clipboard_core::database::GroupRepository;
 
     fn next_snapshot(
         events: &async_channel::Receiver<Event>,
@@ -734,6 +759,63 @@ mod tests {
     }
 
     #[test]
+    fn imported_groups_can_be_browsed_and_reordered_without_mixing_default_history() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let default_item = history.capture("default item")?.unwrap();
+        let first = history.capture("custom first")?.unwrap();
+        let second = history.capture("custom second")?.unwrap();
+        let groups = GroupRepository::new(&db);
+        let group = groups.create("导入分组", None)?;
+        groups.move_item_to_group(first, Some(group.id))?;
+        groups.move_item_to_group(second, Some(group.id))?;
+        drop(history);
+        drop(db);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        let Event::Groups(available) = events.recv_blocking()? else {
+            bail!("启动时没有发送分组列表");
+        };
+        assert_eq!(available[0].id, group.id);
+        assert_eq!(next_snapshot(&events, 0)[0].id, default_item);
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: Some(group.id),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        let rows = next_snapshot(&events, 1);
+        assert_eq!(
+            rows.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![second, first]
+        );
+        service.send(Command::Reorder {
+            from: first,
+            to: second,
+            after: false,
+            favorite_only: false,
+            group_id: Some(group.id),
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1)[0].id, first);
+        let Event::Reordered { result, .. } = events.recv_blocking()? else {
+            bail!("没有排序确认");
+        };
+        result.map_err(anyhow::Error::msg)?;
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 2,
+        })?;
+        assert_eq!(next_snapshot(&events, 2)[0].id, default_item);
+        Ok(())
+    }
+
+    #[test]
     fn worker_serializes_capture_search_and_delete_without_touching_clipboard() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
@@ -743,6 +825,7 @@ mod tests {
         service.send(Command::Query {
             search: "%_".into(),
             favorite_only: false,
+            group_id: None,
             limit: PAGE_SIZE,
             generation: 1,
         })?;
@@ -752,6 +835,7 @@ mod tests {
         service.send(Command::Query {
             search: "".into(),
             favorite_only: false,
+            group_id: None,
             limit: PAGE_SIZE,
             generation: 2,
         })?;
@@ -778,6 +862,7 @@ mod tests {
                 to: second,
                 after: false,
                 favorite_only: false,
+                group_id: None,
                 generation,
             })?;
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -879,6 +964,7 @@ mod tests {
         service.send(Command::Query {
             search: "%_".into(),
             favorite_only: true,
+            group_id: None,
             limit: PAGE_SIZE,
             generation: 1,
         })?;
@@ -890,6 +976,7 @@ mod tests {
         service.send(Command::Query {
             search: "%_".into(),
             favorite_only: false,
+            group_id: None,
             limit: PAGE_SIZE,
             generation: 2,
         })?;
@@ -1017,6 +1104,7 @@ mod tests {
             let _ = service.send(Command::Query {
                 search: "".into(),
                 favorite_only: false,
+                group_id: None,
                 limit: PAGE_SIZE,
                 generation,
             });
@@ -1121,6 +1209,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            group_id: None,
             limit: PAGE_SIZE,
             generation: 1,
         })?;

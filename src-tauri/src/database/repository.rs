@@ -1504,8 +1504,7 @@ impl GroupRepository {
                     item_count: row.get(5)?,
                 })
             })?
-            .filter_map(std::result::Result::ok)
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(groups)
     }
 

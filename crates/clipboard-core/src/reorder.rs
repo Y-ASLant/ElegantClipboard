@@ -3,7 +3,14 @@ use anyhow::{Result, bail};
 use rusqlite::params;
 
 /// Move relative to a stable ID, including records outside the loaded/search window.
-pub fn move_item(db: &Database, from: i64, to: i64, after: bool, favorites: bool) -> Result<()> {
+pub fn move_item(
+    db: &Database,
+    from: i64,
+    to: i64,
+    after: bool,
+    favorites: bool,
+    group_id: Option<i64>,
+) -> Result<()> {
     let connection = db.write_connection();
     let mut connection = connection.lock();
     let tx = connection.transaction()?;
@@ -13,14 +20,21 @@ pub fn move_item(db: &Database, from: i64, to: i64, after: bool, favorites: bool
         "sort_order"
     };
     let filter = if favorites { "AND is_favorite = 1" } else { "" };
+    let group_filter = if group_id.is_some() {
+        "group_id = ?1"
+    } else {
+        "group_id IS NULL"
+    };
     let mut rows: Vec<(i64, bool)> = {
         let mut query = tx.prepare(&format!(
             "SELECT id, is_pinned FROM clipboard_items
-             WHERE group_id IS NULL AND content_type IN ('text', 'url', 'html', 'rtf', 'image', 'files') {filter}
+             WHERE {group_filter} AND content_type IN ('text', 'url', 'html', 'rtf', 'image', 'files') {filter}
              ORDER BY is_pinned DESC, {column} DESC, sort_order DESC, created_at DESC, id DESC"
         ))?;
         query
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map(rusqlite::params_from_iter(group_id), |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .collect::<Result<_, _>>()?
     };
     let Some(&(_, pinned)) = rows.iter().find(|(id, _)| *id == from) else {
@@ -53,7 +67,7 @@ pub fn move_item(db: &Database, from: i64, to: i64, after: bool, favorites: bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{History, PAGE_SIZE};
+    use crate::{History, PAGE_SIZE, database::GroupRepository};
 
     #[test]
     fn reorder_covers_unloaded_rows_and_rolls_back_failed_writes() -> Result<()> {
@@ -127,6 +141,34 @@ mod tests {
         assert_eq!(ids(&history, false)?, before);
         drop(history);
         assert_eq!(ids(&History::open(path)?, false)?, before);
+        Ok(())
+    }
+
+    #[test]
+    fn custom_group_reorder_cannot_cross_group_boundary() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("history.db"))?;
+        let default_item = history.capture("default")?.unwrap();
+        let first = history.capture("group first")?.unwrap();
+        let second = history.capture("group second")?.unwrap();
+        let groups = GroupRepository::new(&history.db);
+        let group = groups.create("常用", None)?;
+        groups.move_item_to_group(first, Some(group.id))?;
+        groups.move_item_to_group(second, Some(group.id))?;
+
+        history.reorder_in_group(first, second, false, false, Some(group.id))?;
+        let in_group = history.list_in_group("", PAGE_SIZE, false, Some(group.id))?;
+        assert_eq!(
+            in_group.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![first, second]
+        );
+        assert_eq!(history.list("", PAGE_SIZE, false)?[0].id, default_item);
+        assert!(
+            history
+                .reorder_in_group(first, default_item, false, false, Some(group.id))
+                .is_err()
+        );
+        assert!(history.reorder(first, default_item, false, false).is_err());
         Ok(())
     }
 }

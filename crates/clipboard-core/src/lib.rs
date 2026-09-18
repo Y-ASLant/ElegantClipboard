@@ -19,7 +19,8 @@ pub use image::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 
 use anyhow::{Result, bail};
 use database::{
-    ClipboardItem, ClipboardRepository, ContentType, Database, NewClipboardItem, QueryOptions,
+    ClipboardItem, ClipboardRepository, ContentType, Database, Group, GroupRepository,
+    NewClipboardItem, QueryOptions,
 };
 use std::path::{Path, PathBuf};
 
@@ -54,7 +55,22 @@ impl History {
     }
 
     pub fn reorder(&self, from: i64, to: i64, after: bool, favorite_only: bool) -> Result<()> {
-        reorder::move_item(&self.db, from, to, after, favorite_only)
+        self.reorder_in_group(from, to, after, favorite_only, None)
+    }
+
+    pub fn reorder_in_group(
+        &self,
+        from: i64,
+        to: i64,
+        after: bool,
+        favorite_only: bool,
+        group_id: Option<i64>,
+    ) -> Result<()> {
+        reorder::move_item(&self.db, from, to, after, favorite_only, group_id)
+    }
+
+    pub fn groups(&self) -> Result<Vec<Group>> {
+        Ok(GroupRepository::new(&self.db).list_with_count()?)
     }
 
     pub fn capture(&self, text: &str) -> Result<Option<i64>> {
@@ -108,20 +124,41 @@ impl History {
         limit: i64,
         favorite_only: bool,
     ) -> Result<Vec<ClipboardItem>> {
+        self.list_in_group(search, limit, favorite_only, None)
+    }
+
+    pub fn list_in_group(
+        &self,
+        search: &str,
+        limit: i64,
+        favorite_only: bool,
+        group_id: Option<i64>,
+    ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
             content_type: Some("text,url,html,rtf,image,files".into()),
             favorite_only,
+            group_id,
             limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
             ..Default::default()
         })?)
     }
 
     pub fn count(&self, search: &str, favorite_only: bool) -> Result<i64> {
+        self.count_in_group(search, favorite_only, None)
+    }
+
+    pub fn count_in_group(
+        &self,
+        search: &str,
+        favorite_only: bool,
+        group_id: Option<i64>,
+    ) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
             content_type: Some("text,url,html,rtf,image,files".into()),
             favorite_only,
+            group_id,
             ..Default::default()
         })?)
     }

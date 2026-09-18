@@ -43,6 +43,7 @@ pub struct HistoryState {
     pub selected: Option<i64>,
     pub loading: bool,
     pub favorite_only: bool,
+    pub group_id: Option<i64>,
 }
 
 impl Default for HistoryState {
@@ -55,6 +56,7 @@ impl Default for HistoryState {
             selected: None,
             loading: true,
             favorite_only: false,
+            group_id: None,
         }
     }
 }
@@ -62,6 +64,11 @@ impl Default for HistoryState {
 impl HistoryState {
     pub fn set_favorite_filter(&mut self, favorite_only: bool) {
         self.favorite_only = favorite_only;
+        self.begin_search();
+    }
+
+    pub fn set_group(&mut self, group_id: Option<i64>) {
+        self.group_id = group_id;
         self.begin_search();
     }
 
@@ -129,6 +136,12 @@ mod tests {
         state.set_favorite_filter(false);
         assert!(!state.favorite_only);
         assert!(state.loading);
+        let old = state.generation;
+        state.set_group(Some(7));
+        assert_eq!(state.group_id, Some(7));
+        assert!(!state.apply(vec![], 1, old));
+        state.set_group(None);
+        assert_eq!(state.group_id, None);
     }
 
     #[test]

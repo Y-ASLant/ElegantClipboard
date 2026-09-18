@@ -825,12 +825,15 @@ mod tests {
         Database::new(path).unwrap()
     }
 
-    fn uuid_simple() -> u64 {
+    fn uuid_simple() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::SystemTime;
-        SystemTime::now()
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            .as_nanos() as u64
+            .as_nanos();
+        format!("{nanos}_{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
     }
 
     #[test]
