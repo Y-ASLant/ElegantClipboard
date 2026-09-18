@@ -255,7 +255,8 @@ struct ClipboardView {
     group_save_pending: bool,
     group_reorder_pending: bool,
     group_drop_target: Option<DropTarget>,
-    group_feedback_id: Option<i64>,
+    group_reorder_before: Option<Vec<i64>>,
+    group_feedback_ids: HashSet<i64>,
     group_feedback_revision: usize,
     group_scroll: ScrollHandle,
     group_drag_direction: i8,
@@ -446,7 +447,8 @@ impl ClipboardView {
             group_save_pending: false,
             group_reorder_pending: false,
             group_drop_target: None,
-            group_feedback_id: None,
+            group_reorder_before: None,
+            group_feedback_ids: HashSet::new(),
             group_feedback_revision: 0,
             group_scroll: ScrollHandle::new(),
             group_drag_direction: 0,
@@ -770,16 +772,24 @@ impl ClipboardView {
                 self.group_reorder_pending = false;
                 self.group_drop_target = None;
                 self.group_drag_direction = 0;
+                let before = self.group_reorder_before.take();
                 match result {
                     Ok(()) => {
                         self.group_feedback_revision += 1;
-                        self.group_feedback_id = Some(from);
+                        self.group_feedback_ids = before
+                            .map(|before| {
+                                let after: Vec<_> =
+                                    self.groups.iter().map(|group| group.id).collect();
+                                reorder_offsets(&before, &after).into_keys().collect()
+                            })
+                            .unwrap_or_default();
+                        self.group_feedback_ids.insert(from);
                         self.group_feedback_task = Some(cx.spawn(async move |view, cx| {
                             cx.background_executor()
                                 .timer(visual::MOTION_DURATION)
                                 .await;
                             let _ = view.update(cx, |this, cx| {
-                                this.group_feedback_id = None;
+                                this.group_feedback_ids.clear();
                                 cx.notify();
                             });
                         }));
@@ -787,6 +797,7 @@ impl ClipboardView {
                         self.is_error = false;
                     }
                     Err(error) => {
+                        self.group_feedback_ids.clear();
                         self.message = format!("分组排序失败：{error}");
                         self.is_error = true;
                     }
@@ -1577,6 +1588,7 @@ impl ClipboardView {
             .flex()
             .items_center()
             .flex_none()
+            .h(px(CONTROL_HEIGHT))
             .on_drag_move(
                 cx.listener(move |this, event: &DragMoveEvent<GroupDrag>, _, cx| {
                     if !event.bounds.contains(&event.event.position) {
@@ -1622,6 +1634,8 @@ impl ClipboardView {
                     cx,
                 ) {
                     this.group_reorder_pending = true;
+                    this.group_reorder_before =
+                        Some(this.groups.iter().map(|group| group.id).collect());
                 }
                 this.group_drop_target = None;
                 this.group_drag_direction = 0;
@@ -1654,6 +1668,7 @@ impl ClipboardView {
                 Button::new(("group", id as usize))
                     .small()
                     .outline()
+                    .h(px(CONTROL_HEIGHT))
                     .label(group.name.clone())
                     .selected(self.history.group_id == group_id)
                     .disabled(
@@ -1686,7 +1701,7 @@ impl ClipboardView {
                     cx,
                 ))
             });
-        if self.group_feedback_id == Some(id) {
+        if self.group_feedback_ids.contains(&id) {
             visual::reveal(
                 div().child(pill),
                 format!(
@@ -1794,6 +1809,7 @@ impl ClipboardView {
                     return;
                 }
                 if !this.valid_drag(drag, pinned) {
+                    this.drop_target = None;
                     this.message = "列表已变化，或跨越了置顶区域，请重新拖动".into();
                     this.is_error = true;
                     cx.notify();
@@ -2562,6 +2578,7 @@ impl ClipboardView {
                         Button::new("group-default")
                             .small()
                             .outline()
+                            .h(px(CONTROL_HEIGHT))
                             .label("默认分组")
                             .selected(self.history.group_id.is_none())
                             .disabled(self.group_delete_pending || self.clear_pending)
