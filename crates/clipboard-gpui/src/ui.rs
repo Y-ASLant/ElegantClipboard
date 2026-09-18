@@ -420,6 +420,7 @@ impl ClipboardView {
                 if self.preview.apply(id, generation, result) {
                     let text = match &self.preview.result {
                         Some(Ok(PreviewContent::Text(text))) => Some(text.clone()),
+                        Some(Ok(PreviewContent::RichText(text))) => Some(text.clone()),
                         Some(Ok(PreviewContent::Files(paths))) => Some(paths.join("\n")),
                         _ => None,
                     };
@@ -552,6 +553,7 @@ impl ClipboardView {
         let ready = matches!(self.preview.result, Some(Ok(_)));
         let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
         let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
+        let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
         let message = match &self.preview.result {
             None => "正在加载完整内容…".to_owned(),
             Some(Err(error)) => error.clone(),
@@ -559,22 +561,23 @@ impl ClipboardView {
                 format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len())
             }
             Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
+            Some(Ok(PreviewContent::RichText(_))) => "富文本 · 纯文本预览".into(),
             Some(Ok(PreviewContent::Files(paths))) => {
                 format!("{} 个文件或文件夹 · 仅保存原始路径", paths.len())
             }
         };
         let body: AnyElement = match &self.preview.result {
-            Some(Ok(PreviewContent::Text(_) | PreviewContent::Files(_))) => {
-                Textarea::new(&self.preview_input)
-                    .readonly(true)
-                    .h_full()
-                    .aria_label(if files {
-                        "文件路径"
-                    } else {
-                        "完整文本内容"
-                    })
-                    .into_any_element()
-            }
+            Some(Ok(
+                PreviewContent::Text(_) | PreviewContent::Files(_) | PreviewContent::RichText(_),
+            )) => Textarea::new(&self.preview_input)
+                .readonly(true)
+                .h_full()
+                .aria_label(if files {
+                    "文件路径"
+                } else {
+                    "完整文本内容"
+                })
+                .into_any_element(),
             Some(Ok(PreviewContent::Image(path))) => div()
                 .flex()
                 .items_center()
@@ -613,6 +616,8 @@ impl ClipboardView {
                         "图片预览"
                     } else if files {
                         "文件路径"
+                    } else if rich {
+                        "富文本预览"
                     } else {
                         "完整内容"
                     }))
@@ -640,6 +645,8 @@ impl ClipboardView {
                             "复制图片"
                         } else if files {
                             "复制文件"
+                        } else if rich {
+                            "复制富文本"
                         } else {
                             "复制全文"
                         })
@@ -678,6 +685,8 @@ impl ClipboardView {
         let kind = match item.content_type.as_str() {
             "image" => "图片",
             "files" => "文件",
+            "html" => "HTML",
+            "rtf" => "RTF",
             "url" => "网址",
             _ => "文本",
         };
@@ -697,6 +706,9 @@ impl ClipboardView {
             } else {
                 format!("{count} 项")
             }
+        } else if matches!(item.content_type.as_str(), "html" | "rtf") && item.char_count.is_none()
+        {
+            "纯文本未知".into()
         } else {
             format!("{} 字符", item.char_count.unwrap_or(0))
         };

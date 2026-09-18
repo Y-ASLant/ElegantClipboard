@@ -9,8 +9,8 @@ use clipboard_core::{
     preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{
-    Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
-    ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
+    Clipboard, ClipboardContent, ClipboardContext, ClipboardHandler, ClipboardWatcher,
+    ClipboardWatcherContext, ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
 };
 use directories::ProjectDirs;
 use std::{
@@ -51,6 +51,11 @@ pub enum Command {
         generation: u64,
     },
     Capture(String),
+    CaptureRich {
+        html: Option<String>,
+        rtf: Option<Vec<u8>>,
+        text: Option<String>,
+    },
     CaptureFiles(Vec<String>),
     CaptureImage {
         png: Vec<u8>,
@@ -147,6 +152,54 @@ impl WatchHandler {
             state.last_sequence = sequence;
             return Ok(());
         }
+        let html = self
+            .clipboard
+            .has(ContentFormat::Html)
+            .then(|| self.clipboard.get_html().ok())
+            .flatten()
+            .filter(|value| !value.is_empty());
+        let rtf = self
+            .clipboard
+            .has(ContentFormat::Rtf)
+            .then(|| self.clipboard.get_buffer("Rich Text Format").ok())
+            .flatten()
+            .filter(|value| !value.is_empty());
+        let text = self
+            .clipboard
+            .has(ContentFormat::Text)
+            .then(|| self.clipboard.get_text().ok())
+            .flatten()
+            .filter(|value| !value.is_empty());
+        if html.is_some() || rtf.is_some() {
+            let bytes = html.as_ref().map_or(0, String::len)
+                + rtf.as_ref().map_or(0, Vec::len)
+                + text.as_ref().map_or(0, String::len);
+            if bytes <= MAX_TEXT_BYTES {
+                self.commands
+                    .try_send(Command::CaptureRich { html, rtf, text })
+                    .map_err(|_| anyhow!("采集队列已满或已停止，本次富文本未保存"))?;
+                state.last_sequence = sequence;
+                return Ok(());
+            }
+            if text.is_none() {
+                state.last_sequence = sequence;
+                bail!("富文本超过 1 MiB 且没有纯文本，未保存");
+            }
+            let _ = self
+                .events
+                .try_send(Event::Status("富文本超过 1 MiB，按纯文本保存".into()));
+        }
+        if let Some(text) = text {
+            if text.len() > MAX_TEXT_BYTES {
+                state.last_sequence = sequence;
+                bail!("文本超过 1 MiB，未保存");
+            }
+            self.commands
+                .try_send(Command::Capture(text))
+                .map_err(|_| anyhow!("采集队列已满或已停止，本次复制未保存"))?;
+            state.last_sequence = sequence;
+            return Ok(());
+        }
         if self.clipboard.has(ContentFormat::Image) {
             let image = self
                 .clipboard
@@ -186,22 +239,6 @@ impl WatchHandler {
             state.last_sequence = sequence;
             return Ok(());
         }
-        if !self.clipboard.has(ContentFormat::Text) {
-            state.last_sequence = sequence;
-            return Ok(());
-        }
-        let text = self
-            .clipboard
-            .get_text()
-            .map_err(|error| anyhow!("读取剪贴板失败：{error}"))?;
-        if text.len() > MAX_TEXT_BYTES {
-            state.last_sequence = sequence;
-            bail!("文本超过 1 MiB，未保存");
-        }
-        // Do not silently replace different rapid copy operations with the last one.
-        self.commands
-            .try_send(Command::Capture(text))
-            .map_err(|_| anyhow!("采集队列已满或已停止，本次复制未保存"))?;
         state.last_sequence = sequence;
         Ok(())
     }
@@ -432,6 +469,14 @@ impl Worker {
             Command::Capture(text) => {
                 self.history.capture_with_media(&text, &self.images_dir)?;
             }
+            Command::CaptureRich { html, rtf, text } => {
+                self.history.capture_rich(
+                    html.as_deref(),
+                    rtf.as_deref(),
+                    text.as_deref(),
+                    &self.images_dir,
+                )?;
+            }
             Command::CaptureFiles(paths) => {
                 self.history.capture_files(&paths, &self.images_dir)?;
             }
@@ -446,6 +491,35 @@ impl Worker {
             }
             Command::Copy(id) => {
                 let item = self.history.item(id)?;
+                let is_rich = matches!(item.content_type.as_str(), "html" | "rtf");
+                let mut rich_contents = Vec::new();
+                if is_rich {
+                    if let Some(text) = item
+                        .text_content
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                    {
+                        rich_contents.push(ClipboardContent::Text(text.to_owned()));
+                    }
+                    if let Some(html) = item
+                        .html_content
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                    {
+                        rich_contents.push(ClipboardContent::Html(html.to_owned()));
+                    }
+                    if let Some(bytes) = item
+                        .rtf_content
+                        .as_deref()
+                        .and_then(clipboard_core::rich::decode_rtf_for_clipboard)
+                    {
+                        rich_contents
+                            .push(ClipboardContent::Other("Rich Text Format".into(), bytes));
+                    }
+                    if rich_contents.is_empty() {
+                        bail!("富文本记录没有可写回的有效格式");
+                    }
+                }
                 let files = if item.content_type == "files" {
                     let paths = self.history.files(id)?;
                     if paths.iter().any(|path| !Path::new(path).exists()) {
@@ -475,6 +549,7 @@ impl Worker {
                     None
                 };
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                let mut rich_preserved = false;
                 if let Some(files) = files {
                     self.clipboard
                         .set_files(files)
@@ -483,6 +558,37 @@ impl Worker {
                     self.clipboard
                         .set_image(image)
                         .map_err(|error| anyhow!("复制图片失败：{error}"))?;
+                } else if is_rich {
+                    self.clipboard
+                        .set(rich_contents)
+                        .map_err(|error| anyhow!("复制富文本失败：{error}"))?;
+                    state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+                    rich_preserved = item.html_content.as_deref().is_some_and(|html| {
+                        !html.is_empty()
+                            && self
+                                .clipboard
+                                .get_html()
+                                .ok()
+                                .is_some_and(|read| !read.is_empty())
+                    }) || item.rtf_content.as_deref().is_some_and(|rtf| {
+                        clipboard_core::rich::decode_rtf_for_clipboard(rtf).is_some()
+                            && self
+                                .clipboard
+                                .get_buffer("Rich Text Format")
+                                .ok()
+                                .is_some_and(|bytes| !bytes.is_empty())
+                    });
+                    let text_copied = item.text_content.as_deref().is_some_and(|text| {
+                        !text.is_empty()
+                            && self
+                                .clipboard
+                                .get_text()
+                                .ok()
+                                .is_some_and(|read| !read.is_empty())
+                    });
+                    if !rich_preserved && !text_copied {
+                        bail!("富文本写回后未检测到可用格式");
+                    }
                 } else {
                     let text = item.text_content.context("记录没有可复制的文本")?;
                     self.clipboard
@@ -494,6 +600,10 @@ impl Worker {
                     match item.content_type.as_str() {
                         "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
                         "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                        "html" | "rtf" if rich_preserved => {
+                            "富文本已复制，可切换到目标应用按 Ctrl+V 粘贴"
+                        }
+                        "html" | "rtf" => "富文本格式未写回，已按纯文本复制",
                         _ => "已复制，可切换到目标应用按 Ctrl+V 粘贴",
                     }
                     .into(),
@@ -837,6 +947,50 @@ mod tests {
                 break;
             }
             assert!(std::time::Instant::now() < deadline, "copy error timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rich_capture_keeps_html_and_binary_rtf_for_preview() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let rtf = b"{\\rtf1\\bin2 \x00\x01}".to_vec();
+        service.send(Command::CaptureRich {
+            html: Some("<b>中文😀</b>".into()),
+            rtf: Some(rtf.clone()),
+            text: Some("中文😀".into()),
+        })?;
+        let rows = next_snapshot(&events, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].content_type, "html");
+        let stored = History::open(directory.path().join("clipboard.db"))?.item(rows[0].id)?;
+        assert_eq!(stored.html_content.as_deref(), Some("<b>中文😀</b>"));
+        assert_eq!(
+            stored
+                .rtf_content
+                .as_deref()
+                .and_then(clipboard_core::rich::decode_rtf_for_clipboard)
+                .unwrap(),
+            [rtf, vec![0]].concat()
+        );
+        service.send(Command::Preview {
+            id: rows[0].id,
+            generation: 1,
+        })?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::Preview { result, .. }) => {
+                    assert_eq!(result.unwrap(), PreviewContent::RichText("中文😀".into()));
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline, "preview timed out");
             thread::sleep(Duration::from_millis(10));
         }
         Ok(())

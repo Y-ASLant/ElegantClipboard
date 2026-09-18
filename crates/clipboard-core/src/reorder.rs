@@ -16,7 +16,7 @@ pub fn move_item(db: &Database, from: i64, to: i64, after: bool, favorites: bool
     let mut rows: Vec<(i64, bool)> = {
         let mut query = tx.prepare(&format!(
             "SELECT id, is_pinned FROM clipboard_items
-             WHERE group_id IS NULL AND content_type IN ('text', 'url', 'image', 'files') {filter}
+             WHERE group_id IS NULL AND content_type IN ('text', 'url', 'html', 'rtf', 'image', 'files') {filter}
              ORDER BY is_pinned DESC, {column} DESC, sort_order DESC, created_at DESC, id DESC"
         ))?;
         query
