@@ -40,6 +40,10 @@ pub enum Command {
         id: i64,
         name: String,
     },
+    DeleteGroup {
+        id: i64,
+        generation: u64,
+    },
     MoveToGroup {
         id: i64,
         source_group_id: Option<i64>,
@@ -83,6 +87,7 @@ pub enum Event {
     Groups(Vec<Group>),
     GroupCreated(Result<Group, String>),
     GroupRenamed(Result<Group, String>),
+    GroupDeleted(Result<usize, String>),
     ItemMoved {
         id: i64,
         result: Result<(), String>,
@@ -733,6 +738,22 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::DeleteGroup { id, generation } => {
+                let result = if self.group_id != Some(id) || self.generation != generation {
+                    Err(anyhow!("列表已切换，请重新选择分组"))
+                } else {
+                    self.history.delete_group_preserving_items(id)
+                }
+                .map_err(|error| error.to_string());
+                if result.is_ok() {
+                    self.group_id = None;
+                    self.send_groups()?;
+                }
+                self.events
+                    .send_blocking(Event::GroupDeleted(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::MoveToGroup {
                 id,
                 source_group_id,
@@ -934,6 +955,56 @@ mod tests {
             events.recv_blocking()?,
             Event::GroupRenamed(Err(_))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn delete_group_preserves_items_and_rejects_stale_view() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        let item = history.capture("keep this")?.unwrap();
+        let group = history.create_group("工作")?;
+        history.move_to_group(item, None, Some(group.id))?;
+        drop(history);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        next_snapshot(&events, 0);
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: Some(group.id),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1)[0].id, item);
+        service.send(Command::DeleteGroup {
+            id: group.id,
+            generation: 0,
+        })?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::GroupDeleted(Err(_))
+        ));
+        service.send(Command::DeleteGroup {
+            id: group.id,
+            generation: 1,
+        })?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(ref groups) if groups.is_empty()));
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::GroupDeleted(Ok(1))
+        ));
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 2,
+        })?;
+        assert_eq!(next_snapshot(&events, 2)[0].id, item);
+        assert_eq!(History::open(path)?.item(item)?.group_id, None);
         Ok(())
     }
 

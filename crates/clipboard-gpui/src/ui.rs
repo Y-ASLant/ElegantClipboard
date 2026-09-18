@@ -177,6 +177,8 @@ struct ClipboardView {
     group_editor_open: bool,
     group_rename_id: Option<i64>,
     group_save_pending: bool,
+    group_delete_id: Option<i64>,
+    group_delete_pending: bool,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -321,6 +323,8 @@ impl ClipboardView {
             group_editor_open: false,
             group_rename_id: None,
             group_save_pending: false,
+            group_delete_id: None,
+            group_delete_pending: false,
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -445,6 +449,7 @@ impl ClipboardView {
         }
         self.search_task = None;
         self.group_move_id = None;
+        self.group_delete_id = None;
         self.history.set_group(group_id);
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.query(cx);
@@ -463,6 +468,28 @@ impl ClipboardView {
         };
         if self.send(command, cx) {
             self.group_save_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn delete_group(&mut self, cx: &mut Context<Self>) {
+        if self.group_delete_pending {
+            return;
+        }
+        let Some(id) = self
+            .group_delete_id
+            .filter(|id| self.history.group_id == Some(*id))
+        else {
+            return;
+        };
+        if self.send(
+            Command::DeleteGroup {
+                id,
+                generation: self.history.generation,
+            },
+            cx,
+        ) {
+            self.group_delete_pending = true;
             cx.notify();
         }
     }
@@ -498,6 +525,7 @@ impl ClipboardView {
                         .any(|group| Some(group.id) == self.history.group_id)
                 {
                     self.history.set_group(None);
+                    self.scroll.scroll_to_item(0, ScrollStrategy::Top);
                     self.query(cx);
                 }
                 self.groups = groups;
@@ -536,6 +564,21 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         self.message = format!("重命名分组失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::GroupDeleted(result) => {
+                self.group_delete_pending = false;
+                self.group_delete_id = None;
+                match result {
+                    Ok(count) => {
+                        window.focus(&self.list_focus, cx);
+                        self.message = format!("已删除分组，{count} 条记录移至默认分组");
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("删除分组失败：{error}");
                         self.is_error = true;
                     }
                 }
@@ -720,6 +763,8 @@ impl ClipboardView {
                 self.paste_pending = None;
                 self.group_move_pending = false;
                 self.group_save_pending = false;
+                self.group_delete_pending = false;
+                self.group_delete_id = None;
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
@@ -1501,7 +1546,7 @@ impl ClipboardView {
                             .small()
                             .ghost()
                             .label("＋ 新建")
-                            .disabled(self.group_save_pending)
+                            .disabled(self.group_save_pending || self.group_delete_pending)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.group_editor_open =
                                     !this.group_editor_open || this.group_rename_id.is_some();
@@ -1522,7 +1567,11 @@ impl ClipboardView {
                             .small()
                             .ghost()
                             .label("重命名")
-                            .disabled(self.history.group_id.is_none() || self.group_save_pending)
+                            .disabled(
+                                self.history.group_id.is_none()
+                                    || self.group_save_pending
+                                    || self.group_delete_pending,
+                            )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let Some(id) = this.history.group_id else {
                                     return;
@@ -1545,11 +1594,31 @@ impl ClipboardView {
                             })),
                     )
                     .child(
+                        Button::new("group-delete-toggle")
+                            .small()
+                            .ghost()
+                            .label("删除分组")
+                            .disabled(
+                                self.history.group_id.is_none()
+                                    || self.group_save_pending
+                                    || self.group_delete_pending,
+                            )
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.group_delete_id = this.history.group_id;
+                                this.group_editor_open = false;
+                                this.group_rename_id = None;
+                                this.group_move_id = None;
+                                window.focus(&this.list_focus, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
                         Button::new("group-default")
                             .small()
                             .outline()
                             .label("默认分组")
                             .selected(self.history.group_id.is_none())
+                            .disabled(self.group_delete_pending)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.select_group(None, window, cx);
                             })),
@@ -1561,6 +1630,7 @@ impl ClipboardView {
                             .outline()
                             .label(group.name.clone())
                             .selected(self.history.group_id == group_id)
+                            .disabled(self.group_delete_pending)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.select_group(group_id, window, cx);
                             }))
@@ -1606,6 +1676,57 @@ impl ClipboardView {
                                 })),
                         ),
                     ("group-editor", self.group_rename_id.unwrap_or(0) as usize),
+                    cx,
+                ))
+            })
+            .when_some(self.group_delete_id, |container, id| {
+                let (name, count) = self
+                    .groups
+                    .iter()
+                    .find(|group| group.id == id)
+                    .map(|group| (group.name.clone(), group.item_count))
+                    .unwrap_or_else(|| ("该分组".into(), 0));
+                container.child(visual::reveal(
+                    div()
+                        .px(px(PAGE_PADDING))
+                        .pb_2()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(format!("删除「{name}」？{count} 条记录将移到默认分组。")),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap_2()
+                                .child(
+                                    Button::new("group-delete-cancel")
+                                        .small()
+                                        .ghost()
+                                        .label("取消")
+                                        .disabled(self.group_delete_pending)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.group_delete_id = None;
+                                            window.focus(&this.list_focus, cx);
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("group-delete-confirm")
+                                        .small()
+                                        .danger()
+                                        .label("保留记录并删除分组")
+                                        .disabled(self.group_delete_pending)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.delete_group(cx)),
+                                        ),
+                                ),
+                        ),
+                    ("group-delete", id as usize),
                     cx,
                 ))
             })

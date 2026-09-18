@@ -9,6 +9,7 @@ pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
 mod files;
+mod groups;
 mod image;
 pub mod import;
 pub mod preferences;
@@ -102,6 +103,10 @@ impl History {
             name: name.to_owned(),
             ..current.clone()
         })
+    }
+
+    pub fn delete_group_preserving_items(&self, id: i64) -> Result<usize> {
+        groups::delete_preserving_items(&self.db, id)
     }
 
     fn checked_group_name(name: &str) -> Result<&str> {
