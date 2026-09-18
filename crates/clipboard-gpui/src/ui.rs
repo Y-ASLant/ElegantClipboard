@@ -862,10 +862,9 @@ impl ClipboardView {
                     cx.notify();
                     return;
                 }
-                let after = this
-                    .drop_target
-                    .filter(|(target, _)| *target == id)
-                    .is_some_and(|(_, after)| after);
+                let Some((_, after)) = this.drop_target.filter(|(target, _)| *target == id) else {
+                    return;
+                };
                 if this.send(
                     Command::Reorder {
                         from: drag.id,
