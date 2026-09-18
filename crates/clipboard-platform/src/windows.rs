@@ -548,12 +548,10 @@ impl Worker {
     fn snapshot(&self) -> Result<()> {
         self.events
             .send_blocking(Event::Snapshot {
-                items: self.history.list_in_group(
-                    &self.search,
-                    self.limit,
-                    self.favorite_only,
-                    self.group_id,
-                )?,
+                items: self
+                    .history
+                    .list_in_group(&self.search, self.limit, self.favorite_only, self.group_id)
+                    .map_err(|error| anyhow!("读取历史记录失败：{error}"))?,
                 total: self.history.count_in_group(
                     &self.search,
                     self.favorite_only,
@@ -1015,6 +1013,34 @@ mod tests {
             );
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn invalid_history_row_reports_startup_error() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let id = History::new(&db).capture("invalid row")?.unwrap();
+        db.write_connection().lock().execute(
+            &format!("UPDATE clipboard_items SET byte_size = X'01' WHERE id = {id}"),
+            [],
+        )?;
+        drop(db);
+
+        let (_service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::Error(message)) => {
+                    assert!(message.contains("读取历史记录失败"), "{message}");
+                    break;
+                }
+                Ok(Event::Snapshot { .. }) => bail!("损坏记录被错误地显示为正常快照"),
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline, "启动错误未上报");
+            thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
     }
 
     #[test]

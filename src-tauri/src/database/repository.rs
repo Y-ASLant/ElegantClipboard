@@ -629,12 +629,8 @@ impl ClipboardRepository {
         let params_refs: Vec<&dyn rusqlite::ToSql> =
             params_vec.iter().map(std::convert::AsRef::as_ref).collect();
         let mut stmt = conn.prepare(&sql)?;
-        let items = stmt
-            .query_map(params_refs.as_slice(), Self::row_to_item)?
-            .filter_map(std::result::Result::ok)
-            .collect();
-
-        Ok(items)
+        stmt.query_map(params_refs.as_slice(), Self::row_to_item)?
+            .collect()
     }
 
     pub fn count(&self, options: QueryOptions) -> Result<i64, rusqlite::Error> {
@@ -1820,6 +1816,33 @@ mod tests {
         let items = repo.list(QueryOptions::default()).unwrap();
         assert_eq!(items.len(), 2);
         assert!(items[0].sort_order > items[1].sort_order);
+    }
+
+    #[test]
+    fn list_reports_invalid_row_instead_of_silently_skipping_it() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let valid_id = repo.insert(make_text_item("valid")).unwrap();
+        let invalid_id = repo.insert(make_text_item("invalid")).unwrap();
+
+        db.write_connection()
+            .lock()
+            .execute(
+                "UPDATE clipboard_items SET byte_size = X'01' WHERE id = ?1",
+                params![invalid_id],
+            )
+            .unwrap();
+
+        assert!(repo.list(QueryOptions::default()).is_err());
+        assert_eq!(repo.count(QueryOptions::default()).unwrap(), 2);
+        assert_eq!(
+            repo.get_by_id(valid_id)
+                .unwrap()
+                .unwrap()
+                .text_content
+                .as_deref(),
+            Some("valid")
+        );
     }
 
     #[test]
