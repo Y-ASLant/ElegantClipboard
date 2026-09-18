@@ -46,6 +46,12 @@ gpui_kit::actions!(
     ]
 );
 
+#[derive(Clone, Copy)]
+struct StartupMode {
+    monitoring: bool,
+    hidden: bool,
+}
+
 pub fn run(options: Options) -> anyhow::Result<()> {
     let data_dir = options.data_dir.clone();
     if clipboard_platform::show_existing_instance(data_dir.clone())? {
@@ -64,7 +70,11 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         }
         Err(error) => return Err(error),
     };
-    let monitoring = options.monitor;
+    let startup = StartupMode {
+        monitoring: options.monitor,
+        hidden: options.start_hidden,
+    };
+    let smoke_test = options.smoke_test;
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -99,6 +109,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         ..TitleBar::title_bar_options()
                     }),
                     window_min_size: Some(size(px(420.), px(520.))),
+                    focus: !startup.hidden,
+                    show: !startup.hidden,
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
                     ..TitleBar::window_options()
                 },
@@ -107,7 +119,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         ClipboardView::new(
                             service,
                             events,
-                            monitoring,
+                            startup,
                             tray_enabled.clone(),
                             exiting.clone(),
                             window,
@@ -125,8 +137,10 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 },
             )
             .expect("无法创建 ElegantClipboard 窗口");
-            cx.activate(true);
-            if options.smoke_test {
+            if !startup.hidden {
+                cx.activate(true);
+            }
+            if smoke_test {
                 cx.spawn(async move |cx| {
                     cx.background_executor().timer(Duration::from_secs(3)).await;
                     smoke_exiting.set(true);
@@ -235,6 +249,8 @@ struct ClipboardView {
     theme_pending: bool,
     hotkey_choice: HotkeyPreference,
     hotkey_pending: bool,
+    autostart: bool,
+    autostart_pending: bool,
     export_pending: bool,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
@@ -258,7 +274,7 @@ impl ClipboardView {
     fn new(
         service: Service,
         events: async_channel::Receiver<Event>,
-        monitoring: bool,
+        startup: StartupMode,
         tray_enabled: Rc<Cell<bool>>,
         exiting: Rc<Cell<bool>>,
         window: &mut Window,
@@ -297,6 +313,9 @@ impl ClipboardView {
         let (tray_sender, tray_receiver) = async_channel::bounded(8);
         let tray = tray::create(tray_sender);
         tray_enabled.set(tray.is_ok());
+        if startup.hidden && tray.is_err() {
+            tray::set_window_visible(window, true);
+        }
         let tray_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(command) = tray_receiver.recv().await {
                 if view
@@ -340,12 +359,16 @@ impl ClipboardView {
             }
         });
         let hotkey_error = hotkey.as_ref().err().map(ToString::to_string);
+        let autostart = clipboard_platform::autostart::enabled(&service.data_dir);
         let mut startup_errors = Vec::new();
         if let Some(error) = tray_error {
             startup_errors.push(format!("托盘不可用：{error}；关闭窗口将退出"));
         }
         if let Some(error) = hotkey_error {
             startup_errors.push(error);
+        }
+        if let Err(error) = &autostart {
+            startup_errors.push(format!("无法读取开机启动设置：{error}"));
         }
         let theme = service.initial_theme;
         let paused = service.initial_paused;
@@ -388,12 +411,14 @@ impl ClipboardView {
             preview_save_pending: false,
             list_focus,
             scroll: UniformListScrollHandle::new(),
-            monitoring,
+            monitoring: startup.monitoring,
             settings_open: false,
             theme,
             theme_pending: false,
             hotkey_choice,
             hotkey_pending: false,
+            autostart: autostart.unwrap_or(false),
+            autostart_pending: false,
             export_pending: false,
             paste_target: None,
             paste_pending: None,
@@ -406,7 +431,7 @@ impl ClipboardView {
             paused,
             pause_pending: false,
             message: if startup_errors.is_empty() {
-                let activity = if !monitoring {
+                let activity = if !startup.monitoring {
                     "采集已禁用"
                 } else if paused {
                     "已暂停记录"
@@ -970,6 +995,25 @@ impl ClipboardView {
                         if let Some(restore_error) = restore_error {
                             self.message.push_str(&format!("；{restore_error}"));
                         }
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::AutostartSaved(result) => {
+                self.autostart_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.autostart = enabled;
+                        self.message = if enabled {
+                            "已开启开机启动"
+                        } else {
+                            "已关闭开机启动"
+                        }
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("开机启动设置失败：{error}");
                         self.is_error = true;
                     }
                 }
@@ -1891,6 +1935,37 @@ impl Render for ClipboardView {
                                             },
                                         ),
                                     ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .px(px(PAGE_PADDING))
+                                .py_1()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("开机启动"),
+                                )
+                                .child(
+                                    Button::new("autostart-toggle")
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(CONTROL_HEIGHT))
+                                        .label(if self.autostart { "关闭" } else { "开启" })
+                                        .disabled(self.autostart_pending)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            if this.send(Command::SetAutostart(!this.autostart), cx)
+                                            {
+                                                this.autostart_pending = true;
+                                                cx.notify();
+                                            }
+                                        })),
                                 ),
                         ),
                     "window-settings",

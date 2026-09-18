@@ -1,4 +1,7 @@
-use crate::instance::{self, InstanceSignal};
+use crate::{
+    autostart,
+    instance::{self, InstanceSignal},
+};
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
@@ -78,6 +81,7 @@ pub enum Command {
     Pause(bool),
     SetTheme(ThemePreference),
     SetHotkey(HotkeyPreference),
+    SetAutostart(bool),
     ExportBackup(PathBuf),
     Reorder {
         from: i64,
@@ -142,6 +146,7 @@ pub enum Event {
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
+    AutostartSaved(Result<bool, String>),
     BackupExported(Result<BackupReport, String>),
     Error(String),
 }
@@ -413,6 +418,7 @@ impl Service {
         let worker_events = events.clone();
         let images_dir = service.data_dir.join("images");
         let staged_dir = service.data_dir.join("staged");
+        let worker_data_dir = service.data_dir.clone();
         service.worker = Some(thread::Builder::new().name("history-worker".into()).spawn(
             move || {
                 let mut worker = Worker {
@@ -421,6 +427,7 @@ impl Service {
                     clipboard: writer,
                     images_dir,
                     staged_dir,
+                    data_dir: worker_data_dir,
                     state: worker_state,
                     search: String::new(),
                     favorite_only: false,
@@ -521,6 +528,7 @@ struct Worker {
     clipboard: ClipboardContext,
     images_dir: PathBuf,
     staged_dir: PathBuf,
+    data_dir: PathBuf,
     state: Arc<Mutex<CaptureState>>,
     search: String,
     favorite_only: bool,
@@ -926,6 +934,15 @@ impl Worker {
                     .map_err(|error| error.to_string());
                 self.events
                     .send_blocking(Event::HotkeySaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetAutostart(enabled) => {
+                let result = autostart::set_enabled(&self.data_dir, enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::AutostartSaved(result))
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }

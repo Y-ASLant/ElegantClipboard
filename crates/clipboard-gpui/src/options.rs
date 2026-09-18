@@ -5,6 +5,7 @@ pub struct Options {
     pub data_dir: Option<PathBuf>,
     pub monitor: bool,
     pub smoke_test: bool,
+    pub start_hidden: bool,
     pub import_db: Option<PathBuf>,
     pub import_backup: Option<PathBuf>,
     pub import_legacy_backup: Option<PathBuf>,
@@ -16,6 +17,7 @@ impl Options {
             data_dir: None,
             monitor: true,
             smoke_test: false,
+            start_hidden: false,
             import_db: None,
             import_backup: None,
             import_legacy_backup: None,
@@ -34,6 +36,7 @@ impl Options {
                 }
                 Some("--no-monitor") => options.monitor = false,
                 Some("--smoke-test") => options.smoke_test = true,
+                Some("--start-hidden") => options.start_hidden = true,
                 Some("--import-db") => {
                     let Some(path) = args.next().filter(|path| {
                         !path.is_empty() && !path.to_string_lossy().starts_with("--")
@@ -62,6 +65,9 @@ impl Options {
             }
         }
         if options.smoke_test {
+            if options.start_hidden {
+                bail!("--smoke-test 不能与 --start-hidden 同时使用");
+            }
             if options.import_db.is_some()
                 || options.import_backup.is_some()
                 || options.import_legacy_backup.is_some()
@@ -106,10 +112,13 @@ mod tests {
         assert!(parse(&["--smoke-test"]).is_err());
         let options = parse(&["--smoke-test", "--data-dir", "C:\\测试 目录"])?.unwrap();
         assert!(!options.monitor);
+        assert!(!options.start_hidden);
         assert_eq!(options.data_dir, Some(PathBuf::from("C:\\测试 目录")));
         assert!(parse(&["--data-dir"]).is_err());
         assert!(parse(&["--data-dir", "--no-monitor"]).is_err());
         assert!(parse(&["--unknown"]).is_err());
+        assert!(parse(&["--smoke-test", "--start-hidden", "--data-dir", "isolated"]).is_err());
+        assert!(parse(&["--start-hidden"])?.unwrap().start_hidden);
         assert!(parse(&["--import-db"]).is_err());
         assert!(parse(&["--import-backup"]).is_err());
         assert!(parse(&["--import-backup", "history.zip"]).is_err());

@@ -13,7 +13,7 @@ mod visual;
 fn main() -> anyhow::Result<()> {
     let Some(options) = options::Options::parse(std::env::args_os().skip(1))? else {
         println!(
-            "ElegantClipboard\n\n  --data-dir PATH              使用独立数据目录\n  --import-db PATH             从旧版 clipboard.db 导入到空 GPUI 目录后退出\n  --import-backup PATH         将 GPUI ZIP 备份恢复到指定空数据目录后退出\n  --import-legacy-backup PATH  将旧版 ZIP 备份导入到指定空数据目录后退出\n  --no-monitor                 不监听系统剪贴板\n  --smoke-test                 打开窗口后自动退出（需 --data-dir，禁用采集）\n  --help                       显示帮助"
+            "ElegantClipboard\n\n  --data-dir PATH              使用独立数据目录\n  --import-db PATH             从旧版 clipboard.db 导入到空 GPUI 目录后退出\n  --import-backup PATH         将 GPUI ZIP 备份恢复到指定空数据目录后退出\n  --import-legacy-backup PATH  将旧版 ZIP 备份导入到指定空数据目录后退出\n  --no-monitor                 不监听系统剪贴板\n  --start-hidden               启动后隐藏到托盘（托盘不可用时显示窗口）\n  --smoke-test                 打开窗口后自动退出（需 --data-dir，禁用采集）\n  --help                       显示帮助"
         );
         return Ok(());
     };
