@@ -1,4 +1,28 @@
 use clipboard_core::{PAGE_SIZE, PreviewContent, database::ClipboardItem};
+use std::collections::HashMap;
+
+/// Previous row positions for items displaced by a confirmed reorder.
+pub fn reorder_offsets(before: &[i64], after: &[i64]) -> HashMap<i64, isize> {
+    if before.len() != after.len() {
+        return HashMap::new();
+    }
+    let positions: HashMap<_, _> = before
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (*id, index))
+        .collect();
+    if !after.iter().all(|id| positions.contains_key(id)) {
+        return HashMap::new();
+    }
+    after
+        .iter()
+        .enumerate()
+        .filter_map(|(index, id)| {
+            let old = *positions.get(id)?;
+            (old != index).then_some((*id, old as isize - index as isize))
+        })
+        .collect()
+}
 
 #[derive(Default)]
 pub struct PreviewState {
@@ -116,6 +140,18 @@ impl HistoryState {
 mod tests {
     use super::*;
     use clipboard_core::History;
+
+    #[test]
+    fn reorder_offsets_include_every_shifted_row() {
+        let offsets = reorder_offsets(&[4, 3, 2, 1], &[3, 2, 4, 1]);
+        assert_eq!(offsets.len(), 3);
+        assert_eq!(offsets.get(&4), Some(&-2));
+        assert_eq!(offsets.get(&3), Some(&1));
+        assert_eq!(offsets.get(&2), Some(&1));
+        assert!(!offsets.contains_key(&1));
+        assert!(reorder_offsets(&[1, 2], &[3, 2]).is_empty());
+        assert!(reorder_offsets(&[1, 2], &[3, 1, 2]).is_empty());
+    }
 
     #[test]
     fn filter_change_resets_paging_and_rejects_previous_results() {

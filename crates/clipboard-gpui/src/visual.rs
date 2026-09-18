@@ -25,16 +25,14 @@ pub fn reveal(element: Div, id: impl Into<ElementId>, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-pub fn settle(element: Div, id: impl Into<ElementId>, cx: &App) -> AnyElement {
+pub fn reflow(element: Div, offset: f32, id: impl Into<ElementId>, cx: &App) -> AnyElement {
     if cx.reduce_motion() {
         return element.into_any_element();
     }
     element
         .relative()
-        .with_animation(id, motion(), |element, progress| {
-            element
-                .top(px(6. * (1. - progress)))
-                .opacity(0.65 + 0.35 * progress)
+        .with_animation(id, motion(), move |element, progress| {
+            element.top(px(offset * (1. - progress)))
         })
         .into_any_element()
 }

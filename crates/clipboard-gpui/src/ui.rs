@@ -3,7 +3,7 @@ use crate::tray::{self, TrayCommand};
 use crate::visual::{self, CONTROL_HEIGHT, GROUP_BAR_HEIGHT, PAGE_PADDING, ROW_HEIGHT};
 use crate::{
     options::Options,
-    state::{HistoryState, PreviewState},
+    state::{HistoryState, PreviewState, reorder_offsets},
 };
 use clipboard_core::{
     HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
@@ -24,7 +24,11 @@ use gpui_kit::{
     *,
 };
 use std::time::{Duration, Instant};
-use std::{cell::Cell, collections::HashSet, rc::Rc};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 use tray_icon::TrayIcon;
 
 gpui_kit::actions!(
@@ -236,7 +240,8 @@ struct ClipboardView {
     paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,
-    reordered: Option<(i64, usize)>,
+    reorder_before: Option<Vec<i64>>,
+    reorder_offsets: HashMap<i64, isize>,
     feedback_revision: usize,
     last_drag_scroll: Instant,
     paused: bool,
@@ -394,7 +399,8 @@ impl ClipboardView {
             paste_pending: None,
             reorder_pending: false,
             drop_target: None,
-            reordered: None,
+            reorder_before: None,
+            reorder_offsets: HashMap::new(),
             feedback_revision: 0,
             last_drag_scroll: Instant::now(),
             paused,
@@ -854,10 +860,15 @@ impl ClipboardView {
             } => {
                 self.reorder_pending = false;
                 self.drop_target = None;
+                let before = self.reorder_before.take();
                 match result {
                     Ok(()) if generation == self.history.generation => {
                         self.feedback_revision += 1;
-                        self.reordered = Some((from, self.feedback_revision));
+                        if let Some(before) = before {
+                            let after: Vec<_> =
+                                self.history.items.iter().map(|item| item.id).collect();
+                            self.reorder_offsets = reorder_offsets(&before, &after);
+                        }
                         if self.history.items.iter().any(|item| item.id == from) {
                             self.history.selected = Some(from);
                         }
@@ -866,7 +877,7 @@ impl ClipboardView {
                                 .timer(visual::MOTION_DURATION)
                                 .await;
                             let _ = view.update(cx, |this, cx| {
-                                this.reordered = None;
+                                this.reorder_offsets.clear();
                                 cx.notify();
                             });
                         }));
@@ -1459,6 +1470,8 @@ impl ClipboardView {
                     cx,
                 ) {
                     this.reorder_pending = true;
+                    this.reorder_before =
+                        Some(this.history.items.iter().map(|item| item.id).collect());
                 }
                 this.drop_target = None;
                 cx.notify();
@@ -1530,7 +1543,7 @@ impl ClipboardView {
                                     .child(div().px_1().child("⠿"))
                                     .child(format!(
                                         "{}{} · {}",
-                                        if pinned { "置顶" } else { "" },
+                                        if pinned { "置顶 · " } else { "" },
                                         kind,
                                         detail
                                     )),
@@ -1731,10 +1744,13 @@ impl ClipboardView {
                     ),
             );
         let row = div().child(row);
-        if let Some((moved, revision)) = self.reordered
-            && moved == id
-        {
-            visual::settle(row, ("reorder-feedback", revision), cx)
+        if let Some(offset) = self.reorder_offsets.get(&id) {
+            visual::reflow(
+                row,
+                *offset as f32 * ROW_HEIGHT,
+                format!("reorder-feedback-{}-{id}", self.feedback_revision),
+                cx,
+            )
         } else {
             row.into_any_element()
         }
