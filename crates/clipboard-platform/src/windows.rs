@@ -64,6 +64,11 @@ pub enum Command {
         generation: u64,
     },
     Delete(i64),
+    DeleteBatch {
+        ids: Vec<i64>,
+        group_id: Option<i64>,
+        generation: u64,
+    },
     ClearHistory {
         group_id: Option<i64>,
         generation: u64,
@@ -133,6 +138,7 @@ pub enum Event {
         result: Result<bool, String>,
     },
     HistoryCleared(Result<i64, String>),
+    BatchDeleted(Result<i64, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
@@ -757,6 +763,28 @@ impl Worker {
                 return Ok(());
             }
             Command::Delete(id) => self.history.delete_with_media(id, &self.images_dir)?,
+            Command::DeleteBatch {
+                ids,
+                group_id,
+                generation,
+            } => {
+                let result = if group_id != self.group_id || generation != self.generation {
+                    Err(anyhow!("列表已切换，请重新选择要删除的记录"))
+                } else {
+                    self.history
+                        .delete_batch_with_media(&ids, group_id, &self.images_dir)
+                };
+                if result.is_ok() {
+                    self.send_groups()?;
+                    self.snapshot()?;
+                }
+                self.events
+                    .send_blocking(Event::BatchDeleted(
+                        result.map_err(|error| error.to_string()),
+                    ))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::ClearHistory {
                 group_id,
                 generation,
@@ -1703,6 +1731,57 @@ mod tests {
         assert!(history.item(removed).is_err());
         assert!(history.item(favorite)?.is_favorite);
         assert_eq!(history.text(default)?, "default");
+        Ok(())
+    }
+
+    #[test]
+    fn batch_delete_rejects_stale_or_cross_group_selection() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let group = history.create_group("Work")?;
+        let first = history.capture("first")?.unwrap();
+        let second = history.capture("second")?.unwrap();
+        history.move_to_group(first, None, Some(group.id))?;
+        history.move_to_group(second, None, Some(group.id))?;
+        let other = history.capture("other")?.unwrap();
+        drop(history);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: Some(group.id),
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1).len(), 2);
+        for (ids, generation) in [(vec![first, second], 0), (vec![first, other], 1)] {
+            service.send(Command::DeleteBatch {
+                ids,
+                group_id: Some(group.id),
+                generation,
+            })?;
+            assert!(matches!(
+                events.recv_blocking()?,
+                Event::BatchDeleted(Err(_))
+            ));
+        }
+        service.send(Command::DeleteBatch {
+            ids: vec![first, second],
+            group_id: Some(group.id),
+            generation: 1,
+        })?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        assert!(next_snapshot(&events, 1).is_empty());
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::BatchDeleted(Ok(2))
+        ));
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        assert!(history.item(first).is_err());
+        assert!(history.item(second).is_err());
+        assert_eq!(history.text(other)?, "other");
         Ok(())
     }
 }

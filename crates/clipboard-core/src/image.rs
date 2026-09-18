@@ -3,6 +3,7 @@ use crate::{
     database::{ContentType, NewClipboardItem},
 };
 use anyhow::{Context, Result, bail};
+use rusqlite::OptionalExtension;
 use std::{
     collections::HashSet,
     io::Write,
@@ -92,6 +93,57 @@ impl History {
         Ok(())
     }
 
+    pub fn delete_batch_with_media(
+        &self,
+        ids: &[i64],
+        group_id: Option<i64>,
+        images_dir: &Path,
+    ) -> Result<i64> {
+        if ids.is_empty() || ids.len() > HISTORY_LIMIT as usize {
+            bail!("请选择有效数量的记录");
+        }
+        let mut seen = HashSet::new();
+        if ids.iter().any(|id| *id <= 0 || !seen.insert(*id)) {
+            bail!("选择的记录 ID 无效或重复");
+        }
+        let connection = self.db.write_connection();
+        let mut connection = connection.lock();
+        let tx = connection.transaction()?;
+        let mut images = Vec::new();
+        let mut payloads = Vec::new();
+        {
+            let mut query = tx.prepare(
+                "SELECT group_id, image_path, file_payload FROM clipboard_items WHERE id = ?1",
+            )?;
+            for id in ids {
+                let row: Option<(Option<i64>, Option<String>, Option<String>)> = query
+                    .query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                    .optional()?;
+                let Some((actual_group, image, payload)) = row else {
+                    bail!("所选记录已不存在，请刷新列表");
+                };
+                if actual_group != group_id {
+                    bail!("所选记录已不属于当前分组，请刷新列表");
+                }
+                images.extend(image);
+                payloads.extend(payload);
+            }
+        }
+        {
+            let mut delete = tx.prepare("DELETE FROM clipboard_items WHERE id = ?1")?;
+            for id in ids {
+                if delete.execute([id])? != 1 {
+                    bail!("所选记录已变化，请重试");
+                }
+            }
+        }
+        tx.commit()?;
+        drop(connection);
+        self.cleanup_images(images, images_dir);
+        self.cleanup_staged(payloads, images_dir);
+        Ok(ids.len() as i64)
+    }
+
     /// Clear non-pinned, non-favorite records in one group and remove only
     /// unreferenced images owned by this data directory.
     pub fn clear_history_with_media(
@@ -170,6 +222,7 @@ fn save_png(png: &[u8], hash: &str, images_dir: &Path) -> Result<SavedImage> {
 mod tests {
     use super::*;
     use crate::database::Database;
+    use rusqlite::params;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\nsynthetic";
 
@@ -272,6 +325,79 @@ mod tests {
         assert_eq!(history.clear_history_with_media(None, &images)?, 1);
         assert!(history.item(default_text).is_err());
         assert_eq!(history.groups()?[0].item_count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let group = history.create_group("批量测试")?;
+        let image = history.capture_image(PNG, 3, 2, &images)?;
+        let image_path = PathBuf::from(history.item(image)?.image_path.unwrap());
+        history.move_to_group(image, None, Some(group.id))?;
+        history.toggle_pin(image)?;
+
+        let staged_dir = directory.path().join("staged");
+        std::fs::create_dir_all(&staged_dir)?;
+        let staged = staged_dir.join("draft.txt");
+        std::fs::write(&staged, b"draft")?;
+        let original = "Z:\\missing\\draft.txt".to_owned();
+        let file = history.capture_files(std::slice::from_ref(&original), &images)?;
+        history.move_to_group(file, None, Some(group.id))?;
+        history.toggle_favorite(file)?;
+        let payload = serde_json::json!({
+            "staged": [{"original": original, "staged": staged.to_string_lossy()}]
+        });
+        history.db.write_connection().lock().execute(
+            "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
+            params![payload.to_string(), file],
+        )?;
+        let other = history.capture("keep in default")?.unwrap();
+
+        assert!(
+            history
+                .delete_batch_with_media(&[image, other], Some(group.id), &images)
+                .is_err()
+        );
+        assert!(
+            history
+                .delete_batch_with_media(&[image, image], Some(group.id), &images)
+                .is_err()
+        );
+        history
+            .db
+            .write_connection()
+            .lock()
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_batch BEFORE DELETE ON clipboard_items
+             WHEN OLD.id = {file} BEGIN SELECT RAISE(ABORT, 'test failure'); END;"
+            ))?;
+        assert!(
+            history
+                .delete_batch_with_media(&[image, file], Some(group.id), &images)
+                .is_err()
+        );
+        assert!(history.item(image).is_ok());
+        assert!(history.item(file).is_ok());
+        assert!(image_path.exists());
+        assert!(staged.exists());
+        history
+            .db
+            .write_connection()
+            .lock()
+            .execute_batch("DROP TRIGGER reject_batch")?;
+
+        assert_eq!(
+            history.delete_batch_with_media(&[image, file], Some(group.id), &images)?,
+            2
+        );
+        assert!(history.item(image).is_err());
+        assert!(history.item(file).is_err());
+        assert!(!image_path.exists());
+        assert!(!staged.exists());
+        assert_eq!(history.text(other)?, "keep in default");
         Ok(())
     }
 

@@ -24,7 +24,7 @@ use gpui_kit::{
     *,
 };
 use std::time::{Duration, Instant};
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, collections::HashSet, rc::Rc};
 use tray_icon::TrayIcon;
 
 gpui_kit::actions!(
@@ -213,6 +213,9 @@ struct ClipboardView {
     group_delete_pending: bool,
     clear_confirm_open: bool,
     clear_pending: bool,
+    selected_ids: HashSet<i64>,
+    batch_confirm_open: bool,
+    batch_pending: bool,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -260,6 +263,7 @@ impl ClipboardView {
         let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.clear_confirm_open = false;
+                this.reset_selection();
                 this.history.begin_search();
                 this.scroll.scroll_to_item(0, ScrollStrategy::Top);
                 this.search_task = Some(cx.spawn(async move |view, cx| {
@@ -367,6 +371,9 @@ impl ClipboardView {
             group_delete_pending: false,
             clear_confirm_open: false,
             clear_pending: false,
+            selected_ids: HashSet::new(),
+            batch_confirm_open: false,
+            batch_pending: false,
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -535,6 +542,7 @@ impl ClipboardView {
         self.group_move_id = None;
         self.group_delete_id = None;
         self.clear_confirm_open = false;
+        self.reset_selection();
         self.history.set_group(group_id);
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.query(cx);
@@ -595,6 +603,44 @@ impl ClipboardView {
         }
     }
 
+    fn reset_selection(&mut self) {
+        self.selected_ids.clear();
+        self.batch_confirm_open = false;
+    }
+
+    fn toggle_selection(&mut self, id: i64, cx: &mut Context<Self>) {
+        if self.batch_pending || self.history.loading {
+            return;
+        }
+        if !self.history.items.iter().any(|item| item.id == id) {
+            return;
+        }
+        if !self.selected_ids.insert(id) {
+            self.selected_ids.remove(&id);
+        }
+        self.batch_confirm_open = false;
+        cx.notify();
+    }
+
+    fn delete_selected(&mut self, cx: &mut Context<Self>) {
+        if !self.batch_confirm_open || self.batch_pending || self.selected_ids.is_empty() {
+            return;
+        }
+        let mut ids: Vec<_> = self.selected_ids.iter().copied().collect();
+        ids.sort_unstable();
+        if self.send(
+            Command::DeleteBatch {
+                ids,
+                group_id: self.history.group_id,
+                generation: self.history.generation,
+            },
+            cx,
+        ) {
+            self.batch_pending = true;
+            cx.notify();
+        }
+    }
+
     fn move_to_group(&mut self, id: i64, target_group_id: Option<i64>, cx: &mut Context<Self>) {
         if self.group_move_pending || target_group_id == self.history.group_id {
             return;
@@ -625,6 +671,7 @@ impl ClipboardView {
                         .iter()
                         .any(|group| Some(group.id) == self.history.group_id)
                 {
+                    self.reset_selection();
                     self.history.set_group(None);
                     self.scroll.scroll_to_item(0, ScrollStrategy::Top);
                     self.query(cx);
@@ -698,6 +745,21 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::BatchDeleted(result) => {
+                self.batch_pending = false;
+                self.batch_confirm_open = false;
+                match result {
+                    Ok(count) => {
+                        self.selected_ids.clear();
+                        self.message = format!("已删除 {count} 条选中记录");
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("批量删除失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::ItemMoved { result, .. } => {
                 self.group_move_pending = false;
                 match result {
@@ -718,6 +780,13 @@ impl ClipboardView {
                 generation,
             } => {
                 let applied = self.history.apply(items, total, generation);
+                if applied {
+                    self.selected_ids
+                        .retain(|id| self.history.items.iter().any(|item| item.id == *id));
+                    if self.selected_ids.is_empty() {
+                        self.batch_confirm_open = false;
+                    }
+                }
                 if applied
                     && !self.group_move_pending
                     && self
@@ -938,6 +1007,8 @@ impl ClipboardView {
                 self.group_save_pending = false;
                 self.group_delete_pending = false;
                 self.clear_pending = false;
+                self.batch_pending = false;
+                self.batch_confirm_open = false;
                 self.group_delete_id = None;
                 self.preview_save_pending = false;
                 self.message = message;
@@ -1309,6 +1380,7 @@ impl ClipboardView {
             format!("{} 字符", item.char_count.unwrap_or(0))
         };
         let selected = self.history.selected == Some(id);
+        let marked = self.selected_ids.contains(&id);
         let pinned = item.is_pinned;
         let favorite = item.is_favorite;
         let drag = HistoryDrag {
@@ -1322,7 +1394,7 @@ impl ClipboardView {
         };
         let entity = cx.entity();
         let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
-        let color = if selected {
+        let color = if selected || marked {
             cx.theme().accent
         } else {
             cx.theme().background
@@ -1408,7 +1480,7 @@ impl ClipboardView {
                     .border_color(match active_drop.filter(|target| target.id == id) {
                         Some(target) if target.allowed => cx.theme().primary,
                         Some(_) => cx.theme().danger,
-                        None if selected => cx.theme().primary,
+                        None if selected || marked => cx.theme().primary,
                         None => cx.theme().border,
                     })
                     .bg(color)
@@ -1465,9 +1537,38 @@ impl ClipboardView {
                             )
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(item.created_at.clone()),
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                cx.stop_propagation()
+                                            })
+                                            .child(
+                                                Button::new(("select", id as usize))
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .h(px(CONTROL_HEIGHT))
+                                                    .label(if marked { "已选" } else { "选择" })
+                                                    .selected(marked)
+                                                    .disabled(
+                                                        self.batch_pending || self.history.loading,
+                                                    )
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            cx.stop_propagation();
+                                                            this.toggle_selection(id, cx);
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(item.created_at.clone()),
+                                    ),
                             ),
                     )
                     .child(
@@ -1923,6 +2024,7 @@ impl ClipboardView {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if this.history.favorite_only != favorite_only {
                             this.clear_confirm_open = false;
+                            this.reset_selection();
                             this.search_task = None;
                             this.history.set_favorite_filter(favorite_only);
                             this.scroll.scroll_to_item(0, ScrollStrategy::Top);
@@ -2012,6 +2114,7 @@ impl ClipboardView {
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.group_delete_id = this.history.group_id;
+                                this.reset_selection();
                                 this.clear_confirm_open = false;
                                 this.group_editor_open = false;
                                 this.group_rename_id = None;
@@ -2032,6 +2135,7 @@ impl ClipboardView {
                             )
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.clear_confirm_open = true;
+                                this.reset_selection();
                                 this.group_delete_id = None;
                                 this.group_editor_open = false;
                                 this.group_rename_id = None;
@@ -2268,6 +2372,113 @@ impl ClipboardView {
                             })),
                     ),
                     ("group-move", id as usize),
+                    cx,
+                ))
+            })
+            .when(!self.selected_ids.is_empty(), |container| {
+                container.child(visual::reveal(
+                    div()
+                        .px(px(PAGE_PADDING))
+                        .pb_2()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!("已选 {} 条", self.selected_ids.len())),
+                        )
+                        .child(
+                            Button::new("batch-select-loaded")
+                                .small()
+                                .ghost()
+                                .label("全选已加载")
+                                .disabled(
+                                    self.batch_pending
+                                        || self.history.loading
+                                        || self.selected_ids.len() == self.history.items.len(),
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.selected_ids
+                                        .extend(this.history.items.iter().map(|item| item.id));
+                                    this.batch_confirm_open = false;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("batch-clear-selection")
+                                .small()
+                                .ghost()
+                                .label("取消选择")
+                                .disabled(self.batch_pending)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.reset_selection();
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("batch-delete-open")
+                                .small()
+                                .danger()
+                                .label("删除选中")
+                                .disabled(self.batch_pending)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.batch_confirm_open = true;
+                                    this.clear_confirm_open = false;
+                                    this.group_delete_id = None;
+                                    cx.notify();
+                                })),
+                        ),
+                    ("batch-toolbar", self.history.group_id.unwrap_or(0) as usize),
+                    cx,
+                ))
+            })
+            .when(self.batch_confirm_open, |container| {
+                container.child(visual::reveal(
+                    div()
+                        .px(px(PAGE_PADDING))
+                        .pb_2()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().text_sm().child(format!(
+                            "确定删除选中的 {} 条记录？包含置顶和收藏，无法撤销。",
+                            self.selected_ids.len()
+                        )))
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .gap_2()
+                                .child(
+                                    Button::new("batch-delete-cancel")
+                                        .small()
+                                        .ghost()
+                                        .label("取消")
+                                        .disabled(self.batch_pending)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.batch_confirm_open = false;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("batch-delete-confirm")
+                                        .small()
+                                        .danger()
+                                        .label(if self.batch_pending {
+                                            "正在删除…".to_owned()
+                                        } else {
+                                            format!("确认删除 {} 条", self.selected_ids.len())
+                                        })
+                                        .disabled(self.batch_pending)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.delete_selected(cx)),
+                                        ),
+                                ),
+                        ),
+                    ("batch-confirm", self.selected_ids.len()),
                     cx,
                 ))
             })
