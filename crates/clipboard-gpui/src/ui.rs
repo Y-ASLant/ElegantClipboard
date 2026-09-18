@@ -383,6 +383,10 @@ impl ClipboardView {
                     .update_in(cx, |this, window, cx| {
                         this.paste_target =
                             paste::is_external_target(window, target).then_some(target);
+                        if this.paste_target.is_some() {
+                            this.message = "已从原窗口唤出，可选择记录并粘贴".into();
+                            this.is_error = false;
+                        }
                         tray::set_window_visible(window, true);
                         cx.notify();
                     })
@@ -410,6 +414,17 @@ impl ClipboardView {
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {
                 apply_theme(this.theme, window, cx);
+            }
+        });
+        let activation = cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() {
+                let had_target = this.paste_target.take().is_some();
+                let had_pending = this.paste_pending.take().is_some();
+                if had_target || had_pending {
+                    this.message = "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出".into();
+                    this.is_error = false;
+                    cx.notify();
+                }
             }
         });
         let list_focus = cx.focus_handle();
@@ -487,7 +502,7 @@ impl ClipboardView {
                 startup_errors.join("；")
             },
             is_error: !startup_errors.is_empty(),
-            _subscriptions: vec![subscription, appearance],
+            _subscriptions: vec![subscription, appearance, activation],
             _events: event_task,
             search_task: None,
             feedback_task: None,
