@@ -25,7 +25,7 @@ use gpui_kit::{
 };
 use std::time::{Duration, Instant};
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -75,6 +75,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         hidden: options.start_hidden,
     };
     let smoke_test = options.smoke_test;
+    let startup_error = Rc::new(RefCell::new(None));
+    let window_error = startup_error.clone();
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -101,7 +103,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             let tray_enabled = Rc::new(Cell::new(false));
             let exiting = Rc::new(Cell::new(false));
             let smoke_exiting = exiting.clone();
-            cx.open_window(
+            if let Err(error) = cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
@@ -135,8 +137,12 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     });
                     cx.new(|cx| Root::new(view, window, cx))
                 },
-            )
-            .expect("无法创建 ElegantClipboard 窗口");
+            ) {
+                *window_error.borrow_mut() =
+                    Some(anyhow::anyhow!("无法创建 ElegantClipboard 窗口：{error:?}"));
+                cx.quit();
+                return;
+            }
             if !startup.hidden {
                 cx.activate(true);
             }
@@ -149,7 +155,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 .detach();
             }
         });
-    Ok(())
+    let error = startup_error.borrow_mut().take();
+    error.map_or(Ok(()), Err)
 }
 
 #[derive(Clone)]
