@@ -3,6 +3,7 @@ use anyhow::Result;
 
 const THEME_KEY: &str = "gpui_theme_mode";
 const HOTKEY_KEY: &str = "gpui_hotkey";
+const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ThemePreference {
@@ -82,6 +83,19 @@ impl Preferences {
             },
         )?)
     }
+
+    pub fn capture_paused(&self) -> Result<bool> {
+        Ok(!matches!(
+            self.repository.get(CAPTURE_PAUSED_KEY)?.as_deref(),
+            None | Some("false")
+        ))
+    }
+
+    pub fn set_capture_paused(&self, paused: bool) -> Result<()> {
+        Ok(self
+            .repository
+            .set(CAPTURE_PAUSED_KEY, if paused { "true" } else { "false" })?)
+    }
 }
 
 #[cfg(test)]
@@ -132,6 +146,26 @@ mod tests {
         assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
         SettingsRepository::new(&db).set(HOTKEY_KEY, "unknown")?;
         assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
+        Ok(())
+    }
+
+    #[test]
+    fn paused_capture_survives_restart_and_unknown_values_stay_paused() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let db = Database::new(path.clone())?;
+        let preferences = Preferences::new(&db);
+        assert!(!preferences.capture_paused()?);
+        preferences.set_capture_paused(true)?;
+        drop(preferences);
+        drop(db);
+        let db = Database::new(path)?;
+        let preferences = Preferences::new(&db);
+        assert!(preferences.capture_paused()?);
+        preferences.set_capture_paused(false)?;
+        assert!(!preferences.capture_paused()?);
+        SettingsRepository::new(&db).set(CAPTURE_PAUSED_KEY, "unknown")?;
+        assert!(preferences.capture_paused()?);
         Ok(())
     }
 }

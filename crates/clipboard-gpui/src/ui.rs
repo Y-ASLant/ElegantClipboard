@@ -270,6 +270,7 @@ impl ClipboardView {
             startup_errors.push(error);
         }
         let theme = service.initial_theme;
+        let paused = service.initial_paused;
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {
@@ -302,13 +303,15 @@ impl ClipboardView {
             reordered: None,
             feedback_revision: 0,
             last_drag_scroll: Instant::now(),
-            paused: false,
+            paused,
             pause_pending: false,
             message: if startup_errors.is_empty() {
-                let activity = if monitoring {
-                    "正在记录文本"
-                } else {
+                let activity = if !monitoring {
                     "采集已禁用"
+                } else if paused {
+                    "已暂停记录"
+                } else {
+                    "正在记录文本"
                 };
                 if hotkey_choice == HotkeyPreference::Disabled {
                     format!("{activity}；可从托盘唤出窗口")

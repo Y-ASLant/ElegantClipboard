@@ -152,6 +152,7 @@ pub struct Service {
     pub data_dir: PathBuf,
     pub initial_theme: ThemePreference,
     pub initial_hotkey: HotkeyPreference,
+    pub initial_paused: bool,
 }
 
 fn resolve_data_dir(data_dir: Option<PathBuf>) -> Result<PathBuf> {
@@ -205,11 +206,15 @@ impl Service {
         let preferences = Preferences::new(&db);
         let initial_theme = preferences.theme()?;
         let initial_hotkey = preferences.hotkey()?;
+        let initial_paused = preferences.capture_paused()?;
         let writer =
             ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
         let (commands, incoming) = mpsc::sync_channel(64);
         let (events, outgoing) = async_channel::bounded(64);
-        let state = Arc::new(Mutex::new(CaptureState::default()));
+        let state = Arc::new(Mutex::new(CaptureState {
+            paused: initial_paused,
+            ..Default::default()
+        }));
         let stop = Arc::new(AtomicBool::new(false));
         let mut service = Self {
             commands: commands.clone(),
@@ -222,6 +227,7 @@ impl Service {
             _instance_lock: instance_lock,
             initial_theme,
             initial_hotkey,
+            initial_paused,
             data_dir,
         };
         let worker_state = state.clone();
@@ -433,6 +439,9 @@ impl Worker {
                 return Ok(());
             }
             Command::Pause(paused) => {
+                self.preferences
+                    .set_capture_paused(paused)
+                    .context("无法保存暂停状态")?;
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
                 state.paused = paused;
                 state.last_sequence = unsafe { GetClipboardSequenceNumber() };
@@ -728,8 +737,9 @@ mod tests {
     fn pause_acknowledgement_is_ordered_and_does_not_change_history() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(!service.initial_paused);
         next_snapshot(&events, 0);
-        for paused in [true, false] {
+        for paused in [true, false, true] {
             service.send(Command::Pause(paused))?;
             let deadline = std::time::Instant::now() + Duration::from_secs(5);
             loop {
@@ -755,6 +765,9 @@ mod tests {
             generation: 1,
         })?;
         assert!(next_snapshot(&events, 1).is_empty());
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(reopened.initial_paused);
         Ok(())
     }
 }
