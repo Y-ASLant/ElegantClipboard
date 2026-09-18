@@ -8,6 +8,7 @@
 pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
+mod editing;
 mod files;
 mod groups;
 mod image;

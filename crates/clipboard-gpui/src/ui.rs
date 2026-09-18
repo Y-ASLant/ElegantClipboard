@@ -183,6 +183,9 @@ struct ClipboardView {
     group_move_pending: bool,
     preview: PreviewState,
     preview_input: Entity<TextareaState>,
+    preview_source_hash: Option<String>,
+    preview_editing: bool,
+    preview_save_pending: bool,
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
@@ -329,6 +332,9 @@ impl ClipboardView {
             group_move_pending: false,
             preview: PreviewState::default(),
             preview_input: cx.new(|cx| TextareaState::new(window, cx)),
+            preview_source_hash: None,
+            preview_editing: false,
+            preview_save_pending: false,
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring,
@@ -632,6 +638,37 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::TextEdited {
+                id,
+                generation,
+                result,
+            } => {
+                if self.preview.id != Some(id) || self.preview.generation != generation {
+                    return;
+                }
+                self.preview_save_pending = false;
+                match result {
+                    Ok(changed) => {
+                        self.preview.close();
+                        self.preview_source_hash = None;
+                        self.preview_editing = false;
+                        self.preview_input
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        window.focus(&self.list_focus, cx);
+                        self.message = if changed {
+                            "内容已保存为纯文本"
+                        } else {
+                            "内容未修改"
+                        }
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("保存编辑失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::Reordered {
                 from,
                 generation,
@@ -765,6 +802,7 @@ impl ClipboardView {
                 self.group_save_pending = false;
                 self.group_delete_pending = false;
                 self.group_delete_id = None;
+                self.preview_save_pending = false;
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
@@ -776,6 +814,14 @@ impl ClipboardView {
 
     fn open_preview(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
         self.history.selected = Some(id);
+        self.preview_source_hash = self
+            .history
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.content_hash.clone());
+        self.preview_editing = false;
+        self.preview_save_pending = false;
         let generation = self.preview.open(id);
         self.preview_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -787,11 +833,68 @@ impl ClipboardView {
     }
 
     fn close_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.preview_save_pending {
+            return;
+        }
+        if self.preview_editing {
+            self.preview_editing = false;
+            let original = match &self.preview.result {
+                Some(Ok(PreviewContent::Text(text) | PreviewContent::RichText(text))) => {
+                    Some(text.clone())
+                }
+                _ => None,
+            };
+            if let Some(original) = original {
+                self.preview_input
+                    .update(cx, |input, cx| input.set_value(original, window, cx));
+            }
+            window.focus(&self.list_focus, cx);
+            cx.notify();
+            return;
+        }
         self.preview.close();
+        self.preview_source_hash = None;
         self.preview_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         window.focus(&self.list_focus, cx);
         cx.notify();
+    }
+
+    fn begin_preview_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.preview_source_hash.is_some()
+            && matches!(
+                self.preview.result,
+                Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
+            )
+        {
+            self.preview_editing = true;
+            self.preview_input
+                .update(cx, |input, cx| input.focus(window, cx));
+            cx.notify();
+        }
+    }
+
+    fn save_preview_edit(&mut self, cx: &mut Context<Self>) {
+        if !self.preview_editing || self.preview_save_pending {
+            return;
+        }
+        let (Some(id), Some(expected_hash)) = (self.preview.id, self.preview_source_hash.clone())
+        else {
+            return;
+        };
+        let new_text = self.preview_input.read(cx).value().to_string();
+        if self.send(
+            Command::EditText {
+                id,
+                expected_hash,
+                new_text,
+                generation: self.preview.generation,
+            },
+            cx,
+        ) {
+            self.preview_save_pending = true;
+            cx.notify();
+        }
     }
 
     fn render_preview(&self, cx: &mut Context<Self>) -> Div {
@@ -800,25 +903,37 @@ impl ClipboardView {
         let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
         let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
         let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
-        let message = match &self.preview.result {
-            None => "正在加载完整内容…".to_owned(),
-            Some(Err(error)) => error.clone(),
-            Some(Ok(PreviewContent::Text(text))) => {
-                format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len())
-            }
-            Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
-            Some(Ok(PreviewContent::RichText(_))) => "富文本 · 纯文本预览".into(),
-            Some(Ok(PreviewContent::Files(paths))) => {
-                format!("{} 个文件或文件夹 · 仅保存原始路径", paths.len())
+        let editable = matches!(
+            self.preview.result,
+            Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
+        ) && self.preview_source_hash.is_some();
+        let message = if self.preview_editing && rich {
+            "保存后将变为纯文本，原富文本格式不会保留".into()
+        } else if self.preview_editing {
+            "编辑文本；保存后搜索结果会更新".into()
+        } else {
+            match &self.preview.result {
+                None => "正在加载完整内容…".to_owned(),
+                Some(Err(error)) => error.clone(),
+                Some(Ok(PreviewContent::Text(text))) => {
+                    format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len())
+                }
+                Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
+                Some(Ok(PreviewContent::RichText(_))) => "富文本 · 纯文本预览".into(),
+                Some(Ok(PreviewContent::Files(paths))) => {
+                    format!("{} 个文件或文件夹 · 仅保存原始路径", paths.len())
+                }
             }
         };
         let body: AnyElement = match &self.preview.result {
             Some(Ok(
                 PreviewContent::Text(_) | PreviewContent::Files(_) | PreviewContent::RichText(_),
             )) => Textarea::new(&self.preview_input)
-                .readonly(true)
+                .readonly(!self.preview_editing || self.preview_save_pending)
                 .h_full()
-                .aria_label(if files {
+                .aria_label(if self.preview_editing {
+                    "编辑文本"
+                } else if files {
                     "文件路径"
                 } else {
                     "完整文本内容"
@@ -858,19 +973,31 @@ impl ClipboardView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_lg().font_semibold().child(if image {
-                        "图片预览"
-                    } else if files {
-                        "文件路径"
-                    } else if rich {
-                        "富文本预览"
-                    } else {
-                        "完整内容"
-                    }))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_semibold()
+                            .child(if self.preview_editing {
+                                "编辑内容"
+                            } else if image {
+                                "图片预览"
+                            } else if files {
+                                "文件路径"
+                            } else if rich {
+                                "富文本预览"
+                            } else {
+                                "完整内容"
+                            }),
+                    )
                     .child(
                         Button::new("preview-close")
                             .ghost()
-                            .label("返回列表 (Esc)")
+                            .label(if self.preview_editing {
+                                "取消编辑 (Esc)"
+                            } else {
+                                "返回列表 (Esc)"
+                            })
+                            .disabled(self.preview_save_pending)
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.close_preview(window, cx)),
                             ),
@@ -888,37 +1015,69 @@ impl ClipboardView {
                     .flex()
                     .justify_end()
                     .gap_2()
-                    .child(
-                        Button::new("preview-paste")
-                            .outline()
-                            .label("粘贴到原窗口")
-                            .disabled(
-                                !ready
-                                    || self.paste_target.is_none()
-                                    || self.paste_pending.is_some()
-                                    || self._tray.is_none(),
-                            )
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.paste_selected(id, window, cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("preview-copy")
-                            .primary()
-                            .label(if image {
-                                "复制图片"
-                            } else if files {
-                                "复制文件"
-                            } else if rich {
-                                "复制富文本"
-                            } else {
-                                "复制全文"
-                            })
-                            .disabled(!ready)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.send(Command::Copy(id), cx);
-                            })),
-                    ),
+                    .when(!self.preview_editing && editable, |bar| {
+                        bar.child(
+                            Button::new("preview-edit")
+                                .outline()
+                                .label("编辑")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin_preview_edit(window, cx);
+                                })),
+                        )
+                    })
+                    .when(!self.preview_editing, |bar| {
+                        bar.child(
+                            Button::new("preview-paste")
+                                .outline()
+                                .label("粘贴到原窗口")
+                                .disabled(
+                                    !ready
+                                        || self.paste_target.is_none()
+                                        || self.paste_pending.is_some()
+                                        || self._tray.is_none(),
+                                )
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.paste_selected(id, window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("preview-copy")
+                                .primary()
+                                .label(if image {
+                                    "复制图片"
+                                } else if files {
+                                    "复制文件"
+                                } else if rich {
+                                    "复制富文本"
+                                } else {
+                                    "复制全文"
+                                })
+                                .disabled(!ready)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.send(Command::Copy(id), cx);
+                                })),
+                        )
+                    })
+                    .when(self.preview_editing, |bar| {
+                        bar.child(
+                            Button::new("preview-cancel-edit")
+                                .ghost()
+                                .label("取消")
+                                .disabled(self.preview_save_pending)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_preview(window, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("preview-save-edit")
+                                .primary()
+                                .label("保存文本")
+                                .disabled(self.preview_save_pending)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.save_preview_edit(cx);
+                                })),
+                        )
+                    }),
             )
     }
 

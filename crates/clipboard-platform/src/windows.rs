@@ -54,6 +54,12 @@ pub enum Command {
         id: i64,
         generation: u64,
     },
+    EditText {
+        id: i64,
+        expected_hash: String,
+        new_text: String,
+        generation: u64,
+    },
     Delete(i64),
     TogglePin(i64),
     ToggleFavorite(i64),
@@ -112,6 +118,11 @@ pub enum Event {
         id: i64,
         generation: u64,
         result: Result<PreviewContent, String>,
+    },
+    TextEdited {
+        id: i64,
+        generation: u64,
+        result: Result<bool, String>,
     },
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
@@ -676,6 +687,28 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::EditText {
+                id,
+                expected_hash,
+                new_text,
+                generation,
+            } => {
+                let result = self
+                    .history
+                    .edit_text(id, &expected_hash, &new_text, &self.images_dir)
+                    .map_err(|error| error.to_string());
+                if matches!(&result, Ok(true)) {
+                    self.snapshot()?;
+                }
+                self.events
+                    .send_blocking(Event::TextEdited {
+                        id,
+                        generation,
+                        result,
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::Delete(id) => self.history.delete_with_media(id, &self.images_dir)?,
             Command::ToggleFavorite(id) => {
                 self.history.toggle_favorite(id)?;
@@ -1005,6 +1038,45 @@ mod tests {
         })?;
         assert_eq!(next_snapshot(&events, 2)[0].id, item);
         assert_eq!(History::open(path)?.item(item)?.group_id, None);
+        Ok(())
+    }
+
+    #[test]
+    fn text_edit_refreshes_snapshot_and_reports_stale_content() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        let id = history.capture("before edit")?.unwrap();
+        let hash = history.item(id)?.content_hash;
+        drop(history);
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        next_snapshot(&events, 0);
+        service.send(Command::EditText {
+            id,
+            expected_hash: hash.clone(),
+            new_text: "after edit".into(),
+            generation: 7,
+        })?;
+        assert_eq!(
+            next_snapshot(&events, 0)[0].preview.as_deref(),
+            Some("after edit")
+        );
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::TextEdited { id: edited, generation: 7, result: Ok(true) } if edited == id
+        ));
+        service.send(Command::EditText {
+            id,
+            expected_hash: hash,
+            new_text: "stale overwrite".into(),
+            generation: 8,
+        })?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::TextEdited { result: Err(_), .. }
+        ));
+        assert_eq!(History::open(path)?.text(id)?, "after edit");
         Ok(())
     }
 
