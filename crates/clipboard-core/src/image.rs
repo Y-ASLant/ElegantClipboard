@@ -329,6 +329,25 @@ mod tests {
     }
 
     #[test]
+    fn clear_history_stops_before_deleting_rows_with_unreadable_media_paths() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let images = directory.path().join("images");
+        let id = history.capture_image(PNG, 3, 2, &images)?;
+        let path = PathBuf::from(history.item(id)?.image_path.unwrap());
+        db.write_connection().lock().execute(
+            "UPDATE clipboard_items SET image_path = X'01' WHERE id = ?1",
+            params![id],
+        )?;
+
+        assert!(history.clear_history_with_media(None, &images).is_err());
+        assert_eq!(history.repo.count(Default::default())?, 1);
+        assert!(path.exists());
+        Ok(())
+    }
+
+    #[test]
     fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;

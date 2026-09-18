@@ -223,11 +223,8 @@ impl ConditionBuilder {
         };
         let refs = self.param_refs();
         let mut stmt = conn.prepare(&sql)?;
-        let results = stmt
-            .query_map(refs.as_slice(), |row| row.get::<_, String>(0))?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(results)
+        stmt.query_map(refs.as_slice(), |row| row.get::<_, String>(0))?
+            .collect()
     }
 
     /// DELETE FROM clipboard_items and return affected row count.
@@ -798,11 +795,7 @@ impl ClipboardRepository {
         let conn = self.read_conn.lock();
         let mut stmt =
             conn.prepare("SELECT image_path FROM clipboard_items WHERE image_path IS NOT NULL")?;
-        let paths = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(paths)
+        stmt.query_map([], |row| row.get::<_, String>(0))?.collect()
     }
 
     /// 获取所有条目的 file_payload（含置顶和收藏）
@@ -810,11 +803,7 @@ impl ClipboardRepository {
         let conn = self.read_conn.lock();
         let mut stmt = conn
             .prepare("SELECT file_payload FROM clipboard_items WHERE file_payload IS NOT NULL")?;
-        let payloads = stmt
-            .query_map([], |row| row.get::<_, String>(0))?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(payloads)
+        stmt.query_map([], |row| row.get::<_, String>(0))?.collect()
     }
 
     /// Get all image paths within a specific group (including pinned and favorites).
@@ -824,11 +813,8 @@ impl ClipboardRepository {
             "SELECT image_path FROM clipboard_items \
              WHERE image_path IS NOT NULL AND group_id = ?1",
         )?;
-        let paths = stmt
-            .query_map(params![group_id], |row| row.get::<_, String>(0))?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(paths)
+        stmt.query_map(params![group_id], |row| row.get::<_, String>(0))?
+            .collect()
     }
 
     pub fn get_file_payloads_by_group(
@@ -840,11 +826,8 @@ impl ClipboardRepository {
             "SELECT file_payload FROM clipboard_items \
              WHERE file_payload IS NOT NULL AND group_id = ?1",
         )?;
-        let payloads = stmt
-            .query_map(params![group_id], |row| row.get::<_, String>(0))?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(payloads)
+        stmt.query_map(params![group_id], |row| row.get::<_, String>(0))?
+            .collect()
     }
 
     /// 清空所有历史（包括置顶和收藏）
@@ -1183,11 +1166,8 @@ impl ClipboardRepository {
             clauses.join(" OR ")
         );
         let mut stmt = conn.prepare(&sql)?;
-        let items = stmt
-            .query_map(rusqlite::params_from_iter(param_values), Self::row_to_item)?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(items)
+        stmt.query_map(rusqlite::params_from_iter(param_values), Self::row_to_item)?
+            .collect()
     }
 
     /// 查询可能引用本地媒体文件的条目（图片/文件条目，或带来源应用图标）
@@ -1197,11 +1177,7 @@ impl ClipboardRepository {
             "SELECT * FROM clipboard_items \
              WHERE content_type IN ('image','files') OR source_app_icon IS NOT NULL",
         )?;
-        let items = stmt
-            .query_map([], Self::row_to_item)?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(items)
+        stmt.query_map([], Self::row_to_item)?.collect()
     }
 
     /// 更新条目的媒体相关路径（WebDAV 同步路径自愈用）
@@ -1421,13 +1397,10 @@ impl SettingsRepository {
     pub fn get_all(&self) -> Result<std::collections::HashMap<String, String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
-        let settings = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(settings)
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect()
     }
 
     /// 批量获取指定 key 的设置值，缺失的 key 不包含在结果中
@@ -1447,13 +1420,10 @@ impl SettingsRepository {
             .join(", ");
         let sql = format!("SELECT key, value FROM settings WHERE key IN ({placeholders})");
         let mut stmt = conn.prepare(&sql)?;
-        let map = stmt
-            .query_map(rusqlite::params_from_iter(keys.iter()), |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(std::result::Result::ok)
-            .collect();
-        Ok(map)
+        stmt.query_map(rusqlite::params_from_iter(keys.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect()
     }
 
     /// 清空所有设置
@@ -1843,6 +1813,24 @@ mod tests {
                 .as_deref(),
             Some("valid")
         );
+    }
+
+    #[test]
+    fn media_reference_queries_fail_if_a_path_cannot_be_read() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let id = repo.insert(make_text_item("media reference")).unwrap();
+        db.write_connection()
+            .lock()
+            .execute(
+                "UPDATE clipboard_items SET image_path = X'01', file_payload = X'01' WHERE id = ?1",
+                params![id],
+            )
+            .unwrap();
+
+        assert!(repo.get_all_image_paths().is_err());
+        assert!(repo.get_all_file_payloads().is_err());
+        assert_eq!(repo.count(QueryOptions::default()).unwrap(), 1);
     }
 
     #[test]
