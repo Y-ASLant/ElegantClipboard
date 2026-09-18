@@ -3,6 +3,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
     History, MAX_TEXT_BYTES, PAGE_SIZE,
     database::{ClipboardItem, Database},
+    import::{ImportReport, import_legacy_database},
     preferences::{Preferences, ThemePreference},
 };
 use clipboard_rs::{
@@ -12,7 +13,7 @@ use clipboard_rs::{
 use directories::ProjectDirs;
 use std::{
     fs::{File, OpenOptions},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -136,28 +137,47 @@ pub struct Service {
     pub initial_theme: ThemePreference,
 }
 
+fn resolve_data_dir(data_dir: Option<PathBuf>) -> Result<PathBuf> {
+    match data_dir {
+        Some(path) => Ok(path),
+        None => Ok(ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")
+            .context("无法确定用户数据目录")?
+            .data_local_dir()
+            .to_owned()),
+    }
+}
+
+fn lock_instance(data_dir: &Path) -> Result<File> {
+    std::fs::create_dir_all(data_dir).context("无法创建数据目录")?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(data_dir.join("instance.lock"))?;
+    file.try_lock()
+        .context("该数据目录已由另一个基础版实例使用")?;
+    Ok(file)
+}
+
+pub fn import_legacy_data(
+    source: &Path,
+    data_dir: Option<PathBuf>,
+) -> Result<(PathBuf, ImportReport)> {
+    let data_dir = resolve_data_dir(data_dir)?;
+    let _instance_lock = lock_instance(&data_dir)?;
+    let destination = data_dir.join("clipboard.db");
+    let report = import_legacy_database(source, &destination)?;
+    Ok((destination, report))
+}
+
 impl Service {
     pub fn start(
         data_dir: Option<PathBuf>,
         monitor: bool,
     ) -> Result<(Self, async_channel::Receiver<Event>)> {
-        let data_dir = match data_dir {
-            Some(path) => path,
-            None => ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")
-                .context("无法确定用户数据目录")?
-                .data_local_dir()
-                .to_owned(),
-        };
-        std::fs::create_dir_all(&data_dir).context("无法创建数据目录")?;
-        let instance_lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(data_dir.join("instance.lock"))?;
-        instance_lock
-            .try_lock()
-            .context("该数据目录已由另一个基础版实例使用")?;
+        let data_dir = resolve_data_dir(data_dir)?;
+        let instance_lock = lock_instance(&data_dir)?;
         // Startup happens before entering the GUI event loop; subsequent DB work is
         // exclusively owned by the worker thread.
         let db = Database::new(data_dir.join("clipboard.db"))?;

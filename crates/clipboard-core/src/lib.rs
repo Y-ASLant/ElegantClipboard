@@ -8,6 +8,7 @@
 pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
+pub mod import;
 pub mod preferences;
 mod reorder;
 

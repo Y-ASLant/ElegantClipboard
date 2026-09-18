@@ -14,7 +14,7 @@ Windows 优先，其他平台保留为后续目标。基础版使用新的根 Ca
 
 共享源码暂通过 `#[path]` 编译原有文件，避免复制一套数据库。旧壳接入共享 crate 时再物理移动源码；当前新核心不依赖 Tauri。
 
-默认目录由 `ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")` 生成，位于 Windows 用户 LocalAppData。不自动读取或迁移旧版安装目录中的数据库。测试只使用临时目录及合成文本。
+默认目录由 `ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")` 生成，位于 Windows 用户 LocalAppData。不自动读取旧版安装目录中的数据库；可通过显式导入命令复制旧库到空 GPUI 数据目录。测试只使用临时目录及合成文本。
 
 限制：单条文本最多 1 MiB；普通未固定历史按原仓储规则保留一万条；空白文本不保存。重复的完全相同文本移动到顶部，文字和换行原样保存。队列满时报告采集失败，不把不同复制事件主动合并成最后一条。
 
@@ -55,6 +55,9 @@ cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target
 
 # 窗口冒烟：禁用采集，约 3 秒后自动退出
 cargo run -p elegant-clipboard-gpui --locked -- --smoke-test --data-dir .\target\gpui-smoke
+
+# 从旧版数据库导入到尚无 clipboard.db 的 GPUI 数据目录；命令完成后退出
+cargo run -p elegant-clipboard-gpui --locked -- --import-db "C:\旧版目录\clipboard.db"
 ```
 
 - 搜索支持中文与字面 `%`/`_`，等待 150ms 后查询；回车复制当前选中结果。
@@ -67,7 +70,7 @@ cargo run -p elegant-clipboard-gpui --locked -- --smoke-test --data-dir .\target
 - 顶部“外观”提供跟随系统、浅色和深色；保存成功后生效，重启恢复选择。设置存于同一 SQLite 数据库，手动主题不随系统通知改变；未知设置值回退为跟随系统。
 - 窗口使用 gpui-kit `TitleBar` 自定义标题栏，列表与全文预览共用；支持拖动、双击最大化/还原、最小化、边缘缩放和关闭。
 - 关闭窗口后隐藏到系统托盘，左键托盘图标、右键菜单“打开剪贴板历史”或按全局 `Ctrl+Shift+V` 可恢复并聚焦；右键菜单“退出 ElegantClipboard”结束后台监听。快捷键被占用时状态栏显示注册错误，托盘入口仍可用；托盘初始化失败时关闭窗口正常退出。当前未提供自动粘贴或快捷键自定义。
-- 请勿将开发版的 `--data-dir` 指向正在使用的旧版数据目录；正式迁移尚未实现。
+- 导入只读访问旧库，使用 SQLite 在线备份获取含 WAL 的一致快照，在新目录升级副本并校验；如果 GPUI 目录已有 `clipboard.db` 就拒绝覆盖。旧版默认数据库位于旧程序可执行文件旁；如旧版 `config.json` 配置了 `data_path`，应指定该目录中的 `clipboard.db`。可用 `--data-dir` 为导入选择另一个空目录。当前界面只显示默认分组的纯文本，其他格式和自定义分组记录仍保存在导入的数据库中，但尚无法查看；外部图片文件不会复制。不要把开发版的 `--data-dir` 指向旧版数据目录。
 
 ## 验证命令
 
@@ -80,7 +83,7 @@ cargo fmt --all -- --check
 cargo build -p elegant-clipboard-gpui --locked
 ```
 
-当前 97 项测试通过（核心 86、Windows 后端 7、应用状态/参数 4），新增暂停确认、搜索代次与选中 ID 保持、键盘边界以及冒烟参数隔离测试。全文预览新增长文本原样返回、已删除记录错误及关闭/重开后旧响应拒收测试。fmt、Clippy（warnings 视为错误）和 Windows debug 构建通过。
+当前 99 项测试通过（核心 88、Windows 后端 7、应用状态/参数 4），覆盖暂停确认、搜索代次与选中 ID 保持、键盘边界、冒烟参数隔离，以及在线旧库导入和拒绝无效来源。fmt、Clippy（warnings 视为错误）和 Windows debug 构建通过。
 
 原生窗口已通过启动/退出、中文路径、重复实例拦截，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查。所有交互使用隔离目录并禁用实际采集；没有覆盖系统剪贴板读写、真实中文 IME、长时间运行、release 打包或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)。
 
@@ -95,3 +98,5 @@ Windows CI 包含 fmt、Clippy、locked 测试和应用构建，尚未在远端�
 托盘验证见 [2026-09-19 托盘记录](evidence/windows-tray-2026-09-19.md)。
 
 全局快捷键验证见 [2026-09-19 快捷键记录](evidence/windows-hotkey-2026-09-19.md)。
+
+旧数据导入验证见 [2026-09-19 导入记录](evidence/windows-import-2026-09-19.md)。
