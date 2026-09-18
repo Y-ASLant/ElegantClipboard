@@ -18,6 +18,7 @@
 - Windows MVP 使用独立用户数据目录；保留旧 Tauri 入口。
 - 新 workspace 的直接依赖按 crates.io 最新非撤回稳定版选取，提交 Cargo.lock；每批开发开始检查更新并做回归，不使用浮动 Git 主分支。
 - 按后续“继续完善 GPUI 重构”的指示，接入稳定版 gpui-kit 0.6.2，并保留其上游锁定的间接依赖。Windows 依赖链包含 ropey 2.0.0-beta.1，属于明确记录的框架例外，不能宣称整个依赖树均为稳定版；详见 [技术决策](decisions/0001-windows-gpui.md)。
+- Windows 主窗口已补充全文只读预览：按需读取、Space 打开、Esc 返回、复制全文及过期响应保护。
 - 本轮详细状态和运行方法记录于 [Windows 基础版](WINDOWS_MVP.md)。
 
 ## 1. 目标与边界

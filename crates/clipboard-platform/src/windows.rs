@@ -25,6 +25,10 @@ pub enum Command {
         generation: u64,
     },
     Copy(i64),
+    Preview {
+        id: i64,
+        generation: u64,
+    },
     Delete(i64),
     TogglePin(i64),
     Pause(bool),
@@ -38,6 +42,11 @@ pub enum Event {
         generation: u64,
     },
     Status(String),
+    Preview {
+        id: i64,
+        generation: u64,
+        result: Result<String, String>,
+    },
     Paused(bool),
     Error(String),
 }
@@ -275,6 +284,16 @@ impl Worker {
                 ));
                 return Ok(());
             }
+            Command::Preview { id, generation } => {
+                self.events
+                    .send_blocking(Event::Preview {
+                        id,
+                        generation,
+                        result: self.history.text(id).map_err(|error| error.to_string()),
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::Delete(id) => self.history.delete(id)?,
             Command::TogglePin(id) => {
                 self.history.toggle_pin(id)?;
@@ -366,6 +385,48 @@ mod tests {
         drop(service);
         let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
         drop(service);
+        Ok(())
+    }
+
+    #[test]
+    fn preview_returns_full_text_and_reports_deleted_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let text = format!("中文😀\r\n{}\n末尾", "long text ".repeat(600));
+        service.send(Command::Capture(text.clone()))?;
+        let rows = next_snapshot(&events, 0);
+        let id = rows[0].id;
+        assert!(rows[0].text_content.is_none());
+        for generation in 1..=2 {
+            if generation == 2 {
+                service.send(Command::Delete(id))?;
+                assert!(next_snapshot(&events, 0).is_empty());
+            }
+            service.send(Command::Preview { id, generation })?;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match events.try_recv() {
+                    Ok(Event::Preview {
+                        id: actual,
+                        generation: request,
+                        result,
+                    }) => {
+                        assert_eq!((actual, request), (id, generation));
+                        if generation == 1 {
+                            assert_eq!(result.unwrap(), text);
+                        } else {
+                            assert!(result.is_err());
+                        }
+                        break;
+                    }
+                    Ok(Event::Error(message)) => panic!("{message}"),
+                    _ => {}
+                }
+                assert!(std::time::Instant::now() < deadline, "preview timed out");
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
         Ok(())
     }
 

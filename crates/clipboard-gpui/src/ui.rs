@@ -1,11 +1,14 @@
-use crate::{options::Options, state::HistoryState};
+use crate::{
+    options::Options,
+    state::{HistoryState, PreviewState},
+};
 use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE};
 use clipboard_platform::{Command, Event, Service};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
         button::*,
-        input::{Input, InputEvent, InputState},
+        input::{Input, InputEvent, InputState, Textarea, TextareaState},
         *,
     },
     *,
@@ -14,7 +17,15 @@ use std::time::Duration;
 
 gpui_kit::actions!(
     history,
-    [Next, Previous, CopySelected, DeleteSelected, FocusSearch]
+    [
+        Next,
+        Previous,
+        CopySelected,
+        DeleteSelected,
+        FocusSearch,
+        PreviewSelected,
+        ClosePreview
+    ]
 );
 
 pub fn run(options: Options) -> anyhow::Result<()> {
@@ -29,6 +40,9 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("up", Previous, Some("HistoryList")),
                 KeyBinding::new("enter", CopySelected, Some("HistoryList")),
                 KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
+                KeyBinding::new("space", PreviewSelected, Some("HistoryList")),
+                KeyBinding::new("escape", ClosePreview, Some("Preview")),
+                KeyBinding::new("escape", ClosePreview, Some("Preview > Input")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
             ]);
             cx.on_window_closed(|cx, _| {
@@ -43,11 +57,11 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
                         title: Some("ElegantClipboard".into()),
-                        ..Default::default()
+                        ..TitleBar::title_bar_options()
                     }),
                     window_min_size: Some(size(px(420.), px(420.))),
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
-                    ..Default::default()
+                    ..TitleBar::window_options()
                 },
                 |window, cx| {
                     let view =
@@ -72,6 +86,8 @@ struct ClipboardView {
     service: Service,
     history: HistoryState,
     search: Entity<InputState>,
+    preview: PreviewState,
+    preview_input: Entity<TextareaState>,
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
@@ -110,10 +126,10 @@ impl ClipboardView {
                 this.send(Command::Copy(id), cx);
             }
         });
-        let event_task = cx.spawn(async move |view, cx| {
+        let event_task = cx.spawn_in(window, async move |view, cx| {
             while let Ok(event) = events.recv().await {
                 if view
-                    .update(cx, |this, cx| this.apply_event(event, cx))
+                    .update_in(cx, |this, window, cx| this.apply_event(event, window, cx))
                     .is_err()
                 {
                     break;
@@ -126,6 +142,8 @@ impl ClipboardView {
             service,
             history: HistoryState::default(),
             search,
+            preview: PreviewState::default(),
+            preview_input: cx.new(|cx| TextareaState::new(window, cx)),
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring,
@@ -166,7 +184,7 @@ impl ClipboardView {
         );
     }
 
-    fn apply_event(&mut self, event: Event, cx: &mut Context<Self>) {
+    fn apply_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
         match event {
             Event::Snapshot {
                 items,
@@ -174,6 +192,20 @@ impl ClipboardView {
                 generation,
             } => {
                 self.history.apply(items, total, generation);
+            }
+            Event::Preview {
+                id,
+                generation,
+                result,
+            } => {
+                if self.preview.apply(id, generation, result)
+                    && let Some(Ok(text)) = &self.preview.result
+                {
+                    self.preview_input.update(cx, |input, cx| {
+                        input.set_value(text.clone(), window, cx);
+                        input.focus(window, cx);
+                    });
+                }
             }
             Event::Status(message) => {
                 self.message = message;
@@ -198,6 +230,100 @@ impl ClipboardView {
             }
         }
         cx.notify();
+    }
+
+    fn open_preview(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.history.selected = Some(id);
+        let generation = self.preview.open(id);
+        self.preview_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        if !self.send(Command::Preview { id, generation }, cx) {
+            self.preview
+                .apply(id, generation, Err(self.message.clone()));
+        }
+        cx.notify();
+    }
+
+    fn close_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.preview.close();
+        self.preview_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    fn render_preview(&self, cx: &mut Context<Self>) -> Div {
+        let id = self.preview.id.expect("preview is open");
+        let ready = matches!(self.preview.result, Some(Ok(_)));
+        let message = match &self.preview.result {
+            None => "正在加载完整内容…".to_owned(),
+            Some(Err(error)) => error.clone(),
+            Some(Ok(text)) => format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len()),
+        };
+        div()
+            .key_context("Preview")
+            .track_focus(&self.list_focus)
+            .flex()
+            .flex_col()
+            .size_full()
+            .p_5()
+            .gap_3()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .font_family("Microsoft YaHei UI")
+            .on_action(
+                cx.listener(|this, _: &ClosePreview, window, cx| this.close_preview(window, cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(div().text_lg().font_semibold().child("完整内容"))
+                    .child(
+                        Button::new("preview-close")
+                            .ghost()
+                            .label("返回列表 (Esc)")
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.close_preview(window, cx)),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(message),
+            )
+            .child(div().flex_1().min_h_0().when(ready, |container| {
+                container.child(
+                    Textarea::new(&self.preview_input)
+                        .readonly(true)
+                        .h_full()
+                        .aria_label("完整文本内容"),
+                )
+            }))
+            .child(
+                div().flex().justify_end().child(
+                    Button::new("preview-copy")
+                        .primary()
+                        .label("复制全文")
+                        .disabled(!ready)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.send(Command::Copy(id), cx);
+                        })),
+                ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(if self.is_error {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(self.message.clone()),
+            )
     }
 
     fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -283,6 +409,16 @@ impl ClipboardView {
                             .gap_1()
                             .justify_end()
                             .child(
+                                Button::new(("preview", id as usize))
+                                    .ghost()
+                                    .xsmall()
+                                    .label("查看")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.open_preview(id, window, cx);
+                                    })),
+                            )
+                            .child(
                                 Button::new(("pin", id as usize))
                                     .ghost()
                                     .xsmall()
@@ -319,6 +455,27 @@ impl ClipboardView {
 
 impl Render for ClipboardView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .font_family("Microsoft YaHei UI")
+            .child(
+                TitleBar::new()
+                    .bg(cx.theme().background)
+                    .child(div().text_sm().font_semibold().child("ElegantClipboard")),
+            )
+            .child(div().flex_1().min_h_0().child(self.render_content(cx)))
+    }
+}
+
+impl ClipboardView {
+    fn render_content(&mut self, cx: &mut Context<Self>) -> Div {
+        if self.preview.id.is_some() {
+            return self.render_preview(cx);
+        }
         let view = cx.entity();
         let empty_message = if self.history.loading {
             "正在加载…"
@@ -404,6 +561,11 @@ impl Render for ClipboardView {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
+                    .on_action(cx.listener(|this, _: &PreviewSelected, window, cx| {
+                        if let Some(id) = this.history.selected {
+                            this.open_preview(id, window, cx);
+                        }
+                    }))
                     .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
                     .on_action(cx.listener(|this, _: &Previous, _, cx| this.select(-1, cx)))
                     .on_action(cx.listener(|this, _: &CopySelected, _, cx| {

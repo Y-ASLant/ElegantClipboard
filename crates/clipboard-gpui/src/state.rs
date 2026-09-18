@@ -1,5 +1,34 @@
 use clipboard_core::{PAGE_SIZE, database::ClipboardItem};
 
+#[derive(Default)]
+pub struct PreviewState {
+    pub id: Option<i64>,
+    pub generation: u64,
+    pub result: Option<Result<String, String>>,
+}
+
+impl PreviewState {
+    pub fn open(&mut self, id: i64) -> u64 {
+        self.generation += 1;
+        self.id = Some(id);
+        self.result = None;
+        self.generation
+    }
+
+    pub fn close(&mut self) {
+        self.id = None;
+        self.result = None;
+    }
+
+    pub fn apply(&mut self, id: i64, generation: u64, result: Result<String, String>) -> bool {
+        if self.id != Some(id) || self.generation != generation {
+            return false;
+        }
+        self.result = Some(result);
+        true
+    }
+}
+
 /// View state kept independent of GPUI so asynchronous ordering can be tested.
 pub struct HistoryState {
     pub items: Vec<ClipboardItem>,
@@ -68,6 +97,22 @@ impl HistoryState {
 mod tests {
     use super::*;
     use clipboard_core::History;
+
+    #[test]
+    fn preview_rejects_closed_switched_and_reopened_requests() {
+        let mut preview = PreviewState::default();
+        let first = preview.open(1);
+        preview.close();
+        assert!(!preview.apply(1, first, Ok("late".into())));
+        let second = preview.open(1);
+        assert!(!preview.apply(1, first, Ok("old".into())));
+        assert!(preview.apply(1, second, Ok("full text".into())));
+        let third = preview.open(2);
+        assert!(preview.result.is_none());
+        assert!(!preview.apply(1, second, Ok("old selection".into())));
+        assert!(preview.apply(2, third, Err("记录已不存在".into())));
+        assert!(preview.result.as_ref().unwrap().is_err());
+    }
 
     #[test]
     fn late_search_results_are_rejected_and_selection_follows_ids() -> anyhow::Result<()> {
