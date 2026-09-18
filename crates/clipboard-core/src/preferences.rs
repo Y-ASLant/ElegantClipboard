@@ -2,6 +2,7 @@ use crate::database::{Database, SettingsRepository};
 use anyhow::Result;
 
 const THEME_KEY: &str = "gpui_theme_mode";
+const HOTKEY_KEY: &str = "gpui_hotkey";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ThemePreference {
@@ -9,6 +10,26 @@ pub enum ThemePreference {
     System,
     Light,
     Dark,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HotkeyPreference {
+    #[default]
+    CtrlShiftV,
+    AltC,
+    CtrlAltV,
+    Disabled,
+}
+
+impl HotkeyPreference {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CtrlShiftV => "Ctrl+Shift+V",
+            Self::AltC => "Alt+C",
+            Self::CtrlAltV => "Ctrl+Alt+V",
+            Self::Disabled => "关闭",
+        }
+    }
 }
 
 pub struct Preferences {
@@ -40,6 +61,27 @@ impl Preferences {
             },
         )?)
     }
+
+    pub fn hotkey(&self) -> Result<HotkeyPreference> {
+        Ok(match self.repository.get(HOTKEY_KEY)?.as_deref() {
+            Some("alt_c") => HotkeyPreference::AltC,
+            Some("ctrl_alt_v") => HotkeyPreference::CtrlAltV,
+            Some("disabled") => HotkeyPreference::Disabled,
+            _ => HotkeyPreference::CtrlShiftV,
+        })
+    }
+
+    pub fn set_hotkey(&self, hotkey: HotkeyPreference) -> Result<()> {
+        Ok(self.repository.set(
+            HOTKEY_KEY,
+            match hotkey {
+                HotkeyPreference::CtrlShiftV => "ctrl_shift_v",
+                HotkeyPreference::AltC => "alt_c",
+                HotkeyPreference::CtrlAltV => "ctrl_alt_v",
+                HotkeyPreference::Disabled => "disabled",
+            },
+        )?)
+    }
 }
 
 #[cfg(test)]
@@ -68,6 +110,28 @@ mod tests {
         assert_eq!(preferences.theme()?, ThemePreference::Dark);
         SettingsRepository::new(&db).set(THEME_KEY, "unknown")?;
         assert_eq!(preferences.theme()?, ThemePreference::System);
+        Ok(())
+    }
+
+    #[test]
+    fn hotkey_preference_persists_independently_of_legacy_setting() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let db = Database::new(path.clone())?;
+        let preferences = Preferences::new(&db);
+        assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
+        SettingsRepository::new(&db).set("global_shortcut", "Alt+C")?;
+        assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
+        preferences.set_hotkey(HotkeyPreference::CtrlAltV)?;
+        drop(preferences);
+        drop(db);
+        let db = Database::new(path)?;
+        let preferences = Preferences::new(&db);
+        assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlAltV);
+        preferences.set_hotkey(HotkeyPreference::Disabled)?;
+        assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
+        SettingsRepository::new(&db).set(HOTKEY_KEY, "unknown")?;
+        assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
         Ok(())
     }
 }

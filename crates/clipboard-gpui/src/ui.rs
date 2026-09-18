@@ -4,7 +4,10 @@ use crate::{
     options::Options,
     state::{HistoryState, PreviewState},
 };
-use clipboard_core::{HISTORY_LIMIT, PAGE_SIZE, preferences::ThemePreference};
+use clipboard_core::{
+    HISTORY_LIMIT, PAGE_SIZE,
+    preferences::{HotkeyPreference, ThemePreference},
+};
 use clipboard_platform::hotkey::Hotkey;
 use clipboard_platform::{Command, Event, InstanceBusy, Service};
 use gpui_kit::prelude::FluentBuilder;
@@ -153,7 +156,8 @@ struct ClipboardView {
     service: Service,
     _tray: Option<TrayIcon>,
     _tray_events: Task<()>,
-    _hotkey: Option<Hotkey>,
+    hotkey: Option<Hotkey>,
+    hotkey_sender: async_channel::Sender<()>,
     _hotkey_events: Task<()>,
     exiting: Rc<Cell<bool>>,
     history: HistoryState,
@@ -165,6 +169,8 @@ struct ClipboardView {
     monitoring: bool,
     theme: ThemePreference,
     theme_pending: bool,
+    hotkey_choice: HotkeyPreference,
+    hotkey_pending: bool,
     reorder_pending: bool,
     drop_target: Option<(i64, bool)>,
     reordered: Option<(i64, usize)>,
@@ -239,7 +245,12 @@ impl ClipboardView {
         });
         let tray_error = tray.as_ref().err().map(ToString::to_string);
         let (hotkey_sender, hotkey_receiver) = async_channel::bounded(1);
-        let hotkey = Hotkey::start(hotkey_sender);
+        let hotkey_choice = service.initial_hotkey;
+        let hotkey = if hotkey_choice == HotkeyPreference::Disabled {
+            Ok(None)
+        } else {
+            Hotkey::start(hotkey_choice, hotkey_sender.clone()).map(Some)
+        };
         let hotkey_events = cx.spawn_in(window, async move |view, cx| {
             while hotkey_receiver.recv().await.is_ok() {
                 if view
@@ -271,7 +282,8 @@ impl ClipboardView {
             service,
             _tray: tray.ok(),
             _tray_events: tray_events,
-            _hotkey: hotkey.ok(),
+            hotkey: hotkey.ok().flatten(),
+            hotkey_sender,
             _hotkey_events: hotkey_events,
             exiting,
             history: HistoryState::default(),
@@ -283,6 +295,8 @@ impl ClipboardView {
             monitoring,
             theme,
             theme_pending: false,
+            hotkey_choice,
+            hotkey_pending: false,
             reorder_pending: false,
             drop_target: None,
             reordered: None,
@@ -291,12 +305,16 @@ impl ClipboardView {
             paused: false,
             pause_pending: false,
             message: if startup_errors.is_empty() {
-                if monitoring {
-                    "正在记录文本；Ctrl+Shift+V 可唤出窗口"
+                let activity = if monitoring {
+                    "正在记录文本"
                 } else {
-                    "采集已禁用；Ctrl+Shift+V 可唤出窗口"
+                    "采集已禁用"
+                };
+                if hotkey_choice == HotkeyPreference::Disabled {
+                    format!("{activity}；可从托盘唤出窗口")
+                } else {
+                    format!("{activity}；{} 可唤出窗口", hotkey_choice.label())
                 }
-                .into()
             } else {
                 startup_errors.join("；")
             },
@@ -317,6 +335,56 @@ impl ClipboardView {
             return false;
         }
         true
+    }
+
+    fn restore_hotkey(&mut self) -> Option<String> {
+        if self.hotkey_choice == HotkeyPreference::Disabled {
+            return None;
+        }
+        match Hotkey::start(self.hotkey_choice, self.hotkey_sender.clone()) {
+            Ok(hotkey) => {
+                self.hotkey = Some(hotkey);
+                None
+            }
+            Err(error) => Some(format!("原快捷键也无法恢复：{error}")),
+        }
+    }
+
+    fn select_hotkey(&mut self, choice: HotkeyPreference, cx: &mut Context<Self>) {
+        if self.hotkey_pending
+            || (choice == self.hotkey_choice
+                && (choice == HotkeyPreference::Disabled || self.hotkey.is_some()))
+        {
+            return;
+        }
+        self.hotkey = None;
+        let registration = if choice == HotkeyPreference::Disabled {
+            Ok(None)
+        } else {
+            Hotkey::start(choice, self.hotkey_sender.clone()).map(Some)
+        };
+        match registration {
+            Ok(hotkey) => self.hotkey = hotkey,
+            Err(error) => {
+                let restore_error = self.restore_hotkey();
+                self.message = format!("快捷键切换失败：{error}");
+                if let Some(restore_error) = restore_error {
+                    self.message.push_str(&format!("；{restore_error}"));
+                }
+                self.is_error = true;
+                cx.notify();
+                return;
+            }
+        }
+        if self.send(Command::SetHotkey(choice), cx) {
+            self.hotkey_pending = true;
+        } else {
+            self.hotkey = None;
+            if let Some(error) = self.restore_hotkey() {
+                self.message.push_str(&format!("；{error}"));
+            }
+        }
+        cx.notify();
     }
 
     fn query(&mut self, cx: &mut Context<Self>) {
@@ -403,6 +471,29 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         self.message = format!("外观保存失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::HotkeySaved(result) => {
+                self.hotkey_pending = false;
+                match result {
+                    Ok(choice) => {
+                        self.hotkey_choice = choice;
+                        self.message = if choice == HotkeyPreference::Disabled {
+                            "全局快捷键已关闭，可从托盘唤出窗口".into()
+                        } else {
+                            format!("已保存唤出快捷键：{}", choice.label())
+                        };
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.hotkey = None;
+                        let restore_error = self.restore_hotkey();
+                        self.message = format!("快捷键保存失败：{error}");
+                        if let Some(restore_error) = restore_error {
+                            self.message.push_str(&format!("；{restore_error}"));
+                        }
                         self.is_error = true;
                     }
                 }
@@ -827,6 +918,44 @@ impl Render for ClipboardView {
                                             this.theme_pending = true;
                                             cx.notify();
                                         }
+                                    }))
+                            }),
+                        ),
+                    ),
+            )
+            .child(
+                div()
+                    .px(px(PAGE_PADDING))
+                    .py_1()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child("唤出"),
+                    )
+                    .child(
+                        div().flex().gap_1().children(
+                            [
+                                ("hotkey-ctrl-shift-v", HotkeyPreference::CtrlShiftV),
+                                ("hotkey-alt-c", HotkeyPreference::AltC),
+                                ("hotkey-ctrl-alt-v", HotkeyPreference::CtrlAltV),
+                                ("hotkey-disabled", HotkeyPreference::Disabled),
+                            ]
+                            .map(|(id, choice)| {
+                                Button::new(id)
+                                    .ghost()
+                                    .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
+                                    .label(choice.label())
+                                    .selected(self.hotkey_choice == choice)
+                                    .disabled(self.hotkey_pending)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.select_hotkey(choice, cx);
                                     }))
                             }),
                         ),

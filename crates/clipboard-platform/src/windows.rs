@@ -5,7 +5,7 @@ use clipboard_core::{
     History, MAX_TEXT_BYTES, PAGE_SIZE,
     database::{ClipboardItem, Database},
     import::{ImportReport, import_legacy_database},
-    preferences::{Preferences, ThemePreference},
+    preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{
     Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
@@ -41,6 +41,7 @@ pub enum Command {
     ToggleFavorite(i64),
     Pause(bool),
     SetTheme(ThemePreference),
+    SetHotkey(HotkeyPreference),
     Reorder {
         from: i64,
         to: i64,
@@ -71,6 +72,7 @@ pub enum Event {
     },
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
+    HotkeySaved(Result<HotkeyPreference, String>),
     Error(String),
 }
 
@@ -149,6 +151,7 @@ pub struct Service {
     _instance_lock: File,
     pub data_dir: PathBuf,
     pub initial_theme: ThemePreference,
+    pub initial_hotkey: HotkeyPreference,
 }
 
 fn resolve_data_dir(data_dir: Option<PathBuf>) -> Result<PathBuf> {
@@ -201,6 +204,7 @@ impl Service {
         let history = History::new(&db);
         let preferences = Preferences::new(&db);
         let initial_theme = preferences.theme()?;
+        let initial_hotkey = preferences.hotkey()?;
         let writer =
             ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
         let (commands, incoming) = mpsc::sync_channel(64);
@@ -217,6 +221,7 @@ impl Service {
             events: events.clone(),
             _instance_lock: instance_lock,
             initial_theme,
+            initial_hotkey,
             data_dir,
         };
         let worker_state = state.clone();
@@ -416,6 +421,17 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::SetHotkey(hotkey) => {
+                let result = self
+                    .preferences
+                    .set_hotkey(hotkey)
+                    .map(|_| hotkey)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::HotkeySaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::Pause(paused) => {
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
                 state.paused = paused;
@@ -560,6 +576,35 @@ mod tests {
         let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
         assert_eq!(reopened.initial_theme, ThemePreference::Dark);
         assert!(next_snapshot(&events, 0).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn hotkey_change_is_acknowledged_and_loaded_on_restart() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_hotkey, HotkeyPreference::CtrlShiftV);
+        next_snapshot(&events, 0);
+        service.send(Command::SetHotkey(HotkeyPreference::AltC))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::HotkeySaved(result)) => {
+                    assert_eq!(result.unwrap(), HotkeyPreference::AltC);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "hotkey save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_hotkey, HotkeyPreference::AltC);
         Ok(())
     }
 

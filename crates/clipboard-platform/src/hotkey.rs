@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use async_channel::Sender;
+use clipboard_core::preferences::HotkeyPreference;
 use std::{
     sync::mpsc,
     thread::{self, JoinHandle},
@@ -9,7 +10,7 @@ use windows::Win32::{
     System::Threading::GetCurrentThreadId,
     UI::{
         Input::KeyboardAndMouse::{
-            MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
+            MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
         },
         WindowsAndMessaging::{
             GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_HOTKEY, WM_QUIT,
@@ -18,7 +19,6 @@ use windows::Win32::{
 };
 
 const HOTKEY_ID: i32 = 1;
-const V_KEY: u32 = b'V' as u32;
 
 pub struct Hotkey {
     thread_id: u32,
@@ -26,7 +26,13 @@ pub struct Hotkey {
 }
 
 impl Hotkey {
-    pub fn start(events: Sender<()>) -> Result<Self> {
+    pub fn start(choice: HotkeyPreference, events: Sender<()>) -> Result<Self> {
+        let (modifiers, key) = match choice {
+            HotkeyPreference::CtrlShiftV => (MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, b'V'),
+            HotkeyPreference::AltC => (MOD_ALT | MOD_NOREPEAT, b'C'),
+            HotkeyPreference::CtrlAltV => (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, b'V'),
+            HotkeyPreference::Disabled => return Err(anyhow!("快捷键已关闭")),
+        };
         let (ready, receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("history-hotkey".into())
@@ -36,14 +42,8 @@ impl Hotkey {
                     let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
                 }
                 let thread_id = unsafe { GetCurrentThreadId() };
-                let registration = unsafe {
-                    RegisterHotKey(
-                        None,
-                        HOTKEY_ID,
-                        MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT,
-                        V_KEY,
-                    )
-                };
+                let registration =
+                    unsafe { RegisterHotKey(None, HOTKEY_ID, modifiers, key as u32) };
                 let registered = registration.is_ok();
                 let _ = ready.send(registration.map(|_| thread_id));
                 if !registered {
@@ -65,7 +65,7 @@ impl Hotkey {
             }),
             Err(error) => {
                 let _ = worker.join();
-                Err(anyhow!("Ctrl+Shift+V 注册失败：{error}"))
+                Err(anyhow!("{} 注册失败：{error}", choice.label()))
             }
         }
     }
