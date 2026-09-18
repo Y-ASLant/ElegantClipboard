@@ -837,9 +837,10 @@ impl Worker {
                     self.history
                         .reorder_in_group(from, to, after, favorite_only, group_id)
                 };
-                if result.is_ok() {
-                    self.snapshot()?;
-                }
+                let result = result.and_then(|_| {
+                    self.snapshot()
+                        .context("顺序已保存，但列表刷新失败，请重启应用后查看")
+                });
                 self.events
                     .send_blocking(Event::Reordered {
                         from,

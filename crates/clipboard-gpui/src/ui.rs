@@ -1058,6 +1058,9 @@ impl ClipboardView {
             }
             Event::Error(message) => {
                 self.paste_pending = None;
+                self.reorder_pending = false;
+                self.reorder_before = None;
+                self.drop_target = None;
                 self.group_move_pending = false;
                 self.group_save_pending = false;
                 self.group_delete_pending = false;
