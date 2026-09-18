@@ -4,6 +4,6 @@
 
 界面中各卡片共用相同的粘贴按钮布局；全文预览也提供相同入口。列表聚焦时可按 Ctrl+Enter。通过托盘或二次启动打开时没有可靠的原目标窗口，粘贴入口禁用。
 
-验证：`cargo check --workspace --all-targets --locked`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked`、`cargo fmt --all -- --check`。隔离窗口站往返程序使用 `CopyForPaste` 验证复制完成事件携带粘贴请求标记，覆盖真实 Windows 剪贴板复制；该程序不执行 `SendInput`，避免把按键发送到交互桌面。
+验证：`cargo check --workspace --all-targets --locked`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked`（119 项）、`cargo fmt --all -- --check`、`cargo build -p elegant-clipboard-gpui --release --locked` 均通过且没有编译告警。debug 与 release 的 `--smoke-test` 窗口启动/自动退出均通过，使用 `target/qa/` 下的隔离数据目录并禁用采集。隔离窗口站往返程序使用 `CopyForPaste` 验证复制完成事件携带粘贴请求标记，覆盖真实 Windows 剪贴板复制；该程序不执行 `SendInput`，避免把按键发送到交互桌面。
 
 仍需在专用交互桌面会话中验证浏览器、编辑器、Office 和管理员窗口的最终粘贴效果。Windows 对高权限目标的输入注入可能拒绝；目标应用也可能不响应 Ctrl+V。当前设计将这些情况作为可手动粘贴的降级路径。
