@@ -257,6 +257,8 @@ struct ClipboardView {
     group_drop_target: Option<DropTarget>,
     group_feedback_id: Option<i64>,
     group_feedback_revision: usize,
+    group_scroll: ScrollHandle,
+    group_drag_direction: i8,
     group_delete_id: Option<i64>,
     group_delete_pending: bool,
     clear_confirm_open: bool,
@@ -299,6 +301,7 @@ struct ClipboardView {
     search_task: Option<Task<()>>,
     feedback_task: Option<Task<()>>,
     group_feedback_task: Option<Task<()>>,
+    group_drag_scroll_task: Option<Task<()>>,
 }
 
 impl ClipboardView {
@@ -430,6 +433,8 @@ impl ClipboardView {
             group_drop_target: None,
             group_feedback_id: None,
             group_feedback_revision: 0,
+            group_scroll: ScrollHandle::new(),
+            group_drag_direction: 0,
             group_delete_id: None,
             group_delete_pending: false,
             clear_confirm_open: false,
@@ -487,6 +492,7 @@ impl ClipboardView {
             search_task: None,
             feedback_task: None,
             group_feedback_task: None,
+            group_drag_scroll_task: None,
         }
     }
 
@@ -748,6 +754,7 @@ impl ClipboardView {
             Event::GroupReordered { from, result } => {
                 self.group_reorder_pending = false;
                 self.group_drop_target = None;
+                self.group_drag_direction = 0;
                 match result {
                     Ok(()) => {
                         self.group_feedback_revision += 1;
@@ -1501,6 +1508,40 @@ impl ClipboardView {
             && drag.group_ids == self.groups.iter().map(|group| group.id).collect::<Vec<_>>()
     }
 
+    fn start_group_drag_scroll(&mut self, cx: &mut Context<Self>) {
+        self.group_drag_direction = 0;
+        self.group_drag_scroll_task = Some(cx.spawn(async move |view, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(60))
+                    .await;
+                let Ok(active) = view.update(cx, |this, cx| {
+                    if !cx.has_active_drag() {
+                        this.group_drag_direction = 0;
+                        this.group_drop_target = None;
+                        cx.notify();
+                        return false;
+                    }
+                    if this.group_drag_direction != 0 {
+                        let offset = this.group_scroll.offset();
+                        let next = (offset.x + px(f32::from(this.group_drag_direction) * 18.))
+                            .clamp(-this.group_scroll.max_offset().x, px(0.));
+                        if next != offset.x {
+                            this.group_scroll.set_offset(point(next, offset.y));
+                            cx.notify();
+                        }
+                    }
+                    true
+                }) else {
+                    break;
+                };
+                if !active {
+                    break;
+                }
+            }
+        }));
+    }
+
     fn render_group(&self, group: &Group, cx: &mut Context<Self>) -> AnyElement {
         let id = group.id;
         let drag = GroupDrag {
@@ -1543,10 +1584,12 @@ impl ClipboardView {
             )
             .on_drop(cx.listener(move |this, drag: &GroupDrag, _, cx| {
                 if drag.id == id {
+                    this.group_drag_direction = 0;
                     return;
                 }
                 if !this.valid_group_drag(drag) {
                     this.group_drop_target = None;
+                    this.group_drag_direction = 0;
                     this.message = "分组列表已变化，请重新拖动".into();
                     this.is_error = true;
                     cx.notify();
@@ -1566,6 +1609,7 @@ impl ClipboardView {
                     this.group_reorder_pending = true;
                 }
                 this.group_drop_target = None;
+                this.group_drag_direction = 0;
                 cx.notify();
             }))
             .child(
@@ -1584,6 +1628,7 @@ impl ClipboardView {
                         handle.on_drag(drag.clone(), move |drag, _, _, cx| {
                             entity.update(cx, |this, cx| {
                                 this.group_drop_target = None;
+                                this.start_group_drag_scroll(cx);
                                 cx.notify();
                             });
                             cx.new(|_| drag.clone())
@@ -2272,6 +2317,7 @@ impl ClipboardView {
                 cx.stop_active_drag(window);
                 this.drop_target = None;
                 this.group_drop_target = None;
+                this.group_drag_direction = 0;
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
@@ -2369,13 +2415,34 @@ impl ClipboardView {
             ))
             .child(
                 div()
+                    .id("group-bar")
                     .px(px(PAGE_PADDING))
                     .pb_2()
                     .h(px(GROUP_BAR_HEIGHT))
                     .flex_none()
                     .flex()
                     .gap_2()
-                    .overflow_x_scrollbar()
+                    .overflow_x_scroll()
+                    .track_scroll(&self.group_scroll)
+                    .horizontal_scrollbar(&self.group_scroll)
+                    .on_drag_move(
+                        cx.listener(|this, event: &DragMoveEvent<GroupDrag>, _, cx| {
+                            let x = event.event.position.x;
+                            let direction = if !event.bounds.contains(&event.event.position) {
+                                0
+                            } else if x < event.bounds.left() + px(28.) {
+                                1
+                            } else if x > event.bounds.right() - px(28.) {
+                                -1
+                            } else {
+                                0
+                            };
+                            if this.group_drag_direction != direction {
+                                this.group_drag_direction = direction;
+                                cx.notify();
+                            }
+                        }),
+                    )
                     .child(
                         Button::new("group-create-toggle")
                             .small()
