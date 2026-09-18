@@ -1,10 +1,10 @@
-use clipboard_core::{PAGE_SIZE, database::ClipboardItem};
+use clipboard_core::{PAGE_SIZE, PreviewContent, database::ClipboardItem};
 
 #[derive(Default)]
 pub struct PreviewState {
     pub id: Option<i64>,
     pub generation: u64,
-    pub result: Option<Result<String, String>>,
+    pub result: Option<Result<PreviewContent, String>>,
 }
 
 impl PreviewState {
@@ -20,7 +20,12 @@ impl PreviewState {
         self.result = None;
     }
 
-    pub fn apply(&mut self, id: i64, generation: u64, result: Result<String, String>) -> bool {
+    pub fn apply(
+        &mut self,
+        id: i64,
+        generation: u64,
+        result: Result<PreviewContent, String>,
+    ) -> bool {
         if self.id != Some(id) || self.generation != generation {
             return false;
         }
@@ -131,13 +136,13 @@ mod tests {
         let mut preview = PreviewState::default();
         let first = preview.open(1);
         preview.close();
-        assert!(!preview.apply(1, first, Ok("late".into())));
+        assert!(!preview.apply(1, first, Ok(PreviewContent::Text("late".into()))));
         let second = preview.open(1);
-        assert!(!preview.apply(1, first, Ok("old".into())));
-        assert!(preview.apply(1, second, Ok("full text".into())));
+        assert!(!preview.apply(1, first, Ok(PreviewContent::Text("old".into()))));
+        assert!(preview.apply(1, second, Ok(PreviewContent::Text("full text".into()))));
         let third = preview.open(2);
         assert!(preview.result.is_none());
-        assert!(!preview.apply(1, second, Ok("old selection".into())));
+        assert!(!preview.apply(1, second, Ok(PreviewContent::Text("old selection".into()))));
         assert!(preview.apply(2, third, Err("记录已不存在".into())));
         assert!(preview.result.as_ref().unwrap().is_err());
     }

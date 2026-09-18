@@ -5,7 +5,7 @@ use crate::{
     state::{HistoryState, PreviewState},
 };
 use clipboard_core::{
-    HISTORY_LIMIT, PAGE_SIZE,
+    HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
     preferences::{HotkeyPreference, ThemePreference},
 };
 use clipboard_platform::hotkey::Hotkey;
@@ -418,7 +418,7 @@ impl ClipboardView {
                 result,
             } => {
                 if self.preview.apply(id, generation, result)
-                    && let Some(Ok(text)) = &self.preview.result
+                    && let Some(Ok(PreviewContent::Text(text))) = &self.preview.result
                 {
                     self.preview_input.update(cx, |input, cx| {
                         input.set_value(text.clone(), window, cx);
@@ -508,7 +508,7 @@ impl ClipboardView {
                 self.message = if paused {
                     "已暂停记录，已有历史仍可使用"
                 } else {
-                    "已恢复记录文本"
+                    "已恢复记录"
                 }
                 .into();
             }
@@ -545,10 +545,35 @@ impl ClipboardView {
     fn render_preview(&self, cx: &mut Context<Self>) -> Div {
         let id = self.preview.id.expect("preview is open");
         let ready = matches!(self.preview.result, Some(Ok(_)));
+        let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
         let message = match &self.preview.result {
             None => "正在加载完整内容…".to_owned(),
             Some(Err(error)) => error.clone(),
-            Some(Ok(text)) => format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len()),
+            Some(Ok(PreviewContent::Text(text))) => {
+                format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len())
+            }
+            Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
+        };
+        let body: AnyElement = match &self.preview.result {
+            Some(Ok(PreviewContent::Text(_))) => Textarea::new(&self.preview_input)
+                .readonly(true)
+                .h_full()
+                .aria_label("完整文本内容")
+                .into_any_element(),
+            Some(Ok(PreviewContent::Image(path))) => div()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size_full()
+                .overflow_hidden()
+                .child(
+                    img(path.clone())
+                        .size_full()
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(|| div().child("图片无法显示").into_any_element()),
+                )
+                .into_any_element(),
+            _ => div().into_any_element(),
         };
         div()
             .key_context("Preview")
@@ -569,7 +594,11 @@ impl ClipboardView {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().text_lg().font_semibold().child("完整内容"))
+                    .child(div().text_lg().font_semibold().child(if image {
+                        "图片预览"
+                    } else {
+                        "完整内容"
+                    }))
                     .child(
                         Button::new("preview-close")
                             .ghost()
@@ -585,19 +614,16 @@ impl ClipboardView {
                     .text_color(cx.theme().muted_foreground)
                     .child(message),
             )
-            .child(div().flex_1().min_h_0().when(ready, |container| {
-                container.child(
-                    Textarea::new(&self.preview_input)
-                        .readonly(true)
-                        .h_full()
-                        .aria_label("完整文本内容"),
-                )
-            }))
+            .child(div().flex_1().min_h_0().child(body))
             .child(
                 div().flex().justify_end().child(
                     Button::new("preview-copy")
                         .primary()
-                        .label("复制全文")
+                        .label(if image {
+                            "复制图片"
+                        } else {
+                            "复制全文"
+                        })
                         .disabled(!ready)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.send(Command::Copy(id), cx);
@@ -629,6 +655,20 @@ impl ClipboardView {
     fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let item = &self.history.items[index];
         let id = item.id;
+        let is_image = item.content_type == "image";
+        let kind = match item.content_type.as_str() {
+            "image" => "图片",
+            "url" => "网址",
+            _ => "文本",
+        };
+        let detail = if is_image {
+            match (item.image_width, item.image_height) {
+                (Some(width), Some(height)) => format!("{width} × {height}"),
+                _ => "尺寸未知".into(),
+            }
+        } else {
+            format!("{} 字符", item.char_count.unwrap_or(0))
+        };
         let selected = self.history.selected == Some(id);
         let pinned = item.is_pinned;
         let favorite = item.is_favorite;
@@ -774,9 +814,10 @@ impl ClipboardView {
                                             ),
                                     )
                                     .child(format!(
-                                        "{} · {} 字符",
-                                        if pinned { "置顶文本" } else { "文本" },
-                                        item.char_count.unwrap_or(0)
+                                        "{}{} · {}",
+                                        if pinned { "置顶" } else { "" },
+                                        kind,
+                                        detail
                                     )),
                             )
                             .child(
@@ -786,7 +827,40 @@ impl ClipboardView {
                                     .child(item.created_at.clone()),
                             ),
                     )
-                    .child(
+                    .child(if is_image {
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .w(px(64.))
+                                    .h(px(48.))
+                                    .flex_none()
+                                    .rounded_sm()
+                                    .overflow_hidden()
+                                    .bg(cx.theme().muted)
+                                    .when_some(item.image_path.as_ref(), |box_, path| {
+                                        box_.child(
+                                            img(std::path::PathBuf::from(path))
+                                                .size_full()
+                                                .object_fit(ObjectFit::Contain)
+                                                .with_fallback(|| {
+                                                    div().child("无法显示").into_any_element()
+                                                }),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(item.preview.clone().unwrap_or_else(|| "图片".into())),
+                            )
+                    } else {
                         div()
                             .flex_1()
                             .overflow_hidden()
@@ -794,8 +868,8 @@ impl ClipboardView {
                             .line_height(px(20.))
                             .line_clamp(2)
                             .text_ellipsis()
-                            .child(item.preview.clone().unwrap_or_default()),
-                    )
+                            .child(item.preview.clone().unwrap_or_default())
+                    })
                     .child(
                         div()
                             .flex()

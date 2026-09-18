@@ -85,7 +85,7 @@ impl History {
         Ok(())
     }
 
-    fn cleanup_images(&self, candidates: Vec<String>, images_dir: &Path) {
+    pub(crate) fn cleanup_images(&self, candidates: Vec<String>, images_dir: &Path) {
         if candidates.is_empty() {
             return;
         }
@@ -166,8 +166,13 @@ mod tests {
         assert_eq!(history.capture_image(PNG, 3, 2, &images)?, id);
         assert_eq!(history.repo.count(Default::default())?, 1);
         std::fs::remove_file(&image_path)?;
+        assert!(history.preview_content(id).is_err());
         assert_eq!(history.capture_image(PNG, 3, 2, &images)?, id);
         assert_eq!(std::fs::read(&image_path)?, PNG);
+        assert_eq!(
+            history.preview_content(id)?,
+            crate::PreviewContent::Image(image_path)
+        );
         Ok(())
     }
 
@@ -210,6 +215,49 @@ mod tests {
         assert!(external.exists());
         history.delete_with_media(id, &images)?;
         assert!(!managed.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn image_and_text_share_the_same_reorder_flow() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        let image = history.capture_image(PNG, 3, 2, &directory.path().join("images"))?;
+        let text = history.capture("text")?.unwrap();
+        assert_eq!(history.list("", crate::PAGE_SIZE, false)?[0].id, text);
+        history.reorder(image, text, false, false)?;
+        assert_eq!(history.list("", crate::PAGE_SIZE, false)?[0].id, image);
+        drop(history);
+        assert_eq!(
+            History::open(path)?.list("", crate::PAGE_SIZE, false)?[0].id,
+            image
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn text_eviction_removes_the_oldest_managed_image() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let images = directory.path().join("images");
+        let image = history.capture_image(PNG, 3, 2, &images)?;
+        let path = PathBuf::from(history.item(image)?.image_path.unwrap());
+        let connection = db.write_connection();
+        connection.lock().execute_batch(
+            "WITH RECURSIVE nums(n) AS (
+               SELECT 1 UNION ALL SELECT n + 1 FROM nums WHERE n < 9999
+             )
+             INSERT INTO clipboard_items
+               (content_type, text_content, content_hash, semantic_hash, created_at)
+             SELECT 'text', printf('filler %d', n), printf('filler-hash-%d', n),
+                    printf('filler-hash-%d', n), '9999-12-31' FROM nums;",
+        )?;
+        drop(connection);
+        history.capture_with_media("new text", &images)?;
+        assert!(history.item(image).is_err());
+        assert!(!path.exists());
         Ok(())
     }
 }

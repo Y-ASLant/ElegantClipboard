@@ -18,7 +18,7 @@ use anyhow::{Result, bail};
 use database::{
     ClipboardItem, ClipboardRepository, ContentType, Database, NewClipboardItem, QueryOptions,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const HISTORY_LIMIT: i64 = 10_000;
@@ -27,6 +27,12 @@ pub const PAGE_SIZE: i64 = 100;
 pub struct History {
     repo: ClipboardRepository,
     db: Database,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreviewContent {
+    Text(String),
+    Image(PathBuf),
 }
 
 impl History {
@@ -47,6 +53,14 @@ impl History {
     }
 
     pub fn capture(&self, text: &str) -> Result<Option<i64>> {
+        self.capture_inner(text, None)
+    }
+
+    pub fn capture_with_media(&self, text: &str, images_dir: &Path) -> Result<Option<i64>> {
+        self.capture_inner(text, Some(images_dir))
+    }
+
+    fn capture_inner(&self, text: &str, images_dir: Option<&Path>) -> Result<Option<i64>> {
         if text.trim().is_empty() {
             return Ok(None);
         }
@@ -76,7 +90,10 @@ impl History {
             char_count: Some(text.chars().count() as i64),
             ..Default::default()
         })?;
-        self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
+        let (_, deleted_images, _) = self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
+        if let Some(images_dir) = images_dir {
+            self.cleanup_images(deleted_images, images_dir);
+        }
         Ok(Some(id))
     }
 
@@ -115,6 +132,25 @@ impl History {
         self.repo
             .get_by_id(id)?
             .ok_or_else(|| anyhow::anyhow!("记录已不存在"))
+    }
+
+    pub fn preview_content(&self, id: i64) -> Result<PreviewContent> {
+        let item = self.item(id)?;
+        if item.content_type == "image" {
+            let path = PathBuf::from(
+                item.image_path
+                    .ok_or_else(|| anyhow::anyhow!("图片路径缺失"))?,
+            );
+            if !path.is_file() {
+                bail!("图片文件已丢失，无法预览");
+            }
+            Ok(PreviewContent::Image(path))
+        } else {
+            Ok(PreviewContent::Text(
+                item.text_content
+                    .ok_or_else(|| anyhow::anyhow!("记录没有可预览的文本"))?,
+            ))
+        }
     }
 
     pub fn delete(&self, id: i64) -> Result<()> {

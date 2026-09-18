@@ -2,7 +2,7 @@ use crate::instance::{self, InstanceSignal};
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
-    History, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TEXT_BYTES, PAGE_SIZE,
+    History, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
     database::{ClipboardItem, Database},
     import::{ImportReport, import_legacy_database},
     preferences::{HotkeyPreference, Preferences, ThemePreference},
@@ -73,7 +73,7 @@ pub enum Event {
     Preview {
         id: i64,
         generation: u64,
-        result: Result<String, String>,
+        result: Result<PreviewContent, String>,
     },
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
@@ -410,7 +410,7 @@ impl Worker {
                 self.generation = generation;
             }
             Command::Capture(text) => {
-                self.history.capture(&text)?;
+                self.history.capture_with_media(&text, &self.images_dir)?;
             }
             Command::CaptureImage { png, width, height } => {
                 let result = self
@@ -428,10 +428,17 @@ impl Worker {
                     if !Path::new(path).is_file() {
                         bail!("图片文件已丢失，无法复制");
                     }
-                    Some(
-                        RustImageData::from_path(path)
-                            .map_err(|error| anyhow!("打开图片失败：{error}"))?,
-                    )
+                    let image = RustImageData::from_path(path)
+                        .map_err(|error| anyhow!("打开图片失败：{error}"))?;
+                    // clipboard-rs clears the clipboard before converting to PNG/BMP.
+                    // Check both conversions before touching the user's current contents.
+                    image
+                        .to_png()
+                        .map_err(|error| anyhow!("图片 PNG 编码失败：{error}"))?;
+                    image
+                        .to_bitmap()
+                        .map_err(|error| anyhow!("图片位图编码失败：{error}"))?;
+                    Some(image)
                 } else {
                     None
                 };
@@ -462,7 +469,10 @@ impl Worker {
                     .send_blocking(Event::Preview {
                         id,
                         generation,
-                        result: self.history.text(id).map_err(|error| error.to_string()),
+                        result: self
+                            .history
+                            .preview_content(id)
+                            .map_err(|error| error.to_string()),
                     })
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
@@ -825,7 +835,7 @@ mod tests {
                     }) => {
                         assert_eq!((actual, request), (id, generation));
                         if generation == 1 {
-                            assert_eq!(result.unwrap(), text);
+                            assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
                         } else {
                             assert!(result.is_err());
                         }
