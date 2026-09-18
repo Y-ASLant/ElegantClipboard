@@ -33,6 +33,7 @@ pub enum Command {
         generation: u64,
     },
     Copy(i64),
+    CopyForPaste(i64),
     Preview {
         id: i64,
         generation: u64,
@@ -72,6 +73,11 @@ pub enum Event {
         generation: u64,
     },
     Status(String),
+    Copied {
+        id: i64,
+        for_paste: bool,
+        message: String,
+    },
     Reordered {
         from: i64,
         generation: u64,
@@ -454,6 +460,7 @@ impl Worker {
     }
 
     fn handle(&mut self, command: Command) -> Result<()> {
+        let for_paste = matches!(&command, Command::CopyForPaste(_));
         match command {
             Command::Query {
                 search,
@@ -489,7 +496,7 @@ impl Worker {
                 drop(state);
                 result?;
             }
-            Command::Copy(id) => {
+            Command::Copy(id) | Command::CopyForPaste(id) => {
                 let item = self.history.item(id)?;
                 let is_rich = matches!(item.content_type.as_str(), "html" | "rtf");
                 let mut rich_contents = Vec::new();
@@ -596,18 +603,22 @@ impl Worker {
                         .map_err(|error| anyhow!("复制失败：{error}"))?;
                 }
                 state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
-                let _ = self.events.try_send(Event::Status(
-                    match item.content_type.as_str() {
-                        "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
-                        "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
-                        "html" | "rtf" if rich_preserved => {
-                            "富文本已复制，可切换到目标应用按 Ctrl+V 粘贴"
+                self.events
+                    .send_blocking(Event::Copied {
+                        id,
+                        for_paste,
+                        message: match item.content_type.as_str() {
+                            "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                            "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                            "html" | "rtf" if rich_preserved => {
+                                "富文本已复制，可切换到目标应用按 Ctrl+V 粘贴"
+                            }
+                            "html" | "rtf" => "富文本格式未写回，已按纯文本复制",
+                            _ => "已复制，可切换到目标应用按 Ctrl+V 粘贴",
                         }
-                        "html" | "rtf" => "富文本格式未写回，已按纯文本复制",
-                        _ => "已复制，可切换到目标应用按 Ctrl+V 粘贴",
-                    }
-                    .into(),
-                ));
+                        .into(),
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
             Command::Preview { id, generation } => {

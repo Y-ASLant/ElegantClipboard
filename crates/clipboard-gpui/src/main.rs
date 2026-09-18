@@ -1,4 +1,6 @@
 mod options;
+#[cfg(windows)]
+mod paste;
 #[cfg(any(windows, test))]
 mod state;
 #[cfg(windows)]

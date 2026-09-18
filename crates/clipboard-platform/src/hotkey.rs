@@ -13,7 +13,8 @@ use windows::Win32::{
             MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey, UnregisterHotKey,
         },
         WindowsAndMessaging::{
-            GetMessageW, MSG, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, WM_HOTKEY, WM_QUIT,
+            GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, MSG, PM_NOREMOVE,
+            PeekMessageW, PostThreadMessageW, WM_HOTKEY, WM_QUIT,
         },
     },
 };
@@ -26,7 +27,7 @@ pub struct Hotkey {
 }
 
 impl Hotkey {
-    pub fn start(choice: HotkeyPreference, events: Sender<()>) -> Result<Self> {
+    pub fn start(choice: HotkeyPreference, events: Sender<(isize, u32)>) -> Result<Self> {
         let (modifiers, key) = match choice {
             HotkeyPreference::CtrlShiftV => (MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, b'V'),
             HotkeyPreference::AltC => (MOD_ALT | MOD_NOREPEAT, b'C'),
@@ -51,7 +52,10 @@ impl Hotkey {
                 }
                 while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
                     if message.message == WM_HOTKEY && message.wParam.0 == HOTKEY_ID as usize {
-                        let _ = events.try_send(());
+                        let foreground = unsafe { GetForegroundWindow() };
+                        let mut process_id = 0;
+                        unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
+                        let _ = events.try_send((foreground.0 as isize, process_id));
                     }
                 }
                 unsafe {

@@ -1,3 +1,4 @@
+use crate::paste;
 use crate::tray::{self, TrayCommand};
 use crate::visual::{self, CONTROL_HEIGHT, PAGE_PADDING, ROW_HEIGHT};
 use crate::{
@@ -29,6 +30,7 @@ gpui_kit::actions!(
         Next,
         Previous,
         CopySelected,
+        PasteSelected,
         DeleteSelected,
         FocusSearch,
         PreviewSelected,
@@ -64,6 +66,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("down", Next, Some("HistoryList")),
                 KeyBinding::new("up", Previous, Some("HistoryList")),
                 KeyBinding::new("enter", CopySelected, Some("HistoryList")),
+                KeyBinding::new("ctrl-enter", PasteSelected, Some("HistoryList")),
                 KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
                 KeyBinding::new("space", PreviewSelected, Some("HistoryList")),
                 KeyBinding::new("escape", ClosePreview, Some("Preview")),
@@ -157,7 +160,7 @@ struct ClipboardView {
     _tray: Option<TrayIcon>,
     _tray_events: Task<()>,
     hotkey: Option<Hotkey>,
-    hotkey_sender: async_channel::Sender<()>,
+    hotkey_sender: async_channel::Sender<(isize, u32)>,
     _hotkey_events: Task<()>,
     exiting: Rc<Cell<bool>>,
     history: HistoryState,
@@ -171,6 +174,8 @@ struct ClipboardView {
     theme_pending: bool,
     hotkey_choice: HotkeyPreference,
     hotkey_pending: bool,
+    paste_target: Option<(isize, u32)>,
+    paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
     drop_target: Option<(i64, bool)>,
     reordered: Option<(i64, usize)>,
@@ -231,7 +236,10 @@ impl ClipboardView {
             while let Ok(command) = tray_receiver.recv().await {
                 if view
                     .update_in(cx, |this, window, cx| match command {
-                        TrayCommand::Show => tray::set_window_visible(window, true),
+                        TrayCommand::Show => {
+                            this.paste_target = None;
+                            tray::set_window_visible(window, true);
+                        }
                         TrayCommand::Quit => {
                             this.exiting.set(true);
                             cx.quit();
@@ -252,9 +260,14 @@ impl ClipboardView {
             Hotkey::start(hotkey_choice, hotkey_sender.clone()).map(Some)
         };
         let hotkey_events = cx.spawn_in(window, async move |view, cx| {
-            while hotkey_receiver.recv().await.is_ok() {
+            while let Ok(target) = hotkey_receiver.recv().await {
                 if view
-                    .update_in(cx, |_, window, _| tray::set_window_visible(window, true))
+                    .update_in(cx, |this, window, cx| {
+                        this.paste_target =
+                            paste::is_external_target(window, target).then_some(target);
+                        tray::set_window_visible(window, true);
+                        cx.notify();
+                    })
                     .is_err()
                 {
                     break;
@@ -298,6 +311,8 @@ impl ClipboardView {
             theme_pending: false,
             hotkey_choice,
             hotkey_pending: false,
+            paste_target: None,
+            paste_pending: None,
             reorder_pending: false,
             drop_target: None,
             reordered: None,
@@ -404,7 +419,10 @@ impl ClipboardView {
 
     fn apply_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
         match event {
-            Event::ShowWindow => tray::set_window_visible(window, true),
+            Event::ShowWindow => {
+                self.paste_target = None;
+                tray::set_window_visible(window, true);
+            }
             Event::Snapshot {
                 items,
                 total,
@@ -469,6 +487,47 @@ impl ClipboardView {
                 self.message = message;
                 self.is_error = false;
             }
+            Event::Copied {
+                id,
+                for_paste,
+                message,
+            } => {
+                self.message = message;
+                self.is_error = false;
+                if let Some((pending_id, target)) = self.paste_pending.take() {
+                    if pending_id == id && for_paste {
+                        if paste::is_external_target(window, target) {
+                            tray::set_window_visible(window, false);
+                            cx.spawn_in(window, async move |view, cx| {
+                                cx.background_executor()
+                                    .timer(Duration::from_millis(60))
+                                    .await;
+                                let _ = view.update_in(cx, |this, window, cx| {
+                                    match paste::send_to_target(target) {
+                                        Ok(()) => {
+                                            this.message =
+                                                "已发送粘贴快捷键，请检查目标应用".into();
+                                            this.is_error = false;
+                                        }
+                                        Err(error) => {
+                                            tray::set_window_visible(window, true);
+                                            this.message = error.to_string();
+                                            this.is_error = true;
+                                        }
+                                    }
+                                    cx.notify();
+                                });
+                            })
+                            .detach();
+                        } else {
+                            self.message = "目标窗口已变化，内容已复制，请手动粘贴".into();
+                            self.is_error = true;
+                        }
+                    } else {
+                        self.paste_pending = Some((pending_id, target));
+                    }
+                }
+            }
             Event::ThemeSaved(result) => {
                 self.theme_pending = false;
                 match result {
@@ -519,6 +578,7 @@ impl ClipboardView {
                 .into();
             }
             Event::Error(message) => {
+                self.paste_pending = None;
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
@@ -638,23 +698,41 @@ impl ClipboardView {
             )
             .child(div().flex_1().min_h_0().child(body))
             .child(
-                div().flex().justify_end().child(
-                    Button::new("preview-copy")
-                        .primary()
-                        .label(if image {
-                            "复制图片"
-                        } else if files {
-                            "复制文件"
-                        } else if rich {
-                            "复制富文本"
-                        } else {
-                            "复制全文"
-                        })
-                        .disabled(!ready)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.send(Command::Copy(id), cx);
-                        })),
-                ),
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("preview-paste")
+                            .outline()
+                            .label("粘贴到原窗口")
+                            .disabled(
+                                !ready
+                                    || self.paste_target.is_none()
+                                    || self.paste_pending.is_some()
+                                    || self._tray.is_none(),
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.paste_selected(id, window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("preview-copy")
+                            .primary()
+                            .label(if image {
+                                "复制图片"
+                            } else if files {
+                                "复制文件"
+                            } else if rich {
+                                "复制富文本"
+                            } else {
+                                "复制全文"
+                            })
+                            .disabled(!ready)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.send(Command::Copy(id), cx);
+                            })),
+                    ),
             )
     }
 
@@ -663,6 +741,28 @@ impl ClipboardView {
             self.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
         }
         cx.notify();
+    }
+
+    fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
+        let Some(target) = self.paste_target else {
+            self.message = "请从目标应用按全局快捷键唤出，再使用粘贴".into();
+            self.is_error = true;
+            cx.notify();
+            return;
+        };
+        if self._tray.is_none() || !paste::is_external_target(window, target) {
+            self.paste_target = None;
+            self.message = "原窗口不可用，仍可使用复制后手动粘贴".into();
+            self.is_error = true;
+            cx.notify();
+            return;
+        }
+        if self.paste_pending.is_none() && self.send(Command::CopyForPaste(id), cx) {
+            self.paste_pending = Some((id, target));
+            self.message = "正在复制并返回原窗口…".into();
+            self.is_error = false;
+            cx.notify();
+        }
     }
 
     fn valid_drag(&self, drag: &HistoryDrag, pinned: bool) -> bool {
@@ -961,6 +1061,22 @@ impl ClipboardView {
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::Delete(id), cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(("paste", id as usize))
+                                    .outline()
+                                    .xsmall()
+                                    .h(px(CONTROL_HEIGHT))
+                                    .label("粘贴")
+                                    .disabled(
+                                        self.paste_target.is_none()
+                                            || self.paste_pending.is_some()
+                                            || self._tray.is_none(),
+                                    )
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.paste_selected(id, window, cx);
                                     })),
                             )
                             .child(
@@ -1263,6 +1379,11 @@ impl ClipboardView {
                     .on_action(cx.listener(|this, _: &CopySelected, _, cx| {
                         if let Some(id) = this.history.selected {
                             this.send(Command::Copy(id), cx);
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &PasteSelected, window, cx| {
+                        if let Some(id) = this.history.selected {
+                            this.paste_selected(id, window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &DeleteSelected, _, cx| {

@@ -83,11 +83,14 @@ fn main() -> anyhow::Result<()> {
             thread::sleep(Duration::from_millis(10));
         }
     };
-    let status = || -> anyhow::Result<()> {
+    let status = |expected_paste: bool| -> anyhow::Result<()> {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             match events.try_recv() {
-                Ok(Event::Status(_)) => return Ok(()),
+                Ok(Event::Copied { for_paste, .. }) => {
+                    assert_eq!(for_paste, expected_paste);
+                    return Ok(());
+                }
                 Ok(Event::Error(message)) => bail!("{message}"),
                 _ => {}
             }
@@ -103,8 +106,8 @@ fn main() -> anyhow::Result<()> {
         .set_text(text.clone())
         .map_err(|error| anyhow!("写入测试文本失败：{error}"))?;
     let text_id = snapshot("text")?;
-    service.send(Command::Copy(text_id))?;
-    status()?;
+    service.send(Command::CopyForPaste(text_id))?;
+    status(true)?;
     assert_eq!(
         clipboard
             .get_text()
@@ -145,7 +148,7 @@ fn main() -> anyhow::Result<()> {
         thread::sleep(Duration::from_millis(10));
     }
     service.send(Command::Copy(rich_id))?;
-    status()?;
+    status(false)?;
     assert_eq!(
         clipboard
             .get_text()
@@ -175,7 +178,7 @@ fn main() -> anyhow::Result<()> {
         .map_err(|error| anyhow!("写入测试图片失败：{error}"))?;
     let image_id = snapshot("image")?;
     service.send(Command::Copy(image_id))?;
-    status()?;
+    status(false)?;
     let image = clipboard
         .get_image()
         .map_err(|error| anyhow!("读回图片失败：{error}"))?;
@@ -190,7 +193,7 @@ fn main() -> anyhow::Result<()> {
         .map_err(|error| anyhow!("写入测试文件失败：{error}"))?;
     let file_id = snapshot("files")?;
     service.send(Command::Copy(file_id))?;
-    status()?;
+    status(false)?;
     assert_eq!(
         clipboard
             .get_files()
