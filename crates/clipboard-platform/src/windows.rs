@@ -36,6 +36,10 @@ pub enum Command {
     Copy(i64),
     CopyForPaste(i64),
     CreateGroup(String),
+    RenameGroup {
+        id: i64,
+        name: String,
+    },
     MoveToGroup {
         id: i64,
         source_group_id: Option<i64>,
@@ -78,6 +82,7 @@ pub enum Event {
     ShowWindow,
     Groups(Vec<Group>),
     GroupCreated(Result<Group, String>),
+    GroupRenamed(Result<Group, String>),
     ItemMoved {
         id: i64,
         result: Result<(), String>,
@@ -715,6 +720,19 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::RenameGroup { id, name } => {
+                let result = self
+                    .history
+                    .rename_group(id, &name)
+                    .map_err(|error| error.to_string());
+                if result.is_ok() {
+                    self.send_groups()?;
+                }
+                self.events
+                    .send_blocking(Event::GroupRenamed(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::MoveToGroup {
                 id,
                 source_group_id,
@@ -883,6 +901,38 @@ mod tests {
         assert!(matches!(
             events.recv_blocking()?,
             Event::GroupCreated(Err(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn rename_group_acknowledges_saved_name_and_rejects_conflict() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let group = history.create_group("工作")?;
+        history.create_group("归档")?;
+        drop(history);
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+        next_snapshot(&events, 0);
+        service.send(Command::RenameGroup {
+            id: group.id,
+            name: "  常用  ".into(),
+        })?;
+        let Event::Groups(groups) = events.recv_blocking()? else {
+            bail!("没有刷新分组列表");
+        };
+        assert_eq!(groups[0].name, "常用");
+        assert!(
+            matches!(events.recv_blocking()?, Event::GroupRenamed(Ok(ref renamed)) if renamed.id == group.id && renamed.name == "常用")
+        );
+        service.send(Command::RenameGroup {
+            id: group.id,
+            name: "归档".into(),
+        })?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::GroupRenamed(Err(_))
         ));
         Ok(())
     }

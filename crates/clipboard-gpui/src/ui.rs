@@ -175,7 +175,8 @@ struct ClipboardView {
     search: Entity<InputState>,
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
-    group_create_pending: bool,
+    group_rename_id: Option<i64>,
+    group_save_pending: bool,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -316,9 +317,10 @@ impl ClipboardView {
             history: HistoryState::default(),
             groups: Vec::new(),
             search,
-            group_name_input: cx.new(|cx| InputState::new(window, cx).placeholder("新分组名称")),
+            group_name_input: cx.new(|cx| InputState::new(window, cx).placeholder("分组名称")),
             group_editor_open: false,
-            group_create_pending: false,
+            group_rename_id: None,
+            group_save_pending: false,
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -450,13 +452,17 @@ impl ClipboardView {
         cx.notify();
     }
 
-    fn create_group(&mut self, cx: &mut Context<Self>) {
-        if self.group_create_pending {
+    fn save_group(&mut self, cx: &mut Context<Self>) {
+        if self.group_save_pending {
             return;
         }
         let name = self.group_name_input.read(cx).value().to_string();
-        if self.send(Command::CreateGroup(name), cx) {
-            self.group_create_pending = true;
+        let command = match self.group_rename_id {
+            Some(id) => Command::RenameGroup { id, name },
+            None => Command::CreateGroup(name),
+        };
+        if self.send(command, cx) {
+            self.group_save_pending = true;
             cx.notify();
         }
     }
@@ -497,10 +503,11 @@ impl ClipboardView {
                 self.groups = groups;
             }
             Event::GroupCreated(result) => {
-                self.group_create_pending = false;
+                self.group_save_pending = false;
                 match result {
                     Ok(group) => {
                         self.group_editor_open = false;
+                        self.group_rename_id = None;
                         self.group_name_input.update(cx, |input, cx| {
                             input.set_value("", window, cx);
                         });
@@ -510,6 +517,25 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         self.message = format!("创建分组失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::GroupRenamed(result) => {
+                self.group_save_pending = false;
+                match result {
+                    Ok(group) => {
+                        self.group_editor_open = false;
+                        self.group_rename_id = None;
+                        self.group_name_input.update(cx, |input, cx| {
+                            input.set_value("", window, cx);
+                        });
+                        window.focus(&self.list_focus, cx);
+                        self.message = format!("分组已重命名为：{}", group.name);
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("重命名分组失败：{error}");
                         self.is_error = true;
                     }
                 }
@@ -693,6 +719,7 @@ impl ClipboardView {
             Event::Error(message) => {
                 self.paste_pending = None;
                 self.group_move_pending = false;
+                self.group_save_pending = false;
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
@@ -1474,15 +1501,46 @@ impl ClipboardView {
                             .small()
                             .ghost()
                             .label("＋ 新建")
+                            .disabled(self.group_save_pending)
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.group_editor_open = !this.group_editor_open;
+                                this.group_editor_open =
+                                    !this.group_editor_open || this.group_rename_id.is_some();
+                                this.group_rename_id = None;
                                 if this.group_editor_open {
                                     this.group_name_input.update(cx, |input, cx| {
+                                        input.set_value("", window, cx);
                                         input.focus(window, cx);
                                     });
                                 } else {
                                     window.focus(&this.list_focus, cx);
                                 }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("group-rename-toggle")
+                            .small()
+                            .ghost()
+                            .label("重命名")
+                            .disabled(self.history.group_id.is_none() || self.group_save_pending)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                let Some(id) = this.history.group_id else {
+                                    return;
+                                };
+                                let Some(name) = this
+                                    .groups
+                                    .iter()
+                                    .find(|group| group.id == id)
+                                    .map(|group| group.name.clone())
+                                else {
+                                    return;
+                                };
+                                this.group_rename_id = Some(id);
+                                this.group_editor_open = true;
+                                this.group_name_input.update(cx, |input, cx| {
+                                    input.set_value(name, window, cx);
+                                    input.focus(window, cx);
+                                });
                                 cx.notify();
                             })),
                     )
@@ -1509,7 +1567,7 @@ impl ClipboardView {
                     })),
             )
             .when(self.group_editor_open, |container| {
-                container.child(
+                container.child(visual::reveal(
                     div()
                         .px(px(PAGE_PADDING))
                         .pb_2()
@@ -1523,76 +1581,87 @@ impl ClipboardView {
                                 .child(Input::new(&self.group_name_input)),
                         )
                         .child(
-                            Button::new("group-create-submit")
+                            Button::new("group-save-submit")
                                 .small()
                                 .outline()
-                                .label("创建")
-                                .disabled(self.group_create_pending)
-                                .on_click(cx.listener(|this, _, _, cx| this.create_group(cx))),
+                                .label(if self.group_rename_id.is_some() {
+                                    "保存名称"
+                                } else {
+                                    "创建"
+                                })
+                                .disabled(self.group_save_pending)
+                                .on_click(cx.listener(|this, _, _, cx| this.save_group(cx))),
                         )
                         .child(
-                            Button::new("group-create-cancel")
+                            Button::new("group-save-cancel")
                                 .small()
                                 .ghost()
                                 .label("取消")
-                                .disabled(self.group_create_pending)
+                                .disabled(self.group_save_pending)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.group_editor_open = false;
+                                    this.group_rename_id = None;
                                     window.focus(&this.list_focus, cx);
                                     cx.notify();
                                 })),
                         ),
-                )
+                    ("group-editor", self.group_rename_id.unwrap_or(0) as usize),
+                    cx,
+                ))
             })
             .when_some(self.group_move_id, |container, id| {
-                container.child(
-                    div()
-                        .px(px(PAGE_PADDING))
-                        .pb_2()
-                        .h(px(42.))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .overflow_x_scrollbar()
-                        .child(
-                            Button::new("move-group-cancel")
-                                .small()
-                                .ghost()
-                                .label("取消移动")
-                                .disabled(self.group_move_pending)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.group_move_id = None;
-                                    cx.notify();
-                                })),
-                        )
-                        .child(div().text_xs().child("移至"))
-                        .child(
-                            Button::new("move-group-default")
-                                .small()
-                                .outline()
-                                .label("默认分组")
-                                .disabled(
-                                    self.group_move_pending || self.history.group_id.is_none(),
-                                )
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.move_to_group(id, None, cx);
-                                })),
-                        )
-                        .children(self.groups.iter().map(|group| {
-                            let target = Some(group.id);
-                            Button::new(("move-group", group.id as usize))
-                                .small()
-                                .outline()
-                                .label(group.name.clone())
-                                .disabled(
-                                    self.group_move_pending || self.history.group_id == target,
-                                )
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.move_to_group(id, target, cx);
-                                }))
-                        })),
-                )
+                container.child(visual::reveal(
+                    div().child(
+                        div()
+                            .px(px(PAGE_PADDING))
+                            .pb_2()
+                            .h(px(GROUP_BAR_HEIGHT))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .overflow_x_scrollbar()
+                            .child(
+                                Button::new("move-group-cancel")
+                                    .small()
+                                    .ghost()
+                                    .label("取消移动")
+                                    .disabled(self.group_move_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.group_move_id = None;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(div().text_xs().child("移至"))
+                            .child(
+                                Button::new("move-group-default")
+                                    .small()
+                                    .outline()
+                                    .label("默认分组")
+                                    .disabled(
+                                        self.group_move_pending || self.history.group_id.is_none(),
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.move_to_group(id, None, cx);
+                                    })),
+                            )
+                            .children(self.groups.iter().map(|group| {
+                                let target = Some(group.id);
+                                Button::new(("move-group", group.id as usize))
+                                    .small()
+                                    .outline()
+                                    .label(group.name.clone())
+                                    .disabled(
+                                        self.group_move_pending || self.history.group_id == target,
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.move_to_group(id, target, cx);
+                                    }))
+                            })),
+                    ),
+                    ("group-move", id as usize),
+                    cx,
+                ))
             })
             .child(
                 div()

@@ -74,6 +74,37 @@ impl History {
     }
 
     pub fn create_group(&self, name: &str) -> Result<Group> {
+        let name = Self::checked_group_name(name)?;
+        if self.groups()?.iter().any(|group| group.name == name) {
+            bail!("分组名称已存在");
+        }
+        Ok(GroupRepository::new(&self.db).create(name, None)?)
+    }
+
+    pub fn rename_group(&self, id: i64, name: &str) -> Result<Group> {
+        let name = Self::checked_group_name(name)?;
+        let groups = self.groups()?;
+        let current = groups
+            .iter()
+            .find(|group| group.id == id)
+            .ok_or_else(|| anyhow::anyhow!("分组已不存在"))?;
+        if groups
+            .iter()
+            .any(|group| group.id != id && group.name == name)
+        {
+            bail!("分组名称已存在");
+        }
+        if current.name == name {
+            return Ok(current.clone());
+        }
+        GroupRepository::new(&self.db).rename(id, name)?;
+        Ok(Group {
+            name: name.to_owned(),
+            ..current.clone()
+        })
+    }
+
+    fn checked_group_name(name: &str) -> Result<&str> {
         let name = name.trim();
         if name.is_empty() {
             bail!("请输入分组名称");
@@ -81,10 +112,7 @@ impl History {
         if name.chars().count() > 40 || name.len() > 160 {
             bail!("分组名称不能超过 40 个字符或 160 字节");
         }
-        if self.groups()?.iter().any(|group| group.name == name) {
-            bail!("分组名称已存在");
-        }
-        Ok(GroupRepository::new(&self.db).create(name, None)?)
+        Ok(name)
     }
 
     pub fn move_to_group(
@@ -272,6 +300,26 @@ mod tests {
         assert!(history.create_group("工作").is_err());
         drop(history);
         assert_eq!(History::open(path)?.groups()?[0].id, group.id);
+        Ok(())
+    }
+
+    #[test]
+    fn group_rename_preserves_membership_and_rejects_duplicates() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        let work = history.create_group("工作")?;
+        history.create_group("归档")?;
+        let id = history.capture("work item")?.unwrap();
+        history.move_to_group(id, None, Some(work.id))?;
+        assert!(history.rename_group(work.id, "归档").is_err());
+        assert!(history.rename_group(-1, "其他").is_err());
+        assert!(history.rename_group(work.id, " ").is_err());
+        let renamed = history.rename_group(work.id, "  常用  ")?;
+        assert_eq!(renamed.name, "常用");
+        assert_eq!(history.item(id)?.group_id, Some(work.id));
+        drop(history);
+        assert_eq!(History::open(path)?.groups()?[0].name, "常用");
         Ok(())
     }
 
