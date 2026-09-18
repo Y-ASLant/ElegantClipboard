@@ -1,5 +1,5 @@
 # Windows x64 独立包验收（2026-09-19）
 
 - 在 Windows x64 MSVC 主机执行 `scripts/package-gpui-windows.ps1`，脚本用锁定依赖构建 Release，按 Cargo 包版本打包 exe、MIT 许可证与运行说明，并生成 SHA-256 文件。脚本拒绝其他构建目标；产物留在 Git 忽略的 `target/packages/`。
-- 重新生成 `elegant-clipboard-gpui-v0.1.0-windows-x64.zip`，SHA-256 为 `48b19f6c2c16930b7a0d07cb83c073ff64fce235241fbcaeed56146ee64a2327`。独立读取归档核对三项文件、包内更新后的运行说明与 SHA-256，解压到隔离目录后从包内 exe 运行 `--smoke-test --no-monitor --data-dir <隔离目录>`，退出码为 0。
-- 此制品未签名、没有安装器和升级机制，不能视作 Windows 正式发布验收。搜索框拼音输入已在活动桌面验收；其他输入框、常见应用之间的最终粘贴与长时间常驻仍待验证。
+- 重新生成 `elegant-clipboard-gpui-v0.1.0-windows-x64.zip`，SHA-256 为 `eff17d80a726847564acfc2352f2ed069bb1909fa1724a26f7234e66de91aa18`。独立读取归档核对 exe、许可证、`README.txt` 三项文件，包内说明包含搜索、分组创建和正文编辑的中文输入验收范围；实测摘要与 `.sha256` 一致。解压到隔离目录 `target/qa/package-20260919-ime` 后从包内 exe 运行 `--smoke-test --no-monitor --data-dir <隔离目录>`，退出码为 0。
+- 此制品未签名、没有安装器和升级机制，不能视作 Windows 正式发布验收。搜索、分组创建和正文编辑的拼音输入已在活动桌面验收；其他输入法及输入场景、常见应用之间的最终粘贴与长时间常驻仍待验证。
