@@ -18,6 +18,7 @@ fn main() -> anyhow::Result<()> {
     };
     use windows::{
         Win32::Foundation::HANDLE,
+        Win32::System::DataExchange::GetClipboardSequenceNumber,
         Win32::System::StationsAndDesktops::{
             CreateDesktopW, CreateWindowStationW, DESKTOP_CONTROL_FLAGS, GetUserObjectInformationW,
             SetProcessWindowStation, SetThreadDesktop, UOI_NAME,
@@ -84,13 +85,17 @@ fn main() -> anyhow::Result<()> {
             thread::sleep(Duration::from_millis(10));
         }
     };
-    let status = |expected_paste: bool| -> anyhow::Result<()> {
+    let status = |expected_paste: bool| -> anyhow::Result<u32> {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             match events.try_recv() {
-                Ok(Event::Copied { for_paste, .. }) => {
+                Ok(Event::Copied {
+                    for_paste,
+                    clipboard_sequence,
+                    ..
+                }) => {
                     assert_eq!(for_paste, expected_paste);
-                    return Ok(());
+                    return Ok(clipboard_sequence);
                 }
                 Ok(Event::Error(message)) => bail!("{message}"),
                 _ => {}
@@ -108,13 +113,19 @@ fn main() -> anyhow::Result<()> {
         .map_err(|error| anyhow!("写入测试文本失败：{error}"))?;
     let text_id = snapshot("text")?;
     service.send(Command::CopyForPaste(text_id))?;
-    status(true)?;
+    let copied_sequence = status(true)?;
+    assert_ne!(copied_sequence, 0);
+    assert_eq!(unsafe { GetClipboardSequenceNumber() }, copied_sequence);
     assert_eq!(
         clipboard
             .get_text()
             .map_err(|error| anyhow!("读回文本失败：{error}"))?,
         text
     );
+    clipboard
+        .set_text("clipboard changed before paste".into())
+        .map_err(|error| anyhow!("模拟外部改写剪贴板失败：{error}"))?;
+    assert_ne!(unsafe { GetClipboardSequenceNumber() }, copied_sequence);
     println!("text capture/copy ok");
 
     let html = "<b>rich smoke</b>";

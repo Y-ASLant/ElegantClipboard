@@ -124,6 +124,7 @@ pub enum Event {
     Copied {
         id: i64,
         for_paste: bool,
+        clipboard_sequence: u32,
         message: String,
     },
     Reordered {
@@ -718,6 +719,7 @@ impl Worker {
                     .send_blocking(Event::Copied {
                         id,
                         for_paste,
+                        clipboard_sequence: state.ignored_sequence,
                         message: match item.content_type.as_str() {
                             _ if plain_only => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",

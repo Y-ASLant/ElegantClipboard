@@ -3,6 +3,7 @@ use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::{
     Foundation::HWND,
+    System::DataExchange::GetClipboardSequenceNumber,
     UI::{
         Input::KeyboardAndMouse::{
             GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
@@ -25,7 +26,7 @@ pub fn is_external_target(window: &Window, target: (isize, u32)) -> bool {
     matches!(handle.as_raw(), RawWindowHandle::Win32(own) if own.hwnd.get() != target.0)
 }
 
-pub fn send_to_target(target: (isize, u32)) -> Result<()> {
+pub fn send_to_target(target: (isize, u32), clipboard_sequence: u32) -> Result<()> {
     if !is_same_window(target) {
         bail!("目标窗口已关闭，内容已复制，请手动粘贴");
     }
@@ -40,6 +41,9 @@ pub fn send_to_target(target: (isize, u32)) -> Result<()> {
         || unsafe { GetForegroundWindow() } != target
     {
         bail!("无法聚焦原窗口，内容已复制，请手动粘贴");
+    }
+    if clipboard_sequence == 0 || unsafe { GetClipboardSequenceNumber() } != clipboard_sequence {
+        bail!("剪贴板内容已变化，已取消自动粘贴，请检查后手动粘贴");
     }
     let inputs = [
         key_input(VK_CONTROL, false),

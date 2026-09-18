@@ -923,6 +923,7 @@ impl ClipboardView {
             Event::Copied {
                 id,
                 for_paste,
+                clipboard_sequence,
                 message,
             } => {
                 self.message = message;
@@ -936,7 +937,7 @@ impl ClipboardView {
                                     .timer(Duration::from_millis(60))
                                     .await;
                                 let _ = view.update_in(cx, |this, window, cx| {
-                                    match paste::send_to_target(target) {
+                                    match paste::send_to_target(target, clipboard_sequence) {
                                         Ok(()) => {
                                             this.message =
                                                 "已发送粘贴快捷键，请检查目标应用".into();
