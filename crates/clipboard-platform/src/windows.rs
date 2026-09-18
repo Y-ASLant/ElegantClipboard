@@ -7,6 +7,7 @@ use clipboard_core::{
     backup::{BackupReport, RestoreReport, restore_backup},
     database::{ClipboardItem, Database, Group},
     import::{ImportReport, import_legacy_database},
+    legacy_backup::{LegacyBackupReport, import_legacy_backup},
     preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{
@@ -353,6 +354,16 @@ pub fn restore_backup_data(source: &Path, data_dir: PathBuf) -> Result<(PathBuf,
     Ok((data_dir.join("clipboard.db"), report))
 }
 
+pub fn import_legacy_backup_data(
+    source: &Path,
+    data_dir: PathBuf,
+) -> Result<(PathBuf, LegacyBackupReport)> {
+    let _instance_lock = lock_instance(&data_dir)?;
+    let data_dir = data_dir.canonicalize().context("无法解析导入目录")?;
+    let report = import_legacy_backup(source, &data_dir)?;
+    Ok((data_dir.join("clipboard.db"), report))
+}
+
 impl Service {
     pub fn start(
         data_dir: Option<PathBuf>,
@@ -394,6 +405,7 @@ impl Service {
         let worker_state = state.clone();
         let worker_events = events.clone();
         let images_dir = service.data_dir.join("images");
+        let staged_dir = service.data_dir.join("staged");
         service.worker = Some(thread::Builder::new().name("history-worker".into()).spawn(
             move || {
                 let mut worker = Worker {
@@ -401,6 +413,7 @@ impl Service {
                     preferences,
                     clipboard: writer,
                     images_dir,
+                    staged_dir,
                     state: worker_state,
                     search: String::new(),
                     favorite_only: false,
@@ -490,6 +503,7 @@ struct Worker {
     preferences: Preferences,
     clipboard: ClipboardContext,
     images_dir: PathBuf,
+    staged_dir: PathBuf,
     state: Arc<Mutex<CaptureState>>,
     search: String,
     favorite_only: bool,
@@ -596,7 +610,7 @@ impl Worker {
                     }
                 }
                 let files = if item.content_type == "files" {
-                    let paths = self.history.files(id)?;
+                    let paths = self.history.files_for_copy(id, &self.staged_dir)?;
                     if paths.iter().any(|path| !Path::new(path).exists()) {
                         bail!("源文件或文件夹已不存在，无法复制");
                     }

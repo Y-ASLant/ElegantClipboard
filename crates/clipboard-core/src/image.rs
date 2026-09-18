@@ -71,16 +71,23 @@ impl History {
             let _ = std::fs::remove_file(&saved.path);
         }
         let id = inserted?;
-        let (_, deleted_images, _) = self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
+        let (_, deleted_images, deleted_payloads) =
+            self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
         self.cleanup_images(deleted_images, images_dir);
+        self.cleanup_staged(deleted_payloads, images_dir);
         Ok(id)
     }
 
     pub fn delete_with_media(&self, id: i64, images_dir: &Path) -> Result<()> {
-        let image_path = self.repo.get_by_id(id)?.and_then(|item| item.image_path);
+        let item = self.repo.get_by_id(id)?;
+        let image_path = item.as_ref().and_then(|item| item.image_path.clone());
+        let file_payload = item.and_then(|item| item.file_payload);
         self.repo.delete(id)?;
         if let Some(image_path) = image_path {
             self.cleanup_images(vec![image_path], images_dir);
+        }
+        if let Some(file_payload) = file_payload {
+            self.cleanup_staged(vec![file_payload], images_dir);
         }
         Ok(())
     }
@@ -93,8 +100,10 @@ impl History {
         images_dir: &Path,
     ) -> Result<i64> {
         let candidates = self.repo.get_clearable_image_paths(group_id, None)?;
+        let staged = self.repo.get_clearable_file_payloads(group_id, None)?;
         let deleted = self.repo.clear_history(group_id, None)?;
         self.cleanup_images(candidates, images_dir);
+        self.cleanup_staged(staged, images_dir);
         Ok(deleted)
     }
 

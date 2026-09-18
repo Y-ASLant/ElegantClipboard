@@ -876,18 +876,22 @@ impl ClipboardView {
                 self.export_pending = false;
                 match result {
                     Ok(report) => {
+                        let included =
+                            report.included_images + report.included_icons + report.included_staged;
+                        let missing =
+                            report.missing_images + report.missing_icons + report.missing_staged;
                         self.message = format!(
-                            "已备份 {} 条记录、{} 张图片到 {}{}",
+                            "已备份 {} 条记录、{} 个附件到 {}{}",
                             report.total_items,
-                            report.included_images,
+                            included,
                             report.destination.display(),
-                            if report.missing_images == 0 {
+                            if missing == 0 {
                                 String::new()
                             } else {
-                                format!("；{} 张源图片已丢失", report.missing_images)
+                                format!("；{missing} 个源附件未包含在备份中")
                             }
                         );
-                        self.is_error = report.missing_images != 0;
+                        self.is_error = missing != 0;
                     }
                     Err(error) => {
                         self.message = format!("导出备份失败：{error}");

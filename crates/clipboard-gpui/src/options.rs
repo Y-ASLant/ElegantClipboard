@@ -7,6 +7,7 @@ pub struct Options {
     pub smoke_test: bool,
     pub import_db: Option<PathBuf>,
     pub import_backup: Option<PathBuf>,
+    pub import_legacy_backup: Option<PathBuf>,
 }
 
 impl Options {
@@ -17,6 +18,7 @@ impl Options {
             smoke_test: false,
             import_db: None,
             import_backup: None,
+            import_legacy_backup: None,
         };
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -48,11 +50,22 @@ impl Options {
                     };
                     options.import_backup = Some(path.into());
                 }
+                Some("--import-legacy-backup") => {
+                    let Some(path) = args.next().filter(|path| {
+                        !path.is_empty() && !path.to_string_lossy().starts_with("--")
+                    }) else {
+                        bail!("--import-legacy-backup 需要旧版 ZIP 备份路径");
+                    };
+                    options.import_legacy_backup = Some(path.into());
+                }
                 _ => bail!("未知参数：{}", arg.to_string_lossy()),
             }
         }
         if options.smoke_test {
-            if options.import_db.is_some() || options.import_backup.is_some() {
+            if options.import_db.is_some()
+                || options.import_backup.is_some()
+                || options.import_legacy_backup.is_some()
+            {
                 bail!("--smoke-test 不能与导入选项同时使用");
             }
             if options.data_dir.is_none() {
@@ -60,11 +73,21 @@ impl Options {
             }
             options.monitor = false;
         }
-        if options.import_db.is_some() && options.import_backup.is_some() {
-            bail!("--import-db 与 --import-backup 只能选择一项");
+        let import_count = [
+            options.import_db.is_some(),
+            options.import_backup.is_some(),
+            options.import_legacy_backup.is_some(),
+        ]
+        .into_iter()
+        .filter(|selected| *selected)
+        .count();
+        if import_count > 1 {
+            bail!("每次只能选择一种导入方式");
         }
-        if options.import_backup.is_some() && options.data_dir.is_none() {
-            bail!("--import-backup 必须指定独立的 --data-dir");
+        if (options.import_backup.is_some() || options.import_legacy_backup.is_some())
+            && options.data_dir.is_none()
+        {
+            bail!("ZIP 备份导入必须指定独立的 --data-dir");
         }
         Ok(Some(options))
     }
@@ -90,6 +113,8 @@ mod tests {
         assert!(parse(&["--import-db"]).is_err());
         assert!(parse(&["--import-backup"]).is_err());
         assert!(parse(&["--import-backup", "history.zip"]).is_err());
+        assert!(parse(&["--import-legacy-backup"]).is_err());
+        assert!(parse(&["--import-legacy-backup", "old.zip"]).is_err());
         assert!(
             parse(&[
                 "--data-dir",
@@ -106,6 +131,33 @@ mod tests {
                 .unwrap()
                 .import_backup,
             Some(PathBuf::from("history.zip"))
+        );
+        assert_eq!(
+            parse(&["--data-dir", "empty", "--import-legacy-backup", "old.zip"])?
+                .unwrap()
+                .import_legacy_backup,
+            Some(PathBuf::from("old.zip"))
+        );
+        assert!(
+            parse(&[
+                "--data-dir",
+                "empty",
+                "--import-backup",
+                "new.zip",
+                "--import-legacy-backup",
+                "old.zip"
+            ])
+            .is_err()
+        );
+        assert!(
+            parse(&[
+                "--data-dir",
+                "empty",
+                "--smoke-test",
+                "--import-legacy-backup",
+                "old.zip"
+            ])
+            .is_err()
         );
         assert!(
             parse(&[

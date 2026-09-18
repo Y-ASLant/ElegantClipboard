@@ -14,6 +14,7 @@ mod files;
 mod groups;
 mod image;
 pub mod import;
+pub mod legacy_backup;
 pub mod preferences;
 mod reorder;
 pub mod rich;
@@ -182,9 +183,11 @@ impl History {
             char_count: Some(text.chars().count() as i64),
             ..Default::default()
         })?;
-        let (_, deleted_images, _) = self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
+        let (_, deleted_images, deleted_payloads) =
+            self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
         if let Some(images_dir) = images_dir {
             self.cleanup_images(deleted_images, images_dir);
+            self.cleanup_staged(deleted_payloads, images_dir);
         }
         Ok(Some(id))
     }

@@ -81,8 +81,10 @@ impl History {
             char_count: text.map(|value| value.chars().count() as i64),
             ..Default::default()
         })?;
-        let (_, deleted_images, _) = self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
+        let (_, deleted_images, deleted_payloads) =
+            self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
         self.cleanup_images(deleted_images, images_dir);
+        self.cleanup_staged(deleted_payloads, images_dir);
         Ok(id)
     }
 }
