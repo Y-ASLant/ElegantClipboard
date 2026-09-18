@@ -1,4 +1,4 @@
-//! Shared text-history use cases. No dependency on a desktop UI or platform API.
+//! Shared clipboard-history use cases. No dependency on a desktop UI or platform API.
 //!
 //! Transitional source bridge: compile the existing schema/repository and dedup
 //! algorithms directly so the two entry points cannot acquire divergent copies.
@@ -8,9 +8,11 @@
 pub(crate) mod clipboard;
 #[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
+mod image;
 pub mod import;
 pub mod preferences;
 mod reorder;
+pub use image::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 
 use anyhow::{Result, bail};
 use database::{
