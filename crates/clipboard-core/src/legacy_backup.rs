@@ -137,11 +137,6 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
     let mut unbundled_images = 0;
     {
         let tx = connection.transaction()?;
-        tx.execute(
-            "DELETE FROM settings WHERE key NOT IN
-             ('gpui_theme_mode', 'gpui_hotkey', 'gpui_capture_paused')",
-            [],
-        )?;
         let rows: Vec<MediaRow> = {
             let mut query = tx.prepare(
                 "SELECT id, image_path, source_app_icon, file_payload FROM clipboard_items",

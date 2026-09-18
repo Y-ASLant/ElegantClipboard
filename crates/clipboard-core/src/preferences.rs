@@ -4,6 +4,8 @@ use anyhow::Result;
 const THEME_KEY: &str = "gpui_theme_mode";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
+pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
+     ('gpui_theme_mode', 'gpui_hotkey', 'gpui_capture_paused')";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ThemePreference {

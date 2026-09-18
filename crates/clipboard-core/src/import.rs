@@ -62,22 +62,40 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
     drop(source_db);
     let report = {
         let database = Database::new(staged.clone()).context("旧版数据库升级失败")?;
-        let reader = database.read_connection();
-        let connection = reader.lock();
-        let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-        if integrity != "ok" {
-            bail!("导入副本校验失败：{integrity}");
+        database
+            .write_connection()
+            .lock()
+            .execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
+        let report = {
+            let reader = database.read_connection();
+            let connection = reader.lock();
+            let integrity: String =
+                connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+            if integrity != "ok" {
+                bail!("导入副本校验失败：{integrity}");
+            }
+            ImportReport {
+                total_items: connection.query_row("SELECT COUNT(*) FROM clipboard_items", [], |row| {
+                    row.get(0)
+                })?,
+                visible_text_items: connection.query_row(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE content_type IN ('text', 'url') AND group_id IS NULL",
+                    [],
+                    |row| row.get(0),
+                )?,
+            }
+        };
+        // Only the main database file is installed, so every WAL write must be
+        // checkpointed before moving it out of the temporary directory.
+        let busy: i64 = database.write_connection().lock().query_row(
+            "PRAGMA wal_checkpoint(TRUNCATE)",
+            [],
+            |row| row.get(0),
+        )?;
+        if busy != 0 {
+            bail!("导入副本仍有未合并的数据库日志");
         }
-        ImportReport {
-            total_items: connection.query_row("SELECT COUNT(*) FROM clipboard_items", [], |row| {
-                row.get(0)
-            })?,
-            visible_text_items: connection.query_row(
-                "SELECT COUNT(*) FROM clipboard_items WHERE content_type IN ('text', 'url') AND group_id IS NULL",
-                [],
-                |row| row.get(0),
-            )?,
-        }
+        report
     };
     std::fs::rename(&staged, destination).context("无法将导入副本移入 GPUI 数据目录")?;
     Ok(report)
@@ -98,6 +116,11 @@ mod tests {
         let id = history.capture("原来的收藏文本")?.unwrap();
         history.toggle_favorite(id)?;
         history.toggle_pin(id)?;
+        old.write_connection().lock().execute_batch(
+            "INSERT INTO settings (key, value) VALUES
+             ('secret_token', 'legacy-secret'),
+             ('gpui_theme_mode', 'dark')",
+        )?;
         old.write_connection().lock().execute(
             "INSERT INTO clipboard_items (content_type, content_hash, semantic_hash, image_path) VALUES ('image', 'image-hash', 'image-hash', 'C:/old/image.png')",
             [],
@@ -112,6 +135,27 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert!(items[0].is_pinned);
         assert!(items[0].is_favorite);
+        let imported_db = Database::new(destination.clone())?;
+        let settings = imported_db.read_connection();
+        let settings = settings.lock();
+        let secret_count: i64 = settings.query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
+            [],
+            |row| row.get(0),
+        )?;
+        let theme: String = settings.query_row(
+            "SELECT value FROM settings WHERE key = 'gpui_theme_mode'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(secret_count, 0);
+        assert_eq!(theme, "dark");
+        let source_secret_count: i64 = old.write_connection().lock().query_row(
+            "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(source_secret_count, 1);
         assert!(import_legacy_database(&source_path, &destination).is_err());
         assert_eq!(imported.count("", false)?, 2);
         Ok(())

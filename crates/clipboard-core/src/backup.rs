@@ -138,11 +138,7 @@ impl History {
         }
 
         // The GPUI backup contains only settings this application consumes.
-        snapshot.execute(
-            "DELETE FROM settings WHERE key NOT IN
-             ('gpui_theme_mode', 'gpui_hotkey', 'gpui_capture_paused')",
-            [],
-        )?;
+        snapshot.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
         let image_rows: Vec<(i64, String)> = {
             let mut query = snapshot.prepare(
                 "SELECT id, image_path FROM clipboard_items WHERE image_path IS NOT NULL",
