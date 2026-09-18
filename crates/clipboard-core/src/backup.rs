@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{self, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -15,6 +15,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 const FORMAT_VERSION: u32 = 2;
 const MAX_DATABASE_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 const MAX_ASSET_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024 * 1024;
+const MAX_ENTRIES: usize = 100_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
@@ -284,8 +286,15 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     {
         bail!("目标数据目录已有数据库或媒体文件，恢复不会覆盖现有数据");
     }
-    let mut archive = ZipArchive::new(File::open(archive_path).context("无法打开备份文件")?)
-        .context("所选文件不是有效的 ZIP 备份")?;
+    let source = File::open(archive_path).context("无法打开备份文件")?;
+    let mut raw_source = source.try_clone()?;
+    let mut archive = ZipArchive::new(source).context("所选文件不是有效的 ZIP 备份")?;
+    preflight_archive(
+        &mut archive,
+        &mut raw_source,
+        MAX_ENTRIES,
+        MAX_ARCHIVE_BYTES,
+    )?;
     let manifest: Manifest = {
         let mut entry = archive
             .by_name("manifest.json")
@@ -309,7 +318,10 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         if entry.size() > MAX_DATABASE_BYTES {
             bail!("备份数据库超过允许大小");
         }
-        io::copy(&mut entry, &mut File::create(&staged_db)?)?;
+        let copied = io::copy(&mut entry, &mut File::create(&staged_db)?)?;
+        if copied != entry.size() {
+            bail!("备份数据库长度不一致");
+        }
     }
     let mut extracted: HashMap<String, HashSet<String>> = HashMap::new();
     for index in 0..archive.len() {
@@ -344,7 +356,10 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         }
         let media_path = stage.path().join(category).join(filename);
         fs::create_dir_all(media_path.parent().unwrap())?;
-        io::copy(&mut entry, &mut File::create(media_path)?)?;
+        let copied = io::copy(&mut entry, &mut File::create(media_path)?)?;
+        if copied != entry.size() {
+            bail!("备份媒体条目长度不一致：{name}");
+        }
     }
 
     let mut restored_db = Connection::open(&staged_db)?;
@@ -453,6 +468,81 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         restored_staged: extracted.get("staged").map_or(0, HashSet::len),
         missing_staged: manifest.missing_staged,
     })
+}
+
+fn preflight_archive(
+    archive: &mut ZipArchive<File>,
+    raw_source: &mut File,
+    max_entries: usize,
+    max_bytes: u64,
+) -> Result<()> {
+    check_central_directory_names(
+        raw_source,
+        archive.central_directory_start(),
+        archive.len(),
+        max_entries,
+    )?;
+    if archive.len() > max_entries {
+        bail!("备份中的文件数量超过限制");
+    }
+    let mut names = HashSet::new();
+    let mut total_bytes = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index)?;
+        let name = entry.name();
+        if !names.insert(name.to_owned()) {
+            bail!("备份包含重复条目：{name}");
+        }
+        if matches!(name, "manifest.json" | "clipboard.db") && entry.is_dir() {
+            bail!("备份条目类型无效：{name}");
+        }
+        total_bytes = total_bytes
+            .checked_add(entry.size())
+            .filter(|size| *size <= max_bytes)
+            .context("备份展开后超过允许大小")?;
+    }
+    if !names.contains("manifest.json") || !names.contains("clipboard.db") {
+        bail!("备份缺少格式说明或数据库");
+    }
+    Ok(())
+}
+
+// zip 8.x keeps central-directory entries in an IndexMap and silently replaces
+// earlier entries with the same raw name. Inspect the directory before trusting
+// ZipArchive::len() or by_name() for restore decisions.
+fn check_central_directory_names(
+    file: &mut File,
+    start: u64,
+    parsed_count: usize,
+    max_entries: usize,
+) -> Result<()> {
+    file.seek(SeekFrom::Start(start))?;
+    let mut names = HashSet::new();
+    loop {
+        let mut signature = [0u8; 4];
+        file.read_exact(&mut signature)?;
+        if signature != *b"PK\x01\x02" {
+            break;
+        }
+        let mut header = [0u8; 42];
+        file.read_exact(&mut header)?;
+        let name_len = u16::from_le_bytes([header[24], header[25]]) as usize;
+        let extra_len = u16::from_le_bytes([header[26], header[27]]) as i64;
+        let comment_len = u16::from_le_bytes([header[28], header[29]]) as i64;
+        let mut name = vec![0; name_len];
+        file.read_exact(&mut name)?;
+        if !names.insert(name) {
+            bail!("备份包含重复条目");
+        }
+        if names.len() > max_entries {
+            bail!("备份中的文件数量超过限制");
+        }
+        file.seek(SeekFrom::Current(extra_len + comment_len))?;
+    }
+    if names.len() != parsed_count {
+        bail!("备份目录条目数量不一致");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -608,6 +698,77 @@ mod tests {
         assert!(restore_backup(&malicious, &target).is_err());
         assert!(!target.join("clipboard.db").exists());
         assert!(!target.join("outside.txt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_entries_are_rejected_without_creating_restore_files() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let source = History::open(dir.path().join("source.db"))?;
+        source.capture("safe text")?;
+        let valid = dir.path().join("valid.zip");
+        source.export_backup(&valid)?;
+
+        for (index, duplicate) in ["manifest.json", "clipboard.db", "images/extra.png"]
+            .into_iter()
+            .enumerate()
+        {
+            let archive_path = dir.path().join(format!("duplicate-{index}.zip"));
+            let mut input = ZipArchive::new(File::open(&valid)?)?;
+            let mut output = ZipWriter::new(File::create(&archive_path)?);
+            for index in 0..input.len() {
+                let mut entry = input.by_index(index)?;
+                output.start_file(entry.name(), SimpleFileOptions::default())?;
+                io::copy(&mut entry, &mut output)?;
+            }
+            if duplicate.starts_with("images/") {
+                output.start_file(duplicate, SimpleFileOptions::default())?;
+                output.write_all(b"first")?;
+            }
+            // ZipWriter refuses duplicate names; replace an equal-length placeholder
+            // in both ZIP headers to exercise a duplicate produced elsewhere.
+            let placeholder = "Q".repeat(duplicate.len());
+            output.start_file(&placeholder, SimpleFileOptions::default())?;
+            output.write_all(b"second")?;
+            output.finish()?;
+            let mut bytes = fs::read(&archive_path)?;
+            let occurrences: Vec<_> = bytes
+                .windows(placeholder.len())
+                .enumerate()
+                .filter_map(|(offset, window)| (window == placeholder.as_bytes()).then_some(offset))
+                .collect();
+            assert_eq!(occurrences.len(), 2);
+            for offset in occurrences {
+                bytes[offset..offset + duplicate.len()].copy_from_slice(duplicate.as_bytes());
+            }
+            fs::write(&archive_path, bytes)?;
+            ZipArchive::new(File::open(&archive_path)?)?;
+            let target = dir.path().join(format!("target-{index}"));
+            fs::create_dir_all(&target)?;
+            assert!(restore_backup(&archive_path, &target).is_err());
+            assert_eq!(fs::read_dir(&target)?.count(), 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn archive_limits_are_checked_before_extraction() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("source.db"))?;
+        history.capture("safe text")?;
+        let backup = dir.path().join("valid.zip");
+        history.export_backup(&backup)?;
+        let source = File::open(&backup)?;
+        let mut raw_source = source.try_clone()?;
+        let mut archive = ZipArchive::new(source)?;
+        assert!(preflight_archive(&mut archive, &mut raw_source, 1, u64::MAX).is_err());
+        assert!(preflight_archive(&mut archive, &mut raw_source, MAX_ENTRIES, 1).is_err());
+        preflight_archive(
+            &mut archive,
+            &mut raw_source,
+            MAX_ENTRIES,
+            MAX_ARCHIVE_BYTES,
+        )?;
         Ok(())
     }
 }
