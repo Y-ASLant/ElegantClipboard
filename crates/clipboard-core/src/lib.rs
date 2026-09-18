@@ -88,7 +88,7 @@ impl History {
     ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text,url".into()),
+            content_type: Some("text,url,image".into()),
             favorite_only,
             limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
             ..Default::default()
@@ -98,7 +98,7 @@ impl History {
     pub fn count(&self, search: &str, favorite_only: bool) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text,url".into()),
+            content_type: Some("text,url,image".into()),
             favorite_only,
             ..Default::default()
         })?)
@@ -108,6 +108,12 @@ impl History {
         self.repo
             .get_by_id(id)?
             .and_then(|item| item.text_content)
+            .ok_or_else(|| anyhow::anyhow!("记录已不存在"))
+    }
+
+    pub fn item(&self, id: i64) -> Result<ClipboardItem> {
+        self.repo
+            .get_by_id(id)?
             .ok_or_else(|| anyhow::anyhow!("记录已不存在"))
     }
 

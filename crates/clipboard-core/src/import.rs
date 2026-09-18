@@ -105,7 +105,7 @@ mod tests {
         let report = import_legacy_database(&source_path, &destination)?;
         assert_eq!(report.total_items, 2);
         assert_eq!(report.visible_text_items, 1);
-        assert_eq!(history.count("", false)?, 1);
+        assert_eq!(history.count("", false)?, 2);
         let imported = History::open(destination.clone())?;
         assert_eq!(imported.text(id)?, "原来的收藏文本");
         let items = imported.list("", PAGE_SIZE, true)?;
@@ -113,7 +113,7 @@ mod tests {
         assert!(items[0].is_pinned);
         assert!(items[0].is_favorite);
         assert!(import_legacy_database(&source_path, &destination).is_err());
-        assert_eq!(imported.count("", false)?, 1);
+        assert_eq!(imported.count("", false)?, 2);
         Ok(())
     }
 

@@ -2,14 +2,14 @@ use crate::instance::{self, InstanceSignal};
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
-    History, MAX_TEXT_BYTES, PAGE_SIZE,
+    History, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_TEXT_BYTES, PAGE_SIZE,
     database::{ClipboardItem, Database},
     import::{ImportReport, import_legacy_database},
     preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{
     Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
-    ContentFormat, WatcherShutdown,
+    ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
 };
 use directories::ProjectDirs;
 use std::{
@@ -50,6 +50,11 @@ pub enum Command {
         generation: u64,
     },
     Capture(String),
+    CaptureImage {
+        png: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
 }
 
 pub enum Event {
@@ -92,7 +97,10 @@ struct CaptureState {
     paused: bool,
     ignored_sequence: u32,
     last_sequence: u32,
+    pending_image_bytes: usize,
 }
+
+const MAX_PENDING_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 
 struct WatchHandler {
     clipboard: ClipboardContext,
@@ -117,6 +125,45 @@ impl WatchHandler {
         let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
         let sequence = unsafe { GetClipboardSequenceNumber() };
         if state.paused || sequence == state.ignored_sequence || sequence == state.last_sequence {
+            return Ok(());
+        }
+        if self.clipboard.has(ContentFormat::Image) {
+            let image = self
+                .clipboard
+                .get_image()
+                .map_err(|error| anyhow!("读取剪贴板图片失败：{error}"))?;
+            let (width, height) = image.get_size();
+            if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS
+            {
+                state.last_sequence = sequence;
+                bail!("图片尺寸无效或超过 2500 万像素");
+            }
+            let png = image
+                .to_png()
+                .map_err(|error| anyhow!("编码剪贴板图片失败：{error}"))?;
+            let bytes = png.get_bytes();
+            if bytes.len() > MAX_IMAGE_BYTES {
+                state.last_sequence = sequence;
+                bail!("图片超过 50 MiB，未保存");
+            }
+            if state.pending_image_bytes.saturating_add(bytes.len()) > MAX_PENDING_IMAGE_BYTES {
+                state.last_sequence = sequence;
+                bail!("图片采集队列已满，本次复制未保存");
+            }
+            state.pending_image_bytes += bytes.len();
+            if self
+                .commands
+                .try_send(Command::CaptureImage {
+                    png: bytes.to_vec(),
+                    width,
+                    height,
+                })
+                .is_err()
+            {
+                state.pending_image_bytes -= bytes.len();
+                bail!("采集队列已满或已停止，本次图片未保存");
+            }
+            state.last_sequence = sequence;
             return Ok(());
         }
         if !self.clipboard.has(ContentFormat::Text) {
@@ -232,12 +279,14 @@ impl Service {
         };
         let worker_state = state.clone();
         let worker_events = events.clone();
+        let images_dir = service.data_dir.join("images");
         service.worker = Some(thread::Builder::new().name("history-worker".into()).spawn(
             move || {
                 let mut worker = Worker {
                     history,
                     preferences,
                     clipboard: writer,
+                    images_dir,
                     state: worker_state,
                     search: String::new(),
                     favorite_only: false,
@@ -325,6 +374,7 @@ struct Worker {
     history: History,
     preferences: Preferences,
     clipboard: ClipboardContext,
+    images_dir: PathBuf,
     state: Arc<Mutex<CaptureState>>,
     search: String,
     favorite_only: bool,
@@ -362,15 +412,48 @@ impl Worker {
             Command::Capture(text) => {
                 self.history.capture(&text)?;
             }
-            Command::Copy(id) => {
-                let text = self.history.text(id)?;
+            Command::CaptureImage { png, width, height } => {
+                let result = self
+                    .history
+                    .capture_image(&png, width, height, &self.images_dir);
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
-                self.clipboard
-                    .set_text(text)
-                    .map_err(|error| anyhow!("复制失败：{error}"))?;
+                state.pending_image_bytes = state.pending_image_bytes.saturating_sub(png.len());
+                drop(state);
+                result?;
+            }
+            Command::Copy(id) => {
+                let item = self.history.item(id)?;
+                let image = if item.content_type == "image" {
+                    let path = item.image_path.as_deref().context("图片文件路径缺失")?;
+                    if !Path::new(path).is_file() {
+                        bail!("图片文件已丢失，无法复制");
+                    }
+                    Some(
+                        RustImageData::from_path(path)
+                            .map_err(|error| anyhow!("打开图片失败：{error}"))?,
+                    )
+                } else {
+                    None
+                };
+                let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                if let Some(image) = image {
+                    self.clipboard
+                        .set_image(image)
+                        .map_err(|error| anyhow!("复制图片失败：{error}"))?;
+                } else {
+                    let text = item.text_content.context("记录没有可复制的文本")?;
+                    self.clipboard
+                        .set_text(text)
+                        .map_err(|error| anyhow!("复制失败：{error}"))?;
+                }
                 state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
                 let _ = self.events.try_send(Event::Status(
-                    "已复制，可切换到目标应用按 Ctrl+V 粘贴".into(),
+                    if item.content_type == "image" {
+                        "图片已复制，可切换到目标应用按 Ctrl+V 粘贴"
+                    } else {
+                        "已复制，可切换到目标应用按 Ctrl+V 粘贴"
+                    }
+                    .into(),
                 ));
                 return Ok(());
             }
@@ -384,7 +467,7 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
-            Command::Delete(id) => self.history.delete(id)?,
+            Command::Delete(id) => self.history.delete_with_media(id, &self.images_dir)?,
             Command::ToggleFavorite(id) => {
                 self.history.toggle_favorite(id)?;
             }
@@ -644,6 +727,31 @@ mod tests {
             generation: 2,
         })?;
         assert_eq!(next_snapshot(&events, 2).len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn image_capture_is_persisted_and_delete_removes_managed_file() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let png = include_bytes!("../../../clipboard-rs/tests/test.png");
+        service.send(Command::CaptureImage {
+            png: png.to_vec(),
+            width: 128,
+            height: 128,
+        })?;
+        let rows = next_snapshot(&events, 0);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].content_type, "image");
+        let image_path = PathBuf::from(rows[0].image_path.as_ref().unwrap());
+        assert_eq!(std::fs::read(&image_path)?, png);
+        let image = RustImageData::from_path(image_path.to_str().unwrap())
+            .map_err(|error| anyhow!("打开测试图片失败：{error}"))?;
+        assert_eq!(image.get_size(), (128, 128));
+        service.send(Command::Delete(rows[0].id))?;
+        assert!(next_snapshot(&events, 0).is_empty());
+        assert!(!image_path.exists());
         Ok(())
     }
 
