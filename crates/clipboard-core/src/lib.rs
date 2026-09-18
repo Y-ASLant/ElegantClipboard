@@ -3,6 +3,7 @@
 //! Transitional source bridge: compile the existing schema/repository and dedup
 //! algorithms directly so the two entry points cannot acquire divergent copies.
 //! Their physical move is deferred until the old shell adopts this crate.
+pub mod backup;
 #[allow(dead_code)] // Rich-format helpers are shared with the legacy application.
 #[path = "../../../src-tauri/src/clipboard/dedup.rs"]
 pub(crate) mod clipboard;

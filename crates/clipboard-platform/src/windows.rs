@@ -4,6 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{
     History, MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES,
     MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
+    backup::{BackupReport, RestoreReport, restore_backup},
     database::{ClipboardItem, Database, Group},
     import::{ImportReport, import_legacy_database},
     preferences::{HotkeyPreference, Preferences, ThemePreference},
@@ -66,6 +67,7 @@ pub enum Command {
     Pause(bool),
     SetTheme(ThemePreference),
     SetHotkey(HotkeyPreference),
+    ExportBackup(PathBuf),
     Reorder {
         from: i64,
         to: i64,
@@ -127,6 +129,7 @@ pub enum Event {
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
+    BackupExported(Result<BackupReport, String>),
     Error(String),
 }
 
@@ -336,6 +339,13 @@ pub fn import_legacy_data(
     let destination = data_dir.join("clipboard.db");
     let report = import_legacy_database(source, &destination)?;
     Ok((destination, report))
+}
+
+pub fn restore_backup_data(source: &Path, data_dir: PathBuf) -> Result<(PathBuf, RestoreReport)> {
+    let _instance_lock = lock_instance(&data_dir)?;
+    let data_dir = data_dir.canonicalize().context("无法解析恢复目录")?;
+    let report = restore_backup(source, &data_dir)?;
+    Ok((data_dir.join("clipboard.db"), report))
 }
 
 impl Service {
@@ -830,6 +840,16 @@ impl Worker {
                     .map_err(|error| error.to_string());
                 self.events
                     .send_blocking(Event::HotkeySaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::ExportBackup(destination) => {
+                self.events
+                    .send_blocking(Event::BackupExported(
+                        self.history
+                            .export_backup(&destination)
+                            .map_err(|error| error.to_string()),
+                    ))
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
@@ -1532,6 +1552,37 @@ mod tests {
         drop(service);
         let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
         assert!(reopened.initial_paused);
+        Ok(())
+    }
+
+    #[test]
+    fn worker_exports_backup_and_cli_restores_into_isolated_directory() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("source");
+        let restored = directory.path().join("restored");
+        let backup = directory.path().join("history.zip");
+        let (service, events) = Service::start(Some(source), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Capture("worker backup".into()))?;
+        let original = next_snapshot(&events, 0)[0].id;
+        service.send(Command::ExportBackup(backup.clone()))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::BackupExported(result)) => {
+                    let report = result.map_err(anyhow::Error::msg)?;
+                    assert_eq!(report.total_items, 1);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline, "backup timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let (database, report) = restore_backup_data(&backup, restored)?;
+        assert_eq!(report.total_items, 1);
+        assert_eq!(History::open(database)?.text(original)?, "worker backup");
         Ok(())
     }
 }

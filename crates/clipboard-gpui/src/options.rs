@@ -6,6 +6,7 @@ pub struct Options {
     pub monitor: bool,
     pub smoke_test: bool,
     pub import_db: Option<PathBuf>,
+    pub import_backup: Option<PathBuf>,
 }
 
 impl Options {
@@ -15,6 +16,7 @@ impl Options {
             monitor: true,
             smoke_test: false,
             import_db: None,
+            import_backup: None,
         };
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -38,17 +40,31 @@ impl Options {
                     };
                     options.import_db = Some(path.into());
                 }
+                Some("--import-backup") => {
+                    let Some(path) = args.next().filter(|path| {
+                        !path.is_empty() && !path.to_string_lossy().starts_with("--")
+                    }) else {
+                        bail!("--import-backup 需要 ZIP 备份路径");
+                    };
+                    options.import_backup = Some(path.into());
+                }
                 _ => bail!("未知参数：{}", arg.to_string_lossy()),
             }
         }
         if options.smoke_test {
-            if options.import_db.is_some() {
-                bail!("--smoke-test 不能与 --import-db 同时使用");
+            if options.import_db.is_some() || options.import_backup.is_some() {
+                bail!("--smoke-test 不能与导入选项同时使用");
             }
             if options.data_dir.is_none() {
                 bail!("--smoke-test 必须指定独立的 --data-dir");
             }
             options.monitor = false;
+        }
+        if options.import_db.is_some() && options.import_backup.is_some() {
+            bail!("--import-db 与 --import-backup 只能选择一项");
+        }
+        if options.import_backup.is_some() && options.data_dir.is_none() {
+            bail!("--import-backup 必须指定独立的 --data-dir");
         }
         Ok(Some(options))
     }
@@ -72,6 +88,25 @@ mod tests {
         assert!(parse(&["--data-dir", "--no-monitor"]).is_err());
         assert!(parse(&["--unknown"]).is_err());
         assert!(parse(&["--import-db"]).is_err());
+        assert!(parse(&["--import-backup"]).is_err());
+        assert!(parse(&["--import-backup", "history.zip"]).is_err());
+        assert!(
+            parse(&[
+                "--data-dir",
+                "empty",
+                "--import-db",
+                "old.db",
+                "--import-backup",
+                "history.zip"
+            ])
+            .is_err()
+        );
+        assert_eq!(
+            parse(&["--data-dir", "empty", "--import-backup", "history.zip"])?
+                .unwrap()
+                .import_backup,
+            Some(PathBuf::from("history.zip"))
+        );
         assert!(
             parse(&[
                 "--smoke-test",

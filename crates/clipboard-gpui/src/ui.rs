@@ -12,6 +12,7 @@ use clipboard_core::{
 };
 use clipboard_platform::hotkey::Hotkey;
 use clipboard_platform::{Command, Event, InstanceBusy, Service};
+use directories::UserDirs;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -193,6 +194,7 @@ struct ClipboardView {
     theme_pending: bool,
     hotkey_choice: HotkeyPreference,
     hotkey_pending: bool,
+    export_pending: bool,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
@@ -342,6 +344,7 @@ impl ClipboardView {
             theme_pending: false,
             hotkey_choice,
             hotkey_pending: false,
+            export_pending: false,
             paste_target: None,
             paste_pending: None,
             reorder_pending: false,
@@ -384,6 +387,43 @@ impl ClipboardView {
             return false;
         }
         true
+    }
+
+    fn start_export(&mut self, cx: &mut Context<Self>) {
+        if self.export_pending {
+            return;
+        }
+        let directory = UserDirs::new()
+            .and_then(|dirs| dirs.document_dir().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| self.service.data_dir.clone());
+        self.export_pending = true;
+        cx.notify();
+        let selection = cx.prompt_for_new_path(&directory, Some("ElegantClipboard_backup.zip"));
+        cx.spawn(async move |view, cx| {
+            let result = selection.await;
+            let _ = view.update(cx, |this, cx| {
+                match result {
+                    Ok(Ok(Some(path))) => {
+                        if !this.send(Command::ExportBackup(path), cx) {
+                            this.export_pending = false;
+                        }
+                    }
+                    Ok(Ok(None)) => this.export_pending = false,
+                    Ok(Err(error)) => {
+                        this.export_pending = false;
+                        this.message = format!("无法选择备份路径：{error}");
+                        this.is_error = true;
+                    }
+                    Err(error) => {
+                        this.export_pending = false;
+                        this.message = format!("备份路径选择中断：{error}");
+                        this.is_error = true;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn restore_hotkey(&mut self) -> Option<String> {
@@ -796,6 +836,29 @@ impl ClipboardView {
                 }
                 .into();
             }
+            Event::BackupExported(result) => {
+                self.export_pending = false;
+                match result {
+                    Ok(report) => {
+                        self.message = format!(
+                            "已备份 {} 条记录、{} 张图片到 {}{}",
+                            report.total_items,
+                            report.included_images,
+                            report.destination.display(),
+                            if report.missing_images == 0 {
+                                String::new()
+                            } else {
+                                format!("；{} 张源图片已丢失", report.missing_images)
+                            }
+                        );
+                        self.is_error = report.missing_images != 0;
+                    }
+                    Err(error) => {
+                        self.message = format!("导出备份失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::Error(message) => {
                 self.paste_pending = None;
                 self.group_move_pending = false;
@@ -807,6 +870,7 @@ impl ClipboardView {
                 self.is_error = true;
                 self.history.loading = false;
                 self.pause_pending = false;
+                self.export_pending = false;
             }
         }
         cx.notify();
@@ -1643,23 +1707,40 @@ impl ClipboardView {
                             ),
                     )
                     .child(
-                        Button::new("pause")
-                            .outline()
-                            .small()
-                            .label(if !self.monitoring {
-                                "采集未启用"
-                            } else if self.paused {
-                                "恢复记录"
-                            } else {
-                                "暂停记录"
-                            })
-                            .disabled(!self.monitoring || self.pause_pending)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                if this.send(Command::Pause(!this.paused), cx) {
-                                    this.pause_pending = true;
-                                    cx.notify();
-                                }
-                            })),
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new("export-backup")
+                                    .outline()
+                                    .small()
+                                    .label(if self.export_pending {
+                                        "正在备份…"
+                                    } else {
+                                        "导出备份"
+                                    })
+                                    .disabled(self.export_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| this.start_export(cx))),
+                            )
+                            .child(
+                                Button::new("pause")
+                                    .outline()
+                                    .small()
+                                    .label(if !self.monitoring {
+                                        "采集未启用"
+                                    } else if self.paused {
+                                        "恢复记录"
+                                    } else {
+                                        "暂停记录"
+                                    })
+                                    .disabled(!self.monitoring || self.pause_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.send(Command::Pause(!this.paused), cx) {
+                                            this.pause_pending = true;
+                                            cx.notify();
+                                        }
+                                    })),
+                            ),
                     ),
             )
             .child(
