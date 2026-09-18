@@ -105,6 +105,54 @@ pub enum Command {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureKind {
+    Query(u64),
+    Paste(i64),
+    GroupSave,
+    GroupDelete,
+    GroupMove,
+    ClearHistory,
+    BatchDelete,
+    EditText { id: i64, generation: u64 },
+    Pause,
+    Other,
+}
+
+impl Command {
+    fn failure_kind(&self) -> Option<FailureKind> {
+        match self {
+            Self::Capture(_)
+            | Self::CaptureRich { .. }
+            | Self::CaptureFiles(_)
+            | Self::CaptureImage { .. } => None,
+            Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
+            Self::CopyForPaste(id) => Some(FailureKind::Paste(*id)),
+            Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
+            Self::DeleteGroup { .. } => Some(FailureKind::GroupDelete),
+            Self::MoveToGroup { .. } => Some(FailureKind::GroupMove),
+            Self::ClearHistory { .. } => Some(FailureKind::ClearHistory),
+            Self::DeleteBatch { .. } => Some(FailureKind::BatchDelete),
+            Self::EditText { id, generation, .. } => Some(FailureKind::EditText {
+                id: *id,
+                generation: *generation,
+            }),
+            Self::Pause(_) => Some(FailureKind::Pause),
+            Self::Copy(_)
+            | Self::CopyPlainText(_)
+            | Self::Preview { .. }
+            | Self::Delete(_)
+            | Self::TogglePin(_)
+            | Self::ToggleFavorite(_)
+            | Self::Reorder { .. }
+            | Self::SetTheme(_)
+            | Self::SetHotkey(_)
+            | Self::SetAutostart(_)
+            | Self::ExportBackup(_) => Some(FailureKind::Other),
+        }
+    }
+}
+
 pub enum Event {
     ShowWindow,
     Groups(Vec<Group>),
@@ -150,6 +198,10 @@ pub enum Event {
     AutostartSaved(Result<bool, String>),
     BackupExported(Result<BackupReport, String>),
     BackgroundError(String),
+    CommandFailed {
+        kind: FailureKind,
+        message: String,
+    },
     Error(String),
 }
 
@@ -446,18 +498,14 @@ impl Service {
                 while !stop.load(Ordering::Acquire) {
                     match incoming.recv_timeout(Duration::from_millis(250)) {
                         Ok(command) => {
-                            let background_capture = matches!(
-                                command,
-                                Command::Capture(_)
-                                    | Command::CaptureRich { .. }
-                                    | Command::CaptureImage { .. }
-                                    | Command::CaptureFiles(_)
-                            );
+                            let failure_kind = command.failure_kind();
                             if let Err(error) = worker.handle(command) {
-                                let event = if background_capture {
-                                    Event::BackgroundError(error.to_string())
-                                } else {
-                                    Event::Error(error.to_string())
+                                let event = match failure_kind {
+                                    None => Event::BackgroundError(error.to_string()),
+                                    Some(kind) => Event::CommandFailed {
+                                        kind,
+                                        message: error.to_string(),
+                                    },
                                 };
                                 let _ = worker.events.try_send(event);
                             }
@@ -1012,6 +1060,27 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::CopyForPaste(424242))?;
+        service.send(Command::SetTheme(ThemePreference::Dark))?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::CommandFailed {
+                kind: FailureKind::Paste(424242),
+                ..
+            }
+        ));
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::ThemeSaved(Ok(ThemePreference::Dark))
+        ));
+        Ok(())
+    }
+
     fn next_snapshot(
         events: &async_channel::Receiver<Event>,
         generation: u64,
@@ -1025,6 +1094,9 @@ mod tests {
                     ..
                 }) if actual == generation => return items,
                 Ok(Event::Error(message)) => panic!("{message}"),
+                Ok(Event::CommandFailed { message, .. } | Event::BackgroundError(message)) => {
+                    panic!("{message}")
+                }
                 _ => {}
             }
             assert!(
@@ -1046,7 +1118,7 @@ mod tests {
         )?;
         drop(db);
 
-        let (_service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             match events.try_recv() {
@@ -1058,6 +1130,32 @@ mod tests {
                 _ => {}
             }
             assert!(std::time::Instant::now() < deadline, "启动错误未上报");
+            thread::sleep(Duration::from_millis(10));
+        }
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 7,
+        })?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::CommandFailed {
+                    kind: FailureKind::Query(7),
+                    message,
+                }) => {
+                    assert!(message.contains("读取历史记录失败"), "{message}");
+                    break;
+                }
+                Ok(Event::Snapshot { .. }) => bail!("损坏记录被错误地显示为正常快照"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "查询错误未携带请求代次"
+            );
             thread::sleep(Duration::from_millis(10));
         }
         Ok(())
@@ -1553,15 +1651,27 @@ mod tests {
         }
         std::fs::remove_file(path)?;
         service.send(Command::Copy(id))?;
+        service.send(Command::SetTheme(ThemePreference::Dark))?;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
-            if let Ok(Event::Error(message)) = events.try_recv() {
-                assert!(message.contains("已不存在"));
-                break;
+            match events.try_recv() {
+                Ok(Event::CommandFailed {
+                    kind: FailureKind::Other,
+                    message,
+                }) => {
+                    assert!(message.contains("已不存在"));
+                    break;
+                }
+                Ok(Event::Error(message) | Event::BackgroundError(message)) => bail!("{message}"),
+                _ => {}
             }
             assert!(std::time::Instant::now() < deadline, "copy error timed out");
             thread::sleep(Duration::from_millis(10));
         }
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::ThemeSaved(Ok(ThemePreference::Dark))
+        ));
         Ok(())
     }
 

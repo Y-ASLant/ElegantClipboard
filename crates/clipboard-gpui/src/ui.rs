@@ -11,7 +11,7 @@ use clipboard_core::{
     preferences::{HotkeyPreference, ThemePreference},
 };
 use clipboard_platform::hotkey::Hotkey;
-use clipboard_platform::{Command, Event, InstanceBusy, Service};
+use clipboard_platform::{Command, Event, FailureKind, InstanceBusy, Service};
 use directories::UserDirs;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
@@ -1057,24 +1057,48 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::CommandFailed { kind, message } => {
+                if let FailureKind::Query(generation) = kind
+                    && !self.history.fail_query(generation)
+                {
+                    return;
+                }
+                if let FailureKind::EditText { id, generation } = kind
+                    && (self.preview.id != Some(id) || self.preview.generation != generation)
+                {
+                    return;
+                }
+                match kind {
+                    FailureKind::Query(_) => {}
+                    FailureKind::Paste(id)
+                        if self
+                            .paste_pending
+                            .is_some_and(|(pending_id, _)| pending_id == id) =>
+                    {
+                        self.paste_pending = None;
+                    }
+                    FailureKind::GroupSave => self.group_save_pending = false,
+                    FailureKind::GroupDelete => {
+                        self.group_delete_pending = false;
+                        self.group_delete_id = None;
+                    }
+                    FailureKind::GroupMove => self.group_move_pending = false,
+                    FailureKind::ClearHistory => self.clear_pending = false,
+                    FailureKind::BatchDelete => {
+                        self.batch_pending = false;
+                        self.batch_confirm_open = false;
+                    }
+                    FailureKind::EditText { .. } => self.preview_save_pending = false,
+                    FailureKind::Pause => self.pause_pending = false,
+                    FailureKind::Other | FailureKind::Paste(_) => {}
+                }
+                self.message = message;
+                self.is_error = true;
+            }
             Event::Error(message) => {
-                self.paste_pending = None;
-                self.reorder_pending = false;
-                self.reorder_before = None;
-                self.drop_target = None;
-                self.group_move_pending = false;
-                self.group_save_pending = false;
-                self.group_delete_pending = false;
-                self.clear_pending = false;
-                self.batch_pending = false;
-                self.batch_confirm_open = false;
-                self.group_delete_id = None;
-                self.preview_save_pending = false;
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
-                self.pause_pending = false;
-                self.export_pending = false;
             }
             Event::BackgroundError(message) => {
                 self.message = message;

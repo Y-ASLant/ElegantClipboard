@@ -118,6 +118,14 @@ impl HistoryState {
         true
     }
 
+    pub fn fail_query(&mut self, generation: u64) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        self.loading = false;
+        true
+    }
+
     pub fn select_relative(&mut self, direction: isize) -> Option<usize> {
         if self.items.is_empty() {
             self.selected = None;
@@ -176,6 +184,10 @@ mod tests {
         state.set_group(Some(7));
         assert_eq!(state.group_id, Some(7));
         assert!(!state.apply(vec![], 1, old));
+        assert!(!state.fail_query(old));
+        assert!(state.loading);
+        assert!(state.fail_query(state.generation));
+        assert!(!state.loading);
         state.set_group(None);
         assert_eq!(state.group_id, None);
     }
