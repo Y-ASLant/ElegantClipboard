@@ -9,8 +9,7 @@ fn main() -> anyhow::Result<()> {
     use clipboard_core::PreviewContent;
     use clipboard_platform::{Command, Event, Service};
     use clipboard_rs::{
-        Clipboard, ClipboardContent, ClipboardContext, ContentFormat, RustImageData,
-        common::RustImage,
+        Clipboard, ClipboardContext, ContentFormat, RustImageData, common::RustImage,
     };
     use std::{
         thread,
@@ -62,6 +61,9 @@ fn main() -> anyhow::Result<()> {
 
     let clipboard =
         ClipboardContext::new().map_err(|error| anyhow!("初始化隔离剪贴板失败：{error}"))?;
+    clipboard
+        .clear()
+        .map_err(|error| anyhow!("重置隔离剪贴板失败：{error}"))?;
     println!("window station: {station_name}");
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), true)?;
@@ -97,6 +99,7 @@ fn main() -> anyhow::Result<()> {
                     assert_eq!(for_paste, expected_paste);
                     return Ok(clipboard_sequence);
                 }
+                Ok(Event::CommandFailed { message, .. }) => bail!("复制命令失败：{message}"),
                 Ok(Event::Error(message)) => bail!("{message}"),
                 _ => {}
             }
@@ -129,13 +132,12 @@ fn main() -> anyhow::Result<()> {
     println!("text capture/copy ok");
 
     let html = "<b>rich smoke</b>";
-    clipboard
-        .set(vec![
-            ClipboardContent::Text("rich smoke".into()),
-            ClipboardContent::Html(html.into()),
-            ClipboardContent::Other("Rich Text Format".into(), b"{\\rtf1 rich smoke}\0".to_vec()),
-        ])
-        .map_err(|error| anyhow!("写入测试富文本失败：{error}"))?;
+    let rtf = b"{\\rtf1\\bin2 \x00\xff rich smoke}\0";
+    service.send(Command::CaptureRich {
+        html: Some(html.into()),
+        rtf: Some(rtf.to_vec()),
+        text: Some("rich smoke".into()),
+    })?;
     let rich_id = snapshot("html")?;
     service.send(Command::Preview {
         id: rich_id,
@@ -173,11 +175,17 @@ fn main() -> anyhow::Result<()> {
             .map_err(|error| anyhow!("读回 HTML 失败：{error}"))?
             .contains(html)
     );
-    assert!(
+    println!(
+        "rich formats: {:?}",
+        clipboard
+            .available_formats()
+            .map_err(|error| anyhow!("列出富文本格式失败：{error}"))?
+    );
+    assert_eq!(
         clipboard
             .get_buffer("Rich Text Format")
-            .map_err(|error| anyhow!("读回 RTF 失败：{error}"))?
-            .starts_with(b"{\\rtf1")
+            .map_err(|error| anyhow!("读回 RTF 失败：{error}"))?,
+        rtf
     );
     println!("rich capture/copy ok");
 

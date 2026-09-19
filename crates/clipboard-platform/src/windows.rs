@@ -14,8 +14,8 @@ use clipboard_core::{
     preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{
-    Clipboard, ClipboardContent, ClipboardContext, ClipboardHandler, ClipboardWatcher,
-    ClipboardWatcherContext, ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
+    Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
+    ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
 };
 use directories::ProjectDirs;
 use std::{
@@ -599,6 +599,109 @@ fn plain_text_for_copy(item: &ClipboardItem) -> Result<&str> {
         .context("记录没有可复制的纯文本")
 }
 
+fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Result<()> {
+    let text = item
+        .text_content
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    let html = item
+        .html_content
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    let rtf = item
+        .rtf_content
+        .as_deref()
+        .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
+    if text.is_none() && html.is_none() && rtf.is_none() {
+        bail!("富文本记录没有可写回的有效格式");
+    }
+
+    // clipboard-rs::set suppresses failures of individual formats. Keep one
+    // clipboard open so every requested format is written or reported as failed.
+    let mut touched = false;
+    let result = (|| {
+        let clipboard = clipboard_win::Clipboard::new_attempts(10)
+            .map_err(|error| anyhow!("打开剪贴板失败：{error}"))?;
+        clipboard_win::raw::empty().map_err(|error| anyhow!("清空剪贴板失败：{error}"))?;
+        touched = true;
+        if let Some(text) = text {
+            clipboard_win::raw::set_string_with(text, clipboard_win::options::NoClear)
+                .map_err(|error| anyhow!("写入纯文本格式失败：{error}"))?;
+        }
+        if let Some(html) = html {
+            let format = clipboard_win::register_format("HTML Format")
+                .context("注册 HTML 剪贴板格式失败")?
+                .get();
+            clipboard_win::raw::set_html_with(format, html, clipboard_win::options::NoClear)
+                .map_err(|error| anyhow!("写入 HTML 格式失败：{error}"))?;
+        }
+        if let Some(rtf) = &rtf {
+            let format = clipboard_win::register_format("Rich Text Format")
+                .context("注册 RTF 剪贴板格式失败")?
+                .get();
+            clipboard_win::raw::set_without_clear(format, rtf)
+                .map_err(|error| anyhow!("写入 RTF 格式失败：{error}"))?;
+        }
+        drop(clipboard);
+        Ok(())
+    })();
+    if touched {
+        // Capture the final sequence after the clipboard guard has closed, even
+        // when a later format failed and left a partial write behind.
+        *ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+    }
+    result
+}
+
+fn rich_clipboard_matches(clipboard: &ClipboardContext, item: &ClipboardItem) -> bool {
+    let html = item
+        .html_content
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    let rtf = item
+        .rtf_content
+        .as_deref()
+        .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
+    let text = item
+        .text_content
+        .as_deref()
+        .filter(|value| !value.is_empty());
+    let html_matches = html.is_none_or(|expected| {
+        clipboard
+            .get_html()
+            .ok()
+            .is_some_and(|actual| actual.contains(expected))
+    });
+    let rtf_matches = rtf.as_deref().is_none_or(|expected| {
+        clipboard
+            .get_buffer("Rich Text Format")
+            .ok()
+            .is_some_and(|actual| actual == expected)
+    });
+    let text_matches = text.is_none_or(|expected| {
+        clipboard
+            .get_text()
+            .ok()
+            .is_some_and(|actual| actual == expected)
+    });
+    html_matches && rtf_matches && text_matches
+}
+
+fn verified_rich_sequence(clipboard: &ClipboardContext, item: &ClipboardItem) -> Result<u32> {
+    for _ in 0..4 {
+        let before = unsafe { GetClipboardSequenceNumber() };
+        if !rich_clipboard_matches(clipboard, item) {
+            bail!("富文本写回后格式校验失败，请重试");
+        }
+        let after = unsafe { GetClipboardSequenceNumber() };
+        if before == after {
+            return Ok(after);
+        }
+        thread::yield_now();
+    }
+    bail!("富文本写回后剪贴板持续变化，请重试")
+}
+
 struct Worker {
     history: History,
     preferences: Preferences,
@@ -685,34 +788,6 @@ impl Worker {
                     .then(|| plain_text_for_copy(&item).map(str::to_owned))
                     .transpose()?;
                 let is_rich = !plain_only && matches!(item.content_type.as_str(), "html" | "rtf");
-                let mut rich_contents = Vec::new();
-                if is_rich {
-                    if let Some(text) = item
-                        .text_content
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                    {
-                        rich_contents.push(ClipboardContent::Text(text.to_owned()));
-                    }
-                    if let Some(html) = item
-                        .html_content
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                    {
-                        rich_contents.push(ClipboardContent::Html(html.to_owned()));
-                    }
-                    if let Some(bytes) = item
-                        .rtf_content
-                        .as_deref()
-                        .and_then(clipboard_core::rich::decode_rtf_for_clipboard)
-                    {
-                        rich_contents
-                            .push(ClipboardContent::Other("Rich Text Format".into(), bytes));
-                    }
-                    if rich_contents.is_empty() {
-                        bail!("富文本记录没有可写回的有效格式");
-                    }
-                }
                 let files = if item.content_type == "files" {
                     let paths = self.history.files_for_copy(id, &self.staged_dir)?;
                     if paths.iter().any(|path| !Path::new(path).exists()) {
@@ -752,36 +827,19 @@ impl Worker {
                         .set_image(image)
                         .map_err(|error| anyhow!("复制图片失败：{error}"))?;
                 } else if is_rich {
-                    self.clipboard
-                        .set(rich_contents)
-                        .map_err(|error| anyhow!("复制富文本失败：{error}"))?;
-                    state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
-                    rich_preserved = item.html_content.as_deref().is_some_and(|html| {
-                        !html.is_empty()
-                            && self
-                                .clipboard
-                                .get_html()
-                                .ok()
-                                .is_some_and(|read| !read.is_empty())
-                    }) || item.rtf_content.as_deref().is_some_and(|rtf| {
-                        clipboard_core::rich::decode_rtf_for_clipboard(rtf).is_some()
-                            && self
-                                .clipboard
-                                .get_buffer("Rich Text Format")
-                                .ok()
-                                .is_some_and(|bytes| !bytes.is_empty())
-                    });
-                    let text_copied = item.text_content.as_deref().is_some_and(|text| {
-                        !text.is_empty()
-                            && self
-                                .clipboard
-                                .get_text()
-                                .ok()
-                                .is_some_and(|read| !read.is_empty())
-                    });
-                    if !rich_preserved && !text_copied {
-                        bail!("富文本写回后未检测到可用格式");
-                    }
+                    // Record partial self-writes as ignored before an error is
+                    // returned, so the listener cannot add them to history.
+                    write_rich_clipboard(&item, &mut state.ignored_sequence)?;
+                    let rtf = item
+                        .rtf_content
+                        .as_deref()
+                        .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
+                    state.ignored_sequence = verified_rich_sequence(&self.clipboard, &item)?;
+                    rich_preserved = item
+                        .html_content
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty())
+                        || rtf.is_some();
                 } else {
                     let text = plain_text
                         .or(item.text_content)
@@ -790,12 +848,22 @@ impl Worker {
                         .set_text(text)
                         .map_err(|error| anyhow!("复制失败：{error}"))?;
                 }
-                state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+                let clipboard_sequence = if is_rich {
+                    state.ignored_sequence
+                } else {
+                    let sequence = unsafe { GetClipboardSequenceNumber() };
+                    state.ignored_sequence = sequence;
+                    sequence
+                };
+                if unsafe { GetClipboardSequenceNumber() } != clipboard_sequence {
+                    bail!("复制过程中剪贴板已被其他应用修改，请重试");
+                }
+                drop(state);
                 self.events
                     .send_blocking(Event::Copied {
                         id,
                         for_paste,
-                        clipboard_sequence: state.ignored_sequence,
+                        clipboard_sequence,
                         message: match item.content_type.as_str() {
                             _ if plain_only => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",

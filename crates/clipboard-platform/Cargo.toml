@@ -13,6 +13,7 @@ clipboard-core = { path = "../clipboard-core" }
 [target.'cfg(windows)'.dependencies]
 blake3.workspace = true
 clipboard-rs.workspace = true
+clipboard-win.workspace = true
 directories.workspace = true
 windows.workspace = true
 

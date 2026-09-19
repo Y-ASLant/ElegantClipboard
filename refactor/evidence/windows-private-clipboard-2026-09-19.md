@@ -18,14 +18,18 @@ cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 window station: Service-0x0-acfbc94$
 text capture/copy ok
 rich capture/copy ok
+rich plain-text copy ok
 image capture/copy ok
 files capture/copy ok
+capture error isolation ok
 isolated clipboard roundtrip passed
 ```
 
 同一个 PowerShell 进程调用 `GetClipboardSequenceNumber`，在测试程序运行前后读到的交互桌面序列号均为 `10`，测试退出码为 `0`。该检查只说明本次测试没有触发交互桌面的剪贴板更新，不能代替跨应用粘贴验收。
 
-程序逐项验证文本、同时含纯文本/HTML/RTF 的富文本、128×128 图片和现存文件路径：外部写入隔离剪贴板，后台监听生成对应历史项，服务写回剪贴板，最后按原始格式读回。富文本还检查后台预览文本。服务、监听和历史均使用正式生产代码路径。
+程序逐项验证文本、同时含纯文本/HTML/RTF 的富文本、128×128 图片和现存文件路径：文本、图片和文件路径由外部写入隔离剪贴板，经后台监听生成历史项；富文本通过监听器实际使用的 `CaptureRich` 命令写入历史，避免测试程序与监听线程同时持有全局剪贴板。随后服务写回剪贴板并按原始格式读回，富文本还检查后台预览文本。服务、监听和历史均使用正式生产代码路径。
+
+后续修复多格式写回后，RTF 样本加入 `\bin2` 与非 UTF-8 字节，读回检查改为精确字节相等；完整测试进程连续运行 50 次通过。程序还列出富文本写回后存在的 `CF_UNICODETEXT`、`HTML Format` 和 `Rich Text Format`。另一次运行前后从同一 PowerShell 进程读取交互桌面剪贴板序号，均为 `36`。原先的一次 RTF 缺失触发了写入路径修复，详见 [富文本记录](windows-rich-text-2026-09-19.md)。
 
 ## 范围限制
 
