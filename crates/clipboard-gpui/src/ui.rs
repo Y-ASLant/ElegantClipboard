@@ -1497,6 +1497,30 @@ impl ClipboardView {
                                 })),
                         )
                     })
+                    .when(!self.preview_editing && (image || files), |bar| {
+                        bar.child(
+                            Button::new("preview-reveal")
+                                .outline()
+                                .label("在资源管理器中显示")
+                                .disabled(!ready)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.send(Command::RevealInExplorer(id), cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("preview-copy-path")
+                                .outline()
+                                .label(if self.paste_target.is_some() && self._tray.is_some() {
+                                    "粘贴路径"
+                                } else {
+                                    "复制路径"
+                                })
+                                .disabled(!ready || self.paste_pending.is_some())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.copy_or_paste_path(id, window, cx);
+                                })),
+                        )
+                    })
                     .when(!self.preview_editing, |bar| {
                         bar.child(
                             Button::new("preview-paste")
@@ -1597,6 +1621,31 @@ impl ClipboardView {
         if self.paste_pending.is_none() && self.send(Command::CopyForPaste(id), cx) {
             self.paste_pending = Some((id, target));
             self.message = "正在复制并返回原窗口…".into();
+            self.is_error = false;
+            cx.notify();
+        }
+    }
+
+    fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
+        if self.paste_pending.is_some() {
+            return;
+        }
+        let target = self
+            .paste_target
+            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
+        if self.paste_target.is_some() && target.is_none() {
+            self.paste_target = None;
+        }
+        let command = if target.is_some() {
+            Command::CopyPathForPaste(id)
+        } else {
+            Command::CopyPath(id)
+        };
+        if self.send(command, cx)
+            && let Some(target) = target
+        {
+            self.paste_pending = Some((id, target));
+            self.message = "正在复制路径并返回原窗口…".into();
             self.is_error = false;
             cx.notify();
         }
@@ -1844,6 +1893,7 @@ impl ClipboardView {
         let item = &self.history.items[index];
         let id = item.id;
         let is_image = item.content_type == "image";
+        let is_files = item.content_type == "files";
         let kind = match item.content_type.as_str() {
             "image" => "图片",
             "files" => "文件",
@@ -1857,7 +1907,7 @@ impl ClipboardView {
                 (Some(width), Some(height)) => format!("{width} × {height}"),
                 _ => "尺寸未知".into(),
             }
-        } else if item.content_type == "files" {
+        } else if is_files {
             let count = item
                 .file_paths
                 .as_deref()
@@ -2183,6 +2233,26 @@ impl ClipboardView {
                                         this.send(Command::Delete(id), cx);
                                     })),
                             )
+                            .when(is_files, |bar| {
+                                bar.child(
+                                    Button::new(("copy-path", id as usize))
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(CONTROL_HEIGHT))
+                                        .label(
+                                            if self.paste_target.is_some() && self._tray.is_some() {
+                                                "粘贴路径"
+                                            } else {
+                                                "复制路径"
+                                            },
+                                        )
+                                        .disabled(self.paste_pending.is_some())
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.copy_or_paste_path(id, window, cx);
+                                        })),
+                                )
+                            })
                             .child(
                                 Button::new(("paste", id as usize))
                                     .outline()

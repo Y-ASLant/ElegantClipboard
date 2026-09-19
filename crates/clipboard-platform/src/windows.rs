@@ -41,6 +41,9 @@ pub enum Command {
     Copy(i64),
     CopyPlainText(i64),
     CopyForPaste(i64),
+    CopyPath(i64),
+    CopyPathForPaste(i64),
+    RevealInExplorer(i64),
     MergeCopy(Vec<i64>),
     MergeForPaste(Vec<i64>),
     CreateGroup(String),
@@ -135,7 +138,7 @@ impl Command {
             | Self::CaptureFiles(_)
             | Self::CaptureImage { .. } => None,
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
-            Self::CopyForPaste(id) => Some(FailureKind::Paste(*id)),
+            Self::CopyForPaste(id) | Self::CopyPathForPaste(id) => Some(FailureKind::Paste(*id)),
             Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
             Self::ReorderGroup { .. } => Some(FailureKind::Other),
@@ -150,6 +153,8 @@ impl Command {
             Self::Pause(_) => Some(FailureKind::Pause),
             Self::Copy(_)
             | Self::CopyPlainText(_)
+            | Self::CopyPath(_)
+            | Self::RevealInExplorer(_)
             | Self::Preview { .. }
             | Self::Delete(_)
             | Self::TogglePin(_)
@@ -608,6 +613,40 @@ fn plain_text_for_copy(item: &ClipboardItem) -> Result<&str> {
         .context("记录没有可复制的纯文本")
 }
 
+fn item_paths_for_action(
+    history: &History,
+    item: &ClipboardItem,
+    staged_dir: &Path,
+) -> Result<Vec<String>> {
+    let paths = match item.content_type.as_str() {
+        "files" => history.files_for_copy(item.id, staged_dir)?,
+        "image" => vec![item.image_path.clone().context("图片文件路径缺失")?],
+        _ => bail!("该记录不是文件或图片"),
+    };
+    if paths.iter().any(|path| !Path::new(path).exists()) {
+        bail!("源文件、文件夹或图片已不存在");
+    }
+    Ok(paths)
+}
+
+fn reveal_in_explorer(path: &Path) -> Result<()> {
+    explorer_command(path)?
+        .spawn()
+        .context("无法启动 Windows 资源管理器")?;
+    Ok(())
+}
+
+fn explorer_command(path: &Path) -> Result<std::process::Command> {
+    let system_root = std::env::var_os("SystemRoot").context("无法确定 Windows 系统目录")?;
+    let explorer = PathBuf::from(system_root).join("explorer.exe");
+    if !explorer.is_file() {
+        bail!("找不到 Windows 资源管理器");
+    }
+    let mut command = std::process::Command::new(explorer);
+    command.arg("/select,").arg(path);
+    Ok(command)
+}
+
 fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Result<()> {
     let text = item
         .text_content
@@ -799,8 +838,15 @@ impl Worker {
     }
 
     fn handle(&mut self, command: Command) -> Result<()> {
-        let for_paste = matches!(&command, Command::CopyForPaste(_));
+        let for_paste = matches!(
+            &command,
+            Command::CopyForPaste(_) | Command::CopyPathForPaste(_)
+        );
         let plain_only = matches!(&command, Command::CopyPlainText(_));
+        let path_only = matches!(
+            &command,
+            Command::CopyPath(_) | Command::CopyPathForPaste(_)
+        );
         let merge_for_paste = matches!(&command, Command::MergeForPaste(_));
         match command {
             Command::Query {
@@ -855,13 +901,38 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
-            Command::Copy(id) | Command::CopyPlainText(id) | Command::CopyForPaste(id) => {
+            Command::RevealInExplorer(id) => {
+                let item = self.history.item(id)?;
+                let paths = item_paths_for_action(&self.history, &item, &self.staged_dir)?;
+                reveal_in_explorer(Path::new(&paths[0]))?;
+                self.events
+                    .send_blocking(Event::Status(if paths.len() == 1 {
+                        "已在资源管理器中定位".into()
+                    } else {
+                        format!("已在资源管理器中定位第一项，共 {} 项", paths.len())
+                    }))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::Copy(id)
+            | Command::CopyPlainText(id)
+            | Command::CopyForPaste(id)
+            | Command::CopyPath(id)
+            | Command::CopyPathForPaste(id) => {
                 let item = self.history.item(id)?;
                 let plain_text = plain_only
                     .then(|| plain_text_for_copy(&item).map(str::to_owned))
                     .transpose()?;
-                let is_rich = !plain_only && matches!(item.content_type.as_str(), "html" | "rtf");
-                let files = if item.content_type == "files" {
+                let path_text = path_only
+                    .then(|| {
+                        item_paths_for_action(&self.history, &item, &self.staged_dir)
+                            .map(|paths| paths.join("\n"))
+                    })
+                    .transpose()?;
+                let is_rich = !plain_only
+                    && !path_only
+                    && matches!(item.content_type.as_str(), "html" | "rtf");
+                let files = if !path_only && item.content_type == "files" {
                     let paths = self.history.files_for_copy(id, &self.staged_dir)?;
                     if paths.iter().any(|path| !Path::new(path).exists()) {
                         bail!("源文件或文件夹已不存在，无法复制");
@@ -870,7 +941,7 @@ impl Worker {
                 } else {
                     None
                 };
-                let image = if item.content_type == "image" {
+                let image = if !path_only && item.content_type == "image" {
                     let path = item.image_path.as_deref().context("图片文件路径缺失")?;
                     if !Path::new(path).is_file() {
                         bail!("图片文件已丢失，无法复制");
@@ -891,7 +962,11 @@ impl Worker {
                 };
                 let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
                 let mut rich_preserved = false;
-                if let Some(files) = files {
+                if let Some(path_text) = path_text {
+                    self.clipboard
+                        .set_text(path_text)
+                        .map_err(|error| anyhow!("复制路径失败：{error}"))?;
+                } else if let Some(files) = files {
                     self.clipboard
                         .set_files(files)
                         .map_err(|error| anyhow!("复制文件失败：{error}"))?;
@@ -938,6 +1013,7 @@ impl Worker {
                         for_paste,
                         clipboard_sequence,
                         message: match item.content_type.as_str() {
+                            _ if path_only => "路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             _ if plain_only => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
                             "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
@@ -1225,16 +1301,71 @@ mod tests {
     }
 
     #[test]
+    fn file_path_actions_use_resolved_existing_sources() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let source = directory.path().join("中文 file.txt");
+        std::fs::write(&source, "content")?;
+        let id = history.capture_files(
+            &[source.to_string_lossy().into_owned()],
+            &directory.path().join("images"),
+        )?;
+        assert_eq!(
+            item_paths_for_action(
+                &history,
+                &history.item(id)?,
+                &directory.path().join("staged")
+            )?,
+            vec![source.to_string_lossy().into_owned()]
+        );
+
+        let command = explorer_command(&source)?;
+        assert!(Path::new(command.get_program()).ends_with("explorer.exe"));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("/select,"), source.as_os_str()]
+        );
+
+        std::fs::remove_file(&source)?;
+        assert!(
+            item_paths_for_action(
+                &history,
+                &history.item(id)?,
+                &directory.path().join("staged")
+            )
+            .is_err()
+        );
+        let text = history.capture("not a file")?.unwrap();
+        assert!(
+            item_paths_for_action(
+                &history,
+                &history.item(text)?,
+                &directory.path().join("staged")
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
     fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
         next_snapshot(&events, 0);
         service.send(Command::CopyForPaste(424242))?;
+        service.send(Command::CopyPathForPaste(424243))?;
         service.send(Command::SetTheme(ThemePreference::Dark))?;
         assert!(matches!(
             events.recv_blocking()?,
             Event::CommandFailed {
                 kind: FailureKind::Paste(424242),
+                ..
+            }
+        ));
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::CommandFailed {
+                kind: FailureKind::Paste(424243),
                 ..
             }
         ));

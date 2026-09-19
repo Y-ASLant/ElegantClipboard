@@ -259,6 +259,17 @@ fn main() -> anyhow::Result<()> {
     );
     println!("files capture/copy ok");
 
+    service.send(Command::CopyPath(file_id))?;
+    status(false)?;
+    assert_eq!(
+        clipboard
+            .get_text()
+            .map_err(|error| anyhow!("读回文件路径文本失败：{error}"))?,
+        file
+    );
+    assert!(!clipboard.has(ContentFormat::Files));
+    println!("file path copy ok");
+
     service.send(Command::MergeCopy(vec![text_id, rich_id, file_id]))?;
     let merged_sequence = merged_status(3)?;
     assert_ne!(merged_sequence, 0);
