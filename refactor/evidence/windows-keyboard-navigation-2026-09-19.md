@@ -1,6 +1,6 @@
 # Windows 历史列表键盘导航（2026-09-19）
 
-- 历史列表新增 Home、End、PageUp 与 PageDown；↑/↓ 保持逐条移动。Home/End 跳到当前已加载记录的首尾，PageUp/PageDown 按上一次布局得到的列表可视高度计算步长，并保留一行上下文。所有按键复用同一选中 ID 与虚拟列表滚动状态。
+- 历史列表新增 Home、End、PageUp 与 PageDown；↑/↓ 保持逐条移动。Home/End 跳到当前已加载记录的首尾，PageUp/PageDown 按上一次布局得到的列表可视高度计算步长，并保留一行上下文。列表聚焦时 Ctrl+A 全选已加载记录，未在拖拽时按 Esc 可清除批量选择；拖拽中的 Esc 仍只取消拖拽。所有导航按键复用同一选中 ID 与虚拟列表滚动状态。
 - 纯状态测试覆盖首尾索引钳制与空列表；全工作区 161 项测试、严格 Clippy、格式检查和 Windows 构建通过。
-- 使用 `target/qa/scale-10000/clipboard.db` 的只读快照创建 `target/qa/keyboard-navigation-20260919-v1/`，关闭采集和全局快捷键后启动真实 GPUI 窗口。默认 560×760 窗口中，End + Space 打开当前已加载第 100 项“条目 09901”，Home + Space 返回首项“条目 10000”；最大化窗口后从首项按 PageDown + Space，按可视高度跨至“条目 09996”。截图保存在 Git 忽略的 QA 目录。
+- 使用 `target/qa/scale-10000/clipboard.db` 的只读快照创建 `target/qa/keyboard-navigation-20260919-v1/`，关闭采集和全局快捷键后启动真实 GPUI 窗口。默认 560×760 窗口中，End + Space 打开当前已加载第 100 项“条目 09901”，Home + Space 返回首项“条目 10000”；最大化窗口后从首项按 PageDown + Space，按可视高度跨至“条目 09996”。另一次默认窗口检查中，Ctrl+A 显示“已选 100 条”及批量工具栏，随后 Esc 清除全部选中状态与工具栏。截图保存在 Git 忽略的 QA 目录。
 - 本次交互仅打开只读预览，没有执行复制或粘贴；验收结束后按可执行文件路径核对并结束精确 QA 进程。End 只到当前已加载页末；继续访问数据库后续记录仍需先点击“加载更多”。

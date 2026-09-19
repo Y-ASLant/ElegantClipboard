@@ -40,6 +40,7 @@ gpui_kit::actions!(
         Last,
         PageUp,
         PageDown,
+        SelectAllLoaded,
         CopySelected,
         PasteSelected,
         DeleteSelected,
@@ -92,6 +93,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("end", Last, Some("HistoryList")),
                 KeyBinding::new("pageup", PageUp, Some("HistoryList")),
                 KeyBinding::new("pagedown", PageDown, Some("HistoryList")),
+                KeyBinding::new("ctrl-a", SelectAllLoaded, Some("HistoryList")),
                 KeyBinding::new("enter", CopySelected, Some("HistoryList")),
                 KeyBinding::new("ctrl-enter", PasteSelected, Some("HistoryList")),
                 KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
@@ -725,6 +727,16 @@ impl ClipboardView {
         if !self.selected_ids.insert(id) {
             self.selected_ids.remove(&id);
         }
+        self.batch_confirm_open = false;
+        cx.notify();
+    }
+
+    fn select_all_loaded(&mut self, cx: &mut Context<Self>) {
+        if self.batch_pending || self.history.loading || self.history.items.is_empty() {
+            return;
+        }
+        self.selected_ids
+            .extend(self.history.items.iter().map(|item| item.id));
         self.batch_confirm_open = false;
         cx.notify();
     }
@@ -2382,10 +2394,14 @@ impl ClipboardView {
             .text_color(cx.theme().foreground)
             .font_family("Microsoft YaHei UI")
             .on_action(cx.listener(|this, _: &CancelDrag, window, cx| {
+                let was_dragging = cx.has_active_drag();
                 cx.stop_active_drag(window);
                 this.drop_target = None;
                 this.group_drop_target = None;
                 this.group_drag_direction = 0;
+                if !was_dragging && !this.selected_ids.is_empty() && !this.batch_pending {
+                    this.reset_selection();
+                }
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
@@ -2857,12 +2873,7 @@ impl ClipboardView {
                                         || self.history.loading
                                         || self.selected_ids.len() == self.history.items.len(),
                                 )
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.selected_ids
-                                        .extend(this.history.items.iter().map(|item| item.id));
-                                    this.batch_confirm_open = false;
-                                    cx.notify();
-                                })),
+                                .on_click(cx.listener(|this, _, _, cx| this.select_all_loaded(cx))),
                         )
                         .child(
                             Button::new("batch-clear-selection")
@@ -2996,6 +3007,9 @@ impl ClipboardView {
                     }))
                     .on_action(cx.listener(|this, _: &PageDown, _, cx| {
                         this.select(this.page_step(), cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &SelectAllLoaded, _, cx| {
+                        this.select_all_loaded(cx);
                     }))
                     .on_action(cx.listener(|this, _: &CopySelected, _, cx| {
                         if let Some(id) = this.history.selected {
