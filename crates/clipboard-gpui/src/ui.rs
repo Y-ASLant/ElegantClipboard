@@ -3065,7 +3065,7 @@ impl ClipboardView {
                 div()
                     .h_full()
                     .px_3()
-                    .py_2()
+                    .py_1()
                     .rounded_md()
                     .border_1()
                     .border_color(match active_drop.filter(|target| target.id == id) {
@@ -3117,8 +3117,12 @@ impl ClipboardView {
                                     .text_color(cx.theme().muted_foreground)
                                     .flex()
                                     .items_center()
-                                    .gap_2()
-                                    .child(div().px_1().child("⠿"))
+                                    .gap_1()
+                                    .child(
+                                        Icon::new(IconName::EllipsisVertical)
+                                            .xsmall()
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
                                     .child(format!(
                                         "{}{} · {}",
                                         if pinned {
@@ -3144,9 +3148,15 @@ impl ClipboardView {
                                                 Button::new(("select", id as usize))
                                                     .ghost()
                                                     .xsmall()
-                                                    .h(px(CONTROL_HEIGHT))
-                                                    .label(if marked {
-                                                        tr(self.language, "已选", "Selected")
+                                                    .h(px(24.))
+                                                    .icon(IconName::Check)
+                                                    .tooltip(if marked {
+                                                        tr(self.language, "取消选择", "Deselect")
+                                                    } else {
+                                                        tr(self.language, "选择", "Select")
+                                                    })
+                                                    .accessibility_label(if marked {
+                                                        tr(self.language, "取消选择", "Deselect")
                                                     } else {
                                                         tr(self.language, "选择", "Select")
                                                     })
@@ -3177,8 +3187,8 @@ impl ClipboardView {
                             .overflow_hidden()
                             .rounded_sm()
                             .bg(cx.theme().muted)
-                            .px_3()
-                            .py_2()
+                            .px_2()
+                            .py_1()
                             .flex()
                             .items_center()
                             .gap_3()
@@ -3219,7 +3229,6 @@ impl ClipboardView {
                         div()
                             .flex()
                             .flex_none()
-                            .flex_wrap()
                             .items_center()
                             .gap_1()
                             .justify_end()
@@ -3228,8 +3237,10 @@ impl ClipboardView {
                                 Button::new(("preview", id as usize))
                                     .ghost()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(tr(self.language, "查看", "View"))
+                                    .h(px(24.))
+                                    .icon(IconName::Eye)
+                                    .tooltip(tr(self.language, "查看", "View"))
+                                    .accessibility_label(tr(self.language, "查看", "View"))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         cx.stop_propagation();
                                         this.open_preview(id, window, cx);
@@ -3239,8 +3250,18 @@ impl ClipboardView {
                                 Button::new(("favorite", id as usize))
                                     .ghost()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(if favorite {
+                                    .h(px(24.))
+                                    .icon(if favorite {
+                                        IconName::HeartOff
+                                    } else {
+                                        IconName::Heart
+                                    })
+                                    .tooltip(if favorite {
+                                        tr(self.language, "取消收藏", "Unfavorite")
+                                    } else {
+                                        tr(self.language, "收藏", "Favorite")
+                                    })
+                                    .accessibility_label(if favorite {
                                         tr(self.language, "取消收藏", "Unfavorite")
                                     } else {
                                         tr(self.language, "收藏", "Favorite")
@@ -3254,8 +3275,18 @@ impl ClipboardView {
                                 Button::new(("pin", id as usize))
                                     .ghost()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(if pinned {
+                                    .h(px(24.))
+                                    .icon(if pinned {
+                                        IconName::StarOff
+                                    } else {
+                                        IconName::Star
+                                    })
+                                    .tooltip(if pinned {
+                                        tr(self.language, "取消置顶", "Unpin")
+                                    } else {
+                                        tr(self.language, "置顶", "Pin")
+                                    })
+                                    .accessibility_label(if pinned {
                                         tr(self.language, "取消置顶", "Unpin")
                                     } else {
                                         tr(self.language, "置顶", "Pin")
@@ -3269,8 +3300,14 @@ impl ClipboardView {
                                 Button::new(("move-group", id as usize))
                                     .ghost()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(tr(self.language, "分组", "Group"))
+                                    .h(px(24.))
+                                    .icon(IconName::Folder)
+                                    .tooltip(tr(self.language, "移动到分组", "Move to group"))
+                                    .accessibility_label(tr(
+                                        self.language,
+                                        "移动到分组",
+                                        "Move to group",
+                                    ))
                                     .disabled(
                                         self.group_move_pending
                                             || (self.groups.is_empty()
@@ -3287,8 +3324,10 @@ impl ClipboardView {
                                 Button::new(("delete", id as usize))
                                     .ghost()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(tr(self.language, "删除", "Delete"))
+                                    .h(px(24.))
+                                    .icon(IconName::Delete)
+                                    .tooltip(tr(self.language, "删除", "Delete"))
+                                    .accessibility_label(tr(self.language, "删除", "Delete"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::Delete(id), cx);
@@ -3299,8 +3338,16 @@ impl ClipboardView {
                                     Button::new(("copy-path", id as usize))
                                         .ghost()
                                         .xsmall()
-                                        .h(px(CONTROL_HEIGHT))
-                                        .label(
+                                        .h(px(24.))
+                                        .icon(IconName::Copy)
+                                        .tooltip(
+                                            if self.paste_target.is_some() && self._tray.is_some() {
+                                                tr(self.language, "粘贴路径", "Paste paths")
+                                            } else {
+                                                tr(self.language, "复制路径", "Copy paths")
+                                            },
+                                        )
+                                        .accessibility_label(
                                             if self.paste_target.is_some() && self._tray.is_some() {
                                                 tr(self.language, "粘贴路径", "Paste paths")
                                             } else {
@@ -3318,8 +3365,10 @@ impl ClipboardView {
                                 Button::new(("paste", id as usize))
                                     .outline()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(tr(self.language, "粘贴", "Paste"))
+                                    .h(px(24.))
+                                    .icon(IconName::Replace)
+                                    .tooltip(tr(self.language, "粘贴", "Paste"))
+                                    .accessibility_label(tr(self.language, "粘贴", "Paste"))
                                     .disabled(
                                         self.paste_target.is_none()
                                             || self.paste_pending.is_some()
@@ -3337,8 +3386,18 @@ impl ClipboardView {
                                         Button::new(("copy-plain", id as usize))
                                             .outline()
                                             .xsmall()
-                                            .h(px(CONTROL_HEIGHT))
-                                            .label(tr(self.language, "纯文本", "Plain text"))
+                                            .h(px(24.))
+                                            .icon(IconName::FileText)
+                                            .tooltip(tr(
+                                                self.language,
+                                                "复制纯文本",
+                                                "Copy plain text",
+                                            ))
+                                            .accessibility_label(tr(
+                                                self.language,
+                                                "复制纯文本",
+                                                "Copy plain text",
+                                            ))
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 cx.stop_propagation();
                                                 this.send(Command::CopyPlainText(id), cx);
@@ -3350,8 +3409,10 @@ impl ClipboardView {
                                 Button::new(("copy", id as usize))
                                     .outline()
                                     .xsmall()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(tr(self.language, "复制", "Copy"))
+                                    .h(px(24.))
+                                    .icon(IconName::Copy)
+                                    .tooltip(tr(self.language, "复制", "Copy"))
+                                    .accessibility_label(tr(self.language, "复制", "Copy"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::Copy(id), cx);
@@ -3360,7 +3421,7 @@ impl ClipboardView {
                     ),
             );
         let row = div()
-            .when(live_drag_source, |row| row.opacity(0.2))
+            .when(live_drag_source, |row| row.opacity(0.0))
             .child(row);
         if let Some(offset) = self.reorder_offsets.get(&id) {
             visual::reflow(
