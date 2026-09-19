@@ -23,7 +23,7 @@ pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
 pub use image::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 pub use merge::MergedContent;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use database::{
     ClipboardItem, ClipboardRepository, ContentType, Database, Group, GroupRepository,
     NewClipboardItem, QueryOptions,
@@ -267,6 +267,21 @@ impl History {
             .ok_or_else(|| anyhow::anyhow!("记录已不存在"))
     }
 
+    pub fn optimize_storage(&self) -> Result<()> {
+        self.db.optimize().context("更新数据库统计失败")?;
+        self.db.vacuum().context("回收数据库空闲空间失败")?;
+        let busy: i64 = self
+            .db
+            .write_connection()
+            .lock()
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))
+            .context("合并数据库日志失败")?;
+        if busy != 0 {
+            bail!("数据库日志正在使用，无法完成空间回收");
+        }
+        Ok(())
+    }
+
     pub fn preview_content(&self, id: i64) -> Result<PreviewContent> {
         self.preview_content_inner(id, None)
     }
@@ -326,6 +341,32 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn database_maintenance_reclaims_free_pages_and_preserves_history() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let database = directory.path().join("clipboard.db");
+        let history = History::open(database.clone())?;
+        let id = history.capture("keep after maintenance")?.unwrap();
+        {
+            let connection = history.db.write_connection();
+            let connection = connection.lock();
+            connection.execute_batch(
+                "CREATE TABLE maintenance_fixture (payload BLOB NOT NULL);
+                 INSERT INTO maintenance_fixture(payload) VALUES (zeroblob(4194304));
+                 DELETE FROM maintenance_fixture;
+                 PRAGMA wal_checkpoint(TRUNCATE);",
+            )?;
+        }
+        let before = std::fs::metadata(&database)?.len();
+
+        history.optimize_storage()?;
+
+        let after = std::fs::metadata(&database)?.len();
+        assert!(after < before, "before={before}, after={after}");
+        assert_eq!(history.text(id)?, "keep after maintenance");
+        Ok(())
+    }
 
     #[test]
     fn group_creation_validates_names_and_persists() -> Result<()> {

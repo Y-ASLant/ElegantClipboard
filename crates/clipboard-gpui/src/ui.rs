@@ -305,6 +305,7 @@ struct ClipboardView {
     autostart_pending: bool,
     data_size: Option<DataSizeInfo>,
     data_size_pending: bool,
+    database_maintenance_pending: bool,
     export_pending: bool,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
@@ -502,6 +503,7 @@ impl ClipboardView {
             autostart_pending: false,
             data_size: None,
             data_size_pending: false,
+            database_maintenance_pending: false,
             export_pending: false,
             paste_target: None,
             paste_pending: None,
@@ -1261,6 +1263,12 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::DatabaseOptimized(size) => {
+                self.database_maintenance_pending = false;
+                self.data_size = Some(size);
+                self.message = "数据库已整理，数据占用已更新".into();
+                self.is_error = false;
+            }
             Event::Paused(paused) => {
                 self.paused = paused;
                 self.pause_pending = false;
@@ -1339,6 +1347,9 @@ impl ClipboardView {
                         self.save_as_pending = None;
                     }
                     FailureKind::DataSize => self.data_size_pending = false,
+                    FailureKind::DatabaseMaintenance => {
+                        self.database_maintenance_pending = false;
+                    }
                     FailureKind::Pause => self.pause_pending = false,
                     FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
                 }
@@ -2764,6 +2775,8 @@ impl Render for ClipboardView {
                                         .child(
                                             div()
                                                 .flex()
+                                                .flex_wrap()
+                                                .justify_end()
                                                 .gap_1()
                                                 .child(
                                                     Button::new("data-size-refresh")
@@ -2775,9 +2788,40 @@ impl Render for ClipboardView {
                                                         } else {
                                                             "刷新"
                                                         })
-                                                        .disabled(self.data_size_pending)
+                                                        .disabled(
+                                                            self.data_size_pending
+                                                                || self
+                                                                    .database_maintenance_pending,
+                                                        )
                                                         .on_click(cx.listener(|this, _, _, cx| {
                                                             this.refresh_data_size(cx);
+                                                        })),
+                                                )
+                                                .child(
+                                                    Button::new("optimize-database")
+                                                        .ghost()
+                                                        .xsmall()
+                                                        .h(px(CONTROL_HEIGHT))
+                                                        .label(
+                                                            if self.database_maintenance_pending {
+                                                                "整理中…"
+                                                            } else {
+                                                                "整理数据库"
+                                                            },
+                                                        )
+                                                        .disabled(
+                                                            self.data_size_pending
+                                                                || self
+                                                                    .database_maintenance_pending,
+                                                        )
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            if this
+                                                                .send(Command::OptimizeDatabase, cx)
+                                                            {
+                                                                this.database_maintenance_pending =
+                                                                    true;
+                                                                cx.notify();
+                                                            }
                                                         })),
                                                 )
                                                 .child(

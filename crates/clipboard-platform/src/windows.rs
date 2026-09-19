@@ -99,6 +99,7 @@ pub enum Command {
     SetHotkey(HotkeyPreference),
     SetAutostart(bool),
     QueryDataSize,
+    OptimizeDatabase,
     OpenDataDirectory,
     ExportBackup(PathBuf),
     Reorder {
@@ -136,6 +137,7 @@ pub enum FailureKind {
     EditText { id: i64, generation: u64 },
     SaveAs(i64),
     DataSize,
+    DatabaseMaintenance,
     Pause,
     Other,
 }
@@ -163,6 +165,7 @@ impl Command {
             }),
             Self::Pause(_) => Some(FailureKind::Pause),
             Self::QueryDataSize => Some(FailureKind::DataSize),
+            Self::OptimizeDatabase => Some(FailureKind::DatabaseMaintenance),
             Self::Copy(_)
             | Self::CopyPlainText(_)
             | Self::CopyPath(_)
@@ -238,6 +241,7 @@ pub enum Event {
     HotkeySaved(Result<HotkeyPreference, String>),
     AutostartSaved(Result<bool, String>),
     DataSize(Result<DataSizeInfo, String>),
+    DatabaseOptimized(DataSizeInfo),
     BackupExported(Result<BackupReport, String>),
     BackgroundError(String),
     CommandFailed {
@@ -1442,6 +1446,15 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::OptimizeDatabase => {
+                self.history.optimize_storage()?;
+                let size = data_size_info(&self.data_dir, &self.images_dir, &self.staged_dir)
+                    .context("数据库已整理，但刷新数据占用失败")?;
+                self.events
+                    .send_blocking(Event::DatabaseOptimized(size))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::OpenDataDirectory => {
                 open_data_directory(&self.data_dir)?;
                 self.events
@@ -1617,6 +1630,31 @@ mod tests {
         let command = data_directory_command(directory.path())?;
         assert!(Path::new(command.get_program()).ends_with("explorer.exe"));
         assert_eq!(command.get_args().collect::<Vec<_>>(), [directory.path()]);
+        Ok(())
+    }
+
+    #[test]
+    fn database_maintenance_preserves_history_and_returns_updated_size() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let database = directory.path().join("clipboard.db");
+        let history = History::open(database.clone())?;
+        let id = history.capture("keep after maintenance")?.unwrap();
+        drop(history);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::OptimizeDatabase)?;
+        match events.recv_blocking()? {
+            Event::DatabaseOptimized(size) => {
+                assert!(size.database_bytes > 0);
+                assert_eq!(size.total_bytes, size.database_bytes);
+            }
+            Event::CommandFailed { message, .. } | Event::Error(message) => panic!("{message}"),
+            _ => panic!("unexpected database maintenance event"),
+        }
+        drop(service);
+
+        assert_eq!(History::open(database)?.text(id)?, "keep after maintenance");
         Ok(())
     }
 
