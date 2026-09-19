@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 clipboard-core = { path = "../clipboard-core" }
-serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 async-channel.workspace = true
@@ -16,8 +15,9 @@ clipboard-platform = { path = "../clipboard-platform" }
 gpui-kit.workspace = true
 directories.workspace = true
 raw-window-handle.workspace = true
+serde_json.workspace = true
 tray-icon.workspace = true
-windows.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile.workspace = true

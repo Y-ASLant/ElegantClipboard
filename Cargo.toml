@@ -28,7 +28,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tempfile = "3.27.0"
 tracing = "0.1.44"
-windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_DataExchange", "Win32_System_Registry", "Win32_System_StationsAndDesktops", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse"] }
+windows = "0.62.2"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [profile.dev]
@@ -38,4 +38,3 @@ debug = 1
 lto = "thin"
 codegen-units = 1
 strip = true
-panic = "unwind"

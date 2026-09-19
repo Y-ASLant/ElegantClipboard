@@ -7,15 +7,18 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-async-channel.workspace = true
 clipboard-core = { path = "../clipboard-core" }
 
 [target.'cfg(windows)'.dependencies]
+async-channel.workspace = true
 blake3.workspace = true
 clipboard-rs.workspace = true
 clipboard-win.workspace = true
 directories.workspace = true
-windows.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_DataExchange", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows = { workspace = true, features = ["Win32_Graphics_Gdi", "Win32_Security", "Win32_System_StationsAndDesktops"] }
