@@ -281,6 +281,8 @@ struct ClipboardView {
     group_delete_pending: bool,
     clear_confirm_open: bool,
     clear_pending: bool,
+    clear_all_confirm_open: bool,
+    clear_all_pending: bool,
     selected_ids: HashSet<i64>,
     batch_confirm_open: bool,
     batch_pending: bool,
@@ -479,6 +481,8 @@ impl ClipboardView {
             group_delete_pending: false,
             clear_confirm_open: false,
             clear_pending: false,
+            clear_all_confirm_open: false,
+            clear_all_pending: false,
             selected_ids: HashSet::new(),
             batch_confirm_open: false,
             batch_pending: false,
@@ -770,6 +774,16 @@ impl ClipboardView {
         }
     }
 
+    fn clear_all_history(&mut self, cx: &mut Context<Self>) {
+        if !self.clear_all_confirm_open || self.clear_all_pending {
+            return;
+        }
+        if self.send(Command::ClearAllHistory, cx) {
+            self.clear_all_pending = true;
+            cx.notify();
+        }
+    }
+
     fn reset_selection(&mut self) {
         self.selected_ids.clear();
         self.batch_confirm_open = false;
@@ -992,6 +1006,28 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         self.message = format!("清理历史失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::AllHistoryCleared(result) => {
+                self.clear_all_pending = false;
+                match result {
+                    Ok(count) => {
+                        self.clear_all_confirm_open = false;
+                        self.selected_ids.clear();
+                        self.batch_confirm_open = false;
+                        self.group_move_id = None;
+                        self.preview.close();
+                        self.preview_source_hash = None;
+                        self.preview_editing = false;
+                        self.preview_save_pending = false;
+                        self.message = format!("已删除全部 {count} 条历史，设置和分组已保留");
+                        self.is_error = false;
+                        window.focus(&self.list_focus, cx);
+                    }
+                    Err(error) => {
+                        self.message = format!("删除全部历史失败：{error}");
                         self.is_error = true;
                     }
                 }
@@ -1338,6 +1374,7 @@ impl ClipboardView {
                     }
                     FailureKind::GroupMove => self.group_move_pending = false,
                     FailureKind::ClearHistory => self.clear_pending = false,
+                    FailureKind::ClearAllHistory => self.clear_all_pending = false,
                     FailureKind::BatchDelete => {
                         self.batch_pending = false;
                         self.batch_confirm_open = false;
@@ -2845,6 +2882,38 @@ impl Render for ClipboardView {
                                         .text_color(cx.theme().muted_foreground)
                                         .child(data_size_detail),
                                 ),
+                        )
+                        .child(
+                            div()
+                                .px(px(PAGE_PADDING))
+                                .py_1()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("隐私清理"),
+                                )
+                                .child(
+                                    Button::new("clear-all-history-toggle")
+                                        .danger()
+                                        .xsmall()
+                                        .h(px(CONTROL_HEIGHT))
+                                        .label("删除全部历史")
+                                        .disabled(self.clear_all_pending)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.clear_all_confirm_open = true;
+                                            this.clear_confirm_open = false;
+                                            this.group_delete_id = None;
+                                            this.group_move_id = None;
+                                            this.reset_selection();
+                                            cx.notify();
+                                        })),
+                                ),
                         ),
                     "window-settings",
                     cx,
@@ -2856,6 +2925,87 @@ impl Render for ClipboardView {
 }
 
 impl ClipboardView {
+    fn render_clear_all_confirmation(&self, cx: &mut Context<Self>) -> Div {
+        div()
+            .key_context("ClipboardApp")
+            .track_focus(&self.list_focus)
+            .size_full()
+            .p(px(PAGE_PADDING))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .on_action(cx.listener(|this, _: &CancelDrag, window, cx| {
+                if !this.clear_all_pending {
+                    this.clear_all_confirm_open = false;
+                    window.focus(&this.list_focus, cx);
+                    cx.notify();
+                }
+            }))
+            .child(
+                div()
+                    .text_lg()
+                    .font_semibold()
+                    .text_color(cx.theme().danger)
+                    .child("删除全部历史"),
+            )
+            .child(
+                div()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().danger)
+                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_sm()
+                            .child("删除所有分组中的全部历史？置顶和收藏也会删除。"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(
+                                "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("clear-all-history-cancel")
+                            .small()
+                            .ghost()
+                            .label("取消")
+                            .disabled(self.clear_all_pending)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.clear_all_confirm_open = false;
+                                window.focus(&this.list_focus, cx);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("clear-all-history-confirm")
+                            .small()
+                            .danger()
+                            .label(if self.clear_all_pending {
+                                "正在删除…"
+                            } else {
+                                "确认删除全部历史"
+                            })
+                            .disabled(self.clear_all_pending)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.clear_all_history(cx);
+                            })),
+                    ),
+            )
+    }
+
     fn render_status(&self, cx: &Context<Self>) -> Div {
         div()
             .flex_shrink_0()
@@ -2877,6 +3027,13 @@ impl ClipboardView {
     }
 
     fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.clear_all_confirm_open {
+            return visual::reveal(
+                self.render_clear_all_confirmation(cx),
+                "clear-all-history-confirmation",
+                cx,
+            );
+        }
         if self.preview.id.is_some() {
             return visual::reveal(
                 self.render_preview(cx),

@@ -159,6 +159,17 @@ impl History {
         Ok(deleted)
     }
 
+    /// Delete every history record, including pinned and favorite items,
+    /// while preserving groups and settings.
+    pub fn clear_all_with_media(&self, images_dir: &Path) -> Result<i64> {
+        let images = self.repo.get_all_image_paths()?;
+        let payloads = self.repo.get_all_file_payloads()?;
+        let deleted = self.repo.clear_all()?;
+        self.cleanup_images(images, images_dir);
+        self.cleanup_staged(payloads, images_dir);
+        Ok(deleted)
+    }
+
     pub(crate) fn cleanup_images(&self, candidates: Vec<String>, images_dir: &Path) {
         if candidates.is_empty() {
             return;
@@ -325,6 +336,51 @@ mod tests {
         assert_eq!(history.clear_history_with_media(None, &images)?, 1);
         assert!(history.item(default_text).is_err());
         assert_eq!(history.groups()?[0].item_count, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let database = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&database);
+        let images = directory.path().join("images");
+        let staged_dir = directory.path().join("staged");
+        std::fs::create_dir_all(&staged_dir)?;
+
+        let group = history.create_group("Keep group")?;
+        let protected = history.capture("protected")?.unwrap();
+        history.toggle_pin(protected)?;
+        history.toggle_favorite(protected)?;
+        let grouped = history.capture("grouped")?.unwrap();
+        history.move_to_group(grouped, None, Some(group.id))?;
+        let image = history.capture_image(PNG, 2, 2, &images)?;
+        let image_path = PathBuf::from(history.item(image)?.image_path.unwrap());
+        let missing = "Z:\\ElegantClipboard-QA-missing\\clear-all.txt".to_owned();
+        let file = history.capture_files(std::slice::from_ref(&missing), &images)?;
+        let staged = staged_dir.join("clear-all.txt");
+        std::fs::write(&staged, b"staged")?;
+        let payload = serde_json::json!({
+            "staged": [{"original": missing, "staged": staged.to_string_lossy()}]
+        });
+        history.db.write_connection().lock().execute(
+            "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
+            params![payload.to_string(), file],
+        )?;
+        crate::preferences::Preferences::new(&database)
+            .set_theme(crate::preferences::ThemePreference::Dark)?;
+
+        assert_eq!(history.clear_all_with_media(&images)?, 4);
+
+        assert_eq!(history.count("", false)?, 0);
+        assert_eq!(history.count_in_group("", false, Some(group.id))?, 0);
+        assert!(history.groups()?.iter().any(|item| item.id == group.id));
+        assert_eq!(
+            crate::preferences::Preferences::new(&database).theme()?,
+            crate::preferences::ThemePreference::Dark
+        );
+        assert!(!image_path.exists());
+        assert!(!staged.exists());
         Ok(())
     }
 

@@ -92,6 +92,7 @@ pub enum Command {
         group_id: Option<i64>,
         generation: u64,
     },
+    ClearAllHistory,
     TogglePin(i64),
     ToggleFavorite(i64),
     Pause(bool),
@@ -133,6 +134,7 @@ pub enum FailureKind {
     GroupDelete,
     GroupMove,
     ClearHistory,
+    ClearAllHistory,
     BatchDelete,
     EditText { id: i64, generation: u64 },
     SaveAs(i64),
@@ -158,6 +160,7 @@ impl Command {
             Self::DeleteGroup { .. } => Some(FailureKind::GroupDelete),
             Self::MoveToGroup { .. } => Some(FailureKind::GroupMove),
             Self::ClearHistory { .. } => Some(FailureKind::ClearHistory),
+            Self::ClearAllHistory => Some(FailureKind::ClearAllHistory),
             Self::DeleteBatch { .. } => Some(FailureKind::BatchDelete),
             Self::EditText { id, generation, .. } => Some(FailureKind::EditText {
                 id: *id,
@@ -235,6 +238,7 @@ pub enum Event {
         result: Result<PathBuf, String>,
     },
     HistoryCleared(Result<i64, String>),
+    AllHistoryCleared(Result<i64, String>),
     BatchDeleted(Result<i64, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
@@ -1287,6 +1291,24 @@ impl Worker {
                 }
                 self.events
                     .send_blocking(Event::HistoryCleared(
+                        result.map_err(|error| error.to_string()),
+                    ))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::ClearAllHistory => {
+                let result = self
+                    .history
+                    .clear_all_with_media(&self.images_dir)
+                    .and_then(|count| {
+                        self.send_groups()
+                            .context("全部历史已删除，但分组计数刷新失败，请重启应用后查看")?;
+                        self.snapshot()
+                            .context("全部历史已删除，但列表刷新失败，请重启应用后查看")?;
+                        Ok(count)
+                    });
+                self.events
+                    .send_blocking(Event::AllHistoryCleared(
                         result.map_err(|error| error.to_string()),
                     ))
                     .map_err(|_| anyhow!("窗口已关闭"))?;
@@ -2605,6 +2627,35 @@ mod tests {
         assert!(history.item(removed).is_err());
         assert!(history.item(favorite)?.is_favorite);
         assert_eq!(history.text(default)?, "default");
+        Ok(())
+    }
+
+    #[test]
+    fn clear_all_history_removes_protected_items_across_groups() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let group = history.create_group("Keep group")?;
+        let pinned = history.capture("pinned")?.unwrap();
+        history.toggle_pin(pinned)?;
+        let favorite = history.capture("favorite")?.unwrap();
+        history.toggle_favorite(favorite)?;
+        history.move_to_group(favorite, None, Some(group.id))?;
+        drop(history);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::ClearAllHistory)?;
+        assert!(next_snapshot(&events, 0).is_empty());
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::AllHistoryCleared(Ok(2))
+        ));
+        drop(service);
+
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        assert_eq!(history.count("", false)?, 0);
+        assert_eq!(history.count_in_group("", false, Some(group.id))?, 0);
+        assert!(history.groups()?.iter().any(|item| item.id == group.id));
         Ok(())
     }
 
