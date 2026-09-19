@@ -10,7 +10,7 @@ use crate::{
 use clipboard_core::{
     FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
     database::Group,
-    preferences::{HotkeyPreference, ThemePreference},
+    preferences::{HotkeyPreference, ThemePreference, WindowSizePreference},
 };
 use clipboard_platform::hotkey::Hotkey;
 use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
@@ -81,6 +81,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         monitoring: options.monitor,
         hidden: options.start_hidden,
     };
+    let initial_window_size = service.initial_window_size.unwrap_or_default();
     let smoke_test = options.smoke_test;
     let startup_error = Rc::new(RefCell::new(None));
     let window_error = startup_error.clone();
@@ -111,7 +112,14 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 }
             })
             .detach();
-            let bounds = Bounds::centered(None, size(px(560.), px(760.)), cx);
+            let bounds = Bounds::centered(
+                None,
+                size(
+                    px(initial_window_size.width as f32),
+                    px(initial_window_size.height as f32),
+                ),
+                cx,
+            );
             let tray_enabled = Rc::new(Cell::new(false));
             let exiting = Rc::new(Cell::new(false));
             let smoke_exiting = exiting.clone();
@@ -312,6 +320,7 @@ struct ClipboardView {
     database_maintenance_pending: bool,
     export_pending: bool,
     window_pinned: bool,
+    last_window_size: Option<WindowSizePreference>,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
@@ -331,6 +340,7 @@ struct ClipboardView {
     group_feedback_task: Option<Task<()>>,
     group_drag_scroll_task: Option<Task<()>>,
     history_drag_scroll_task: Option<Task<()>>,
+    window_size_task: Option<Task<()>>,
 }
 
 impl ClipboardView {
@@ -439,6 +449,7 @@ impl ClipboardView {
         }
         let theme = service.initial_theme;
         let paused = service.initial_paused;
+        let initial_window_size = service.initial_window_size;
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {
@@ -456,6 +467,9 @@ impl ClipboardView {
                     cx.notify();
                 }
             }
+        });
+        let bounds = cx.observe_window_bounds(window, |this, window, cx| {
+            this.window_bounds_changed(window, cx);
         });
         let list_focus = cx.focus_handle();
         window.focus(&list_focus, cx);
@@ -514,6 +528,7 @@ impl ClipboardView {
             database_maintenance_pending: false,
             export_pending: false,
             window_pinned: false,
+            last_window_size: initial_window_size,
             paste_target: None,
             paste_pending: None,
             reorder_pending: false,
@@ -541,13 +556,14 @@ impl ClipboardView {
                 startup_errors.join("；")
             },
             is_error: !startup_errors.is_empty(),
-            _subscriptions: vec![subscription, appearance, activation],
+            _subscriptions: vec![subscription, appearance, activation, bounds],
             _events: event_task,
             search_task: None,
             feedback_task: None,
             group_feedback_task: None,
             group_drag_scroll_task: None,
             history_drag_scroll_task: None,
+            window_size_task: None,
         }
     }
 
@@ -559,6 +575,29 @@ impl ClipboardView {
             return false;
         }
         true
+    }
+
+    fn window_bounds_changed(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let WindowBounds::Windowed(bounds) = window.window_bounds() else {
+            return;
+        };
+        let Some(size) = WindowSizePreference::new(
+            f32::from(bounds.size.width).round() as u32,
+            f32::from(bounds.size.height).round() as u32,
+        ) else {
+            return;
+        };
+        if self.last_window_size == Some(size) {
+            return;
+        }
+        self.window_size_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(300))
+                .await;
+            let _ = view.update(cx, |this, cx| {
+                this.send(Command::SetWindowSize(size), cx);
+            });
+        }));
     }
 
     fn refresh_data_size(&mut self, cx: &mut Context<Self>) {
@@ -1273,6 +1312,13 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::WindowSizeSaved(result) => match result {
+                Ok(size) => self.last_window_size = Some(size),
+                Err(error) => {
+                    self.message = format!("保存窗口大小失败：{error}");
+                    self.is_error = true;
+                }
+            },
             Event::AutostartSaved(result) => {
                 self.autostart_pending = false;
                 match result {

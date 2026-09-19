@@ -13,7 +13,7 @@ use clipboard_core::{
     database::{ClipboardItem, Database, Group},
     import::{ImportReport, import_legacy_database},
     legacy_backup::{LegacyBackupReport, import_legacy_backup},
-    preferences::{HotkeyPreference, Preferences, ThemePreference},
+    preferences::{HotkeyPreference, Preferences, ThemePreference, WindowSizePreference},
 };
 use clipboard_rs::{
     Clipboard, ClipboardContent, ClipboardContext, ClipboardHandler, ClipboardWatcher,
@@ -98,6 +98,7 @@ pub enum Command {
     Pause(bool),
     SetTheme(ThemePreference),
     SetHotkey(HotkeyPreference),
+    SetWindowSize(WindowSizePreference),
     SetAutostart(bool),
     QueryDataSize,
     OptimizeDatabase,
@@ -180,6 +181,7 @@ impl Command {
             | Self::Reorder { .. }
             | Self::SetTheme(_)
             | Self::SetHotkey(_)
+            | Self::SetWindowSize(_)
             | Self::SetAutostart(_)
             | Self::OpenDataDirectory
             | Self::ExportBackup(_) => Some(FailureKind::Other),
@@ -243,6 +245,7 @@ pub enum Event {
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
+    WindowSizeSaved(Result<WindowSizePreference, String>),
     AutostartSaved(Result<bool, String>),
     DataSize(Result<DataSizeInfo, String>),
     DatabaseOptimized(DataSizeInfo),
@@ -436,6 +439,7 @@ pub struct Service {
     pub initial_theme: ThemePreference,
     pub initial_hotkey: HotkeyPreference,
     pub initial_paused: bool,
+    pub initial_window_size: Option<WindowSizePreference>,
 }
 
 fn resolve_data_dir(data_dir: Option<PathBuf>) -> Result<PathBuf> {
@@ -507,6 +511,7 @@ impl Service {
         let initial_theme = preferences.theme()?;
         let initial_hotkey = preferences.hotkey()?;
         let initial_paused = preferences.capture_paused()?;
+        let initial_window_size = preferences.window_size()?;
         let writer =
             ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
         let (commands, incoming) = mpsc::sync_channel(64);
@@ -528,6 +533,7 @@ impl Service {
             initial_theme,
             initial_hotkey,
             initial_paused,
+            initial_window_size,
             data_dir,
         };
         let worker_state = state.clone();
@@ -1451,6 +1457,17 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::SetWindowSize(size) => {
+                let result = self
+                    .preferences
+                    .set_window_size(size)
+                    .map(|_| size)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::WindowSizeSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::SetAutostart(enabled) => {
                 let result = autostart::set_enabled(&self.data_dir, enabled)
                     .map(|_| enabled)
@@ -2257,6 +2274,36 @@ mod tests {
         drop(service);
         let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
         assert_eq!(reopened.initial_hotkey, HotkeyPreference::AltC);
+        Ok(())
+    }
+
+    #[test]
+    fn window_size_is_acknowledged_and_loaded_on_restart() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_window_size, None);
+        next_snapshot(&events, 0);
+        let size = WindowSizePreference::new(960, 720).unwrap();
+        service.send(Command::SetWindowSize(size))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::WindowSizeSaved(result)) => {
+                    assert_eq!(result.unwrap(), size);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "window size save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_window_size, Some(size));
         Ok(())
     }
 

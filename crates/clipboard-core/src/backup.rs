@@ -549,7 +549,7 @@ mod tests {
     use super::*;
     use crate::{
         History, PreviewContent,
-        preferences::{Preferences, ThemePreference},
+        preferences::{Preferences, ThemePreference, WindowSizePreference},
     };
 
     #[test]
@@ -585,7 +585,10 @@ mod tests {
             "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
             params![payload.to_string(), file],
         )?;
-        Preferences::new(&history.db).set_theme(ThemePreference::Dark)?;
+        let preferences = Preferences::new(&history.db);
+        preferences.set_theme(ThemePreference::Dark)?;
+        let window_size = WindowSizePreference::new(900, 700).unwrap();
+        preferences.set_window_size(window_size)?;
         history.db.write_connection().lock().execute(
             "INSERT INTO settings (key, value) VALUES ('secret_token', 'do-not-export')",
             [],
@@ -611,6 +614,10 @@ mod tests {
         assert_eq!(
             Preferences::new(&restored.db).theme()?,
             ThemePreference::Dark
+        );
+        assert_eq!(
+            Preferences::new(&restored.db).window_size()?,
+            Some(window_size)
         );
         assert!(
             matches!(restored.preview_content(image)?, PreviewContent::Image(path) if path.starts_with(target.join("images")) && fs::read(&path)? == png)
