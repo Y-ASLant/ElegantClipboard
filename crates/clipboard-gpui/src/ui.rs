@@ -11,7 +11,7 @@ use clipboard_core::{
     preferences::{HotkeyPreference, ThemePreference},
 };
 use clipboard_platform::hotkey::Hotkey;
-use clipboard_platform::{Command, Event, FailureKind, InstanceBusy, Service};
+use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
 use directories::UserDirs;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
@@ -303,6 +303,8 @@ struct ClipboardView {
     hotkey_pending: bool,
     autostart: bool,
     autostart_pending: bool,
+    data_size: Option<DataSizeInfo>,
+    data_size_pending: bool,
     export_pending: bool,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
@@ -498,6 +500,8 @@ impl ClipboardView {
             hotkey_pending: false,
             autostart: autostart.unwrap_or(false),
             autostart_pending: false,
+            data_size: None,
+            data_size_pending: false,
             export_pending: false,
             paste_target: None,
             paste_pending: None,
@@ -543,6 +547,16 @@ impl ClipboardView {
             return false;
         }
         true
+    }
+
+    fn refresh_data_size(&mut self, cx: &mut Context<Self>) {
+        if self.data_size_pending {
+            return;
+        }
+        if self.send(Command::QueryDataSize, cx) {
+            self.data_size_pending = true;
+            cx.notify();
+        }
     }
 
     fn start_export(&mut self, cx: &mut Context<Self>) {
@@ -1234,6 +1248,20 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::DataSize(result) => {
+                self.data_size_pending = false;
+                match result {
+                    Ok(size) => {
+                        self.data_size = Some(size);
+                        self.message = "数据占用已更新".into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("统计数据占用失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::Paused(paused) => {
                 self.paused = paused;
                 self.pause_pending = false;
@@ -1311,6 +1339,7 @@ impl ClipboardView {
                     FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
                         self.save_as_pending = None;
                     }
+                    FailureKind::DataSize => self.data_size_pending = false,
                     FailureKind::Pause => self.pause_pending = false,
                     FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
                 }
@@ -2395,6 +2424,20 @@ impl ClipboardView {
 
 impl Render for ClipboardView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let data_size_detail = self.data_size.map_or_else(
+            || "尚未统计数据占用".to_owned(),
+            |size| {
+                format!(
+                    "共 {} · 数据库 {} · 图片 {} 个 / {} · 暂存 {} 个 / {}",
+                    format_bytes(size.total_bytes),
+                    format_bytes(size.database_bytes),
+                    size.image_count,
+                    format_bytes(size.image_bytes),
+                    size.staged_count,
+                    format_bytes(size.staged_bytes)
+                )
+            },
+        );
         div()
             .flex()
             .flex_col()
@@ -2435,6 +2478,9 @@ impl Render for ClipboardView {
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.settings_open = !this.settings_open;
+                                if this.settings_open {
+                                    this.refresh_data_size(cx);
+                                }
                                 cx.notify();
                             })),
                     ),
@@ -2558,6 +2604,67 @@ impl Render for ClipboardView {
                                                 cx.notify();
                                             }
                                         })),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .px(px(PAGE_PADDING))
+                                .py_2()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .border_b_1()
+                                .border_color(cx.theme().border)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child("数据占用"),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .gap_1()
+                                                .child(
+                                                    Button::new("data-size-refresh")
+                                                        .ghost()
+                                                        .xsmall()
+                                                        .h(px(CONTROL_HEIGHT))
+                                                        .label(if self.data_size_pending {
+                                                            "统计中…"
+                                                        } else {
+                                                            "刷新"
+                                                        })
+                                                        .disabled(self.data_size_pending)
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.refresh_data_size(cx);
+                                                        })),
+                                                )
+                                                .child(
+                                                    Button::new("open-data-directory")
+                                                        .ghost()
+                                                        .xsmall()
+                                                        .h(px(CONTROL_HEIGHT))
+                                                        .label("打开目录")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.send(
+                                                                Command::OpenDataDirectory,
+                                                                cx,
+                                                            );
+                                                        })),
+                                                ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(data_size_detail),
                                 ),
                         ),
                     "window-settings",
@@ -3324,6 +3431,22 @@ impl ClipboardView {
             )
             .into_any_element()
     }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = KIB * 1024;
+    const GIB: u64 = MIB * 1024;
+    let (unit_bytes, unit) = if bytes >= GIB {
+        (GIB, "GiB")
+    } else if bytes >= MIB {
+        (MIB, "MiB")
+    } else if bytes >= KIB {
+        (KIB, "KiB")
+    } else {
+        return format!("{bytes} B");
+    };
+    format!("{:.1} {unit}", bytes as f64 / unit_bytes as f64)
 }
 
 fn apply_theme(preference: ThemePreference, window: &mut Window, cx: &mut App) {

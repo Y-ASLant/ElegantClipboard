@@ -96,6 +96,8 @@ pub enum Command {
     SetTheme(ThemePreference),
     SetHotkey(HotkeyPreference),
     SetAutostart(bool),
+    QueryDataSize,
+    OpenDataDirectory,
     ExportBackup(PathBuf),
     Reorder {
         from: i64,
@@ -131,6 +133,7 @@ pub enum FailureKind {
     BatchDelete,
     EditText { id: i64, generation: u64 },
     SaveAs(i64),
+    DataSize,
     Pause,
     Other,
 }
@@ -157,6 +160,7 @@ impl Command {
                 generation: *generation,
             }),
             Self::Pause(_) => Some(FailureKind::Pause),
+            Self::QueryDataSize => Some(FailureKind::DataSize),
             Self::Copy(_)
             | Self::CopyPlainText(_)
             | Self::CopyPath(_)
@@ -169,6 +173,7 @@ impl Command {
             | Self::SetTheme(_)
             | Self::SetHotkey(_)
             | Self::SetAutostart(_)
+            | Self::OpenDataDirectory
             | Self::ExportBackup(_) => Some(FailureKind::Other),
         }
     }
@@ -230,6 +235,7 @@ pub enum Event {
     ThemeSaved(Result<ThemePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
     AutostartSaved(Result<bool, String>),
+    DataSize(Result<DataSizeInfo, String>),
     BackupExported(Result<BackupReport, String>),
     BackgroundError(String),
     CommandFailed {
@@ -237,6 +243,16 @@ pub enum Event {
         message: String,
     },
     Error(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DataSizeInfo {
+    pub database_bytes: u64,
+    pub image_bytes: u64,
+    pub image_count: u64,
+    pub staged_bytes: u64,
+    pub staged_count: u64,
+    pub total_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -647,14 +663,107 @@ fn reveal_in_explorer(path: &Path) -> Result<()> {
 }
 
 fn explorer_command(path: &Path) -> Result<std::process::Command> {
+    let mut command = std::process::Command::new(explorer_executable()?);
+    command.arg("/select,").arg(path);
+    Ok(command)
+}
+
+fn explorer_executable() -> Result<PathBuf> {
     let system_root = std::env::var_os("SystemRoot").context("无法确定 Windows 系统目录")?;
     let explorer = PathBuf::from(system_root).join("explorer.exe");
     if !explorer.is_file() {
         bail!("找不到 Windows 资源管理器");
     }
-    let mut command = std::process::Command::new(explorer);
-    command.arg("/select,").arg(path);
+    Ok(explorer)
+}
+
+fn open_data_directory(data_dir: &Path) -> Result<()> {
+    data_directory_command(data_dir)?
+        .spawn()
+        .context("无法打开数据目录")?;
+    Ok(())
+}
+
+fn data_directory_command(data_dir: &Path) -> Result<std::process::Command> {
+    if !data_dir.is_dir() {
+        bail!("数据目录不存在");
+    }
+    let mut command = std::process::Command::new(explorer_executable()?);
+    command.arg(data_dir);
     Ok(command)
+}
+
+fn file_size_if_present(path: &Path) -> Result<u64> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(metadata.len()),
+        Ok(_) => bail!("{} 不是普通文件", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error).with_context(|| format!("无法读取 {}", path.display())),
+    }
+}
+
+fn directory_size_and_count(root: &Path) -> Result<(u64, u64)> {
+    if !root.exists() {
+        return Ok((0, 0));
+    }
+    if !root.is_dir() {
+        bail!("{} 不是目录", root.display());
+    }
+    let mut bytes = 0u64;
+    let mut count = 0u64;
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory)
+            .with_context(|| format!("无法读取目录 {}", directory.display()))?
+        {
+            let entry = entry.with_context(|| format!("无法读取目录项 {}", directory.display()))?;
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("无法读取文件类型 {}", entry.path().display()))?;
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                pending.push(entry.path());
+            } else if file_type.is_file() {
+                let length = entry
+                    .metadata()
+                    .with_context(|| format!("无法读取文件信息 {}", entry.path().display()))?
+                    .len();
+                bytes = bytes
+                    .checked_add(length)
+                    .context("数据目录大小超过可表示范围")?;
+                count = count
+                    .checked_add(1)
+                    .context("数据目录文件数超过可表示范围")?;
+            }
+        }
+    }
+    Ok((bytes, count))
+}
+
+fn data_size_info(data_dir: &Path, images_dir: &Path, staged_dir: &Path) -> Result<DataSizeInfo> {
+    let database_bytes = ["clipboard.db", "clipboard.db-wal", "clipboard.db-shm"]
+        .into_iter()
+        .try_fold(0u64, |total, name| {
+            total
+                .checked_add(file_size_if_present(&data_dir.join(name))?)
+                .context("数据库大小超过可表示范围")
+        })?;
+    let (image_bytes, image_count) = directory_size_and_count(images_dir)?;
+    let (staged_bytes, staged_count) = directory_size_and_count(staged_dir)?;
+    let total_bytes = database_bytes
+        .checked_add(image_bytes)
+        .and_then(|total| total.checked_add(staged_bytes))
+        .context("数据占用超过可表示范围")?;
+    Ok(DataSizeInfo {
+        database_bytes,
+        image_bytes,
+        image_count,
+        staged_bytes,
+        staged_count,
+        total_bytes,
+    })
 }
 
 fn save_item_as(
@@ -1323,6 +1432,21 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::QueryDataSize => {
+                let result = data_size_info(&self.data_dir, &self.images_dir, &self.staged_dir)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::DataSize(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::OpenDataDirectory => {
+                open_data_directory(&self.data_dir)?;
+                self.events
+                    .send_blocking(Event::Status("已打开数据目录".into()))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::ExportBackup(destination) => {
                 self.events
                     .send_blocking(Event::BackupExported(
@@ -1459,6 +1583,38 @@ mod tests {
             std::fs::read(&image_destination)?,
             b"\x89PNG\r\n\x1a\nsynthetic"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn data_size_counts_database_and_managed_media() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let images = directory.path().join("images");
+        let nested_images = images.join("nested");
+        let staged = directory.path().join("staged");
+        std::fs::create_dir_all(&nested_images)?;
+        std::fs::create_dir_all(&staged)?;
+        std::fs::write(directory.path().join("clipboard.db"), [0u8; 3])?;
+        std::fs::write(directory.path().join("clipboard.db-wal"), [0u8; 5])?;
+        std::fs::write(images.join("one.png"), [0u8; 7])?;
+        std::fs::write(nested_images.join("two.png"), [0u8; 11])?;
+        std::fs::write(staged.join("payload.bin"), [0u8; 13])?;
+        std::fs::write(directory.path().join("unmanaged.txt"), [0u8; 17])?;
+
+        assert_eq!(
+            data_size_info(directory.path(), &images, &staged)?,
+            DataSizeInfo {
+                database_bytes: 8,
+                image_bytes: 18,
+                image_count: 2,
+                staged_bytes: 13,
+                staged_count: 1,
+                total_bytes: 39,
+            }
+        );
+        let command = data_directory_command(directory.path())?;
+        assert!(Path::new(command.get_program()).ends_with("explorer.exe"));
+        assert_eq!(command.get_args().collect::<Vec<_>>(), [directory.path()]);
         Ok(())
     }
 
