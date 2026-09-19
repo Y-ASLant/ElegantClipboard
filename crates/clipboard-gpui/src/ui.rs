@@ -284,6 +284,7 @@ struct ClipboardView {
     selected_ids: HashSet<i64>,
     batch_confirm_open: bool,
     batch_pending: bool,
+    batch_paste_pending: Option<(isize, u32)>,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -438,7 +439,8 @@ impl ClipboardView {
             if !window.is_window_active() {
                 let had_target = this.paste_target.take().is_some();
                 let had_pending = this.paste_pending.take().is_some();
-                if had_target || had_pending {
+                let had_batch_pending = this.batch_paste_pending.take().is_some();
+                if had_target || had_pending || had_batch_pending {
                     this.message = "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出".into();
                     this.is_error = false;
                     cx.notify();
@@ -476,6 +478,7 @@ impl ClipboardView {
             selected_ids: HashSet::new(),
             batch_confirm_open: false,
             batch_pending: false,
+            batch_paste_pending: None,
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -739,6 +742,45 @@ impl ClipboardView {
             .extend(self.history.items.iter().map(|item| item.id));
         self.batch_confirm_open = false;
         cx.notify();
+    }
+
+    fn merge_selected(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.batch_pending || self.selected_ids.len() < 2 || self.paste_pending.is_some() {
+            return;
+        }
+        let ids: Vec<_> = self
+            .history
+            .items
+            .iter()
+            .filter_map(|item| self.selected_ids.contains(&item.id).then_some(item.id))
+            .collect();
+        if ids.len() < 2 {
+            return;
+        }
+        let target = self
+            .paste_target
+            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
+        if self.paste_target.is_some() && target.is_none() {
+            self.paste_target = None;
+        }
+        let command = if target.is_some() {
+            Command::MergeForPaste(ids)
+        } else {
+            Command::MergeCopy(ids)
+        };
+        if self.send(command, cx) {
+            self.batch_pending = true;
+            self.batch_paste_pending = target;
+            self.batch_confirm_open = false;
+            self.message = if target.is_some() {
+                "正在合并并返回原窗口…"
+            } else {
+                "正在合并所选记录…"
+            }
+            .into();
+            self.is_error = false;
+            cx.notify();
+        }
     }
 
     fn delete_selected(&mut self, cx: &mut Context<Self>) {
@@ -1053,36 +1095,31 @@ impl ClipboardView {
                 self.is_error = false;
                 if let Some((pending_id, target)) = self.paste_pending.take() {
                     if pending_id == id && for_paste {
-                        if paste::is_external_target(window, target) {
-                            tray::set_window_visible(window, false);
-                            cx.spawn_in(window, async move |view, cx| {
-                                cx.background_executor()
-                                    .timer(Duration::from_millis(60))
-                                    .await;
-                                let _ = view.update_in(cx, |this, window, cx| {
-                                    match paste::send_to_target(target, clipboard_sequence) {
-                                        Ok(()) => {
-                                            this.message =
-                                                "已发送粘贴快捷键，请检查目标应用".into();
-                                            this.is_error = false;
-                                        }
-                                        Err(error) => {
-                                            tray::set_window_visible(window, true);
-                                            this.message = error.to_string();
-                                            this.is_error = true;
-                                        }
-                                    }
-                                    cx.notify();
-                                });
-                            })
-                            .detach();
-                        } else {
-                            self.message = "目标窗口已变化，内容已复制，请手动粘贴".into();
-                            self.is_error = true;
-                        }
+                        self.return_to_paste_target(target, clipboard_sequence, window, cx);
                     } else {
                         self.paste_pending = Some((pending_id, target));
                     }
+                }
+            }
+            Event::Merged {
+                for_paste,
+                clipboard_sequence,
+                item_count,
+            } => {
+                self.batch_pending = false;
+                self.batch_confirm_open = false;
+                self.selected_ids.clear();
+                let target = self.batch_paste_pending.take();
+                if for_paste {
+                    if let Some(target) = target {
+                        self.return_to_paste_target(target, clipboard_sequence, window, cx);
+                    } else {
+                        self.message = format!("已合并 {item_count} 条记录并复制，请手动粘贴");
+                        self.is_error = true;
+                    }
+                } else {
+                    self.message = format!("已合并 {item_count} 条记录并复制");
+                    self.is_error = false;
                 }
             }
             Event::ThemeSaved(result) => {
@@ -1199,6 +1236,10 @@ impl ClipboardView {
                             .is_some_and(|(pending_id, _)| pending_id == id) =>
                     {
                         self.paste_pending = None;
+                    }
+                    FailureKind::Merge => {
+                        self.batch_pending = false;
+                        self.batch_paste_pending = None;
                     }
                     FailureKind::GroupSave => self.group_save_pending = false,
                     FailureKind::GroupDelete => {
@@ -1559,6 +1600,41 @@ impl ClipboardView {
             self.is_error = false;
             cx.notify();
         }
+    }
+
+    fn return_to_paste_target(
+        &mut self,
+        target: (isize, u32),
+        clipboard_sequence: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !paste::is_external_target(window, target) {
+            self.message = "目标窗口已变化，内容已复制，请手动粘贴".into();
+            self.is_error = true;
+            return;
+        }
+        tray::set_window_visible(window, false);
+        cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(60))
+                .await;
+            let _ = view.update_in(cx, |this, window, cx| {
+                match paste::send_to_target(target, clipboard_sequence) {
+                    Ok(()) => {
+                        this.message = "已发送粘贴快捷键，请检查目标应用".into();
+                        this.is_error = false;
+                    }
+                    Err(error) => {
+                        tray::set_window_visible(window, true);
+                        this.message = error.to_string();
+                        this.is_error = true;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn valid_drag(&self, drag: &HistoryDrag, pinned: bool) -> bool {
@@ -2884,6 +2960,24 @@ impl ClipboardView {
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.reset_selection();
                                     cx.notify();
+                                })),
+                        )
+                        .child(
+                            Button::new("batch-merge")
+                                .small()
+                                .outline()
+                                .label(if self.paste_target.is_some() && self._tray.is_some() {
+                                    "合并粘贴"
+                                } else {
+                                    "合并复制"
+                                })
+                                .disabled(
+                                    self.batch_pending
+                                        || self.paste_pending.is_some()
+                                        || self.selected_ids.len() < 2,
+                                )
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.merge_selected(window, cx);
                                 })),
                         )
                         .child(

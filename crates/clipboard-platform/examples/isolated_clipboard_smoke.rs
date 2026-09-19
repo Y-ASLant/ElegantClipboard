@@ -109,6 +109,31 @@ fn main() -> anyhow::Result<()> {
             thread::sleep(Duration::from_millis(10));
         }
     };
+    let merged_status = |expected_count: usize| -> anyhow::Result<u32> {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match events.try_recv() {
+                Ok(Event::Merged {
+                    for_paste,
+                    clipboard_sequence,
+                    item_count,
+                }) => {
+                    assert!(!for_paste);
+                    assert_eq!(item_count, expected_count);
+                    return Ok(clipboard_sequence);
+                }
+                Ok(Event::CommandFailed { message, .. }) => {
+                    bail!("合并复制命令失败：{message}")
+                }
+                Ok(Event::Error(message)) => bail!("{message}"),
+                _ => {}
+            }
+            if Instant::now() >= deadline {
+                bail!("等待合并复制确认超时");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
 
     let text = format!("isolated-text-{}", std::process::id());
     clipboard
@@ -230,9 +255,27 @@ fn main() -> anyhow::Result<()> {
         clipboard
             .get_files()
             .map_err(|error| anyhow!("读回文件失败：{error}"))?,
-        vec![file]
+        vec![file.clone()]
     );
     println!("files capture/copy ok");
+
+    service.send(Command::MergeCopy(vec![text_id, rich_id, file_id]))?;
+    let merged_sequence = merged_status(3)?;
+    assert_ne!(merged_sequence, 0);
+    assert_eq!(unsafe { GetClipboardSequenceNumber() }, merged_sequence);
+    assert_eq!(
+        clipboard
+            .get_text()
+            .map_err(|error| anyhow!("读回合并文本失败：{error}"))?,
+        format!("{text}\nrich smoke\n{file}")
+    );
+    assert_eq!(
+        clipboard
+            .get_files()
+            .map_err(|error| anyhow!("读回合并文件失败：{error}"))?,
+        vec![file]
+    );
+    println!("merged text/files copy ok");
 
     clipboard
         .set_text("x".repeat(clipboard_core::MAX_TEXT_BYTES + 1))

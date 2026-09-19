@@ -14,8 +14,8 @@ use clipboard_core::{
     preferences::{HotkeyPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{
-    Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
-    ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
+    Clipboard, ClipboardContent, ClipboardContext, ClipboardHandler, ClipboardWatcher,
+    ClipboardWatcherContext, ContentFormat, RustImageData, WatcherShutdown, common::RustImage,
 };
 use directories::ProjectDirs;
 use std::{
@@ -41,6 +41,8 @@ pub enum Command {
     Copy(i64),
     CopyPlainText(i64),
     CopyForPaste(i64),
+    MergeCopy(Vec<i64>),
+    MergeForPaste(Vec<i64>),
     CreateGroup(String),
     ReorderGroup {
         from: i64,
@@ -114,6 +116,7 @@ pub enum Command {
 pub enum FailureKind {
     Query(u64),
     Paste(i64),
+    Merge,
     GroupSave,
     GroupDelete,
     GroupMove,
@@ -133,6 +136,7 @@ impl Command {
             | Self::CaptureImage { .. } => None,
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
             Self::CopyForPaste(id) => Some(FailureKind::Paste(*id)),
+            Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
             Self::ReorderGroup { .. } => Some(FailureKind::Other),
             Self::DeleteGroup { .. } => Some(FailureKind::GroupDelete),
@@ -184,6 +188,11 @@ pub enum Event {
         for_paste: bool,
         clipboard_sequence: u32,
         message: String,
+    },
+    Merged {
+        for_paste: bool,
+        clipboard_sequence: u32,
+        item_count: usize,
     },
     Reordered {
         from: i64,
@@ -702,6 +711,53 @@ fn verified_rich_sequence(clipboard: &ClipboardContext, item: &ClipboardItem) ->
     bail!("富文本写回后剪贴板持续变化，请重试")
 }
 
+fn write_merged_clipboard(
+    clipboard: &ClipboardContext,
+    merged: &clipboard_core::MergedContent,
+    ignored_sequence: &mut u32,
+) -> Result<u32> {
+    let mut contents = Vec::with_capacity(2);
+    if !merged.files.is_empty() {
+        contents.push(ClipboardContent::Files(merged.files.clone()));
+    }
+    if let Some(text) = &merged.text {
+        contents.push(ClipboardContent::Text(text.clone()));
+    }
+    let write_result = clipboard
+        .set(contents)
+        .map_err(|error| anyhow!("写入合并内容失败：{error}"));
+    *ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+    write_result?;
+    if *ignored_sequence == 0 {
+        bail!("无法确认合并内容的剪贴板序列号，请重试");
+    }
+
+    for _ in 0..4 {
+        let before = unsafe { GetClipboardSequenceNumber() };
+        let text_matches = merged.text.as_ref().is_none_or(|expected| {
+            clipboard
+                .get_text()
+                .ok()
+                .is_some_and(|actual| actual == expected.as_str())
+        });
+        let files_match = merged.files.is_empty()
+            || clipboard
+                .get_files()
+                .ok()
+                .is_some_and(|actual| actual.as_slice() == merged.files.as_slice());
+        if !text_matches || !files_match {
+            bail!("合并内容写回后格式校验失败，请重试");
+        }
+        let after = unsafe { GetClipboardSequenceNumber() };
+        if before == after {
+            *ignored_sequence = after;
+            return Ok(after);
+        }
+        thread::yield_now();
+    }
+    bail!("合并内容写回后剪贴板持续变化，请重试")
+}
+
 struct Worker {
     history: History,
     preferences: Preferences,
@@ -745,6 +801,7 @@ impl Worker {
     fn handle(&mut self, command: Command) -> Result<()> {
         let for_paste = matches!(&command, Command::CopyForPaste(_));
         let plain_only = matches!(&command, Command::CopyPlainText(_));
+        let merge_for_paste = matches!(&command, Command::MergeForPaste(_));
         match command {
             Command::Query {
                 search,
@@ -781,6 +838,22 @@ impl Worker {
                 state.pending_image_bytes = state.pending_image_bytes.saturating_sub(png.len());
                 drop(state);
                 result?;
+            }
+            Command::MergeCopy(ids) | Command::MergeForPaste(ids) => {
+                let item_count = ids.len();
+                let merged = self.history.merge_content(&ids, &self.staged_dir)?;
+                let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                let clipboard_sequence =
+                    write_merged_clipboard(&self.clipboard, &merged, &mut state.ignored_sequence)?;
+                drop(state);
+                self.events
+                    .send_blocking(Event::Merged {
+                        for_paste: merge_for_paste,
+                        clipboard_sequence,
+                        item_count,
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
             }
             Command::Copy(id) | Command::CopyPlainText(id) | Command::CopyForPaste(id) => {
                 let item = self.history.item(id)?;
@@ -1162,6 +1235,27 @@ mod tests {
             events.recv_blocking()?,
             Event::CommandFailed {
                 kind: FailureKind::Paste(424242),
+                ..
+            }
+        ));
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::ThemeSaved(Ok(ThemePreference::Dark))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn failed_merge_identifies_only_the_batch_request() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::MergeForPaste(vec![424242, 424243]))?;
+        service.send(Command::SetTheme(ThemePreference::Dark))?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::CommandFailed {
+                kind: FailureKind::Merge,
                 ..
             }
         ));
