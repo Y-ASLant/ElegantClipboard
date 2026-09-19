@@ -36,6 +36,10 @@ gpui_kit::actions!(
     [
         Next,
         Previous,
+        First,
+        Last,
+        PageUp,
+        PageDown,
         CopySelected,
         PasteSelected,
         DeleteSelected,
@@ -84,6 +88,10 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             cx.bind_keys([
                 KeyBinding::new("down", Next, Some("HistoryList")),
                 KeyBinding::new("up", Previous, Some("HistoryList")),
+                KeyBinding::new("home", First, Some("HistoryList")),
+                KeyBinding::new("end", Last, Some("HistoryList")),
+                KeyBinding::new("pageup", PageUp, Some("HistoryList")),
+                KeyBinding::new("pagedown", PageDown, Some("HistoryList")),
                 KeyBinding::new("enter", CopySelected, Some("HistoryList")),
                 KeyBinding::new("ctrl-enter", PasteSelected, Some("HistoryList")),
                 KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
@@ -1497,6 +1505,26 @@ impl ClipboardView {
             self.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
         }
         cx.notify();
+    }
+
+    fn select_index(&mut self, index: usize, strategy: ScrollStrategy, cx: &mut Context<Self>) {
+        if let Some(index) = self.history.select_index(index) {
+            self.scroll.scroll_to_item(index, strategy);
+        }
+        cx.notify();
+    }
+
+    fn page_step(&self) -> isize {
+        self.scroll
+            .0
+            .borrow()
+            .last_item_size
+            .map(|size| {
+                ((f32::from(size.item.height) / ROW_HEIGHT).floor() as usize)
+                    .saturating_sub(1)
+                    .max(1) as isize
+            })
+            .unwrap_or(1)
     }
 
     fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
@@ -2920,7 +2948,7 @@ impl ClipboardView {
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(format!("{} 条记录", self.history.total))
-                    .child("↑↓ 选择 · Enter 复制"),
+                    .child("↑↓/PgUp/PgDn/Home/End · Enter 复制"),
             )
             .child(
                 div()
@@ -2957,6 +2985,18 @@ impl ClipboardView {
                     )
                     .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
                     .on_action(cx.listener(|this, _: &Previous, _, cx| this.select(-1, cx)))
+                    .on_action(cx.listener(|this, _: &First, _, cx| {
+                        this.select_index(0, ScrollStrategy::Top, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &Last, _, cx| {
+                        this.select_index(usize::MAX, ScrollStrategy::Bottom, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &PageUp, _, cx| {
+                        this.select(-this.page_step(), cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &PageDown, _, cx| {
+                        this.select(this.page_step(), cx);
+                    }))
                     .on_action(cx.listener(|this, _: &CopySelected, _, cx| {
                         if let Some(id) = this.history.selected {
                             this.send(Command::Copy(id), cx);

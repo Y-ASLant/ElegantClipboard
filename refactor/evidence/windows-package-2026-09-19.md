@@ -6,5 +6,6 @@
 - 修正旧库导入提示后重新打包的先前同名 ZIP 摘要为 `729457db12e178bd3d3fc7d5dab57e001cf538bdefabe618e2ea43f0bd1334cb`。当时解压到隔离目录 `target/qa/package-current-1724062e632747e1b524e90c29c7ed6d/`，从包内 exe 导入两条合成历史，提示正确，窗口冒烟退出码为 0。
 - 富文本多格式写回初次修复后的先前同名 ZIP 摘要为 `4b364162e2747ce63bbf2a35e7c4e7e89a2cbce20443de4dfb014a582d6d83c1`；当时解压到 `target/qa/rich-package-a95223931b75412a92a60588a3ba50bd/` 后窗口冒烟退出码为 0。
 - 完善写入序号与读回稳定性检查后的先前同名 ZIP 摘要为 `8ee041c4e8b88dcf894ae697bcc70cdf8eebe33dd5b6fd141eda0422cd59dda2`；当时解压到 `target/qa/rich-package-final-f307b8481c2a40fe803f672f46ca564a/` 后窗口冒烟退出码为 0。
-- 收紧部分写入失败的序号抑制后再次构建 Release，当前 ZIP 的 SHA-256 为 `d0ebfd7970f9748f7d0550f9d3746224ec8681967bf527f8539750ea0d9ed87c`，与 `.sha256` 相符。包内 exe 的哈希与 Release 构建一致；解压到 `target/qa/rich-package-release-0bd58f83f8fd4668b7fea9e32d8dd48e/` 后以独立数据目录运行 `--smoke-test`，退出码为 0。以上先前摘要只用于追溯，已不对应当前同名 ZIP。
+- 收紧部分写入失败的序号抑制后的先前同名 ZIP 摘要为 `d0ebfd7970f9748f7d0550f9d3746224ec8681967bf527f8539750ea0d9ed87c`；当时解压到 `target/qa/rich-package-release-0bd58f83f8fd4668b7fea9e32d8dd48e/` 后窗口冒烟退出码为 0。
+- 增加历史列表首尾与翻页键后再次构建 Release，当前 ZIP 的 SHA-256 为 `018554df830e2c5cfa5e9426e04b91d74f660ab3accfcea1f718655ec9179552`，与 `.sha256` 相符。包内 exe 的哈希与 Release 构建一致；解压到 `target/qa/keyboard-package-15e1bee658ee432b81f59003e66e4ad0/` 后以独立数据目录运行 `--smoke-test`，退出码为 0。以上先前摘要只用于追溯，已不对应当前同名 ZIP。
 - 此制品未签名、没有安装器和升级机制，不能视作 Windows 正式发布验收。搜索、分组创建和正文编辑的拼音输入已在活动桌面验收；其他输入法及输入场景、常见应用之间的最终粘贴与长时间常驻仍待验证。

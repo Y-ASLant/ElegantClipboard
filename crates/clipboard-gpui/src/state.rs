@@ -142,6 +142,12 @@ impl HistoryState {
         self.selected = Some(self.items[next].id);
         Some(next)
     }
+
+    pub fn select_index(&mut self, index: usize) -> Option<usize> {
+        let index = index.min(self.items.len().checked_sub(1)?);
+        self.selected = Some(self.items[index].id);
+        Some(index)
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +231,10 @@ mod tests {
         assert_eq!(state.select_relative(1), Some(1));
         assert_eq!(state.select_relative(-1), Some(0));
         assert_eq!(state.select_relative(-1), Some(0));
+        assert_eq!(state.select_index(usize::MAX), Some(1));
+        assert_eq!(state.selected, Some(b));
+        assert_eq!(state.select_index(0), Some(0));
+        assert_eq!(state.selected, Some(a));
         state.begin_search();
         assert!(!state.apply(history.list("", PAGE_SIZE, false)?, 2, 0));
         assert!(state.items.is_empty());
@@ -233,6 +243,7 @@ mod tests {
         history.delete(b)?;
         state.apply(vec![], 0, 1);
         assert_eq!(state.select_relative(1), None);
+        assert_eq!(state.select_index(0), None);
         assert_eq!(state.selected, None);
         Ok(())
     }
