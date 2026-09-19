@@ -292,6 +292,7 @@ struct ClipboardView {
     preview_source_hash: Option<String>,
     preview_editing: bool,
     preview_save_pending: bool,
+    save_as_pending: Option<i64>,
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
@@ -486,6 +487,7 @@ impl ClipboardView {
             preview_source_hash: None,
             preview_editing: false,
             preview_save_pending: false,
+            save_as_pending: None,
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring: startup.monitoring,
@@ -571,6 +573,43 @@ impl ClipboardView {
                     Err(error) => {
                         this.export_pending = false;
                         this.message = format!("备份路径选择中断：{error}");
+                        this.is_error = true;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn start_save_as(&mut self, id: i64, suggested_name: String, cx: &mut Context<Self>) {
+        if self.save_as_pending.is_some() {
+            return;
+        }
+        let directory = UserDirs::new()
+            .and_then(|dirs| dirs.document_dir().map(|path| path.to_path_buf()))
+            .unwrap_or_else(|| self.service.data_dir.clone());
+        self.save_as_pending = Some(id);
+        cx.notify();
+        let selection = cx.prompt_for_new_path(&directory, Some(&suggested_name));
+        cx.spawn(async move |view, cx| {
+            let result = selection.await;
+            let _ = view.update(cx, |this, cx| {
+                match result {
+                    Ok(Ok(Some(destination))) => {
+                        if !this.send(Command::SaveAs { id, destination }, cx) {
+                            this.save_as_pending = None;
+                        }
+                    }
+                    Ok(Ok(None)) => this.save_as_pending = None,
+                    Ok(Err(error)) => {
+                        this.save_as_pending = None;
+                        this.message = format!("无法选择另存为路径：{error}");
+                        this.is_error = true;
+                    }
+                    Err(error) => {
+                        this.save_as_pending = None;
+                        this.message = format!("另存为路径选择中断：{error}");
                         this.is_error = true;
                     }
                 }
@@ -1043,6 +1082,22 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::SavedAs { id, result } => {
+                if self.save_as_pending != Some(id) {
+                    return;
+                }
+                self.save_as_pending = None;
+                match result {
+                    Ok(destination) => {
+                        self.message = format!("已另存到 {}", destination.display());
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!("另存为失败：{error}");
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::Reordered {
                 from,
                 generation,
@@ -1253,8 +1308,11 @@ impl ClipboardView {
                         self.batch_confirm_open = false;
                     }
                     FailureKind::EditText { .. } => self.preview_save_pending = false,
+                    FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
+                        self.save_as_pending = None;
+                    }
                     FailureKind::Pause => self.pause_pending = false,
-                    FailureKind::Other | FailureKind::Paste(_) => {}
+                    FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
                 }
                 self.message = message;
                 self.is_error = true;
@@ -1363,6 +1421,18 @@ impl ClipboardView {
         let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
         let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
         let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
+        let save_as_name = match &self.preview.result {
+            Some(Ok(PreviewContent::Image(path))) => path.file_name(),
+            Some(Ok(PreviewContent::Files(paths))) => paths
+                .first()
+                .and_then(|path| std::path::Path::new(path).file_name()),
+            _ => None,
+        }
+        .map(|name| name.to_string_lossy().into_owned());
+        let save_as_label = match &self.preview.result {
+            Some(Ok(PreviewContent::Files(paths))) if paths.len() > 1 => "另存第一项",
+            _ => "另存为",
+        };
         let editable = matches!(
             self.preview.result,
             Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
@@ -1498,7 +1568,18 @@ impl ClipboardView {
                         )
                     })
                     .when(!self.preview_editing && (image || files), |bar| {
-                        bar.child(
+                        bar.when_some(save_as_name, |bar, suggested_name| {
+                            bar.child(
+                                Button::new("preview-save-as")
+                                    .outline()
+                                    .label(save_as_label)
+                                    .disabled(!ready || self.save_as_pending.is_some())
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.start_save_as(id, suggested_name.clone(), cx);
+                                    })),
+                            )
+                        })
+                        .child(
                             Button::new("preview-reveal")
                                 .outline()
                                 .label("在资源管理器中显示")

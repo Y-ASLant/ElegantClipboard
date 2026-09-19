@@ -44,6 +44,10 @@ pub enum Command {
     CopyPath(i64),
     CopyPathForPaste(i64),
     RevealInExplorer(i64),
+    SaveAs {
+        id: i64,
+        destination: PathBuf,
+    },
     MergeCopy(Vec<i64>),
     MergeForPaste(Vec<i64>),
     CreateGroup(String),
@@ -126,6 +130,7 @@ pub enum FailureKind {
     ClearHistory,
     BatchDelete,
     EditText { id: i64, generation: u64 },
+    SaveAs(i64),
     Pause,
     Other,
 }
@@ -139,6 +144,7 @@ impl Command {
             | Self::CaptureImage { .. } => None,
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
             Self::CopyForPaste(id) | Self::CopyPathForPaste(id) => Some(FailureKind::Paste(*id)),
+            Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
             Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
             Self::ReorderGroup { .. } => Some(FailureKind::Other),
@@ -213,6 +219,10 @@ pub enum Event {
         id: i64,
         generation: u64,
         result: Result<bool, String>,
+    },
+    SavedAs {
+        id: i64,
+        result: Result<PathBuf, String>,
     },
     HistoryCleared(Result<i64, String>),
     BatchDeleted(Result<i64, String>),
@@ -647,6 +657,52 @@ fn explorer_command(path: &Path) -> Result<std::process::Command> {
     Ok(command)
 }
 
+fn save_item_as(
+    history: &History,
+    item: &ClipboardItem,
+    staged_dir: &Path,
+    destination: &Path,
+) -> Result<u64> {
+    if !destination.is_absolute() {
+        bail!("另存为目标必须是绝对路径");
+    }
+    let destination_name = destination.file_name().context("另存为目标缺少文件名")?;
+    let destination_parent = destination.parent().context("另存为目标缺少父目录")?;
+    if !destination_parent.is_dir() {
+        bail!("另存为目标目录不存在");
+    }
+    if destination.is_dir() {
+        bail!("另存为目标不能是文件夹");
+    }
+
+    let paths = item_paths_for_action(history, item, staged_dir)?;
+    let source = Path::new(&paths[0]);
+    if !source.is_file() {
+        bail!("文件夹不支持另存为，请先在资源管理器中复制");
+    }
+    let canonical_source = source.canonicalize().context("无法解析另存为源文件")?;
+    let canonical_destination = if destination.exists() {
+        destination
+            .canonicalize()
+            .context("无法解析另存为目标文件")?
+    } else {
+        destination_parent
+            .canonicalize()
+            .context("无法解析另存为目标目录")?
+            .join(destination_name)
+    };
+    if canonical_source == canonical_destination {
+        bail!("不能将文件另存为其自身");
+    }
+    std::fs::copy(&canonical_source, destination).with_context(|| {
+        format!(
+            "无法将 {} 另存为 {}",
+            canonical_source.display(),
+            destination.display()
+        )
+    })
+}
+
 fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Result<()> {
     let text = item
         .text_content
@@ -911,6 +967,20 @@ impl Worker {
                     } else {
                         format!("已在资源管理器中定位第一项，共 {} 项", paths.len())
                     }))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SaveAs { id, destination } => {
+                let result = self
+                    .history
+                    .item(id)
+                    .and_then(|item| {
+                        save_item_as(&self.history, &item, &self.staged_dir, &destination)
+                    })
+                    .map(|_| destination)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::SavedAs { id, result })
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
@@ -1343,6 +1413,51 @@ mod tests {
                 &directory.path().join("staged")
             )
             .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn save_as_copies_the_first_resolved_file_and_rejects_unsafe_targets() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let staged = directory.path().join("staged");
+        let source = directory.path().join("中文 source.txt");
+        std::fs::write(&source, "saved content")?;
+        let file_id = history.capture_files(&[source.to_string_lossy().into_owned()], &images)?;
+        let destination = directory.path().join("另存 file.txt");
+        assert_eq!(
+            save_item_as(&history, &history.item(file_id)?, &staged, &destination)?,
+            13
+        );
+        assert_eq!(std::fs::read_to_string(&destination)?, "saved content");
+        assert!(save_item_as(&history, &history.item(file_id)?, &staged, &source).is_err());
+
+        let folder = directory.path().join("folder");
+        std::fs::create_dir(&folder)?;
+        let folder_id = history.capture_files(&[folder.to_string_lossy().into_owned()], &images)?;
+        assert!(
+            save_item_as(
+                &history,
+                &history.item(folder_id)?,
+                &staged,
+                &directory.path().join("folder-copy")
+            )
+            .is_err()
+        );
+
+        let image_id = history.capture_image(b"\x89PNG\r\n\x1a\nsynthetic", 1, 1, &images)?;
+        let image_destination = directory.path().join("image-copy.png");
+        save_item_as(
+            &history,
+            &history.item(image_id)?,
+            &staged,
+            &image_destination,
+        )?;
+        assert_eq!(
+            std::fs::read(&image_destination)?,
+            b"\x89PNG\r\n\x1a\nsynthetic"
         );
         Ok(())
     }
