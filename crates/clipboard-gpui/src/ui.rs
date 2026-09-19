@@ -6,7 +6,7 @@ use crate::{
     state::{HistoryState, PreviewState, reorder_offsets},
 };
 use clipboard_core::{
-    HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
+    FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
     database::Group,
     preferences::{HotkeyPreference, ThemePreference},
 };
@@ -1054,7 +1054,6 @@ impl ClipboardView {
                     let text = match &self.preview.result {
                         Some(Ok(PreviewContent::Text(text))) => Some(text.clone()),
                         Some(Ok(PreviewContent::RichText(text))) => Some(text.clone()),
-                        Some(Ok(PreviewContent::Files(paths))) => Some(paths.join("\n")),
                         _ => None,
                     };
                     if let Some(text) = text {
@@ -1444,6 +1443,117 @@ impl ClipboardView {
         }
     }
 
+    fn render_file_preview(
+        &self,
+        entries: &[FilePreviewEntry],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .id("file-details-scroll")
+            .size_full()
+            .p_1()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .overflow_y_scrollbar()
+            .children(entries.iter().enumerate().map(|(index, entry)| {
+                let name = std::path::Path::new(&entry.original_path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| entry.original_path.clone());
+                let unavailable = !entry.exists || entry.metadata_error.is_some();
+                let status = if entry.metadata_error.is_some() {
+                    "无法读取".to_owned()
+                } else if !entry.exists {
+                    "已失效".to_owned()
+                } else if entry.is_dir {
+                    "文件夹".to_owned()
+                } else if let Some(size) = entry.size {
+                    format_bytes(size)
+                } else {
+                    "文件".to_owned()
+                };
+                div()
+                    .id(("file-detail", index))
+                    .flex_none()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(if unavailable {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().border
+                    })
+                    .bg(cx.theme().background)
+                    .p_3()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_sm()
+                                    .font_semibold()
+                                    .line_clamp(1)
+                                    .text_ellipsis()
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .rounded_sm()
+                                    .border_1()
+                                    .border_color(if unavailable {
+                                        cx.theme().danger
+                                    } else {
+                                        cx.theme().border
+                                    })
+                                    .px_2()
+                                    .py_1()
+                                    .text_xs()
+                                    .text_color(if unavailable {
+                                        cx.theme().danger
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
+                                    .child(status),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .line_clamp(2)
+                            .text_ellipsis()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("原始路径：{}", entry.original_path)),
+                    )
+                    .when(entry.recovered, |row| {
+                        row.child(
+                            div()
+                                .text_xs()
+                                .line_clamp(2)
+                                .text_ellipsis()
+                                .text_color(cx.theme().primary)
+                                .child(format!("备份副本：{}", entry.resolved_path)),
+                        )
+                    })
+                    .when_some(entry.metadata_error.clone(), |row, error| {
+                        row.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().danger)
+                                .child(format!("无法读取元数据：{error}")),
+                        )
+                    })
+            }))
+            .into_any_element()
+    }
+
     fn render_preview(&self, cx: &mut Context<Self>) -> Div {
         let id = self.preview.id.expect("preview is open");
         let ready = matches!(self.preview.result, Some(Ok(_)));
@@ -1452,9 +1562,9 @@ impl ClipboardView {
         let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
         let save_as_name = match &self.preview.result {
             Some(Ok(PreviewContent::Image(path))) => path.file_name(),
-            Some(Ok(PreviewContent::Files(paths))) => paths
+            Some(Ok(PreviewContent::Files(entries))) => entries
                 .first()
-                .and_then(|path| std::path::Path::new(path).file_name()),
+                .and_then(|entry| std::path::Path::new(&entry.original_path).file_name()),
             _ => None,
         }
         .map(|name| name.to_string_lossy().into_owned());
@@ -1479,25 +1589,50 @@ impl ClipboardView {
                 }
                 Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
                 Some(Ok(PreviewContent::RichText(_))) => "富文本 · 纯文本预览".into(),
-                Some(Ok(PreviewContent::Files(paths))) => {
-                    format!("{} 个文件或文件夹 · 仅保存原始路径", paths.len())
+                Some(Ok(PreviewContent::Files(entries))) => {
+                    let directories = entries
+                        .iter()
+                        .filter(|entry| entry.exists && entry.is_dir)
+                        .count();
+                    let missing = entries
+                        .iter()
+                        .filter(|entry| !entry.exists && entry.metadata_error.is_none())
+                        .count();
+                    let unreadable = entries
+                        .iter()
+                        .filter(|entry| entry.metadata_error.is_some())
+                        .count();
+                    let recovered = entries.iter().filter(|entry| entry.recovered).count();
+                    let mut details = vec![format!("{} 项", entries.len())];
+                    if directories > 0 {
+                        details.push(format!("{directories} 个文件夹"));
+                    }
+                    if missing > 0 {
+                        details.push(format!("{missing} 项已失效"));
+                    }
+                    if unreadable > 0 {
+                        details.push(format!("{unreadable} 项无法读取"));
+                    }
+                    if recovered > 0 {
+                        details.push(format!("{recovered} 项使用备份副本"));
+                    }
+                    details.join(" · ")
                 }
             }
         };
         let body: AnyElement = match &self.preview.result {
-            Some(Ok(
-                PreviewContent::Text(_) | PreviewContent::Files(_) | PreviewContent::RichText(_),
-            )) => Textarea::new(&self.preview_input)
-                .readonly(!self.preview_editing || self.preview_save_pending)
-                .h_full()
-                .aria_label(if self.preview_editing {
-                    "编辑文本"
-                } else if files {
-                    "文件路径"
-                } else {
-                    "完整文本内容"
-                })
-                .into_any_element(),
+            Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_))) => {
+                Textarea::new(&self.preview_input)
+                    .readonly(!self.preview_editing || self.preview_save_pending)
+                    .h_full()
+                    .aria_label(if self.preview_editing {
+                        "编辑文本"
+                    } else {
+                        "完整文本内容"
+                    })
+                    .into_any_element()
+            }
+            Some(Ok(PreviewContent::Files(entries))) => self.render_file_preview(entries, cx),
             Some(Ok(PreviewContent::Image(path))) => div()
                 .flex()
                 .items_center()
@@ -1541,7 +1676,7 @@ impl ClipboardView {
                             } else if image {
                                 "图片预览"
                             } else if files {
-                                "文件路径"
+                                "文件详情"
                             } else if rich {
                                 "富文本预览"
                             } else {

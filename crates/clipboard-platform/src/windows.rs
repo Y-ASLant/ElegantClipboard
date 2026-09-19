@@ -4,6 +4,8 @@ use crate::{
 };
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
+#[cfg(test)]
+use clipboard_core::FilePreviewEntry;
 use clipboard_core::{
     History, MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES,
     MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
@@ -1214,7 +1216,7 @@ impl Worker {
                         generation,
                         result: self
                             .history
-                            .preview_content(id)
+                            .preview_content_with_staged(id, &self.staged_dir)
                             .map_err(|error| error.to_string()),
                     })
                     .map_err(|_| anyhow!("窗口已关闭"))?;
@@ -2273,7 +2275,18 @@ mod tests {
         loop {
             match events.try_recv() {
                 Ok(Event::Preview { result, .. }) => {
-                    assert_eq!(result.unwrap(), PreviewContent::Files(vec![path.clone()]));
+                    assert_eq!(
+                        result.unwrap(),
+                        PreviewContent::Files(vec![FilePreviewEntry {
+                            original_path: path.clone(),
+                            resolved_path: path.clone(),
+                            exists: true,
+                            is_dir: false,
+                            size: Some(6),
+                            recovered: false,
+                            metadata_error: None,
+                        }])
+                    );
                     break;
                 }
                 Ok(Event::Error(message)) => panic!("{message}"),

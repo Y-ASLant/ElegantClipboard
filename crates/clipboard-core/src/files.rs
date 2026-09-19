@@ -1,5 +1,5 @@
 use crate::{
-    HISTORY_LIMIT, History,
+    FilePreviewEntry, HISTORY_LIMIT, History,
     database::{ContentType, NewClipboardItem},
 };
 use anyhow::{Result, bail};
@@ -120,6 +120,56 @@ impl History {
             .collect())
     }
 
+    pub(crate) fn file_preview_entries(
+        &self,
+        id: i64,
+        staged_dir: Option<&Path>,
+    ) -> Result<Vec<FilePreviewEntry>> {
+        let originals = self.files(id)?;
+        let resolved = staged_dir.map_or_else(
+            || Ok(originals.clone()),
+            |staged_dir| self.files_for_copy(id, staged_dir),
+        )?;
+        Ok(originals
+            .into_iter()
+            .zip(resolved)
+            .map(|(original_path, resolved_path)| {
+                let recovered = original_path != resolved_path;
+                match fs::metadata(&resolved_path) {
+                    Ok(metadata) => FilePreviewEntry {
+                        original_path,
+                        resolved_path,
+                        exists: true,
+                        is_dir: metadata.is_dir(),
+                        size: metadata.is_file().then_some(metadata.len()),
+                        recovered,
+                        metadata_error: None,
+                    },
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        FilePreviewEntry {
+                            original_path,
+                            resolved_path,
+                            exists: false,
+                            is_dir: false,
+                            size: None,
+                            recovered,
+                            metadata_error: None,
+                        }
+                    }
+                    Err(error) => FilePreviewEntry {
+                        original_path,
+                        resolved_path,
+                        exists: false,
+                        is_dir: false,
+                        size: None,
+                        recovered,
+                        metadata_error: Some(error.to_string()),
+                    },
+                }
+            })
+            .collect())
+    }
+
     pub(crate) fn cleanup_staged(&self, candidates: Vec<String>, images_dir: &Path) {
         if candidates.is_empty() {
             return;
@@ -169,7 +219,7 @@ fn staged_paths(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{PAGE_SIZE, PreviewContent};
+    use crate::{FilePreviewEntry, PAGE_SIZE, PreviewContent};
 
     #[test]
     fn file_paths_are_saved_deduplicated_and_reordered_with_text() -> Result<()> {
@@ -182,6 +232,7 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
         ];
+        fs::write(&files[0], b"sample")?;
         let id = history.capture_files(&files, &directory.path().join("images"))?;
         let text = history.capture("text")?.unwrap();
         assert_eq!(
@@ -189,7 +240,18 @@ mod tests {
             id
         );
         assert_eq!(history.files(id)?, files);
-        assert_eq!(history.preview_content(id)?, PreviewContent::Files(files));
+        assert_eq!(
+            history.preview_content(id)?,
+            PreviewContent::Files(vec![FilePreviewEntry {
+                original_path: files[0].clone(),
+                resolved_path: files[0].clone(),
+                exists: true,
+                is_dir: false,
+                size: Some(6),
+                recovered: false,
+                metadata_error: None,
+            }])
+        );
         history.reorder(text, id, false, false)?;
         assert_eq!(history.list("", PAGE_SIZE, false)?[0].id, text);
         assert_eq!(history.count("", false)?, 2);
@@ -247,6 +309,22 @@ mod tests {
                 } else {
                     original.clone()
                 }]
+            );
+            assert_eq!(
+                history.preview_content_with_staged(id, &staged_dir)?,
+                PreviewContent::Files(vec![FilePreviewEntry {
+                    original_path: original.clone(),
+                    resolved_path: if candidate == &staged {
+                        staged.to_string_lossy().into_owned()
+                    } else {
+                        original.clone()
+                    },
+                    exists: candidate == &staged,
+                    is_dir: false,
+                    size: (candidate == &staged).then_some(9),
+                    recovered: candidate == &staged,
+                    metadata_error: None,
+                }])
             );
         }
         history.delete_with_media(id, &directory.path().join("images"))?;

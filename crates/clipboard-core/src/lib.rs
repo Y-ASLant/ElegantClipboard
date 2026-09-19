@@ -40,10 +40,21 @@ pub struct History {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilePreviewEntry {
+    pub original_path: String,
+    pub resolved_path: String,
+    pub exists: bool,
+    pub is_dir: bool,
+    pub size: Option<u64>,
+    pub recovered: bool,
+    pub metadata_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreviewContent {
     Text(String),
     Image(PathBuf),
-    Files(Vec<String>),
+    Files(Vec<FilePreviewEntry>),
     RichText(String),
 }
 
@@ -257,11 +268,23 @@ impl History {
     }
 
     pub fn preview_content(&self, id: i64) -> Result<PreviewContent> {
+        self.preview_content_inner(id, None)
+    }
+
+    pub fn preview_content_with_staged(
+        &self,
+        id: i64,
+        staged_dir: &Path,
+    ) -> Result<PreviewContent> {
+        self.preview_content_inner(id, Some(staged_dir))
+    }
+
+    fn preview_content_inner(&self, id: i64, staged_dir: Option<&Path>) -> Result<PreviewContent> {
         let item = self.item(id)?;
         if item.content_type == "files" {
-            return Ok(PreviewContent::Files(files::parse_file_paths(
-                item.file_paths.as_deref(),
-            )?));
+            return Ok(PreviewContent::Files(
+                self.file_preview_entries(id, staged_dir)?,
+            ));
         }
         if matches!(item.content_type.as_str(), "html" | "rtf") {
             return Ok(PreviewContent::RichText(
