@@ -311,6 +311,7 @@ struct ClipboardView {
     data_size_pending: bool,
     database_maintenance_pending: bool,
     export_pending: bool,
+    window_pinned: bool,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
@@ -512,6 +513,7 @@ impl ClipboardView {
             data_size_pending: false,
             database_maintenance_pending: false,
             export_pending: false,
+            window_pinned: false,
             paste_target: None,
             paste_pending: None,
             reorder_pending: false,
@@ -1961,7 +1963,10 @@ impl ClipboardView {
             self.is_error = true;
             return;
         }
-        tray::set_window_visible(window, false);
+        let hide_window = !self.window_pinned;
+        if hide_window {
+            tray::set_window_visible(window, false);
+        }
         cx.spawn_in(window, async move |view, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(60))
@@ -1973,7 +1978,9 @@ impl ClipboardView {
                         this.is_error = false;
                     }
                     Err(error) => {
-                        tray::set_window_visible(window, true);
+                        if hide_window {
+                            tray::set_window_visible(window, true);
+                        }
                         this.message = error.to_string();
                         this.is_error = true;
                     }
@@ -1982,6 +1989,26 @@ impl ClipboardView {
             });
         })
         .detach();
+    }
+
+    fn toggle_window_pin(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let pinned = !self.window_pinned;
+        match tray::set_window_topmost(window, pinned) {
+            Ok(()) => {
+                self.window_pinned = pinned;
+                self.message = if pinned {
+                    "窗口已置顶；粘贴后保持可见".into()
+                } else {
+                    "已取消窗口置顶".into()
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!("更新窗口置顶失败：{error}");
+                self.is_error = true;
+            }
+        }
+        cx.notify();
     }
 
     fn valid_drag(&self, drag: &HistoryDrag, pinned: bool) -> bool {
@@ -3189,7 +3216,23 @@ impl ClipboardView {
                     .child(
                         div()
                             .flex()
+                            .flex_wrap()
+                            .justify_end()
                             .gap_2()
+                            .child(
+                                Button::new("window-pin")
+                                    .outline()
+                                    .small()
+                                    .label(if self.window_pinned {
+                                        "已置顶"
+                                    } else {
+                                        "置顶"
+                                    })
+                                    .selected(self.window_pinned)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_window_pin(window, cx);
+                                    })),
+                            )
                             .child(
                                 Button::new("export-backup")
                                     .outline()

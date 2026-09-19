@@ -7,7 +7,10 @@ use tray_icon::{
 };
 use windows::Win32::{
     Foundation::HWND,
-    UI::WindowsAndMessaging::{SW_HIDE, SW_SHOW, ShowWindow},
+    UI::WindowsAndMessaging::{
+        HWND_NOTOPMOST, HWND_TOPMOST, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos, ShowWindow,
+    },
 };
 
 #[derive(Clone, Copy)]
@@ -72,6 +75,32 @@ pub fn set_window_visible(window: &Window, visible: bool) {
             window.activate_window();
         }
     }
+}
+
+pub fn set_window_topmost(window: &Window, topmost: bool) -> Result<()> {
+    let handle = HasWindowHandle::window_handle(window)
+        .map_err(|error| anyhow::anyhow!("无法读取窗口句柄：{error}"))?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        anyhow::bail!("当前窗口不是 Win32 窗口");
+    };
+    let hwnd = HWND(handle.hwnd.get() as *mut _);
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(if topmost {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            }),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+        .context("无法更新窗口置顶状态")?;
+    }
+    Ok(())
 }
 
 fn icon_pixels() -> Vec<u8> {
