@@ -24,6 +24,35 @@ pub fn reorder_offsets(before: &[i64], after: &[i64]) -> HashMap<i64, isize> {
         .collect()
 }
 
+/// Advance a virtual list by one row without leaving the loaded item range.
+pub fn next_drag_scroll_index(current: usize, item_count: usize, direction: i8) -> usize {
+    if item_count == 0 || direction == 0 {
+        return current;
+    }
+    if direction < 0 {
+        current.saturating_sub(1)
+    } else {
+        current.saturating_add(1).min(item_count - 1)
+    }
+}
+
+/// Resolve the row under the active edge after programmatic virtual-list scrolling.
+pub fn drag_edge_target_index(
+    scroll_top: usize,
+    item_count: usize,
+    visible_span: usize,
+    direction: i8,
+) -> Option<usize> {
+    if item_count == 0 || direction == 0 {
+        return None;
+    }
+    Some(if direction < 0 {
+        scroll_top.min(item_count - 1)
+    } else {
+        scroll_top.saturating_add(visible_span).min(item_count - 1)
+    })
+}
+
 #[derive(Default)]
 pub struct PreviewState {
     pub id: Option<i64>,
@@ -165,6 +194,21 @@ mod tests {
         assert!(!offsets.contains_key(&1));
         assert!(reorder_offsets(&[1, 2], &[3, 2]).is_empty());
         assert!(reorder_offsets(&[1, 2], &[3, 1, 2]).is_empty());
+    }
+
+    #[test]
+    fn drag_scroll_stops_at_loaded_list_edges() {
+        assert_eq!(next_drag_scroll_index(4, 10, -1), 3);
+        assert_eq!(next_drag_scroll_index(0, 10, -1), 0);
+        assert_eq!(next_drag_scroll_index(4, 10, 1), 5);
+        assert_eq!(next_drag_scroll_index(9, 10, 1), 9);
+        assert_eq!(next_drag_scroll_index(4, 10, 0), 4);
+        assert_eq!(next_drag_scroll_index(0, 0, 1), 0);
+        assert_eq!(drag_edge_target_index(4, 10, 2, -1), Some(4));
+        assert_eq!(drag_edge_target_index(4, 10, 2, 1), Some(6));
+        assert_eq!(drag_edge_target_index(8, 10, 2, 1), Some(9));
+        assert_eq!(drag_edge_target_index(0, 0, 2, 1), None);
+        assert_eq!(drag_edge_target_index(4, 10, 2, 0), None);
     }
 
     #[test]

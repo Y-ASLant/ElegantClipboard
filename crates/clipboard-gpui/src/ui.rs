@@ -3,7 +3,9 @@ use crate::tray::{self, TrayCommand};
 use crate::visual::{self, CONTROL_HEIGHT, GROUP_BAR_HEIGHT, PAGE_PADDING, ROW_HEIGHT};
 use crate::{
     options::Options,
-    state::{HistoryState, PreviewState, reorder_offsets},
+    state::{
+        HistoryState, PreviewState, drag_edge_target_index, next_drag_scroll_index, reorder_offsets,
+    },
 };
 use clipboard_core::{
     FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
@@ -23,7 +25,7 @@ use gpui_kit::{
     },
     *,
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
@@ -316,7 +318,7 @@ struct ClipboardView {
     reorder_before: Option<Vec<i64>>,
     reorder_offsets: HashMap<i64, isize>,
     feedback_revision: usize,
-    last_drag_scroll: Instant,
+    history_drag_direction: i8,
     paused: bool,
     pause_pending: bool,
     message: String,
@@ -327,6 +329,7 @@ struct ClipboardView {
     feedback_task: Option<Task<()>>,
     group_feedback_task: Option<Task<()>>,
     group_drag_scroll_task: Option<Task<()>>,
+    history_drag_scroll_task: Option<Task<()>>,
 }
 
 impl ClipboardView {
@@ -516,7 +519,7 @@ impl ClipboardView {
             reorder_before: None,
             reorder_offsets: HashMap::new(),
             feedback_revision: 0,
-            last_drag_scroll: Instant::now(),
+            history_drag_direction: 0,
             paused,
             pause_pending: false,
             message: if startup_errors.is_empty() {
@@ -542,6 +545,7 @@ impl ClipboardView {
             feedback_task: None,
             group_feedback_task: None,
             group_drag_scroll_task: None,
+            history_drag_scroll_task: None,
         }
     }
 
@@ -1156,6 +1160,7 @@ impl ClipboardView {
             } => {
                 self.reorder_pending = false;
                 self.drop_target = None;
+                self.history_drag_direction = 0;
                 let before = self.reorder_before.take();
                 match result {
                     Ok(()) if generation == self.history.generation => {
@@ -2006,7 +2011,7 @@ impl ClipboardView {
         self.group_drag_scroll_task = Some(cx.spawn(async move |view, cx| {
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(60))
+                    .timer(visual::DRAG_SCROLL_INTERVAL)
                     .await;
                 let Ok(active) = view.update(cx, |this, cx| {
                     if !cx.has_active_drag() {
@@ -2017,12 +2022,84 @@ impl ClipboardView {
                     }
                     if this.group_drag_direction != 0 {
                         let offset = this.group_scroll.offset();
-                        let next = (offset.x + px(f32::from(this.group_drag_direction) * 18.))
-                            .clamp(-this.group_scroll.max_offset().x, px(0.));
+                        let next = (offset.x
+                            + px(f32::from(this.group_drag_direction)
+                                * visual::GROUP_DRAG_SCROLL_STEP))
+                        .clamp(-this.group_scroll.max_offset().x, px(0.));
                         if next != offset.x {
                             this.group_scroll.set_offset(point(next, offset.y));
                             cx.notify();
                         }
+                    }
+                    true
+                }) else {
+                    break;
+                };
+                if !active {
+                    break;
+                }
+            }
+        }));
+    }
+
+    fn start_history_drag_scroll(&mut self, cx: &mut Context<Self>) {
+        self.history_drag_direction = 0;
+        self.history_drag_scroll_task = Some(cx.spawn(async move |view, cx| {
+            let mut ticks = 0usize;
+            let mut scroll_target = None;
+            loop {
+                cx.background_executor()
+                    .timer(visual::DRAG_SCROLL_INTERVAL)
+                    .await;
+                let Ok(active) = view.update(cx, |this, cx| {
+                    if !cx.has_active_drag() {
+                        this.history_drag_direction = 0;
+                        this.drop_target = None;
+                        cx.notify();
+                        return false;
+                    }
+                    if this.history_drag_direction == 0 {
+                        ticks = 0;
+                        scroll_target = None;
+                        return true;
+                    }
+                    ticks += 1;
+                    if !ticks.is_multiple_of(visual::HISTORY_DRAG_SCROLL_TICKS) {
+                        return true;
+                    }
+                    let current = scroll_target.unwrap_or_else(|| {
+                        this.scroll.0.borrow().base_handle.logical_scroll_top().0
+                    });
+                    let next = next_drag_scroll_index(
+                        current,
+                        this.history.items.len(),
+                        this.history_drag_direction,
+                    );
+                    if next != current {
+                        scroll_target = Some(next);
+                        this.scroll.scroll_to_item_strict(next, ScrollStrategy::Top);
+                    }
+                    let target = drag_edge_target_index(
+                        next,
+                        this.history.items.len(),
+                        this.page_step().max(1) as usize,
+                        this.history_drag_direction,
+                    )
+                    .and_then(|index| this.history.items.get(index))
+                    .and_then(|target| {
+                        let source = this
+                            .history
+                            .selected
+                            .and_then(|id| this.history.items.iter().find(|item| item.id == id))?;
+                        (source.id != target.id).then_some(DropTarget {
+                            id: target.id,
+                            after: this.history_drag_direction > 0,
+                            allowed: source.is_pinned == target.is_pinned,
+                        })
+                    });
+                    if next != current || this.drop_target != target {
+                        this.drop_target = target;
+                        cx.notify();
                     }
                     true
                 }) else {
@@ -2244,6 +2321,7 @@ impl ClipboardView {
                     entity.update(cx, |this, cx| {
                         this.history.selected = Some(drag.id);
                         this.drop_target = None;
+                        this.start_history_drag_scroll(cx);
                         cx.notify();
                     });
                     cx.new(|_| drag.clone())
@@ -2274,16 +2352,23 @@ impl ClipboardView {
             )
             .on_drop(cx.listener(move |this, drag: &HistoryDrag, _, cx| {
                 if drag.id == id {
+                    this.drop_target = None;
+                    this.history_drag_direction = 0;
+                    cx.notify();
                     return;
                 }
                 if !this.valid_drag(drag, pinned) {
                     this.drop_target = None;
+                    this.history_drag_direction = 0;
                     this.message = "列表已变化，或跨越了置顶区域，请重新拖动".into();
                     this.is_error = true;
                     cx.notify();
                     return;
                 }
                 let Some(target) = this.drop_target.filter(|target| target.id == id) else {
+                    this.drop_target = None;
+                    this.history_drag_direction = 0;
+                    cx.notify();
                     return;
                 };
                 if this.send(
@@ -2302,6 +2387,7 @@ impl ClipboardView {
                         Some(this.history.items.iter().map(|item| item.id).collect());
                 }
                 this.drop_target = None;
+                this.history_drag_direction = 0;
                 cx.notify();
             }))
             .py_2()
@@ -3069,6 +3155,7 @@ impl ClipboardView {
                 this.drop_target = None;
                 this.group_drop_target = None;
                 this.group_drag_direction = 0;
+                this.history_drag_direction = 0;
                 if !was_dragging && !this.selected_ids.is_empty() && !this.batch_pending {
                     this.reset_selection();
                 }
@@ -3184,9 +3271,9 @@ impl ClipboardView {
                             let x = event.event.position.x;
                             let direction = if !event.bounds.contains(&event.event.position) {
                                 0
-                            } else if x < event.bounds.left() + px(28.) {
+                            } else if x < event.bounds.left() + px(visual::DRAG_EDGE_ZONE) {
                                 1
-                            } else if x > event.bounds.right() - px(28.) {
+                            } else if x > event.bounds.right() - px(visual::DRAG_EDGE_ZONE) {
                                 -1
                             } else {
                                 0
@@ -3663,23 +3750,20 @@ impl ClipboardView {
                     }))
                     .on_drag_move(
                         cx.listener(|this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
-                            if !event.bounds.contains(&event.event.position) {
-                                return;
-                            }
-                            if this.last_drag_scroll.elapsed() < Duration::from_millis(120) {
-                                return;
-                            }
-                            let top = this.scroll.0.borrow().base_handle.logical_scroll_top().0;
-                            let next = if event.event.position.y < event.bounds.top() + px(36.) {
-                                top.saturating_sub(1)
-                            } else if event.event.position.y > event.bounds.bottom() - px(36.) {
-                                (top + 1).min(this.history.items.len().saturating_sub(1))
+                            let y = event.event.position.y;
+                            let direction = if !event.bounds.contains(&event.event.position) {
+                                0
+                            } else if y < event.bounds.top() + px(visual::DRAG_EDGE_ZONE) {
+                                -1
+                            } else if y > event.bounds.bottom() - px(visual::DRAG_EDGE_ZONE) {
+                                1
                             } else {
-                                return;
+                                0
                             };
-                            this.last_drag_scroll = Instant::now();
-                            this.scroll.scroll_to_item_strict(next, ScrollStrategy::Top);
-                            cx.notify();
+                            if this.history_drag_direction != direction {
+                                this.history_drag_direction = direction;
+                                cx.notify();
+                            }
                         }),
                     )
                     .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
