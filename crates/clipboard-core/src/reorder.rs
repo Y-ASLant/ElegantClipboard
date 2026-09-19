@@ -37,21 +37,24 @@ pub fn move_item(
             })?
             .collect::<Result<_, _>>()?
     };
-    let Some(&(_, pinned)) = rows.iter().find(|(id, _)| *id == from) else {
+    let Some(&(_, source_pinned)) = rows.iter().find(|(id, _)| *id == from) else {
         bail!("拖动的记录已不存在或已不属于当前视图");
     };
     let Some(&(_, target_pinned)) = rows.iter().find(|(id, _)| *id == to) else {
         bail!("目标记录已不存在或已不属于当前视图");
     };
-    if pinned != target_pinned {
-        bail!("置顶与普通记录分别排序，请先调整置顶状态");
-    }
     if from == to {
         return Ok(());
     }
-    rows.retain(|(id, is_pinned)| *is_pinned == pinned && *id != from);
+    if source_pinned != target_pinned {
+        tx.execute(
+            "UPDATE clipboard_items SET is_pinned = ?1 WHERE id = ?2",
+            params![target_pinned, from],
+        )?;
+    }
+    rows.retain(|(id, is_pinned)| *is_pinned == target_pinned && *id != from);
     let index = rows.iter().position(|(id, _)| *id == to).unwrap() + usize::from(after);
-    rows.insert(index, (from, pinned));
+    rows.insert(index, (from, target_pinned));
     {
         let mut update = tx.prepare(&format!(
             "UPDATE clipboard_items SET {column} = ?1 WHERE id = ?2"
@@ -134,13 +137,64 @@ mod tests {
         assert_eq!(ids(&history, true)?, vec![a, d, c]);
         assert_eq!(ids(&history, false)?, vec![d, c, b, a]);
         history.toggle_pin(d)?;
+        history.reorder(a, d, false, false)?;
+        assert_eq!(ids(&history, false)?, vec![a, d, c, b]);
+        assert!(history.item(a)?.is_pinned);
+        history.reorder(d, b, true, false)?;
+        assert_eq!(ids(&history, false)?, vec![a, c, b, d]);
+        assert!(!history.item(d)?.is_pinned);
         let before = ids(&history, false)?;
-        assert!(history.reorder(a, d, false, false).is_err());
         assert!(history.reorder(a, -1, false, false).is_err());
         assert!(history.reorder(b, c, false, true).is_err());
         assert_eq!(ids(&history, false)?, before);
         drop(history);
         assert_eq!(ids(&History::open(path)?, false)?, before);
+        Ok(())
+    }
+
+    #[test]
+    fn cross_pin_reorder_is_atomic_and_uses_favorite_order() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("history.db"))?;
+        let first = history.capture("first")?.unwrap();
+        let second = history.capture("second")?.unwrap();
+        let pinned = history.capture("pinned")?.unwrap();
+        history.toggle_pin(pinned)?;
+        for id in [first, second, pinned] {
+            history.toggle_favorite(id)?;
+        }
+
+        history.reorder(first, pinned, false, true)?;
+        let favorites = history.list("", PAGE_SIZE, true)?;
+        assert_eq!(
+            favorites.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![first, pinned, second]
+        );
+        assert!(history.item(first)?.is_pinned);
+
+        history.toggle_pin(first)?;
+        let before = history.list("", PAGE_SIZE, false)?;
+        history
+            .db
+            .write_connection()
+            .lock()
+            .execute_batch(&format!(
+                "CREATE TRIGGER reject_cross_pin BEFORE UPDATE OF sort_order ON clipboard_items
+             WHEN OLD.id = {pinned} BEGIN SELECT RAISE(ABORT, 'test write failure'); END;"
+            ))?;
+        assert!(history.reorder(first, pinned, false, false).is_err());
+        assert!(!history.item(first)?.is_pinned);
+        assert_eq!(
+            history
+                .list("", PAGE_SIZE, false)?
+                .iter()
+                .map(|item| (item.id, item.is_pinned, item.sort_order))
+                .collect::<Vec<_>>(),
+            before
+                .iter()
+                .map(|item| (item.id, item.is_pinned, item.sort_order))
+                .collect::<Vec<_>>()
+        );
         Ok(())
     }
 

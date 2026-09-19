@@ -2209,9 +2209,34 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
         }
+        service.send(Command::TogglePin(second))?;
+        let rows = next_snapshot(&events, 0);
+        assert!(rows[0].is_pinned);
+        assert_eq!(rows[0].id, second);
+        service.send(Command::Reorder {
+            from: first,
+            to: second,
+            after: false,
+            favorite_only: false,
+            group_id: None,
+            generation: 0,
+        })?;
+        let rows = next_snapshot(&events, 0);
+        assert_eq!(
+            rows.iter()
+                .map(|item| (item.id, item.is_pinned))
+                .collect::<Vec<_>>(),
+            vec![(first, true), (second, true)]
+        );
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::Reordered { result: Ok(()), .. }
+        ));
         drop(service);
         let (_service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(next_snapshot(&events, 0)[0].id, first);
+        let rows = next_snapshot(&events, 0);
+        assert_eq!(rows[0].id, first);
+        assert!(rows[0].is_pinned);
         Ok(())
     }
 

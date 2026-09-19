@@ -2057,18 +2057,17 @@ impl ClipboardView {
         cx.notify();
     }
 
-    fn valid_drag(&self, drag: &HistoryDrag, pinned: bool) -> bool {
+    fn valid_drag(&self, drag: &HistoryDrag) -> bool {
         !self.reorder_pending
             && !self.history.loading
             && drag.generation == self.history.generation
             && drag.favorite_only == self.history.favorite_only
             && drag.group_id == self.history.group_id
-            && drag.pinned == pinned
             && self
                 .history
                 .items
                 .iter()
-                .any(|item| item.id == drag.id && item.is_pinned == pinned)
+                .any(|item| item.id == drag.id && item.is_pinned == drag.pinned)
     }
 
     fn valid_group_drag(&self, drag: &GroupDrag) -> bool {
@@ -2415,7 +2414,7 @@ impl ClipboardView {
                     let target = (event.drag(cx).id != id).then_some(DropTarget {
                         id,
                         after,
-                        allowed: this.valid_drag(event.drag(cx), pinned),
+                        allowed: this.valid_drag(event.drag(cx)),
                     });
                     if this.drop_target != target {
                         this.drop_target = target;
@@ -2430,10 +2429,10 @@ impl ClipboardView {
                     cx.notify();
                     return;
                 }
-                if !this.valid_drag(drag, pinned) {
+                if !this.valid_drag(drag) {
                     this.drop_target = None;
                     this.history_drag_direction = 0;
-                    this.message = "列表已变化，或跨越了置顶区域，请重新拖动".into();
+                    this.message = "列表已变化，请重新拖动".into();
                     this.is_error = true;
                     cx.notify();
                     return;
