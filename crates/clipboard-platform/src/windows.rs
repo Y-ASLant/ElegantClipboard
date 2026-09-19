@@ -13,7 +13,9 @@ use clipboard_core::{
     database::{ClipboardItem, Database, Group},
     import::{ImportReport, import_legacy_database},
     legacy_backup::{LegacyBackupReport, import_legacy_backup},
-    preferences::{HotkeyPreference, Preferences, ThemePreference, WindowSizePreference},
+    preferences::{
+        HotkeyPreference, LanguagePreference, Preferences, ThemePreference, WindowSizePreference,
+    },
 };
 use clipboard_rs::{
     Clipboard, ClipboardContent, ClipboardContext, ClipboardHandler, ClipboardWatcher,
@@ -97,6 +99,7 @@ pub enum Command {
     ToggleFavorite(i64),
     Pause(bool),
     SetTheme(ThemePreference),
+    SetLanguage(LanguagePreference),
     SetHotkey(HotkeyPreference),
     SetWindowSize(WindowSizePreference),
     SetAutostart(bool),
@@ -180,6 +183,7 @@ impl Command {
             | Self::ToggleFavorite(_)
             | Self::Reorder { .. }
             | Self::SetTheme(_)
+            | Self::SetLanguage(_)
             | Self::SetHotkey(_)
             | Self::SetWindowSize(_)
             | Self::SetAutostart(_)
@@ -244,6 +248,7 @@ pub enum Event {
     BatchDeleted(Result<i64, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
+    LanguageSaved(Result<LanguagePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
     WindowSizeSaved(Result<WindowSizePreference, String>),
     AutostartSaved(Result<bool, String>),
@@ -437,6 +442,7 @@ pub struct Service {
     _instance_lock: File,
     pub data_dir: PathBuf,
     pub initial_theme: ThemePreference,
+    pub initial_language: LanguagePreference,
     pub initial_hotkey: HotkeyPreference,
     pub initial_paused: bool,
     pub initial_window_size: Option<WindowSizePreference>,
@@ -509,6 +515,7 @@ impl Service {
         let history = History::new(&db);
         let preferences = Preferences::new(&db);
         let initial_theme = preferences.theme()?;
+        let initial_language = preferences.language()?;
         let initial_hotkey = preferences.hotkey()?;
         let initial_paused = preferences.capture_paused()?;
         let initial_window_size = preferences.window_size()?;
@@ -531,6 +538,7 @@ impl Service {
             events: events.clone(),
             _instance_lock: instance_lock,
             initial_theme,
+            initial_language,
             initial_hotkey,
             initial_paused,
             initial_window_size,
@@ -1446,6 +1454,17 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::SetLanguage(language) => {
+                let result = self
+                    .preferences
+                    .set_language(language)
+                    .map(|_| language)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::LanguageSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::SetHotkey(hotkey) => {
                 let result = self
                     .preferences
@@ -2270,6 +2289,35 @@ mod tests {
         let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
         assert_eq!(reopened.initial_theme, ThemePreference::Dark);
         assert!(next_snapshot(&events, 0).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn language_defaults_to_chinese_and_is_loaded_after_restart() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_language, LanguagePreference::Chinese);
+        next_snapshot(&events, 0);
+        service.send(Command::SetLanguage(LanguagePreference::English))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::LanguageSaved(result)) => {
+                    assert_eq!(result.unwrap(), LanguagePreference::English);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "language save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_language, LanguagePreference::English);
         Ok(())
     }
 

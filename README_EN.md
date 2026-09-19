@@ -10,7 +10,7 @@ ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, an
 - Favorites, pins, groups, drag sorting, batch deletion, and history cleanup
 - Text editing, rich text/image/file previews, copy, plain-text copy, and automatic paste
 - Global shortcut, system tray, autostart, capture pause, and single-instance activation
-- Light/dark themes, always-on-top mode, and remembered window size
+- Simplified Chinese and English UI (Chinese by default), light/dark themes, always-on-top mode, and remembered window size
 - GPUI ZIP backup and restore, plus import of an older database or legacy ZIP backup
 
 See [Windows GPUI status](docs/WINDOWS_MVP.md) for implementation details and known limits.

@@ -4,13 +4,14 @@ use crate::visual::{self, CONTROL_HEIGHT, GROUP_BAR_HEIGHT, PAGE_PADDING, ROW_HE
 use crate::{
     options::Options,
     state::{
-        HistoryState, PreviewState, drag_edge_target_index, next_drag_scroll_index, reorder_offsets,
+        HistoryState, PreviewState, drag_edge_target_index, drag_reorder_offsets,
+        next_drag_scroll_index, reorder_offsets,
     },
 };
 use clipboard_core::{
     FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
     database::Group,
-    preferences::{HotkeyPreference, ThemePreference, WindowSizePreference},
+    preferences::{HotkeyPreference, LanguagePreference, ThemePreference, WindowSizePreference},
 };
 use clipboard_platform::hotkey::Hotkey;
 use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
@@ -32,6 +33,56 @@ use std::{
     rc::Rc,
 };
 use tray_icon::TrayIcon;
+
+fn tr(language: LanguagePreference, chinese: &'static str, english: &'static str) -> &'static str {
+    match language {
+        LanguagePreference::Chinese => chinese,
+        LanguagePreference::English => english,
+    }
+}
+
+fn hotkey_label(language: LanguagePreference, choice: HotkeyPreference) -> &'static str {
+    if choice == HotkeyPreference::Disabled {
+        tr(language, "关闭", "Disabled")
+    } else {
+        choice.label()
+    }
+}
+
+fn localize_service_message(language: LanguagePreference, message: String) -> String {
+    if language == LanguagePreference::Chinese {
+        return message;
+    }
+    match message.as_str() {
+        "富文本超过 1 MiB，按纯文本保存" => {
+            "Rich text exceeded 1 MiB and was saved as plain text".into()
+        }
+        "已在资源管理器中定位" => "Located in File Explorer".into(),
+        "已打开数据目录" => "Data folder opened".into(),
+        "路径已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Paths copied; switch to the target app and press Ctrl+V".into()
+        }
+        "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Plain text copied; switch to the target app and press Ctrl+V".into()
+        }
+        "图片已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Image copied; switch to the target app and press Ctrl+V".into()
+        }
+        "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Files copied; switch to the target app and press Ctrl+V".into()
+        }
+        "富文本已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Rich text copied; switch to the target app and press Ctrl+V".into()
+        }
+        "富文本格式未写回，已按纯文本复制" => {
+            "Rich-text formatting could not be restored; copied as plain text".into()
+        }
+        "已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Copied; switch to the target app and press Ctrl+V".into()
+        }
+        _ => message,
+    }
+}
 
 gpui_kit::actions!(
     history,
@@ -148,6 +199,18 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                             cx,
                         )
                     });
+                    if smoke_test {
+                        let settings_view = view.clone();
+                        cx.spawn(async move |cx| {
+                            cx.background_executor()
+                                .timer(Duration::from_millis(250))
+                                .await;
+                            settings_view.update(cx, |view, cx| {
+                                view.open_settings_window(cx);
+                            });
+                        })
+                        .detach();
+                    }
                     window.on_window_should_close(cx, move |window, _| {
                         if exiting.get() || !tray_enabled.get() {
                             return true;
@@ -188,6 +251,7 @@ struct HistoryDrag {
     generation: u64,
     kind: &'static str,
     preview: String,
+    language: LanguagePreference,
 }
 
 #[derive(Clone)]
@@ -225,7 +289,11 @@ impl Render for HistoryDrag {
                         .text_color(cx.theme().muted_foreground)
                         .child(format!(
                             "⠿  {}{}",
-                            if self.pinned { "置顶 · " } else { "" },
+                            if self.pinned {
+                                tr(self.language, "置顶 · ", "Pinned · ")
+                            } else {
+                                ""
+                            },
                             self.kind
                         )),
                 )
@@ -268,6 +336,8 @@ impl Render for GroupDrag {
 struct ClipboardView {
     service: Service,
     _tray: Option<TrayIcon>,
+    tray_sender: async_channel::Sender<TrayCommand>,
+    tray_enabled: Rc<Cell<bool>>,
     _tray_events: Task<()>,
     hotkey: Option<Hotkey>,
     hotkey_sender: async_channel::Sender<(isize, u32)>,
@@ -308,9 +378,12 @@ struct ClipboardView {
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
-    settings_open: bool,
+    settings_window: Option<AnyWindowHandle>,
+    settings_window_opening: bool,
     theme: ThemePreference,
     theme_pending: bool,
+    language: LanguagePreference,
+    language_pending: bool,
     hotkey_choice: HotkeyPreference,
     hotkey_pending: bool,
     autostart: bool,
@@ -343,6 +416,24 @@ struct ClipboardView {
     window_size_task: Option<Task<()>>,
 }
 
+struct SettingsWindowView {
+    owner: WeakEntity<ClipboardView>,
+    _owner_subscription: Subscription,
+}
+
+impl SettingsWindowView {
+    fn new(owner: WeakEntity<ClipboardView>, cx: &mut Context<Self>) -> Self {
+        let entity = owner
+            .upgrade()
+            .expect("settings window requires its owner view");
+        let subscription = cx.observe(&entity, |_, _, cx| cx.notify());
+        Self {
+            owner,
+            _owner_subscription: subscription,
+        }
+    }
+}
+
 impl ClipboardView {
     fn new(
         service: Service,
@@ -353,7 +444,14 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("搜索剪贴板历史…"));
+        let language = service.initial_language;
+        let search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr(
+                language,
+                "搜索剪贴板历史…",
+                "Search clipboard history…",
+            ))
+        });
         let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.clear_confirm_open = false;
@@ -384,7 +482,7 @@ impl ClipboardView {
             }
         });
         let (tray_sender, tray_receiver) = async_channel::bounded(8);
-        let tray = tray::create(tray_sender);
+        let tray = tray::create(tray_sender.clone(), language);
         tray_enabled.set(tray.is_ok());
         if startup.hidden && tray.is_err() {
             tray::set_window_visible(window, true);
@@ -396,6 +494,16 @@ impl ClipboardView {
                         TrayCommand::Show => {
                             this.paste_target = None;
                             tray::set_window_visible(window, true);
+                        }
+                        TrayCommand::Settings => this.open_settings_window(cx),
+                        TrayCommand::TogglePause => {
+                            if this.monitoring
+                                && !this.pause_pending
+                                && this.send(Command::Pause(!this.paused), cx)
+                            {
+                                this.pause_pending = true;
+                                cx.notify();
+                            }
                         }
                         TrayCommand::Quit => {
                             this.exiting.set(true);
@@ -423,7 +531,12 @@ impl ClipboardView {
                         this.paste_target =
                             paste::is_external_target(window, target).then_some(target);
                         if this.paste_target.is_some() {
-                            this.message = "已从原窗口唤出，可选择记录并粘贴".into();
+                            this.message = tr(
+                                this.language,
+                                "已从原窗口唤出，可选择记录并粘贴",
+                                "Opened from the previous window; select an item to paste.",
+                            )
+                            .into();
                             this.is_error = false;
                         }
                         tray::set_window_visible(window, true);
@@ -439,13 +552,27 @@ impl ClipboardView {
         let autostart = clipboard_platform::autostart::enabled(&service.data_dir);
         let mut startup_errors = Vec::new();
         if let Some(error) = tray_error {
-            startup_errors.push(format!("托盘不可用：{error}；关闭窗口将退出"));
+            startup_errors.push(format!(
+                "{}: {error}",
+                tr(
+                    language,
+                    "托盘不可用，关闭窗口将退出",
+                    "The tray is unavailable; closing the window will exit"
+                )
+            ));
         }
         if let Some(error) = hotkey_error {
             startup_errors.push(error);
         }
         if let Err(error) = &autostart {
-            startup_errors.push(format!("无法读取开机启动设置：{error}"));
+            startup_errors.push(format!(
+                "{}: {error}",
+                tr(
+                    language,
+                    "无法读取开机启动设置",
+                    "Unable to read startup settings"
+                )
+            ));
         }
         let theme = service.initial_theme;
         let paused = service.initial_paused;
@@ -462,7 +589,12 @@ impl ClipboardView {
                 let had_pending = this.paste_pending.take().is_some();
                 let had_batch_pending = this.batch_paste_pending.take().is_some();
                 if had_target || had_pending || had_batch_pending {
-                    this.message = "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出".into();
+                    this.message = tr(
+                        this.language,
+                        "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出",
+                        "The history window lost focus. Open it again from the target app to paste automatically.",
+                    )
+                    .into();
                     this.is_error = false;
                     cx.notify();
                 }
@@ -476,6 +608,8 @@ impl ClipboardView {
         Self {
             service,
             _tray: tray.ok(),
+            tray_sender,
+            tray_enabled,
             _tray_events: tray_events,
             hotkey: hotkey.ok().flatten(),
             hotkey_sender,
@@ -484,7 +618,9 @@ impl ClipboardView {
             history: HistoryState::default(),
             groups: Vec::new(),
             search,
-            group_name_input: cx.new(|cx| InputState::new(window, cx).placeholder("分组名称")),
+            group_name_input: cx.new(|cx| {
+                InputState::new(window, cx).placeholder(tr(language, "分组名称", "Group name"))
+            }),
             group_editor_open: false,
             group_rename_id: None,
             group_save_pending: false,
@@ -516,9 +652,12 @@ impl ClipboardView {
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring: startup.monitoring,
-            settings_open: false,
+            settings_window: None,
+            settings_window_opening: false,
             theme,
             theme_pending: false,
+            language,
+            language_pending: false,
             hotkey_choice,
             hotkey_pending: false,
             autostart: autostart.unwrap_or(false),
@@ -540,18 +679,7 @@ impl ClipboardView {
             paused,
             pause_pending: false,
             message: if startup_errors.is_empty() {
-                let activity = if !startup.monitoring {
-                    "采集已禁用"
-                } else if paused {
-                    "已暂停记录"
-                } else {
-                    "正在记录文本"
-                };
-                if hotkey_choice == HotkeyPreference::Disabled {
-                    format!("{activity}；可从托盘唤出窗口")
-                } else {
-                    format!("{activity}；{} 可唤出窗口", hotkey_choice.label())
-                }
+                String::new()
             } else {
                 startup_errors.join("；")
             },
@@ -610,6 +738,85 @@ impl ClipboardView {
         }
     }
 
+    fn open_settings_window(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.settings_window {
+            if handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+            {
+                return;
+            }
+            self.settings_window = None;
+        }
+        if self.settings_window_opening {
+            return;
+        }
+
+        self.settings_window_opening = true;
+        self.refresh_data_size(cx);
+        cx.notify();
+        cx.spawn(async move |owner, cx| {
+            let Some(owner_entity) = owner.upgrade() else {
+                return;
+            };
+            let (theme, language) =
+                owner_entity.update(cx, |owner, _| (owner.theme, owner.language));
+            let options = cx.update(|cx| WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(820.), px(500.)),
+                    cx,
+                ))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(tr(language, "设置", "Settings").into()),
+                    ..TitleBar::title_bar_options()
+                }),
+                window_min_size: Some(size(px(700.), px(420.))),
+                focus: true,
+                show: true,
+                app_id: Some("com.aslant.elegant-clipboard-gpui.settings".into()),
+                ..TitleBar::window_options()
+            });
+            let settings_owner = owner.clone();
+            let close_owner = owner.clone();
+            let opened = cx.open_window(options, move |window, cx| {
+                apply_theme(theme, window, cx);
+                window.set_window_title(tr(language, "设置", "Settings"));
+                window.on_window_should_close(cx, move |_, cx| {
+                    let _ = close_owner.update(cx, |owner, cx| {
+                        owner.settings_window = None;
+                        cx.notify();
+                    });
+                    true
+                });
+                let settings = cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), cx));
+                cx.new(|cx| Root::new(settings, window, cx))
+            });
+            owner_entity.update(cx, |owner, cx| {
+                owner.settings_window_opening = false;
+                match opened {
+                    Ok(handle) => {
+                        owner.settings_window = Some(handle.into());
+                        owner.is_error = false;
+                    }
+                    Err(error) => {
+                        owner.message = format!(
+                            "{}: {error:?}",
+                            tr(
+                                owner.language,
+                                "无法打开设置窗口",
+                                "Unable to open settings"
+                            )
+                        );
+                        owner.is_error = true;
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn start_export(&mut self, cx: &mut Context<Self>) {
         if self.export_pending {
             return;
@@ -632,12 +839,26 @@ impl ClipboardView {
                     Ok(Ok(None)) => this.export_pending = false,
                     Ok(Err(error)) => {
                         this.export_pending = false;
-                        this.message = format!("无法选择备份路径：{error}");
+                        this.message = format!(
+                            "{}: {error}",
+                            tr(
+                                this.language,
+                                "无法选择备份路径",
+                                "Unable to select a backup path"
+                            )
+                        );
                         this.is_error = true;
                     }
                     Err(error) => {
                         this.export_pending = false;
-                        this.message = format!("备份路径选择中断：{error}");
+                        this.message = format!(
+                            "{}: {error}",
+                            tr(
+                                this.language,
+                                "备份路径选择中断",
+                                "Backup path selection was interrupted"
+                            )
+                        );
                         this.is_error = true;
                     }
                 }
@@ -669,12 +890,26 @@ impl ClipboardView {
                     Ok(Ok(None)) => this.save_as_pending = None,
                     Ok(Err(error)) => {
                         this.save_as_pending = None;
-                        this.message = format!("无法选择另存为路径：{error}");
+                        this.message = format!(
+                            "{}: {error}",
+                            tr(
+                                this.language,
+                                "无法选择另存为路径",
+                                "Unable to select a destination"
+                            )
+                        );
                         this.is_error = true;
                     }
                     Err(error) => {
                         this.save_as_pending = None;
-                        this.message = format!("另存为路径选择中断：{error}");
+                        this.message = format!(
+                            "{}: {error}",
+                            tr(
+                                this.language,
+                                "另存为路径选择中断",
+                                "Destination selection was interrupted"
+                            )
+                        );
                         this.is_error = true;
                     }
                 }
@@ -693,7 +928,14 @@ impl ClipboardView {
                 self.hotkey = Some(hotkey);
                 None
             }
-            Err(error) => Some(format!("原快捷键也无法恢复：{error}")),
+            Err(error) => Some(format!(
+                "{}: {error}",
+                tr(
+                    self.language,
+                    "原快捷键也无法恢复",
+                    "The previous shortcut could not be restored"
+                )
+            )),
         }
     }
 
@@ -714,7 +956,10 @@ impl ClipboardView {
             Ok(hotkey) => self.hotkey = hotkey,
             Err(error) => {
                 let restore_error = self.restore_hotkey();
-                self.message = format!("快捷键切换失败：{error}");
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "快捷键切换失败", "Failed to change shortcut")
+                );
                 if let Some(restore_error) = restore_error {
                     self.message.push_str(&format!("；{restore_error}"));
                 }
@@ -887,9 +1132,17 @@ impl ClipboardView {
             self.batch_paste_pending = target;
             self.batch_confirm_open = false;
             self.message = if target.is_some() {
-                "正在合并并返回原窗口…"
+                tr(
+                    self.language,
+                    "正在合并并返回原窗口…",
+                    "Merging and returning to the previous window…",
+                )
             } else {
-                "正在合并所选记录…"
+                tr(
+                    self.language,
+                    "正在合并所选记录…",
+                    "Merging selected items…",
+                )
             }
             .into();
             self.is_error = false;
@@ -978,12 +1231,16 @@ impl ClipboardView {
                                 cx.notify();
                             });
                         }));
-                        self.message = "分组顺序已保存".into();
+                        self.message =
+                            tr(self.language, "分组顺序已保存", "Group order saved").into();
                         self.is_error = false;
                     }
                     Err(error) => {
                         self.group_feedback_ids.clear();
-                        self.message = format!("分组排序失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "分组排序失败", "Failed to reorder groups")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -998,11 +1255,18 @@ impl ClipboardView {
                             input.set_value("", window, cx);
                         });
                         self.select_group(Some(group.id), window, cx);
-                        self.message = format!("已创建分组：{}", group.name);
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Group created: {}", group.name)
+                        } else {
+                            format!("已创建分组：{}", group.name)
+                        };
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("创建分组失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "创建分组失败", "Failed to create group")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1017,11 +1281,18 @@ impl ClipboardView {
                             input.set_value("", window, cx);
                         });
                         window.focus(&self.list_focus, cx);
-                        self.message = format!("分组已重命名为：{}", group.name);
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Group renamed to: {}", group.name)
+                        } else {
+                            format!("分组已重命名为：{}", group.name)
+                        };
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("重命名分组失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "重命名分组失败", "Failed to rename group")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1032,11 +1303,18 @@ impl ClipboardView {
                 match result {
                     Ok(count) => {
                         window.focus(&self.list_focus, cx);
-                        self.message = format!("已删除分组，{count} 条记录移至默认分组");
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Group deleted; {count} items moved to the default group")
+                        } else {
+                            format!("已删除分组，{count} 条记录移至默认分组")
+                        };
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("删除分组失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "删除分组失败", "Failed to delete group")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1046,11 +1324,18 @@ impl ClipboardView {
                 self.clear_confirm_open = false;
                 match result {
                     Ok(count) => {
-                        self.message = format!("已清理 {count} 条未置顶且未收藏的记录");
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Cleared {count} unpinned, non-favorite items")
+                        } else {
+                            format!("已清理 {count} 条未置顶且未收藏的记录")
+                        };
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("清理历史失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "清理历史失败", "Failed to clear history")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1067,12 +1352,23 @@ impl ClipboardView {
                         self.preview_source_hash = None;
                         self.preview_editing = false;
                         self.preview_save_pending = false;
-                        self.message = format!("已删除全部 {count} 条历史，设置和分组已保留");
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Deleted all {count} items; settings and groups were kept")
+                        } else {
+                            format!("已删除全部 {count} 条历史，设置和分组已保留")
+                        };
                         self.is_error = false;
                         window.focus(&self.list_focus, cx);
                     }
                     Err(error) => {
-                        self.message = format!("删除全部历史失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "删除全部历史失败",
+                                "Failed to delete all history"
+                            )
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1083,11 +1379,22 @@ impl ClipboardView {
                 match result {
                     Ok(count) => {
                         self.selected_ids.clear();
-                        self.message = format!("已删除 {count} 条选中记录");
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Deleted {count} selected items")
+                        } else {
+                            format!("已删除 {count} 条选中记录")
+                        };
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("批量删除失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "批量删除失败",
+                                "Failed to delete selected items"
+                            )
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1097,11 +1404,19 @@ impl ClipboardView {
                 match result {
                     Ok(()) => {
                         self.group_move_id = None;
-                        self.message = "已移动到目标分组".into();
+                        self.message = tr(
+                            self.language,
+                            "已移动到目标分组",
+                            "Moved to the selected group",
+                        )
+                        .into();
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("移动分组失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "移动分组失败", "Failed to move item")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1165,15 +1480,22 @@ impl ClipboardView {
                             .update(cx, |input, cx| input.set_value("", window, cx));
                         window.focus(&self.list_focus, cx);
                         self.message = if changed {
-                            "内容已保存为纯文本"
+                            tr(
+                                self.language,
+                                "内容已保存为纯文本",
+                                "Content saved as plain text",
+                            )
                         } else {
-                            "内容未修改"
+                            tr(self.language, "内容未修改", "Content was not changed")
                         }
                         .into();
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("保存编辑失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "保存编辑失败", "Failed to save changes")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1185,11 +1507,18 @@ impl ClipboardView {
                 self.save_as_pending = None;
                 match result {
                     Ok(destination) => {
-                        self.message = format!("已另存到 {}", destination.display());
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Saved to {}", destination.display())
+                        } else {
+                            format!("已另存到 {}", destination.display())
+                        };
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("另存为失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "另存为失败", "Save as failed")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1223,7 +1552,7 @@ impl ClipboardView {
                                 cx.notify();
                             });
                         }));
-                        self.message = "顺序已保存".into();
+                        self.message = tr(self.language, "顺序已保存", "Order saved").into();
                         self.is_error = false;
                     }
                     Ok(()) => {}
@@ -1234,7 +1563,7 @@ impl ClipboardView {
                 }
             }
             Event::Status(message) => {
-                self.message = message;
+                self.message = localize_service_message(self.language, message);
                 self.is_error = false;
             }
             Event::Copied {
@@ -1243,7 +1572,7 @@ impl ClipboardView {
                 clipboard_sequence,
                 message,
             } => {
-                self.message = message;
+                self.message = localize_service_message(self.language, message);
                 self.is_error = false;
                 if let Some((pending_id, target)) = self.paste_pending.take() {
                     if pending_id == id && for_paste {
@@ -1266,11 +1595,19 @@ impl ClipboardView {
                     if let Some(target) = target {
                         self.return_to_paste_target(target, clipboard_sequence, window, cx);
                     } else {
-                        self.message = format!("已合并 {item_count} 条记录并复制，请手动粘贴");
+                        self.message = if self.language == LanguagePreference::English {
+                            format!("Merged and copied {item_count} items; paste manually")
+                        } else {
+                            format!("已合并 {item_count} 条记录并复制，请手动粘贴")
+                        };
                         self.is_error = true;
                     }
                 } else {
-                    self.message = format!("已合并 {item_count} 条记录并复制");
+                    self.message = if self.language == LanguagePreference::English {
+                        format!("Merged and copied {item_count} items")
+                    } else {
+                        format!("已合并 {item_count} 条记录并复制")
+                    };
                     self.is_error = false;
                 }
             }
@@ -1280,11 +1617,71 @@ impl ClipboardView {
                     Ok(theme) => {
                         self.theme = theme;
                         apply_theme(theme, window, cx);
-                        self.message = "外观设置已保存".into();
+                        self.message = tr(
+                            self.language,
+                            "外观设置已保存",
+                            "Appearance preference saved",
+                        )
+                        .into();
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("外观保存失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "外观保存失败", "Failed to save appearance")
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::LanguageSaved(result) => {
+                self.language_pending = false;
+                match result {
+                    Ok(language) => {
+                        self.language = language;
+                        self.search.update(cx, |input, cx| {
+                            input.set_placeholder(
+                                tr(language, "搜索剪贴板历史…", "Search clipboard history…"),
+                                window,
+                                cx,
+                            );
+                        });
+                        self.group_name_input.update(cx, |input, cx| {
+                            input.set_placeholder(
+                                tr(language, "分组名称", "Group name"),
+                                window,
+                                cx,
+                            );
+                        });
+                        match tray::create(self.tray_sender.clone(), language) {
+                            Ok(tray) => {
+                                self._tray = Some(tray);
+                                self.tray_enabled.set(true);
+                                self.message =
+                                    tr(language, "语言设置已保存", "Language preference saved")
+                                        .into();
+                                self.is_error = false;
+                            }
+                            Err(error) => {
+                                self._tray = None;
+                                self.tray_enabled.set(false);
+                                self.message = format!(
+                                    "{}: {error}",
+                                    tr(
+                                        language,
+                                        "语言已保存，但托盘菜单更新失败",
+                                        "Language saved, but the tray menu could not be updated"
+                                    )
+                                );
+                                self.is_error = true;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "语言保存失败", "Failed to save language")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1295,7 +1692,14 @@ impl ClipboardView {
                     Ok(choice) => {
                         self.hotkey_choice = choice;
                         self.message = if choice == HotkeyPreference::Disabled {
-                            "全局快捷键已关闭，可从托盘唤出窗口".into()
+                            tr(
+                                self.language,
+                                "全局快捷键已关闭，可从托盘唤出窗口",
+                                "The global shortcut is disabled; open the window from the tray.",
+                            )
+                            .into()
+                        } else if self.language == LanguagePreference::English {
+                            format!("Shortcut saved: {}", hotkey_label(self.language, choice))
                         } else {
                             format!("已保存唤出快捷键：{}", choice.label())
                         };
@@ -1304,9 +1708,12 @@ impl ClipboardView {
                     Err(error) => {
                         self.hotkey = None;
                         let restore_error = self.restore_hotkey();
-                        self.message = format!("快捷键保存失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "快捷键保存失败", "Failed to save shortcut")
+                        );
                         if let Some(restore_error) = restore_error {
-                            self.message.push_str(&format!("；{restore_error}"));
+                            self.message.push_str(&format!("; {restore_error}"));
                         }
                         self.is_error = true;
                     }
@@ -1315,7 +1722,14 @@ impl ClipboardView {
             Event::WindowSizeSaved(result) => match result {
                 Ok(size) => self.last_window_size = Some(size),
                 Err(error) => {
-                    self.message = format!("保存窗口大小失败：{error}");
+                    self.message = format!(
+                        "{}: {error}",
+                        tr(
+                            self.language,
+                            "保存窗口大小失败",
+                            "Failed to save window size"
+                        )
+                    );
                     self.is_error = true;
                 }
             },
@@ -1325,15 +1739,22 @@ impl ClipboardView {
                     Ok(enabled) => {
                         self.autostart = enabled;
                         self.message = if enabled {
-                            "已开启开机启动"
+                            tr(self.language, "已开启开机启动", "Startup enabled")
                         } else {
-                            "已关闭开机启动"
+                            tr(self.language, "已关闭开机启动", "Startup disabled")
                         }
                         .into();
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("开机启动设置失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "开机启动设置失败",
+                                "Failed to update startup"
+                            )
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1343,11 +1764,19 @@ impl ClipboardView {
                 match result {
                     Ok(size) => {
                         self.data_size = Some(size);
-                        self.message = "数据占用已更新".into();
+                        self.message =
+                            tr(self.language, "数据占用已更新", "Storage usage updated").into();
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!("统计数据占用失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "统计数据占用失败",
+                                "Failed to calculate storage usage"
+                            )
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1355,7 +1784,12 @@ impl ClipboardView {
             Event::DatabaseOptimized(size) => {
                 self.database_maintenance_pending = false;
                 self.data_size = Some(size);
-                self.message = "数据库已整理，数据占用已更新".into();
+                self.message = tr(
+                    self.language,
+                    "数据库已整理，数据占用已更新",
+                    "Database optimized and storage usage updated",
+                )
+                .into();
                 self.is_error = false;
             }
             Event::Paused(paused) => {
@@ -1363,9 +1797,13 @@ impl ClipboardView {
                 self.pause_pending = false;
                 self.is_error = false;
                 self.message = if paused {
-                    "已暂停记录，已有历史仍可使用"
+                    tr(
+                        self.language,
+                        "已暂停记录，已有历史仍可使用",
+                        "Recording paused; existing history is still available",
+                    )
                 } else {
-                    "已恢复记录"
+                    tr(self.language, "已恢复记录", "Recording resumed")
                 }
                 .into();
             }
@@ -1377,21 +1815,38 @@ impl ClipboardView {
                             report.included_images + report.included_icons + report.included_staged;
                         let missing =
                             report.missing_images + report.missing_icons + report.missing_staged;
-                        self.message = format!(
-                            "已备份 {} 条记录、{} 个附件到 {}{}",
-                            report.total_items,
-                            included,
-                            report.destination.display(),
-                            if missing == 0 {
-                                String::new()
-                            } else {
-                                format!("；{missing} 个源附件未包含在备份中")
-                            }
-                        );
+                        self.message = if self.language == LanguagePreference::English {
+                            format!(
+                                "Backed up {} items and {} attachments to {}{}",
+                                report.total_items,
+                                included,
+                                report.destination.display(),
+                                if missing == 0 {
+                                    String::new()
+                                } else {
+                                    format!("; {missing} source attachments were not included")
+                                }
+                            )
+                        } else {
+                            format!(
+                                "已备份 {} 条记录、{} 个附件到 {}{}",
+                                report.total_items,
+                                included,
+                                report.destination.display(),
+                                if missing == 0 {
+                                    String::new()
+                                } else {
+                                    format!("；{missing} 个源附件未包含在备份中")
+                                }
+                            )
+                        };
                         self.is_error = missing != 0;
                     }
                     Err(error) => {
-                        self.message = format!("导出备份失败：{error}");
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "导出备份失败", "Failed to export backup")
+                        );
                         self.is_error = true;
                     }
                 }
@@ -1564,15 +2019,15 @@ impl ClipboardView {
                     .unwrap_or_else(|| entry.original_path.clone());
                 let unavailable = !entry.exists || entry.metadata_error.is_some();
                 let status = if entry.metadata_error.is_some() {
-                    "无法读取".to_owned()
+                    tr(self.language, "无法读取", "Unreadable").to_owned()
                 } else if !entry.exists {
-                    "已失效".to_owned()
+                    tr(self.language, "已失效", "Missing").to_owned()
                 } else if entry.is_dir {
-                    "文件夹".to_owned()
+                    tr(self.language, "文件夹", "Folder").to_owned()
                 } else if let Some(size) = entry.size {
                     format_bytes(size)
                 } else {
-                    "文件".to_owned()
+                    tr(self.language, "文件", "File").to_owned()
                 };
                 div()
                     .id(("file-detail", index))
@@ -1631,7 +2086,11 @@ impl ClipboardView {
                             .line_clamp(2)
                             .text_ellipsis()
                             .text_color(cx.theme().muted_foreground)
-                            .child(format!("原始路径：{}", entry.original_path)),
+                            .child(if self.language == LanguagePreference::English {
+                                format!("Original path: {}", entry.original_path)
+                            } else {
+                                format!("原始路径：{}", entry.original_path)
+                            }),
                     )
                     .when(entry.recovered, |row| {
                         row.child(
@@ -1640,16 +2099,21 @@ impl ClipboardView {
                                 .line_clamp(2)
                                 .text_ellipsis()
                                 .text_color(cx.theme().primary)
-                                .child(format!("备份副本：{}", entry.resolved_path)),
+                                .child(if self.language == LanguagePreference::English {
+                                    format!("Backup copy: {}", entry.resolved_path)
+                                } else {
+                                    format!("备份副本：{}", entry.resolved_path)
+                                }),
                         )
                     })
                     .when_some(entry.metadata_error.clone(), |row, error| {
-                        row.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().danger)
-                                .child(format!("无法读取元数据：{error}")),
-                        )
+                        row.child(div().text_xs().text_color(cx.theme().danger).child(
+                            if self.language == LanguagePreference::English {
+                                format!("Unable to read metadata: {error}")
+                            } else {
+                                format!("无法读取元数据：{error}")
+                            },
+                        ))
                     })
             }))
             .into_any_element()
@@ -1661,6 +2125,7 @@ impl ClipboardView {
         let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
         let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
         let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
+        let image_unavailable = tr(self.language, "图片无法显示", "Image unavailable");
         let save_as_name = match &self.preview.result {
             Some(Ok(PreviewContent::Image(path))) => path.file_name(),
             Some(Ok(PreviewContent::Files(entries))) => entries
@@ -1670,26 +2135,57 @@ impl ClipboardView {
         }
         .map(|name| name.to_string_lossy().into_owned());
         let save_as_label = match &self.preview.result {
-            Some(Ok(PreviewContent::Files(paths))) if paths.len() > 1 => "另存第一项",
-            _ => "另存为",
+            Some(Ok(PreviewContent::Files(paths))) if paths.len() > 1 => {
+                tr(self.language, "另存第一项", "Save first item as")
+            }
+            _ => tr(self.language, "另存为", "Save as"),
         };
         let editable = matches!(
             self.preview.result,
             Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
         ) && self.preview_source_hash.is_some();
         let message = if self.preview_editing && rich {
-            "保存后将变为纯文本，原富文本格式不会保留".into()
+            tr(
+                self.language,
+                "保存后将变为纯文本，原富文本格式不会保留",
+                "Saving converts this to plain text and removes rich-text formatting.",
+            )
+            .into()
         } else if self.preview_editing {
-            "编辑文本；保存后搜索结果会更新".into()
+            tr(
+                self.language,
+                "编辑文本；保存后搜索结果会更新",
+                "Edit the text; search results update after saving.",
+            )
+            .into()
         } else {
             match &self.preview.result {
-                None => "正在加载完整内容…".to_owned(),
+                None => tr(self.language, "正在加载完整内容…", "Loading full content…").to_owned(),
                 Some(Err(error)) => error.clone(),
+                Some(Ok(PreviewContent::Text(text)))
+                    if self.language == LanguagePreference::English =>
+                {
+                    format!(
+                        "{} characters · {} bytes · read-only",
+                        text.chars().count(),
+                        text.len()
+                    )
+                }
                 Some(Ok(PreviewContent::Text(text))) => {
                     format!("{} 字符 · {} 字节 · 只读", text.chars().count(), text.len())
                 }
-                Some(Ok(PreviewContent::Image(_))) => "图片预览 · 保持原始比例".into(),
-                Some(Ok(PreviewContent::RichText(_))) => "富文本 · 纯文本预览".into(),
+                Some(Ok(PreviewContent::Image(_))) => tr(
+                    self.language,
+                    "图片预览 · 保持原始比例",
+                    "Image preview · Original aspect ratio",
+                )
+                .into(),
+                Some(Ok(PreviewContent::RichText(_))) => tr(
+                    self.language,
+                    "富文本 · 纯文本预览",
+                    "Rich text · Plain-text preview",
+                )
+                .into(),
                 Some(Ok(PreviewContent::Files(entries))) => {
                     let directories = entries
                         .iter()
@@ -1704,18 +2200,38 @@ impl ClipboardView {
                         .filter(|entry| entry.metadata_error.is_some())
                         .count();
                     let recovered = entries.iter().filter(|entry| entry.recovered).count();
-                    let mut details = vec![format!("{} 项", entries.len())];
+                    let mut details = vec![if self.language == LanguagePreference::English {
+                        format!("{} items", entries.len())
+                    } else {
+                        format!("{} 项", entries.len())
+                    }];
                     if directories > 0 {
-                        details.push(format!("{directories} 个文件夹"));
+                        details.push(if self.language == LanguagePreference::English {
+                            format!("{directories} folders")
+                        } else {
+                            format!("{directories} 个文件夹")
+                        });
                     }
                     if missing > 0 {
-                        details.push(format!("{missing} 项已失效"));
+                        details.push(if self.language == LanguagePreference::English {
+                            format!("{missing} missing")
+                        } else {
+                            format!("{missing} 项已失效")
+                        });
                     }
                     if unreadable > 0 {
-                        details.push(format!("{unreadable} 项无法读取"));
+                        details.push(if self.language == LanguagePreference::English {
+                            format!("{unreadable} unreadable")
+                        } else {
+                            format!("{unreadable} 项无法读取")
+                        });
                     }
                     if recovered > 0 {
-                        details.push(format!("{recovered} 项使用备份副本"));
+                        details.push(if self.language == LanguagePreference::English {
+                            format!("{recovered} from backup copies")
+                        } else {
+                            format!("{recovered} 项使用备份副本")
+                        });
                     }
                     details.join(" · ")
                 }
@@ -1727,9 +2243,9 @@ impl ClipboardView {
                     .readonly(!self.preview_editing || self.preview_save_pending)
                     .h_full()
                     .aria_label(if self.preview_editing {
-                        "编辑文本"
+                        tr(self.language, "编辑文本", "Edit text")
                     } else {
-                        "完整文本内容"
+                        tr(self.language, "完整文本内容", "Full text content")
                     })
                     .into_any_element()
             }
@@ -1744,7 +2260,7 @@ impl ClipboardView {
                     img(path.clone())
                         .size_full()
                         .object_fit(ObjectFit::Contain)
-                        .with_fallback(|| div().child("图片无法显示").into_any_element()),
+                        .with_fallback(move || div().child(image_unavailable).into_any_element()),
                 )
                 .into_any_element(),
             _ => div().into_any_element(),
@@ -1773,24 +2289,24 @@ impl ClipboardView {
                             .text_lg()
                             .font_semibold()
                             .child(if self.preview_editing {
-                                "编辑内容"
+                                tr(self.language, "编辑内容", "Edit content")
                             } else if image {
-                                "图片预览"
+                                tr(self.language, "图片预览", "Image preview")
                             } else if files {
-                                "文件详情"
+                                tr(self.language, "文件详情", "File details")
                             } else if rich {
-                                "富文本预览"
+                                tr(self.language, "富文本预览", "Rich-text preview")
                             } else {
-                                "完整内容"
+                                tr(self.language, "完整内容", "Full content")
                             }),
                     )
                     .child(
                         Button::new("preview-close")
                             .ghost()
                             .label(if self.preview_editing {
-                                "取消编辑 (Esc)"
+                                tr(self.language, "取消编辑 (Esc)", "Cancel editing (Esc)")
                             } else {
-                                "返回列表 (Esc)"
+                                tr(self.language, "返回列表 (Esc)", "Back to list (Esc)")
                             })
                             .disabled(self.preview_save_pending)
                             .on_click(
@@ -1815,7 +2331,7 @@ impl ClipboardView {
                         bar.child(
                             Button::new("preview-edit")
                                 .outline()
-                                .label("编辑")
+                                .label(tr(self.language, "编辑", "Edit"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.begin_preview_edit(window, cx);
                                 })),
@@ -1825,7 +2341,7 @@ impl ClipboardView {
                         bar.child(
                             Button::new("preview-copy-plain")
                                 .outline()
-                                .label("复制纯文本")
+                                .label(tr(self.language, "复制纯文本", "Copy plain text"))
                                 .disabled(!ready)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.send(Command::CopyPlainText(id), cx);
@@ -1847,7 +2363,11 @@ impl ClipboardView {
                         .child(
                             Button::new("preview-reveal")
                                 .outline()
-                                .label("在资源管理器中显示")
+                                .label(tr(
+                                    self.language,
+                                    "在资源管理器中显示",
+                                    "Show in File Explorer",
+                                ))
                                 .disabled(!ready)
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.send(Command::RevealInExplorer(id), cx);
@@ -1857,9 +2377,9 @@ impl ClipboardView {
                             Button::new("preview-copy-path")
                                 .outline()
                                 .label(if self.paste_target.is_some() && self._tray.is_some() {
-                                    "粘贴路径"
+                                    tr(self.language, "粘贴路径", "Paste paths")
                                 } else {
-                                    "复制路径"
+                                    tr(self.language, "复制路径", "Copy paths")
                                 })
                                 .disabled(!ready || self.paste_pending.is_some())
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -1871,7 +2391,11 @@ impl ClipboardView {
                         bar.child(
                             Button::new("preview-paste")
                                 .outline()
-                                .label("粘贴到原窗口")
+                                .label(tr(
+                                    self.language,
+                                    "粘贴到原窗口",
+                                    "Paste to previous window",
+                                ))
                                 .disabled(
                                     !ready
                                         || self.paste_target.is_none()
@@ -1886,13 +2410,13 @@ impl ClipboardView {
                             Button::new("preview-copy")
                                 .primary()
                                 .label(if image {
-                                    "复制图片"
+                                    tr(self.language, "复制图片", "Copy image")
                                 } else if files {
-                                    "复制文件"
+                                    tr(self.language, "复制文件", "Copy files")
                                 } else if rich {
-                                    "复制富文本"
+                                    tr(self.language, "复制富文本", "Copy rich text")
                                 } else {
-                                    "复制全文"
+                                    tr(self.language, "复制全文", "Copy all text")
                                 })
                                 .disabled(!ready)
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -1904,7 +2428,7 @@ impl ClipboardView {
                         bar.child(
                             Button::new("preview-cancel-edit")
                                 .ghost()
-                                .label("取消")
+                                .label(tr(self.language, "取消", "Cancel"))
                                 .disabled(self.preview_save_pending)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.close_preview(window, cx);
@@ -1913,7 +2437,7 @@ impl ClipboardView {
                         .child(
                             Button::new("preview-save-edit")
                                 .primary()
-                                .label("保存文本")
+                                .label(tr(self.language, "保存文本", "Save text"))
                                 .disabled(self.preview_save_pending)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.save_preview_edit(cx);
@@ -1952,21 +2476,36 @@ impl ClipboardView {
 
     fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
         let Some(target) = self.paste_target else {
-            self.message = "请从目标应用按全局快捷键唤出，再使用粘贴".into();
+            self.message = tr(
+                self.language,
+                "请从目标应用按全局快捷键唤出，再使用粘贴",
+                "Open the clipboard with the global shortcut from the target app before pasting.",
+            )
+            .into();
             self.is_error = true;
             cx.notify();
             return;
         };
         if self._tray.is_none() || !paste::is_external_target(window, target) {
             self.paste_target = None;
-            self.message = "原窗口不可用，仍可使用复制后手动粘贴".into();
+            self.message = tr(
+                self.language,
+                "原窗口不可用，仍可使用复制后手动粘贴",
+                "The previous window is unavailable; copy and paste manually instead.",
+            )
+            .into();
             self.is_error = true;
             cx.notify();
             return;
         }
         if self.paste_pending.is_none() && self.send(Command::CopyForPaste(id), cx) {
             self.paste_pending = Some((id, target));
-            self.message = "正在复制并返回原窗口…".into();
+            self.message = tr(
+                self.language,
+                "正在复制并返回原窗口…",
+                "Copying and returning to the previous window…",
+            )
+            .into();
             self.is_error = false;
             cx.notify();
         }
@@ -1991,7 +2530,12 @@ impl ClipboardView {
             && let Some(target) = target
         {
             self.paste_pending = Some((id, target));
-            self.message = "正在复制路径并返回原窗口…".into();
+            self.message = tr(
+                self.language,
+                "正在复制路径并返回原窗口…",
+                "Copying paths and returning to the previous window…",
+            )
+            .into();
             self.is_error = false;
             cx.notify();
         }
@@ -2005,7 +2549,12 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if !paste::is_external_target(window, target) {
-            self.message = "目标窗口已变化，内容已复制，请手动粘贴".into();
+            self.message = tr(
+                self.language,
+                "目标窗口已变化，内容已复制，请手动粘贴",
+                "The target window changed. The content was copied; paste it manually.",
+            )
+            .into();
             self.is_error = true;
             return;
         }
@@ -2020,7 +2569,12 @@ impl ClipboardView {
             let _ = view.update_in(cx, |this, window, cx| {
                 match paste::send_to_target(target, clipboard_sequence) {
                     Ok(()) => {
-                        this.message = "已发送粘贴快捷键，请检查目标应用".into();
+                        this.message = tr(
+                            this.language,
+                            "已发送粘贴快捷键，请检查目标应用",
+                            "Paste shortcut sent; check the target app.",
+                        )
+                        .into();
                         this.is_error = false;
                     }
                     Err(error) => {
@@ -2043,14 +2597,26 @@ impl ClipboardView {
             Ok(()) => {
                 self.window_pinned = pinned;
                 self.message = if pinned {
-                    "窗口已置顶；粘贴后保持可见".into()
+                    tr(
+                        self.language,
+                        "窗口已置顶；粘贴后保持可见",
+                        "Window pinned; it will stay visible after pasting.",
+                    )
+                    .into()
                 } else {
-                    "已取消窗口置顶".into()
+                    tr(self.language, "已取消窗口置顶", "Window unpinned").into()
                 };
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!("更新窗口置顶失败：{error}");
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "更新窗口置顶失败",
+                        "Failed to update window pinning"
+                    )
+                );
                 self.is_error = true;
             }
         }
@@ -2233,7 +2799,12 @@ impl ClipboardView {
                 if !this.valid_group_drag(drag) {
                     this.group_drop_target = None;
                     this.group_drag_direction = 0;
-                    this.message = "分组列表已变化，请重新拖动".into();
+                    this.message = tr(
+                        this.language,
+                        "分组列表已变化，请重新拖动",
+                        "The group list changed; drag again.",
+                    )
+                    .into();
                     this.is_error = true;
                     cx.notify();
                     return;
@@ -2336,18 +2907,19 @@ impl ClipboardView {
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
+        let image_unavailable = tr(self.language, "无法显示", "Cannot display");
         let kind = match item.content_type.as_str() {
-            "image" => "图片",
-            "files" => "文件",
+            "image" => tr(self.language, "图片", "Image"),
+            "files" => tr(self.language, "文件", "Files"),
             "html" => "HTML",
             "rtf" => "RTF",
-            "url" => "网址",
-            _ => "文本",
+            "url" => tr(self.language, "网址", "URL"),
+            _ => tr(self.language, "文本", "Text"),
         };
         let detail = if is_image {
             match (item.image_width, item.image_height) {
                 (Some(width), Some(height)) => format!("{width} × {height}"),
-                _ => "尺寸未知".into(),
+                _ => tr(self.language, "尺寸未知", "Unknown size").into(),
             }
         } else if is_files {
             let count = item
@@ -2356,13 +2928,17 @@ impl ClipboardView {
                 .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
                 .map_or(0, |paths| paths.len());
             if count == 0 {
-                "路径不可用".into()
+                tr(self.language, "路径不可用", "Paths unavailable").into()
+            } else if self.language == LanguagePreference::English {
+                format!("{count} items")
             } else {
                 format!("{count} 项")
             }
         } else if matches!(item.content_type.as_str(), "html" | "rtf") && item.char_count.is_none()
         {
-            "纯文本未知".into()
+            tr(self.language, "纯文本未知", "Plain text unavailable").into()
+        } else if self.language == LanguagePreference::English {
+            format!("{} characters", item.char_count.unwrap_or(0))
         } else {
             format!("{} 字符", item.char_count.unwrap_or(0))
         };
@@ -2378,9 +2954,20 @@ impl ClipboardView {
             generation: self.history.generation,
             kind,
             preview: item.preview.clone().unwrap_or_else(|| kind.to_owned()),
+            language: self.language,
         };
         let entity = cx.entity();
         let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
+        let live_offset = active_drop
+            .filter(|target| target.allowed)
+            .and_then(|target| {
+                let source = self.history.selected?;
+                let ids: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
+                drag_reorder_offsets(&ids, source, target.id, target.after)
+                    .get(&id)
+                    .copied()
+            });
+        let live_drag_source = cx.has_active_drag() && self.history.selected == Some(id);
         let color = if selected || marked {
             cx.theme().accent
         } else {
@@ -2432,7 +3019,12 @@ impl ClipboardView {
                 if !this.valid_drag(drag) {
                     this.drop_target = None;
                     this.history_drag_direction = 0;
-                    this.message = "列表已变化，请重新拖动".into();
+                    this.message = tr(
+                        this.language,
+                        "列表已变化，请重新拖动",
+                        "The list changed; drag again.",
+                    )
+                    .into();
                     this.is_error = true;
                     cx.notify();
                     return;
@@ -2462,7 +3054,7 @@ impl ClipboardView {
                 this.history_drag_direction = 0;
                 cx.notify();
             }))
-            .py_2()
+            .py_1()
             .cursor_grab()
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.history.selected = Some(id);
@@ -2512,7 +3104,7 @@ impl ClipboardView {
                     })
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap_1()
                     .child(
                         div()
                             .flex()
@@ -2529,7 +3121,11 @@ impl ClipboardView {
                                     .child(div().px_1().child("⠿"))
                                     .child(format!(
                                         "{}{} · {}",
-                                        if pinned { "置顶 · " } else { "" },
+                                        if pinned {
+                                            tr(self.language, "置顶 · ", "Pinned · ")
+                                        } else {
+                                            ""
+                                        },
                                         kind,
                                         detail
                                     )),
@@ -2549,7 +3145,11 @@ impl ClipboardView {
                                                     .ghost()
                                                     .xsmall()
                                                     .h(px(CONTROL_HEIGHT))
-                                                    .label(if marked { "已选" } else { "选择" })
+                                                    .label(if marked {
+                                                        tr(self.language, "已选", "Selected")
+                                                    } else {
+                                                        tr(self.language, "选择", "Select")
+                                                    })
                                                     .selected(marked)
                                                     .disabled(
                                                         self.batch_pending || self.history.loading,
@@ -2595,8 +3195,10 @@ impl ClipboardView {
                                                 img(std::path::PathBuf::from(path))
                                                     .size_full()
                                                     .object_fit(ObjectFit::Contain)
-                                                    .with_fallback(|| {
-                                                        div().child("无法显示").into_any_element()
+                                                    .with_fallback(move || {
+                                                        div()
+                                                            .child(image_unavailable)
+                                                            .into_any_element()
                                                     }),
                                             )
                                         }),
@@ -2627,7 +3229,7 @@ impl ClipboardView {
                                     .ghost()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label("查看")
+                                    .label(tr(self.language, "查看", "View"))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         cx.stop_propagation();
                                         this.open_preview(id, window, cx);
@@ -2638,7 +3240,11 @@ impl ClipboardView {
                                     .ghost()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label(if favorite { "取消收藏" } else { "收藏" })
+                                    .label(if favorite {
+                                        tr(self.language, "取消收藏", "Unfavorite")
+                                    } else {
+                                        tr(self.language, "收藏", "Favorite")
+                                    })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::ToggleFavorite(id), cx);
@@ -2649,7 +3255,11 @@ impl ClipboardView {
                                     .ghost()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label(if pinned { "取消置顶" } else { "置顶" })
+                                    .label(if pinned {
+                                        tr(self.language, "取消置顶", "Unpin")
+                                    } else {
+                                        tr(self.language, "置顶", "Pin")
+                                    })
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::TogglePin(id), cx);
@@ -2660,7 +3270,7 @@ impl ClipboardView {
                                     .ghost()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label("分组")
+                                    .label(tr(self.language, "分组", "Group"))
                                     .disabled(
                                         self.group_move_pending
                                             || (self.groups.is_empty()
@@ -2678,7 +3288,7 @@ impl ClipboardView {
                                     .ghost()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label("删除")
+                                    .label(tr(self.language, "删除", "Delete"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::Delete(id), cx);
@@ -2692,9 +3302,9 @@ impl ClipboardView {
                                         .h(px(CONTROL_HEIGHT))
                                         .label(
                                             if self.paste_target.is_some() && self._tray.is_some() {
-                                                "粘贴路径"
+                                                tr(self.language, "粘贴路径", "Paste paths")
                                             } else {
-                                                "复制路径"
+                                                tr(self.language, "复制路径", "Copy paths")
                                             },
                                         )
                                         .disabled(self.paste_pending.is_some())
@@ -2709,7 +3319,7 @@ impl ClipboardView {
                                     .outline()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label("粘贴")
+                                    .label(tr(self.language, "粘贴", "Paste"))
                                     .disabled(
                                         self.paste_target.is_none()
                                             || self.paste_pending.is_some()
@@ -2728,7 +3338,7 @@ impl ClipboardView {
                                             .outline()
                                             .xsmall()
                                             .h(px(CONTROL_HEIGHT))
-                                            .label("纯文本")
+                                            .label(tr(self.language, "纯文本", "Plain text"))
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 cx.stop_propagation();
                                                 this.send(Command::CopyPlainText(id), cx);
@@ -2741,7 +3351,7 @@ impl ClipboardView {
                                     .outline()
                                     .xsmall()
                                     .h(px(CONTROL_HEIGHT))
-                                    .label("复制")
+                                    .label(tr(self.language, "复制", "Copy"))
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.stop_propagation();
                                         this.send(Command::Copy(id), cx);
@@ -2749,7 +3359,9 @@ impl ClipboardView {
                             ),
                     ),
             );
-        let row = div().child(row);
+        let row = div()
+            .when(live_drag_source, |row| row.opacity(0.2))
+            .child(row);
         if let Some(offset) = self.reorder_offsets.get(&id) {
             visual::reflow(
                 row,
@@ -2757,28 +3369,468 @@ impl ClipboardView {
                 format!("reorder-feedback-{}-{id}", self.feedback_revision),
                 cx,
             )
+        } else if let Some(offset) = live_offset {
+            row.relative()
+                .top(px(offset as f32 * ROW_HEIGHT))
+                .into_any_element()
         } else {
             row.into_any_element()
         }
     }
 }
 
-impl Render for ClipboardView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let data_size_detail = self.data_size.map_or_else(
-            || "尚未统计数据占用".to_owned(),
-            |size| {
-                format!(
-                    "共 {} · 数据库 {} · 图片 {} 个 / {} · 暂存 {} 个 / {}",
-                    format_bytes(size.total_bytes),
-                    format_bytes(size.database_bytes),
-                    size.image_count,
-                    format_bytes(size.image_bytes),
-                    size.staged_count,
-                    format_bytes(size.staged_bytes)
+fn settings_window_card(
+    icon: IconName,
+    title: &'static str,
+    description: &'static str,
+    content: impl IntoElement,
+    cx: &App,
+) -> Div {
+    div()
+        .w_full()
+        .rounded_md()
+        .border_1()
+        .border_color(cx.theme().border)
+        .bg(cx.theme().background)
+        .p_3()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    Icon::new(icon)
+                        .small()
+                        .text_color(cx.theme().muted_foreground),
                 )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(div().text_sm().font_semibold().child(title))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(description),
+                        ),
+                ),
+        )
+        .child(content)
+}
+
+impl Render for SettingsWindowView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(owner_entity) = self.owner.upgrade() else {
+            return div()
+                .size_full()
+                .child("The main window is no longer available");
+        };
+        let owner_state = owner_entity.read(cx);
+        let language = owner_state.language;
+        let language_pending = owner_state.language_pending;
+        window.set_window_title(tr(language, "设置", "Settings"));
+        let theme = owner_state.theme;
+        let theme_pending = owner_state.theme_pending;
+        let hotkey_choice = owner_state.hotkey_choice;
+        let hotkey_pending = owner_state.hotkey_pending;
+        let autostart = owner_state.autostart;
+        let autostart_pending = owner_state.autostart_pending;
+        let data_size = owner_state.data_size;
+        let data_size_pending = owner_state.data_size_pending;
+        let maintenance_pending = owner_state.database_maintenance_pending;
+        let export_pending = owner_state.export_pending;
+        let clear_all_pending = owner_state.clear_all_pending;
+        let data_size_detail = data_size.map_or_else(
+            || {
+                tr(
+                    language,
+                    "尚未统计数据占用",
+                    "Usage has not been calculated",
+                )
+                .to_owned()
+            },
+            |size| {
+                if language == LanguagePreference::English {
+                    format!(
+                        "Total {} · Database {} · Images {} / {} · Staged {} / {}",
+                        format_bytes(size.total_bytes),
+                        format_bytes(size.database_bytes),
+                        size.image_count,
+                        format_bytes(size.image_bytes),
+                        size.staged_count,
+                        format_bytes(size.staged_bytes)
+                    )
+                } else {
+                    format!(
+                        "共 {} · 数据库 {} · 图片 {} 个 / {} · 暂存 {} 个 / {}",
+                        format_bytes(size.total_bytes),
+                        format_bytes(size.database_bytes),
+                        size.image_count,
+                        format_bytes(size.image_bytes),
+                        size.staged_count,
+                        format_bytes(size.staged_bytes)
+                    )
+                }
             },
         );
+
+        let appearance = settings_window_card(
+            IconName::Palette,
+            tr(language, "外观与语言", "Appearance & language"),
+            tr(
+                language,
+                "选择界面语言和明暗主题",
+                "Choose the interface language and theme",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div().flex().gap_2().children(
+                        [
+                            (
+                                "settings-window-language-zh",
+                                "简体中文",
+                                LanguagePreference::Chinese,
+                            ),
+                            (
+                                "settings-window-language-en",
+                                "English",
+                                LanguagePreference::English,
+                            ),
+                        ]
+                        .map(|(id, label, preference)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(language == preference)
+                                .disabled(language_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        if owner.language != preference
+                                            && owner.send(Command::SetLanguage(preference), cx)
+                                        {
+                                            owner.language_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                })
+                        }),
+                    ),
+                )
+                .child(
+                    div().flex().gap_2().children(
+                        [
+                            (
+                                "settings-window-theme-system",
+                                tr(language, "跟随系统", "System"),
+                                IconName::LayoutDashboard,
+                                ThemePreference::System,
+                            ),
+                            (
+                                "settings-window-theme-light",
+                                tr(language, "浅色", "Light"),
+                                IconName::Sun,
+                                ThemePreference::Light,
+                            ),
+                            (
+                                "settings-window-theme-dark",
+                                tr(language, "深色", "Dark"),
+                                IconName::Moon,
+                                ThemePreference::Dark,
+                            ),
+                        ]
+                        .map(|(id, label, icon, preference)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .icon(icon)
+                                .tooltip(label)
+                                .accessibility_label(label)
+                                .selected(theme == preference)
+                                .disabled(theme_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        if owner.theme != preference
+                                            && owner.send(Command::SetTheme(preference), cx)
+                                        {
+                                            owner.theme_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                })
+                        }),
+                    ),
+                ),
+            cx,
+        );
+
+        let shortcut = settings_window_card(
+            IconName::SquareTerminal,
+            tr(language, "唤出快捷键", "Shortcut"),
+            tr(
+                language,
+                "用于打开剪贴板窗口的全局快捷键",
+                "Global shortcut used to open the clipboard",
+            ),
+            div().flex().flex_wrap().gap_2().children(
+                [
+                    (
+                        "settings-window-hotkey-ctrl-shift-v",
+                        HotkeyPreference::CtrlShiftV,
+                    ),
+                    ("settings-window-hotkey-alt-c", HotkeyPreference::AltC),
+                    (
+                        "settings-window-hotkey-ctrl-alt-v",
+                        HotkeyPreference::CtrlAltV,
+                    ),
+                    (
+                        "settings-window-hotkey-disabled",
+                        HotkeyPreference::Disabled,
+                    ),
+                ]
+                .map(|(id, choice)| {
+                    let owner = self.owner.clone();
+                    Button::new(id)
+                        .outline()
+                        .small()
+                        .label(hotkey_label(language, choice))
+                        .selected(hotkey_choice == choice)
+                        .disabled(hotkey_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |owner, cx| {
+                                owner.select_hotkey(choice, cx);
+                            });
+                        })
+                }),
+            ),
+            cx,
+        );
+
+        let startup_owner = self.owner.clone();
+        let startup = settings_window_card(
+            IconName::Play,
+            tr(language, "开机启动", "Startup"),
+            tr(
+                language,
+                "登录 Windows 后自动启动",
+                "Launch automatically after signing in to Windows",
+            ),
+            div().child(
+                Button::new("settings-window-autostart")
+                    .outline()
+                    .small()
+                    .icon(if autostart {
+                        IconName::Pause
+                    } else {
+                        IconName::Play
+                    })
+                    .label(if autostart {
+                        tr(language, "已开启", "Enabled")
+                    } else {
+                        tr(language, "已关闭", "Disabled")
+                    })
+                    .selected(autostart)
+                    .disabled(autostart_pending)
+                    .on_click(move |_, _, cx| {
+                        let _ = startup_owner.update(cx, |owner, cx| {
+                            if owner.send(Command::SetAutostart(!owner.autostart), cx) {
+                                owner.autostart_pending = true;
+                                cx.notify();
+                            }
+                        });
+                    }),
+            ),
+            cx,
+        );
+
+        let refresh_owner = self.owner.clone();
+        let optimize_owner = self.owner.clone();
+        let folder_owner = self.owner.clone();
+        let export_owner = self.owner.clone();
+        let storage = settings_window_card(
+            IconName::HardDrive,
+            tr(language, "本地数据", "Storage"),
+            tr(
+                language,
+                "数据库、受管图片和暂存文件",
+                "Database, managed images and staged files",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(data_size_detail),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            Button::new("settings-window-refresh")
+                                .outline()
+                                .small()
+                                .icon(IconName::RotateCw)
+                                .tooltip(tr(language, "刷新占用", "Refresh usage"))
+                                .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
+                                .disabled(data_size_pending || maintenance_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = refresh_owner.update(cx, |owner, cx| {
+                                        owner.refresh_data_size(cx);
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("settings-window-optimize")
+                                .outline()
+                                .small()
+                                .icon(IconName::HardDrive)
+                                .tooltip(tr(language, "整理数据库", "Optimize database"))
+                                .accessibility_label(tr(
+                                    language,
+                                    "整理数据库",
+                                    "Optimize database",
+                                ))
+                                .disabled(data_size_pending || maintenance_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = optimize_owner.update(cx, |owner, cx| {
+                                        if owner.send(Command::OptimizeDatabase, cx) {
+                                            owner.database_maintenance_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("settings-window-folder")
+                                .outline()
+                                .small()
+                                .icon(IconName::FolderOpen)
+                                .tooltip(tr(language, "打开数据目录", "Open data folder"))
+                                .accessibility_label(tr(
+                                    language,
+                                    "打开数据目录",
+                                    "Open data folder",
+                                ))
+                                .on_click(move |_, _, cx| {
+                                    let _ = folder_owner.update(cx, |owner, cx| {
+                                        owner.send(Command::OpenDataDirectory, cx);
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new("settings-window-export")
+                                .outline()
+                                .small()
+                                .icon(IconName::ExternalLink)
+                                .tooltip(tr(language, "导出备份", "Export backup"))
+                                .accessibility_label(tr(language, "导出备份", "Export backup"))
+                                .disabled(export_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = export_owner.update(cx, |owner, cx| {
+                                        owner.start_export(cx);
+                                    });
+                                }),
+                        ),
+                ),
+            cx,
+        );
+
+        let privacy_owner = self.owner.clone();
+        let privacy = settings_window_card(
+            IconName::CircleX,
+            tr(language, "隐私清理", "Privacy"),
+            tr(
+                language,
+                "永久删除全部剪贴板历史",
+                "Permanently delete all clipboard history",
+            ),
+            div().child(
+                Button::new("settings-window-clear-all")
+                    .danger()
+                    .small()
+                    .icon(IconName::Delete)
+                    .label(tr(language, "删除全部历史", "Delete all history"))
+                    .disabled(clear_all_pending)
+                    .on_click(move |_, window, cx| {
+                        let _ = privacy_owner.update(cx, |owner, cx| {
+                            owner.settings_window = None;
+                            owner.clear_all_confirm_open = true;
+                            owner.clear_confirm_open = false;
+                            owner.group_delete_id = None;
+                            owner.group_move_id = None;
+                            owner.reset_selection();
+                            cx.notify();
+                        });
+                        window.remove_window();
+                    }),
+            ),
+            cx,
+        );
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .font_family("Microsoft YaHei UI")
+            .child(
+                TitleBar::new().bg(cx.theme().background).child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .child(tr(language, "设置", "Settings")),
+                ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .p_4()
+                    .flex()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(appearance)
+                            .child(shortcut)
+                            .child(startup),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(storage)
+                            .child(privacy),
+                    ),
+            )
+    }
+}
+
+impl Render for ClipboardView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -2787,296 +3839,54 @@ impl Render for ClipboardView {
             .text_color(cx.theme().foreground)
             .font_family("Microsoft YaHei UI")
             .child(
-                TitleBar::new()
-                    .bg(cx.theme().background)
-                    .child(div().text_sm().font_semibold().child("ElegantClipboard")),
-            )
-            .child(
-                div()
-                    .h(px(32.))
-                    .flex_none()
-                    .px(px(PAGE_PADDING))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("窗口设置"),
-                    )
-                    .child(
-                        Button::new("settings-toggle")
-                            .ghost()
-                            .xsmall()
-                            .h(px(CONTROL_HEIGHT))
-                            .label(if self.settings_open {
-                                "收起"
-                            } else {
-                                "展开"
-                            })
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.settings_open = !this.settings_open;
-                                if this.settings_open {
-                                    this.refresh_data_size(cx);
-                                }
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .when(self.settings_open, |view| {
-                view.child(visual::reveal(
+                TitleBar::new().bg(cx.theme().background).child(
                     div()
+                        .w_full()
+                        .h_full()
                         .flex()
-                        .flex_col()
+                        .items_center()
+                        .justify_between()
+                        .child(div().text_sm().font_semibold().child("ElegantClipboard"))
                         .child(
                             div()
-                                .px(px(PAGE_PADDING))
-                                .py_1()
+                                .h_full()
+                                .pr_1()
                                 .flex()
                                 .items_center()
-                                .justify_between()
-                                .border_b_1()
-                                .border_color(cx.theme().border)
+                                .gap_1()
+                                .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                })
                                 .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("外观"),
-                                )
-                                .child(
-                                    div().flex().gap_1().children(
-                                        [
-                                            ("theme-system", "跟随系统", ThemePreference::System),
-                                            ("theme-light", "浅色", ThemePreference::Light),
-                                            ("theme-dark", "深色", ThemePreference::Dark),
-                                        ]
-                                        .map(
-                                            |(id, label, theme)| {
-                                                Button::new(id)
-                                                    .ghost()
-                                                    .xsmall()
-                                                    .h(px(CONTROL_HEIGHT))
-                                                    .label(label)
-                                                    .selected(self.theme == theme)
-                                                    .disabled(self.theme_pending)
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if this.theme != theme
-                                                            && this
-                                                                .send(Command::SetTheme(theme), cx)
-                                                        {
-                                                            this.theme_pending = true;
-                                                            cx.notify();
-                                                        }
-                                                    }))
-                                            },
-                                        ),
-                                    ),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .px(px(PAGE_PADDING))
-                                .py_1()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .border_b_1()
-                                .border_color(cx.theme().border)
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("唤出"),
-                                )
-                                .child(
-                                    div().flex().gap_1().children(
-                                        [
-                                            ("hotkey-ctrl-shift-v", HotkeyPreference::CtrlShiftV),
-                                            ("hotkey-alt-c", HotkeyPreference::AltC),
-                                            ("hotkey-ctrl-alt-v", HotkeyPreference::CtrlAltV),
-                                            ("hotkey-disabled", HotkeyPreference::Disabled),
-                                        ]
-                                        .map(
-                                            |(id, choice)| {
-                                                Button::new(id)
-                                                    .ghost()
-                                                    .xsmall()
-                                                    .h(px(CONTROL_HEIGHT))
-                                                    .label(choice.label())
-                                                    .selected(self.hotkey_choice == choice)
-                                                    .disabled(self.hotkey_pending)
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.select_hotkey(choice, cx);
-                                                    }))
-                                            },
-                                        ),
-                                    ),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .px(px(PAGE_PADDING))
-                                .py_1()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .border_b_1()
-                                .border_color(cx.theme().border)
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("开机启动"),
-                                )
-                                .child(
-                                    Button::new("autostart-toggle")
+                                    Button::new("window-pin")
                                         .ghost()
                                         .xsmall()
                                         .h(px(CONTROL_HEIGHT))
-                                        .label(if self.autostart { "关闭" } else { "开启" })
-                                        .disabled(self.autostart_pending)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            if this.send(Command::SetAutostart(!this.autostart), cx)
-                                            {
-                                                this.autostart_pending = true;
-                                                cx.notify();
-                                            }
-                                        })),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .px(px(PAGE_PADDING))
-                                .py_2()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .border_b_1()
-                                .border_color(cx.theme().border)
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child("数据占用"),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_wrap()
-                                                .justify_end()
-                                                .gap_1()
-                                                .child(
-                                                    Button::new("data-size-refresh")
-                                                        .ghost()
-                                                        .xsmall()
-                                                        .h(px(CONTROL_HEIGHT))
-                                                        .label(if self.data_size_pending {
-                                                            "统计中…"
-                                                        } else {
-                                                            "刷新"
-                                                        })
-                                                        .disabled(
-                                                            self.data_size_pending
-                                                                || self
-                                                                    .database_maintenance_pending,
-                                                        )
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.refresh_data_size(cx);
-                                                        })),
-                                                )
-                                                .child(
-                                                    Button::new("optimize-database")
-                                                        .ghost()
-                                                        .xsmall()
-                                                        .h(px(CONTROL_HEIGHT))
-                                                        .label(
-                                                            if self.database_maintenance_pending {
-                                                                "整理中…"
-                                                            } else {
-                                                                "整理数据库"
-                                                            },
-                                                        )
-                                                        .disabled(
-                                                            self.data_size_pending
-                                                                || self
-                                                                    .database_maintenance_pending,
-                                                        )
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            if this
-                                                                .send(Command::OptimizeDatabase, cx)
-                                                            {
-                                                                this.database_maintenance_pending =
-                                                                    true;
-                                                                cx.notify();
-                                                            }
-                                                        })),
-                                                )
-                                                .child(
-                                                    Button::new("open-data-directory")
-                                                        .ghost()
-                                                        .xsmall()
-                                                        .h(px(CONTROL_HEIGHT))
-                                                        .label("打开目录")
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.send(
-                                                                Command::OpenDataDirectory,
-                                                                cx,
-                                                            );
-                                                        })),
-                                                ),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(data_size_detail),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .px(px(PAGE_PADDING))
-                                .py_1()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .border_b_1()
-                                .border_color(cx.theme().border)
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child("隐私清理"),
-                                )
-                                .child(
-                                    Button::new("clear-all-history-toggle")
-                                        .danger()
-                                        .xsmall()
-                                        .h(px(CONTROL_HEIGHT))
-                                        .label("删除全部历史")
-                                        .disabled(self.clear_all_pending)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.clear_all_confirm_open = true;
-                                            this.clear_confirm_open = false;
-                                            this.group_delete_id = None;
-                                            this.group_move_id = None;
-                                            this.reset_selection();
-                                            cx.notify();
+                                        .icon(if self.window_pinned {
+                                            IconName::StarFill
+                                        } else {
+                                            IconName::Star
+                                        })
+                                        .tooltip(if self.window_pinned {
+                                            tr(self.language, "取消置顶窗口", "Unpin window")
+                                        } else {
+                                            tr(self.language, "置顶窗口", "Pin window")
+                                        })
+                                        .accessibility_label(if self.window_pinned {
+                                            tr(self.language, "取消置顶窗口", "Unpin window")
+                                        } else {
+                                            tr(self.language, "置顶窗口", "Pin window")
+                                        })
+                                        .selected(self.window_pinned)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.toggle_window_pin(window, cx);
                                         })),
                                 ),
                         ),
-                    "window-settings",
-                    cx,
-                ))
-            })
+                ),
+            )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
             .child(self.render_status(cx))
     }
@@ -3104,7 +3914,7 @@ impl ClipboardView {
                     .text_lg()
                     .font_semibold()
                     .text_color(cx.theme().danger)
-                    .child("删除全部历史"),
+                    .child(tr(self.language, "删除全部历史", "Delete all history")),
             )
             .child(
                 div()
@@ -3118,15 +3928,21 @@ impl ClipboardView {
                     .child(
                         div()
                             .text_sm()
-                            .child("删除所有分组中的全部历史？置顶和收藏也会删除。"),
+                            .child(tr(
+                                self.language,
+                                "删除所有分组中的全部历史？置顶和收藏也会删除。",
+                                "Delete all history from every group? Pinned and favorite items will also be deleted.",
+                            )),
                     )
                     .child(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(
+                            .child(tr(
+                                self.language,
                                 "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
-                            ),
+                                "Settings and custom groups will be kept. Content and managed media cannot be recovered; export a backup first if needed.",
+                            )),
                     ),
             )
             .child(
@@ -3139,7 +3955,7 @@ impl ClipboardView {
                         Button::new("clear-all-history-cancel")
                             .small()
                             .ghost()
-                            .label("取消")
+                            .label(tr(self.language, "取消", "Cancel"))
                             .disabled(self.clear_all_pending)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.clear_all_confirm_open = false;
@@ -3152,9 +3968,13 @@ impl ClipboardView {
                             .small()
                             .danger()
                             .label(if self.clear_all_pending {
-                                "正在删除…"
+                                tr(self.language, "正在删除…", "Deleting…")
                             } else {
-                                "确认删除全部历史"
+                                tr(
+                                    self.language,
+                                    "确认删除全部历史",
+                                    "Delete all history",
+                                )
                             })
                             .disabled(self.clear_all_pending)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -3165,12 +3985,15 @@ impl ClipboardView {
     }
 
     fn render_status(&self, cx: &Context<Self>) -> Div {
+        if self.message.is_empty() && !self.reorder_pending {
+            return div();
+        }
         div()
             .flex_shrink_0()
             .border_t_1()
             .border_color(cx.theme().border)
             .px(px(PAGE_PADDING))
-            .py_3()
+            .py_1()
             .text_xs()
             .text_color(if self.is_error {
                 cx.theme().danger
@@ -3178,7 +4001,7 @@ impl ClipboardView {
                 cx.theme().muted_foreground
             })
             .child(if self.reorder_pending {
-                "正在保存顺序…".to_owned()
+                tr(self.language, "正在保存顺序…", "Saving order…").to_owned()
             } else {
                 self.message.clone()
             })
@@ -3201,17 +4024,33 @@ impl ClipboardView {
         }
         let view = cx.entity();
         let empty_message = if self.history.loading {
-            "正在加载…"
+            tr(self.language, "正在加载…", "Loading…")
         } else if self.search.read(cx).value().is_empty() {
             if self.history.favorite_only {
-                "还没有收藏，点击记录上的“收藏”保留常用文本"
+                tr(
+                    self.language,
+                    "还没有收藏，点击记录上的“收藏”保留常用文本",
+                    "No favorites yet. Mark an item as a favorite to keep it handy.",
+                )
             } else if self.history.group_id.is_some() {
-                "该分组暂无可显示的记录"
+                tr(
+                    self.language,
+                    "该分组暂无可显示的记录",
+                    "There are no items in this group.",
+                )
             } else {
-                "复制一段文本，它会出现在这里"
+                tr(
+                    self.language,
+                    "复制一段文本，它会出现在这里",
+                    "Copy something and it will appear here.",
+                )
             }
         } else {
-            "没有匹配的记录，试试其他关键词"
+            tr(
+                self.language,
+                "没有匹配的记录，试试其他关键词",
+                "No matching items. Try another search.",
+            )
         };
         div()
             .key_context("ClipboardApp")
@@ -3242,249 +4081,195 @@ impl ClipboardView {
                     .px(px(PAGE_PADDING))
                     .pt_3()
                     .pb_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(div().text_lg().font_semibold().child("剪贴板历史"))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("卡片/分组可拖动 · 红线不可放置"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .justify_end()
-                            .gap_2()
-                            .child(
-                                Button::new("window-pin")
-                                    .outline()
-                                    .small()
-                                    .label(if self.window_pinned {
-                                        "已置顶"
-                                    } else {
-                                        "置顶"
-                                    })
-                                    .selected(self.window_pinned)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.toggle_window_pin(window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("export-backup")
-                                    .outline()
-                                    .small()
-                                    .label(if self.export_pending {
-                                        "正在备份…"
-                                    } else {
-                                        "导出备份"
-                                    })
-                                    .disabled(self.export_pending)
-                                    .on_click(cx.listener(|this, _, _, cx| this.start_export(cx))),
-                            )
-                            .child(
-                                Button::new("pause")
-                                    .outline()
-                                    .small()
-                                    .label(if !self.monitoring {
-                                        "采集未启用"
-                                    } else if self.paused {
-                                        "恢复记录"
-                                    } else {
-                                        "暂停记录"
-                                    })
-                                    .disabled(!self.monitoring || self.pause_pending)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if this.send(Command::Pause(!this.paused), cx) {
-                                            this.pause_pending = true;
-                                            cx.notify();
-                                        }
-                                    })),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .px(px(PAGE_PADDING))
-                    .pb_2()
                     .child(Input::new(&self.search).cleanable(true)),
             )
-            .child(div().px(px(PAGE_PADDING)).pb_2().flex().gap_2().children(
-                [(false, "全部"), (true, "收藏记录")].map(|(favorite_only, label)| {
-                    Button::new(if favorite_only {
-                        "filter-favorites"
-                    } else {
-                        "filter-all"
-                    })
-                    .small()
-                    .outline()
-                    .label(label)
-                    .selected(self.history.favorite_only == favorite_only)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        if this.history.favorite_only != favorite_only {
-                            this.clear_confirm_open = false;
-                            this.reset_selection();
-                            this.search_task = None;
-                            this.history.set_favorite_filter(favorite_only);
-                            this.scroll.scroll_to_item(0, ScrollStrategy::Top);
-                            this.query(cx);
-                            window.focus(&this.list_focus, cx);
-                            cx.notify();
-                        }
-                    }))
-                }),
-            ))
             .child(
                 div()
-                    .id("group-bar")
+                    .id("toolbar-row")
                     .px(px(PAGE_PADDING))
                     .pb_2()
                     .h(px(GROUP_BAR_HEIGHT))
                     .flex_none()
                     .flex()
+                    .items_center()
                     .gap_2()
-                    .overflow_x_scroll()
-                    .track_scroll(&self.group_scroll)
-                    .horizontal_scrollbar(&self.group_scroll)
-                    .on_drag_move(
-                        cx.listener(|this, event: &DragMoveEvent<GroupDrag>, _, cx| {
-                            let x = event.event.position.x;
-                            let direction = if !event.bounds.contains(&event.event.position) {
-                                0
-                            } else if x < event.bounds.left() + px(visual::DRAG_EDGE_ZONE) {
-                                1
-                            } else if x > event.bounds.right() - px(visual::DRAG_EDGE_ZONE) {
-                                -1
+                    .child(div().flex_none().flex().gap_2().children(
+                        [
+                            (false, tr(self.language, "全部", "All")),
+                            (true, tr(self.language, "收藏记录", "Favorites")),
+                        ]
+                        .map(|(favorite_only, label)| {
+                            Button::new(if favorite_only {
+                                "filter-favorites"
                             } else {
-                                0
-                            };
-                            if this.group_drag_direction != direction {
-                                this.group_drag_direction = direction;
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .child(
-                        Button::new("group-create-toggle")
-                            .small()
-                            .ghost()
-                            .label("＋ 新建")
-                            .disabled(
-                                self.group_save_pending
-                                    || self.group_delete_pending
-                                    || self.clear_pending,
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.group_editor_open =
-                                    !this.group_editor_open || this.group_rename_id.is_some();
-                                this.group_rename_id = None;
-                                if this.group_editor_open {
-                                    this.group_name_input.update(cx, |input, cx| {
-                                        input.set_value("", window, cx);
-                                        input.focus(window, cx);
-                                    });
-                                } else {
-                                    window.focus(&this.list_focus, cx);
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("group-rename-toggle")
-                            .small()
-                            .ghost()
-                            .label("重命名")
-                            .disabled(
-                                self.history.group_id.is_none()
-                                    || self.group_save_pending
-                                    || self.group_delete_pending
-                                    || self.clear_pending,
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                let Some(id) = this.history.group_id else {
-                                    return;
-                                };
-                                let Some(name) = this
-                                    .groups
-                                    .iter()
-                                    .find(|group| group.id == id)
-                                    .map(|group| group.name.clone())
-                                else {
-                                    return;
-                                };
-                                this.group_rename_id = Some(id);
-                                this.group_editor_open = true;
-                                this.group_name_input.update(cx, |input, cx| {
-                                    input.set_value(name, window, cx);
-                                    input.focus(window, cx);
-                                });
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("group-delete-toggle")
-                            .small()
-                            .ghost()
-                            .label("删除分组")
-                            .disabled(
-                                self.history.group_id.is_none()
-                                    || self.group_save_pending
-                                    || self.group_delete_pending
-                                    || self.clear_pending,
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.group_delete_id = this.history.group_id;
-                                this.reset_selection();
-                                this.clear_confirm_open = false;
-                                this.group_editor_open = false;
-                                this.group_rename_id = None;
-                                this.group_move_id = None;
-                                window.focus(&this.list_focus, cx);
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("clear-history-toggle")
-                            .small()
-                            .ghost()
-                            .label("清理历史")
-                            .disabled(
-                                self.group_save_pending
-                                    || self.group_delete_pending
-                                    || self.clear_pending,
-                            )
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.clear_confirm_open = true;
-                                this.reset_selection();
-                                this.group_delete_id = None;
-                                this.group_editor_open = false;
-                                this.group_rename_id = None;
-                                this.group_move_id = None;
-                                window.focus(&this.list_focus, cx);
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("group-default")
+                                "filter-all"
+                            })
                             .small()
                             .outline()
-                            .h(px(CONTROL_HEIGHT))
-                            .label("默认分组")
-                            .selected(self.history.group_id.is_none())
-                            .disabled(self.group_delete_pending || self.clear_pending)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.select_group(None, window, cx);
-                            })),
-                    )
-                    .children(self.groups.iter().map(|group| self.render_group(group, cx))),
+                            .label(label)
+                            .selected(self.history.favorite_only == favorite_only)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    if this.history.favorite_only != favorite_only {
+                                        this.clear_confirm_open = false;
+                                        this.reset_selection();
+                                        this.search_task = None;
+                                        this.history.set_favorite_filter(favorite_only);
+                                        this.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                                        this.query(cx);
+                                        window.focus(&this.list_focus, cx);
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .id("group-bar")
+                            .h_full()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .overflow_x_scroll()
+                            .track_scroll(&self.group_scroll)
+                            .horizontal_scrollbar(&self.group_scroll)
+                            .on_drag_move(cx.listener(
+                                |this, event: &DragMoveEvent<GroupDrag>, _, cx| {
+                                    let x = event.event.position.x;
+                                    let direction = if !event.bounds.contains(&event.event.position)
+                                    {
+                                        0
+                                    } else if x < event.bounds.left() + px(visual::DRAG_EDGE_ZONE) {
+                                        1
+                                    } else if x > event.bounds.right() - px(visual::DRAG_EDGE_ZONE)
+                                    {
+                                        -1
+                                    } else {
+                                        0
+                                    };
+                                    if this.group_drag_direction != direction {
+                                        this.group_drag_direction = direction;
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                            .child(
+                                Button::new("group-create-toggle")
+                                    .small()
+                                    .ghost()
+                                    .label(tr(self.language, "＋ 新建", "+ New"))
+                                    .disabled(
+                                        self.group_save_pending
+                                            || self.group_delete_pending
+                                            || self.clear_pending,
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.group_editor_open = !this.group_editor_open
+                                            || this.group_rename_id.is_some();
+                                        this.group_rename_id = None;
+                                        if this.group_editor_open {
+                                            this.group_name_input.update(cx, |input, cx| {
+                                                input.set_value("", window, cx);
+                                                input.focus(window, cx);
+                                            });
+                                        } else {
+                                            window.focus(&this.list_focus, cx);
+                                        }
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("group-rename-toggle")
+                                    .small()
+                                    .ghost()
+                                    .label(tr(self.language, "重命名", "Rename"))
+                                    .disabled(
+                                        self.history.group_id.is_none()
+                                            || self.group_save_pending
+                                            || self.group_delete_pending
+                                            || self.clear_pending,
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let Some(id) = this.history.group_id else {
+                                            return;
+                                        };
+                                        let Some(name) = this
+                                            .groups
+                                            .iter()
+                                            .find(|group| group.id == id)
+                                            .map(|group| group.name.clone())
+                                        else {
+                                            return;
+                                        };
+                                        this.group_rename_id = Some(id);
+                                        this.group_editor_open = true;
+                                        this.group_name_input.update(cx, |input, cx| {
+                                            input.set_value(name, window, cx);
+                                            input.focus(window, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("group-delete-toggle")
+                                    .small()
+                                    .ghost()
+                                    .label(tr(self.language, "删除分组", "Delete group"))
+                                    .disabled(
+                                        self.history.group_id.is_none()
+                                            || self.group_save_pending
+                                            || self.group_delete_pending
+                                            || self.clear_pending,
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.group_delete_id = this.history.group_id;
+                                        this.reset_selection();
+                                        this.clear_confirm_open = false;
+                                        this.group_editor_open = false;
+                                        this.group_rename_id = None;
+                                        this.group_move_id = None;
+                                        window.focus(&this.list_focus, cx);
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("clear-history-toggle")
+                                    .small()
+                                    .ghost()
+                                    .label(tr(self.language, "清理历史", "Clear history"))
+                                    .disabled(
+                                        self.group_save_pending
+                                            || self.group_delete_pending
+                                            || self.clear_pending,
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.clear_confirm_open = true;
+                                        this.reset_selection();
+                                        this.group_delete_id = None;
+                                        this.group_editor_open = false;
+                                        this.group_rename_id = None;
+                                        this.group_move_id = None;
+                                        window.focus(&this.list_focus, cx);
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                Button::new("group-default")
+                                    .small()
+                                    .outline()
+                                    .h(px(CONTROL_HEIGHT))
+                                    .label(tr(self.language, "默认分组", "Default"))
+                                    .selected(self.history.group_id.is_none())
+                                    .disabled(self.group_delete_pending || self.clear_pending)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.select_group(None, window, cx);
+                                    })),
+                            )
+                            .children(self.groups.iter().map(|group| self.render_group(group, cx))),
+                    ),
             )
             .when(self.group_editor_open, |container| {
                 container.child(visual::reveal(
@@ -3505,9 +4290,9 @@ impl ClipboardView {
                                 .small()
                                 .outline()
                                 .label(if self.group_rename_id.is_some() {
-                                    "保存名称"
+                                    tr(self.language, "保存名称", "Save name")
                                 } else {
-                                    "创建"
+                                    tr(self.language, "创建", "Create")
                                 })
                                 .disabled(self.group_save_pending)
                                 .on_click(cx.listener(|this, _, _, cx| this.save_group(cx))),
@@ -3516,7 +4301,7 @@ impl ClipboardView {
                             Button::new("group-save-cancel")
                                 .small()
                                 .ghost()
-                                .label("取消")
+                                .label(tr(self.language, "取消", "Cancel"))
                                 .disabled(self.group_save_pending)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.group_editor_open = false;
@@ -3535,7 +4320,14 @@ impl ClipboardView {
                     .iter()
                     .find(|group| group.id == id)
                     .map(|group| (group.name.clone(), group.item_count))
-                    .unwrap_or_else(|| ("该分组".into(), 0));
+                    .unwrap_or_else(|| {
+                        (tr(self.language, "该分组", "this group").into(), 0)
+                    });
+                let prompt = if self.language == LanguagePreference::English {
+                    format!("Delete “{name}”? {count} items will move to the default group.")
+                } else {
+                    format!("删除「{name}」？{count} 条记录将移到默认分组。")
+                };
                 container.child(visual::reveal(
                     div()
                         .px(px(PAGE_PADDING))
@@ -3546,7 +4338,7 @@ impl ClipboardView {
                         .child(
                             div()
                                 .text_sm()
-                                .child(format!("删除「{name}」？{count} 条记录将移到默认分组。")),
+                                .child(prompt),
                         )
                         .child(
                             div()
@@ -3557,7 +4349,7 @@ impl ClipboardView {
                                     Button::new("group-delete-cancel")
                                         .small()
                                         .ghost()
-                                        .label("取消")
+                                        .label(tr(self.language, "取消", "Cancel"))
                                         .disabled(self.group_delete_pending)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.group_delete_id = None;
@@ -3569,7 +4361,11 @@ impl ClipboardView {
                                     Button::new("group-delete-confirm")
                                         .small()
                                         .danger()
-                                        .label("保留记录并删除分组")
+                                        .label(tr(
+                                            self.language,
+                                            "保留记录并删除分组",
+                                            "Delete group and keep items",
+                                        ))
                                         .disabled(self.group_delete_pending)
                                         .on_click(
                                             cx.listener(|this, _, _, cx| this.delete_group(cx)),
@@ -3586,7 +4382,16 @@ impl ClipboardView {
                     .group_id
                     .and_then(|id| self.groups.iter().find(|group| group.id == id))
                     .map(|group| group.name.as_str())
-                    .unwrap_or("默认分组");
+                    .unwrap_or(tr(self.language, "默认分组", "Default"));
+                let prompt = if self.language == LanguagePreference::English {
+                    format!(
+                        "Clear unpinned, non-favorite items from “{name}”? Search and favorite filters do not change the scope."
+                    )
+                } else {
+                    format!(
+                        "清理「{name}」中未置顶且未收藏的记录？搜索和收藏筛选不影响清理范围。"
+                    )
+                };
                 container.child(visual::reveal(
                     div()
                         .px(px(PAGE_PADDING))
@@ -3594,14 +4399,16 @@ impl ClipboardView {
                         .flex()
                         .flex_col()
                         .gap_1()
-                        .child(div().text_sm().child(format!(
-                            "清理「{name}」中未置顶且未收藏的记录？搜索和收藏筛选不影响清理范围。"
-                        )))
+                        .child(div().text_sm().child(prompt))
                         .child(
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("此操作无法撤销；可先导出备份。"),
+                                .child(tr(
+                                    self.language,
+                                    "此操作无法撤销；可先导出备份。",
+                                    "This cannot be undone. Export a backup first if needed.",
+                                )),
                         )
                         .child(
                             div()
@@ -3612,7 +4419,7 @@ impl ClipboardView {
                                     Button::new("clear-history-cancel")
                                         .small()
                                         .ghost()
-                                        .label("取消")
+                                        .label(tr(self.language, "取消", "Cancel"))
                                         .disabled(self.clear_pending)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.clear_confirm_open = false;
@@ -3625,9 +4432,9 @@ impl ClipboardView {
                                         .small()
                                         .danger()
                                         .label(if self.clear_pending {
-                                            "正在清理…"
+                                            tr(self.language, "正在清理…", "Clearing…")
                                         } else {
-                                            "确认清理"
+                                            tr(self.language, "确认清理", "Clear")
                                         })
                                         .disabled(self.clear_pending)
                                         .on_click(
@@ -3655,19 +4462,19 @@ impl ClipboardView {
                                 Button::new("move-group-cancel")
                                     .small()
                                     .ghost()
-                                    .label("取消移动")
+                                    .label(tr(self.language, "取消移动", "Cancel move"))
                                     .disabled(self.group_move_pending)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.group_move_id = None;
                                         cx.notify();
                                     })),
                             )
-                            .child(div().text_xs().child("移至"))
+                            .child(div().text_xs().child(tr(self.language, "移至", "Move to")))
                             .child(
                                 Button::new("move-group-default")
                                     .small()
                                     .outline()
-                                    .label("默认分组")
+                                    .label(tr(self.language, "默认分组", "Default"))
                                     .disabled(
                                         self.group_move_pending || self.history.group_id.is_none(),
                                     )
@@ -3706,13 +4513,17 @@ impl ClipboardView {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(format!("已选 {} 条", self.selected_ids.len())),
+                                .child(if self.language == LanguagePreference::English {
+                                    format!("{} selected", self.selected_ids.len())
+                                } else {
+                                    format!("已选 {} 条", self.selected_ids.len())
+                                }),
                         )
                         .child(
                             Button::new("batch-select-loaded")
                                 .small()
                                 .ghost()
-                                .label("全选已加载")
+                                .label(tr(self.language, "全选已加载", "Select loaded"))
                                 .disabled(
                                     self.batch_pending
                                         || self.history.loading
@@ -3724,7 +4535,7 @@ impl ClipboardView {
                             Button::new("batch-clear-selection")
                                 .small()
                                 .ghost()
-                                .label("取消选择")
+                                .label(tr(self.language, "取消选择", "Clear selection"))
                                 .disabled(self.batch_pending)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.reset_selection();
@@ -3736,9 +4547,9 @@ impl ClipboardView {
                                 .small()
                                 .outline()
                                 .label(if self.paste_target.is_some() && self._tray.is_some() {
-                                    "合并粘贴"
+                                    tr(self.language, "合并粘贴", "Merge and paste")
                                 } else {
-                                    "合并复制"
+                                    tr(self.language, "合并复制", "Merge and copy")
                                 })
                                 .disabled(
                                     self.batch_pending
@@ -3753,7 +4564,7 @@ impl ClipboardView {
                             Button::new("batch-delete-open")
                                 .small()
                                 .danger()
-                                .label("删除选中")
+                                .label(tr(self.language, "删除选中", "Delete selected"))
                                 .disabled(self.batch_pending)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.batch_confirm_open = true;
@@ -3767,6 +4578,17 @@ impl ClipboardView {
                 ))
             })
             .when(self.batch_confirm_open, |container| {
+                let prompt = if self.language == LanguagePreference::English {
+                    format!(
+                        "Delete the {} selected items? This includes pinned and favorite items and cannot be undone.",
+                        self.selected_ids.len()
+                    )
+                } else {
+                    format!(
+                        "确定删除选中的 {} 条记录？包含置顶和收藏，无法撤销。",
+                        self.selected_ids.len()
+                    )
+                };
                 container.child(visual::reveal(
                     div()
                         .px(px(PAGE_PADDING))
@@ -3774,10 +4596,7 @@ impl ClipboardView {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(div().text_sm().child(format!(
-                            "确定删除选中的 {} 条记录？包含置顶和收藏，无法撤销。",
-                            self.selected_ids.len()
-                        )))
+                        .child(div().text_sm().child(prompt))
                         .child(
                             div()
                                 .flex()
@@ -3787,7 +4606,7 @@ impl ClipboardView {
                                     Button::new("batch-delete-cancel")
                                         .small()
                                         .ghost()
-                                        .label("取消")
+                                        .label(tr(self.language, "取消", "Cancel"))
                                         .disabled(self.batch_pending)
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.batch_confirm_open = false;
@@ -3799,7 +4618,9 @@ impl ClipboardView {
                                         .small()
                                         .danger()
                                         .label(if self.batch_pending {
-                                            "正在删除…".to_owned()
+                                            tr(self.language, "正在删除…", "Deleting…").to_owned()
+                                        } else if self.language == LanguagePreference::English {
+                                            format!("Delete {} items", self.selected_ids.len())
                                         } else {
                                             format!("确认删除 {} 条", self.selected_ids.len())
                                         })
@@ -3821,8 +4642,16 @@ impl ClipboardView {
                     .justify_between()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(format!("{} 条记录", self.history.total))
-                    .child("↑↓/PgUp/PgDn/Home/End · Enter 复制"),
+                    .child(if self.language == LanguagePreference::English {
+                        format!("{} items", self.history.total)
+                    } else {
+                        format!("{} 条记录", self.history.total)
+                    })
+                    .child(tr(
+                        self.language,
+                        "↑↓/PgUp/PgDn/Home/End · Enter 复制",
+                        "↑↓/PgUp/PgDn/Home/End · Enter to copy",
+                    )),
             )
             .child(
                 div()
@@ -3923,7 +4752,7 @@ impl ClipboardView {
                             Button::new("more")
                                 .ghost()
                                 .small()
-                                .label("加载更多")
+                                .label(tr(self.language, "加载更多", "Load more"))
                                 .disabled(self.history.loading)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.history.limit =

@@ -549,7 +549,7 @@ mod tests {
     use super::*;
     use crate::{
         History, PreviewContent,
-        preferences::{Preferences, ThemePreference, WindowSizePreference},
+        preferences::{LanguagePreference, Preferences, ThemePreference, WindowSizePreference},
     };
 
     #[test]
@@ -587,6 +587,7 @@ mod tests {
         )?;
         let preferences = Preferences::new(&history.db);
         preferences.set_theme(ThemePreference::Dark)?;
+        preferences.set_language(LanguagePreference::English)?;
         let window_size = WindowSizePreference::new(900, 700).unwrap();
         preferences.set_window_size(window_size)?;
         history.db.write_connection().lock().execute(
@@ -614,6 +615,10 @@ mod tests {
         assert_eq!(
             Preferences::new(&restored.db).theme()?,
             ThemePreference::Dark
+        );
+        assert_eq!(
+            Preferences::new(&restored.db).language()?,
+            LanguagePreference::English
         );
         assert_eq!(
             Preferences::new(&restored.db).window_size()?,

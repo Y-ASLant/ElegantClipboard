@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use clipboard_core::preferences::LanguagePreference;
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::{
@@ -16,18 +17,42 @@ use windows::Win32::{
 #[derive(Clone, Copy)]
 pub enum TrayCommand {
     Show,
+    Settings,
+    TogglePause,
     Quit,
 }
 
-pub fn create(sender: async_channel::Sender<TrayCommand>) -> Result<TrayIcon> {
+pub fn create(
+    sender: async_channel::Sender<TrayCommand>,
+    language: LanguagePreference,
+) -> Result<TrayIcon> {
     let menu = Menu::new();
-    let show = MenuItem::with_id("show", "打开剪贴板历史", true, None);
-    let quit = MenuItem::with_id("quit", "退出 ElegantClipboard", true, None);
+    let english = language == LanguagePreference::English;
+    let show = MenuItem::with_id("show", if english { "Open" } else { "打开" }, true, None);
+    let settings = MenuItem::with_id(
+        "settings",
+        if english { "Settings" } else { "设置" },
+        true,
+        None,
+    );
+    let pause = MenuItem::with_id(
+        "toggle-pause",
+        if english {
+            "Pause / Resume Recording"
+        } else {
+            "暂停 / 恢复记录"
+        },
+        true,
+        None,
+    );
+    let quit = MenuItem::with_id("quit", if english { "Quit" } else { "退出" }, true, None);
     menu.append(&show).context("无法创建托盘菜单")?;
+    menu.append(&settings).context("无法创建托盘菜单")?;
+    menu.append(&pause).context("无法创建托盘菜单")?;
     menu.append(&quit).context("无法创建托盘菜单")?;
     let icon = Icon::from_rgba(icon_pixels(), 32, 32).context("无法创建托盘图标")?;
     let tray = TrayIconBuilder::new()
-        .with_tooltip("ElegantClipboard · 剪贴板历史")
+        .with_tooltip("ElegantClipboard")
         .with_icon(icon)
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
@@ -37,6 +62,8 @@ pub fn create(sender: async_channel::Sender<TrayCommand>) -> Result<TrayIcon> {
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
             "show" => Some(TrayCommand::Show),
+            "settings" => Some(TrayCommand::Settings),
+            "toggle-pause" => Some(TrayCommand::TogglePause),
             "quit" => Some(TrayCommand::Quit),
             _ => None,
         };

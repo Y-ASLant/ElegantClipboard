@@ -10,7 +10,7 @@ ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的 Windows 原生剪�
 - 收藏、置顶、分组、拖拽排序、批量删除与历史清理
 - 文本编辑、富文本/图片/文件预览以及复制、纯文本复制和自动粘贴
 - 全局快捷键、系统托盘、开机启动、暂停采集和单实例唤回
-- 明暗主题、窗口置顶和窗口尺寸记忆
+- 简体中文/English 界面（默认简体中文）、明暗主题、窗口置顶和窗口尺寸记忆
 - GPUI ZIP 备份与恢复，并可导入旧数据库或旧版 ZIP 备份
 
 Windows 实现和已知边界详见 [Windows GPUI 状态](docs/WINDOWS_MVP.md)。

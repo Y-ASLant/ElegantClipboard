@@ -24,6 +24,43 @@ pub fn reorder_offsets(before: &[i64], after: &[i64]) -> HashMap<i64, isize> {
         .collect()
 }
 
+/// Row deltas for the live preview shown while an item is dragged.
+/// Values are expressed in rows relative to the current list position.
+pub fn drag_reorder_offsets(
+    ids: &[i64],
+    source: i64,
+    target: i64,
+    after: bool,
+) -> HashMap<i64, isize> {
+    let Some(source_index) = ids.iter().position(|id| *id == source) else {
+        return HashMap::new();
+    };
+    if source == target || !ids.contains(&target) {
+        return HashMap::new();
+    }
+
+    let mut preview = ids.to_vec();
+    preview.remove(source_index);
+    let Some(target_index) = preview.iter().position(|id| *id == target) else {
+        return HashMap::new();
+    };
+    let insert_index = target_index + usize::from(after);
+    preview.insert(insert_index, source);
+
+    let preview_positions: HashMap<_, _> = preview
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (*id, index))
+        .collect();
+    ids.iter()
+        .enumerate()
+        .filter_map(|(index, id)| {
+            let preview_index = *preview_positions.get(id)?;
+            (preview_index != index).then_some((*id, preview_index as isize - index as isize))
+        })
+        .collect()
+}
+
 /// Advance a virtual list by one row without leaving the loaded item range.
 pub fn next_drag_scroll_index(current: usize, item_count: usize, direction: i8) -> usize {
     if item_count == 0 || direction == 0 {
@@ -194,6 +231,20 @@ mod tests {
         assert!(!offsets.contains_key(&1));
         assert!(reorder_offsets(&[1, 2], &[3, 2]).is_empty());
         assert!(reorder_offsets(&[1, 2], &[3, 1, 2]).is_empty());
+    }
+
+    #[test]
+    fn drag_reorder_offsets_shift_rows_into_the_preview_gap() {
+        assert_eq!(
+            drag_reorder_offsets(&[4, 3, 2, 1], 4, 2, true),
+            HashMap::from([(4, 2), (3, -1), (2, -1)])
+        );
+        assert_eq!(
+            drag_reorder_offsets(&[4, 3, 2, 1], 1, 3, false),
+            HashMap::from([(3, 1), (2, 1), (1, -2)])
+        );
+        assert!(drag_reorder_offsets(&[1, 2], 1, 1, false).is_empty());
+        assert!(drag_reorder_offsets(&[1, 2], 3, 1, false).is_empty());
     }
 
     #[test]

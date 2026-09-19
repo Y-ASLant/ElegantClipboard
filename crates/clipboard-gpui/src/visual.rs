@@ -2,7 +2,7 @@
 use gpui_kit::*;
 use std::time::Duration;
 pub const PAGE_PADDING: f32 = 20.;
-pub const ROW_HEIGHT: f32 = 184.;
+pub const ROW_HEIGHT: f32 = 144.;
 pub const CONTROL_HEIGHT: f32 = 28.;
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
 pub const DROP_MARKER_HEIGHT: f32 = 3.;

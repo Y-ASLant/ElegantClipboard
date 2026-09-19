@@ -2,11 +2,12 @@ use crate::database::{Database, SettingsRepository};
 use anyhow::Result;
 
 const THEME_KEY: &str = "gpui_theme_mode";
+const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
 const WINDOW_SIZE_KEY: &str = "gpui_window_size";
 pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
-     ('gpui_theme_mode', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size')";
+     ('gpui_theme_mode', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size')";
 
 pub const MIN_WINDOW_WIDTH: u32 = 420;
 pub const MIN_WINDOW_HEIGHT: u32 = 520;
@@ -50,6 +51,13 @@ pub enum ThemePreference {
     System,
     Light,
     Dark,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LanguagePreference {
+    #[default]
+    Chinese,
+    English,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,6 +106,23 @@ impl Preferences {
                 ThemePreference::System => "system",
                 ThemePreference::Light => "light",
                 ThemePreference::Dark => "dark",
+            },
+        )?)
+    }
+
+    pub fn language(&self) -> Result<LanguagePreference> {
+        Ok(match self.repository.get(LANGUAGE_KEY)?.as_deref() {
+            Some("en") => LanguagePreference::English,
+            _ => LanguagePreference::Chinese,
+        })
+    }
+
+    pub fn set_language(&self, language: LanguagePreference) -> Result<()> {
+        Ok(self.repository.set(
+            LANGUAGE_KEY,
+            match language {
+                LanguagePreference::Chinese => "zh-CN",
+                LanguagePreference::English => "en",
             },
         )?)
     }
@@ -199,6 +224,25 @@ mod tests {
         assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
         SettingsRepository::new(&db).set(HOTKEY_KEY, "unknown")?;
         assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
+        Ok(())
+    }
+
+    #[test]
+    fn language_defaults_to_chinese_and_persists_english() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let db = Database::new(path.clone())?;
+        let preferences = Preferences::new(&db);
+        assert_eq!(preferences.language()?, LanguagePreference::Chinese);
+        preferences.set_language(LanguagePreference::English)?;
+        drop(preferences);
+        drop(db);
+
+        let db = Database::new(path)?;
+        let preferences = Preferences::new(&db);
+        assert_eq!(preferences.language()?, LanguagePreference::English);
+        SettingsRepository::new(&db).set(LANGUAGE_KEY, "unknown")?;
+        assert_eq!(preferences.language()?, LanguagePreference::Chinese);
         Ok(())
     }
 
