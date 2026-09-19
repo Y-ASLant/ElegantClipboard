@@ -38,7 +38,7 @@ try {
     try {
         Copy-Item -LiteralPath $executable -Destination (Join-Path $stage 'elegant-clipboard-gpui.exe')
         Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'LICENSE')
-        Copy-Item -LiteralPath (Join-Path $root 'refactor\WINDOWS_PACKAGE_README.txt') -Destination (Join-Path $stage 'README.txt')
+        Copy-Item -LiteralPath (Join-Path $root 'docs\WINDOWS_PACKAGE_README.txt') -Destination (Join-Path $stage 'README.txt')
 
         $archive = Join-Path $packageRoot $filename
         Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $archive -CompressionLevel Optimal -Force

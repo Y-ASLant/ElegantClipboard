@@ -2369,7 +2369,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
         next_snapshot(&events, 0);
-        let png = include_bytes!("../../../clipboard-rs/tests/test.png");
+        let png = include_bytes!("../tests/fixtures/test.png");
         service.send(Command::CaptureImage {
             png: png.to_vec(),
             width: 128,

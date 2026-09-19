@@ -227,7 +227,7 @@ fn main() -> anyhow::Result<()> {
     println!("rich plain-text copy ok");
 
     let image_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../clipboard-rs/tests/test.png");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/test.png");
     let image = RustImageData::from_path(image_path.to_str().context("测试图片路径不是 UTF-8")?)
         .map_err(|error| anyhow!("读取测试图片失败：{error}"))?;
     clipboard

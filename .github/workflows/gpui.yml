@@ -1,16 +1,11 @@
-name: GPUI Windows foundation
+name: GPUI CI
 
 on:
   push:
     branches: [gpui]
   pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/**"
-      - "src-tauri/src/database/**"
-      - "src-tauri/src/clipboard/dedup.rs"
-      - ".github/workflows/gpui.yml"
+    branches: [gpui]
+  workflow_dispatch:
 
 jobs:
   windows:
@@ -23,9 +18,11 @@ jobs:
       - uses: swatinem/rust-cache@v2.9.2
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Check
+        run: cargo check --workspace --all-targets --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Tests (isolated data, no system clipboard writes)
+      - name: Tests
         run: cargo test --workspace --locked
       - name: Build Windows application
-        run: cargo build -p elegant-clipboard-gpui --locked
+        run: cargo build -p elegant-clipboard-gpui --release --locked

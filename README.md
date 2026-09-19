@@ -2,211 +2,79 @@
 
 [English](README_EN.md) | 中文
 
-> 说明：本文档中的界面截图可能与最新版本略有差异，当前截图拍摄于 **v0.5.0**。
+ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的 Windows 原生剪贴板管理器。当前分支只有 GPUI 应用，不需要 Node.js、WebView 或 Tauri。
 
-<p align="center">
-  <img src="src-tauri/icons/icon.png" alt="ElegantClipboard" width="128" height="128">
-</p>
-<p align="center">
-  低占用 · 高性能 · 现代化 · 完全本地化离线剪贴板。
-</p>
+## 当前功能
 
+- 采集和检索文本、URL、HTML/RTF、图片及文件路径
+- 收藏、置顶、分组、拖拽排序、批量删除与历史清理
+- 文本编辑、富文本/图片/文件预览以及复制、纯文本复制和自动粘贴
+- 全局快捷键、系统托盘、开机启动、暂停采集和单实例唤回
+- 明暗主题、窗口置顶和窗口尺寸记忆
+- GPUI ZIP 备份与恢复，并可导入旧数据库或旧版 ZIP 备份
 
-<p align="center">
-  <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/v/release/Y-ASLant/ElegantClipboard?label=version&color=blue" alt="version"></a>
-  <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/downloads/Y-ASLant/ElegantClipboard/total?label=downloads&color=brightgreen" alt="downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="platform">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license">
-  <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-</p>
+Windows 实现和已知边界详见 [Windows GPUI 状态](docs/WINDOWS_MVP.md)。
 
-## 界面截图（v0.5.0）
+## 工程结构
 
-### 外观主题
-
-#### 跟随系统强调色
-
-![跟随系统](img/theme_0.png)
-
-| 经典黑白 | 翡翠绿 | 天空青 |
-|:-:|:-:|:-:|
-| ![经典黑白](img/theme_1.png) | ![翡翠绿](img/theme_2.png) | ![天空青](img/theme_3.png) |
-
-#### 暗色模式
-
-自动跟随系统深色/浅色模式，实时切换
-
-### 设置界面
-
-| 数据管理 | 显示设置 | 快捷按键 |
-|:-:|:-:|:-:|
-| ![数据管理](img/setting_1.png) | ![显示设置](img/setting_2.png) | ![快捷按键](img/setting_3.png) |
-
-### 图片悬浮预览
-
-![图片预览](img/preview_mode.png)
-
-### 文本悬浮预览
-
-文本悬浮预览与图片悬浮预览共用预览位置与悬浮预览延时设置（默认 500ms，文本预览默认关闭）。
-
-### 启动通知
-
-![启动通知](img/startup_notification.png)
-
-## 设计理念
-
-**低占用 · 高性能 · 现代化 · 隐私优先**
-
-- **低占用** - 托盘常驻，不打扰核心工作流，窗口不抢占焦点，仅可见时启用监控
-- **高性能** - 优化的 LIKE 搜索（兼容 CJK 文本）、虚拟列表处理万级记录、异步图像处理、内容哈希去重
-- **现代化** - Tauri 2.0 + React 19 + Tailwind CSS 4，类型安全，优雅架构
-- **隐私优先** - 数据默认完全本地存储，可选 WebDAV 自建同步，隐私由用户掌控
-- **多语言界面** - 简体中文 / English / 繁體中文，设置中切换，多窗口实时同步
-
-## 功能特性
-
-完整功能列表与术语约定见 [FEATURES.md](FEATURES.md)。
-
-## 快捷键
-
-### 全局快捷键
-
-| 快捷键 | 功能 |
-|--------|------|
-| `Alt+C` | 显示/隐藏窗口（默认，可自定义） |
-| `Win+V` | 显示/隐藏窗口（可选，需在设置中开启） |
-
-### 窗口内快捷键
-
-| 快捷键 | 功能 |
-|--------|------|
-| `↑` / `↓` | 上下选择剪贴板条目 |
-| `←` / `→` | 切换分组标签（全部 / 文本 / 其它） |
-| `Enter` | 粘贴选中条目 |
-| `Shift+Enter` | 以纯文本粘贴选中条目 |
-| `Delete` | 删除选中条目 |
-| `ESC` | 关闭对话框/隐藏窗口 |
-| `Ctrl+滚轮` | 缩放图片预览 / 滚动文本预览 |
-
-## 技术栈
-
-| 类别 | 技术 |
-|------|------|
-| **框架** | Tauri 2.0 |
-| **前端** | React 19 + TypeScript |
-| **构建** | Vite 7 |
-| **样式** | Tailwind CSS 4 |
-| **组件** | shadcn/ui (Radix UI) + Fluent UI Icons |
-| **状态管理** | Zustand 5（持久化 + 多窗口同步） |
-| **虚拟列表** | react-virtuoso |
-| **拖拽排序** | @dnd-kit |
-| **后端** | Rust |
-| **数据库** | SQLite (rusqlite) + 优化的 LIKE 查询（支持 CJK 文本） |
-| **哈希** | BLAKE3（内容去重） |
-| **锁** | parking_lot（高性能 Mutex/RwLock） |
-| **并行** | rayon（文件检查并行化） |
-| **剪贴板** | clipboard-rs（文本 / HTML / RTF / 图片 / 文件 / 监听） |
-| **窗口特效** | window-vibrancy（Mica/Acrylic/Tabbed） |
-| **键盘模拟** | enigo |
-| **输入监控** | Win32 LL Hook（WH_MOUSE_LL + WH_KEYBOARD_LL，仅窗口可见时启用键盘钩子） |
-| **自动更新** | 基于 GitHub Release 的检查与下载（支持系统代理） |
-| **CI/CD** | GitHub Actions（CI + Tag 触发 Release） |
-
-## 安装
-
-### 下载安装包
-
-从 [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) 页面下载最新版本：
-
-- **安装版**（推荐）：`ElegantClipboard_x.x.x_x64-setup.exe`
-- **便携版**：`ElegantClipboard_x.x.x_x64_portable.exe`（无需安装，直接运行）
-
-### winget
-
-```powershell
-winget install Y-ASLant.ElegantClipboard
+```text
+crates/
+  clipboard-core/      数据模型、SQLite、查询、备份与业务规则
+  clipboard-platform/  Windows 剪贴板、快捷键、托盘和系统集成
+  clipboard-gpui/      GPUI 应用入口、状态与界面
+scripts/               打包与验证辅助脚本
+docs/                  架构决策、功能状态和验收证据
 ```
 
-### Scoop
+## 从源码运行
+
+要求：
+
+- Windows 10/11 x64
+- Rust 1.98 或更高版本，MSVC 工具链
+- 打包时需要 PowerShell 7（`pwsh`）
 
 ```powershell
-scoop bucket add elegantclipboard https://github.com/Y-ASLant/ElegantClipboard
-scoop install elegantclipboard
+cargo run -p elegant-clipboard-gpui --locked
 ```
 
-### 从源码构建
+也可以使用：
 
-#### 环境要求
+```powershell
+make run
+```
 
-- Node.js 18+（推荐 LTS 版本）
-- Rust 1.96+（Rust edition 2024）
-- Windows 10/11
+默认数据位于当前用户 LocalAppData 下的 `ElegantClipboard-GPUI` 应用目录。测试或隔离运行可显式指定目录：
 
-#### 构建步骤
+```powershell
+cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
+```
 
-```bash
-# 克隆仓库
-git clone https://github.com/Y-ASLant/ElegantClipboard.git
-cd ElegantClipboard
+## 构建与验证
 
-# 安装依赖
-npm install
-
-# 仅构建前端静态资源（dist/）
-npm run build
-
-# 开发模式
-npm run tauri dev
-
-# 构建生产版本（默认仅当前机器架构）
-npm run tauri build
-
-# 分别构建 x64 / arm64 安装包（需执行两次）
-npm run tauri build -- --target x86_64-pc-windows-msvc
-npm run tauri build -- --target aarch64-pc-windows-msvc
-
-# 代码检查
-npm run lint
-
-# 单元/组件/性能测试
+```powershell
+make check
 make test
-# 或：npx vitest run
+make build
 ```
 
-说明：
-- `npm run build` 只会执行 `tsc && vite build`，用于前端资源构建，不会生成安装包。
-- 安装包由 `npm run tauri build` 生成；不指定 `--target` 时只构建当前环境对应架构。
-- 需要同时发布 `x64` 和 `arm64` 时，需分别执行两次带 `--target` 的构建命令（或在 CI 中分架构构建）。
+对应的 Release 可执行文件为 `target\release\elegant-clipboard-gpui.exe`。
 
-#### 版本管理
+生成未经签名的 Windows x64 独立 ZIP：
 
 ```powershell
-# 统一修改三处版本号（package.json, tauri.conf.json, Cargo.toml）
-.\scripts\bump-version.ps1 0.5.0
+make package
 ```
 
-或直接推送 tag，Release workflow 自动同步版本号并构建：
+产物与 SHA-256 文件写入 `target\packages\`。当前不提供安装器、自动更新或 ARM64 制品。
 
-```bash
-git tag v0.5.0
-git push origin v0.5.0
+## 版本管理
+
+```powershell
+.\scripts\bump-version.ps1 0.2.0
 ```
 
-## 数据存储
-
-数据存储在**可执行文件所在目录**：
-
-| 类型 | 路径 |
-|---|---|
-| 配置文件 | `<安装目录>\config.json` |
-| 数据库 | `<安装目录>\clipboard.db` |
-| 图片缓存 | `<安装目录>\images\` |
-| 日志 | `<安装目录>\app.log` |
-
-可在设置 → 常规 → 数据存储位置修改默认路径，支持数据迁移。
-
-安装版默认使用安装目录，需管理员权限写入；便携版（无 `uninstall.exe`）在 exe 同级目录可正常读写。
+脚本更新根 Cargo 工作区版本和锁文件。发布标签必须与 Cargo 版本一致，例如 `v0.2.0`。
 
 ## 许可证
 

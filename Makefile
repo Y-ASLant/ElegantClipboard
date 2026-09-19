@@ -2,60 +2,39 @@ SHELL := powershell.exe
 .SHELLFLAGS := -NoProfile -Command
 .DEFAULT_GOAL := help
 
-.PHONY: help clean build run check format test
+.PHONY: help clean build package run check test format
 
 help:
 	@Write-Host "Usage: make <target>"
 	@Write-Host ""
 	@Write-Host "Available targets:"
-	@Write-Host "  make clean   Remove frontend dist and Rust target artifacts"
-	@Write-Host "  make build   Build Tauri release installer"
-	@Write-Host "  make run     Build frontend and run backend"
-	@Write-Host "  make check   Run lint, TypeScript, and cargo check"
-	@Write-Host "  make test    Run frontend (vitest) and backend (cargo test) tests"
-	@Write-Host "  make format  Run frontend autofix and Rust formatter"
+	@Write-Host "  make clean    Remove Cargo build artifacts"
+	@Write-Host "  make build    Build the GPUI release executable"
+	@Write-Host "  make package  Build the Windows x64 GPUI ZIP package"
+	@Write-Host "  make run      Run the GPUI application"
+	@Write-Host "  make check    Run rustfmt, cargo check, and Clippy"
+	@Write-Host "  make test     Run all workspace tests"
+	@Write-Host "  make format   Format the Rust workspace"
 
 clean:
-	@Write-Host "[clean] remove frontend dist"
-	if (Test-Path dist) { Remove-Item -Recurse -Force dist }
-	@Write-Host "[clean] remove Vite cache"
-	if (Test-Path node_modules/.vite) { Remove-Item -Recurse -Force node_modules/.vite }
-	@Write-Host "[clean] remove Rust target"
-	cargo clean --manifest-path src-tauri/Cargo.toml
-	@Write-Host "[clean] done"
+	cargo clean
 
 build:
-	@Write-Host "[build] tauri release installer"
-	npm run tauri build
-	@Write-Host "[build] done"
+	cargo build -p elegant-clipboard-gpui --release --locked
+
+package:
+	pwsh.exe -NoProfile -File scripts/package-gpui-windows.ps1
 
 run:
-	@Write-Host "[run] frontend production build"
-	npm run build
-	@Write-Host "[run] start backend"
-	cargo run --manifest-path src-tauri/Cargo.toml
+	cargo run -p elegant-clipboard-gpui --locked
 
 check:
-	@Write-Host "[check] eslint"
-	npm run lint
-	@Write-Host "[check] typescript"
-	npx tsc --noEmit
-	@Write-Host "[check] cargo"
-	cargo check --manifest-path src-tauri/Cargo.toml
-	@Write-Host "[check] clippy"
-	cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-	@Write-Host "[check] done"
+	cargo fmt --all -- --check
+	cargo check --workspace --all-targets --locked
+	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 test:
-	@Write-Host "[test] frontend: unit, component, perf"
-	npx vitest run --reporter=verbose
-	@Write-Host "[test] backend: cargo test"
-	cargo test --manifest-path src-tauri/Cargo.toml
-	@Write-Host "[test] done"
+	cargo test --workspace --locked
 
 format:
-	@Write-Host "[format] eslint autofix"
-	npm run lint:fix
-	@Write-Host "[format] rustfmt"
-	@Set-Location src-tauri; Get-ChildItem -Path src -Recurse -Filter *.rs | ForEach-Object { rustup run stable rustfmt --edition 2024 $$_.FullName }
-	@Write-Host "[format] done"
+	cargo fmt --all

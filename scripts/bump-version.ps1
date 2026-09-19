@@ -1,39 +1,32 @@
-# bump-version.ps1 — Unified version bump for ElegantClipboard
-# Usage: .\scripts\bump-version.ps1 0.5.0
-
 param(
-    [Parameter(Mandatory=$true, Position=0)]
+    [Parameter(Mandatory = $true, Position = 0)]
     [ValidatePattern('^\d+\.\d+\.\d+$')]
     [string]$Version
 )
 
-$ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
+$ErrorActionPreference = 'Stop'
+$root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$cargoPath = Join-Path $root 'Cargo.toml'
+$cargo = Get-Content -LiteralPath $cargoPath -Raw
+$pattern = '(?m)(^\[workspace\.package\]\r?\nversion\s*=\s*")[^"]+("\s*$)'
+$match = [regex]::Match($cargo, $pattern)
+if (-not $match.Success) {
+    throw '无法定位 Cargo 工作区版本'
+}
 
-Write-Host "Bumping version to $Version ..." -ForegroundColor Cyan
+$updated = [regex]::Replace($cargo, $pattern, "`${1}$Version`${2}", 1)
+if ($updated -ne $cargo) {
+    Set-Content -LiteralPath $cargoPath -Value $updated -Encoding utf8NoBOM -NoNewline
+}
+Push-Location $root
+try {
+    & cargo check --workspace
+    if ($LASTEXITCODE -ne 0) {
+        throw "Cargo 锁文件更新或检查失败：$LASTEXITCODE"
+    }
+}
+finally {
+    Pop-Location
+}
 
-# 1. package.json
-$pkgPath = Join-Path $root "package.json"
-$pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
-$oldVersion = $pkg.version
-$pkg.version = $Version
-$pkg | ConvertTo-Json -Depth 10 | Set-Content $pkgPath -Encoding utf8NoBOM
-Write-Host "  package.json: $oldVersion -> $Version" -ForegroundColor Green
-
-# 2. src-tauri/tauri.conf.json
-$tauriPath = Join-Path $root "src-tauri\tauri.conf.json"
-$tauri = Get-Content $tauriPath -Raw | ConvertFrom-Json
-$tauri.version = $Version
-$tauri | ConvertTo-Json -Depth 10 | Set-Content $tauriPath -Encoding utf8NoBOM
-Write-Host "  tauri.conf.json: -> $Version" -ForegroundColor Green
-
-# 3. src-tauri/Cargo.toml (regex replace to preserve formatting)
-$cargoPath = Join-Path $root "src-tauri\Cargo.toml"
-$cargo = Get-Content $cargoPath -Raw
-$cargo = $cargo -replace '(?m)^(version\s*=\s*")[^"]*(")', "`${1}$Version`${2}"
-Set-Content $cargoPath $cargo -Encoding utf8NoBOM -NoNewline
-Write-Host "  Cargo.toml: -> $Version" -ForegroundColor Green
-
-Write-Host ""
-Write-Host "Done! Version set to $Version in all 3 files." -ForegroundColor Cyan
-Write-Host "Next: git add -A && git commit -m 'chore: bump version to $Version'" -ForegroundColor DarkGray
+Write-Output "Cargo 工作区版本已更新为 $Version"

@@ -1,13 +1,7 @@
 //! Shared clipboard-history use cases. No dependency on a desktop UI or platform API.
-//!
-//! Transitional source bridge: compile the existing schema/repository and dedup
-//! algorithms directly so the two entry points cannot acquire divergent copies.
-//! Their physical move is deferred until the old shell adopts this crate.
 pub mod backup;
-#[allow(dead_code)] // Rich-format helpers are shared with the legacy application.
-#[path = "../../../src-tauri/src/clipboard/dedup.rs"]
+#[allow(dead_code)]
 pub(crate) mod clipboard;
-#[path = "../../../src-tauri/src/database/mod.rs"]
 pub mod database;
 mod editing;
 mod files;

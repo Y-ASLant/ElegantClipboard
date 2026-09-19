@@ -1,51 +1,25 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-# Dependencies
-node_modules
-
-# Build output
+# Rust build output
 target/
-dist
-dist-ssr
 
-# Environment files
+# Logs and local runtime data
+logs/
+*.log
+*.tmp
 *.local
 .env
 .env.*
 !.env.example
 
-# Editor directories and files
+# Editors and operating systems
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 *.suo
-*.ntvs*
-*.njsproj
 *.sln
 *.sw?
-
-# System files
 .DS_Store
 Thumbs.db
-*.tmp
 desktop.ini
 
-# Test coverage
-coverage/
-
-# Tauri
-src-tauri/target/
-src-tauri/gen/schemas/
-
-# wingetcreate generated manifests
-manifests/
-
-# Codegraph
+# Local analysis output
 .codegraph/

@@ -2,211 +2,79 @@
 
 English | [中文](README.md)
 
-> Note: UI screenshots in this document may be outdated and were captured on **v0.5.0**.
+ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, and gpui-kit. This branch contains only the GPUI application and does not require Node.js, WebView, or Tauri.
 
-<p align="center">
-  <img src="src-tauri/icons/icon.png" alt="ElegantClipboard" width="128" height="128">
-</p>
-<p align="center">
-  Low footprint · High performance · Modern · Privacy first clipboard.
-</p>
+## Current features
 
+- Capture and search text, URLs, HTML/RTF, images, and file paths
+- Favorites, pins, groups, drag sorting, batch deletion, and history cleanup
+- Text editing, rich text/image/file previews, copy, plain-text copy, and automatic paste
+- Global shortcut, system tray, autostart, capture pause, and single-instance activation
+- Light/dark themes, always-on-top mode, and remembered window size
+- GPUI ZIP backup and restore, plus import of an older database or legacy ZIP backup
 
-<p align="center">
-  <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/v/release/Y-ASLant/ElegantClipboard?label=version&color=blue" alt="version"></a>
-  <a href="https://github.com/Y-ASLant/ElegantClipboard/releases"><img src="https://img.shields.io/github/downloads/Y-ASLant/ElegantClipboard/total?label=downloads&color=brightgreen" alt="downloads"></a>
-  <img src="https://img.shields.io/badge/platform-Windows-lightgrey.svg" alt="platform">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license">
-  <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-</p>
+See [Windows GPUI status](docs/WINDOWS_MVP.md) for implementation details and known limits.
 
-## UI Screenshots (v0.5.0)
+## Repository layout
 
-### Themes
-
-#### System Accent Color
-
-![System Theme](img/theme_0.png)
-
-| Classic B&W | Jade Green | Sky Cyan |
-|:-:|:-:|:-:|
-| ![Classic](img/theme_1.png) | ![Jade](img/theme_2.png) | ![Sky](img/theme_3.png) |
-
-#### Dark Mode
-
-Automatically follows system dark/light mode, real-time switching
-
-### Settings
-
-| Data Management | Display | Shortcuts |
-|:-:|:-:|:-:|
-| ![Data](img/setting_1.png) | ![Display](img/setting_2.png) | ![Shortcuts](img/setting_3.png) |
-
-### Hover Image Preview
-
-![Preview](img/preview_mode.png)
-
-### Hover Text Preview
-
-Hover text preview shares the same preview position and hover preview delay settings (default 500ms; text preview is disabled by default).
-
-### Startup Notification
-
-![Notification](img/startup_notification.png)
-
-## Design Philosophy
-
-**Low footprint · High performance · Modern · Privacy first**
-
-- **Low footprint** - Tray resident, non-intrusive to core workflow, window doesn't steal focus, monitoring only when visible
-- **High performance** - Optimized LIKE search (CJK text support), virtual list for 10k+ records, async image processing, content hash deduplication
-- **Modern** - Tauri 2.0 + React 19 + Tailwind CSS 4, type-safe, elegant architecture
-- **Privacy first** - Data stored locally by default, optional WebDAV self-hosted sync, privacy in user's hands
-- **Multilingual UI** - Simplified Chinese / English / Traditional Chinese, switch in settings, synced across windows
-
-## Features
-
-See [FEATURES_EN.md](FEATURES_EN.md) for complete feature list and terminology.
-
-## Shortcuts
-
-### Global Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Alt+C` | Show/hide window (default, customizable) |
-| `Win+V` | Show/hide window (optional, requires enable in settings) |
-
-### In-Window Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `↑` / `↓` | Navigate up/down |
-| `←` / `→` | Switch tab (All / Text / Other) |
-| `Enter` | Paste selected item |
-| `Shift+Enter` | Paste as plain text |
-| `Delete` | Delete selected item |
-| `ESC` | Close dialog / hide window |
-| `Ctrl+Scroll` | Zoom image preview / scroll text preview |
-
-## Tech Stack
-
-| Category | Technology |
-|----------|------------|
-| **Framework** | Tauri 2.0 |
-| **Frontend** | React 19 + TypeScript |
-| **Build** | Vite 7 |
-| **Styling** | Tailwind CSS 4 |
-| **Components** | shadcn/ui (Radix UI) + Fluent UI Icons |
-| **State** | Zustand 5 (persistence + multi-window sync) |
-| **Virtual List** | react-virtuoso |
-| **Drag & Drop** | @dnd-kit |
-| **Backend** | Rust |
-| **Database** | SQLite (rusqlite) + optimized LIKE (CJK support) |
-| **Hash** | BLAKE3 (content deduplication) |
-| **Locking** | parking_lot (high-performance Mutex/RwLock) |
-| **Parallel** | rayon (parallel file checking) |
-| **Clipboard** | clipboard-rs (text / HTML / RTF / image / files / watcher) |
-| **Window Effects** | window-vibrancy (Mica/Acrylic/Tabbed) |
-| **Keyboard Simulation** | enigo |
-| **Input Monitoring** | Win32 LL Hook (WH_MOUSE_LL + WH_KEYBOARD_LL, only when window visible) |
-| **Auto Update** | GitHub Release based check & download (system proxy supported) |
-| **CI/CD** | GitHub Actions (CI + Tag triggers Release) |
-
-## Installation
-
-### Download Installer
-
-Download the latest version from [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases):
-
-- **Installer** (recommended): `ElegantClipboard_x.x.x_x64-setup.exe`
-- **Portable**: `ElegantClipboard_x.x.x_x64_portable.exe` (no installation required)
-
-### winget
-
-```powershell
-winget install Y-ASLant.ElegantClipboard
+```text
+crates/
+  clipboard-core/      Data model, SQLite, queries, backups, and business rules
+  clipboard-platform/  Windows clipboard, shortcuts, tray, and OS integration
+  clipboard-gpui/      GPUI application entry point, state, and UI
+scripts/               Packaging and verification helpers
+docs/                  Architecture decisions, feature status, and QA evidence
 ```
 
-### Scoop
+## Run from source
+
+Requirements:
+
+- Windows 10/11 x64
+- Rust 1.98 or newer with the MSVC toolchain
+- PowerShell 7 (`pwsh`) for packaging
 
 ```powershell
-scoop bucket add elegantclipboard https://github.com/Y-ASLant/ElegantClipboard
-scoop install elegantclipboard
+cargo run -p elegant-clipboard-gpui --locked
 ```
 
-### Build from Source
+Or use:
 
-#### Requirements
+```powershell
+make run
+```
 
-- Node.js 18+ (LTS recommended)
-- Rust 1.96+ (Rust edition 2024)
-- Windows 10/11
+By default, data is stored in the `ElegantClipboard-GPUI` application directory under the current user's LocalAppData. For an isolated run, specify a directory explicitly:
 
-#### Build Steps
+```powershell
+cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
+```
 
-```bash
-# Clone repository
-git clone https://github.com/Y-ASLant/ElegantClipboard.git
-cd ElegantClipboard
+## Build and verify
 
-# Install dependencies
-npm install
-
-# Build frontend only (dist/)
-npm run build
-
-# Development mode
-npm run tauri dev
-
-# Build production (current machine architecture)
-npm run tauri build
-
-# Build x64 / arm64 separately (run twice)
-npm run tauri build -- --target x86_64-pc-windows-msvc
-npm run tauri build -- --target aarch64-pc-windows-msvc
-
-# Code check
-npm run lint
-
-# Unit/component/perf tests
+```powershell
+make check
 make test
-# or: npx vitest run
+make build
 ```
 
-Notes:
-- `npm run build` only runs `tsc && vite build` for frontend assets, no installer generated.
-- Installers are generated by `npm run tauri build`; without `--target` it only builds for current architecture.
-- To publish both x64 and arm64, run the target-specific build commands twice (or use CI with separate builds).
+The release executable is written to `target\release\elegant-clipboard-gpui.exe`.
 
-#### Version Management
+Create an unsigned Windows x64 standalone ZIP:
 
 ```powershell
-# Update version in three places (package.json, tauri.conf.json, Cargo.toml)
-.\scripts\bump-version.ps1 0.5.0
+make package
 ```
 
-Or push a tag, Release workflow will auto-sync version:
+The archive and its SHA-256 file are written to `target\packages\`. Installers, automatic updates, and ARM64 artifacts are not currently provided.
 
-```bash
-git tag v0.5.0
-git push origin v0.5.0
+## Versioning
+
+```powershell
+.\scripts\bump-version.ps1 0.2.0
 ```
 
-## Data Storage
-
-Data is stored in the **application installation directory**:
-
-| Type | Path |
-|---|---|
-| Config | `<install dir>\config.json` |
-| Database | `<install dir>\clipboard.db` |
-| Image Cache | `<install dir>\images\` |
-| Log | `<install dir>\app.log` |
-
-You can change the default data path in Settings → General → Data storage location. Data migration is supported.
-
-The installer version writes to the install directory and requires admin privileges. The portable version (no `uninstall.exe` beside the exe) can read and write in the exe directory normally.
+The script updates the root Cargo workspace version and lockfile. Release tags must match the Cargo version, for example `v0.2.0`.
 
 ## License
 

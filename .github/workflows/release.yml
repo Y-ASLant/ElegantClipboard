@@ -1,4 +1,4 @@
-name: Release
+name: GPUI Release
 
 on:
   push:
@@ -6,119 +6,36 @@ on:
       - "v*"
 
 jobs:
-  build-and-release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            rust-target: x86_64-pc-windows-msvc
-          - arch: arm64
-            rust-target: aarch64-pc-windows-msvc
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Extract version from tag (v0.6.0 → 0.6.0)
-      - name: Extract version from tag
-        id: version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      # Sync version in package.json, tauri.conf.json, Cargo.toml
-      - name: Bump version to ${{ steps.version.outputs.VERSION }}
-        shell: pwsh
-        run: |
-          $v = "${{ steps.version.outputs.VERSION }}"
-          $root = $env:GITHUB_WORKSPACE
-
-          # package.json
-          $pkgPath = Join-Path $root "package.json"
-          $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
-          $pkg.version = $v
-          $pkg | ConvertTo-Json -Depth 10 | Set-Content $pkgPath -Encoding utf8NoBOM
-
-          # src-tauri/tauri.conf.json
-          $tauriPath = Join-Path $root "src-tauri\tauri.conf.json"
-          $tauri = Get-Content $tauriPath -Raw | ConvertFrom-Json
-          $tauri.version = $v
-          $tauri | ConvertTo-Json -Depth 10 | Set-Content $tauriPath -Encoding utf8NoBOM
-
-          # src-tauri/Cargo.toml
-          $cargoPath = Join-Path $root "src-tauri\Cargo.toml"
-          $cargo = Get-Content $cargoPath -Raw
-          $cargo = $cargo -replace '(?m)^(version\s*=\s*")[^"]*(")', "`${1}$v`${2}"
-          Set-Content $cargoPath $cargo -Encoding utf8NoBOM -NoNewline
-
-          Write-Host "Version synced to $v in all 3 files"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-          cache: npm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust-target }}
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: "./src-tauri -> target"
-          key: ${{ matrix.arch }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build and release
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          UPDATER_GITHUB_TOKEN: ${{ secrets.UPDATER_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "ElegantClipboard ${{ github.ref_name }}"
-          releaseBody: "See the assets to download and install."
-          releaseDraft: true
-          prerelease: false
-          args: --target ${{ matrix.rust-target }}
-
-      - name: Rename portable exe
-        shell: pwsh
-        run: |
-          $v = "${{ steps.version.outputs.VERSION }}"
-          $arch = "${{ matrix.arch }}"
-          $src = "src-tauri/target/${{ matrix.rust-target }}/release/elegant-clipboard.exe"
-          Copy-Item $src "ElegantClipboard_${v}_${arch}_portable.exe"
-
-      - name: Upload portable artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: portable-${{ matrix.arch }}
-          path: ElegantClipboard_*_portable.exe
-
-  upload-portable:
-    needs: build-and-release
+  windows-x64:
     runs-on: windows-latest
     permissions:
       contents: write
     steps:
-      - name: Download portable artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: portable-*
-          path: ./portables
-          merge-multiple: true
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2.9.2
 
-      - name: Upload portable to release
+      - name: Verify tag matches Cargo version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
+          $package = @($metadata.packages | Where-Object name -eq 'elegant-clipboard-gpui')
+          if ($package.Count -ne 1) {
+            throw 'Unable to determine the GPUI package version'
+          }
+          if ("v$($package[0].version)" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $($package[0].version)"
+          }
+
+      - name: Build Windows x64 package
+        shell: pwsh
+        run: .\scripts\package-gpui-windows.ps1
+
+      - name: Create draft release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
           draft: true
-          files: portables/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: true
+          files: |
+            target/packages/*.zip
+            target/packages/*.sha256

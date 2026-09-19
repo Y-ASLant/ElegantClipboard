@@ -1,6 +1,5 @@
 [workspace]
 members = ["crates/clipboard-core", "crates/clipboard-platform", "crates/clipboard-gpui"]
-exclude = ["src-tauri", "clipboard-rs"]
 resolver = "3"
 
 [workspace.package]
