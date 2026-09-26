@@ -33,6 +33,9 @@ use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy
 use directories::UserDirs;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::sidebar::{
+    Sidebar, SidebarGroup, SidebarHeader, SidebarMenu, SidebarMenuItem,
+};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
@@ -946,6 +949,19 @@ impl SettingsPage {
             Self::Audio => tr(language, "音效", "Audio"),
             Self::Shortcuts => tr(language, "快捷键", "Shortcuts"),
             Self::About => tr(language, "关于", "About"),
+        }
+    }
+
+    fn icon(self) -> IconName {
+        match self {
+            Self::General => IconName::Settings,
+            Self::Display => IconName::Eye,
+            Self::Theme => IconName::Palette,
+            Self::Data => IconName::HardDrive,
+            Self::AppFilter => IconName::Search,
+            Self::Audio => IconName::Bell,
+            Self::Shortcuts => IconName::SquareTerminal,
+            Self::About => IconName::Info,
         }
     }
 }
@@ -9049,6 +9065,34 @@ impl Render for SettingsWindowView {
             ],
         };
         let page = self.page;
+        let settings = cx.entity().downgrade();
+        let sidebar = Sidebar::new("settings-sidebar")
+            .w(px(200.))
+            .collapsible(false)
+            .header(
+                SidebarHeader::new()
+                    .child(Icon::new(IconName::Settings))
+                    .child(tr(language, "设置", "Settings")),
+            )
+            .child(SidebarGroup::new(tr(language, "页面", "Pages")).child(
+                SidebarMenu::new().children(SettingsPage::ALL.into_iter().map(|item| {
+                    let settings = settings.clone();
+                    SidebarMenuItem::new(item.label(language))
+                        .icon(item.icon())
+                        .active(page == item)
+                        .on_click(move |_, _, cx| {
+                            let _ = settings.update(cx, |this, cx| {
+                                if this.page != item {
+                                    this.page = item;
+                                    this.shortcut_recording = false;
+                                    this.shortcut_editing = None;
+                                    this.shortcut_capture_error = None;
+                                    cx.notify();
+                                }
+                            });
+                        })
+                })),
+            ));
 
         div()
             .size_full()
@@ -9066,50 +9110,19 @@ impl Render for SettingsWindowView {
                 ),
             )
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .p_4()
-                    .flex()
-                    .gap_4()
-                    .child(
-                        div()
-                            .w(px(154.))
-                            .flex_shrink_0()
-                            .min_h_0()
-                            .overflow_y_scrollbar()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .children(SettingsPage::ALL.into_iter().map(|item| {
-                                Button::new(format!("settings-page-{}", item.id()))
-                                    .outline()
-                                    .small()
-                                    .label(item.label(language))
-                                    .selected(page == item)
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        if this.page != item {
-                                            this.page = item;
-                                            this.shortcut_recording = false;
-                                            this.shortcut_editing = None;
-                                            this.shortcut_capture_error = None;
-                                            cx.notify();
-                                        }
-                                    }))
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id(format!("settings-content-{}", page.id()))
-                            .flex_1()
-                            .min_w_0()
-                            .min_h_0()
-                            .overflow_y_scrollbar()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .children(content),
-                    ),
+                div().flex_1().min_h_0().flex().child(sidebar).child(
+                    div()
+                        .id(format!("settings-content-{}", page.id()))
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .p_4()
+                        .overflow_y_scrollbar()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .children(content),
+                ),
             )
     }
 }
