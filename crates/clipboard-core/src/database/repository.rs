@@ -358,6 +358,18 @@ impl ClipboardRepository {
         self.touch_by_column(HashColumn::Content, hash, group_id)
     }
 
+    pub fn set_source_app(
+        &self,
+        id: i64,
+        name: &str,
+        icon: Option<&str>,
+    ) -> Result<bool, rusqlite::Error> {
+        Ok(self.write_conn.lock().execute(
+            "UPDATE clipboard_items SET source_app_name = ?1, source_app_icon = ?2 WHERE id = ?3",
+            params![name, icon, id],
+        )? > 0)
+    }
+
     pub fn touch_by_semantic_hash(
         &self,
         hash: &str,
@@ -1391,6 +1403,19 @@ impl SettingsRepository {
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, datetime('now', 'localtime'))",
             params![key, value],
         )?;
+        Ok(())
+    }
+
+    pub fn set_batch(&self, values: &[(&str, &str)]) -> Result<(), rusqlite::Error> {
+        let mut conn = self.write_conn.lock();
+        let tx = conn.transaction()?;
+        for (key, value) in values {
+            tx.execute(
+                "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, datetime('now', 'localtime'))",
+                params![key, value],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

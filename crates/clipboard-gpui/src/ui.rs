@@ -1,21 +1,37 @@
+use crate::links::{self, ProjectLink};
 use crate::paste;
+use crate::position;
+use crate::sound::{self, Sound};
 use crate::tray::{self, TrayCommand};
-use crate::visual::{self, CONTROL_HEIGHT, GROUP_BAR_HEIGHT, PAGE_PADDING, ROW_HEIGHT};
+use crate::visual::{self, CONTROL_HEIGHT, GROUP_BAR_HEIGHT, PAGE_PADDING};
 use crate::{
     options::Options,
     state::{
-        HistoryState, PreviewState, drag_edge_target_index, drag_reorder_offsets,
-        next_drag_scroll_index, reorder_offsets,
+        HistoryState, PreviewState, adjacent_group_id, drag_edge_target_index,
+        drag_reorder_offsets, format_card_time, next_drag_scroll_index, reorder_offsets,
+        search_excerpt, search_highlight_ranges, selection_range_ids, should_hide_after_paste,
+        source_app_parts,
     },
 };
 use clipboard_core::{
-    FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
+    ContentCategory, FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
     database::Group,
-    preferences::{HotkeyPreference, LanguagePreference, ThemePreference, WindowSizePreference},
+    preferences::{
+        AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
+        HotkeyPreference, HoverPreviewPosition, HoverPreviewPreference, LanguagePreference,
+        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, SoundTiming,
+        SourceAppDisplay, ThemePreference, TimeFormat, ToolbarButton, ToolbarPreference,
+        WindowPositionPreference, WindowSizePreference,
+    },
 };
-use clipboard_platform::hotkey::Hotkey;
+use clipboard_platform::hotkey::{
+    Hotkey, PasteHotkeyEvent, PasteHotkeys, normalize_paste_shortcut, validate_paste_shortcuts,
+};
+use clipboard_platform::outside_click::OutsideClickMonitor;
+use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
 use directories::UserDirs;
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -26,6 +42,7 @@ use gpui_kit::{
     },
     *,
 };
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{
     cell::{Cell, RefCell},
@@ -33,6 +50,7 @@ use std::{
     rc::Rc,
 };
 use tray_icon::TrayIcon;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_SHIFT};
 
 fn tr(language: LanguagePreference, chinese: &'static str, english: &'static str) -> &'static str {
     match language {
@@ -41,11 +59,332 @@ fn tr(language: LanguagePreference, chinese: &'static str, english: &'static str
     }
 }
 
+fn hover_zoom_percent(current: u16, change: i32) -> u16 {
+    (i32::from(current) + change).clamp(50, 400) as u16
+}
+
+#[cfg(test)]
+mod hover_zoom_tests {
+    use super::hover_zoom_percent;
+
+    #[test]
+    fn zoom_stays_within_visible_range() {
+        assert_eq!(hover_zoom_percent(100, 20), 120);
+        assert_eq!(hover_zoom_percent(50, -50), 50);
+        assert_eq!(hover_zoom_percent(400, 50), 400);
+    }
+}
+
+fn single_file_image_path(entries: &[FilePreviewEntry]) -> Option<PathBuf> {
+    let [entry] = entries else { return None };
+    if !entry.exists || entry.is_dir || entry.metadata_error.is_some() {
+        return None;
+    }
+    let size = entry.size?;
+    let limit = file_image_preview_limit(&entry.resolved_path);
+    if size == 0 || size > limit {
+        return None;
+    }
+    if !supported_image_file(&entry.resolved_path) {
+        return None;
+    }
+    Some(PathBuf::from(&entry.resolved_path))
+}
+
+fn file_image_preview_limit(path: &str) -> u64 {
+    if path.starts_with(r"\\") {
+        10 * 1024 * 1024
+    } else {
+        50 * 1024 * 1024
+    }
+}
+
+fn supported_image_file(path: &str) -> bool {
+    let Some(extension) = Path::new(path).extension().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    matches!(
+        extension.to_ascii_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileCardAvailability {
+    Available,
+    Missing,
+    Unreadable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileCardKind {
+    File,
+    Folder,
+    Multiple,
+}
+
+#[derive(Clone, Debug)]
+struct FileCardInfo {
+    availability: FileCardAvailability,
+    kind: FileCardKind,
+    image_path: Option<PathBuf>,
+    image_too_large: bool,
+    total_size: Option<u64>,
+}
+
+fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
+    let mut info = FileCardInfo {
+        availability: FileCardAvailability::Available,
+        kind: FileCardKind::File,
+        image_path: None,
+        image_too_large: false,
+        total_size: Some(0),
+    };
+    let Ok(paths) = serde_json::from_str::<Vec<String>>(raw_paths) else {
+        info.availability = FileCardAvailability::Unreadable;
+        info.total_size = None;
+        return info;
+    };
+    if paths.is_empty() {
+        info.availability = FileCardAvailability::Unreadable;
+        info.total_size = None;
+        return info;
+    }
+    if paths.len() > 1 {
+        info.kind = FileCardKind::Multiple;
+    }
+    for path in &paths {
+        if !Path::new(path).is_absolute() {
+            info.availability = FileCardAvailability::Unreadable;
+            info.total_size = None;
+            continue;
+        }
+        match std::fs::metadata(path) {
+            Ok(metadata) if paths.len() == 1 && metadata.is_file() => {
+                info.total_size = info
+                    .total_size
+                    .and_then(|total| total.checked_add(metadata.len()));
+                info.image_too_large =
+                    supported_image_file(path) && metadata.len() > file_image_preview_limit(path);
+                info.image_path = single_file_image_path(&[FilePreviewEntry {
+                    original_path: path.clone(),
+                    resolved_path: path.clone(),
+                    exists: true,
+                    is_dir: false,
+                    size: Some(metadata.len()),
+                    recovered: false,
+                    metadata_error: None,
+                }]);
+            }
+            Ok(metadata) if paths.len() == 1 && metadata.is_dir() => {
+                info.kind = FileCardKind::Folder;
+                info.total_size = None;
+            }
+            Ok(metadata) if metadata.is_file() => {
+                info.total_size = info
+                    .total_size
+                    .and_then(|total| total.checked_add(metadata.len()));
+            }
+            Ok(_) => info.total_size = None,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                info.total_size = None;
+                if info.availability == FileCardAvailability::Available {
+                    info.availability = FileCardAvailability::Missing;
+                }
+            }
+            Err(_) => {
+                info.availability = FileCardAvailability::Unreadable;
+                info.total_size = None;
+            }
+        }
+    }
+    info
+}
+
+#[cfg(test)]
+mod file_image_preview_tests {
+    use super::{
+        FileCardAvailability, FileCardKind, FilePreviewEntry, inspect_file_card,
+        single_file_image_path,
+    };
+    use std::path::PathBuf;
+
+    fn entry(path: &str, size: Option<u64>) -> FilePreviewEntry {
+        FilePreviewEntry {
+            original_path: path.into(),
+            resolved_path: path.into(),
+            exists: true,
+            is_dir: false,
+            size,
+            recovered: false,
+            metadata_error: None,
+        }
+    }
+
+    #[test]
+    fn only_single_readable_bounded_image_is_decoded() {
+        let image = entry(r"C:\sample.PNG", Some(2_000));
+        assert_eq!(
+            single_file_image_path(std::slice::from_ref(&image)),
+            Some(PathBuf::from(r"C:\sample.PNG"))
+        );
+        assert!(single_file_image_path(&[image.clone(), image]).is_none());
+        assert!(single_file_image_path(&[entry(r"C:\sample.txt", Some(2_000))]).is_none());
+        assert!(single_file_image_path(&[entry(r"C:\sample.png", None)]).is_none());
+        assert!(
+            single_file_image_path(&[entry(r"C:\sample.png", Some(50 * 1024 * 1024 + 1))])
+                .is_none()
+        );
+        assert!(
+            single_file_image_path(&[entry(
+                r"\\server\share\sample.png",
+                Some(10 * 1024 * 1024 + 1)
+            )])
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn missing_unreadable_and_directory_paths_keep_file_details() {
+        let mut image = entry(r"C:\sample.png", Some(2_000));
+        image.exists = false;
+        assert!(single_file_image_path(std::slice::from_ref(&image)).is_none());
+        image.exists = true;
+        image.is_dir = true;
+        assert!(single_file_image_path(std::slice::from_ref(&image)).is_none());
+        image.is_dir = false;
+        image.metadata_error = Some("unavailable".into());
+        assert!(single_file_image_path(&[image]).is_none());
+    }
+
+    #[test]
+    fn card_file_probe_reports_missing_and_oversized_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = dir.path().join("sample.png");
+        std::fs::write(&image, b"small synthetic payload").unwrap();
+        let checked = inspect_file_card(&serde_json::to_string(&vec![image.clone()]).unwrap());
+        assert_eq!(checked.availability, FileCardAvailability::Available);
+        assert_eq!(checked.kind, FileCardKind::File);
+        assert_eq!(checked.image_path, Some(image));
+        assert_eq!(checked.total_size, Some(23));
+        let missing = dir.path().join("missing.png");
+        let checked = inspect_file_card(&serde_json::to_string(&vec![missing]).unwrap());
+        assert_eq!(checked.availability, FileCardAvailability::Missing);
+        assert!(checked.image_path.is_none());
+        assert_eq!(checked.total_size, None);
+        assert_eq!(
+            inspect_file_card("not json").availability,
+            FileCardAvailability::Unreadable
+        );
+        let folder = dir.path().join("folder.png");
+        std::fs::create_dir(&folder).unwrap();
+        let checked = inspect_file_card(&serde_json::to_string(&vec![folder.clone()]).unwrap());
+        assert_eq!(checked.availability, FileCardAvailability::Available);
+        assert_eq!(checked.kind, FileCardKind::Folder);
+        assert!(checked.image_path.is_none());
+        assert_eq!(checked.total_size, None);
+        let mixed = serde_json::to_string(&vec![folder, dir.path().join("missing.png")]);
+        let checked = inspect_file_card(&mixed.unwrap());
+        assert_eq!(checked.availability, FileCardAvailability::Missing);
+        assert_eq!(checked.kind, FileCardKind::Multiple);
+        assert_eq!(checked.total_size, None);
+        let large = dir.path().join("large.png");
+        std::fs::File::create(&large)
+            .unwrap()
+            .set_len(50 * 1024 * 1024 + 1)
+            .unwrap();
+        let checked = inspect_file_card(&serde_json::to_string(&vec![large]).unwrap());
+        assert_eq!(checked.availability, FileCardAvailability::Available);
+        assert!(checked.image_path.is_none());
+        assert!(checked.image_too_large);
+    }
+}
+
 fn hotkey_label(language: LanguagePreference, choice: HotkeyPreference) -> &'static str {
     if choice == HotkeyPreference::Disabled {
         tr(language, "关闭", "Disabled")
     } else {
         choice.label()
+    }
+}
+
+fn shortcut_from_keystroke(keystroke: &Keystroke, shift_down: bool) -> Result<String, String> {
+    let modifiers = keystroke.modifiers;
+    if modifiers.platform || modifiers.function {
+        return Err("快速粘贴不支持 Win 或 Fn 修饰键".into());
+    }
+    if !modifiers.control && !modifiers.alt {
+        return Err("快速粘贴快捷键至少需要 Ctrl 或 Alt".into());
+    }
+    let key = if shift_down {
+        match keystroke.key.as_str() {
+            "!" => "1",
+            "@" => "2",
+            "#" => "3",
+            "$" => "4",
+            "%" => "5",
+            "^" => "6",
+            "&" => "7",
+            "*" => "8",
+            "(" => "9",
+            ")" => "0",
+            key => key,
+        }
+    } else {
+        keystroke.key.as_str()
+    };
+    let mut parts = Vec::new();
+    if modifiers.control {
+        parts.push("Ctrl");
+    }
+    if modifiers.alt {
+        parts.push("Alt");
+    }
+    if shift_down {
+        parts.push("Shift");
+    }
+    parts.push(key);
+    normalize_paste_shortcut(&parts.join("+")).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod shortcut_capture_tests {
+    use super::shortcut_from_keystroke;
+    use gpui_kit::{Keystroke, Modifiers};
+
+    #[test]
+    fn gpui_keystrokes_become_paste_shortcuts() {
+        let stroke = Keystroke {
+            modifiers: Modifiers {
+                control: true,
+                alt: true,
+                ..Default::default()
+            },
+            key: "z".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            shortcut_from_keystroke(&stroke, false).unwrap(),
+            "Ctrl+Alt+Z"
+        );
+        let shifted_digit = Keystroke {
+            modifiers: Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+            key: "!".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            shortcut_from_keystroke(&shifted_digit, true).unwrap(),
+            "Alt+Shift+1"
+        );
+        assert!(shortcut_from_keystroke(&stroke, true).is_ok());
+        let bare = Keystroke {
+            key: "z".into(),
+            ..Default::default()
+        };
+        assert!(shortcut_from_keystroke(&bare, false).is_err());
     }
 }
 
@@ -89,18 +428,24 @@ gpui_kit::actions!(
     [
         Next,
         Previous,
+        PreviousCategory,
+        NextCategory,
+        PreviousGroup,
+        NextGroup,
         First,
         Last,
         PageUp,
         PageDown,
         SelectAllLoaded,
-        CopySelected,
+        ActivateSelected,
+        PastePlainTextSelected,
         PasteSelected,
         DeleteSelected,
         FocusSearch,
+        FocusFirstHistoryItem,
         PreviewSelected,
         ClosePreview,
-        CancelDrag
+        DismissOrHide
     ]
 );
 
@@ -108,6 +453,7 @@ gpui_kit::actions!(
 struct StartupMode {
     monitoring: bool,
     hidden: bool,
+    show_onboarding: bool,
 }
 
 pub fn run(options: Options) -> anyhow::Result<()> {
@@ -131,6 +477,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     let startup = StartupMode {
         monitoring: options.monitor,
         hidden: options.start_hidden,
+        show_onboarding: !options.smoke_test,
     };
     let initial_window_size = service.initial_window_size.unwrap_or_default();
     let smoke_test = options.smoke_test;
@@ -143,19 +490,25 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             cx.bind_keys([
                 KeyBinding::new("down", Next, Some("HistoryList")),
                 KeyBinding::new("up", Previous, Some("HistoryList")),
+                KeyBinding::new("left", PreviousCategory, Some("HistoryList")),
+                KeyBinding::new("right", NextCategory, Some("HistoryList")),
+                KeyBinding::new("ctrl-left", PreviousGroup, Some("HistoryList")),
+                KeyBinding::new("ctrl-right", NextGroup, Some("HistoryList")),
                 KeyBinding::new("home", First, Some("HistoryList")),
                 KeyBinding::new("end", Last, Some("HistoryList")),
                 KeyBinding::new("pageup", PageUp, Some("HistoryList")),
                 KeyBinding::new("pagedown", PageDown, Some("HistoryList")),
                 KeyBinding::new("ctrl-a", SelectAllLoaded, Some("HistoryList")),
-                KeyBinding::new("enter", CopySelected, Some("HistoryList")),
+                KeyBinding::new("enter", ActivateSelected, Some("HistoryList")),
+                KeyBinding::new("shift-enter", PastePlainTextSelected, Some("HistoryList")),
                 KeyBinding::new("ctrl-enter", PasteSelected, Some("HistoryList")),
                 KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
                 KeyBinding::new("space", PreviewSelected, Some("HistoryList")),
                 KeyBinding::new("escape", ClosePreview, Some("Preview")),
                 KeyBinding::new("escape", ClosePreview, Some("Preview > Input")),
-                KeyBinding::new("escape", CancelDrag, Some("ClipboardApp")),
+                KeyBinding::new("escape", DismissOrHide, Some("ClipboardApp")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
+                KeyBinding::new("down", FocusFirstHistoryItem, Some("HistorySearch > Input")),
             ]);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
@@ -211,9 +564,23 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         })
                         .detach();
                     }
-                    window.on_window_should_close(cx, move |window, _| {
+                    let close_view = view.clone();
+                    window.on_window_should_close(cx, move |window, cx| {
                         if exiting.get() || !tray_enabled.get() {
                             return true;
+                        }
+                        let can_hide = close_view.update(cx, |this, cx| {
+                            if this.batch_pending
+                                || this.paste_pending.is_some()
+                                || this.batch_paste_pending.is_some()
+                            {
+                                return false;
+                            }
+                            this.prepare_to_hide(window, cx);
+                            true
+                        });
+                        if !can_hide {
+                            return false;
                         }
                         tray::set_window_visible(window, false);
                         false
@@ -261,11 +628,49 @@ struct GroupDrag {
     group_ids: Vec<i64>,
 }
 
+#[derive(Clone)]
+struct ToolbarDrag {
+    button: ToolbarButton,
+    label: &'static str,
+    toolbar: ToolbarPreference,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct DropTarget {
     id: i64,
     after: bool,
     allowed: bool,
+}
+
+enum HistoryMenuAction {
+    Paste,
+    PastePlainText,
+    Copy,
+    CopyPath,
+    Preview,
+    Edit,
+    Reveal,
+    SaveAs(String),
+    ToggleFavorite,
+    TogglePin,
+    MoveToGroup,
+    Delete,
+}
+
+fn history_menu_item(
+    label: &'static str,
+    disabled: bool,
+    view: Entity<ClipboardView>,
+    id: i64,
+    action: HistoryMenuAction,
+) -> PopupMenuItem {
+    PopupMenuItem::new(label)
+        .disabled(disabled)
+        .on_click(move |_, window, cx| {
+            view.update(cx, |this, cx| {
+                this.perform_history_menu_action(id, &action, window, cx);
+            });
+        })
 }
 
 impl Render for HistoryDrag {
@@ -333,6 +738,21 @@ impl Render for GroupDrag {
     }
 }
 
+impl Render for ToolbarDrag {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_3()
+            .py_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().primary)
+            .bg(cx.theme().background)
+            .shadow_md()
+            .text_sm()
+            .child(format!("⠿  {}", self.label))
+    }
+}
+
 struct ClipboardView {
     service: Service,
     _tray: Option<TrayIcon>,
@@ -342,8 +762,15 @@ struct ClipboardView {
     hotkey: Option<Hotkey>,
     hotkey_sender: async_channel::Sender<(isize, u32)>,
     _hotkey_events: Task<()>,
+    paste_hotkeys: Option<PasteHotkeys>,
+    paste_hotkey_sender: async_channel::Sender<PasteHotkeyEvent>,
+    _paste_hotkey_events: Task<()>,
+    _outside_click_monitor: Option<OutsideClickMonitor>,
+    _outside_click_events: Task<()>,
     exiting: Rc<Cell<bool>>,
     history: HistoryState,
+    file_card_info: HashMap<i64, FileCardInfo>,
+    file_card_checked: HashMap<i64, String>,
     groups: Vec<Group>,
     search: Entity<InputState>,
     group_name_input: Entity<InputState>,
@@ -363,7 +790,9 @@ struct ClipboardView {
     clear_pending: bool,
     clear_all_confirm_open: bool,
     clear_all_pending: bool,
+    batch_mode: bool,
     selected_ids: HashSet<i64>,
+    selection_anchor: Option<i64>,
     batch_confirm_open: bool,
     batch_pending: bool,
     batch_paste_pending: Option<(isize, u32)>,
@@ -373,11 +802,28 @@ struct ClipboardView {
     preview_input: Entity<TextareaState>,
     preview_source_hash: Option<String>,
     preview_editing: bool,
+    preview_edit_requested: bool,
     preview_save_pending: bool,
+    image_zoom_percent: u16,
+    hover_preview: PreviewState,
+    hover_popup: Option<AnyWindowHandle>,
+    hover_popup_opening: Option<(i64, u64)>,
+    hover_source_active: bool,
+    hover_popup_active: bool,
+    hover_task: Option<Task<()>>,
+    hover_close_task: Option<Task<()>>,
+    hover_preference: HoverPreviewPreference,
+    hover_preference_pending: bool,
+    pending_row_click: Option<(i64, u64)>,
+    row_click_task: Option<Task<()>>,
     save_as_pending: Option<i64>,
     list_focus: FocusHandle,
     scroll: UniformListScrollHandle,
     monitoring: bool,
+    onboarding_completed: bool,
+    onboarding_step: usize,
+    onboarding_pending: bool,
+    show_onboarding: bool,
     settings_window: Option<AnyWindowHandle>,
     settings_window_opening: bool,
     theme: ThemePreference,
@@ -386,6 +832,13 @@ struct ClipboardView {
     language_pending: bool,
     hotkey_choice: HotkeyPreference,
     hotkey_pending: bool,
+    quick_paste_enabled: bool,
+    quick_paste_pending_setting: bool,
+    quick_paste_registration_warning: Option<String>,
+    paste_shortcuts: PasteShortcutConfig,
+    paste_shortcuts_pending: Option<PasteShortcutConfig>,
+    paste_shortcut_status: Option<(String, bool)>,
+    quick_paste_pending: Option<(u8, bool, (isize, u32))>,
     autostart: bool,
     autostart_pending: bool,
     data_size: Option<DataSizeInfo>,
@@ -393,6 +846,36 @@ struct ClipboardView {
     database_maintenance_pending: bool,
     export_pending: bool,
     window_pinned: bool,
+    window_position: WindowPositionPreference,
+    window_position_pending: bool,
+    persist_window_size: bool,
+    persist_window_size_pending: bool,
+    auto_reset_state: bool,
+    auto_reset_state_pending: bool,
+    search_auto_focus: bool,
+    search_auto_focus_pending: bool,
+    search_auto_clear: bool,
+    search_auto_clear_pending: bool,
+    skip_clear_confirm: bool,
+    skip_clear_confirm_pending: bool,
+    paste_close_window: bool,
+    paste_close_window_pending: bool,
+    paste_key: PasteKeyPreference,
+    paste_key_pending: bool,
+    paste_move_to_top: bool,
+    paste_move_to_top_pending: bool,
+    toolbar: ToolbarPreference,
+    toolbar_pending: bool,
+    display: DisplayPreference,
+    display_pending: bool,
+    audio: AudioPreference,
+    audio_pending: bool,
+    monitor_types: MonitorTypesPreference,
+    monitor_types_pending: bool,
+    app_filter: AppFilterPreference,
+    app_filter_pending: bool,
+    running_apps: Vec<RunningApp>,
+    running_apps_pending: bool,
     last_window_size: Option<WindowSizePreference>,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
@@ -416,21 +899,720 @@ struct ClipboardView {
     window_size_task: Option<Task<()>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsPage {
+    General,
+    Display,
+    Theme,
+    Data,
+    AppFilter,
+    Audio,
+    Shortcuts,
+    About,
+}
+
+impl SettingsPage {
+    const ALL: [Self; 8] = [
+        Self::General,
+        Self::Display,
+        Self::Theme,
+        Self::Data,
+        Self::AppFilter,
+        Self::Audio,
+        Self::Shortcuts,
+        Self::About,
+    ];
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Display => "display",
+            Self::Theme => "theme",
+            Self::Data => "data",
+            Self::AppFilter => "app-filter",
+            Self::Audio => "audio",
+            Self::Shortcuts => "shortcuts",
+            Self::About => "about",
+        }
+    }
+
+    fn label(self, language: LanguagePreference) -> &'static str {
+        match self {
+            Self::General => tr(language, "常规", "General"),
+            Self::Display => tr(language, "显示", "Display"),
+            Self::Theme => tr(language, "外观", "Appearance"),
+            Self::Data => tr(language, "数据", "Data"),
+            Self::AppFilter => tr(language, "应用过滤", "App filter"),
+            Self::Audio => tr(language, "音效", "Audio"),
+            Self::Shortcuts => tr(language, "快捷键", "Shortcuts"),
+            Self::About => tr(language, "关于", "About"),
+        }
+    }
+}
+
 struct SettingsWindowView {
     owner: WeakEntity<ClipboardView>,
     _owner_subscription: Subscription,
+    page: SettingsPage,
+    shortcut_input: Option<Entity<InputState>>,
+    shortcut_editing: Option<(bool, u8)>,
+    shortcut_capture_focus: FocusHandle,
+    shortcut_recording: bool,
+    shortcut_capture_error: Option<String>,
+    recent_shortcuts_expanded: bool,
+    favorite_shortcuts_expanded: bool,
+    app_filter_input: Entity<InputState>,
+    _app_filter_input_subscription: Subscription,
+    app_picker_open: bool,
+    app_filter_error: bool,
+    link_error: Option<String>,
+    toolbar_drop_target: Option<(ToolbarButton, bool)>,
+}
+
+struct HoverPreviewWindowView {
+    owner: WeakEntity<ClipboardView>,
+    id: i64,
+    generation: u64,
+    language: LanguagePreference,
+    content: Result<PreviewContent, String>,
+    text_input: Entity<TextareaState>,
+    zoom_percent: u16,
+    zoom_step: u8,
+}
+
+impl HoverPreviewWindowView {
+    fn change_zoom(&mut self, change: i32, cx: &mut Context<Self>) {
+        let next = hover_zoom_percent(self.zoom_percent, change);
+        if next != self.zoom_percent {
+            self.zoom_percent = next;
+            cx.notify();
+        }
+    }
+
+    fn new(
+        owner: WeakEntity<ClipboardView>,
+        request: (i64, u64),
+        language: LanguagePreference,
+        content: Result<PreviewContent, String>,
+        zoom_step: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let text = match &content {
+            Ok(PreviewContent::Text(text) | PreviewContent::RichText(text)) => text.clone(),
+            Ok(PreviewContent::Files(entries)) => entries
+                .iter()
+                .map(|entry| entry.original_path.clone())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Err(error) => error.clone(),
+            Ok(PreviewContent::Image(_)) => String::new(),
+        };
+        let text_input = cx.new(|cx| TextareaState::new(window, cx));
+        text_input.update(cx, |input, cx| input.set_value(text, window, cx));
+        Self {
+            owner,
+            id: request.0,
+            generation: request.1,
+            language,
+            content,
+            text_input,
+            zoom_percent: 100,
+            zoom_step,
+        }
+    }
+}
+
+impl Render for HoverPreviewWindowView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = match &self.content {
+            Ok(PreviewContent::Text(_)) => tr(self.language, "文本预览", "Text preview"),
+            Ok(PreviewContent::RichText(_)) => tr(self.language, "富文本预览", "Rich-text preview"),
+            Ok(PreviewContent::Image(_)) => tr(self.language, "图片预览", "Image preview"),
+            Ok(PreviewContent::Files(_)) => tr(self.language, "文件预览", "File preview"),
+            Err(_) => tr(self.language, "预览失败", "Preview unavailable"),
+        };
+        let image_preview = matches!(&self.content, Ok(PreviewContent::Image(_)))
+            || matches!(
+                &self.content,
+                Ok(PreviewContent::Files(entries)) if single_file_image_path(entries).is_some()
+            );
+        let body: AnyElement = match &self.content {
+            Ok(PreviewContent::Image(path)) => div()
+                .id("hover-image-viewport")
+                .size_full()
+                .overflow_scroll()
+                .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                    if event.modifiers.control {
+                        let delta = event.delta.pixel_delta(window.line_height()).y;
+                        let change = if delta > px(0.) {
+                            i32::from(this.zoom_step)
+                        } else {
+                            -i32::from(this.zoom_step)
+                        };
+                        this.change_zoom(change, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+                .when(self.zoom_percent <= 100, |viewport| {
+                    viewport.flex().items_center().justify_center()
+                })
+                .child(
+                    div()
+                        .w(relative(f32::from(self.zoom_percent) / 100.0))
+                        .h(relative(f32::from(self.zoom_percent) / 100.0))
+                        .flex_none()
+                        .child(img(path.clone()).size_full().object_fit(ObjectFit::Contain)),
+                )
+                .into_any_element(),
+            Ok(PreviewContent::Files(entries)) if single_file_image_path(entries).is_some() => {
+                let path = single_file_image_path(entries).expect("checked above");
+                let unavailable = tr(self.language, "图片无法显示", "Image unavailable");
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .id("hover-file-image-viewport")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_scroll()
+                            .on_scroll_wheel(cx.listener(
+                                |this, event: &ScrollWheelEvent, window, cx| {
+                                    if event.modifiers.control {
+                                        let delta = event.delta.pixel_delta(window.line_height()).y;
+                                        let change = if delta > px(0.) {
+                                            i32::from(this.zoom_step)
+                                        } else {
+                                            -i32::from(this.zoom_step)
+                                        };
+                                        this.change_zoom(change, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
+                            .when(self.zoom_percent <= 100, |viewport| {
+                                viewport.flex().items_center().justify_center()
+                            })
+                            .child(
+                                div()
+                                    .w(relative(f32::from(self.zoom_percent) / 100.0))
+                                    .h(relative(f32::from(self.zoom_percent) / 100.0))
+                                    .flex_none()
+                                    .child(
+                                        img(path)
+                                            .size_full()
+                                            .object_fit(ObjectFit::Contain)
+                                            .with_fallback(move || {
+                                                div().child(unavailable).into_any_element()
+                                            }),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .line_clamp(1)
+                            .text_ellipsis()
+                            .child(entries[0].original_path.clone()),
+                    )
+                    .into_any_element()
+            }
+            _ => Textarea::new(&self.text_input)
+                .readonly(true)
+                .size_full()
+                .aria_label(title)
+                .into_any_element(),
+        };
+        let owner = self.owner.clone();
+        let id = self.id;
+        let generation = self.generation;
+        div()
+            .id("hover-preview-window")
+            .size_full()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .border_1()
+            .border_color(cx.theme().border)
+            .rounded_md()
+            .shadow_lg()
+            .on_hover(move |hovered, _, cx| {
+                let _ = owner.update(cx, |this, cx| {
+                    this.set_hover_popup_active(id, generation, *hovered, cx);
+                });
+            })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .text_sm()
+                    .font_semibold()
+                    .child(title)
+                    .when(image_preview, |header| {
+                        header.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new("hover-zoom-out")
+                                        .xsmall()
+                                        .ghost()
+                                        .label("−")
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "缩小悬浮图片",
+                                            "Zoom out hover image",
+                                        ))
+                                        .disabled(self.zoom_percent <= 50)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.change_zoom(-i32::from(this.zoom_step), cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("hover-zoom-reset")
+                                        .xsmall()
+                                        .ghost()
+                                        .label(format!("{}%", self.zoom_percent))
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "重置悬浮图片缩放",
+                                            "Reset hover image zoom",
+                                        ))
+                                        .disabled(self.zoom_percent == 100)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.zoom_percent = 100;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("hover-zoom-in")
+                                        .xsmall()
+                                        .ghost()
+                                        .label("+")
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "放大悬浮图片",
+                                            "Zoom in hover image",
+                                        ))
+                                        .disabled(self.zoom_percent >= 400)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.change_zoom(i32::from(this.zoom_step), cx);
+                                        })),
+                                ),
+                        )
+                    }),
+            )
+            .child(div().flex_1().min_h_0().child(body))
+    }
 }
 
 impl SettingsWindowView {
-    fn new(owner: WeakEntity<ClipboardView>, cx: &mut Context<Self>) -> Self {
+    fn new(owner: WeakEntity<ClipboardView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let entity = owner
             .upgrade()
             .expect("settings window requires its owner view");
         let subscription = cx.observe(&entity, |_, _, cx| cx.notify());
+        let app_filter_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("notepad.exe or *browser*"));
+        let app_filter_input_subscription =
+            cx.subscribe_in(&app_filter_input, window, |this, _, event, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.add_app_filter_rule(window, cx);
+                }
+            });
         Self {
             owner,
             _owner_subscription: subscription,
+            page: SettingsPage::General,
+            shortcut_input: None,
+            shortcut_editing: None,
+            shortcut_capture_focus: cx.focus_handle(),
+            shortcut_recording: false,
+            shortcut_capture_error: None,
+            recent_shortcuts_expanded: false,
+            favorite_shortcuts_expanded: false,
+            app_filter_input,
+            _app_filter_input_subscription: app_filter_input_subscription,
+            app_picker_open: false,
+            app_filter_error: false,
+            link_error: None,
+            toolbar_drop_target: None,
         }
+    }
+
+    fn add_app_filter_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rule = self.app_filter_input.read(cx).value().trim().to_owned();
+        if rule.is_empty() {
+            return;
+        }
+        let Some(owner) = self.owner.upgrade() else {
+            return;
+        };
+        let accepted = owner.update(cx, |owner, cx| {
+            let Some(next) = owner.app_filter.clone().with_rule(&rule) else {
+                owner.message = tr(
+                    owner.language,
+                    "规则无效或已达到上限",
+                    "Invalid rule or rule limit reached",
+                )
+                .into();
+                owner.is_error = true;
+                cx.notify();
+                return false;
+            };
+            if next == owner.app_filter {
+                return true;
+            }
+            owner.save_app_filter(next, cx);
+            owner.app_filter_pending
+        });
+        if accepted {
+            self.app_filter_error = false;
+            self.app_filter_input
+                .update(cx, |input, cx| input.set_value(String::new(), window, cx));
+            cx.notify();
+        } else {
+            self.app_filter_error = true;
+            cx.notify();
+        }
+    }
+
+    fn begin_shortcut_edit(
+        &mut self,
+        favorite: bool,
+        slot: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(owner) = self.owner.upgrade() else {
+            return;
+        };
+        let shortcut = owner
+            .read(cx)
+            .paste_shortcuts
+            .slot(favorite, slot)
+            .unwrap_or_default()
+            .to_owned();
+        let shortcut_input = self.shortcut_input.get_or_insert_with(|| {
+            cx.new(|cx| InputState::new(window, cx).placeholder("Ctrl+Alt+1"))
+        });
+        shortcut_input.update(cx, |input, cx| input.set_value(shortcut, window, cx));
+        self.shortcut_editing = Some((favorite, slot));
+        self.shortcut_recording = false;
+        self.shortcut_capture_error = None;
+        shortcut_input.update(cx, |input, cx| input.focus(window, cx));
+        cx.notify();
+    }
+
+    fn save_shortcut_edit(&mut self, cx: &mut Context<Self>) {
+        let Some((favorite, slot)) = self.shortcut_editing else {
+            return;
+        };
+        let Some(owner) = self.owner.upgrade() else {
+            return;
+        };
+        let Some(shortcut_input) = &self.shortcut_input else {
+            return;
+        };
+        let shortcut = shortcut_input.read(cx).value().to_string();
+        let accepted = owner.update(cx, |owner, cx| {
+            owner.save_paste_shortcut(favorite, slot, &shortcut, cx);
+            owner.paste_shortcuts_pending.is_some()
+        });
+        if accepted {
+            self.shortcut_editing = None;
+            self.shortcut_recording = false;
+            cx.notify();
+        }
+    }
+
+    fn start_shortcut_recording(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.shortcut_recording = true;
+        self.shortcut_capture_error = None;
+        self.shortcut_capture_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn capture_shortcut_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        if !self.shortcut_recording || event.is_held {
+            return;
+        }
+        if event.keystroke.key.eq_ignore_ascii_case("escape")
+            && !event.keystroke.modifiers.control
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.shift
+            && !event.keystroke.modifiers.platform
+        {
+            self.shortcut_recording = false;
+            self.shortcut_capture_error = None;
+            cx.notify();
+            return;
+        }
+        let shift_down = event.keystroke.modifiers.shift
+            || unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) } < 0;
+        match shortcut_from_keystroke(&event.keystroke, shift_down) {
+            Ok(shortcut) => {
+                if let Some(input) = &self.shortcut_input {
+                    input.update(cx, |input, cx| input.set_value(shortcut, window, cx));
+                }
+                self.shortcut_recording = false;
+                self.shortcut_capture_error = None;
+            }
+            Err(error) => self.shortcut_capture_error = Some(error),
+        }
+        cx.notify();
+    }
+
+    fn shortcut_editor(
+        &self,
+        favorite: bool,
+        slot: u8,
+        language: LanguagePreference,
+        pending: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(cx.theme().border)
+            .child(format!(
+                "{} {slot}: {}",
+                tr(
+                    language,
+                    if favorite { "收藏" } else { "普通" },
+                    if favorite { "Favorite" } else { "Recent" }
+                ),
+                tr(
+                    language,
+                    "输入组合键，例如 Ctrl+Alt+Z",
+                    "Enter a shortcut, for example Ctrl+Alt+Z"
+                )
+            ))
+            .child(Input::new(
+                self.shortcut_input.as_ref().expect("editing input exists"),
+            ))
+            .when(self.shortcut_recording, |panel| {
+                panel.child(
+                    div()
+                        .id("paste-shortcut-recorder")
+                        .track_focus(&self.shortcut_capture_focus)
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().accent)
+                        .p_2()
+                        .child(tr(
+                            language,
+                            "请按组合键；按 Esc 取消录制",
+                            "Press a shortcut; press Esc to cancel recording",
+                        ))
+                        .on_key_down(cx.listener(|this, event, window, cx| {
+                            this.capture_shortcut_key(event, window, cx);
+                        })),
+                )
+            })
+            .when_some(self.shortcut_capture_error.clone(), |panel, error| {
+                panel.child(div().text_xs().text_color(cx.theme().danger).child(error))
+            })
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("paste-shortcut-record")
+                            .small()
+                            .outline()
+                            .label(if self.shortcut_recording {
+                                tr(language, "录制中", "Recording")
+                            } else {
+                                tr(language, "录制", "Record")
+                            })
+                            .disabled(pending)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.start_shortcut_recording(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("paste-shortcut-save")
+                            .small()
+                            .label(tr(language, "保存", "Save"))
+                            .disabled(pending)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_shortcut_edit(cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("paste-shortcut-cancel")
+                            .small()
+                            .ghost()
+                            .label(tr(language, "取消", "Cancel"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.shortcut_editing = None;
+                                this.shortcut_recording = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn paste_slot_rows(
+        &self,
+        favorite: bool,
+        shortcuts: &PasteShortcutConfig,
+        pending: bool,
+        language: LanguagePreference,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .children((1..=10u8).map(|slot| {
+                let shortcut = shortcuts.slot(favorite, slot).unwrap_or_default();
+                let shortcut_label = if shortcut.is_empty() {
+                    tr(language, "未设置", "Not set").to_owned()
+                } else {
+                    shortcut.to_owned()
+                };
+                let default = PasteShortcutConfig::default()
+                    .slot(favorite, slot)
+                    .unwrap_or_default()
+                    .to_owned();
+                let owner_disable = self.owner.clone();
+                let owner_reset = self.owner.clone();
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .py_1()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().w(px(96.)).text_xs().child(format!(
+                                "{} {slot}",
+                                tr(
+                                    language,
+                                    if favorite { "收藏" } else { "普通" },
+                                    if favorite { "Favorite" } else { "Recent" }
+                                )
+                            )))
+                            .child(div().text_sm().child(shortcut_label)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .child(
+                                Button::new(format!("paste-slot-edit-{favorite}-{slot}"))
+                                    .outline()
+                                    .small()
+                                    .label(tr(language, "修改", "Edit"))
+                                    .disabled(pending)
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.begin_shortcut_edit(favorite, slot, window, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new(format!("paste-slot-disable-{favorite}-{slot}"))
+                                    .ghost()
+                                    .small()
+                                    .label(tr(language, "停用", "Disable"))
+                                    .disabled(pending || shortcut.is_empty())
+                                    .on_click(move |_, _, cx| {
+                                        let _ = owner_disable.update(cx, |owner, cx| {
+                                            owner.save_paste_shortcut(favorite, slot, "", cx);
+                                        });
+                                    }),
+                            )
+                            .child(
+                                Button::new(format!("paste-slot-reset-{favorite}-{slot}"))
+                                    .ghost()
+                                    .small()
+                                    .label(tr(language, "默认", "Default"))
+                                    .disabled(pending || shortcut == default)
+                                    .on_click(move |_, _, cx| {
+                                        let _ = owner_reset.update(cx, |owner, cx| {
+                                            owner.save_paste_shortcut(favorite, slot, &default, cx);
+                                        });
+                                    }),
+                            ),
+                    )
+                    .when(self.shortcut_editing == Some((favorite, slot)), |row| {
+                        row.child(self.shortcut_editor(favorite, slot, language, pending, cx))
+                    })
+            }))
+    }
+
+    fn paste_group_actions(
+        &self,
+        favorite: bool,
+        shortcuts: &PasteShortcutConfig,
+        pending: bool,
+        language: LanguagePreference,
+    ) -> Div {
+        let defaults = PasteShortcutConfig::default();
+        let (current, defaults) = if favorite {
+            (&shortcuts.favorites, &defaults.favorites)
+        } else {
+            (&shortcuts.recent, &defaults.recent)
+        };
+        let reset_owner = self.owner.clone();
+        let disable_owner = self.owner.clone();
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .child(
+                Button::new(format!("paste-{favorite}-reset-all"))
+                    .outline()
+                    .small()
+                    .label(tr(language, "全部恢复默认", "Restore all defaults"))
+                    .disabled(pending || current == defaults)
+                    .on_click(move |_, _, cx| {
+                        let _ = reset_owner.update(cx, |owner, cx| {
+                            owner.set_paste_shortcut_group_defaults(favorite, true, cx);
+                        });
+                    }),
+            )
+            .child(
+                Button::new(format!("paste-{favorite}-disable-all"))
+                    .outline()
+                    .small()
+                    .label(tr(language, "全部停用", "Disable all"))
+                    .disabled(pending || current.iter().all(String::is_empty))
+                    .on_click(move |_, _, cx| {
+                        let _ = disable_owner.update(cx, |owner, cx| {
+                            owner.set_paste_shortcut_group_defaults(favorite, false, cx);
+                        });
+                    }),
+            )
     }
 }
 
@@ -445,6 +1627,8 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> Self {
         let language = service.initial_language;
+        let window_position = service.initial_window_position;
+        let hover_preference = service.initial_hover_preview;
         let search = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr(
                 language,
@@ -454,6 +1638,8 @@ impl ClipboardView {
         });
         let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::Change) {
+                this.cancel_pending_row_click();
+                this.close_hover_preview(cx);
                 this.clear_confirm_open = false;
                 this.reset_selection();
                 this.history.begin_search();
@@ -465,7 +1651,10 @@ impl ClipboardView {
                     let _ = view.update(cx, |this, cx| this.query(cx));
                 }));
                 cx.notify();
+            } else if matches!(event, InputEvent::Focus) {
+                this.cancel_pending_row_click();
             } else if matches!(event, InputEvent::PressEnter { .. })
+                && !this.batch_mode
                 && let Some(id) = this.history.selected
             {
                 this.send(Command::Copy(id), cx);
@@ -493,7 +1682,17 @@ impl ClipboardView {
                     .update_in(cx, |this, window, cx| match command {
                         TrayCommand::Show => {
                             this.paste_target = None;
-                            tray::set_window_visible(window, true);
+                            this.show_window(window, cx);
+                            cx.notify();
+                        }
+                        TrayCommand::Toggle => {
+                            if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
+                                this.hide_visible_window(window, cx);
+                            } else {
+                                this.paste_target = None;
+                                this.show_window(window, cx);
+                                cx.notify();
+                            }
                         }
                         TrayCommand::Settings => this.open_settings_window(cx),
                         TrayCommand::TogglePause => {
@@ -528,6 +1727,10 @@ impl ClipboardView {
             while let Ok(target) = hotkey_receiver.recv().await {
                 if view
                     .update_in(cx, |this, window, cx| {
+                        if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
+                            this.hide_visible_window(window, cx);
+                            return;
+                        }
                         this.paste_target =
                             paste::is_external_target(window, target).then_some(target);
                         if this.paste_target.is_some() {
@@ -539,7 +1742,7 @@ impl ClipboardView {
                             .into();
                             this.is_error = false;
                         }
-                        tray::set_window_visible(window, true);
+                        this.show_window(window, cx);
                         cx.notify();
                     })
                     .is_err()
@@ -549,6 +1752,58 @@ impl ClipboardView {
             }
         });
         let hotkey_error = hotkey.as_ref().err().map(ToString::to_string);
+        let quick_paste_enabled = service.initial_quick_paste_enabled;
+        let paste_shortcuts = service.initial_paste_shortcuts.clone();
+        let (paste_hotkey_sender, paste_hotkey_receiver) = async_channel::bounded(16);
+        let paste_hotkeys = if startup.monitoring && quick_paste_enabled {
+            PasteHotkeys::start(paste_hotkey_sender.clone(), &paste_shortcuts, hotkey_choice)
+                .map(Some)
+        } else {
+            Ok(None)
+        };
+        let paste_hotkey_events = cx.spawn_in(window, async move |view, cx| {
+            while let Ok(event) = paste_hotkey_receiver.recv().await {
+                if view
+                    .update_in(cx, |this, window, cx| {
+                        this.handle_quick_hotkey(event, window, cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let paste_hotkey_error = paste_hotkeys.as_ref().err().map(ToString::to_string);
+        let paste_hotkey_warnings = paste_hotkeys
+            .as_ref()
+            .ok()
+            .and_then(|result| result.as_ref().map(|(_, warnings)| warnings.clone()))
+            .unwrap_or_default();
+        let (outside_click_sender, outside_click_receiver) = async_channel::bounded(16);
+        let outside_click_monitor = if tray.is_ok() {
+            tray::window_hwnd(window)
+                .ok_or_else(|| anyhow::anyhow!("无法取得历史窗口句柄"))
+                .and_then(|hwnd| OutsideClickMonitor::start(outside_click_sender, hwnd.0 as isize))
+                .map(Some)
+        } else {
+            Ok(None)
+        };
+        let outside_click_events = cx.spawn_in(window, async move |view, cx| {
+            while let Ok(position) = outside_click_receiver.recv().await {
+                if view
+                    .update_in(cx, |this, window, cx| {
+                        this.handle_outside_click(position, window, cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let outside_click_error = outside_click_monitor
+            .as_ref()
+            .err()
+            .map(ToString::to_string);
         let autostart = clipboard_platform::autostart::enabled(&service.data_dir);
         let mut startup_errors = Vec::new();
         if let Some(error) = tray_error {
@@ -564,6 +1819,22 @@ impl ClipboardView {
         if let Some(error) = hotkey_error {
             startup_errors.push(error);
         }
+        if let Some(error) = paste_hotkey_error {
+            startup_errors.push(error);
+        }
+        if !paste_hotkey_warnings.is_empty() {
+            startup_errors.push(format!(
+                "部分快速粘贴快捷键不可用：{}",
+                paste_hotkey_warnings
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ));
+        }
+        if let Some(error) = outside_click_error {
+            startup_errors.push(error);
+        }
         if let Err(error) = &autostart {
             startup_errors.push(format!(
                 "{}: {error}",
@@ -577,6 +1848,25 @@ impl ClipboardView {
         let theme = service.initial_theme;
         let paused = service.initial_paused;
         let initial_window_size = service.initial_window_size;
+        let persist_window_size = service.initial_persist_window_size;
+        let auto_reset_state = service.initial_auto_reset_state;
+        let search_auto_focus = service.initial_search_auto_focus;
+        let search_auto_clear = service.initial_search_auto_clear;
+        let skip_clear_confirm = service.initial_skip_clear_confirm;
+        let paste_close_window = service.initial_paste_close_window;
+        let paste_key = service.initial_paste_key;
+        let paste_move_to_top = service.initial_paste_move_to_top;
+        let toolbar = service.initial_toolbar;
+        let display = service.initial_display;
+        let audio = service.initial_audio;
+        let monitor_types = service.initial_monitor_types;
+        let app_filter = service.initial_app_filter.clone();
+        let onboarding_completed = service.initial_onboarding_completed;
+        if (!startup.hidden || tray.is_err())
+            && let Err(error) = position::position_window(window, window_position)
+        {
+            startup_errors.push(error.to_string());
+        }
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {
@@ -585,6 +1875,7 @@ impl ClipboardView {
         });
         let activation = cx.observe_window_activation(window, |this, window, cx| {
             if !window.is_window_active() {
+                this.cancel_pending_row_click();
                 let had_target = this.paste_target.take().is_some();
                 let had_pending = this.paste_pending.take().is_some();
                 let had_batch_pending = this.batch_paste_pending.take().is_some();
@@ -604,7 +1895,13 @@ impl ClipboardView {
             this.window_bounds_changed(window, cx);
         });
         let list_focus = cx.focus_handle();
-        window.focus(&list_focus, cx);
+        if startup.show_onboarding && !onboarding_completed {
+            window.focus(&list_focus, cx);
+        } else if search_auto_focus && (!startup.hidden || tray.is_err()) {
+            search.update(cx, |input, cx| input.focus(window, cx));
+        } else {
+            window.focus(&list_focus, cx);
+        }
         Self {
             service,
             _tray: tray.ok(),
@@ -614,8 +1911,15 @@ impl ClipboardView {
             hotkey: hotkey.ok().flatten(),
             hotkey_sender,
             _hotkey_events: hotkey_events,
+            paste_hotkeys: paste_hotkeys.ok().flatten().map(|(hotkeys, _)| hotkeys),
+            paste_hotkey_sender,
+            _paste_hotkey_events: paste_hotkey_events,
+            _outside_click_monitor: outside_click_monitor.ok().flatten(),
+            _outside_click_events: outside_click_events,
             exiting,
             history: HistoryState::default(),
+            file_card_info: HashMap::new(),
+            file_card_checked: HashMap::new(),
             groups: Vec::new(),
             search,
             group_name_input: cx.new(|cx| {
@@ -637,7 +1941,9 @@ impl ClipboardView {
             clear_pending: false,
             clear_all_confirm_open: false,
             clear_all_pending: false,
+            batch_mode: false,
             selected_ids: HashSet::new(),
+            selection_anchor: None,
             batch_confirm_open: false,
             batch_pending: false,
             batch_paste_pending: None,
@@ -647,11 +1953,28 @@ impl ClipboardView {
             preview_input: cx.new(|cx| TextareaState::new(window, cx)),
             preview_source_hash: None,
             preview_editing: false,
+            preview_edit_requested: false,
             preview_save_pending: false,
+            image_zoom_percent: 100,
+            hover_preview: PreviewState::default(),
+            hover_popup: None,
+            hover_popup_opening: None,
+            hover_source_active: false,
+            hover_popup_active: false,
+            hover_task: None,
+            hover_close_task: None,
+            hover_preference,
+            hover_preference_pending: false,
+            pending_row_click: None,
+            row_click_task: None,
             save_as_pending: None,
             list_focus,
             scroll: UniformListScrollHandle::new(),
             monitoring: startup.monitoring,
+            onboarding_completed,
+            onboarding_step: 0,
+            onboarding_pending: false,
+            show_onboarding: startup.show_onboarding,
             settings_window: None,
             settings_window_opening: false,
             theme,
@@ -660,6 +1983,13 @@ impl ClipboardView {
             language_pending: false,
             hotkey_choice,
             hotkey_pending: false,
+            quick_paste_enabled,
+            quick_paste_pending_setting: false,
+            quick_paste_registration_warning: None,
+            paste_shortcuts,
+            paste_shortcuts_pending: None,
+            paste_shortcut_status: None,
+            quick_paste_pending: None,
             autostart: autostart.unwrap_or(false),
             autostart_pending: false,
             data_size: None,
@@ -667,6 +1997,36 @@ impl ClipboardView {
             database_maintenance_pending: false,
             export_pending: false,
             window_pinned: false,
+            window_position,
+            window_position_pending: false,
+            persist_window_size,
+            persist_window_size_pending: false,
+            auto_reset_state,
+            auto_reset_state_pending: false,
+            search_auto_focus,
+            search_auto_focus_pending: false,
+            search_auto_clear,
+            search_auto_clear_pending: false,
+            skip_clear_confirm,
+            skip_clear_confirm_pending: false,
+            paste_close_window,
+            paste_close_window_pending: false,
+            paste_key,
+            paste_key_pending: false,
+            paste_move_to_top,
+            paste_move_to_top_pending: false,
+            toolbar,
+            toolbar_pending: false,
+            display,
+            display_pending: false,
+            audio,
+            audio_pending: false,
+            monitor_types,
+            monitor_types_pending: false,
+            app_filter,
+            app_filter_pending: false,
+            running_apps: Vec::new(),
+            running_apps_pending: false,
             last_window_size: initial_window_size,
             paste_target: None,
             paste_pending: None,
@@ -696,16 +2056,33 @@ impl ClipboardView {
     }
 
     fn send(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
+        let copy_requested = matches!(
+            &command,
+            Command::Copy(_)
+                | Command::CopyPlainText(_)
+                | Command::CopyPlainTextForPaste(_)
+                | Command::CopyForPaste(_)
+                | Command::CopyPath(_)
+                | Command::CopyPathForPaste(_)
+                | Command::MergeCopy(_)
+                | Command::MergeForPaste(_)
+        );
         if let Err(error) = self.service.send(command) {
             self.message = error.to_string();
             self.is_error = true;
             cx.notify();
             return false;
         }
+        if copy_requested && sound::enabled(self.audio, Sound::Copy, SoundTiming::Immediate) {
+            sound::play(Sound::Copy);
+        }
         true
     }
 
     fn window_bounds_changed(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if !self.persist_window_size || self.persist_window_size_pending {
+            return;
+        }
         let WindowBounds::Windowed(bounds) = window.window_bounds() else {
             return;
         };
@@ -723,7 +2100,9 @@ impl ClipboardView {
                 .timer(Duration::from_millis(300))
                 .await;
             let _ = view.update(cx, |this, cx| {
-                this.send(Command::SetWindowSize(size), cx);
+                if this.persist_window_size && !this.persist_window_size_pending {
+                    this.send(Command::SetWindowSize(size), cx);
+                }
             });
         }));
     }
@@ -739,6 +2118,8 @@ impl ClipboardView {
     }
 
     fn open_settings_window(&mut self, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
         if let Some(handle) = self.settings_window {
             if handle
                 .update(cx, |_, window, _| window.activate_window())
@@ -789,7 +2170,8 @@ impl ClipboardView {
                     });
                     true
                 });
-                let settings = cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), cx));
+                let settings =
+                    cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), window, cx));
                 cx.new(|cx| Root::new(settings, window, cx))
             });
             owner_entity.update(cx, |owner, cx| {
@@ -941,9 +2323,16 @@ impl ClipboardView {
 
     fn select_hotkey(&mut self, choice: HotkeyPreference, cx: &mut Context<Self>) {
         if self.hotkey_pending
+            || self.paste_shortcuts_pending.is_some()
             || (choice == self.hotkey_choice
                 && (choice == HotkeyPreference::Disabled || self.hotkey.is_some()))
         {
+            return;
+        }
+        if let Err(error) = validate_paste_shortcuts(&self.paste_shortcuts, choice) {
+            self.message = error.to_string();
+            self.is_error = true;
+            cx.notify();
             return;
         }
         self.hotkey = None;
@@ -979,6 +2368,250 @@ impl ClipboardView {
         cx.notify();
     }
 
+    fn select_quick_paste_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if !self.monitoring
+            || self.quick_paste_pending_setting
+            || self.paste_shortcuts_pending.is_some()
+            || enabled == self.quick_paste_enabled
+        {
+            return;
+        }
+        if enabled {
+            match PasteHotkeys::start(
+                self.paste_hotkey_sender.clone(),
+                &self.paste_shortcuts,
+                self.hotkey_choice,
+            ) {
+                Ok((hotkeys, warnings)) => {
+                    self.paste_hotkeys = Some(hotkeys);
+                    self.quick_paste_registration_warning = (!warnings.is_empty()).then(|| {
+                        format!(
+                            "{}: {}",
+                            tr(
+                                self.language,
+                                "部分快速粘贴快捷键不可用",
+                                "Some quick paste shortcuts are unavailable",
+                            ),
+                            warnings
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        )
+                    });
+                }
+                Err(error) => {
+                    self.message = error.to_string();
+                    self.is_error = true;
+                    cx.notify();
+                    return;
+                }
+            }
+        } else {
+            self.paste_hotkeys = None;
+            self.quick_paste_registration_warning = None;
+        }
+        if self.send(Command::SetQuickPasteEnabled(enabled), cx) {
+            self.quick_paste_pending_setting = true;
+        } else if enabled {
+            self.paste_hotkeys = None;
+            self.quick_paste_registration_warning = None;
+        } else if let Ok((hotkeys, _)) = PasteHotkeys::start(
+            self.paste_hotkey_sender.clone(),
+            &self.paste_shortcuts,
+            self.hotkey_choice,
+        ) {
+            self.paste_hotkeys = Some(hotkeys);
+        }
+        cx.notify();
+    }
+
+    fn restore_paste_hotkeys(&mut self) -> Option<String> {
+        if !self.monitoring || !self.quick_paste_enabled {
+            return None;
+        }
+        match PasteHotkeys::start(
+            self.paste_hotkey_sender.clone(),
+            &self.paste_shortcuts,
+            self.hotkey_choice,
+        ) {
+            Ok((hotkeys, warnings)) => {
+                self.paste_hotkeys = Some(hotkeys);
+                (!warnings.is_empty()).then(|| {
+                    warnings
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                })
+            }
+            Err(error) => Some(error.to_string()),
+        }
+    }
+
+    fn save_paste_shortcut(
+        &mut self,
+        favorite: bool,
+        slot: u8,
+        shortcut: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let next = (|| {
+            let normalized = normalize_paste_shortcut(shortcut)?;
+            let mut next = self.paste_shortcuts.clone();
+            next.set_slot(favorite, slot, normalized)?;
+            Ok::<_, anyhow::Error>(next)
+        })();
+        match next {
+            Ok(next) => self.save_paste_shortcuts(next, cx),
+            Err(error) => {
+                self.message = error.to_string();
+                self.is_error = true;
+                self.paste_shortcut_status = Some((self.message.clone(), true));
+                cx.notify();
+            }
+        }
+    }
+
+    fn save_paste_shortcuts(&mut self, next: PasteShortcutConfig, cx: &mut Context<Self>) {
+        if self.paste_shortcuts_pending.is_some()
+            || self.quick_paste_pending_setting
+            || self.hotkey_pending
+        {
+            return;
+        }
+        self.paste_shortcut_status = None;
+        if let Err(error) = validate_paste_shortcuts(&next, self.hotkey_choice) {
+            self.message = error.to_string();
+            self.is_error = true;
+            self.paste_shortcut_status = Some((self.message.clone(), true));
+            cx.notify();
+            return;
+        }
+        if next == self.paste_shortcuts {
+            return;
+        }
+        self.paste_hotkeys = None;
+        if self.monitoring && self.quick_paste_enabled {
+            match PasteHotkeys::start(self.paste_hotkey_sender.clone(), &next, self.hotkey_choice) {
+                Ok((hotkeys, warnings)) => {
+                    let changed_slot_failed = warnings.iter().any(|warning| {
+                        next.slot(warning.favorite, warning.slot)
+                            != self.paste_shortcuts.slot(warning.favorite, warning.slot)
+                    });
+                    if changed_slot_failed {
+                        drop(hotkeys);
+                        let restore_error = self.restore_paste_hotkeys();
+                        self.message = warnings
+                            .iter()
+                            .filter(|warning| {
+                                next.slot(warning.favorite, warning.slot)
+                                    != self.paste_shortcuts.slot(warning.favorite, warning.slot)
+                            })
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        if let Some(error) = restore_error {
+                            self.message.push_str(&format!("; {error}"));
+                        }
+                        self.is_error = true;
+                        self.paste_shortcut_status = Some((self.message.clone(), true));
+                        cx.notify();
+                        return;
+                    }
+                    self.paste_hotkeys = Some(hotkeys);
+                    self.quick_paste_registration_warning = (!warnings.is_empty()).then(|| {
+                        warnings
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    });
+                }
+                Err(error) => {
+                    let restore_error = self.restore_paste_hotkeys();
+                    self.message = error.to_string();
+                    if let Some(error) = restore_error {
+                        self.message.push_str(&format!("; {error}"));
+                    }
+                    self.is_error = true;
+                    self.paste_shortcut_status = Some((self.message.clone(), true));
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        let previous = self.paste_shortcuts.clone();
+        if self.send(Command::SetPasteShortcuts(Box::new(next.clone())), cx) {
+            self.paste_shortcuts = next;
+            self.paste_shortcuts_pending = Some(previous);
+        } else {
+            self.paste_hotkeys = None;
+            if let Some(error) = self.restore_paste_hotkeys() {
+                self.message.push_str(&format!("; {error}"));
+            }
+            self.paste_shortcut_status = Some((self.message.clone(), true));
+            self.quick_paste_registration_warning = None;
+        }
+        cx.notify();
+    }
+
+    fn set_paste_shortcut_group_defaults(
+        &mut self,
+        favorite: bool,
+        reset: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut next = self.paste_shortcuts.clone();
+        let defaults = PasteShortcutConfig::default();
+        let group = if favorite {
+            &mut next.favorites
+        } else {
+            &mut next.recent
+        };
+        for (index, shortcut) in group.iter_mut().enumerate() {
+            *shortcut = if reset {
+                if favorite {
+                    defaults.favorites[index].clone()
+                } else {
+                    defaults.recent[index].clone()
+                }
+            } else {
+                String::new()
+            };
+        }
+        self.save_paste_shortcuts(next, cx);
+    }
+
+    fn handle_quick_hotkey(
+        &mut self,
+        event: PasteHotkeyEvent,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.monitoring
+            || !self.quick_paste_enabled
+            || self.paste_hotkeys.is_none()
+            || self.quick_paste_pending.is_some()
+            || self.paste_pending.is_some()
+            || self.batch_pending
+            || self.batch_paste_pending.is_some()
+            || !paste::is_external_target(window, event.target)
+        {
+            return;
+        }
+        if self.send(
+            Command::ResolveQuickPaste {
+                slot: event.slot,
+                favorite: event.favorite,
+                group_id: self.history.group_id,
+            },
+            cx,
+        ) {
+            self.quick_paste_pending = Some((event.slot, event.favorite, event.target));
+        }
+    }
+
     fn query(&mut self, cx: &mut Context<Self>) {
         let generation = self.history.generation;
         if !self.send(
@@ -986,6 +2619,7 @@ impl ClipboardView {
                 search: self.search.read(cx).value().to_string(),
                 limit: self.history.limit,
                 favorite_only: self.history.favorite_only,
+                category: self.history.category,
                 group_id: self.history.group_id,
                 generation,
             },
@@ -996,9 +2630,14 @@ impl ClipboardView {
     }
 
     fn select_group(&mut self, group_id: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.history.group_id == group_id {
+        if self.history.group_id == group_id
+            && !self.history.favorite_only
+            && self.history.category == ContentCategory::All
+        {
             return;
         }
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
         self.search_task = None;
         self.group_move_id = None;
         self.group_delete_id = None;
@@ -1009,6 +2648,97 @@ impl ClipboardView {
         self.query(cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
+    }
+
+    fn select_category(
+        &mut self,
+        category: Option<ContentCategory>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
+            return;
+        }
+        let selected = match category {
+            None => self.history.favorite_only && self.history.group_id.is_none(),
+            Some(category) => {
+                !self.history.favorite_only
+                    && self.history.category == category
+                    && self.history.group_id.is_none()
+            }
+        };
+        if selected {
+            return;
+        }
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
+        self.clear_confirm_open = false;
+        self.group_move_id = None;
+        self.group_delete_id = None;
+        self.reset_selection();
+        self.search_task = None;
+        if let Some(category) = category {
+            self.history.set_category(category);
+        } else {
+            self.history.set_favorite_filter(true);
+        }
+        self.group_scroll.scroll_to_item(4);
+        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.query(cx);
+        window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    fn select_adjacent_category(
+        &mut self,
+        direction: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.display.show_category_filter {
+            return;
+        }
+        let current: usize = if self.history.favorite_only {
+            1
+        } else {
+            match self.history.category {
+                ContentCategory::All => 0,
+                ContentCategory::Text => 2,
+                ContentCategory::Other => 3,
+            }
+        };
+        let categories = [
+            Some(ContentCategory::All),
+            None,
+            Some(ContentCategory::Text),
+            Some(ContentCategory::Other),
+        ];
+        if let Some(next) = current.checked_add_signed(direction)
+            && let Some(&category) = categories.get(next)
+        {
+            self.select_category(category, window, cx);
+        }
+    }
+
+    fn select_adjacent_group(
+        &mut self,
+        direction: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
+            return;
+        }
+        let ids: Vec<_> = self.groups.iter().map(|group| group.id).collect();
+        let Some(group_id) = adjacent_group_id(&ids, self.history.group_id, direction) else {
+            return;
+        };
+        // Four group actions and the default pill precede custom group pills.
+        let pill_index = group_id
+            .and_then(|id| ids.iter().position(|candidate| *candidate == id))
+            .map_or(4, |index| 5 + index);
+        self.group_scroll.scroll_to_item(pill_index);
+        self.select_group(group_id, window, cx);
     }
 
     fn save_group(&mut self, cx: &mut Context<Self>) {
@@ -1049,7 +2779,7 @@ impl ClipboardView {
     }
 
     fn clear_history(&mut self, cx: &mut Context<Self>) {
-        if !self.clear_confirm_open || self.clear_pending {
+        if (!self.clear_confirm_open && !self.skip_clear_confirm) || self.clear_pending {
             return;
         }
         if self.send(
@@ -1075,21 +2805,459 @@ impl ClipboardView {
     }
 
     fn reset_selection(&mut self) {
+        self.batch_mode = false;
         self.selected_ids.clear();
+        self.selection_anchor = None;
         self.batch_confirm_open = false;
     }
 
-    fn toggle_selection(&mut self, id: i64, cx: &mut Context<Self>) {
+    fn save_toolbar(&mut self, toolbar: ToolbarPreference, cx: &mut Context<Self>) {
+        if !self.toolbar_pending
+            && toolbar != self.toolbar
+            && self.send(Command::SetToolbar(toolbar), cx)
+        {
+            self.toolbar_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn save_display(&mut self, display: DisplayPreference, cx: &mut Context<Self>) {
+        if !self.display_pending
+            && display != self.display
+            && self.send(Command::SetDisplay(display), cx)
+        {
+            self.display_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn save_audio(&mut self, audio: AudioPreference, cx: &mut Context<Self>) {
+        if !self.audio_pending && audio != self.audio && self.send(Command::SetAudio(audio), cx) {
+            self.audio_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn save_monitor_types(
+        &mut self,
+        monitor_types: MonitorTypesPreference,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.monitor_types_pending
+            && monitor_types.valid()
+            && monitor_types != self.monitor_types
+            && self.send(Command::SetMonitorTypes(monitor_types), cx)
+        {
+            self.monitor_types_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn save_app_filter(&mut self, preference: AppFilterPreference, cx: &mut Context<Self>) {
+        if !self.app_filter_pending
+            && preference.valid()
+            && preference != self.app_filter
+            && self.send(Command::SetAppFilter(Box::new(preference)), cx)
+        {
+            self.app_filter_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn load_running_apps(&mut self, cx: &mut Context<Self>) {
+        if !self.running_apps_pending && self.send(Command::ListRunningApps, cx) {
+            self.running_apps_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn toggle_batch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.batch_pending || self.reorder_pending || self.history.loading {
+            return;
+        }
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
+        let enabled = !self.batch_mode;
+        self.reset_selection();
+        self.batch_mode = enabled;
+        window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    fn clear_batch_selection(&mut self, cx: &mut Context<Self>) {
+        if self.batch_pending {
+            return;
+        }
+        self.selected_ids.clear();
+        self.selection_anchor = None;
+        self.batch_confirm_open = false;
+        cx.notify();
+    }
+
+    fn handle_outside_click(
+        &mut self,
+        position: windows::Win32::Foundation::POINT,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !tray::is_window_shown(window)
+            || self.window_pinned
+            || self._tray.is_none()
+            || self.settings_window.is_some()
+            || self.settings_window_opening
+            || self.paste_pending.is_some()
+            || self.batch_paste_pending.is_some()
+            || self.batch_pending
+            || self
+                ._tray
+                .as_ref()
+                .is_some_and(|tray| tray::is_tray_click(tray, position))
+        {
+            return;
+        }
+        self.prepare_to_hide(window, cx);
+        tray::set_window_visible(window, false);
+        cx.notify();
+    }
+
+    fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let was_minimized = tray::is_window_minimized(window);
+        if was_minimized {
+            tray::set_window_visible(window, true);
+        }
+        if let Err(error) = position::position_window(window, self.window_position) {
+            self.message = format!(
+                "{}: {error}",
+                tr(self.language, "无法定位窗口", "Failed to position window")
+            );
+            self.is_error = true;
+        }
+        if !was_minimized {
+            tray::set_window_visible(window, true);
+        }
+        if self.search_auto_clear && !self.search.read(cx).value().is_empty() {
+            self.search_task = None;
+            self.search
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.history.begin_search();
+            self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            self.query(cx);
+        }
+        if self.preview_editing || self.preview_save_pending {
+            return;
+        }
+        if self.search_auto_focus {
+            self.search.update(cx, |input, cx| input.focus(window, cx));
+        } else if self.preview.id.is_none() {
+            window.focus(&self.list_focus, cx);
+        }
+    }
+
+    fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.paste_pending.is_some() || self.batch_paste_pending.is_some() || self.batch_pending
+        {
+            return;
+        }
+        self.prepare_to_hide(window, cx);
+        tray::set_window_visible(window, false);
+        cx.notify();
+    }
+
+    fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
+        self.paste_target = None;
+        self.reset_selection();
+        if self.auto_reset_state {
+            self.search_task = None;
+            self.search
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.history.set_group(None);
+            self.group_scroll.scroll_to_item(0);
+            self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            if !self.preview_editing && !self.preview_save_pending {
+                self.preview.close();
+                self.preview_source_hash = None;
+                self.preview_edit_requested = false;
+            }
+            self.query(cx);
+        }
+    }
+
+    fn onboarding_visible(&self) -> bool {
+        self.show_onboarding && !self.onboarding_completed
+    }
+
+    fn advance_onboarding(&mut self, cx: &mut Context<Self>) {
+        if !self.onboarding_visible() || self.onboarding_pending {
+            return;
+        }
+        if self.onboarding_step < 3 {
+            self.onboarding_step += 1;
+            cx.notify();
+        } else {
+            self.complete_onboarding(cx);
+        }
+    }
+
+    fn complete_onboarding(&mut self, cx: &mut Context<Self>) {
+        if self.onboarding_visible()
+            && !self.onboarding_pending
+            && self.send(Command::CompleteOnboarding, cx)
+        {
+            self.onboarding_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn dismiss_or_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.onboarding_visible() {
+            self.complete_onboarding(cx);
+            return;
+        }
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
+        if cx.has_active_drag() {
+            cx.stop_active_drag(window);
+            self.drop_target = None;
+            self.group_drop_target = None;
+            self.group_drag_direction = 0;
+            self.history_drag_direction = 0;
+            cx.notify();
+            return;
+        }
+        if self.clear_all_confirm_open {
+            if !self.clear_all_pending {
+                self.clear_all_confirm_open = false;
+                window.focus(&self.list_focus, cx);
+                cx.notify();
+            }
+            return;
+        }
+        if self.group_delete_id.is_some() {
+            if !self.group_delete_pending {
+                self.group_delete_id = None;
+                cx.notify();
+            }
+            return;
+        }
+        if self.clear_confirm_open {
+            if !self.clear_pending {
+                self.clear_confirm_open = false;
+                cx.notify();
+            }
+            return;
+        }
+        if self.batch_confirm_open {
+            if !self.batch_pending {
+                self.batch_confirm_open = false;
+                cx.notify();
+            }
+            return;
+        }
+        if self.group_move_id.is_some() {
+            if !self.group_move_pending {
+                self.group_move_id = None;
+                cx.notify();
+            }
+            return;
+        }
+        if self.group_editor_open {
+            if !self.group_save_pending {
+                self.group_editor_open = false;
+                self.group_rename_id = None;
+                self.group_name_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                window.focus(&self.list_focus, cx);
+                cx.notify();
+            }
+            return;
+        }
+        if self.batch_mode {
+            if !self.batch_pending {
+                self.reset_selection();
+                cx.notify();
+            }
+            return;
+        }
+        if self.paste_pending.is_some() || self.batch_paste_pending.is_some() {
+            return;
+        }
+        self.paste_target = None;
+        if self._tray.is_some() {
+            self.prepare_to_hide(window, cx);
+            tray::set_window_visible(window, false);
+            cx.notify();
+        } else {
+            self.exiting.set(true);
+            window.remove_window();
+        }
+    }
+
+    fn toggle_selection(&mut self, id: i64, extend_range: bool, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
         if self.batch_pending || self.history.loading {
             return;
         }
         if !self.history.items.iter().any(|item| item.id == id) {
             return;
         }
-        if !self.selected_ids.insert(id) {
+        self.close_hover_preview(cx);
+        self.batch_mode = true;
+        let ids: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
+        let range = extend_range
+            .then_some(self.selection_anchor)
+            .flatten()
+            .and_then(|anchor| selection_range_ids(&ids, anchor, id));
+        if let Some(range) = range {
+            self.selected_ids.extend(range.iter().copied());
+        } else if !self.selected_ids.insert(id) {
             self.selected_ids.remove(&id);
         }
+        self.selection_anchor = Some(id);
         self.batch_confirm_open = false;
+        cx.notify();
+    }
+
+    fn cancel_pending_row_click(&mut self) {
+        self.pending_row_click = None;
+        self.row_click_task = None;
+    }
+
+    fn handle_row_click(
+        &mut self,
+        id: i64,
+        event: &ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.reorder_pending
+            || self.history.loading
+            || self.batch_pending
+            || self.paste_pending.is_some()
+            || !self.history.items.iter().any(|item| item.id == id)
+        {
+            return;
+        }
+        let editable = self.history.items.iter().any(|item| {
+            item.id == id && matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf")
+        });
+        if self.batch_mode || !editable || event.is_keyboard() {
+            self.cancel_pending_row_click();
+            self.activate_row(id, event.modifiers().shift, window, cx);
+            return;
+        }
+        if event.click_count() >= 2 {
+            self.cancel_pending_row_click();
+            if !self.history.loading && !self.batch_pending && self.paste_pending.is_none() {
+                self.open_preview_for_edit(id, window, cx);
+            }
+            return;
+        }
+        self.cancel_pending_row_click();
+        let generation = self.history.generation;
+        self.close_hover_preview(cx);
+        self.pending_row_click = Some((id, generation));
+        self.history.selected = Some(id);
+        window.focus(&self.list_focus, cx);
+        let delay = unsafe { GetDoubleClickTime() }.max(1).saturating_add(30);
+        self.row_click_task = Some(cx.spawn_in(window, async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(u64::from(delay)))
+                .await;
+            let _ = view.update_in(cx, |this, window, cx| {
+                if this.pending_row_click == Some((id, generation))
+                    && this.history.generation == generation
+                    && this.preview.id.is_none()
+                    && !this.batch_mode
+                {
+                    this.cancel_pending_row_click();
+                    this.activate_row(id, false, window, cx);
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    fn activate_row(
+        &mut self,
+        id: i64,
+        extend_range: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.reorder_pending
+            || self.history.loading
+            || self.batch_pending
+            || self.paste_pending.is_some()
+            || !self.history.items.iter().any(|item| item.id == id)
+        {
+            return;
+        }
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
+        self.history.selected = Some(id);
+        window.focus(&self.list_focus, cx);
+        if self.batch_mode {
+            self.toggle_selection(id, extend_range, cx);
+            return;
+        }
+        let can_paste = self.paste_target.is_some_and(|target| {
+            self._tray.is_some() && paste::is_external_target(window, target)
+        });
+        if can_paste {
+            self.paste_selected(id, window, cx);
+        } else {
+            self.paste_target = None;
+            self.send(Command::Copy(id), cx);
+        }
+        cx.notify();
+    }
+
+    fn perform_history_menu_action(
+        &mut self,
+        id: i64,
+        action: &HistoryMenuAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.history.loading
+            || self.batch_pending
+            || self.batch_mode
+            || !self.history.items.iter().any(|item| item.id == id)
+        {
+            return;
+        }
+        self.cancel_pending_row_click();
+        self.history.selected = Some(id);
+        match action {
+            HistoryMenuAction::Paste => self.paste_selected(id, window, cx),
+            HistoryMenuAction::PastePlainText => self.copy_or_paste_plain_text(id, window, cx),
+            HistoryMenuAction::Copy => {
+                self.send(Command::Copy(id), cx);
+            }
+            HistoryMenuAction::CopyPath => self.copy_or_paste_path(id, window, cx),
+            HistoryMenuAction::Preview => self.open_preview(id, window, cx),
+            HistoryMenuAction::Edit => self.open_preview_for_edit(id, window, cx),
+            HistoryMenuAction::Reveal => {
+                self.send(Command::RevealInExplorer(id), cx);
+            }
+            HistoryMenuAction::SaveAs(name) => self.start_save_as(id, name.clone(), cx),
+            HistoryMenuAction::ToggleFavorite => {
+                self.send(Command::ToggleFavorite(id), cx);
+            }
+            HistoryMenuAction::TogglePin => {
+                self.send(Command::TogglePin(id), cx);
+            }
+            HistoryMenuAction::MoveToGroup => {
+                if !self.group_move_pending {
+                    self.group_move_id = Some(id);
+                }
+            }
+            HistoryMenuAction::Delete => {
+                self.send(Command::Delete(id), cx);
+            }
+        }
         cx.notify();
     }
 
@@ -1097,6 +3265,7 @@ impl ClipboardView {
         if self.batch_pending || self.history.loading || self.history.items.is_empty() {
             return;
         }
+        self.batch_mode = true;
         self.selected_ids
             .extend(self.history.items.iter().map(|item| item.id));
         self.batch_confirm_open = false;
@@ -1191,7 +3360,7 @@ impl ClipboardView {
         match event {
             Event::ShowWindow => {
                 self.paste_target = None;
-                tray::set_window_visible(window, true);
+                self.show_window(window, cx);
             }
             Event::Groups(groups) => {
                 if self.history.group_id.is_some()
@@ -1345,12 +3514,12 @@ impl ClipboardView {
                 match result {
                     Ok(count) => {
                         self.clear_all_confirm_open = false;
-                        self.selected_ids.clear();
-                        self.batch_confirm_open = false;
+                        self.reset_selection();
                         self.group_move_id = None;
                         self.preview.close();
                         self.preview_source_hash = None;
                         self.preview_editing = false;
+                        self.preview_edit_requested = false;
                         self.preview_save_pending = false;
                         self.message = if self.language == LanguagePreference::English {
                             format!("Deleted all {count} items; settings and groups were kept")
@@ -1378,7 +3547,7 @@ impl ClipboardView {
                 self.batch_confirm_open = false;
                 match result {
                     Ok(count) => {
-                        self.selected_ids.clear();
+                        self.reset_selection();
                         self.message = if self.language == LanguagePreference::English {
                             format!("Deleted {count} selected items")
                         } else {
@@ -1427,9 +3596,24 @@ impl ClipboardView {
                 generation,
             } => {
                 let applied = self.history.apply(items, total, generation);
+                if applied
+                    && self
+                        .hover_preview
+                        .id
+                        .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+                {
+                    self.close_hover_preview(cx);
+                }
                 if applied {
+                    self.refresh_file_card_info(cx);
                     self.selected_ids
                         .retain(|id| self.history.items.iter().any(|item| item.id == *id));
+                    if self
+                        .selection_anchor
+                        .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+                    {
+                        self.selection_anchor = None;
+                    }
                     if self.selected_ids.is_empty() {
                         self.batch_confirm_open = false;
                     }
@@ -1459,6 +3643,49 @@ impl ClipboardView {
                             input.set_value(text, window, cx);
                             input.focus(window, cx);
                         });
+                        if self.preview_edit_requested {
+                            self.begin_preview_edit(window, cx);
+                        }
+                    }
+                    self.preview_edit_requested = false;
+                }
+            }
+            Event::HoverPreview {
+                id,
+                generation,
+                result,
+            } => {
+                if self.hover_preview.apply(id, generation, result)
+                    && self.hover_source_active
+                    && self.preview.id.is_none()
+                {
+                    self.open_hover_popup(window, cx);
+                }
+            }
+            Event::HoverPreviewSaved(result) => {
+                self.hover_preference_pending = false;
+                match result {
+                    Ok(preference) => {
+                        self.hover_preference = preference;
+                        self.close_hover_preview(cx);
+                        self.message = tr(
+                            self.language,
+                            "悬停预览设置已保存",
+                            "Hover preview preferences saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "悬停预览设置保存失败",
+                                "Failed to save hover preview preferences",
+                            )
+                        );
+                        self.is_error = true;
                     }
                 }
             }
@@ -1476,6 +3703,7 @@ impl ClipboardView {
                         self.preview.close();
                         self.preview_source_hash = None;
                         self.preview_editing = false;
+                        self.preview_edit_requested = false;
                         self.preview_input
                             .update(cx, |input, cx| input.set_value("", window, cx));
                         window.focus(&self.list_focus, cx);
@@ -1574,9 +3802,18 @@ impl ClipboardView {
             } => {
                 self.message = localize_service_message(self.language, message);
                 self.is_error = false;
+                if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
+                    sound::play(Sound::Copy);
+                }
                 if let Some((pending_id, target)) = self.paste_pending.take() {
                     if pending_id == id && for_paste {
-                        self.return_to_paste_target(target, clipboard_sequence, window, cx);
+                        self.return_to_paste_target(
+                            target,
+                            clipboard_sequence,
+                            Some(id),
+                            window,
+                            cx,
+                        );
                     } else {
                         self.paste_pending = Some((pending_id, target));
                     }
@@ -1589,11 +3826,14 @@ impl ClipboardView {
             } => {
                 self.batch_pending = false;
                 self.batch_confirm_open = false;
-                self.selected_ids.clear();
+                self.reset_selection();
+                if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
+                    sound::play(Sound::Copy);
+                }
                 let target = self.batch_paste_pending.take();
                 if for_paste {
                     if let Some(target) = target {
-                        self.return_to_paste_target(target, clipboard_sequence, window, cx);
+                        self.return_to_paste_target(target, clipboard_sequence, None, window, cx);
                     } else {
                         self.message = if self.language == LanguagePreference::English {
                             format!("Merged and copied {item_count} items; paste manually")
@@ -1615,6 +3855,7 @@ impl ClipboardView {
                 self.theme_pending = false;
                 match result {
                     Ok(theme) => {
+                        self.close_hover_preview(cx);
                         self.theme = theme;
                         apply_theme(theme, window, cx);
                         self.message = tr(
@@ -1638,6 +3879,7 @@ impl ClipboardView {
                 self.language_pending = false;
                 match result {
                     Ok(language) => {
+                        self.close_hover_preview(cx);
                         self.language = language;
                         self.search.update(cx, |input, cx| {
                             input.set_placeholder(
@@ -1733,6 +3975,501 @@ impl ClipboardView {
                     self.is_error = true;
                 }
             },
+            Event::PersistWindowSizeSaved(result) => {
+                self.persist_window_size_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.persist_window_size = enabled;
+                        self.last_window_size = None;
+                        if enabled {
+                            self.window_bounds_changed(window, cx);
+                        }
+                        self.message = tr(
+                            self.language,
+                            "窗口大小设置已保存",
+                            "Window size setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存窗口大小设置失败",
+                                "Failed to save window size setting"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::AutoResetStateSaved(result) => {
+                self.auto_reset_state_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.auto_reset_state = enabled;
+                        self.message = tr(
+                            self.language,
+                            "隐藏时重置设置已保存",
+                            "Reset-on-hide setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存隐藏设置失败",
+                                "Failed to save hide setting"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::SearchAutoFocusSaved(result) => {
+                self.search_auto_focus_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.search_auto_focus = enabled;
+                        self.message = tr(
+                            self.language,
+                            "搜索焦点设置已保存",
+                            "Search focus setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存搜索焦点失败",
+                                "Failed to save search focus"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::SearchAutoClearSaved(result) => {
+                self.search_auto_clear_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.search_auto_clear = enabled;
+                        self.message = tr(
+                            self.language,
+                            "搜索清空设置已保存",
+                            "Search clearing setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存搜索清空失败",
+                                "Failed to save search clearing"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::SkipClearConfirmSaved(result) => {
+                self.skip_clear_confirm_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.skip_clear_confirm = enabled;
+                        self.message = tr(
+                            self.language,
+                            "清理确认设置已保存",
+                            "Clear confirmation setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存清理确认设置失败",
+                                "Failed to save clear confirmation setting"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::PasteCloseWindowSaved(result) => {
+                self.paste_close_window_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.paste_close_window = enabled;
+                        self.message = tr(
+                            self.language,
+                            "粘贴后关闭窗口设置已保存",
+                            "Close-after-paste setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存粘贴后窗口行为失败",
+                                "Failed to save paste window behavior",
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::PasteKeySaved(result) => {
+                self.paste_key_pending = false;
+                match result {
+                    Ok(key) => {
+                        self.paste_key = key;
+                        self.message = tr(
+                            self.language,
+                            "粘贴按键设置已保存",
+                            "Paste key setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存粘贴按键失败",
+                                "Failed to save paste key"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::PasteMoveToTopSaved(result) => {
+                self.paste_move_to_top_pending = false;
+                match result {
+                    Ok(enabled) => {
+                        self.paste_move_to_top = enabled;
+                        self.message = tr(
+                            self.language,
+                            "粘贴后移到首位设置已保存",
+                            "Move-to-top-after-paste setting saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存粘贴后排序设置失败",
+                                "Failed to save paste sorting setting",
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::QuickPasteEnabledSaved(result) => {
+                self.quick_paste_pending_setting = false;
+                match result {
+                    Ok(enabled) => {
+                        self.quick_paste_enabled = enabled;
+                        if let Some(warning) = self.quick_paste_registration_warning.take() {
+                            self.message = warning;
+                            self.is_error = true;
+                        } else {
+                            self.message = tr(
+                                self.language,
+                                "快速粘贴快捷键设置已保存",
+                                "Quick paste shortcuts setting saved",
+                            )
+                            .into();
+                            self.is_error = false;
+                        }
+                    }
+                    Err(error) => {
+                        self.quick_paste_registration_warning = None;
+                        if self.quick_paste_enabled && self.paste_hotkeys.is_none() {
+                            if let Ok((hotkeys, _)) = PasteHotkeys::start(
+                                self.paste_hotkey_sender.clone(),
+                                &self.paste_shortcuts,
+                                self.hotkey_choice,
+                            ) {
+                                self.paste_hotkeys = Some(hotkeys);
+                            }
+                        } else if !self.quick_paste_enabled {
+                            self.paste_hotkeys = None;
+                        }
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存快速粘贴快捷键设置失败",
+                                "Failed to save quick paste shortcuts setting",
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::PasteShortcutsSaved(result) => {
+                let Some(previous) = self.paste_shortcuts_pending.take() else {
+                    return;
+                };
+                match result {
+                    Ok(shortcuts) => {
+                        self.paste_shortcuts = *shortcuts;
+                        if let Some(warning) = self.quick_paste_registration_warning.take() {
+                            self.message = warning;
+                            self.is_error = true;
+                        } else {
+                            self.message = tr(
+                                self.language,
+                                "快速粘贴槽位快捷键已保存",
+                                "Quick paste slot shortcut saved",
+                            )
+                            .into();
+                            self.is_error = false;
+                        }
+                        self.paste_shortcut_status = Some((self.message.clone(), self.is_error));
+                    }
+                    Err(error) => {
+                        self.paste_shortcuts = previous;
+                        self.paste_hotkeys = None;
+                        self.quick_paste_registration_warning = None;
+                        let restore_error = self.restore_paste_hotkeys();
+                        self.message = error;
+                        if let Some(error) = restore_error {
+                            self.message.push_str(&format!("; {error}"));
+                        }
+                        self.is_error = true;
+                        self.paste_shortcut_status = Some((self.message.clone(), true));
+                    }
+                }
+            }
+            Event::QuickPasteResolved {
+                slot,
+                favorite,
+                result,
+            } => {
+                let Some((pending_slot, pending_favorite, target)) =
+                    self.quick_paste_pending.take()
+                else {
+                    return;
+                };
+                if slot != pending_slot || favorite != pending_favorite {
+                    self.quick_paste_pending = Some((pending_slot, pending_favorite, target));
+                    return;
+                }
+                match result {
+                    Ok(id) if paste::is_external_target(window, target) => {
+                        if self.send(Command::CopyForPaste(id), cx) {
+                            self.paste_pending = Some((id, target));
+                        }
+                    }
+                    Ok(_) => {
+                        self.message = tr(
+                            self.language,
+                            "目标窗口已变化，快速粘贴已取消",
+                            "Target window changed; quick paste was canceled",
+                        )
+                        .into();
+                        self.is_error = true;
+                    }
+                    Err(error) => {
+                        self.message = error;
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::ToolbarSaved(result) => {
+                self.toolbar_pending = false;
+                match result {
+                    Ok(toolbar) => {
+                        self.toolbar = toolbar;
+                        self.message =
+                            tr(self.language, "工具栏设置已保存", "Toolbar saved").into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(self.language, "保存工具栏失败", "Failed to save toolbar")
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::DisplaySaved(result) => {
+                self.display_pending = false;
+                match result {
+                    Ok(display) => {
+                        self.display = display;
+                        if !display.show_category_filter {
+                            self.select_category(Some(ContentCategory::All), window, cx);
+                        }
+                        self.message =
+                            tr(self.language, "显示设置已保存", "Display settings saved").into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存显示设置失败",
+                                "Failed to save display settings"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::AudioSaved(result) => {
+                self.audio_pending = false;
+                match result {
+                    Ok(audio) => {
+                        self.audio = audio;
+                        self.message =
+                            tr(self.language, "音效设置已保存", "Audio settings saved").into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存音效设置失败",
+                                "Failed to save audio settings"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::MonitorTypesSaved(result) => {
+                self.monitor_types_pending = false;
+                match result {
+                    Ok(preference) => {
+                        self.monitor_types = preference;
+                        self.message =
+                            tr(self.language, "监听类型已保存", "Capture types saved").into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存监听类型失败",
+                                "Failed to save capture types"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::AppFilterSaved(result) => {
+                self.app_filter_pending = false;
+                match result {
+                    Ok(preference) => {
+                        self.app_filter = *preference;
+                        self.message =
+                            tr(self.language, "应用过滤设置已保存", "App filter saved").into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存应用过滤失败",
+                                "Failed to save app filter"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::RunningApps(apps) => {
+                self.running_apps_pending = false;
+                self.running_apps = apps;
+            }
+            Event::OnboardingCompleted(result) => {
+                self.onboarding_pending = false;
+                match result {
+                    Ok(()) => {
+                        self.onboarding_completed = true;
+                        self.message = tr(
+                            self.language,
+                            "欢迎使用 ElegantClipboard",
+                            "Welcome to ElegantClipboard",
+                        )
+                        .into();
+                        self.is_error = false;
+                        if self.search_auto_focus {
+                            self.search.update(cx, |input, cx| input.focus(window, cx));
+                        } else {
+                            window.focus(&self.list_focus, cx);
+                        }
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存引导状态失败",
+                                "Failed to save onboarding state"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Event::WindowPositionSaved(result) => {
+                self.window_position_pending = false;
+                match result {
+                    Ok(position) => {
+                        self.window_position = position;
+                        self.message = tr(
+                            self.language,
+                            "窗口唤出位置已保存",
+                            "Window position mode saved",
+                        )
+                        .into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存窗口位置失败",
+                                "Failed to save window position"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
             Event::AutostartSaved(result) => {
                 self.autostart_pending = false;
                 match result {
@@ -1915,6 +4652,8 @@ impl ClipboardView {
     }
 
     fn open_preview(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
+        self.close_hover_preview(cx);
         self.history.selected = Some(id);
         self.preview_source_hash = self
             .history
@@ -1923,7 +4662,9 @@ impl ClipboardView {
             .find(|item| item.id == id)
             .map(|item| item.content_hash.clone());
         self.preview_editing = false;
+        self.preview_edit_requested = false;
         self.preview_save_pending = false;
+        self.image_zoom_percent = 100;
         let generation = self.preview.open(id);
         self.preview_input
             .update(cx, |input, cx| input.set_value("", window, cx));
@@ -1932,6 +4673,11 @@ impl ClipboardView {
                 .apply(id, generation, Err(self.message.clone()));
         }
         cx.notify();
+    }
+
+    fn open_preview_for_edit(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_preview(id, window, cx);
+        self.preview_edit_requested = true;
     }
 
     fn close_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1956,6 +4702,8 @@ impl ClipboardView {
         }
         self.preview.close();
         self.preview_source_hash = None;
+        self.preview_edit_requested = false;
+        self.image_zoom_percent = 100;
         self.preview_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         window.focus(&self.list_focus, cx);
@@ -1974,6 +4722,220 @@ impl ClipboardView {
                 .update(cx, |input, cx| input.focus(window, cx));
             cx.notify();
         }
+    }
+
+    fn zoom_image(&mut self, change: i16, cx: &mut Context<Self>) {
+        if !matches!(self.preview.result, Some(Ok(PreviewContent::Image(_)))) {
+            return;
+        }
+        let next = (i32::from(self.image_zoom_percent) + i32::from(change)).clamp(50, 400) as u16;
+        if next != self.image_zoom_percent {
+            self.image_zoom_percent = next;
+            cx.notify();
+        }
+    }
+
+    fn close_hover_preview(&mut self, cx: &mut Context<Self>) {
+        self.hover_task = None;
+        self.hover_close_task = None;
+        self.hover_preview.close();
+        self.hover_popup_opening = None;
+        self.hover_source_active = false;
+        self.hover_popup_active = false;
+        if let Some(handle) = self.hover_popup.take() {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+        cx.notify();
+    }
+
+    fn schedule_hover_close(&mut self, cx: &mut Context<Self>) {
+        self.hover_close_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(180))
+                .await;
+            let _ = view.update(cx, |this, cx| {
+                if !this.hover_source_active && !this.hover_popup_active {
+                    this.close_hover_preview(cx);
+                }
+            });
+        }));
+    }
+
+    fn set_hover_source(&mut self, id: i64, entered: bool, cx: &mut Context<Self>) {
+        if entered {
+            if self.batch_mode
+                || self.history.loading
+                || self.preview.id.is_some()
+                || self.pending_row_click.is_some()
+            {
+                return;
+            }
+            let Some(item) = self.history.items.iter().find(|item| item.id == id) else {
+                return;
+            };
+            if !self.hover_preference.allows(&item.content_type) {
+                if self.hover_preview.id.is_some() {
+                    self.close_hover_preview(cx);
+                }
+                return;
+            }
+            if self.hover_preview.id != Some(id) {
+                self.close_hover_preview(cx);
+                let generation = self.hover_preview.open(id);
+                let delay = self.hover_preference.delay_ms;
+                self.hover_task = Some(cx.spawn(async move |view, cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(u64::from(delay)))
+                        .await;
+                    let _ = view.update(cx, |this, cx| {
+                        if this.hover_preview.id == Some(id)
+                            && this.hover_preview.generation == generation
+                            && this.hover_source_active
+                        {
+                            this.send(Command::HoverPreview { id, generation }, cx);
+                        }
+                    });
+                }));
+            }
+            self.hover_source_active = true;
+            self.hover_close_task = None;
+        } else if self.hover_preview.id == Some(id) {
+            self.hover_source_active = false;
+            self.schedule_hover_close(cx);
+        }
+    }
+
+    fn set_hover_popup_active(
+        &mut self,
+        id: i64,
+        generation: u64,
+        entered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.hover_preview.id != Some(id) || self.hover_preview.generation != generation {
+            return;
+        }
+        self.hover_popup_active = entered;
+        if entered {
+            self.hover_close_task = None;
+        } else if !self.hover_source_active {
+            self.schedule_hover_close(cx);
+        }
+    }
+
+    fn save_hover_preference(
+        &mut self,
+        preference: HoverPreviewPreference,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.hover_preference_pending
+            && self.hover_preference != preference
+            && self.send(Command::SetHoverPreview(preference), cx)
+        {
+            self.hover_preference_pending = true;
+            cx.notify();
+        }
+    }
+
+    fn open_hover_popup(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.hover_popup.is_some()
+            || self.hover_popup_opening.is_some()
+            || !self.hover_source_active
+        {
+            return;
+        }
+        let (Some(id), Some(result)) = (self.hover_preview.id, self.hover_preview.result.clone())
+        else {
+            return;
+        };
+        let generation = self.hover_preview.generation;
+        let screen = window.display(cx).map(|display| display.bounds());
+        let image_dimensions = (self.hover_preference.expanded_image
+            && matches!(&result, Ok(PreviewContent::Image(_))))
+        .then(|| {
+            self.history
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .and_then(|item| Some((item.image_width?, item.image_height?)))
+        })
+        .flatten();
+        let bounds = position::hover_popup_bounds(
+            point(
+                window.bounds().origin.x + window.mouse_position().x,
+                window.bounds().origin.y + window.mouse_position().y,
+            ),
+            screen.unwrap_or_else(|| window.bounds()),
+            self.hover_preference.position,
+            image_dimensions,
+        );
+        let theme = self.theme;
+        let language = self.language;
+        let zoom_step = self.hover_preference.zoom_step;
+        self.hover_popup_opening = Some((id, generation));
+        cx.spawn(async move |owner, cx| {
+            let Some(owner_entity) = owner.upgrade() else {
+                return;
+            };
+            let valid = owner_entity.update(cx, |this, _| {
+                this.hover_preview.id == Some(id)
+                    && this.hover_preview.generation == generation
+                    && (this.hover_source_active || this.hover_popup_active)
+            });
+            if !valid {
+                owner_entity.update(cx, |this, _| {
+                    if this.hover_popup_opening == Some((id, generation)) {
+                        this.hover_popup_opening = None;
+                    }
+                });
+                return;
+            }
+            let popup_owner = owner.clone();
+            let opened = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: None,
+                    kind: WindowKind::PopUp,
+                    focus: false,
+                    show: true,
+                    is_movable: false,
+                    is_resizable: false,
+                    app_id: Some("com.aslant.elegant-clipboard-gpui.hover".into()),
+                    ..Default::default()
+                },
+                move |window, cx| {
+                    apply_theme(theme, window, cx);
+                    let view = cx.new(|cx| {
+                        HoverPreviewWindowView::new(
+                            popup_owner.clone(),
+                            (id, generation),
+                            language,
+                            result,
+                            zoom_step,
+                            window,
+                            cx,
+                        )
+                    });
+                    cx.new(|cx| Root::new(view, window, cx))
+                },
+            );
+            owner_entity.update(cx, |this, cx| {
+                if this.hover_popup_opening == Some((id, generation)) {
+                    this.hover_popup_opening = None;
+                }
+                if let Ok(handle) = opened {
+                    if this.hover_preview.id == Some(id)
+                        && this.hover_preview.generation == generation
+                        && (this.hover_source_active || this.hover_popup_active)
+                    {
+                        this.hover_popup = Some(handle.into());
+                    } else {
+                        let _ = handle.update(cx, |_, window, _| window.remove_window());
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     fn save_preview_edit(&mut self, cx: &mut Context<Self>) {
@@ -2012,6 +4974,26 @@ impl ClipboardView {
             .flex_col()
             .gap_2()
             .overflow_y_scrollbar()
+            .when_some(single_file_image_path(entries), |body, path| {
+                let unavailable = tr(self.language, "图片无法显示", "Image unavailable");
+                body.child(
+                    div()
+                        .w_full()
+                        .h(px(260.))
+                        .flex_none()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(cx.theme().border)
+                        .bg(cx.theme().muted)
+                        .overflow_hidden()
+                        .child(
+                            img(path)
+                                .size_full()
+                                .object_fit(ObjectFit::Contain)
+                                .with_fallback(move || div().child(unavailable).into_any_element()),
+                        ),
+                )
+            })
             .children(entries.iter().enumerate().map(|(index, entry)| {
                 let name = std::path::Path::new(&entry.original_path)
                     .file_name()
@@ -2251,16 +5233,36 @@ impl ClipboardView {
             }
             Some(Ok(PreviewContent::Files(entries))) => self.render_file_preview(entries, cx),
             Some(Ok(PreviewContent::Image(path))) => div()
-                .flex()
-                .items_center()
-                .justify_center()
+                .id("image-preview-viewport")
                 .size_full()
-                .overflow_hidden()
+                .overflow_scroll()
+                .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                    if event.modifiers.control {
+                        let delta = event.delta.pixel_delta(window.line_height()).y;
+                        if delta > px(0.) {
+                            this.zoom_image(10, cx);
+                        } else if delta < px(0.) {
+                            this.zoom_image(-10, cx);
+                        }
+                        cx.stop_propagation();
+                    }
+                }))
+                .when(self.image_zoom_percent <= 100, |viewport| {
+                    viewport.flex().items_center().justify_center()
+                })
                 .child(
-                    img(path.clone())
-                        .size_full()
-                        .object_fit(ObjectFit::Contain)
-                        .with_fallback(move || div().child(image_unavailable).into_any_element()),
+                    div()
+                        .w(relative(f32::from(self.image_zoom_percent) / 100.0))
+                        .h(relative(f32::from(self.image_zoom_percent) / 100.0))
+                        .flex_none()
+                        .child(
+                            img(path.clone())
+                                .size_full()
+                                .object_fit(ObjectFit::Contain)
+                                .with_fallback(move || {
+                                    div().child(image_unavailable).into_any_element()
+                                }),
+                        ),
                 )
                 .into_any_element(),
             _ => div().into_any_element(),
@@ -2327,6 +5329,60 @@ impl ClipboardView {
                     .flex_wrap()
                     .justify_end()
                     .gap_2()
+                    .when(image, |bar| {
+                        bar.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(
+                                    Button::new("image-zoom-out")
+                                        .small()
+                                        .outline()
+                                        .label("−")
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "缩小图片",
+                                            "Zoom out",
+                                        ))
+                                        .disabled(self.image_zoom_percent <= 50)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.zoom_image(-10, cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new("image-zoom-reset")
+                                        .small()
+                                        .ghost()
+                                        .label(format!("{}%", self.image_zoom_percent))
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "重置图片缩放",
+                                            "Reset zoom",
+                                        ))
+                                        .disabled(self.image_zoom_percent == 100)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.image_zoom_percent = 100;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new("image-zoom-in")
+                                        .small()
+                                        .outline()
+                                        .label("+")
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "放大图片",
+                                            "Zoom in",
+                                        ))
+                                        .disabled(self.image_zoom_percent >= 400)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.zoom_image(10, cx);
+                                        })),
+                                ),
+                        )
+                    })
                     .when(!self.preview_editing && editable, |bar| {
                         bar.child(
                             Button::new("preview-edit")
@@ -2341,10 +5397,14 @@ impl ClipboardView {
                         bar.child(
                             Button::new("preview-copy-plain")
                                 .outline()
-                                .label(tr(self.language, "复制纯文本", "Copy plain text"))
-                                .disabled(!ready)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.send(Command::CopyPlainText(id), cx);
+                                .label(if self.paste_target.is_some() {
+                                    tr(self.language, "粘贴纯文本", "Paste plain text")
+                                } else {
+                                    tr(self.language, "复制纯文本", "Copy plain text")
+                                })
+                                .disabled(!ready || self.paste_pending.is_some())
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.copy_or_paste_plain_text(id, window, cx);
                                 })),
                         )
                     })
@@ -2448,13 +5508,34 @@ impl ClipboardView {
     }
 
     fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
         if let Some(index) = self.history.select_relative(direction) {
             self.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
         }
         cx.notify();
     }
 
+    fn select_previous_or_focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.items.first().map(|item| item.id) == self.history.selected
+            && self.history.selected.is_some()
+        {
+            self.search
+                .update(cx, |search, cx| search.focus(window, cx));
+        } else {
+            self.select(-1, cx);
+        }
+    }
+
+    fn focus_first_history_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.loading || self.history.items.is_empty() {
+            return;
+        }
+        self.select_index(0, ScrollStrategy::Top, cx);
+        window.focus(&self.list_focus, cx);
+    }
+
     fn select_index(&mut self, index: usize, strategy: ScrollStrategy, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
         if let Some(index) = self.history.select_index(index) {
             self.scroll.scroll_to_item(index, strategy);
         }
@@ -2467,7 +5548,9 @@ impl ClipboardView {
             .borrow()
             .last_item_size
             .map(|size| {
-                ((f32::from(size.item.height) / ROW_HEIGHT).floor() as usize)
+                ((f32::from(size.item.height)
+                    / visual::row_height(self.display.card_density, self.display.card_max_lines))
+                .floor() as usize)
                     .saturating_sub(1)
                     .max(1) as isize
             })
@@ -2475,6 +5558,7 @@ impl ClipboardView {
     }
 
     fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
         let Some(target) = self.paste_target else {
             self.message = tr(
                 self.language,
@@ -2511,7 +5595,39 @@ impl ClipboardView {
         }
     }
 
+    fn copy_or_paste_plain_text(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
+        if self.paste_pending.is_some() {
+            return;
+        }
+        let target = self
+            .paste_target
+            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
+        if self.paste_target.is_some() && target.is_none() {
+            self.paste_target = None;
+        }
+        let command = if target.is_some() {
+            Command::CopyPlainTextForPaste(id)
+        } else {
+            Command::CopyPlainText(id)
+        };
+        if self.send(command, cx)
+            && let Some(target) = target
+        {
+            self.paste_pending = Some((id, target));
+            self.message = tr(
+                self.language,
+                "正在复制纯文本并返回原窗口…",
+                "Copying plain text and returning to the previous window…",
+            )
+            .into();
+            self.is_error = false;
+            cx.notify();
+        }
+    }
+
     fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
+        self.cancel_pending_row_click();
         if self.paste_pending.is_some() {
             return;
         }
@@ -2545,6 +5661,7 @@ impl ClipboardView {
         &mut self,
         target: (isize, u32),
         clipboard_sequence: u32,
+        pasted_id: Option<i64>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2558,8 +5675,10 @@ impl ClipboardView {
             self.is_error = true;
             return;
         }
-        let hide_window = !self.window_pinned;
+        let hide_window = should_hide_after_paste(self.paste_close_window, self.window_pinned)
+            && tray::is_window_shown(window);
         if hide_window {
+            self.prepare_to_hide(window, cx);
             tray::set_window_visible(window, false);
         }
         cx.spawn_in(window, async move |view, cx| {
@@ -2567,8 +5686,14 @@ impl ClipboardView {
                 .timer(Duration::from_millis(60))
                 .await;
             let _ = view.update_in(cx, |this, window, cx| {
-                match paste::send_to_target(target, clipboard_sequence) {
+                if sound::enabled(this.audio, Sound::Paste, SoundTiming::Immediate) {
+                    sound::play(Sound::Paste);
+                }
+                match paste::send_to_target(target, clipboard_sequence, this.paste_key) {
                     Ok(()) => {
+                        if sound::enabled(this.audio, Sound::Paste, SoundTiming::AfterSuccess) {
+                            sound::play(Sound::Paste);
+                        }
                         this.message = tr(
                             this.language,
                             "已发送粘贴快捷键，请检查目标应用",
@@ -2576,10 +5701,13 @@ impl ClipboardView {
                         )
                         .into();
                         this.is_error = false;
+                        if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top) {
+                            this.send(Command::BumpToTop(id), cx);
+                        }
                     }
                     Err(error) => {
                         if hide_window {
-                            tray::set_window_visible(window, true);
+                            this.show_window(window, cx);
                         }
                         this.message = error.to_string();
                         this.is_error = true;
@@ -2902,11 +6030,108 @@ impl ClipboardView {
         }
     }
 
+    fn refresh_file_card_info(&mut self, cx: &mut Context<Self>) {
+        let loaded_paths: HashMap<_, _> = self
+            .history
+            .items
+            .iter()
+            .filter(|item| item.content_type == "files")
+            .map(|item| (item.id, item.file_paths.as_deref().unwrap_or_default()))
+            .collect();
+        self.file_card_checked
+            .retain(|id, raw| loaded_paths.get(id).is_some_and(|current| *current == raw));
+        self.file_card_info
+            .retain(|id, _| self.file_card_checked.contains_key(id));
+        let candidates: Vec<_> = self
+            .history
+            .items
+            .iter()
+            .filter(|item| {
+                item.content_type == "files" && !self.file_card_checked.contains_key(&item.id)
+            })
+            .map(|item| (item.id, item.file_paths.clone().unwrap_or_default()))
+            .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        self.file_card_checked.extend(candidates.iter().cloned());
+        let (sender, receiver) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let (local, network): (Vec<_>, Vec<_>) =
+                candidates.into_iter().partition(|(_, raw)| {
+                    !serde_json::from_str::<Vec<String>>(raw)
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|path| path.starts_with(r"\\"))
+                });
+            let local_results: Vec<_> = local
+                .into_iter()
+                .map(|(id, raw)| (id, raw.clone(), inspect_file_card(&raw)))
+                .collect();
+            if !local_results.is_empty() && sender.send_blocking(local_results).is_err() {
+                return;
+            }
+            for (id, raw) in network {
+                let result = (id, raw.clone(), inspect_file_card(&raw));
+                if sender.send_blocking(vec![result]).is_err() {
+                    return;
+                }
+            }
+        });
+        cx.spawn(async move |view, cx| {
+            while let Ok(results) = receiver.recv().await {
+                let _ = view.update(cx, |this, cx| {
+                    let mut changed = false;
+                    for (id, source, info) in results {
+                        if this.history.items.iter().any(|item| {
+                            item.id == id
+                                && item.content_type == "files"
+                                && item.file_paths.as_deref().unwrap_or_default() == source
+                        }) {
+                            this.file_card_info.insert(id, info);
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
     fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let item = &self.history.items[index];
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
+        let file_info = self.file_card_info.get(&id);
+        let thumbnail_path = if is_image {
+            item.image_path.as_ref().map(PathBuf::from)
+        } else {
+            file_info.and_then(|info| info.image_path.clone())
+        };
+        let show_file_icon = is_files && thumbnail_path.is_none();
+        let file_warning = file_info.and_then(|info| match info.availability {
+            FileCardAvailability::Available => None,
+            FileCardAvailability::Missing => {
+                Some(tr(self.language, "源文件已失效", "Source file missing"))
+            }
+            FileCardAvailability::Unreadable => {
+                Some(tr(self.language, "文件无法读取", "File unreadable"))
+            }
+        });
+        let file_icon = if file_warning.is_some() {
+            IconName::TriangleAlert
+        } else if file_info
+            .is_some_and(|info| matches!(info.kind, FileCardKind::Folder | FileCardKind::Multiple))
+        {
+            IconName::Folder
+        } else {
+            IconName::File
+        };
+        let image_too_large = file_info.is_some_and(|info| info.image_too_large);
         let image_unavailable = tr(self.language, "无法显示", "Cannot display");
         let kind = match item.content_type.as_str() {
             "image" => tr(self.language, "图片", "Image"),
@@ -2916,10 +6141,11 @@ impl ClipboardView {
             "url" => tr(self.language, "网址", "URL"),
             _ => tr(self.language, "文本", "Text"),
         };
+        let pinned = item.is_pinned;
         let detail = if is_image {
             match (item.image_width, item.image_height) {
-                (Some(width), Some(height)) => format!("{width} × {height}"),
-                _ => tr(self.language, "尺寸未知", "Unknown size").into(),
+                (Some(width), Some(height)) => Some(format!("{width} × {height}")),
+                _ => Some(tr(self.language, "尺寸未知", "Unknown size").into()),
             }
         } else if is_files {
             let count = item
@@ -2928,24 +6154,118 @@ impl ClipboardView {
                 .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
                 .map_or(0, |paths| paths.len());
             if count == 0 {
-                tr(self.language, "路径不可用", "Paths unavailable").into()
+                Some(tr(self.language, "路径不可用", "Paths unavailable").into())
             } else if self.language == LanguagePreference::English {
-                format!("{count} items")
+                Some(format!("{count} items"))
             } else {
-                format!("{count} 项")
+                Some(format!("{count} 项"))
             }
+        } else if !self.display.show_char_count {
+            None
         } else if matches!(item.content_type.as_str(), "html" | "rtf") && item.char_count.is_none()
         {
-            tr(self.language, "纯文本未知", "Plain text unavailable").into()
+            Some(tr(self.language, "纯文本未知", "Plain text unavailable").into())
         } else if self.language == LanguagePreference::English {
-            format!("{} characters", item.char_count.unwrap_or(0))
+            Some(format!("{} characters", item.char_count.unwrap_or(0)))
         } else {
-            format!("{} 字符", item.char_count.unwrap_or(0))
+            Some(format!("{} 字符", item.char_count.unwrap_or(0)))
         };
-        let selected = self.history.selected == Some(id);
+        let mut summary = if pinned {
+            format!("{} · {kind}", tr(self.language, "置顶", "Pinned"))
+        } else {
+            kind.to_owned()
+        };
+        let source_icon = item
+            .source_app_icon
+            .as_deref()
+            .filter(|path| !path.is_empty());
+        let (show_source_name, show_source_icon) = if self.display.show_source_app {
+            source_app_parts(self.display.source_app_display, source_icon.is_some())
+        } else {
+            (false, false)
+        };
+        if show_source_name
+            && let Some(name) = item
+                .source_app_name
+                .as_deref()
+                .filter(|name| !name.is_empty())
+        {
+            summary.push_str(" · ");
+            summary.push_str(name);
+        }
+        if let Some(detail) = detail {
+            summary.push_str(" · ");
+            summary.push_str(&detail);
+        }
+        if self.display.show_byte_size {
+            let size = if is_files {
+                file_info.and_then(|info| info.total_size)
+            } else {
+                Some(item.byte_size.max(0) as u64)
+            };
+            if let Some(size) = size {
+                summary.push_str(" · ");
+                summary.push_str(&format_bytes(size));
+            }
+        }
+        if let Some(warning) = file_warning {
+            summary.push_str(" · ");
+            summary.push_str(warning);
+        } else if image_too_large {
+            summary.push_str(" · ");
+            summary.push_str(tr(self.language, "图片过大", "Image too large"));
+        }
+        let selected = !self.batch_mode && self.history.selected == Some(id);
         let marked = self.selected_ids.contains(&id);
-        let pinned = item.is_pinned;
         let favorite = item.is_favorite;
+        let saved_preview = item.preview.as_deref().unwrap_or(kind);
+        let search = self.search.read(cx).value();
+        let file_names = is_files
+            .then_some(item.file_paths.as_deref())
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+            .filter(|paths| paths.len() > 1)
+            .map(|paths| {
+                let mut names = paths
+                    .iter()
+                    .take(3)
+                    .map(|path| {
+                        Path::new(path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.clone())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(if self.language == LanguagePreference::Chinese {
+                        "、"
+                    } else {
+                        ", "
+                    });
+                if paths.len() > 3 {
+                    names.push('…');
+                }
+                names
+            });
+        let preview_text = file_names.unwrap_or_else(|| {
+            item.text_content
+                .as_deref()
+                .and_then(|full| search_excerpt(full, saved_preview, &search))
+                .unwrap_or_else(|| saved_preview.to_owned())
+        });
+        let highlights = search_highlight_ranges(&preview_text, &search)
+            .into_iter()
+            .map(|range| {
+                (
+                    range,
+                    HighlightStyle {
+                        color: Some(cx.theme().primary),
+                        background_color: Some(cx.theme().primary.opacity(0.18)),
+                        font_weight: Some(FontWeight::SEMIBOLD),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
         let drag = HistoryDrag {
             id,
             pinned,
@@ -2956,7 +6276,10 @@ impl ClipboardView {
             preview: item.preview.clone().unwrap_or_else(|| kind.to_owned()),
             language: self.language,
         };
-        let entity = cx.entity();
+        let left_drag_entity = cx.entity();
+        let right_drag_entity = cx.entity();
+        let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
+        let show_drag_area_indicator = self.display.show_drag_area_indicator;
         let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
         let live_offset = active_drop
             .filter(|target| target.allowed)
@@ -2973,20 +6296,18 @@ impl ClipboardView {
         } else {
             cx.theme().background
         };
+        let card_spacing = visual::card_spacing(self.display.card_density);
+        let (thumbnail_width, thumbnail_height) = visual::thumbnail_size(self.display.card_density);
         let row = div()
             .id(("history-row", id as usize))
-            .when(!self.reorder_pending && !self.history.loading, |row| {
-                row.on_drag(drag.clone(), move |drag, _, _, cx| {
-                    entity.update(cx, |this, cx| {
-                        this.history.selected = Some(drag.id);
-                        this.drop_target = None;
-                        this.start_history_drag_scroll(cx);
-                        cx.notify();
-                    });
-                    cx.new(|_| drag.clone())
-                })
-            })
-            .h(px(ROW_HEIGHT))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _, _, _| this.cancel_pending_row_click()),
+            )
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                this.set_hover_source(id, *hovered, cx);
+            }))
+            .h(px(visual::row_height(self.display.card_density, self.display.card_max_lines)))
             .px(px(PAGE_PADDING))
             .on_drag_move(
                 cx.listener(move |this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
@@ -3054,18 +6375,19 @@ impl ClipboardView {
                 this.history_drag_direction = 0;
                 cx.notify();
             }))
-            .py_1()
-            .cursor_grab()
-            .on_click(cx.listener(move |this, _, window, cx| {
-                this.history.selected = Some(id);
-                window.focus(&this.list_focus, cx);
-                cx.notify();
+            .py(px(card_spacing))
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                if cx.has_active_drag() {
+                    return;
+                }
+                this.handle_row_click(id, event, window, cx);
             }))
             .child(
                 div()
                     .h_full()
-                    .px_3()
-                    .py_1()
+                    .when(self.batch_mode, |card| card.px_3())
+                    .when(!self.batch_mode, |card| card.pl(px(38.)).pr(px(38.)))
+                    .py(px(card_spacing))
                     .rounded_md()
                     .border_1()
                     .border_color(match active_drop.filter(|target| target.id == id) {
@@ -3104,7 +6426,7 @@ impl ClipboardView {
                     })
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap(px(card_spacing))
                     .child(
                         div()
                             .flex()
@@ -3114,7 +6436,14 @@ impl ClipboardView {
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
+                                    .text_color(if file_warning.is_some() {
+                                        cx.theme().danger
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
                                     .flex()
                                     .items_center()
                                     .gap_1()
@@ -3123,16 +6452,19 @@ impl ClipboardView {
                                             .xsmall()
                                             .text_color(cx.theme().muted_foreground),
                                     )
-                                    .child(format!(
-                                        "{}{} · {}",
-                                        if pinned {
-                                            tr(self.language, "置顶 · ", "Pinned · ")
-                                        } else {
-                                            ""
+                                    .when_some(
+                                        show_source_icon.then_some(source_icon).flatten(),
+                                        |header, path| {
+                                            header.child(
+                                                img(std::path::PathBuf::from(path))
+                                                    .w(px(16.))
+                                                    .h(px(16.))
+                                                    .object_fit(ObjectFit::Contain)
+                                                    .with_fallback(|| div().into_any_element()),
+                                            )
                                         },
-                                        kind,
-                                        detail
-                                    )),
+                                    )
+                                    .child(summary),
                             )
                             .child(
                                 div()
@@ -3141,9 +6473,13 @@ impl ClipboardView {
                                     .gap_2()
                                     .child(
                                         div()
-                                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                                cx.stop_propagation()
-                                            })
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(|this, _, _, cx| {
+                                                    this.cancel_pending_row_click();
+                                                    cx.stop_propagation();
+                                                }),
+                                            )
                                             .child(
                                                 Button::new(("select", id as usize))
                                                     .ghost()
@@ -3151,9 +6487,9 @@ impl ClipboardView {
                                                     .h(px(24.))
                                                     .icon(IconName::Check)
                                                     .tooltip(if marked {
-                                                        tr(self.language, "取消选择", "Deselect")
+                                                        tr(self.language, "取消选择；Shift 点击可连选", "Deselect; Shift-click to select a range")
                                                     } else {
-                                                        tr(self.language, "选择", "Select")
+                                                        tr(self.language, "选择；Shift 点击可连选", "Select; Shift-click to select a range")
                                                     })
                                                     .accessibility_label(if marked {
                                                         tr(self.language, "取消选择", "Deselect")
@@ -3165,19 +6501,30 @@ impl ClipboardView {
                                                         self.batch_pending || self.history.loading,
                                                     )
                                                     .on_click(cx.listener(
-                                                        move |this, _, _, cx| {
+                                                        move |this, event: &ClickEvent, _, cx| {
                                                             cx.stop_propagation();
-                                                            this.toggle_selection(id, cx);
+                                                            this.toggle_selection(
+                                                                id,
+                                                                event.modifiers().shift,
+                                                                cx,
+                                                            );
                                                         },
                                                     )),
                                             ),
                                     )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(item.created_at.clone()),
-                                    ),
+                                    .when(self.display.show_time, |header| {
+                                        header.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(format_card_time(
+                                                    &item.created_at,
+                                                    self.display.time_format,
+                                                    self.language,
+                                                    chrono::Local::now().naive_local(),
+                                                )),
+                                        )
+                                    }),
                             ),
                     )
                     .child(
@@ -3188,21 +6535,45 @@ impl ClipboardView {
                             .rounded_sm()
                             .bg(cx.theme().muted)
                             .px_2()
-                            .py_1()
+                            .py(px(card_spacing))
                             .flex()
                             .items_center()
                             .gap_3()
-                            .when(is_image, |body| {
+                            .when(show_file_icon, |body| {
                                 body.child(
                                     div()
-                                        .w(px(visual::THUMBNAIL_WIDTH))
-                                        .h(px(visual::THUMBNAIL_HEIGHT))
+                                        .w(px(thumbnail_width))
+                                        .h(px(thumbnail_height))
+                                        .flex_none()
+                                        .rounded_sm()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .bg(if file_warning.is_some() {
+                                            cx.theme().danger.opacity(0.12)
+                                        } else {
+                                            cx.theme().primary.opacity(0.12)
+                                        })
+                                        .child(Icon::new(file_icon).large().text_color(
+                                            if file_warning.is_some() {
+                                                cx.theme().danger
+                                            } else {
+                                                cx.theme().primary
+                                            },
+                                        )),
+                                )
+                            })
+                            .when(thumbnail_path.is_some(), |body| {
+                                body.child(
+                                    div()
+                                        .w(px(thumbnail_width))
+                                        .h(px(thumbnail_height))
                                         .flex_none()
                                         .rounded_sm()
                                         .overflow_hidden()
-                                        .when_some(item.image_path.as_ref(), |box_, path| {
+                                        .when_some(thumbnail_path, |box_, path| {
                                             box_.child(
-                                                img(std::path::PathBuf::from(path))
+                                                img(path)
                                                     .size_full()
                                                     .object_fit(ObjectFit::Contain)
                                                     .with_fallback(move || {
@@ -3219,20 +6590,31 @@ impl ClipboardView {
                                     .flex_1()
                                     .min_w_0()
                                     .text_sm()
+                                    .text_color(if file_warning.is_some() {
+                                        cx.theme().danger
+                                    } else {
+                                        cx.theme().foreground
+                                    })
                                     .line_height(px(20.))
-                                    .line_clamp(2)
+                                    .line_clamp(self.display.card_max_lines as usize)
                                     .text_ellipsis()
-                                    .child(item.preview.clone().unwrap_or_else(|| kind.into())),
+                                    .child(StyledText::new(preview_text).with_highlights(highlights)),
                             ),
                     )
-                    .child(
+                    .when(!self.batch_mode, |card| card.child(
                         div()
                             .flex()
                             .flex_none()
                             .items_center()
                             .gap_1()
                             .justify_end()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.cancel_pending_row_click();
+                                    cx.stop_propagation();
+                                }),
+                            )
                             .child(
                                 Button::new(("preview", id as usize))
                                     .ghost()
@@ -3388,19 +6770,20 @@ impl ClipboardView {
                                             .xsmall()
                                             .h(px(24.))
                                             .icon(IconName::FileText)
-                                            .tooltip(tr(
-                                                self.language,
-                                                "复制纯文本",
-                                                "Copy plain text",
-                                            ))
-                                            .accessibility_label(tr(
-                                                self.language,
-                                                "复制纯文本",
-                                                "Copy plain text",
-                                            ))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                            .tooltip(if self.paste_target.is_some() {
+                                                tr(self.language, "粘贴纯文本", "Paste plain text")
+                                            } else {
+                                                tr(self.language, "复制纯文本", "Copy plain text")
+                                            })
+                                            .accessibility_label(if self.paste_target.is_some() {
+                                                tr(self.language, "粘贴纯文本", "Paste plain text")
+                                            } else {
+                                                tr(self.language, "复制纯文本", "Copy plain text")
+                                            })
+                                            .disabled(self.paste_pending.is_some())
+                                            .on_click(cx.listener(move |this, _, window, cx| {
                                                 cx.stop_propagation();
-                                                this.send(Command::CopyPlainText(id), cx);
+                                                this.copy_or_paste_plain_text(id, window, cx);
                                             })),
                                     )
                                 },
@@ -3418,21 +6801,255 @@ impl ClipboardView {
                                         this.send(Command::Copy(id), cx);
                                     })),
                             ),
-                    ),
+                    ))
+                    .when(!self.batch_mode, |card| {
+                        card.child(
+                            div()
+                                .id(("history-drag-left", id as usize))
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(32.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .when(show_drag_area_indicator, |handle| {
+                                    handle
+                                        .bg(cx.theme().accent)
+                                        .text_color(cx.theme().primary)
+                                        .child("⠿")
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.cancel_pending_row_click();
+                                    cx.stop_propagation();
+                                }))
+                                .when(drag_enabled, |handle| {
+                                    handle.cursor_grab().on_drag(
+                                        drag.clone(),
+                                        move |drag, _, _, cx| {
+                                            left_drag_entity.update(cx, |this, cx| {
+                                                this.cancel_pending_row_click();
+                                                this.close_hover_preview(cx);
+                                                this.history.selected = Some(drag.id);
+                                                this.drop_target = None;
+                                                this.start_history_drag_scroll(cx);
+                                                cx.notify();
+                                            });
+                                            cx.new(|_| drag.clone())
+                                        },
+                                    )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .id(("history-drag-right", id as usize))
+                                .absolute()
+                                .right_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(32.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .when(show_drag_area_indicator, |handle| {
+                                    handle
+                                        .bg(cx.theme().accent)
+                                        .text_color(cx.theme().primary)
+                                        .child("⠿")
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.cancel_pending_row_click();
+                                    cx.stop_propagation();
+                                }))
+                                .when(drag_enabled, |handle| {
+                                    handle.cursor_grab().on_drag(
+                                        drag.clone(),
+                                        move |drag, _, _, cx| {
+                                            right_drag_entity.update(cx, |this, cx| {
+                                                this.cancel_pending_row_click();
+                                                this.close_hover_preview(cx);
+                                                this.history.selected = Some(drag.id);
+                                                this.drop_target = None;
+                                                this.start_history_drag_scroll(cx);
+                                                cx.notify();
+                                            });
+                                            cx.new(|_| drag.clone())
+                                        },
+                                    )
+                                }),
+                        )
+                    }),
             );
+        let entity = cx.entity();
+        let text_like = matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf");
+        let language = self.language;
+        let batch_mode = self.batch_mode;
+        let can_paste = self.paste_target.is_some() && self._tray.is_some();
+        let paste_pending = self.paste_pending.is_some();
+        let save_as_pending = self.save_as_pending.is_some();
+        let group_move_disabled =
+            self.group_move_pending || (self.groups.is_empty() && self.history.group_id.is_none());
+        let save_as_name = if is_image {
+            item.image_path.as_deref().and_then(|path| {
+                std::path::Path::new(path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+        } else if is_files {
+            item.file_paths
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                .and_then(|paths| paths.into_iter().next())
+                .and_then(|path| {
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+        } else {
+            None
+        };
+        let row = if batch_mode {
+            row.into_any_element()
+        } else {
+            row.context_menu(move |menu, _, _| {
+                let menu = menu
+                    .item(history_menu_item(
+                        tr(language, "粘贴到原窗口", "Paste to previous window"),
+                        !can_paste || paste_pending,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::Paste,
+                    ))
+                    .when(text_like, |menu| {
+                        menu.item(history_menu_item(
+                            if can_paste {
+                                tr(language, "粘贴纯文本", "Paste plain text")
+                            } else {
+                                tr(language, "复制纯文本", "Copy plain text")
+                            },
+                            paste_pending,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::PastePlainText,
+                        ))
+                    })
+                    .item(history_menu_item(
+                        tr(language, "复制", "Copy"),
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::Copy,
+                    ));
+                let menu = if is_image || is_files {
+                    let menu = menu.item(history_menu_item(
+                        if can_paste {
+                            tr(language, "粘贴路径", "Paste paths")
+                        } else {
+                            tr(language, "复制路径", "Copy paths")
+                        },
+                        paste_pending,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::CopyPath,
+                    ));
+                    let menu = menu.item(history_menu_item(
+                        tr(language, "在资源管理器中显示", "Show in File Explorer"),
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::Reveal,
+                    ));
+                    if let Some(name) = save_as_name.clone() {
+                        menu.item(history_menu_item(
+                            tr(language, "另存为", "Save as"),
+                            save_as_pending,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::SaveAs(name),
+                        ))
+                    } else {
+                        menu
+                    }
+                } else {
+                    menu
+                };
+                menu.separator()
+                    .item(history_menu_item(
+                        tr(language, "查看详情", "View details"),
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::Preview,
+                    ))
+                    .when(text_like, |menu| {
+                        menu.item(history_menu_item(
+                            tr(language, "编辑", "Edit"),
+                            false,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::Edit,
+                        ))
+                    })
+                    .separator()
+                    .item(history_menu_item(
+                        if favorite {
+                            tr(language, "取消收藏", "Unfavorite")
+                        } else {
+                            tr(language, "收藏", "Favorite")
+                        },
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::ToggleFavorite,
+                    ))
+                    .item(history_menu_item(
+                        if pinned {
+                            tr(language, "取消置顶", "Unpin")
+                        } else {
+                            tr(language, "置顶", "Pin")
+                        },
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::TogglePin,
+                    ))
+                    .item(history_menu_item(
+                        tr(language, "移动到分组", "Move to group"),
+                        group_move_disabled,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::MoveToGroup,
+                    ))
+                    .separator()
+                    .item(history_menu_item(
+                        tr(language, "删除", "Delete"),
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::Delete,
+                    ))
+            })
+            .into_any_element()
+        };
         let row = div()
             .when(live_drag_source, |row| row.opacity(0.0))
             .child(row);
         if let Some(offset) = self.reorder_offsets.get(&id) {
             visual::reflow(
                 row,
-                *offset as f32 * ROW_HEIGHT,
+                *offset as f32
+                    * visual::row_height(self.display.card_density, self.display.card_max_lines),
                 format!("reorder-feedback-{}-{id}", self.feedback_revision),
                 cx,
             )
         } else if let Some(offset) = live_offset {
             row.relative()
-                .top(px(offset as f32 * ROW_HEIGHT))
+                .top(px(offset as f32
+                    * visual::row_height(
+                        self.display.card_density,
+                        self.display.card_max_lines,
+                    )))
                 .into_any_element()
         } else {
             row.into_any_element()
@@ -3484,6 +7101,333 @@ fn settings_window_card(
         .child(content)
 }
 
+impl SettingsWindowView {
+    fn audio_settings_card(
+        &self,
+        copy: bool,
+        audio: AudioPreference,
+        pending: bool,
+        language: LanguagePreference,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let kind = if copy { "copy" } else { "paste" };
+        let enabled = if copy {
+            audio.copy_enabled
+        } else {
+            audio.paste_enabled
+        };
+        let timing = if copy {
+            audio.copy_timing
+        } else {
+            audio.paste_timing
+        };
+        let toggle_owner = self.owner.clone();
+        let immediate_owner = self.owner.clone();
+        let success_owner = self.owner.clone();
+        let preview_owner = self.owner.clone();
+        settings_window_card(
+            if copy {
+                IconName::Copy
+            } else {
+                IconName::SquareTerminal
+            },
+            if copy {
+                tr(language, "复制音效", "Copy sound")
+            } else {
+                tr(language, "粘贴音效", "Paste sound")
+            },
+            if copy {
+                tr(
+                    language,
+                    "复制历史记录时播放反馈音",
+                    "Play a sound when copying a history item",
+                )
+            } else {
+                tr(
+                    language,
+                    "向原窗口发送粘贴快捷键时播放反馈音",
+                    "Play a sound when sending paste to the previous window",
+                )
+            },
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    Button::new(format!("audio-{kind}-enabled"))
+                        .outline()
+                        .small()
+                        .label(tr(language, "启用", "Enable"))
+                        .selected(enabled)
+                        .disabled(pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = toggle_owner.update(cx, |owner, cx| {
+                                let mut next = owner.audio;
+                                if copy {
+                                    next.copy_enabled = !next.copy_enabled;
+                                } else {
+                                    next.paste_enabled = !next.paste_enabled;
+                                }
+                                owner.save_audio(next, cx);
+                            });
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(tr(language, "播放时机", "Timing"))
+                        .child(
+                            Button::new(format!("audio-{kind}-immediate"))
+                                .outline()
+                                .small()
+                                .label(tr(language, "立即", "Immediate"))
+                                .selected(timing == SoundTiming::Immediate)
+                                .disabled(pending || !enabled)
+                                .on_click(move |_, _, cx| {
+                                    let _ = immediate_owner.update(cx, |owner, cx| {
+                                        let mut next = owner.audio;
+                                        if copy {
+                                            next.copy_timing = SoundTiming::Immediate;
+                                        } else {
+                                            next.paste_timing = SoundTiming::Immediate;
+                                        }
+                                        owner.save_audio(next, cx);
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new(format!("audio-{kind}-success"))
+                                .outline()
+                                .small()
+                                .label(tr(language, "成功后", "After success"))
+                                .selected(timing == SoundTiming::AfterSuccess)
+                                .disabled(pending || !enabled)
+                                .on_click(move |_, _, cx| {
+                                    let _ = success_owner.update(cx, |owner, cx| {
+                                        let mut next = owner.audio;
+                                        if copy {
+                                            next.copy_timing = SoundTiming::AfterSuccess;
+                                        } else {
+                                            next.paste_timing = SoundTiming::AfterSuccess;
+                                        }
+                                        owner.save_audio(next, cx);
+                                    });
+                                }),
+                        )
+                        .child(
+                            Button::new(format!("audio-{kind}-preview"))
+                                .outline()
+                                .small()
+                                .label(tr(language, "试听", "Preview"))
+                                .on_click(move |_, _, cx| {
+                                    let played =
+                                        sound::play(if copy { Sound::Copy } else { Sound::Paste });
+                                    if !played {
+                                        let _ = preview_owner.update(cx, |owner, cx| {
+                                            owner.message = tr(
+                                                owner.language,
+                                                "音频设备不可用，无法试听",
+                                                "Audio device unavailable; preview could not play",
+                                            )
+                                            .into();
+                                            owner.is_error = true;
+                                            cx.notify();
+                                        });
+                                    }
+                                }),
+                        ),
+                ),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn quick_paste_settings_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(owner) = self.owner.upgrade() else {
+            return div().into_any_element();
+        };
+        let (
+            language,
+            quick_paste_enabled,
+            quick_paste_pending_setting,
+            paste_key,
+            paste_key_pending,
+            paste_shortcuts,
+            paste_shortcuts_pending,
+            shortcut_actions_pending,
+            paste_shortcut_status,
+            monitoring,
+        ) = {
+            let state = owner.read(cx);
+            (
+                state.language,
+                state.quick_paste_enabled,
+                state.quick_paste_pending_setting,
+                state.paste_key,
+                state.paste_key_pending,
+                state.paste_shortcuts.clone(),
+                state.paste_shortcuts_pending.is_some(),
+                state.paste_shortcuts_pending.is_some()
+                    || state.quick_paste_pending_setting
+                    || state.hotkey_pending,
+                state.paste_shortcut_status.clone(),
+                state.monitoring,
+            )
+        };
+        let quick_paste_owner = self.owner.clone();
+        let recent_shortcut_rows = self.recent_shortcuts_expanded.then(|| {
+            self.paste_slot_rows(
+                false,
+                &paste_shortcuts,
+                shortcut_actions_pending,
+                language,
+                cx,
+            )
+            .into_any_element()
+        });
+        let favorite_shortcut_rows = self.favorite_shortcuts_expanded.then(|| {
+            self.paste_slot_rows(
+                true,
+                &paste_shortcuts,
+                shortcut_actions_pending,
+                language,
+                cx,
+            )
+            .into_any_element()
+        });
+        settings_window_card(
+            IconName::SquareTerminal,
+            tr(language, "快速粘贴", "Quick paste"),
+            tr(
+                language,
+                "从其他应用直接粘贴当前分组中排在前面的记录",
+                "Paste top items in the selected group from another app",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(
+                    Button::new("quick-paste-enabled")
+                        .outline()
+                        .small()
+                        .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
+                        .selected(quick_paste_enabled)
+                        .disabled(quick_paste_pending_setting || paste_shortcuts_pending || !monitoring)
+                        .on_click(move |_, _, cx| {
+                            let _ = quick_paste_owner.update(cx, |owner, cx| {
+                                owner.select_quick_paste_enabled(!owner.quick_paste_enabled, cx);
+                            });
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(div().text_xs().child(tr(
+                            language,
+                            "自动粘贴使用按键",
+                            "Key sent for automatic paste",
+                        )))
+                        .child(div().flex().gap_2().children([
+                            ("paste-key-ctrl-v", "Ctrl+V", PasteKeyPreference::CtrlV),
+                            (
+                                "paste-key-shift-insert",
+                                "Shift+Insert",
+                                PasteKeyPreference::ShiftInsert,
+                            ),
+                        ]
+                        .map(|(id, label, key)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(paste_key == key)
+                                .disabled(paste_key_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        if owner.paste_key != key
+                                            && owner.send(Command::SetPasteKey(key), cx)
+                                        {
+                                            owner.paste_key_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                })
+                        }))),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(
+                            language,
+                            "可逐项修改、停用或恢复默认快捷键；数字键自动支持数字小键盘",
+                            "Edit, disable, or restore each shortcut; digit keys also work on the numpad",
+                        )),
+                )
+                .when_some(paste_shortcut_status, |panel, (message, is_error)| {
+                    panel.child(
+                        div()
+                            .text_xs()
+                            .text_color(if is_error {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().muted_foreground
+                            })
+                            .child(message),
+                    )
+                })
+                .child(
+                    Button::new("paste-recent-expand")
+                        .outline()
+                        .small()
+                        .label(tr(language, "普通记录槽位（10）", "Recent slots (10)"))
+                        .selected(self.recent_shortcuts_expanded)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.recent_shortcuts_expanded = !this.recent_shortcuts_expanded;
+                            cx.notify();
+                        })),
+                )
+                .when(self.recent_shortcuts_expanded, |panel| {
+                    panel.child(self.paste_group_actions(
+                        false,
+                        &paste_shortcuts,
+                        shortcut_actions_pending,
+                        language,
+                    ))
+                })
+                .when_some(recent_shortcut_rows, |panel, rows| panel.child(rows))
+                .child(
+                    Button::new("paste-favorite-expand")
+                        .outline()
+                        .small()
+                        .label(tr(language, "收藏槽位（10）", "Favorite slots (10)"))
+                        .selected(self.favorite_shortcuts_expanded)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.favorite_shortcuts_expanded = !this.favorite_shortcuts_expanded;
+                            cx.notify();
+                        })),
+                )
+                .when(self.favorite_shortcuts_expanded, |panel| {
+                    panel.child(self.paste_group_actions(
+                        true,
+                        &paste_shortcuts,
+                        shortcut_actions_pending,
+                        language,
+                    ))
+                })
+                .when_some(favorite_shortcut_rows, |panel, rows| panel.child(rows)),
+            cx,
+        ).into_any_element()
+    }
+}
+
 impl Render for SettingsWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(owner_entity) = self.owner.upgrade() else {
@@ -3497,8 +7441,38 @@ impl Render for SettingsWindowView {
         window.set_window_title(tr(language, "设置", "Settings"));
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
+        let hover_preference = owner_state.hover_preference;
+        let hover_pending = owner_state.hover_preference_pending;
         let hotkey_choice = owner_state.hotkey_choice;
         let hotkey_pending = owner_state.hotkey_pending;
+        let window_position = owner_state.window_position;
+        let window_position_pending = owner_state.window_position_pending;
+        let persist_window_size = owner_state.persist_window_size;
+        let persist_window_size_pending = owner_state.persist_window_size_pending;
+        let auto_reset_state = owner_state.auto_reset_state;
+        let auto_reset_state_pending = owner_state.auto_reset_state_pending;
+        let search_auto_focus = owner_state.search_auto_focus;
+        let search_auto_focus_pending = owner_state.search_auto_focus_pending;
+        let search_auto_clear = owner_state.search_auto_clear;
+        let search_auto_clear_pending = owner_state.search_auto_clear_pending;
+        let skip_clear_confirm = owner_state.skip_clear_confirm;
+        let skip_clear_confirm_pending = owner_state.skip_clear_confirm_pending;
+        let paste_close_window = owner_state.paste_close_window;
+        let paste_close_window_pending = owner_state.paste_close_window_pending;
+        let paste_move_to_top = owner_state.paste_move_to_top;
+        let paste_move_to_top_pending = owner_state.paste_move_to_top_pending;
+        let toolbar = owner_state.toolbar;
+        let toolbar_pending = owner_state.toolbar_pending;
+        let display = owner_state.display;
+        let display_pending = owner_state.display_pending;
+        let audio = owner_state.audio;
+        let audio_pending = owner_state.audio_pending;
+        let monitor_types = owner_state.monitor_types;
+        let monitor_types_pending = owner_state.monitor_types_pending;
+        let app_filter = owner_state.app_filter.clone();
+        let app_filter_pending = owner_state.app_filter_pending;
+        let running_apps = owner_state.running_apps.clone();
+        let running_apps_pending = owner_state.running_apps_pending;
         let autostart = owner_state.autostart;
         let autostart_pending = owner_state.autostart_pending;
         let data_size = owner_state.data_size;
@@ -3635,6 +7609,200 @@ impl Render for SettingsWindowView {
             cx,
         );
 
+        let expanded_hover_owner = self.owner.clone();
+        let hover = settings_window_card(
+            IconName::Eye,
+            tr(language, "悬停预览", "Hover preview"),
+            tr(
+                language,
+                "分别控制内容类型、延时、位置和图片缩放",
+                "Choose content types, delay, position and image zoom",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div().flex().flex_wrap().gap_2().children(
+                        [
+                            (
+                                "hover-image",
+                                tr(language, "图片", "Images"),
+                                hover_preference.image,
+                                HoverPreviewPreference {
+                                    image: !hover_preference.image,
+                                    ..hover_preference
+                                },
+                            ),
+                            (
+                                "hover-text",
+                                tr(language, "文本", "Text"),
+                                hover_preference.text,
+                                HoverPreviewPreference {
+                                    text: !hover_preference.text,
+                                    ..hover_preference
+                                },
+                            ),
+                            (
+                                "hover-files",
+                                tr(language, "文件", "Files"),
+                                hover_preference.files,
+                                HoverPreviewPreference {
+                                    files: !hover_preference.files,
+                                    ..hover_preference
+                                },
+                            ),
+                        ]
+                        .map(|(id, label, selected, preference)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(selected)
+                                .disabled(hover_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_hover_preference(preference, cx);
+                                    });
+                                })
+                        }),
+                    ),
+                )
+                .child(
+                    Button::new("hover-expanded-image")
+                        .outline()
+                        .small()
+                        .label(tr(
+                            language,
+                            "大图使用更大浮窗",
+                            "Expand image hover window",
+                        ))
+                        .selected(hover_preference.expanded_image)
+                        .disabled(hover_pending || !hover_preference.image)
+                        .on_click(move |_, _, cx| {
+                            let _ = expanded_hover_owner.update(cx, |owner, cx| {
+                                owner.save_hover_preference(
+                                    HoverPreviewPreference {
+                                        expanded_image: !hover_preference.expanded_image,
+                                        ..hover_preference
+                                    },
+                                    cx,
+                                );
+                            });
+                        }),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .child(tr(language, "停留延时", "Hover delay")),
+                )
+                .child(
+                    div().flex().flex_wrap().gap_2().children(
+                        [
+                            (250, "250 ms"),
+                            (500, "500 ms"),
+                            (750, "750 ms"),
+                            (1000, "1000 ms"),
+                        ]
+                        .map(|(delay, label)| {
+                            let owner = self.owner.clone();
+                            Button::new(("hover-delay", usize::from(delay)))
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(hover_preference.delay_ms == delay)
+                                .disabled(hover_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_hover_preference(
+                                            HoverPreviewPreference {
+                                                delay_ms: delay,
+                                                ..hover_preference
+                                            },
+                                            cx,
+                                        );
+                                    });
+                                })
+                        }),
+                    ),
+                )
+                .child(div().text_xs().child(tr(language, "浮窗位置", "Position")))
+                .child(
+                    div().flex().flex_wrap().gap_2().children(
+                        [
+                            (
+                                "hover-auto",
+                                tr(language, "自动", "Auto"),
+                                HoverPreviewPosition::Auto,
+                            ),
+                            (
+                                "hover-left",
+                                tr(language, "左侧", "Left"),
+                                HoverPreviewPosition::Left,
+                            ),
+                            (
+                                "hover-right",
+                                tr(language, "右侧", "Right"),
+                                HoverPreviewPosition::Right,
+                            ),
+                        ]
+                        .map(|(id, label, position)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(hover_preference.position == position)
+                                .disabled(hover_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_hover_preference(
+                                            HoverPreviewPreference {
+                                                position,
+                                                ..hover_preference
+                                            },
+                                            cx,
+                                        );
+                                    });
+                                })
+                        }),
+                    ),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .child(tr(language, "图片缩放步进", "Image zoom step")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .children([5, 10, 20, 50].map(|zoom_step| {
+                            let owner = self.owner.clone();
+                            Button::new(("hover-zoom-step", usize::from(zoom_step)))
+                                .outline()
+                                .small()
+                                .label(format!("{zoom_step}%"))
+                                .selected(hover_preference.zoom_step == zoom_step)
+                                .disabled(hover_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_hover_preference(
+                                            HoverPreviewPreference {
+                                                zoom_step,
+                                                ..hover_preference
+                                            },
+                                            cx,
+                                        );
+                                    });
+                                })
+                        })),
+                ),
+            cx,
+        );
+
         let shortcut = settings_window_card(
             IconName::SquareTerminal,
             tr(language, "唤出快捷键", "Shortcut"),
@@ -3671,6 +7839,742 @@ impl Render for SettingsWindowView {
                             let _ = owner.update(cx, |owner, cx| {
                                 owner.select_hotkey(choice, cx);
                             });
+                        })
+                }),
+            ),
+            cx,
+        );
+
+        let quick_shortcuts = self.quick_paste_settings_card(cx);
+
+        let positioning = settings_window_card(
+            IconName::LayoutDashboard,
+            tr(language, "窗口位置", "Window position"),
+            tr(
+                language,
+                "选择每次唤出历史窗口时的位置",
+                "Choose where the history window opens",
+            ),
+            div().flex().flex_wrap().gap_2().children(
+                [
+                    (
+                        "window-position-cursor",
+                        tr(language, "跟随光标", "Follow cursor"),
+                        WindowPositionPreference::FollowCursor,
+                    ),
+                    (
+                        "window-position-center",
+                        tr(language, "当前屏幕居中", "Center on screen"),
+                        WindowPositionPreference::ScreenCenter,
+                    ),
+                    (
+                        "window-position-fixed",
+                        tr(language, "保持位置", "Keep position"),
+                        WindowPositionPreference::FixedPosition,
+                    ),
+                ]
+                .map(|(id, label, preference)| {
+                    let owner = self.owner.clone();
+                    Button::new(id)
+                        .outline()
+                        .small()
+                        .label(label)
+                        .selected(window_position == preference)
+                        .disabled(window_position_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.window_position != preference
+                                    && owner.send(Command::SetWindowPosition(preference), cx)
+                                {
+                                    owner.window_position_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        })
+                }),
+            ),
+            cx,
+        );
+
+        let persist_owner = self.owner.clone();
+        let reset_owner = self.owner.clone();
+        let search_focus_owner = self.owner.clone();
+        let search_clear_owner = self.owner.clone();
+        let skip_clear_owner = self.owner.clone();
+        let paste_close_owner = self.owner.clone();
+        let paste_move_owner = self.owner.clone();
+        let behavior = settings_window_card(
+            IconName::LayoutDashboard,
+            tr(language, "窗口行为", "Window behavior"),
+            tr(
+                language,
+                "控制窗口大小记忆及搜索和隐藏行为",
+                "Control size memory, search and hide behavior",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(
+                    Button::new("persist-window-size")
+                        .outline()
+                        .small()
+                        .label(tr(language, "记住窗口大小", "Remember window size"))
+                        .selected(persist_window_size)
+                        .disabled(persist_window_size_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = persist_owner.update(cx, |owner, cx| {
+                                if owner.send(
+                                    Command::SetPersistWindowSize(!owner.persist_window_size),
+                                    cx,
+                                ) {
+                                    owner.persist_window_size_pending = true;
+                                    owner.window_size_task = None;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("auto-reset-state")
+                        .outline()
+                        .small()
+                        .label(tr(
+                            language,
+                            "隐藏时重置搜索、筛选和滚动",
+                            "Reset search, filters and scroll on hide",
+                        ))
+                        .selected(auto_reset_state)
+                        .disabled(auto_reset_state_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = reset_owner.update(cx, |owner, cx| {
+                                if owner
+                                    .send(Command::SetAutoResetState(!owner.auto_reset_state), cx)
+                                {
+                                    owner.auto_reset_state_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("search-auto-focus")
+                        .outline()
+                        .small()
+                        .label(tr(language, "唤出时聚焦搜索", "Focus search when shown"))
+                        .selected(search_auto_focus)
+                        .disabled(search_auto_focus_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = search_focus_owner.update(cx, |owner, cx| {
+                                if owner
+                                    .send(Command::SetSearchAutoFocus(!owner.search_auto_focus), cx)
+                                {
+                                    owner.search_auto_focus_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("search-auto-clear")
+                        .outline()
+                        .small()
+                        .label(tr(language, "唤出时清空搜索", "Clear search when shown"))
+                        .selected(search_auto_clear)
+                        .disabled(search_auto_clear_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = search_clear_owner.update(cx, |owner, cx| {
+                                if owner
+                                    .send(Command::SetSearchAutoClear(!owner.search_auto_clear), cx)
+                                {
+                                    owner.search_auto_clear_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("skip-clear-confirm")
+                        .outline()
+                        .small()
+                        .label(tr(
+                            language,
+                            "清理历史免确认",
+                            "Clear history without confirmation",
+                        ))
+                        .selected(skip_clear_confirm)
+                        .disabled(skip_clear_confirm_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = skip_clear_owner.update(cx, |owner, cx| {
+                                if owner.send(
+                                    Command::SetSkipClearConfirm(!owner.skip_clear_confirm),
+                                    cx,
+                                ) {
+                                    owner.skip_clear_confirm_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("paste-close-window")
+                        .outline()
+                        .small()
+                        .label(tr(language, "粘贴后关闭窗口", "Close after paste"))
+                        .selected(paste_close_window)
+                        .disabled(paste_close_window_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = paste_close_owner.update(cx, |owner, cx| {
+                                if owner.send(
+                                    Command::SetPasteCloseWindow(!owner.paste_close_window),
+                                    cx,
+                                ) {
+                                    owner.paste_close_window_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("paste-move-to-top")
+                        .outline()
+                        .small()
+                        .label(tr(
+                            language,
+                            "粘贴后移到列表首位",
+                            "Move to top after paste",
+                        ))
+                        .selected(paste_move_to_top)
+                        .disabled(paste_move_to_top_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = paste_move_owner.update(cx, |owner, cx| {
+                                if owner
+                                    .send(Command::SetPasteMoveToTop(!owner.paste_move_to_top), cx)
+                                {
+                                    owner.paste_move_to_top_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                ),
+            cx,
+        );
+
+        let toolbar_settings =
+            settings_window_card(
+                IconName::LayoutDashboard,
+                tr(language, "工具栏", "Toolbar"),
+                tr(
+                    language,
+                    "选择按钮并调整顺序",
+                    "Show buttons and change their order",
+                ),
+                div().flex().flex_col().gap_2().children(
+                    toolbar.items.into_iter().enumerate().map(|(index, item)| {
+                        let button = item.button;
+                        let label = match button {
+                            ToolbarButton::Clear => tr(language, "清理历史", "Clear history"),
+                            ToolbarButton::Batch => tr(language, "批量选择", "Batch select"),
+                            ToolbarButton::Pin => tr(language, "置顶窗口", "Pin window"),
+                            ToolbarButton::Settings => tr(language, "设置", "Settings"),
+                        };
+                        let toggle_owner = self.owner.clone();
+                        let up_owner = self.owner.clone();
+                        let down_owner = self.owner.clone();
+                        let drag = ToolbarDrag {
+                            button,
+                            label,
+                            toolbar,
+                        };
+                        let drag_entity = cx.entity();
+                        let target = cx
+                            .has_active_drag()
+                            .then_some(self.toolbar_drop_target)
+                            .flatten()
+                            .filter(|(target, _)| *target == button);
+                        div()
+                            .relative()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .on_drag_move(cx.listener(
+                                move |this, event: &DragMoveEvent<ToolbarDrag>, _, cx| {
+                                    if !event.bounds.contains(&event.event.position) {
+                                        if this
+                                            .toolbar_drop_target
+                                            .is_some_and(|(target, _)| target == button)
+                                        {
+                                            this.toolbar_drop_target = None;
+                                            cx.notify();
+                                        }
+                                        return;
+                                    }
+                                    let drag = event.drag(cx);
+                                    let valid = this.owner.upgrade().is_some_and(|owner| {
+                                        let owner = owner.read(cx);
+                                        !owner.toolbar_pending && owner.toolbar == drag.toolbar
+                                    });
+                                    let next = (valid && drag.button != button && item.visible)
+                                        .then_some((
+                                            button,
+                                            event.event.position.y > event.bounds.center().y,
+                                        ));
+                                    if this.toolbar_drop_target != next {
+                                        this.toolbar_drop_target = next;
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                            .on_drop(cx.listener(move |this, drag: &ToolbarDrag, _, cx| {
+                                let target = this.toolbar_drop_target.take();
+                                let Some((target_button, after)) =
+                                    target.filter(|(target_button, _)| *target_button == button)
+                                else {
+                                    cx.notify();
+                                    return;
+                                };
+                                if let Some(owner) = this.owner.upgrade() {
+                                    owner.update(cx, |owner, cx| {
+                                        if !owner.toolbar_pending
+                                            && owner.toolbar == drag.toolbar
+                                            && let Some(next) = drag.toolbar.move_before_or_after(
+                                                drag.button,
+                                                target_button,
+                                                after,
+                                            )
+                                        {
+                                            owner.save_toolbar(next, cx);
+                                        }
+                                    });
+                                }
+                                cx.notify();
+                            }))
+                            .child(
+                                div()
+                                    .id(("toolbar-drag-handle", index))
+                                    .w(px(22.))
+                                    .h(px(28.))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child("⠿")
+                                    .when(item.visible && !toolbar_pending, |handle| {
+                                        handle.cursor_grab().on_drag(
+                                            drag.clone(),
+                                            move |drag, _, _, cx| {
+                                                drag_entity.update(cx, |this, cx| {
+                                                    this.toolbar_drop_target = None;
+                                                    cx.notify();
+                                                });
+                                                cx.new(|_| drag.clone())
+                                            },
+                                        )
+                                    }),
+                            )
+                            .child(
+                                Button::new(("toolbar-visible", index))
+                                    .small()
+                                    .outline()
+                                    .label(label)
+                                    .selected(item.visible)
+                                    .disabled(toolbar_pending || button == ToolbarButton::Settings)
+                                    .on_click(move |_, _, cx| {
+                                        if let Some(next) =
+                                            toolbar.with_visibility(button, !item.visible)
+                                        {
+                                            let _ = toggle_owner.update(cx, |owner, cx| {
+                                                owner.save_toolbar(next, cx);
+                                            });
+                                        }
+                                    }),
+                            )
+                            .child(
+                                Button::new(("toolbar-up", index))
+                                    .small()
+                                    .ghost()
+                                    .label(tr(language, "上移", "Up"))
+                                    .disabled(toolbar_pending || index == 0)
+                                    .on_click(move |_, _, cx| {
+                                        if let Some(next) = toolbar.move_button(button, -1) {
+                                            let _ = up_owner.update(cx, |owner, cx| {
+                                                owner.save_toolbar(next, cx);
+                                            });
+                                        }
+                                    }),
+                            )
+                            .child(
+                                Button::new(("toolbar-down", index))
+                                    .small()
+                                    .ghost()
+                                    .label(tr(language, "下移", "Down"))
+                                    .disabled(toolbar_pending || index + 1 == toolbar.items.len())
+                                    .on_click(move |_, _, cx| {
+                                        if let Some(next) = toolbar.move_button(button, 1) {
+                                            let _ = down_owner.update(cx, |owner, cx| {
+                                                owner.save_toolbar(next, cx);
+                                            });
+                                        }
+                                    }),
+                            )
+                            .when_some(target, |row, (_, after)| {
+                                row.child(
+                                    div()
+                                        .absolute()
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(2.))
+                                        .bg(cx.theme().primary)
+                                        .when(after, |line| line.bottom_0())
+                                        .when(!after, |line| line.top_0()),
+                                )
+                            })
+                    }),
+                ),
+                cx,
+            );
+
+        let category_owner = self.owner.clone();
+        let drag_indicator_owner = self.owner.clone();
+        let fewer_lines_owner = self.owner.clone();
+        let more_lines_owner = self.owner.clone();
+        let display_settings = settings_window_card(
+            IconName::LayoutDashboard,
+            tr(language, "列表显示", "List display"),
+            tr(
+                language,
+                "调整分类栏和卡片间距",
+                "Adjust filters and card spacing",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap_2()
+                .child(
+                    Button::new("show-category-filter")
+                        .small()
+                        .outline()
+                        .label(tr(language, "显示分类筛选", "Show category filters"))
+                        .selected(display.show_category_filter)
+                        .disabled(display_pending)
+                        .on_click(move |_, _, cx| {
+                            let next = DisplayPreference {
+                                show_category_filter: !display.show_category_filter,
+                                ..display
+                            };
+                            let _ = category_owner.update(cx, |owner, cx| {
+                                owner.save_display(next, cx);
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("show-drag-area-indicator")
+                        .small()
+                        .outline()
+                        .label(tr(language, "显示卡片拖动区域", "Show card drag areas"))
+                        .selected(display.show_drag_area_indicator)
+                        .disabled(display_pending)
+                        .on_click(move |_, _, cx| {
+                            let next = DisplayPreference {
+                                show_drag_area_indicator: !display.show_drag_area_indicator,
+                                ..display
+                            };
+                            let _ = drag_indicator_owner.update(cx, |owner, cx| {
+                                owner.save_display(next, cx);
+                            });
+                        }),
+                )
+                .child(
+                    div().flex().flex_wrap().gap_2().children(
+                        [
+                            (CardDensity::Compact, tr(language, "紧凑", "Compact")),
+                            (CardDensity::Standard, tr(language, "标准", "Standard")),
+                            (CardDensity::Spacious, tr(language, "宽松", "Spacious")),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (density, label))| {
+                            let owner = self.owner.clone();
+                            Button::new(("card-density", index))
+                                .small()
+                                .outline()
+                                .label(label)
+                                .selected(display.card_density == density)
+                                .disabled(display_pending)
+                                .on_click(move |_, _, cx| {
+                                    let next = DisplayPreference {
+                                        card_density: density,
+                                        ..display
+                                    };
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_display(next, cx);
+                                    });
+                                })
+                        }),
+                    ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(tr(language, "卡片预览行数", "Card preview lines"))
+                        .child(
+                            Button::new("card-lines-less")
+                                .small()
+                                .outline()
+                                .label("−")
+                                .accessibility_label(tr(
+                                    language,
+                                    "减少预览行数",
+                                    "Fewer preview lines",
+                                ))
+                                .disabled(display_pending || display.card_max_lines == 1)
+                                .on_click(move |_, _, cx| {
+                                    let next = DisplayPreference {
+                                        card_max_lines: display.card_max_lines - 1,
+                                        ..display
+                                    };
+                                    let _ = fewer_lines_owner.update(cx, |owner, cx| {
+                                        owner.save_display(next, cx);
+                                    });
+                                }),
+                        )
+                        .child(display.card_max_lines.to_string())
+                        .child(
+                            Button::new("card-lines-more")
+                                .small()
+                                .outline()
+                                .label("+")
+                                .accessibility_label(tr(
+                                    language,
+                                    "增加预览行数",
+                                    "More preview lines",
+                                ))
+                                .disabled(display_pending || display.card_max_lines == 10)
+                                .on_click(move |_, _, cx| {
+                                    let next = DisplayPreference {
+                                        card_max_lines: display.card_max_lines + 1,
+                                        ..display
+                                    };
+                                    let _ = more_lines_owner.update(cx, |owner, cx| {
+                                        owner.save_display(next, cx);
+                                    });
+                                }),
+                        ),
+                )
+                .child(
+                    div().flex().flex_wrap().gap_2().children(
+                        [
+                            (
+                                "show-card-time",
+                                tr(language, "显示时间", "Show time"),
+                                display.show_time,
+                                DisplayPreference {
+                                    show_time: !display.show_time,
+                                    ..display
+                                },
+                            ),
+                            (
+                                "show-card-characters",
+                                tr(language, "显示字符数", "Show character count"),
+                                display.show_char_count,
+                                DisplayPreference {
+                                    show_char_count: !display.show_char_count,
+                                    ..display
+                                },
+                            ),
+                            (
+                                "show-card-size",
+                                tr(language, "显示大小", "Show size"),
+                                display.show_byte_size,
+                                DisplayPreference {
+                                    show_byte_size: !display.show_byte_size,
+                                    ..display
+                                },
+                            ),
+                            (
+                                "show-card-source",
+                                tr(language, "显示来源应用", "Show source app"),
+                                display.show_source_app,
+                                DisplayPreference {
+                                    show_source_app: !display.show_source_app,
+                                    ..display
+                                },
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(id, label, selected, next)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .small()
+                                .outline()
+                                .label(label)
+                                .selected(selected)
+                                .disabled(display_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_display(next, cx);
+                                    });
+                                })
+                        }),
+                    ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .child(tr(language, "时间格式", "Time format"))
+                        .children(
+                            [
+                                (TimeFormat::Absolute, tr(language, "绝对时间", "Absolute")),
+                                (TimeFormat::Relative, tr(language, "相对时间", "Relative")),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, (format, label))| {
+                                let owner = self.owner.clone();
+                                Button::new(("time-format", index))
+                                    .small()
+                                    .outline()
+                                    .label(label)
+                                    .selected(display.time_format == format)
+                                    .disabled(display_pending || !display.show_time)
+                                    .on_click(move |_, _, cx| {
+                                        let next = DisplayPreference {
+                                            time_format: format,
+                                            ..display
+                                        };
+                                        let _ = owner.update(cx, |owner, cx| {
+                                            owner.save_display(next, cx);
+                                        });
+                                    })
+                            }),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .child(tr(language, "来源显示", "Source display"))
+                        .children(
+                            [
+                                (
+                                    SourceAppDisplay::Both,
+                                    tr(language, "名称和图标", "Name and icon"),
+                                ),
+                                (SourceAppDisplay::Name, tr(language, "仅名称", "Name only")),
+                                (SourceAppDisplay::Icon, tr(language, "仅图标", "Icon only")),
+                            ]
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, (mode, label))| {
+                                let owner = self.owner.clone();
+                                Button::new(("source-app-display", index))
+                                    .small()
+                                    .outline()
+                                    .label(label)
+                                    .selected(display.source_app_display == mode)
+                                    .disabled(display_pending || !display.show_source_app)
+                                    .on_click(move |_, _, cx| {
+                                        let next = DisplayPreference {
+                                            source_app_display: mode,
+                                            ..display
+                                        };
+                                        let _ = owner.update(cx, |owner, cx| {
+                                            owner.save_display(next, cx);
+                                        });
+                                    })
+                            }),
+                        ),
+                ),
+            cx,
+        );
+
+        let monitor_settings = settings_window_card(
+            IconName::Eye,
+            tr(language, "监听内容类型", "Capture content types"),
+            tr(
+                language,
+                "选择保存到历史的内容类型；至少保留一种",
+                "Choose which content types enter history; keep at least one",
+            ),
+            div().flex().flex_wrap().gap_2().children(
+                [
+                    (
+                        "monitor-text",
+                        tr(language, "文本", "Text"),
+                        monitor_types.text,
+                        MonitorTypesPreference {
+                            text: !monitor_types.text,
+                            ..monitor_types
+                        },
+                    ),
+                    (
+                        "monitor-url",
+                        tr(language, "网址", "URL"),
+                        monitor_types.url,
+                        MonitorTypesPreference {
+                            url: !monitor_types.url,
+                            ..monitor_types
+                        },
+                    ),
+                    (
+                        "monitor-html",
+                        "HTML",
+                        monitor_types.html,
+                        MonitorTypesPreference {
+                            html: !monitor_types.html,
+                            ..monitor_types
+                        },
+                    ),
+                    (
+                        "monitor-rtf",
+                        "RTF",
+                        monitor_types.rtf,
+                        MonitorTypesPreference {
+                            rtf: !monitor_types.rtf,
+                            ..monitor_types
+                        },
+                    ),
+                    (
+                        "monitor-image",
+                        tr(language, "图片", "Images"),
+                        monitor_types.image,
+                        MonitorTypesPreference {
+                            image: !monitor_types.image,
+                            ..monitor_types
+                        },
+                    ),
+                    (
+                        "monitor-files",
+                        tr(language, "文件", "Files"),
+                        monitor_types.files,
+                        MonitorTypesPreference {
+                            files: !monitor_types.files,
+                            ..monitor_types
+                        },
+                    ),
+                ]
+                .into_iter()
+                .map(|(id, label, selected, next)| {
+                    let owner = self.owner.clone();
+                    Button::new(id)
+                        .small()
+                        .outline()
+                        .label(label)
+                        .selected(selected)
+                        .disabled(monitor_types_pending || !next.valid())
+                        .on_click(move |_, _, cx| {
+                            let _ =
+                                owner.update(cx, |owner, cx| owner.save_monitor_types(next, cx));
                         })
                 }),
             ),
@@ -3811,6 +8715,196 @@ impl Render for SettingsWindowView {
             cx,
         );
 
+        let filter_enable_owner = self.owner.clone();
+        let app_filter_settings = settings_window_card(
+            IconName::Eye,
+            tr(language, "来源应用过滤", "Source app filter"),
+            tr(
+                language,
+                "按来源应用决定是否保存新复制的内容",
+                "Choose which source apps can add new history",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    Button::new("app-filter-enabled")
+                        .small()
+                        .outline()
+                        .label(tr(language, "启用应用过滤", "Enable app filter"))
+                        .selected(app_filter.enabled)
+                        .disabled(app_filter_pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = filter_enable_owner.update(cx, |owner, cx| {
+                                let mut next = owner.app_filter.clone();
+                                next.enabled = !next.enabled;
+                                owner.save_app_filter(next, cx);
+                            });
+                        }),
+                )
+                .child(div().flex().flex_wrap().gap_2().children(
+                    [
+                        (AppFilterMode::Blacklist, "app-filter-blacklist", tr(language, "黑名单", "Blocklist")),
+                        (AppFilterMode::Whitelist, "app-filter-whitelist", tr(language, "白名单", "Allowlist")),
+                    ]
+                    .into_iter()
+                    .map(|(mode, id, label)| {
+                        let owner = self.owner.clone();
+                        Button::new(id)
+                            .small()
+                            .outline()
+                            .label(label)
+                            .selected(app_filter.mode == mode)
+                            .disabled(app_filter_pending)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |owner, cx| {
+                                    let mut next = owner.app_filter.clone();
+                                    next.mode = mode;
+                                    owner.save_app_filter(next, cx);
+                                });
+                            })
+                    }),
+                ))
+                .child(
+                    div().text_xs().text_color(cx.theme().muted_foreground).child(
+                        if app_filter.mode == AppFilterMode::Blacklist {
+                            tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
+                        } else {
+                            tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
+                        },
+                    ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(div().flex_1().min_w_0().child(Input::new(&self.app_filter_input)))
+                        .child(
+                            Button::new("app-filter-add-rule")
+                                .small()
+                                .outline()
+                                .label(tr(language, "添加", "Add"))
+                                .disabled(app_filter_pending)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.add_app_filter_rule(window, cx);
+                                })),
+                        ),
+                )
+                .when(self.app_filter_error, |panel| {
+                    panel.child(
+                        div().text_xs().text_color(cx.theme().danger).child(
+                            tr(language, "规则无效、数量已达上限或保存尚未完成", "Invalid rule, rule limit reached, or save still in progress"),
+                        ),
+                    )
+                })
+                .when(app_filter.rules.is_empty(), |panel| {
+                    panel.child(
+                        div().text_xs().text_color(cx.theme().muted_foreground).child(
+                            tr(language, "尚无规则，可输入进程名或 *、? 通配符", "No rules yet. Enter a process name or use * and ? wildcards"),
+                        ),
+                    )
+                })
+                .children(app_filter.rules.iter().enumerate().map(|(index, rule)| {
+                    let owner = self.owner.clone();
+                    let remove_rule = rule.clone();
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(div().flex_1().min_w_0().text_sm().text_ellipsis().child(rule.clone()))
+                        .child(
+                            Button::new(format!("app-filter-remove-{index}"))
+                                .small()
+                                .ghost()
+                                .label(tr(language, "移除", "Remove"))
+                                .disabled(app_filter_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        let next = owner.app_filter.clone().without_rule(&remove_rule);
+                                        owner.save_app_filter(next, cx);
+                                    });
+                                }),
+                        )
+                }))
+                .child(
+                    Button::new("app-filter-pick-running")
+                        .small()
+                        .outline()
+                        .label(if self.app_picker_open {
+                            tr(language, "收起运行中应用", "Hide running apps")
+                        } else {
+                            tr(language, "选择运行中应用", "Choose a running app")
+                        })
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.app_picker_open = !this.app_picker_open;
+                            if this.app_picker_open
+                                && let Some(owner) = this.owner.upgrade()
+                            {
+                                owner.update(cx, |owner, cx| owner.load_running_apps(cx));
+                            }
+                            cx.notify();
+                        })),
+                )
+                .when(self.app_picker_open, |panel| {
+                    panel.child(
+                        div()
+                            .max_h(px(240.))
+                            .overflow_y_scrollbar()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .when(running_apps_pending, |list| {
+                                list.child(tr(language, "正在读取运行中应用…", "Loading running apps…"))
+                            })
+                            .when(!running_apps_pending && running_apps.is_empty(), |list| {
+                                list.child(tr(language, "没有找到可选应用", "No running apps found"))
+                            })
+                            .children(running_apps.into_iter().enumerate().map(|(index, app)| {
+                                let owner = self.owner.clone();
+                                let process = app.process.clone();
+                                let already_added = app_filter.rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .when_some(app.icon, |row, path| {
+                                        row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
+                                    })
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .flex()
+                                            .flex_col()
+                                            .child(
+                                                Button::new(format!("app-filter-pick-{index}"))
+                                                    .small()
+                                                    .ghost()
+                                                    .label(app.process)
+                                                    .disabled(app_filter_pending || already_added)
+                                                    .on_click(move |_, _, cx| {
+                                                        let _ = owner.update(cx, |owner, cx| {
+                                                            if let Some(next) = owner.app_filter.clone().with_rule(&process) {
+                                                                owner.save_app_filter(next, cx);
+                                                            }
+                                                        });
+                                                    }),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .text_ellipsis()
+                                                    .child(app.name),
+                                            ),
+                                    )
+                            })),
+                    )
+                }),
+            cx,
+        );
+
         let privacy_owner = self.owner.clone();
         let privacy = settings_window_card(
             IconName::CircleX,
@@ -3842,6 +8936,119 @@ impl Render for SettingsWindowView {
             ),
             cx,
         );
+        let copy_sound = self.audio_settings_card(true, audio, audio_pending, language, cx);
+        let paste_sound = self.audio_settings_card(false, audio, audio_pending, language, cx);
+
+        let about_details = settings_window_card(
+            IconName::Star,
+            tr(language, "作者与项目", "Author & project"),
+            tr(
+                language,
+                "在浏览器中打开项目主页或提交问题",
+                "Open the project page or report an issue in your browser",
+            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .children(
+                    [
+                        (
+                            "about-author",
+                            tr(language, "作者", "Author"),
+                            "ASLant",
+                            ProjectLink::Author,
+                        ),
+                        (
+                            "about-repository",
+                            "GitHub",
+                            "ElegantClipboard",
+                            ProjectLink::Repository,
+                        ),
+                        (
+                            "about-issues",
+                            tr(language, "反馈", "Feedback"),
+                            tr(language, "提交问题", "Submit issue"),
+                            ProjectLink::Issues,
+                        ),
+                    ]
+                    .map(|(id, caption, label, link)| {
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(caption),
+                            )
+                            .child(
+                                Button::new(id)
+                                    .small()
+                                    .ghost()
+                                    .icon(IconName::ExternalLink)
+                                    .label(label)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.link_error =
+                                            links::open(link).err().map(|error| error.to_string());
+                                        cx.notify();
+                                    })),
+                            )
+                    }),
+                )
+                .when_some(self.link_error.clone(), |panel, error| {
+                    panel.child(div().text_xs().text_color(cx.theme().danger).child(error))
+                }),
+            cx,
+        );
+        let content: Vec<AnyElement> = match self.page {
+            SettingsPage::General => vec![
+                positioning.into_any_element(),
+                behavior.into_any_element(),
+                startup.into_any_element(),
+            ],
+            SettingsPage::Display => vec![
+                toolbar_settings.into_any_element(),
+                display_settings.into_any_element(),
+                hover.into_any_element(),
+            ],
+            SettingsPage::Theme => vec![appearance.into_any_element()],
+            SettingsPage::Data => vec![
+                monitor_settings.into_any_element(),
+                storage.into_any_element(),
+                privacy.into_any_element(),
+            ],
+            SettingsPage::AppFilter => vec![app_filter_settings.into_any_element()],
+            SettingsPage::Audio => vec![copy_sound, paste_sound],
+            SettingsPage::Shortcuts => vec![shortcut.into_any_element(), quick_shortcuts],
+            SettingsPage::About => vec![
+                settings_window_card(
+                    IconName::Info,
+                    tr(language, "关于 ElegantClipboard", "About ElegantClipboard"),
+                    tr(
+                        language,
+                        "Windows 原生 GPUI 剪贴板管理器",
+                        "Native GPUI clipboard manager for Windows",
+                    ),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(format!("v{}", env!("CARGO_PKG_VERSION")))
+                        .child(tr(
+                            language,
+                            "数据保存在本机；可在“数据”中导出备份。",
+                            "Data stays on this device; export a backup from Data.",
+                        )),
+                    cx,
+                )
+                .into_any_element(),
+                about_details.into_any_element(),
+            ],
+        };
+        let page = self.page;
 
         div()
             .size_full()
@@ -3867,24 +9074,41 @@ impl Render for SettingsWindowView {
                     .gap_4()
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
+                            .w(px(154.))
+                            .flex_shrink_0()
+                            .min_h_0()
+                            .overflow_y_scrollbar()
                             .flex()
                             .flex_col()
-                            .gap_3()
-                            .child(appearance)
-                            .child(shortcut)
-                            .child(startup),
+                            .gap_1()
+                            .children(SettingsPage::ALL.into_iter().map(|item| {
+                                Button::new(format!("settings-page-{}", item.id()))
+                                    .outline()
+                                    .small()
+                                    .label(item.label(language))
+                                    .selected(page == item)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if this.page != item {
+                                            this.page = item;
+                                            this.shortcut_recording = false;
+                                            this.shortcut_editing = None;
+                                            this.shortcut_capture_error = None;
+                                            cx.notify();
+                                        }
+                                    }))
+                            })),
                     )
                     .child(
                         div()
+                            .id(format!("settings-content-{}", page.id()))
                             .flex_1()
                             .min_w_0()
+                            .min_h_0()
+                            .overflow_y_scrollbar()
                             .flex()
                             .flex_col()
                             .gap_3()
-                            .child(storage)
-                            .child(privacy),
+                            .children(content),
                     ),
             )
     }
@@ -3906,46 +9130,7 @@ impl Render for ClipboardView {
                         .h_full()
                         .flex()
                         .items_center()
-                        .justify_between()
-                        .child(div().text_sm().font_semibold().child("ElegantClipboard"))
-                        .child(
-                            div()
-                                .h_full()
-                                .pr_1()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                })
-                                .child(
-                                    Button::new("window-pin")
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(CONTROL_HEIGHT))
-                                        .icon(if self.window_pinned {
-                                            IconName::StarFill
-                                        } else {
-                                            IconName::Star
-                                        })
-                                        .tooltip(if self.window_pinned {
-                                            tr(self.language, "取消置顶窗口", "Unpin window")
-                                        } else {
-                                            tr(self.language, "置顶窗口", "Pin window")
-                                        })
-                                        .accessibility_label(if self.window_pinned {
-                                            tr(self.language, "取消置顶窗口", "Unpin window")
-                                        } else {
-                                            tr(self.language, "置顶窗口", "Pin window")
-                                        })
-                                        .selected(self.window_pinned)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            cx.stop_propagation();
-                                            this.toggle_window_pin(window, cx);
-                                        })),
-                                ),
-                        ),
+                        .child(div().text_sm().font_semibold().child("ElegantClipboard")),
                 ),
             )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
@@ -3954,6 +9139,178 @@ impl Render for ClipboardView {
 }
 
 impl ClipboardView {
+    fn render_onboarding(&self, cx: &mut Context<Self>) -> Div {
+        let language = self.language;
+        let steps = [
+            (
+                IconName::Copy,
+                tr(
+                    language,
+                    "欢迎使用 ElegantClipboard",
+                    "Welcome to ElegantClipboard",
+                ),
+                tr(
+                    language,
+                    "复制的内容保存在本机，随时可从历史中查找。",
+                    "Copied content stays on this device and is easy to find later.",
+                ),
+                tr(
+                    language,
+                    "复制文本、图片或文件即可开始记录",
+                    "Copy text, images, or files to start recording",
+                ),
+            ),
+            (
+                IconName::Eye,
+                tr(language, "快速搜索", "Quick search"),
+                tr(
+                    language,
+                    "在顶部搜索框输入关键词，历史卡片会显示匹配内容。",
+                    "Search from the top field and see matches in your history cards.",
+                ),
+                tr(
+                    language,
+                    "按 Ctrl+F 可以聚焦搜索框",
+                    "Press Ctrl+F to focus search",
+                ),
+            ),
+            (
+                IconName::Star,
+                tr(language, "置顶与收藏", "Pin and favorite"),
+                tr(
+                    language,
+                    "把常用记录置顶或收藏，也可以通过卡片按钮查看详情。",
+                    "Pin or favorite useful items and open card details when needed.",
+                ),
+                tr(
+                    language,
+                    "从目标应用用快捷键唤出后，点击卡片可自动粘贴",
+                    "Open from a target app with the shortcut, then click a card to paste",
+                ),
+            ),
+            (
+                IconName::SquareTerminal,
+                tr(language, "键盘快捷键", "Keyboard shortcuts"),
+                tr(
+                    language,
+                    "方向键选择记录，Enter 复制或粘贴，Delete 删除；左右键切换分类。",
+                    "Use arrows to select, Enter to copy or paste, Delete to remove, and Left/Right to switch categories.",
+                ),
+                tr(
+                    language,
+                    "Shift+Enter 使用纯文本表示",
+                    "Shift+Enter uses the plain-text representation",
+                ),
+            ),
+        ];
+        let (icon, title, description, tip) = steps[self.onboarding_step.min(3)].clone();
+        let is_last = self.onboarding_step == 3;
+        div()
+            .key_context("ClipboardApp")
+            .track_focus(&self.list_focus)
+            .size_full()
+            .p_4()
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
+                this.dismiss_or_hide(window, cx);
+            }))
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(390.))
+                    .rounded_md()
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().background)
+                    .p_4()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .w(px(64.))
+                            .h(px(64.))
+                            .rounded_md()
+                            .bg(cx.theme().accent)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Icon::new(icon).text_color(cx.theme().primary)),
+                    )
+                    .child(div().text_lg().font_semibold().child(title))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(description),
+                    )
+                    .child(
+                        div()
+                            .rounded_md()
+                            .bg(cx.theme().accent)
+                            .px_3()
+                            .py_2()
+                            .text_xs()
+                            .text_color(cx.theme().primary)
+                            .child(tip),
+                    )
+                    .child(div().flex().gap_2().children((0..4).map(|index| {
+                        div()
+                            .w(px(if index == self.onboarding_step {
+                                24.
+                            } else {
+                                10.
+                            }))
+                            .h(px(6.))
+                            .rounded_md()
+                            .bg(if index <= self.onboarding_step {
+                                cx.theme().primary
+                            } else {
+                                cx.theme().muted
+                            })
+                    })))
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .justify_between()
+                            .child(
+                                Button::new("onboarding-skip")
+                                    .small()
+                                    .ghost()
+                                    .label(tr(language, "跳过", "Skip"))
+                                    .disabled(self.onboarding_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.complete_onboarding(cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("onboarding-next")
+                                    .small()
+                                    .primary()
+                                    .label(if is_last {
+                                        tr(language, "开始使用", "Get started")
+                                    } else {
+                                        tr(language, "下一步", "Next")
+                                    })
+                                    .disabled(self.onboarding_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.advance_onboarding(cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(tr(language, "按 Esc 跳过引导", "Press Esc to skip")),
+                    ),
+            )
+    }
+
     fn render_clear_all_confirmation(&self, cx: &mut Context<Self>) -> Div {
         div()
             .key_context("ClipboardApp")
@@ -3963,12 +9320,8 @@ impl ClipboardView {
             .flex()
             .flex_col()
             .gap_3()
-            .on_action(cx.listener(|this, _: &CancelDrag, window, cx| {
-                if !this.clear_all_pending {
-                    this.clear_all_confirm_open = false;
-                    window.focus(&this.list_focus, cx);
-                    cx.notify();
-                }
+            .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
+                this.dismiss_or_hide(window, cx);
             }))
             .child(
                 div()
@@ -4068,7 +9421,71 @@ impl ClipboardView {
             })
     }
 
+    fn render_toolbar_button(&self, button: ToolbarButton, cx: &mut Context<Self>) -> AnyElement {
+        match button {
+            ToolbarButton::Clear => Button::new("toolbar-clear")
+                .small()
+                .outline()
+                .label(tr(self.language, "清理历史", "Clear history"))
+                .disabled(
+                    self.group_save_pending || self.group_delete_pending || self.clear_pending,
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.reset_selection();
+                    this.group_delete_id = None;
+                    this.group_editor_open = false;
+                    this.group_rename_id = None;
+                    this.group_move_id = None;
+                    window.focus(&this.list_focus, cx);
+                    if this.skip_clear_confirm {
+                        this.clear_confirm_open = false;
+                        this.clear_history(cx);
+                    } else {
+                        this.clear_confirm_open = true;
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+            ToolbarButton::Batch => Button::new("toolbar-batch")
+                .small()
+                .outline()
+                .label(if self.batch_mode {
+                    tr(self.language, "退出批量", "Exit batch")
+                } else {
+                    tr(self.language, "批量选择", "Batch select")
+                })
+                .selected(self.batch_mode)
+                .disabled(self.batch_pending || self.reorder_pending || self.history.loading)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_batch_mode(window, cx);
+                }))
+                .into_any_element(),
+            ToolbarButton::Pin => Button::new("toolbar-pin")
+                .small()
+                .outline()
+                .label(if self.window_pinned {
+                    tr(self.language, "已置顶", "Pinned")
+                } else {
+                    tr(self.language, "置顶窗口", "Pin window")
+                })
+                .selected(self.window_pinned)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.toggle_window_pin(window, cx);
+                }))
+                .into_any_element(),
+            ToolbarButton::Settings => Button::new("toolbar-settings")
+                .small()
+                .outline()
+                .label(tr(self.language, "设置", "Settings"))
+                .on_click(cx.listener(|this, _, _, cx| this.open_settings_window(cx)))
+                .into_any_element(),
+        }
+    }
+
     fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if self.onboarding_visible() {
+            return self.render_onboarding(cx).into_any_element();
+        }
         if self.clear_all_confirm_open {
             return visual::reveal(
                 self.render_clear_all_confirmation(cx),
@@ -4099,6 +9516,10 @@ impl ClipboardView {
                     "该分组暂无可显示的记录",
                     "There are no items in this group.",
                 )
+            } else if self.history.category == ContentCategory::Text {
+                tr(self.language, "还没有文本记录", "No text items yet.")
+            } else if self.history.category == ContentCategory::Other {
+                tr(self.language, "还没有其他类型记录", "No other items yet.")
             } else {
                 tr(
                     self.language,
@@ -4113,6 +9534,13 @@ impl ClipboardView {
                 "No matching items. Try another search.",
             )
         };
+        let toolbar_buttons = self
+            .toolbar
+            .items
+            .into_iter()
+            .filter(|item| item.visible)
+            .map(|item| self.render_toolbar_button(item.button, cx))
+            .collect::<Vec<_>>();
         div()
             .key_context("ClipboardApp")
             .flex()
@@ -4121,17 +9549,8 @@ impl ClipboardView {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .font_family("Microsoft YaHei UI")
-            .on_action(cx.listener(|this, _: &CancelDrag, window, cx| {
-                let was_dragging = cx.has_active_drag();
-                cx.stop_active_drag(window);
-                this.drop_target = None;
-                this.group_drop_target = None;
-                this.group_drag_direction = 0;
-                this.history_drag_direction = 0;
-                if !was_dragging && !this.selected_ids.is_empty() && !this.batch_pending {
-                    this.reset_selection();
-                }
-                cx.notify();
+            .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
+                this.dismiss_or_hide(window, cx);
             }))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.search
@@ -4139,9 +9558,13 @@ impl ClipboardView {
             }))
             .child(
                 div()
+                    .key_context("HistorySearch")
                     .px(px(PAGE_PADDING))
                     .pt_3()
                     .pb_2()
+                    .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
+                        this.focus_first_history_item(window, cx);
+                    }))
                     .child(Input::new(&self.search).cleanable(true)),
             )
             .child(
@@ -4149,47 +9572,52 @@ impl ClipboardView {
                     .id("toolbar-row")
                     .px(px(PAGE_PADDING))
                     .pb_2()
-                    .h(px(GROUP_BAR_HEIGHT))
                     .flex_none()
                     .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().flex_none().flex().gap_2().children(
+                    .flex_col()
+                    .gap_1()
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .children(toolbar_buttons),
+                    )
+                    .when(self.display.show_category_filter, |bar| bar.child(div().w_full().flex_none().flex().items_center().gap_2().children(
                         [
-                            (false, tr(self.language, "全部", "All")),
-                            (true, tr(self.language, "收藏记录", "Favorites")),
+                            (Some(ContentCategory::All), "filter-all", tr(self.language, "全部", "All")),
+                            (None, "filter-favorites", tr(self.language, "收藏", "Favorites")),
+                            (Some(ContentCategory::Text), "filter-text", tr(self.language, "文本", "Text")),
+                            (Some(ContentCategory::Other), "filter-other", tr(self.language, "其他", "Other")),
                         ]
-                        .map(|(favorite_only, label)| {
-                            Button::new(if favorite_only {
-                                "filter-favorites"
-                            } else {
-                                "filter-all"
-                            })
+                        .map(|(category, id, label)| {
+                            let selected = match category {
+                                None => self.history.favorite_only && self.history.group_id.is_none(),
+                                Some(category) => {
+                                    !self.history.favorite_only
+                                        && self.history.category == category
+                                        && self.history.group_id.is_none()
+                                }
+                            };
+                            Button::new(id)
                             .small()
                             .outline()
                             .label(label)
-                            .selected(self.history.favorite_only == favorite_only)
+                            .selected(selected)
                             .on_click(cx.listener(
                                 move |this, _, window, cx| {
-                                    if this.history.favorite_only != favorite_only {
-                                        this.clear_confirm_open = false;
-                                        this.reset_selection();
-                                        this.search_task = None;
-                                        this.history.set_favorite_filter(favorite_only);
-                                        this.scroll.scroll_to_item(0, ScrollStrategy::Top);
-                                        this.query(cx);
-                                        window.focus(&this.list_focus, cx);
-                                        cx.notify();
-                                    }
+                                    this.select_category(category, window, cx);
                                 },
                             ))
                         }),
-                    ))
+                    )))
                     .child(
                         div()
                             .id("group-bar")
-                            .h_full()
-                            .flex_1()
+                            .h(px(GROUP_BAR_HEIGHT))
+                            .w_full()
                             .min_w_0()
                             .flex()
                             .items_center()
@@ -4289,27 +9717,6 @@ impl ClipboardView {
                                         this.group_delete_id = this.history.group_id;
                                         this.reset_selection();
                                         this.clear_confirm_open = false;
-                                        this.group_editor_open = false;
-                                        this.group_rename_id = None;
-                                        this.group_move_id = None;
-                                        window.focus(&this.list_focus, cx);
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("clear-history-toggle")
-                                    .small()
-                                    .ghost()
-                                    .label(tr(self.language, "清理历史", "Clear history"))
-                                    .disabled(
-                                        self.group_save_pending
-                                            || self.group_delete_pending
-                                            || self.clear_pending,
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.clear_confirm_open = true;
-                                        this.reset_selection();
-                                        this.group_delete_id = None;
                                         this.group_editor_open = false;
                                         this.group_rename_id = None;
                                         this.group_move_id = None;
@@ -4446,11 +9853,11 @@ impl ClipboardView {
                     .unwrap_or(tr(self.language, "默认分组", "Default"));
                 let prompt = if self.language == LanguagePreference::English {
                     format!(
-                        "Clear unpinned, non-favorite items from “{name}”? Search and favorite filters do not change the scope."
+                        "Clear unpinned, non-favorite items from “{name}”? Search, favorites, and type filters do not change the scope."
                     )
                 } else {
                     format!(
-                        "清理「{name}」中未置顶且未收藏的记录？搜索和收藏筛选不影响清理范围。"
+                        "清理「{name}」中未置顶且未收藏的记录？搜索、收藏和类型筛选不影响清理范围。"
                     )
                 };
                 container.child(visual::reveal(
@@ -4561,7 +9968,7 @@ impl ClipboardView {
                     cx,
                 ))
             })
-            .when(!self.selected_ids.is_empty(), |container| {
+            .when(self.batch_mode, |container| {
                 container.child(visual::reveal(
                     div()
                         .px(px(PAGE_PADDING))
@@ -4597,10 +10004,9 @@ impl ClipboardView {
                                 .small()
                                 .ghost()
                                 .label(tr(self.language, "取消选择", "Clear selection"))
-                                .disabled(self.batch_pending)
+                                .disabled(self.batch_pending || self.selected_ids.is_empty())
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.reset_selection();
-                                    cx.notify();
+                                    this.clear_batch_selection(cx);
                                 })),
                         )
                         .child(
@@ -4626,7 +10032,7 @@ impl ClipboardView {
                                 .small()
                                 .danger()
                                 .label(tr(self.language, "删除选中", "Delete selected"))
-                                .disabled(self.batch_pending)
+                                .disabled(self.batch_pending || self.selected_ids.is_empty())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.batch_confirm_open = true;
                                     this.clear_confirm_open = false;
@@ -4700,7 +10106,9 @@ impl ClipboardView {
                     .px(px(PAGE_PADDING))
                     .pb_2()
                     .flex()
+                    .flex_wrap()
                     .justify_between()
+                    .gap_1()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(if self.language == LanguagePreference::English {
@@ -4708,10 +10116,22 @@ impl ClipboardView {
                     } else {
                         format!("{} 条记录", self.history.total)
                     })
+                    .when(self.history.items.len() > 8, |bar| {
+                        bar.child(
+                            Button::new("history-scroll-to-top")
+                                .small()
+                                .ghost()
+                                .label(tr(self.language, "返回顶部 ↑", "Back to top ↑"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
+                                    cx.notify();
+                                })),
+                        )
+                    })
                     .child(tr(
                         self.language,
-                        "↑↓/PgUp/PgDn/Home/End · Enter 复制",
-                        "↑↓/PgUp/PgDn/Home/End · Enter to copy",
+                        "点击卡片或 Enter 复制/粘贴 · Shift+Enter 纯文本 · ←→ 分类 · Ctrl+←→ 分组",
+                        "Click a card or Enter to copy/paste · Shift+Enter plain text · ←→ categories · Ctrl+←→ groups",
                     )),
             )
             .child(
@@ -4722,7 +10142,7 @@ impl ClipboardView {
                     .min_h_0()
                     .overflow_hidden()
                     .on_action(cx.listener(|this, _: &PreviewSelected, window, cx| {
-                        if let Some(id) = this.history.selected {
+                        if !this.batch_mode && let Some(id) = this.history.selected {
                             this.open_preview(id, window, cx);
                         }
                     }))
@@ -4745,7 +10165,21 @@ impl ClipboardView {
                         }),
                     )
                     .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
-                    .on_action(cx.listener(|this, _: &Previous, _, cx| this.select(-1, cx)))
+                    .on_action(cx.listener(|this, _: &Previous, window, cx| {
+                        this.select_previous_or_focus_search(window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviousCategory, window, cx| {
+                        this.select_adjacent_category(-1, window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &NextCategory, window, cx| {
+                        this.select_adjacent_category(1, window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &PreviousGroup, window, cx| {
+                        this.select_adjacent_group(-1, window, cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &NextGroup, window, cx| {
+                        this.select_adjacent_group(1, window, cx);
+                    }))
                     .on_action(cx.listener(|this, _: &First, _, cx| {
                         this.select_index(0, ScrollStrategy::Top, cx);
                     }))
@@ -4761,18 +10195,25 @@ impl ClipboardView {
                     .on_action(cx.listener(|this, _: &SelectAllLoaded, _, cx| {
                         this.select_all_loaded(cx);
                     }))
-                    .on_action(cx.listener(|this, _: &CopySelected, _, cx| {
-                        if let Some(id) = this.history.selected {
-                            this.send(Command::Copy(id), cx);
+                    .on_action(cx.listener(|this, _: &ActivateSelected, window, cx| {
+                        if !this.batch_mode
+                            && let Some(id) = this.history.selected
+                        {
+                            this.activate_row(id, false, window, cx);
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &PastePlainTextSelected, window, cx| {
+                        if !this.batch_mode && let Some(id) = this.history.selected {
+                            this.copy_or_paste_plain_text(id, window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &PasteSelected, window, cx| {
-                        if let Some(id) = this.history.selected {
+                        if !this.batch_mode && let Some(id) = this.history.selected {
                             this.paste_selected(id, window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &DeleteSelected, _, cx| {
-                        if let Some(id) = this.history.selected {
+                        if !this.batch_mode && let Some(id) = this.history.selected {
                             this.send(Command::Delete(id), cx);
                         }
                     }))

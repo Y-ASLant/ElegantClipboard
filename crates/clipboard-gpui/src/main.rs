@@ -1,8 +1,14 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+mod links;
 mod options;
 #[cfg(windows)]
 mod paste;
+#[cfg(windows)]
+mod position;
+#[cfg(windows)]
+mod sound;
 #[cfg(any(windows, test))]
 mod state;
 #[cfg(windows)]

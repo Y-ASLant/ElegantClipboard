@@ -549,7 +549,13 @@ mod tests {
     use super::*;
     use crate::{
         History, PreviewContent,
-        preferences::{LanguagePreference, Preferences, ThemePreference, WindowSizePreference},
+        preferences::{
+            AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
+            HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
+            PasteShortcutConfig, Preferences, SoundTiming, SourceAppDisplay, ThemePreference,
+            TimeFormat, ToolbarButton, ToolbarPreference, WindowPositionPreference,
+            WindowSizePreference,
+        },
     };
 
     #[test]
@@ -590,6 +596,62 @@ mod tests {
         preferences.set_language(LanguagePreference::English)?;
         let window_size = WindowSizePreference::new(900, 700).unwrap();
         preferences.set_window_size(window_size)?;
+        preferences.set_persist_window_size(true)?;
+        preferences.set_auto_reset_state(true)?;
+        preferences.set_search_auto_focus(true)?;
+        preferences.set_search_auto_clear(false)?;
+        preferences.set_paste_close_window(false)?;
+        preferences.set_paste_key(PasteKeyPreference::ShiftInsert)?;
+        preferences.set_paste_move_to_top(false)?;
+        preferences.set_quick_paste_enabled(false)?;
+        let mut paste_shortcuts = PasteShortcutConfig::default();
+        paste_shortcuts.set_slot(true, 10, "Ctrl+Shift+Z".into())?;
+        preferences.set_paste_shortcuts(&paste_shortcuts)?;
+        preferences.set_window_position(WindowPositionPreference::ScreenCenter)?;
+        let hover_preference = HoverPreviewPreference {
+            text: true,
+            expanded_image: true,
+            delay_ms: 750,
+            ..HoverPreviewPreference::default()
+        };
+        preferences.set_hover_preview(hover_preference)?;
+        let toolbar = ToolbarPreference::default()
+            .move_button(ToolbarButton::Settings, -1)
+            .unwrap()
+            .with_visibility(ToolbarButton::Clear, false)
+            .unwrap();
+        preferences.set_toolbar(toolbar)?;
+        let display = DisplayPreference {
+            show_category_filter: false,
+            show_drag_area_indicator: false,
+            card_density: CardDensity::Spacious,
+            card_max_lines: 5,
+            show_time: false,
+            time_format: TimeFormat::Relative,
+            show_char_count: false,
+            show_byte_size: false,
+            show_source_app: false,
+            source_app_display: SourceAppDisplay::Name,
+        };
+        preferences.set_display(display)?;
+        let audio = AudioPreference {
+            copy_enabled: true,
+            copy_timing: SoundTiming::AfterSuccess,
+            ..AudioPreference::default()
+        };
+        preferences.set_audio(audio)?;
+        let monitor_types = MonitorTypesPreference {
+            image: false,
+            ..MonitorTypesPreference::default()
+        };
+        preferences.set_monitor_types(monitor_types)?;
+        let app_filter = AppFilterPreference {
+            enabled: true,
+            mode: AppFilterMode::Blacklist,
+            rules: vec!["*browser*".into()],
+        };
+        preferences.set_app_filter(&app_filter)?;
+        preferences.set_onboarding_completed()?;
         history.db.write_connection().lock().execute(
             "INSERT INTO settings (key, value) VALUES ('secret_token', 'do-not-export')",
             [],
@@ -624,6 +686,38 @@ mod tests {
             Preferences::new(&restored.db).window_size()?,
             Some(window_size)
         );
+        assert!(Preferences::new(&restored.db).persist_window_size()?);
+        assert!(Preferences::new(&restored.db).auto_reset_state()?);
+        assert!(Preferences::new(&restored.db).search_auto_focus()?);
+        assert!(!Preferences::new(&restored.db).search_auto_clear()?);
+        assert!(!Preferences::new(&restored.db).paste_close_window()?);
+        assert_eq!(
+            Preferences::new(&restored.db).paste_key()?,
+            PasteKeyPreference::ShiftInsert
+        );
+        assert!(!Preferences::new(&restored.db).paste_move_to_top()?);
+        assert!(!Preferences::new(&restored.db).quick_paste_enabled()?);
+        assert_eq!(
+            Preferences::new(&restored.db).paste_shortcuts()?,
+            paste_shortcuts
+        );
+        assert_eq!(
+            Preferences::new(&restored.db).window_position()?,
+            WindowPositionPreference::ScreenCenter
+        );
+        assert_eq!(
+            Preferences::new(&restored.db).hover_preview()?,
+            hover_preference
+        );
+        assert_eq!(Preferences::new(&restored.db).toolbar()?, toolbar);
+        assert_eq!(Preferences::new(&restored.db).display()?, display);
+        assert_eq!(Preferences::new(&restored.db).audio()?, audio);
+        assert_eq!(
+            Preferences::new(&restored.db).monitor_types()?,
+            monitor_types
+        );
+        assert_eq!(Preferences::new(&restored.db).app_filter()?, app_filter);
+        assert!(Preferences::new(&restored.db).onboarding_completed()?);
         assert!(
             matches!(restored.preview_content(image)?, PreviewContent::Image(path) if path.starts_with(target.join("images")) && fs::read(&path)? == png)
         );

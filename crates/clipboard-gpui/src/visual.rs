@@ -1,8 +1,33 @@
 //! Shared spacing, control sizing and motion for the native UI.
+use clipboard_core::preferences::CardDensity;
 use gpui_kit::*;
 use std::time::Duration;
 pub const PAGE_PADDING: f32 = 20.;
 pub const ROW_HEIGHT: f32 = 116.;
+pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
+    let base = match density {
+        CardDensity::Compact => 100.,
+        CardDensity::Standard => ROW_HEIGHT,
+        CardDensity::Spacious => 160.,
+    };
+    base + f32::from(preview_lines.saturating_sub(2)) * 22.
+}
+
+pub fn card_spacing(density: CardDensity) -> f32 {
+    match density {
+        CardDensity::Compact => 2.,
+        CardDensity::Standard => 4.,
+        CardDensity::Spacious => 6.,
+    }
+}
+
+pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
+    match density {
+        CardDensity::Compact => (40., 30.),
+        CardDensity::Standard => (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT),
+        CardDensity::Spacious => (60., 48.),
+    }
+}
 pub const CONTROL_HEIGHT: f32 = 28.;
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
 pub const DROP_MARKER_HEIGHT: f32 = 2.;

@@ -1,20 +1,25 @@
 use crate::{
     autostart,
     instance::{self, InstanceSignal},
+    source_app,
 };
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 #[cfg(test)]
 use clipboard_core::FilePreviewEntry;
 use clipboard_core::{
-    History, MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES,
-    MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
+    ContentCategory, History, MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS,
+    MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES, PAGE_SIZE, PreviewContent,
     backup::{BackupReport, RestoreReport, restore_backup},
     database::{ClipboardItem, Database, Group},
     import::{ImportReport, import_legacy_database},
+    is_url_text,
     legacy_backup::{LegacyBackupReport, import_legacy_backup},
     preferences::{
-        HotkeyPreference, LanguagePreference, Preferences, ThemePreference, WindowSizePreference,
+        AppFilterPreference, AudioPreference, DisplayPreference, HotkeyPreference,
+        HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
+        PasteShortcutConfig, Preferences, ThemePreference, ToolbarPreference,
+        WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_rs::{
@@ -38,12 +43,14 @@ pub enum Command {
     Query {
         search: String,
         favorite_only: bool,
+        category: ContentCategory,
         group_id: Option<i64>,
         limit: i64,
         generation: u64,
     },
     Copy(i64),
     CopyPlainText(i64),
+    CopyPlainTextForPaste(i64),
     CopyForPaste(i64),
     CopyPath(i64),
     CopyPathForPaste(i64),
@@ -78,6 +85,10 @@ pub enum Command {
         id: i64,
         generation: u64,
     },
+    HoverPreview {
+        id: i64,
+        generation: u64,
+    },
     EditText {
         id: i64,
         expected_hash: String,
@@ -102,6 +113,31 @@ pub enum Command {
     SetLanguage(LanguagePreference),
     SetHotkey(HotkeyPreference),
     SetWindowSize(WindowSizePreference),
+    SetPersistWindowSize(bool),
+    SetAutoResetState(bool),
+    SetSearchAutoFocus(bool),
+    SetSearchAutoClear(bool),
+    SetSkipClearConfirm(bool),
+    SetPasteCloseWindow(bool),
+    SetPasteKey(PasteKeyPreference),
+    SetPasteMoveToTop(bool),
+    SetQuickPasteEnabled(bool),
+    SetPasteShortcuts(Box<PasteShortcutConfig>),
+    SetWindowPosition(WindowPositionPreference),
+    SetHoverPreview(HoverPreviewPreference),
+    SetToolbar(ToolbarPreference),
+    SetDisplay(DisplayPreference),
+    SetAudio(AudioPreference),
+    SetMonitorTypes(MonitorTypesPreference),
+    SetAppFilter(Box<AppFilterPreference>),
+    ListRunningApps,
+    CompleteOnboarding,
+    BumpToTop(i64),
+    ResolveQuickPaste {
+        slot: u8,
+        favorite: bool,
+        group_id: Option<i64>,
+    },
     SetAutostart(bool),
     QueryDataSize,
     OptimizeDatabase,
@@ -127,6 +163,55 @@ pub enum Command {
         width: u32,
         height: u32,
     },
+    ObservedCapture {
+        content: CapturedClipboard,
+        source: Option<source_app::SourceApp>,
+    },
+}
+
+pub enum CapturedClipboard {
+    Text(String),
+    Rich {
+        html: Option<String>,
+        rtf: Option<Vec<u8>>,
+        text: Option<String>,
+    },
+    Files(Vec<String>),
+    Image {
+        png: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+}
+
+fn filter_observed_capture(
+    content: CapturedClipboard,
+    allowed: MonitorTypesPreference,
+) -> Option<CapturedClipboard> {
+    match content {
+        CapturedClipboard::Text(text) => {
+            let enabled = if is_url_text(&text) {
+                allowed.url
+            } else {
+                allowed.text
+            };
+            enabled.then_some(CapturedClipboard::Text(text))
+        }
+        CapturedClipboard::Rich { html, rtf, text } => {
+            let html = html.filter(|_| allowed.html);
+            let rtf = rtf.filter(|_| allowed.rtf);
+            if html.is_some() || rtf.is_some() {
+                Some(CapturedClipboard::Rich { html, rtf, text })
+            } else {
+                text.and_then(|text| {
+                    filter_observed_capture(CapturedClipboard::Text(text), allowed)
+                })
+            }
+        }
+        CapturedClipboard::Image { .. } if !allowed.image => None,
+        CapturedClipboard::Files(_) if !allowed.files => None,
+        content => Some(content),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,9 +239,12 @@ impl Command {
             Self::Capture(_)
             | Self::CaptureRich { .. }
             | Self::CaptureFiles(_)
-            | Self::CaptureImage { .. } => None,
+            | Self::CaptureImage { .. }
+            | Self::ObservedCapture { .. } => None,
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
-            Self::CopyForPaste(id) | Self::CopyPathForPaste(id) => Some(FailureKind::Paste(*id)),
+            Self::CopyForPaste(id)
+            | Self::CopyPlainTextForPaste(id)
+            | Self::CopyPathForPaste(id) => Some(FailureKind::Paste(*id)),
             Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
             Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
@@ -178,6 +266,7 @@ impl Command {
             | Self::CopyPath(_)
             | Self::RevealInExplorer(_)
             | Self::Preview { .. }
+            | Self::HoverPreview { .. }
             | Self::Delete(_)
             | Self::TogglePin(_)
             | Self::ToggleFavorite(_)
@@ -186,6 +275,27 @@ impl Command {
             | Self::SetLanguage(_)
             | Self::SetHotkey(_)
             | Self::SetWindowSize(_)
+            | Self::SetPersistWindowSize(_)
+            | Self::SetAutoResetState(_)
+            | Self::SetSearchAutoFocus(_)
+            | Self::SetSearchAutoClear(_)
+            | Self::SetSkipClearConfirm(_)
+            | Self::SetPasteCloseWindow(_)
+            | Self::SetPasteKey(_)
+            | Self::SetPasteMoveToTop(_)
+            | Self::SetQuickPasteEnabled(_)
+            | Self::SetPasteShortcuts(_)
+            | Self::SetWindowPosition(_)
+            | Self::SetHoverPreview(_)
+            | Self::SetToolbar(_)
+            | Self::SetDisplay(_)
+            | Self::SetAudio(_)
+            | Self::SetMonitorTypes(_)
+            | Self::SetAppFilter(_)
+            | Self::ListRunningApps
+            | Self::CompleteOnboarding
+            | Self::BumpToTop(_)
+            | Self::ResolveQuickPaste { .. }
             | Self::SetAutostart(_)
             | Self::OpenDataDirectory
             | Self::ExportBackup(_) => Some(FailureKind::Other),
@@ -234,6 +344,11 @@ pub enum Event {
         generation: u64,
         result: Result<PreviewContent, String>,
     },
+    HoverPreview {
+        id: i64,
+        generation: u64,
+        result: Result<PreviewContent, String>,
+    },
     TextEdited {
         id: i64,
         generation: u64,
@@ -251,6 +366,30 @@ pub enum Event {
     LanguageSaved(Result<LanguagePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
     WindowSizeSaved(Result<WindowSizePreference, String>),
+    PersistWindowSizeSaved(Result<bool, String>),
+    AutoResetStateSaved(Result<bool, String>),
+    SearchAutoFocusSaved(Result<bool, String>),
+    SearchAutoClearSaved(Result<bool, String>),
+    SkipClearConfirmSaved(Result<bool, String>),
+    PasteCloseWindowSaved(Result<bool, String>),
+    PasteKeySaved(Result<PasteKeyPreference, String>),
+    PasteMoveToTopSaved(Result<bool, String>),
+    QuickPasteEnabledSaved(Result<bool, String>),
+    PasteShortcutsSaved(Result<Box<PasteShortcutConfig>, String>),
+    QuickPasteResolved {
+        slot: u8,
+        favorite: bool,
+        result: Result<i64, String>,
+    },
+    WindowPositionSaved(Result<WindowPositionPreference, String>),
+    HoverPreviewSaved(Result<HoverPreviewPreference, String>),
+    ToolbarSaved(Result<ToolbarPreference, String>),
+    DisplaySaved(Result<DisplayPreference, String>),
+    AudioSaved(Result<AudioPreference, String>),
+    MonitorTypesSaved(Result<MonitorTypesPreference, String>),
+    AppFilterSaved(Result<Box<AppFilterPreference>, String>),
+    RunningApps(Vec<source_app::RunningApp>),
+    OnboardingCompleted(Result<(), String>),
     AutostartSaved(Result<bool, String>),
     DataSize(Result<DataSizeInfo, String>),
     DatabaseOptimized(DataSizeInfo),
@@ -321,6 +460,7 @@ impl WatchHandler {
         if state.paused || sequence == state.ignored_sequence || sequence == state.last_sequence {
             return Ok(());
         }
+        let source = source_app::clipboard_source();
         if self.clipboard.has(ContentFormat::Files) {
             let paths = self
                 .clipboard
@@ -334,7 +474,10 @@ impl WatchHandler {
                 bail!("文件路径列表为空或超过限制，本次复制未保存");
             }
             self.commands
-                .try_send(Command::CaptureFiles(paths))
+                .try_send(Command::ObservedCapture {
+                    content: CapturedClipboard::Files(paths),
+                    source,
+                })
                 .map_err(|_| anyhow!("采集队列已满或已停止，本次文件未保存"))?;
             state.last_sequence = sequence;
             return Ok(());
@@ -363,7 +506,10 @@ impl WatchHandler {
                 + text.as_ref().map_or(0, String::len);
             if bytes <= MAX_TEXT_BYTES {
                 self.commands
-                    .try_send(Command::CaptureRich { html, rtf, text })
+                    .try_send(Command::ObservedCapture {
+                        content: CapturedClipboard::Rich { html, rtf, text },
+                        source,
+                    })
                     .map_err(|_| anyhow!("采集队列已满或已停止，本次富文本未保存"))?;
                 state.last_sequence = sequence;
                 return Ok(());
@@ -382,7 +528,10 @@ impl WatchHandler {
                 bail!("文本超过 1 MiB，未保存");
             }
             self.commands
-                .try_send(Command::Capture(text))
+                .try_send(Command::ObservedCapture {
+                    content: CapturedClipboard::Text(text),
+                    source,
+                })
                 .map_err(|_| anyhow!("采集队列已满或已停止，本次复制未保存"))?;
             state.last_sequence = sequence;
             return Ok(());
@@ -413,10 +562,13 @@ impl WatchHandler {
             state.pending_image_bytes += bytes.len();
             if self
                 .commands
-                .try_send(Command::CaptureImage {
-                    png: bytes.to_vec(),
-                    width,
-                    height,
+                .try_send(Command::ObservedCapture {
+                    content: CapturedClipboard::Image {
+                        png: bytes.to_vec(),
+                        width,
+                        height,
+                    },
+                    source,
                 })
                 .is_err()
             {
@@ -446,6 +598,24 @@ pub struct Service {
     pub initial_hotkey: HotkeyPreference,
     pub initial_paused: bool,
     pub initial_window_size: Option<WindowSizePreference>,
+    pub initial_persist_window_size: bool,
+    pub initial_auto_reset_state: bool,
+    pub initial_search_auto_focus: bool,
+    pub initial_search_auto_clear: bool,
+    pub initial_skip_clear_confirm: bool,
+    pub initial_paste_close_window: bool,
+    pub initial_paste_key: PasteKeyPreference,
+    pub initial_paste_move_to_top: bool,
+    pub initial_quick_paste_enabled: bool,
+    pub initial_paste_shortcuts: PasteShortcutConfig,
+    pub initial_window_position: WindowPositionPreference,
+    pub initial_hover_preview: HoverPreviewPreference,
+    pub initial_toolbar: ToolbarPreference,
+    pub initial_display: DisplayPreference,
+    pub initial_audio: AudioPreference,
+    pub initial_monitor_types: MonitorTypesPreference,
+    pub initial_app_filter: AppFilterPreference,
+    pub initial_onboarding_completed: bool,
 }
 
 fn resolve_data_dir(data_dir: Option<PathBuf>) -> Result<PathBuf> {
@@ -519,6 +689,34 @@ impl Service {
         let initial_hotkey = preferences.hotkey()?;
         let initial_paused = preferences.capture_paused()?;
         let initial_window_size = preferences.window_size()?;
+        let initial_persist_window_size = preferences.persist_window_size()?;
+        let initial_auto_reset_state = preferences.auto_reset_state()?;
+        let initial_search_auto_focus = preferences.search_auto_focus()?;
+        let initial_search_auto_clear = preferences.search_auto_clear()?;
+        let initial_skip_clear_confirm = preferences.skip_clear_confirm()?;
+        let initial_paste_close_window = preferences.paste_close_window()?;
+        let initial_paste_key = preferences.paste_key()?;
+        let initial_paste_move_to_top = preferences.paste_move_to_top()?;
+        let initial_quick_paste_enabled = preferences.quick_paste_enabled()?;
+        let initial_paste_shortcuts = preferences.paste_shortcuts()?;
+        let initial_window_position = preferences.window_position()?;
+        let initial_hover_preview = preferences.hover_preview()?;
+        let initial_toolbar = preferences.toolbar()?;
+        let initial_display = preferences.display()?;
+        let initial_audio = preferences.audio()?;
+        let initial_monitor_types = preferences.monitor_types()?;
+        let initial_app_filter = preferences.app_filter()?;
+        let initial_onboarding_completed = if preferences.onboarding_completed()? {
+            true
+        } else if history.count("", false)? > 0
+            || history.groups()?.iter().any(|group| group.item_count > 0)
+        {
+            // Existing GPUI data predates the introduction of onboarding.
+            preferences.set_onboarding_completed()?;
+            true
+        } else {
+            false
+        };
         let writer =
             ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
         let (commands, incoming) = mpsc::sync_channel(64);
@@ -542,6 +740,24 @@ impl Service {
             initial_hotkey,
             initial_paused,
             initial_window_size,
+            initial_persist_window_size,
+            initial_auto_reset_state,
+            initial_search_auto_focus,
+            initial_search_auto_clear,
+            initial_skip_clear_confirm,
+            initial_paste_close_window,
+            initial_paste_key,
+            initial_paste_move_to_top,
+            initial_quick_paste_enabled,
+            initial_paste_shortcuts,
+            initial_window_position,
+            initial_hover_preview,
+            initial_toolbar,
+            initial_display,
+            initial_audio,
+            initial_monitor_types,
+            initial_app_filter: initial_app_filter.clone(),
+            initial_onboarding_completed,
             data_dir,
         };
         let worker_state = state.clone();
@@ -559,8 +775,11 @@ impl Service {
                     staged_dir,
                     data_dir: worker_data_dir,
                     state: worker_state,
+                    monitor_types: initial_monitor_types,
+                    app_filter: initial_app_filter,
                     search: String::new(),
                     favorite_only: false,
+                    category: ContentCategory::All,
                     group_id: None,
                     limit: PAGE_SIZE,
                     generation: 0,
@@ -994,8 +1213,11 @@ struct Worker {
     staged_dir: PathBuf,
     data_dir: PathBuf,
     state: Arc<Mutex<CaptureState>>,
+    monitor_types: MonitorTypesPreference,
+    app_filter: AppFilterPreference,
     search: String,
     favorite_only: bool,
+    category: ContentCategory,
     group_id: Option<i64>,
     limit: i64,
     generation: u64,
@@ -1014,12 +1236,19 @@ impl Worker {
             .send_blocking(Event::Snapshot {
                 items: self
                     .history
-                    .list_in_group(&self.search, self.limit, self.favorite_only, self.group_id)
+                    .list_filtered_in_group(
+                        &self.search,
+                        self.limit,
+                        self.favorite_only,
+                        self.group_id,
+                        self.category,
+                    )
                     .map_err(|error| anyhow!("读取历史记录失败：{error}"))?,
-                total: self.history.count_in_group(
+                total: self.history.count_filtered_in_group(
                     &self.search,
                     self.favorite_only,
                     self.group_id,
+                    self.category,
                 )?,
                 generation: self.generation,
             })
@@ -1029,9 +1258,14 @@ impl Worker {
     fn handle(&mut self, command: Command) -> Result<()> {
         let for_paste = matches!(
             &command,
-            Command::CopyForPaste(_) | Command::CopyPathForPaste(_)
+            Command::CopyForPaste(_)
+                | Command::CopyPlainTextForPaste(_)
+                | Command::CopyPathForPaste(_)
         );
-        let plain_only = matches!(&command, Command::CopyPlainText(_));
+        let plain_only = matches!(
+            &command,
+            Command::CopyPlainText(_) | Command::CopyPlainTextForPaste(_)
+        );
         let path_only = matches!(
             &command,
             Command::CopyPath(_) | Command::CopyPathForPaste(_)
@@ -1041,12 +1275,14 @@ impl Worker {
             Command::Query {
                 search,
                 favorite_only,
+                category,
                 group_id,
                 limit,
                 generation,
             } => {
                 self.search = search;
                 self.favorite_only = favorite_only;
+                self.category = category;
                 self.group_id = group_id;
                 self.limit = limit;
                 self.generation = generation;
@@ -1073,6 +1309,60 @@ impl Worker {
                 state.pending_image_bytes = state.pending_image_bytes.saturating_sub(png.len());
                 drop(state);
                 result?;
+            }
+            Command::ObservedCapture { content, source } => {
+                let image_bytes = match &content {
+                    CapturedClipboard::Image { png, .. } => png.len(),
+                    _ => 0,
+                };
+                let excluded = self.app_filter.excludes(
+                    source.as_ref().map(|app| app.name.as_str()),
+                    source.as_ref().and_then(|app| app.executable.as_deref()),
+                );
+                let filtered = (!excluded)
+                    .then(|| filter_observed_capture(content, self.monitor_types))
+                    .flatten();
+                let Some(content) = filtered else {
+                    if image_bytes != 0 {
+                        let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                        state.pending_image_bytes =
+                            state.pending_image_bytes.saturating_sub(image_bytes);
+                    }
+                    return Ok(());
+                };
+                let id = match content {
+                    CapturedClipboard::Text(text) => {
+                        self.history.capture_with_media(&text, &self.images_dir)?
+                    }
+                    CapturedClipboard::Rich { html, rtf, text } => {
+                        Some(self.history.capture_rich(
+                            html.as_deref(),
+                            rtf.as_deref(),
+                            text.as_deref(),
+                            &self.images_dir,
+                        )?)
+                    }
+                    CapturedClipboard::Files(paths) => {
+                        Some(self.history.capture_files(&paths, &self.images_dir)?)
+                    }
+                    CapturedClipboard::Image { png, width, height } => {
+                        let result =
+                            self.history
+                                .capture_image(&png, width, height, &self.images_dir);
+                        let mut state = self.state.lock().map_err(|_| anyhow!("剪贴板状态异常"))?;
+                        state.pending_image_bytes =
+                            state.pending_image_bytes.saturating_sub(png.len());
+                        drop(state);
+                        Some(result?)
+                    }
+                };
+                if let (Some(id), Some(source)) = (id, source) {
+                    let icon = source.executable.as_deref().and_then(|executable| {
+                        source_app::extract_and_cache_icon(executable, &self.data_dir.join("icons"))
+                    });
+                    self.history
+                        .set_source_app(id, &source.name, icon.as_deref())?;
+                }
             }
             Command::MergeCopy(ids) | Command::MergeForPaste(ids) => {
                 let item_count = ids.len();
@@ -1119,6 +1409,7 @@ impl Worker {
             }
             Command::Copy(id)
             | Command::CopyPlainText(id)
+            | Command::CopyPlainTextForPaste(id)
             | Command::CopyForPaste(id)
             | Command::CopyPath(id)
             | Command::CopyPathForPaste(id) => {
@@ -1244,6 +1535,19 @@ impl Worker {
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
+            Command::HoverPreview { id, generation } => {
+                self.events
+                    .send_blocking(Event::HoverPreview {
+                        id,
+                        generation,
+                        result: self
+                            .history
+                            .preview_content_with_staged(id, &self.staged_dir)
+                            .map_err(|error| error.to_string()),
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
             Command::EditText {
                 id,
                 expected_hash,
@@ -1333,6 +1637,30 @@ impl Worker {
             }
             Command::TogglePin(id) => {
                 self.history.toggle_pin(id)?;
+            }
+            Command::BumpToTop(id) => {
+                self.history.bump_to_top(id)?;
+                self.snapshot()?;
+                return Ok(());
+            }
+            Command::ResolveQuickPaste {
+                slot,
+                favorite,
+                group_id,
+            } => {
+                let result = self
+                    .history
+                    .quick_paste_item_id(slot, favorite, group_id)
+                    .map_err(|error| error.to_string())
+                    .and_then(|item| item.ok_or_else(|| format!("槽位 {slot} 没有可用的历史记录")));
+                self.events
+                    .send_blocking(Event::QuickPasteResolved {
+                        slot,
+                        favorite,
+                        result,
+                    })
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
             }
             Command::Reorder {
                 from,
@@ -1468,7 +1796,11 @@ impl Worker {
             Command::SetHotkey(hotkey) => {
                 let result = self
                     .preferences
-                    .set_hotkey(hotkey)
+                    .paste_shortcuts()
+                    .and_then(|shortcuts| {
+                        crate::hotkey::validate_paste_shortcuts(&shortcuts, hotkey)
+                    })
+                    .and_then(|_| self.preferences.set_hotkey(hotkey))
                     .map(|_| hotkey)
                     .map_err(|error| error.to_string());
                 self.events
@@ -1484,6 +1816,216 @@ impl Worker {
                     .map_err(|error| error.to_string());
                 self.events
                     .send_blocking(Event::WindowSizeSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetPersistWindowSize(enabled) => {
+                let result = self
+                    .preferences
+                    .set_persist_window_size(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::PersistWindowSizeSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetAutoResetState(enabled) => {
+                let result = self
+                    .preferences
+                    .set_auto_reset_state(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::AutoResetStateSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetSearchAutoFocus(enabled) => {
+                let result = self
+                    .preferences
+                    .set_search_auto_focus(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::SearchAutoFocusSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetSearchAutoClear(enabled) => {
+                let result = self
+                    .preferences
+                    .set_search_auto_clear(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::SearchAutoClearSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetSkipClearConfirm(enabled) => {
+                let result = self
+                    .preferences
+                    .set_skip_clear_confirm(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::SkipClearConfirmSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetPasteCloseWindow(enabled) => {
+                let result = self
+                    .preferences
+                    .set_paste_close_window(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::PasteCloseWindowSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetPasteKey(key) => {
+                let result = self
+                    .preferences
+                    .set_paste_key(key)
+                    .map(|_| key)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::PasteKeySaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetPasteMoveToTop(enabled) => {
+                let result = self
+                    .preferences
+                    .set_paste_move_to_top(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::PasteMoveToTopSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetQuickPasteEnabled(enabled) => {
+                let result = self
+                    .preferences
+                    .set_quick_paste_enabled(enabled)
+                    .map(|_| enabled)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::QuickPasteEnabledSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetPasteShortcuts(shortcuts) => {
+                let result =
+                    crate::hotkey::validate_paste_shortcuts(&shortcuts, self.preferences.hotkey()?)
+                        .and_then(|_| self.preferences.set_paste_shortcuts(&shortcuts))
+                        .map(|_| shortcuts)
+                        .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::PasteShortcutsSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetWindowPosition(position) => {
+                let result = self
+                    .preferences
+                    .set_window_position(position)
+                    .map(|_| position)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::WindowPositionSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetHoverPreview(preference) => {
+                let result = self
+                    .preferences
+                    .set_hover_preview(preference)
+                    .map(|_| preference)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::HoverPreviewSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetToolbar(preference) => {
+                let result = self
+                    .preferences
+                    .set_toolbar(preference)
+                    .map(|_| preference)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::ToolbarSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetDisplay(preference) => {
+                let result = self
+                    .preferences
+                    .set_display(preference)
+                    .map(|_| preference)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::DisplaySaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetAudio(preference) => {
+                let result = self
+                    .preferences
+                    .set_audio(preference)
+                    .map(|_| preference)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::AudioSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetMonitorTypes(preference) => {
+                let result = self
+                    .preferences
+                    .set_monitor_types(preference)
+                    .map(|_| {
+                        self.monitor_types = preference;
+                        preference
+                    })
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::MonitorTypesSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::SetAppFilter(preference) => {
+                let result = self
+                    .preferences
+                    .set_app_filter(&preference)
+                    .map(|_| {
+                        self.app_filter = *preference.clone();
+                        preference
+                    })
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::AppFilterSaved(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::ListRunningApps => {
+                let apps = source_app::running_apps(&self.data_dir.join("icons"));
+                self.events
+                    .send_blocking(Event::RunningApps(apps))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::CompleteOnboarding => {
+                let result = self
+                    .preferences
+                    .set_onboarding_completed()
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::OnboardingCompleted(result))
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }
@@ -1552,6 +2094,217 @@ impl Worker {
 mod tests {
     use super::*;
     use clipboard_core::database::GroupRepository;
+
+    #[test]
+    fn observed_capture_filter_distinguishes_url_and_preserves_allowed_rich_format() {
+        let allowed = MonitorTypesPreference {
+            text: false,
+            url: true,
+            html: false,
+            rtf: true,
+            image: false,
+            files: false,
+        };
+        assert!(
+            filter_observed_capture(CapturedClipboard::Text("plain text".into()), allowed)
+                .is_none()
+        );
+        assert!(matches!(
+            filter_observed_capture(
+                CapturedClipboard::Text("https://example.com".into()),
+                allowed
+            ),
+            Some(CapturedClipboard::Text(_))
+        ));
+        assert!(matches!(
+            filter_observed_capture(
+                CapturedClipboard::Rich {
+                    html: Some("<b>rich</b>".into()),
+                    rtf: Some(b"{\\rtf1 rich}".to_vec()),
+                    text: Some("rich".into()),
+                },
+                allowed
+            ),
+            Some(CapturedClipboard::Rich {
+                html: None,
+                rtf: Some(_),
+                ..
+            })
+        ));
+        assert!(
+            filter_observed_capture(
+                CapturedClipboard::Files(vec!["C:\\test.txt".into()]),
+                allowed
+            )
+            .is_none()
+        );
+        assert!(
+            filter_observed_capture(
+                CapturedClipboard::Image {
+                    png: vec![1],
+                    width: 1,
+                    height: 1
+                },
+                allowed
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let allowed = MonitorTypesPreference {
+            text: false,
+            ..MonitorTypesPreference::default()
+        };
+        service.send(Command::SetMonitorTypes(allowed))?;
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("ordinary text".into()),
+            source: None,
+        })?;
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("https://example.com".into()),
+            source: None,
+        })?;
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            category: ContentCategory::All,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        let items = next_snapshot(&events, 1);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].preview.as_deref(), Some("https://example.com"));
+        drop(service);
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        assert_eq!(Preferences::new(&db).monitor_types()?, allowed);
+        Ok(())
+    }
+
+    #[test]
+    fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let blacklist = AppFilterPreference {
+            enabled: true,
+            mode: clipboard_core::preferences::AppFilterMode::Blacklist,
+            rules: vec!["notepad.exe".into()],
+        };
+        service.send(Command::SetAppFilter(Box::new(blacklist.clone())))?;
+        let notepad = source_app::SourceApp {
+            name: "Notepad".into(),
+            executable: Some("C:\\Windows\\notepad.exe".into()),
+        };
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("blocked note".into()),
+            source: Some(notepad.clone()),
+        })?;
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("unknown source".into()),
+            source: None,
+        })?;
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            category: ContentCategory::All,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        let items = next_snapshot(&events, 1);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].preview.as_deref(), Some("unknown source"));
+
+        let whitelist = AppFilterPreference {
+            mode: clipboard_core::preferences::AppFilterMode::Whitelist,
+            ..blacklist
+        };
+        service.send(Command::SetAppFilter(Box::new(whitelist.clone())))?;
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("allowed note".into()),
+            source: Some(notepad),
+        })?;
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("blocked browser".into()),
+            source: Some(source_app::SourceApp {
+                name: "Browser".into(),
+                executable: Some("C:\\Apps\\browser.exe".into()),
+            }),
+        })?;
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            category: ContentCategory::All,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 2,
+        })?;
+        let items = next_snapshot(&events, 2);
+        assert_eq!(items.len(), 2);
+        assert!(
+            items
+                .iter()
+                .any(|item| item.preview.as_deref() == Some("allowed note"))
+        );
+        assert!(
+            !items
+                .iter()
+                .any(|item| item.preview.as_deref() == Some("blocked browser"))
+        );
+        drop(service);
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        assert_eq!(Preferences::new(&db).app_filter()?, whitelist);
+        Ok(())
+    }
+
+    #[test]
+    fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
+        let fresh = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(fresh.path().to_owned()), false)?;
+        assert!(!service.initial_onboarding_completed);
+        next_snapshot(&events, 0);
+        service.send(Command::CompleteOnboarding)?;
+        assert!(matches!(
+            events.recv_blocking()?,
+            Event::OnboardingCompleted(Ok(()))
+        ));
+        drop(service);
+        let (service, _) = Service::start(Some(fresh.path().to_owned()), false)?;
+        assert!(service.initial_onboarding_completed);
+        drop(service);
+
+        let existing = tempfile::tempdir()?;
+        let history = History::open(existing.path().join("clipboard.db"))?;
+        let id = history.capture("existing history")?.expect("new item");
+        let group = history.create_group("Existing group")?;
+        history.move_to_group(id, None, Some(group.id))?;
+        assert_eq!(history.count("", false)?, 0);
+        drop(history);
+        let (service, _) = Service::start(Some(existing.path().to_owned()), false)?;
+        assert!(service.initial_onboarding_completed);
+        drop(service);
+        let db = Database::new(existing.path().join("clipboard.db"))?;
+        assert!(Preferences::new(&db).onboarding_completed()?);
+        Ok(())
+    }
+
+    #[test]
+    fn plain_text_paste_failure_is_routed_to_its_pending_item() {
+        assert_eq!(
+            Command::CopyPlainTextForPaste(42).failure_kind(),
+            Some(FailureKind::Paste(42))
+        );
+        assert_eq!(
+            Command::CopyPlainText(42).failure_kind(),
+            Some(FailureKind::Other)
+        );
+    }
 
     #[test]
     fn plain_text_copy_uses_only_stored_text_and_rejects_missing_representation() -> Result<()> {
@@ -1820,6 +2573,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 7,
@@ -1870,6 +2624,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: Some(group.id),
             limit: PAGE_SIZE,
             generation: 1,
@@ -1895,6 +2650,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 2,
@@ -2020,6 +2776,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: Some(group.id),
             limit: PAGE_SIZE,
             generation: 1,
@@ -2045,6 +2802,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 2,
@@ -2119,6 +2877,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: Some(group.id),
             limit: PAGE_SIZE,
             generation: 1,
@@ -2153,6 +2912,7 @@ mod tests {
         service.send(Command::Query {
             search: "%_".into(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 1,
@@ -2163,6 +2923,7 @@ mod tests {
         service.send(Command::Query {
             search: "".into(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 2,
@@ -2381,6 +3142,470 @@ mod tests {
     }
 
     #[test]
+    fn window_position_is_acknowledged_and_loaded_on_restart() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(
+            service.initial_window_position,
+            WindowPositionPreference::FollowCursor
+        );
+        next_snapshot(&events, 0);
+        service.send(Command::SetWindowPosition(
+            WindowPositionPreference::ScreenCenter,
+        ))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::WindowPositionSaved(result)) => {
+                    assert_eq!(result.unwrap(), WindowPositionPreference::ScreenCenter);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "window position save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(
+            reopened.initial_window_position,
+            WindowPositionPreference::ScreenCenter
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn window_behavior_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(service.initial_persist_window_size);
+        assert!(!service.initial_auto_reset_state);
+        assert!(!service.initial_search_auto_focus);
+        assert!(service.initial_search_auto_clear);
+        assert!(!service.initial_skip_clear_confirm);
+        assert!(service.initial_paste_close_window);
+        assert_eq!(service.initial_paste_key, PasteKeyPreference::CtrlV);
+        assert!(service.initial_paste_move_to_top);
+        assert!(service.initial_quick_paste_enabled);
+        next_snapshot(&events, 0);
+        service.send(Command::SetPersistWindowSize(false))?;
+        service.send(Command::SetAutoResetState(true))?;
+        service.send(Command::SetSearchAutoFocus(true))?;
+        service.send(Command::SetSearchAutoClear(false))?;
+        service.send(Command::SetSkipClearConfirm(true))?;
+        service.send(Command::SetPasteCloseWindow(false))?;
+        service.send(Command::SetPasteKey(PasteKeyPreference::ShiftInsert))?;
+        service.send(Command::SetPasteMoveToTop(false))?;
+        service.send(Command::SetQuickPasteEnabled(false))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut size_acknowledged = false;
+        let mut reset_acknowledged = false;
+        let mut focus_acknowledged = false;
+        let mut clear_acknowledged = false;
+        let mut skip_clear_acknowledged = false;
+        let mut paste_acknowledged = false;
+        let mut paste_key_acknowledged = false;
+        let mut move_acknowledged = false;
+        let mut quick_acknowledged = false;
+        while !size_acknowledged
+            || !reset_acknowledged
+            || !focus_acknowledged
+            || !clear_acknowledged
+            || !skip_clear_acknowledged
+            || !paste_acknowledged
+            || !paste_key_acknowledged
+            || !move_acknowledged
+            || !quick_acknowledged
+        {
+            match events.try_recv() {
+                Ok(Event::PersistWindowSizeSaved(result)) => {
+                    assert!(!result.unwrap());
+                    size_acknowledged = true;
+                }
+                Ok(Event::AutoResetStateSaved(result)) => {
+                    assert!(result.unwrap());
+                    reset_acknowledged = true;
+                }
+                Ok(Event::SearchAutoFocusSaved(result)) => {
+                    assert!(result.unwrap());
+                    focus_acknowledged = true;
+                }
+                Ok(Event::SearchAutoClearSaved(result)) => {
+                    assert!(!result.unwrap());
+                    clear_acknowledged = true;
+                }
+                Ok(Event::SkipClearConfirmSaved(result)) => {
+                    assert!(result.unwrap());
+                    skip_clear_acknowledged = true;
+                }
+                Ok(Event::PasteCloseWindowSaved(result)) => {
+                    assert!(!result.unwrap());
+                    paste_acknowledged = true;
+                }
+                Ok(Event::PasteKeySaved(result)) => {
+                    assert_eq!(result.unwrap(), PasteKeyPreference::ShiftInsert);
+                    paste_key_acknowledged = true;
+                }
+                Ok(Event::PasteMoveToTopSaved(result)) => {
+                    assert!(!result.unwrap());
+                    move_acknowledged = true;
+                }
+                Ok(Event::QuickPasteEnabledSaved(result)) => {
+                    assert!(!result.unwrap());
+                    quick_acknowledged = true;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "window behavior save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert!(!reopened.initial_persist_window_size);
+        assert!(reopened.initial_auto_reset_state);
+        assert!(reopened.initial_search_auto_focus);
+        assert!(!reopened.initial_search_auto_clear);
+        assert!(reopened.initial_skip_clear_confirm);
+        assert!(!reopened.initial_paste_close_window);
+        assert_eq!(reopened.initial_paste_key, PasteKeyPreference::ShiftInsert);
+        assert!(!reopened.initial_paste_move_to_top);
+        assert!(!reopened.initial_quick_paste_enabled);
+        Ok(())
+    }
+
+    #[test]
+    fn paste_shortcuts_save_atomically_and_reject_window_hotkey_conflicts() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let mut shortcuts = service.initial_paste_shortcuts.clone();
+        shortcuts.set_slot(true, 10, "Ctrl+Shift+Z".into())?;
+        service.send(Command::SetPasteShortcuts(Box::new(shortcuts.clone())))?;
+        let result = loop {
+            match events.recv_blocking()? {
+                Event::PasteShortcutsSaved(result) => break result,
+                Event::Error(message) => anyhow::bail!("{message}"),
+                _ => {}
+            }
+        };
+        assert_eq!(*result.unwrap(), shortcuts);
+        let mut invalid = shortcuts.clone();
+        invalid.set_slot(true, 10, "Ctrl+Shift+V".into())?;
+        service.send(Command::SetPasteShortcuts(Box::new(invalid)))?;
+        let result = loop {
+            match events.recv_blocking()? {
+                Event::PasteShortcutsSaved(result) => break result,
+                Event::Error(message) => anyhow::bail!("{message}"),
+                _ => {}
+            }
+        };
+        assert!(result.is_err());
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_paste_shortcuts, shortcuts);
+        Ok(())
+    }
+
+    #[test]
+    fn bump_to_top_refreshes_the_visible_history_without_clipboard_access() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let older = history.capture("older item")?.unwrap();
+        let newer = history.capture("newer item")?.unwrap();
+        drop(history);
+        drop(db);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(next_snapshot(&events, 0)[0].id, newer);
+        service.send(Command::BumpToTop(older))?;
+        assert_eq!(next_snapshot(&events, 0)[0].id, older);
+        Ok(())
+    }
+
+    #[test]
+    fn quick_paste_resolves_recent_and_favorite_slots_with_group_isolation() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let favorite = history.capture("favorite")?.unwrap();
+        history.toggle_favorite(favorite)?;
+        let recent = history.capture("recent")?.unwrap();
+        let grouped = history.capture("grouped")?.unwrap();
+        let groups = GroupRepository::new(&db);
+        let group = groups.create("Group", None)?;
+        groups.move_item_to_group(grouped, Some(group.id))?;
+        drop(history);
+        drop(db);
+
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        for (slot, is_favorite, group_id, expected) in [
+            (1, false, None, Some(recent)),
+            (1, true, None, Some(favorite)),
+            (1, false, Some(group.id), Some(grouped)),
+            (2, false, Some(group.id), None),
+            (0, false, None, None),
+        ] {
+            service.send(Command::ResolveQuickPaste {
+                slot,
+                favorite: is_favorite,
+                group_id,
+            })?;
+            let Event::QuickPasteResolved {
+                slot: actual_slot,
+                favorite: actual_favorite,
+                result,
+            } = events.recv_blocking()?
+            else {
+                bail!("没有返回快速粘贴槽位结果");
+            };
+            assert_eq!((actual_slot, actual_favorite), (slot, is_favorite));
+            assert_eq!(result.ok(), expected);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn toolbar_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
+        use clipboard_core::preferences::ToolbarButton;
+
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_toolbar, ToolbarPreference::default());
+        next_snapshot(&events, 0);
+        let toolbar = ToolbarPreference::default()
+            .move_button(ToolbarButton::Settings, -1)
+            .unwrap()
+            .with_visibility(ToolbarButton::Clear, false)
+            .unwrap();
+        service.send(Command::SetToolbar(toolbar))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::ToolbarSaved(result)) => {
+                    assert_eq!(result.unwrap(), toolbar);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "toolbar save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_toolbar, toolbar);
+        Ok(())
+    }
+
+    #[test]
+    fn display_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
+        use clipboard_core::preferences::CardDensity;
+
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_display, DisplayPreference::default());
+        next_snapshot(&events, 0);
+        let display = DisplayPreference {
+            show_category_filter: false,
+            show_drag_area_indicator: false,
+            card_density: CardDensity::Spacious,
+            card_max_lines: 5,
+            show_time: false,
+            time_format: clipboard_core::preferences::TimeFormat::Relative,
+            show_char_count: false,
+            show_byte_size: false,
+            show_source_app: false,
+            source_app_display: clipboard_core::preferences::SourceAppDisplay::Icon,
+        };
+        service.send(Command::SetDisplay(display))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::DisplaySaved(result)) => {
+                    assert_eq!(result.unwrap(), display);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "display save timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_display, display);
+        Ok(())
+    }
+
+    #[test]
+    fn audio_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
+        use clipboard_core::preferences::SoundTiming;
+
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(service.initial_audio, AudioPreference::default());
+        next_snapshot(&events, 0);
+        let audio = AudioPreference {
+            copy_enabled: true,
+            copy_timing: SoundTiming::AfterSuccess,
+            paste_enabled: true,
+            paste_timing: SoundTiming::AfterSuccess,
+        };
+        service.send(Command::SetAudio(audio))?;
+        assert!(matches!(events.recv_blocking()?, Event::AudioSaved(Ok(saved)) if saved == audio));
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_audio, audio);
+        Ok(())
+    }
+
+    #[test]
+    fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("source test".into()),
+            source: Some(source_app::SourceApp {
+                name: "Editor".into(),
+                executable: None,
+            }),
+        })?;
+        let items = next_snapshot(&events, 0);
+        assert_eq!(items[0].source_app_name.as_deref(), Some("Editor"));
+
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("source test".into()),
+            source: Some(source_app::SourceApp {
+                name: "Browser".into(),
+                executable: None,
+            }),
+        })?;
+        let items = next_snapshot(&events, 0);
+        assert_eq!(items[0].source_app_name.as_deref(), Some("Browser"));
+
+        for (content, source) in [
+            (
+                CapturedClipboard::Rich {
+                    html: Some("<b>rich source</b>".into()),
+                    rtf: None,
+                    text: Some("rich source".into()),
+                },
+                "Mail",
+            ),
+            (
+                CapturedClipboard::Files(vec![r"C:\source-test.txt".into()]),
+                "Explorer",
+            ),
+            (
+                CapturedClipboard::Image {
+                    png: include_bytes!("../tests/fixtures/test.png").to_vec(),
+                    width: 128,
+                    height: 128,
+                },
+                "Paint",
+            ),
+        ] {
+            service.send(Command::ObservedCapture {
+                content,
+                source: Some(source_app::SourceApp {
+                    name: source.into(),
+                    executable: None,
+                }),
+            })?;
+            let items = next_snapshot(&events, 0);
+            assert_eq!(items[0].source_app_name.as_deref(), Some(source));
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires a Windows system executable with an icon"]
+    fn observed_capture_persists_a_cached_source_icon() -> Result<()> {
+        let system_root = std::env::var("SystemRoot")?;
+        let executable = Path::new(&system_root).join("System32/notepad.exe");
+        anyhow::ensure!(executable.is_file(), "system executable is unavailable");
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::ObservedCapture {
+            content: CapturedClipboard::Text("icon source test".into()),
+            source: Some(source_app::SourceApp {
+                name: "Notepad".into(),
+                executable: Some(executable.to_string_lossy().into_owned()),
+            }),
+        })?;
+        let items = next_snapshot(&events, 0);
+        assert_eq!(items[0].source_app_name.as_deref(), Some("Notepad"));
+        let icon = items[0]
+            .source_app_icon
+            .as_deref()
+            .context("missing icon path")?;
+        assert!(Path::new(icon).starts_with(directory.path().join("icons")));
+        assert!(Path::new(icon).is_file());
+        Ok(())
+    }
+
+    #[test]
+    fn hover_preview_preferences_are_acknowledged_and_loaded_on_restart() -> Result<()> {
+        use clipboard_core::preferences::HoverPreviewPosition;
+
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(
+            service.initial_hover_preview,
+            HoverPreviewPreference::default()
+        );
+        next_snapshot(&events, 0);
+        let preference = HoverPreviewPreference {
+            text: true,
+            expanded_image: true,
+            delay_ms: 750,
+            position: HoverPreviewPosition::Left,
+            zoom_step: 20,
+            ..HoverPreviewPreference::default()
+        };
+        service.send(Command::SetHoverPreview(preference))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match events.try_recv() {
+                Ok(Event::HoverPreviewSaved(result)) => {
+                    assert_eq!(result.unwrap(), preference);
+                    break;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "hover settings timed out"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        drop(service);
+        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
+        assert_eq!(reopened.initial_hover_preview, preference);
+        Ok(())
+    }
+
+    #[test]
     fn worker_keeps_favorite_filter_during_capture_and_toggle() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
@@ -2392,6 +3617,7 @@ mod tests {
         service.send(Command::Query {
             search: "%_".into(),
             favorite_only: true,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 1,
@@ -2404,11 +3630,52 @@ mod tests {
         service.send(Command::Query {
             search: "%_".into(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 2,
         })?;
         assert_eq!(next_snapshot(&events, 2).len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn worker_keeps_category_filter_when_history_changes() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        service.send(Command::Capture("first text".into()))?;
+        next_snapshot(&events, 0);
+        service.send(Command::CaptureImage {
+            png: include_bytes!("../tests/fixtures/test.png").to_vec(),
+            width: 128,
+            height: 128,
+        })?;
+        assert_eq!(next_snapshot(&events, 0).len(), 2);
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            category: ContentCategory::Text,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert_eq!(next_snapshot(&events, 1).len(), 1);
+        service.send(Command::Capture("second text".into()))?;
+        let rows = next_snapshot(&events, 1);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|item| item.content_type == "text"));
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            category: ContentCategory::Other,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 2,
+        })?;
+        let rows = next_snapshot(&events, 2);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].content_type, "image");
         Ok(())
     }
 
@@ -2555,6 +3822,7 @@ mod tests {
             let _ = service.send(Command::Query {
                 search: "".into(),
                 favorite_only: false,
+                category: ContentCategory::All,
                 group_id: None,
                 limit: PAGE_SIZE,
                 generation,
@@ -2633,6 +3901,48 @@ mod tests {
     }
 
     #[test]
+    fn hover_preview_has_its_own_response_and_reads_full_text() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        let text = format!("悬停预览\n{}", "正文".repeat(500));
+        service.send(Command::Capture(text.clone()))?;
+        let id = next_snapshot(&events, 0)[0].id;
+        service.send(Command::HoverPreview { id, generation: 7 })?;
+        service.send(Command::Preview { id, generation: 3 })?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut hover_seen = false;
+        let mut preview_seen = false;
+        while !hover_seen || !preview_seen {
+            match events.try_recv() {
+                Ok(Event::HoverPreview {
+                    id: actual,
+                    generation,
+                    result,
+                }) => {
+                    assert_eq!((actual, generation), (id, 7));
+                    assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
+                    hover_seen = true;
+                }
+                Ok(Event::Preview {
+                    id: actual,
+                    generation,
+                    result,
+                }) => {
+                    assert_eq!((actual, generation), (id, 3));
+                    assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
+                    preview_seen = true;
+                }
+                Ok(Event::Error(message)) => panic!("{message}"),
+                _ => {}
+            }
+            assert!(std::time::Instant::now() < deadline, "preview timed out");
+            thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+
+    #[test]
     fn pause_acknowledgement_is_ordered_and_does_not_change_history() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
@@ -2660,6 +3970,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: None,
             limit: PAGE_SIZE,
             generation: 1,
@@ -2720,6 +4031,7 @@ mod tests {
         service.send(Command::Query {
             search: "favorite".into(),
             favorite_only: true,
+            category: ContentCategory::All,
             group_id: Some(group.id),
             limit: PAGE_SIZE,
             generation: 1,
@@ -2796,6 +4108,7 @@ mod tests {
         service.send(Command::Query {
             search: String::new(),
             favorite_only: false,
+            category: ContentCategory::All,
             group_id: Some(group.id),
             limit: PAGE_SIZE,
             generation: 1,

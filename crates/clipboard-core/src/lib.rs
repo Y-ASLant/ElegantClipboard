@@ -28,6 +28,28 @@ pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const HISTORY_LIMIT: i64 = 10_000;
 pub const PAGE_SIZE: i64 = 100;
 
+pub fn is_url_text(text: &str) -> bool {
+    clipboard::is_url(text)
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ContentCategory {
+    #[default]
+    All,
+    Text,
+    Other,
+}
+
+impl ContentCategory {
+    fn content_types(self) -> &'static str {
+        match self {
+            Self::All => "text,url,html,rtf,image,files",
+            Self::Text => "text,html,rtf",
+            Self::Other => "image,files,url",
+        }
+    }
+}
+
 pub struct History {
     repo: ClipboardRepository,
     db: Database,
@@ -164,6 +186,40 @@ impl History {
         self.capture_inner(text, Some(images_dir))
     }
 
+    pub fn set_source_app(&self, id: i64, name: &str, icon: Option<&str>) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 128 {
+            bail!("来源应用名称无效");
+        }
+        if !self.repo.set_source_app(id, name, icon)? {
+            bail!("历史记录已不存在");
+        }
+        Ok(())
+    }
+
+    pub fn bump_to_top(&self, id: i64) -> Result<()> {
+        self.repo.bump_to_top(id)?;
+        Ok(())
+    }
+
+    pub fn quick_paste_item_id(
+        &self,
+        slot: u8,
+        favorite: bool,
+        group_id: Option<i64>,
+    ) -> Result<Option<i64>> {
+        if !(1..=10).contains(&slot) {
+            bail!("快速粘贴槽位必须在 1 到 10 之间");
+        }
+        let index = usize::from(slot - 1);
+        let item = if favorite {
+            self.repo.get_favorite_by_position(index, group_id)?
+        } else {
+            self.repo.get_by_position(index, group_id)?
+        };
+        Ok(item.map(|item| item.id))
+    }
+
     fn capture_inner(&self, text: &str, images_dir: Option<&Path>) -> Result<Option<i64>> {
         if text.trim().is_empty() {
             return Ok(None);
@@ -219,9 +275,20 @@ impl History {
         favorite_only: bool,
         group_id: Option<i64>,
     ) -> Result<Vec<ClipboardItem>> {
+        self.list_filtered_in_group(search, limit, favorite_only, group_id, ContentCategory::All)
+    }
+
+    pub fn list_filtered_in_group(
+        &self,
+        search: &str,
+        limit: i64,
+        favorite_only: bool,
+        group_id: Option<i64>,
+        category: ContentCategory,
+    ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text,url,html,rtf,image,files".into()),
+            content_type: Some(category.content_types().into()),
             favorite_only,
             group_id,
             limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
@@ -239,9 +306,19 @@ impl History {
         favorite_only: bool,
         group_id: Option<i64>,
     ) -> Result<i64> {
+        self.count_filtered_in_group(search, favorite_only, group_id, ContentCategory::All)
+    }
+
+    pub fn count_filtered_in_group(
+        &self,
+        search: &str,
+        favorite_only: bool,
+        group_id: Option<i64>,
+        category: ContentCategory,
+    ) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some("text,url,html,rtf,image,files".into()),
+            content_type: Some(category.content_types().into()),
             favorite_only,
             group_id,
             ..Default::default()
@@ -490,6 +567,67 @@ mod tests {
         assert_eq!(history.capture(&format!("  {url}  "))?, Some(id));
         assert_eq!(history.count("", false)?, 1);
         assert_eq!(history.text(id)?, url);
+        Ok(())
+    }
+
+    #[test]
+    fn category_queries_filter_search_count_and_group() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let repo = ClipboardRepository::new(&db);
+        let mut ids = Vec::new();
+        for (index, kind) in [
+            ContentType::Text,
+            ContentType::Html,
+            ContentType::Rtf,
+            ContentType::Image,
+            ContentType::Files,
+            ContentType::Url,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            ids.push(repo.insert(NewClipboardItem {
+                content_type: kind,
+                text_content: Some(format!("needle-{index}")),
+                content_hash: format!("category-{index}"),
+                semantic_hash: format!("category-{index}"),
+                ..Default::default()
+            })?);
+        }
+        let history = History::new(&db);
+        assert_eq!(
+            history.count_filtered_in_group("needle", false, None, ContentCategory::Text)?,
+            3
+        );
+        assert_eq!(
+            history
+                .list_filtered_in_group("", PAGE_SIZE, false, None, ContentCategory::Other)?
+                .len(),
+            3
+        );
+        history.toggle_favorite(ids[1])?;
+        assert_eq!(
+            history.count_filtered_in_group("", true, None, ContentCategory::Text)?,
+            1
+        );
+        let group = history.create_group("archive")?;
+        history.move_to_group(ids[5], None, Some(group.id))?;
+        assert_eq!(
+            history.count_filtered_in_group("", false, None, ContentCategory::Other)?,
+            2
+        );
+        assert_eq!(
+            history.list_filtered_in_group(
+                "needle",
+                PAGE_SIZE,
+                false,
+                Some(group.id),
+                ContentCategory::Other
+            )?[0]
+                .id,
+            ids[5]
+        );
         Ok(())
     }
 
