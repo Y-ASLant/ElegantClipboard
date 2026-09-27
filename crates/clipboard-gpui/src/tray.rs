@@ -13,10 +13,10 @@ use tray_icon::{
 use windows::Win32::{
     Foundation::{HWND, POINT},
     UI::{
-        Input::KeyboardAndMouse::GetDoubleClickTime,
+        Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_MENU},
         WindowsAndMessaging::{
             HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOW,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos, ShowWindow,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
         },
     },
 };
@@ -177,7 +177,15 @@ pub fn set_window_visible(window: &Window, visible: bool) {
             let _ = ShowWindow(hwnd, command);
         }
         if visible {
-            window.activate_window();
+            if unsafe { GetAsyncKeyState(i32::from(VK_MENU.0)) } < 0 {
+                // GPUI activation injects Alt down/up, which releases a held Alt+C
+                // chord and prevents pressing C again until Alt is physically reset.
+                unsafe {
+                    let _ = SetForegroundWindow(hwnd);
+                }
+            } else {
+                window.activate_window();
+            }
         }
     }
 }

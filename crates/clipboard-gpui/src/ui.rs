@@ -956,6 +956,21 @@ struct ClipboardView {
     window_size_task: Option<Task<()>>,
 }
 
+// Settings also observes the view, so its implicit GPUI window association can
+// point at the settings window. Flush effects even when the main window is hidden.
+fn update_clipboard_window<R>(
+    view: &WeakEntity<ClipboardView>,
+    handle: AnyWindowHandle,
+    cx: &AsyncApp,
+    update: impl FnOnce(&mut ClipboardView, &mut Window, &mut Context<ClipboardView>) -> R,
+) -> anyhow::Result<R> {
+    cx.update(|cx| {
+        handle.update(cx, |_, window, cx| {
+            view.update(cx, |view, cx| update(view, window, cx))
+        })?
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsPage {
     General,
@@ -1851,11 +1866,13 @@ impl ClipboardView {
                 this.send(Command::Copy(id), cx);
             }
         });
+        let main_window = window.window_handle();
         let event_task = cx.spawn_in(window, async move |view, cx| {
             while let Ok(event) = events.recv().await {
-                if view
-                    .update_in(cx, |this, window, cx| this.apply_event(event, window, cx))
-                    .is_err()
+                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                    this.apply_event(event, window, cx)
+                })
+                .is_err()
                 {
                     break;
                 }
@@ -1869,53 +1886,53 @@ impl ClipboardView {
         }
         let tray_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(command) = tray_receiver.recv().await {
-                if view
-                    .update_in(cx, |this, window, cx| match command {
-                        TrayCommand::Show => {
+                if update_clipboard_window(&view, main_window, cx, |this, window, cx| match command
+                {
+                    TrayCommand::Show => {
+                        this.paste_target = None;
+                        this.show_window(window, cx);
+                        cx.notify();
+                    }
+                    TrayCommand::Toggle => {
+                        if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
+                            this.hide_visible_window(window, cx);
+                        } else {
                             this.paste_target = None;
                             this.show_window(window, cx);
                             cx.notify();
                         }
-                        TrayCommand::Toggle => {
-                            if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
-                                this.hide_visible_window(window, cx);
-                            } else {
-                                this.paste_target = None;
-                                this.show_window(window, cx);
-                                cx.notify();
-                            }
+                    }
+                    TrayCommand::Settings => this.open_settings_window(SettingsPage::General, cx),
+                    TrayCommand::ClearHistory => {
+                        this.paste_target = None;
+                        this.show_window(window, cx);
+                        this.open_clear_history(window, cx);
+                    }
+                    TrayCommand::TogglePin => this.toggle_window_pin(window, cx),
+                    TrayCommand::TogglePause => {
+                        if this.monitoring
+                            && !this.pause_pending
+                            && this.send(Command::Pause(!this.paused), cx)
+                        {
+                            this.pause_pending = true;
+                            cx.notify();
                         }
-                        TrayCommand::Settings => {
-                            this.open_settings_window(SettingsPage::General, cx)
-                        }
-                        TrayCommand::ClearHistory => {
-                            this.paste_target = None;
-                            this.show_window(window, cx);
-                            this.open_clear_history(window, cx);
-                        }
-                        TrayCommand::TogglePin => this.toggle_window_pin(window, cx),
-                        TrayCommand::TogglePause => {
-                            if this.monitoring
-                                && !this.pause_pending
-                                && this.send(Command::Pause(!this.paused), cx)
-                            {
-                                this.pause_pending = true;
-                                cx.notify();
-                            }
-                        }
-                        TrayCommand::Quit => {
-                            this.exiting.set(true);
-                            cx.quit();
-                        }
-                    })
-                    .is_err()
+                    }
+                    TrayCommand::Quit => {
+                        this.exiting.set(true);
+                        cx.quit();
+                    }
+                })
+                .is_err()
                 {
                     break;
                 }
             }
         });
         let tray_error = tray.as_ref().err().map(ToString::to_string);
-        let (hotkey_sender, hotkey_receiver) = async_channel::bounded(1);
+        // The hotkey thread uses try_send; a full channel must not discard the
+        // second press while the first press is still waking the window.
+        let (hotkey_sender, hotkey_receiver) = async_channel::unbounded();
         let hotkey_choice = service.initial_hotkey;
         let hotkey = if hotkey_choice == HotkeyPreference::Disabled {
             Ok(None)
@@ -1924,27 +1941,25 @@ impl ClipboardView {
         };
         let hotkey_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(target) = hotkey_receiver.recv().await {
-                if view
-                    .update_in(cx, |this, window, cx| {
-                        if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
-                            this.hide_visible_window(window, cx);
-                            return;
-                        }
-                        this.paste_target =
-                            paste::is_external_target(window, target).then_some(target);
-                        if this.paste_target.is_some() {
-                            this.message = tr(
-                                this.language,
-                                "已从原窗口唤出，可选择记录并粘贴",
-                                "Opened from the previous window; select an item to paste.",
-                            )
-                            .into();
-                            this.is_error = false;
-                        }
-                        this.show_window(window, cx);
-                        cx.notify();
-                    })
-                    .is_err()
+                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                    if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
+                        this.hide_visible_window(window, cx);
+                        return;
+                    }
+                    this.paste_target = paste::is_external_target(window, target).then_some(target);
+                    if this.paste_target.is_some() {
+                        this.message = tr(
+                            this.language,
+                            "已从原窗口唤出，可选择记录并粘贴",
+                            "Opened from the previous window; select an item to paste.",
+                        )
+                        .into();
+                        this.is_error = false;
+                    }
+                    this.show_window(window, cx);
+                    cx.notify();
+                })
+                .is_err()
                 {
                     break;
                 }
@@ -1962,11 +1977,10 @@ impl ClipboardView {
         };
         let paste_hotkey_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(event) = paste_hotkey_receiver.recv().await {
-                if view
-                    .update_in(cx, |this, window, cx| {
-                        this.handle_quick_hotkey(event, window, cx);
-                    })
-                    .is_err()
+                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                    this.handle_quick_hotkey(event, window, cx);
+                })
+                .is_err()
                 {
                     break;
                 }
@@ -1989,11 +2003,10 @@ impl ClipboardView {
         };
         let outside_click_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(position) = outside_click_receiver.recv().await {
-                if view
-                    .update_in(cx, |this, window, cx| {
-                        this.handle_outside_click(position, window, cx);
-                    })
-                    .is_err()
+                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                    this.handle_outside_click(position, window, cx);
+                })
+                .is_err()
                 {
                     break;
                 }
@@ -2318,7 +2331,7 @@ impl ClipboardView {
         self.close_hover_preview(cx);
         if let Some(handle) = self.settings_window {
             if handle
-                .update(cx, |_, window, _| window.activate_window())
+                .update(cx, |_, window, _| tray::set_window_visible(window, true))
                 .is_ok()
             {
                 return;
@@ -2333,13 +2346,16 @@ impl ClipboardView {
         self.refresh_data_size(cx);
         self.refresh_daily_counts(cx);
         cx.notify();
-        cx.spawn(async move |owner, cx| {
+        let owner = cx.weak_entity();
+        // Run after this view's update releases its borrow; unlike a spawned task,
+        // a deferred effect also runs when the main window is hidden in the tray.
+        cx.defer(move |cx| {
             let Some(owner_entity) = owner.upgrade() else {
                 return;
             };
             let (theme, language) =
                 owner_entity.update(cx, |owner, _| (owner.theme, owner.language));
-            let options = cx.update(|cx| WindowOptions {
+            let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
                     size(px(1280.), px(720.)),
@@ -2354,7 +2370,7 @@ impl ClipboardView {
                 show: true,
                 app_id: Some("com.aslant.elegant-clipboard-gpui.settings".into()),
                 ..TitleBar::window_options()
-            });
+            };
             let settings_owner = owner.clone();
             let close_owner = owner.clone();
             let opened = cx.open_window(options, move |window, cx| {
@@ -2392,8 +2408,7 @@ impl ClipboardView {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        });
     }
 
     fn start_export(&mut self, cx: &mut Context<Self>) {
@@ -3411,11 +3426,12 @@ impl ClipboardView {
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);
         let delay = unsafe { GetDoubleClickTime() }.max(1).saturating_add(30);
+        let main_window = window.window_handle();
         self.row_click_task = Some(cx.spawn_in(window, async move |view, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(u64::from(delay)))
                 .await;
-            let _ = view.update_in(cx, |this, window, cx| {
+            let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
                 if this.pending_row_click == Some((id, generation))
                     && this.history.generation == generation
                     && this.preview.id.is_none()
@@ -5987,11 +6003,12 @@ impl ClipboardView {
             self.prepare_to_hide(window, cx);
             tray::set_window_visible(window, false);
         }
+        let main_window = window.window_handle();
         cx.spawn_in(window, async move |view, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(60))
                 .await;
-            let _ = view.update_in(cx, |this, window, cx| {
+            let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
                 if sound::enabled(this.audio, Sound::Paste, SoundTiming::Immediate) {
                     sound::play(Sound::Paste);
                 }
@@ -6525,6 +6542,7 @@ impl ClipboardView {
             }))
             .py(px(card_spacing))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                cx.stop_propagation();
                 if cx.has_active_drag() {
                     return;
                 }
@@ -8138,11 +8156,21 @@ impl ClipboardView {
             )
             .child(
                 div()
+                    .id("history-content")
                     .key_context("HistoryList")
                     .track_focus(&self.list_focus)
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if !this.window_pinned
+                            && this._tray.is_some()
+                            && this.settings_window.is_none()
+                            && !this.settings_window_opening
+                        {
+                            this.hide_visible_window(window, cx);
+                        }
+                    }))
                     .on_action(cx.listener(|this, _: &PreviewSelected, window, cx| {
                         if !this.batch_mode && let Some(id) = this.history.selected {
                             this.open_preview(id, window, cx);
