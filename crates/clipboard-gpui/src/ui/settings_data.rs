@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::dialog::DialogFooter;
 
 impl SettingsWindowView {
     pub(super) fn settings_monitor_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -487,16 +488,92 @@ impl SettingsWindowView {
                     .label(tr(language, "删除全部历史", "Delete all history"))
                     .disabled(clear_all_pending)
                     .on_click(move |_, window, cx| {
-                        let _ = privacy_owner.update(cx, |owner, cx| {
-                            owner.settings_window = None;
-                            owner.clear_all_confirm_open = true;
-                            owner.clear_confirm_open = false;
-                            owner.group_delete_id = None;
-                            owner.group_move_id = None;
-                            owner.reset_selection();
+                        let dialog_owner = privacy_owner.clone();
+                        let _ = dialog_owner.update(cx, |owner, cx| {
+                            owner.clear_all_error = None;
                             cx.notify();
                         });
-                        window.remove_window();
+                        window.open_dialog(cx, move |dialog, _, cx| {
+                            let (pending, error) = dialog_owner
+                                .upgrade()
+                                .map(|owner| {
+                                    let owner = owner.read(cx);
+                                    (owner.clear_all_pending, owner.clear_all_error.clone())
+                                })
+                                .unwrap_or((false, None));
+                            let confirm_owner = dialog_owner.clone();
+                            let keyboard_owner = dialog_owner.clone();
+                            let cancel_owner = dialog_owner.clone();
+                            dialog
+                                .title(tr(language, "删除全部历史", "Delete all history"))
+                                .close_button(false)
+                                .overlay_closable(false)
+                                .on_ok(move |_, _, cx| {
+                                    let _ = keyboard_owner.update(cx, |owner, cx| {
+                                        owner.clear_all_history(cx);
+                                    });
+                                    false
+                                })
+                                .on_cancel(move |_, _, cx| {
+                                    cancel_owner
+                                        .upgrade()
+                                        .is_none_or(|owner| !owner.read(cx).clear_all_pending)
+                                })
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_2()
+                                        .child(tr(
+                                            language,
+                                            "删除所有分组中的全部历史？置顶和收藏也会删除。",
+                                            "Delete all history from every group? Pinned and favorite items will also be deleted.",
+                                        ))
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(tr(
+                                                    language,
+                                                    "设置和自定义分组会保留；内容及受管媒体无法恢复，可先导出备份。",
+                                                    "Settings and custom groups will be kept. Content and managed media cannot be recovered; export a backup first if needed.",
+                                                )),
+                                        )
+                                        .when_some(error, |content, error| {
+                                            content.child(
+                                                div()
+                                                    .text_sm()
+                                                    .text_color(cx.theme().danger)
+                                                    .child(error),
+                                            )
+                                        }),
+                                )
+                                .footer(
+                                    DialogFooter::new()
+                                        .child(
+                                            Button::new("clear-all-history-cancel")
+                                                .outline()
+                                                .label(tr(language, "取消", "Cancel"))
+                                                .disabled(pending)
+                                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                                        )
+                                        .child(
+                                            Button::new("clear-all-history-confirm")
+                                                .danger()
+                                                .label(if pending {
+                                                    tr(language, "正在删除…", "Deleting…")
+                                                } else {
+                                                    tr(language, "确认删除全部历史", "Delete all history")
+                                                })
+                                                .disabled(pending)
+                                                .on_click(move |_, _, cx| {
+                                                    let _ = confirm_owner.update(cx, |owner, cx| {
+                                                        owner.clear_all_history(cx);
+                                                    });
+                                                }),
+                                        ),
+                                )
+                        });
                     }),
             )
             .into_any_element()

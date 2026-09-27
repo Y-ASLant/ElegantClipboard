@@ -446,7 +446,7 @@ impl Default for HoverPreviewPreference {
     fn default() -> Self {
         Self {
             image: true,
-            text: false,
+            text: true,
             files: false,
             expanded_image: false,
             delay_ms: 500,
@@ -1174,9 +1174,13 @@ mod tests {
             HoverPreviewPreference::default()
         );
         assert!(preferences.hover_preview()?.allows("image"));
-        assert!(!preferences.hover_preview()?.allows("text"));
+        assert!(preferences.hover_preview()?.allows("text"));
+        assert!(preferences.hover_preview()?.allows("url"));
+        assert!(preferences.hover_preview()?.allows("html"));
+        assert!(preferences.hover_preview()?.allows("rtf"));
+        assert!(!preferences.hover_preview()?.allows("files"));
         let preference = HoverPreviewPreference {
-            text: true,
+            text: false,
             files: true,
             expanded_image: true,
             delay_ms: 750,
@@ -1191,7 +1195,7 @@ mod tests {
         let db = Database::new(path)?;
         let preferences = Preferences::new(&db);
         assert_eq!(preferences.hover_preview()?, preference);
-        assert!(preferences.hover_preview()?.allows("rtf"));
+        assert!(!preferences.hover_preview()?.allows("rtf"));
         assert!(
             preferences
                 .set_hover_preview(HoverPreviewPreference {
