@@ -31,7 +31,8 @@ pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE
       'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
       'gpui_toolbar', 'gpui_display', 'gpui_monitor_types', 'gpui_app_filter',
-      'gpui_onboarding_completed', 'gpui_audio')";
+      'gpui_onboarding_completed', 'gpui_audio',
+      '_migration_url_content_type', '_migration_backfill_semantic_hash')";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

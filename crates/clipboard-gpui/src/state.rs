@@ -309,6 +309,12 @@ impl Default for HistoryState {
 }
 
 impl HistoryState {
+    pub fn should_reset_category_filter(&self, show_category_filter: bool) -> bool {
+        !show_category_filter
+            && self.group_id.is_none()
+            && (self.favorite_only || self.category != ContentCategory::All)
+    }
+
     pub fn set_favorite_filter(&mut self, favorite_only: bool) {
         self.favorite_only = favorite_only;
         self.category = ContentCategory::All;
@@ -603,6 +609,48 @@ mod tests {
         state.set_group(Some(7));
         assert!(!state.favorite_only);
         assert_eq!(state.category, ContentCategory::All);
+    }
+
+    #[test]
+    fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("history.db"))?;
+        let id = history.capture("selected entry")?.unwrap();
+        let group = history.create_group("Selected group")?;
+        history.move_to_group(id, None, Some(group.id))?;
+        let items = history.list_in_group("", PAGE_SIZE, false, Some(group.id))?;
+        let mut state = HistoryState::default();
+
+        state.set_group(Some(group.id));
+        assert!(state.apply(items, 1, state.generation));
+        assert_eq!(state.select_index(0), Some(0));
+        let group_generation = state.generation;
+        for _ in 0..2 {
+            assert!(!state.should_reset_category_filter(false));
+            assert_eq!(state.group_id, Some(group.id));
+            assert_eq!(state.selected, Some(id));
+            assert_eq!(state.items.len(), 1);
+            assert_eq!(state.generation, group_generation);
+        }
+
+        for category in [ContentCategory::Text, ContentCategory::Other] {
+            state.set_category(category);
+            assert!(!state.should_reset_category_filter(true));
+            assert_eq!(state.category, category);
+            assert!(state.should_reset_category_filter(false));
+            state.set_category(ContentCategory::All);
+            assert_eq!(state.category, ContentCategory::All);
+            assert!(!state.should_reset_category_filter(false));
+        }
+
+        state.set_favorite_filter(true);
+        assert!(!state.should_reset_category_filter(true));
+        assert!(state.favorite_only);
+        assert!(state.should_reset_category_filter(false));
+        state.set_category(ContentCategory::All);
+        assert!(!state.favorite_only);
+        assert!(!state.should_reset_category_filter(false));
+        Ok(())
     }
 
     #[test]

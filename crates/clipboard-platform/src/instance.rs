@@ -65,7 +65,9 @@ impl InstanceSignal {
                     if worker_stop.load(Ordering::Acquire) {
                         break;
                     }
-                    let _ = events.try_send(Event::ShowWindow);
+                    if events.send_blocking(Event::ShowWindow).is_err() {
+                        break;
+                    }
                 }
             }) {
             Ok(worker) => worker,

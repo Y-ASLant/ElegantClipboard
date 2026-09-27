@@ -2932,14 +2932,11 @@ impl ClipboardView {
         if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
             return;
         }
-        let selected = match category {
-            None => self.history.favorite_only && self.history.group_id.is_none(),
-            Some(category) => {
-                !self.history.favorite_only
-                    && self.history.category == category
-                    && self.history.group_id.is_none()
-            }
-        };
+        let selected = self.history.group_id.is_none()
+            && match category {
+                None => self.history.favorite_only,
+                Some(category) => !self.history.favorite_only && self.history.category == category,
+            };
         if selected {
             return;
         }
@@ -4627,7 +4624,10 @@ impl ClipboardView {
                     Ok(display) => {
                         self.display = display;
                         self.scroll.remeasure();
-                        if !display.show_category_filter {
+                        if self
+                            .history
+                            .should_reset_category_filter(display.show_category_filter)
+                        {
                             self.select_category(Some(ContentCategory::All), window, cx);
                         }
                         self.message =

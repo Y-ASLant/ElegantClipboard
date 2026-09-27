@@ -111,6 +111,29 @@ mod tests {
     }
 
     #[test]
+    fn edited_url_stays_text_after_database_reopen() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("clipboard.db");
+        let history = History::open(path.clone())?;
+        let id = history.capture("https://example.com/old")?.unwrap();
+        let item = history.item(id)?;
+        assert_eq!(item.content_type, "url");
+        assert!(history.edit_text(
+            id,
+            &item.content_hash,
+            "https://example.com/edited",
+            dir.path(),
+        )?);
+        assert_eq!(history.item(id)?.content_type, "text");
+        drop(history);
+
+        let reopened = History::open(path)?;
+        assert_eq!(reopened.item(id)?.content_type, "text");
+        assert_eq!(reopened.text(id)?, "https://example.com/edited");
+        Ok(())
+    }
+
+    #[test]
     fn rich_text_edit_downgrades_to_plain_text_only_when_changed() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let history = History::open(dir.path().join("clipboard.db"))?;

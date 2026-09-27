@@ -789,21 +789,33 @@ impl Service {
                     events: worker_events,
                 };
                 if let Err(error) = worker.send_groups().and_then(|_| worker.snapshot()) {
-                    let _ = worker.events.try_send(Event::Error(error.to_string()));
+                    let _ = worker.events.send_blocking(Event::Error(error.to_string()));
                 }
                 while !stop.load(Ordering::Acquire) {
                     match incoming.recv_timeout(Duration::from_millis(250)) {
                         Ok(command) => {
                             let failure_kind = command.failure_kind();
+                            let observed_capture =
+                                matches!(command, Command::ObservedCapture { .. });
                             if let Err(error) = worker.handle(command) {
-                                let event = match failure_kind {
-                                    None => Event::BackgroundError(error.to_string()),
-                                    Some(kind) => Event::CommandFailed {
-                                        kind,
-                                        message: error.to_string(),
-                                    },
-                                };
-                                let _ = worker.events.try_send(event);
+                                match failure_kind {
+                                    None if observed_capture => {
+                                        let _ = worker
+                                            .events
+                                            .try_send(Event::BackgroundError(error.to_string()));
+                                    }
+                                    None => {
+                                        let _ = worker.events.send_blocking(
+                                            Event::BackgroundError(error.to_string()),
+                                        );
+                                    }
+                                    Some(kind) => {
+                                        let _ = worker.events.send_blocking(Event::CommandFailed {
+                                            kind,
+                                            message: error.to_string(),
+                                        });
+                                    }
+                                }
                             }
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
@@ -859,10 +871,10 @@ impl Service {
 
 impl Drop for Service {
     fn drop(&mut self) {
-        self.instance_signal = None;
         self.stop.store(true, Ordering::Release);
-        // Release a worker waiting for a slow/closed UI before joining it.
+        // Closing first releases both the worker and the instance signal under UI backpressure.
         self.events.close();
+        self.instance_signal = None;
         if let Some(shutdown) = self.shutdown.take() {
             shutdown.stop();
         }
@@ -2532,6 +2544,53 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn command_failures_wait_for_room_in_a_full_event_queue() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        for _ in 0..64 {
+            assert!(
+                service
+                    .events
+                    .try_send(Event::Status(String::new()))
+                    .is_ok()
+            );
+        }
+        service.send(Command::CopyForPaste(424242))?;
+        service.send(Command::CopyPathForPaste(424243))?;
+        service.send(Command::Capture("x".repeat(MAX_TEXT_BYTES + 1)))?;
+        service.send(Command::SetTheme(ThemePreference::Dark))?;
+
+        for _ in 0..64 {
+            assert!(matches!(events.try_recv()?, Event::Status(_)));
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut failures = Vec::new();
+        let mut capture_error = false;
+        let mut theme_saved = false;
+        while !theme_saved {
+            match events.try_recv() {
+                Ok(Event::CommandFailed { kind, .. }) => failures.push(kind),
+                Ok(Event::BackgroundError(_)) => capture_error = true,
+                Ok(Event::ThemeSaved(Ok(ThemePreference::Dark))) => theme_saved = true,
+                Ok(_) | Err(async_channel::TryRecvError::Empty) => {}
+                Err(error) => return Err(error.into()),
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker did not report all command results"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            failures,
+            [FailureKind::Paste(424242), FailureKind::Paste(424243)]
+        );
+        assert!(capture_error, "explicit capture failure was dropped");
+        Ok(())
+    }
+
     fn next_snapshot(
         events: &async_channel::Receiver<Event>,
         generation: u64,
@@ -3828,20 +3887,28 @@ mod tests {
     #[test]
     fn instance_lock_and_shutdown_work_even_with_a_full_event_queue() -> Result<()> {
         let directory = tempfile::tempdir()?;
-        let (service, _events) = Service::start(Some(directory.path().to_owned()), false)?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
         assert!(Service::start(Some(directory.path().to_owned()), false).is_err());
-        for generation in 1..=160 {
-            // Deliberately create UI backpressure. A full command queue is expected.
-            let _ = service.send(Command::Query {
-                search: "".into(),
-                favorite_only: false,
-                category: ContentCategory::All,
-                group_id: None,
-                limit: PAGE_SIZE,
-                generation,
-            });
-            thread::sleep(Duration::from_millis(1));
+        next_snapshot(&events, 0);
+        for _ in 0..64 {
+            assert!(
+                service
+                    .events
+                    .try_send(Event::Status(String::new()))
+                    .is_ok()
+            );
         }
+        service.send(Command::Query {
+            search: String::new(),
+            favorite_only: false,
+            category: ContentCategory::All,
+            group_id: None,
+            limit: PAGE_SIZE,
+            generation: 1,
+        })?;
+        assert!(show_existing_instance(Some(directory.path().to_owned()))?);
+        // Keep the receiver stalled while both producers reach the full channel.
+        thread::sleep(Duration::from_millis(50));
         drop(service);
         let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
         drop(service);
@@ -3868,6 +3935,39 @@ mod tests {
         assert!(received);
         drop(service);
         assert!(!show_existing_instance(Some(first.path().to_owned()))?);
+        Ok(())
+    }
+
+    #[test]
+    fn second_launch_wakes_after_a_full_event_queue_drains() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        for _ in 0..64 {
+            assert!(
+                service
+                    .events
+                    .try_send(Event::Status(String::new()))
+                    .is_ok()
+            );
+        }
+        assert!(show_existing_instance(Some(directory.path().to_owned()))?);
+        // Give the instance listener time to encounter the full queue before draining it.
+        thread::sleep(Duration::from_millis(50));
+        for _ in 0..64 {
+            assert!(matches!(events.try_recv()?, Event::Status(_)));
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Ok(Event::ShowWindow) = events.try_recv() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "second-launch wake request was lost"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         Ok(())
     }
 

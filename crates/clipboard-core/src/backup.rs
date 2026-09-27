@@ -740,11 +740,46 @@ mod tests {
     }
 
     #[test]
+    fn edited_url_stays_text_after_gpui_backup_restore() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("source.db"))?;
+        let id = history.capture("https://example.com/original")?.unwrap();
+        let item = history.item(id)?;
+        assert_eq!(item.content_type, "url");
+        history.edit_text(
+            id,
+            &item.content_hash,
+            "https://example.com/edited",
+            dir.path(),
+        )?;
+        assert_eq!(history.item(id)?.content_type, "text");
+
+        let backup = dir.path().join("history.zip");
+        history.export_backup(&backup)?;
+        let target = dir.path().join("restored");
+        fs::create_dir(&target)?;
+        restore_backup(&backup, &target)?;
+        let restored = History::open(target.join("clipboard.db"))?;
+        assert_eq!(restored.item(id)?.content_type, "text");
+        assert_eq!(restored.text(id)?, "https://example.com/edited");
+        Ok(())
+    }
+
+    #[test]
     fn restores_previous_gpui_v1_backup() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let source_path = dir.path().join("source.db");
         let history = History::open(source_path.clone())?;
         let id = history.capture("v1 text")?.unwrap();
+        let legacy_url_id = history.capture("https://example.com/v1")?.unwrap();
+        history.db.write_connection().lock().execute(
+            "UPDATE clipboard_items SET content_type = 'text' WHERE id = ?1",
+            params![legacy_url_id],
+        )?;
+        history.db.write_connection().lock().execute(
+            "DELETE FROM settings WHERE key = '_migration_url_content_type'",
+            [],
+        )?;
         history.db.write_connection().lock().execute(
             "INSERT INTO settings (key, value) VALUES ('secret_token', 'legacy-secret')",
             [],
@@ -763,7 +798,7 @@ mod tests {
         let mut output = ZipWriter::new(File::create(&previous)?);
         output.start_file("manifest.json", SimpleFileOptions::default())?;
         output.write_all(
-            br#"{"format":"elegantclipboard-gpui","version":1,"total_items":1,"missing_images":0}"#,
+            br#"{"format":"elegantclipboard-gpui","version":1,"total_items":2,"missing_images":0}"#,
         )?;
         output.start_file("clipboard.db", SimpleFileOptions::default())?;
         io::copy(&mut File::open(&source_path)?, &mut output)?;
@@ -771,11 +806,17 @@ mod tests {
         let target = dir.path().join("restored");
         fs::create_dir_all(&target)?;
         let report = restore_backup(&previous, &target)?;
-        assert_eq!(report.total_items, 1);
+        assert_eq!(report.total_items, 2);
         assert_eq!((report.restored_icons, report.restored_staged), (0, 0));
         assert_eq!(
             History::open(target.join("clipboard.db"))?.text(id)?,
             "v1 text"
+        );
+        assert_eq!(
+            History::open(target.join("clipboard.db"))?
+                .item(legacy_url_id)?
+                .content_type,
+            "url"
         );
         let restored_db = Connection::open(target.join("clipboard.db"))?;
         let secret_count: i64 = restored_db.query_row(

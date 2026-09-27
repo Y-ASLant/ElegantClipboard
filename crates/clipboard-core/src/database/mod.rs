@@ -73,6 +73,13 @@ impl Database {
         Self::run_migrations(&conn)?;
 
         conn.execute_batch(SCHEMA_SQL)?;
+        // Migration ran before settings existed on a new database (or an old
+        // database without settings); record its completion after schema setup.
+        Self::mark_url_content_type_migration_done(&conn)?;
+        conn.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('_migration_backfill_semantic_hash', 'done')",
+            [],
+        )?;
         info!("Database schema initialized");
 
         Ok(())
@@ -80,17 +87,16 @@ impl Database {
 
     /// 数据库迁移（在 schema 创建前执行）
     fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+        Self::recover_orphan_clipboard_items_table(conn)?;
         let table_exists: bool = conn.query_row(
             "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
             [],
             |row| row.get(0),
-        ).unwrap_or(false);
+        )?;
 
         if !table_exists {
             return Ok(());
         }
-
-        Self::recover_orphan_clipboard_items_table(conn)?;
 
         // 迁移 1: sort_order
         let has_sort_order: bool = conn.query_row(
@@ -377,24 +383,23 @@ impl Database {
         Ok(())
     }
 
-    /// 若迁移过程中进程异常退出，可能留下 clipboard_items_new 而无 clipboard_items
+    /// Recover a table left behind by an interrupted legacy rebuild before
+    /// deciding whether the database has any clipboard items to migrate.
     fn recover_orphan_clipboard_items_table(conn: &Connection) -> Result<(), rusqlite::Error> {
-        let has_new: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items_new'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        let has_old: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-
-        if has_new && !has_old {
+        let has_new: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items_new'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_new {
+            return Ok(());
+        }
+        let has_old: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_old {
             tracing::warn!("Recovering orphaned clipboard_items_new from interrupted migration");
             conn.execute_batch("ALTER TABLE clipboard_items_new RENAME TO clipboard_items;")?;
         }
@@ -429,7 +434,8 @@ impl Database {
             .unwrap_or(false);
         if settings_exist {
             conn.execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES ('_migration_url_content_type', 'done')",
+                "INSERT INTO settings (key, value) VALUES ('_migration_url_content_type', 'done')
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE value != excluded.value",
                 [],
             )?;
         }
@@ -437,17 +443,6 @@ impl Database {
     }
 
     fn migrate_url_content_type(conn: &Connection) -> Result<(), rusqlite::Error> {
-        let table_exists: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        if !table_exists {
-            return Ok(());
-        }
-
         // 旧库：迁移 10 曾通过重建表把 'url' 写进 CHECK 约束
         let legacy_done: bool = conn
             .query_row(
@@ -938,10 +933,47 @@ mod tests {
     }
 
     #[test]
+    fn orphaned_clipboard_items_table_is_recovered_before_schema_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("orphan.db");
+        let db = Database::new(path.clone()).unwrap();
+        db.write_connection()
+            .lock()
+            .execute(
+                "INSERT INTO clipboard_items (content_type, text_content, content_hash, semantic_hash)
+                 VALUES ('text', 'preserved', 'hash', 'hash')",
+                [],
+            )
+            .unwrap();
+        drop(db);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("ALTER TABLE clipboard_items RENAME TO clipboard_items_new;")
+            .unwrap();
+        drop(conn);
+
+        let reopened = Database::new(path).unwrap();
+        let read = reopened.read_connection();
+        let read = read.lock();
+        let text: String = read
+            .query_row("SELECT text_content FROM clipboard_items", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(text, "preserved");
+        let orphan_count: i64 = read
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'clipboard_items_new'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphan_count, 0);
+    }
+
+    #[test]
     fn migration_10_adds_url_content_type_from_legacy_schema() {
-        let dir = std::env::temp_dir().join(format!("ec_mig10_{}", uuid_simple()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("legacy.db");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.db");
 
         {
             let conn = Connection::open(&path).unwrap();
@@ -990,7 +1022,7 @@ mod tests {
             .unwrap();
         }
 
-        let db = Database::new(path).unwrap();
+        let db = Database::new(path.clone()).unwrap();
         let conn = db.read_connection();
         let conn = conn.lock();
 
@@ -1011,6 +1043,34 @@ mod tests {
             )
             .unwrap();
         assert_eq!(null_semantic, 0);
+        let marker: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = '_migration_url_content_type'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, "done");
+        drop(conn);
+        db.write_connection()
+            .lock()
+            .execute(
+                "UPDATE clipboard_items SET content_type = 'text', text_content = 'https://example.com/edited' WHERE id = 1",
+                [],
+            )
+            .unwrap();
+        drop(db);
+        let reopened = Database::new(path).unwrap();
+        let content_type: String = reopened
+            .read_connection()
+            .lock()
+            .query_row(
+                "SELECT content_type FROM clipboard_items WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(content_type, "text");
     }
 
     #[test]

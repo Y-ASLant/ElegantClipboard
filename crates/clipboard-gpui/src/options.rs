@@ -27,39 +27,28 @@ impl Options {
             match arg.to_str() {
                 Some("--help" | "-h") => return Ok(None),
                 Some("--data-dir") => {
-                    let Some(path) = args.next().filter(|path| {
-                        !path.is_empty() && !path.to_string_lossy().starts_with("--")
-                    }) else {
-                        bail!("--data-dir 需要目录路径");
-                    };
-                    options.data_dir = Some(path.into());
+                    options.data_dir = Some(required_path(&mut args, "--data-dir", "目录路径")?);
                 }
                 Some("--no-monitor") => options.monitor = false,
                 Some("--smoke-test") => options.smoke_test = true,
                 Some("--start-hidden") => options.start_hidden = true,
                 Some("--import-db") => {
-                    let Some(path) = args.next().filter(|path| {
-                        !path.is_empty() && !path.to_string_lossy().starts_with("--")
-                    }) else {
-                        bail!("--import-db 需要旧版 clipboard.db 路径");
-                    };
-                    options.import_db = Some(path.into());
+                    options.import_db = Some(required_path(
+                        &mut args,
+                        "--import-db",
+                        "旧版 clipboard.db 路径",
+                    )?);
                 }
                 Some("--import-backup") => {
-                    let Some(path) = args.next().filter(|path| {
-                        !path.is_empty() && !path.to_string_lossy().starts_with("--")
-                    }) else {
-                        bail!("--import-backup 需要 ZIP 备份路径");
-                    };
-                    options.import_backup = Some(path.into());
+                    options.import_backup =
+                        Some(required_path(&mut args, "--import-backup", "ZIP 备份路径")?);
                 }
                 Some("--import-legacy-backup") => {
-                    let Some(path) = args.next().filter(|path| {
-                        !path.is_empty() && !path.to_string_lossy().starts_with("--")
-                    }) else {
-                        bail!("--import-legacy-backup 需要旧版 ZIP 备份路径");
-                    };
-                    options.import_legacy_backup = Some(path.into());
+                    options.import_legacy_backup = Some(required_path(
+                        &mut args,
+                        "--import-legacy-backup",
+                        "旧版 ZIP 备份路径",
+                    )?);
                 }
                 _ => bail!("未知参数：{}", arg.to_string_lossy()),
             }
@@ -97,6 +86,20 @@ impl Options {
         }
         Ok(Some(options))
     }
+}
+
+fn required_path(
+    args: &mut impl Iterator<Item = OsString>,
+    argument: &str,
+    expected: &str,
+) -> Result<PathBuf> {
+    let Some(path) = args
+        .next()
+        .filter(|path| !path.is_empty() && !path.to_string_lossy().starts_with("--"))
+    else {
+        bail!("{argument} 需要{expected}");
+    };
+    Ok(path.into())
 }
 
 #[cfg(test)]
