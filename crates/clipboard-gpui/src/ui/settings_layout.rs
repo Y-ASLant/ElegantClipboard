@@ -40,10 +40,10 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Display,
-        chinese: "工具栏",
-        english: "Toolbar",
-        description_chinese: "选择按钮并调整顺序",
-        description_english: "Show buttons and change their order",
+        chinese: "操作按钮",
+        english: "Action buttons",
+        description_chinese: "清理历史、置顶与设置位于托盘菜单；批量选择图标位于搜索框旁",
+        description_english: "Tray menu: Clear, Pin, Settings; batch icon beside search",
         content: SettingsWindowView::settings_toolbar_content,
     },
     Section {
@@ -130,8 +130,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Shortcuts,
         chinese: "快速粘贴",
         english: "Quick paste",
-        description_chinese: "从其他应用直接粘贴当前分组中排在前面的记录",
-        description_english: "Paste top items in the selected group from another app",
+        description_chinese: "默认关闭；启用后可从其他应用直接粘贴当前分组排在前面的记录",
+        description_english: "Off by default; enable to paste top items in the selected group from another app",
         content: SettingsWindowView::settings_quick_paste_content,
     },
     Section {

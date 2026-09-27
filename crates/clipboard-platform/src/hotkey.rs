@@ -332,12 +332,9 @@ impl PasteHotkeys {
         if !registered_any && !failures.is_empty() {
             let _ = worker.join();
             return Err(anyhow!(
-                "快速粘贴快捷键均被其他程序占用：{}",
-                failures
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
+                "全部 {} 个快速粘贴组合键无法注册（如 {}）；请在设置 → 快捷键中更换组合键或关闭快速粘贴",
+                failures.len(),
+                failures[0],
             ));
         }
         Ok((

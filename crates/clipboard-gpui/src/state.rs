@@ -148,23 +148,6 @@ pub fn search_excerpt(full: &str, preview: &str, search: &str) -> Option<String>
     Some(excerpt)
 }
 
-/// Return the neighboring group in display order. The default group precedes
-/// every custom group; the outer Option is None when already at an edge.
-pub fn adjacent_group_id(
-    group_ids: &[i64],
-    current: Option<i64>,
-    direction: isize,
-) -> Option<Option<i64>> {
-    let index = current
-        .and_then(|id| group_ids.iter().position(|candidate| *candidate == id))
-        .map_or(0, |index| index + 1);
-    let next = index.checked_add_signed(direction)?;
-    if next == index || next > group_ids.len() {
-        return None;
-    }
-    Some((next > 0).then(|| group_ids[next - 1]))
-}
-
 /// IDs between two loaded rows, inclusive, in their current display order.
 /// An unloaded or filtered-out anchor does not define a range.
 pub fn selection_range_ids(ids: &[i64], anchor: i64, target: i64) -> Option<&[i64]> {
@@ -527,17 +510,6 @@ mod tests {
         assert!(!search_highlight_ranges(&excerpt, "目标").is_empty());
         assert!(search_excerpt(&full, "已显示目标", "目标").is_none());
         assert!(search_excerpt(&full, "前前前", "不存在").is_none());
-    }
-
-    #[test]
-    fn adjacent_group_follows_display_order_and_stops_at_edges() {
-        let groups = [9, 3, 7];
-        assert_eq!(adjacent_group_id(&groups, None, 1), Some(Some(9)));
-        assert_eq!(adjacent_group_id(&groups, Some(3), -1), Some(Some(9)));
-        assert_eq!(adjacent_group_id(&groups, Some(9), -1), Some(None));
-        assert_eq!(adjacent_group_id(&groups, Some(7), 1), None);
-        assert_eq!(adjacent_group_id(&groups, None, -1), None);
-        assert_eq!(adjacent_group_id(&[], None, 1), None);
     }
 
     #[test]

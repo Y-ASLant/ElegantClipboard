@@ -2,6 +2,7 @@
 
 本目录记录 ElegantClipboard GPUI 应用的架构决策、Windows 功能状态和验证证据。
 
+- [变更日志](CHANGELOG.md)：从 GPUI 重构版 2.0.0 开始的版本记录。
 - [Windows GPUI 状态](WINDOWS_MVP.md)：当前实现、依赖、运行方式、验证命令与限制。
 - [UI 规范](UI_GUIDELINES.md)：GPUI 界面样式与交互约定。
 - [Windows 独立包说明](WINDOWS_PACKAGE_README.txt)：ZIP 制品的运行与数据目录说明。

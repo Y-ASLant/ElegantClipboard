@@ -4,6 +4,8 @@
 
 2026-09-19 更新：首批选择的 0.6.2 已升级为[稳定补丁版 0.6.4](https://github.com/longbridge/gpui-kit/releases/tag/v0.6.4)；下文关于首批实现的描述保留原决策背景。应用仍由 Kit 配套 GPUI 依赖。
 
+2026-09-27 更新：应用已升级至 gpui-kit 0.6.6，配套 `gpui-pre-*` 依赖为 0.3.6；下文 0.6.2/0.6.4 与 0.3.5 为当时的决策记录。
+
 ## 栈与依赖
 
 - 首批使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。

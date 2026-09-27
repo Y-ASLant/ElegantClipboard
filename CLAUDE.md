@@ -12,6 +12,10 @@ This branch is a Rust-only GPUI application for Windows. Do not add Tauri, React
 
 Dependency direction is `clipboard-gpui -> clipboard-platform -> clipboard-core`; `clipboard-gpui` also uses `clipboard-core` directly. Core must not depend on GPUI or Windows APIs.
 
+## UI components
+
+The Windows UI uses GPUI Kit. For every UI component provided in the [official GPUI Kit component catalog](https://gpui-kit.com/zh-CN/component), use the official component rather than implementing or introducing a replacement. Use GPUI primitives for layout and application-specific content that the catalog does not provide; do not add another component library. Check the catalog before adding or replacing UI controls.
+
 ## Required checks
 
 ```powershell

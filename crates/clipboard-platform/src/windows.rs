@@ -3190,7 +3190,7 @@ mod tests {
         assert!(service.initial_paste_close_window);
         assert_eq!(service.initial_paste_key, PasteKeyPreference::CtrlV);
         assert!(service.initial_paste_move_to_top);
-        assert!(service.initial_quick_paste_enabled);
+        assert!(!service.initial_quick_paste_enabled);
         next_snapshot(&events, 0);
         service.send(Command::SetPersistWindowSize(false))?;
         service.send(Command::SetAutoResetState(true))?;
@@ -3200,7 +3200,7 @@ mod tests {
         service.send(Command::SetPasteCloseWindow(false))?;
         service.send(Command::SetPasteKey(PasteKeyPreference::ShiftInsert))?;
         service.send(Command::SetPasteMoveToTop(false))?;
-        service.send(Command::SetQuickPasteEnabled(false))?;
+        service.send(Command::SetQuickPasteEnabled(true))?;
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let mut size_acknowledged = false;
         let mut reset_acknowledged = false;
@@ -3255,7 +3255,7 @@ mod tests {
                     move_acknowledged = true;
                 }
                 Ok(Event::QuickPasteEnabledSaved(result)) => {
-                    assert!(!result.unwrap());
+                    assert!(result.unwrap());
                     quick_acknowledged = true;
                 }
                 Ok(Event::Error(message)) => panic!("{message}"),
@@ -3277,7 +3277,7 @@ mod tests {
         assert!(!reopened.initial_paste_close_window);
         assert_eq!(reopened.initial_paste_key, PasteKeyPreference::ShiftInsert);
         assert!(!reopened.initial_paste_move_to_top);
-        assert!(!reopened.initial_quick_paste_enabled);
+        assert!(reopened.initial_quick_paste_enabled);
         Ok(())
     }
 

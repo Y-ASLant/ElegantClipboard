@@ -1,3 +1,4 @@
+mod group_select;
 mod settings_data;
 mod settings_display;
 mod settings_general;
@@ -8,14 +9,13 @@ use crate::paste;
 use crate::position;
 use crate::sound::{self, Sound};
 use crate::tray::{self, TrayCommand};
-use crate::visual::{self, CONTROL_HEIGHT, GROUP_BAR_HEIGHT, PAGE_PADDING};
+use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
 use crate::{
     options::Options,
     state::{
-        HistoryState, PreviewState, adjacent_group_id, drag_edge_target_index,
-        drag_reorder_offsets, format_card_time, next_drag_scroll_index, reorder_offsets,
-        search_excerpt, search_highlight_ranges, selection_range_ids, should_hide_after_paste,
-        source_app_parts,
+        HistoryState, PreviewState, drag_edge_target_index, drag_reorder_offsets, format_card_time,
+        next_drag_scroll_index, reorder_offsets, search_excerpt, search_highlight_ranges,
+        selection_range_ids, should_hide_after_paste, source_app_parts,
     },
 };
 use clipboard_core::{
@@ -30,7 +30,8 @@ use clipboard_core::{
     },
 };
 use clipboard_platform::hotkey::{
-    Hotkey, PasteHotkeyEvent, PasteHotkeys, normalize_paste_shortcut, validate_paste_shortcuts,
+    Hotkey, PasteHotkeyEvent, PasteHotkeys, PasteRegistrationWarning, normalize_paste_shortcut,
+    validate_paste_shortcuts,
 };
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
@@ -38,6 +39,8 @@ use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy
 use directories::UserDirs;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::stepper::{Stepper, StepperItem};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -48,6 +51,7 @@ use gpui_kit::{
     },
     *,
 };
+use group_select::{GroupChoice, GroupOption, group_options};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{
@@ -62,6 +66,47 @@ fn tr(language: LanguagePreference, chinese: &'static str, english: &'static str
     match language {
         LanguagePreference::Chinese => chinese,
         LanguagePreference::English => english,
+    }
+}
+
+fn paste_registration_summary(
+    language: LanguagePreference,
+    warnings: &[PasteRegistrationWarning],
+) -> Option<String> {
+    let first = warnings.first()?;
+    Some(match language {
+        LanguagePreference::Chinese => format!(
+            "{} 个快速粘贴组合键不可用（如 {first}）；可在设置 → 快捷键中更换或关闭快速粘贴",
+            warnings.len()
+        ),
+        LanguagePreference::English => format!(
+            "{} quick paste shortcuts are unavailable (e.g. {first}); change or disable them in Settings → Shortcuts",
+            warnings.len()
+        ),
+    })
+}
+
+#[cfg(test)]
+mod paste_registration_tests {
+    use super::{LanguagePreference, PasteRegistrationWarning, paste_registration_summary};
+
+    #[test]
+    fn many_failures_produce_one_bounded_status_with_a_representative_error() {
+        let warnings = (0..32)
+            .map(|index| PasteRegistrationWarning {
+                slot: 1,
+                favorite: false,
+                message: format!("conflict-{index}"),
+            })
+            .collect::<Vec<_>>();
+        for language in [LanguagePreference::Chinese, LanguagePreference::English] {
+            assert!(paste_registration_summary(language, &[]).is_none());
+            let summary = paste_registration_summary(language, &warnings).unwrap();
+            assert!(summary.contains("32"));
+            assert!(summary.contains("conflict-0"));
+            assert!(!summary.contains("conflict-31"));
+            assert!(summary.chars().count() < 170);
+        }
     }
 }
 
@@ -545,13 +590,14 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
                         title: Some("ElegantClipboard".into()),
-                        ..TitleBar::title_bar_options()
+                        appears_transparent: true,
+                        ..Default::default()
                     }),
                     window_min_size: Some(size(px(420.), px(520.))),
                     focus: !startup.hidden,
                     show: !startup.hidden,
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
-                    ..TitleBar::window_options()
+                    ..WindowOptions::default()
                 },
                 |window, cx| {
                     let view = cx.new(|cx| {
@@ -632,13 +678,6 @@ struct HistoryDrag {
     kind: &'static str,
     preview: String,
     language: LanguagePreference,
-}
-
-#[derive(Clone)]
-struct GroupDrag {
-    id: i64,
-    name: String,
-    group_ids: Vec<i64>,
 }
 
 #[derive(Clone)]
@@ -732,25 +771,6 @@ impl Render for HistoryDrag {
     }
 }
 
-impl Render for GroupDrag {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        visual::reveal(
-            div()
-                .px_3()
-                .py_2()
-                .rounded_md()
-                .border_1()
-                .border_color(cx.theme().primary)
-                .bg(cx.theme().background)
-                .shadow_md()
-                .text_sm()
-                .child(format!("⠿  {}", self.name)),
-            ("group-drag-preview", self.id as usize),
-            cx,
-        )
-    }
-}
-
 impl Render for ToolbarDrag {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -785,18 +805,13 @@ struct ClipboardView {
     file_card_info: HashMap<i64, FileCardInfo>,
     file_card_checked: HashMap<i64, String>,
     groups: Vec<Group>,
+    group_select: Entity<SelectState<Vec<GroupOption>>>,
     search: Entity<InputState>,
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
     group_rename_id: Option<i64>,
     group_save_pending: bool,
     group_reorder_pending: bool,
-    group_drop_target: Option<DropTarget>,
-    group_reorder_before: Option<Vec<i64>>,
-    group_feedback_ids: HashSet<i64>,
-    group_feedback_revision: usize,
-    group_scroll: ScrollHandle,
-    group_drag_direction: i8,
     group_delete_id: Option<i64>,
     group_delete_pending: bool,
     clear_confirm_open: bool,
@@ -906,8 +921,6 @@ struct ClipboardView {
     _events: Task<()>,
     search_task: Option<Task<()>>,
     feedback_task: Option<Task<()>>,
-    group_feedback_task: Option<Task<()>>,
-    group_drag_scroll_task: Option<Task<()>>,
     history_drag_scroll_task: Option<Task<()>>,
     window_size_task: Option<Task<()>>,
 }
@@ -1640,6 +1653,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> Self {
         let language = service.initial_language;
+        let toolbar = service.initial_toolbar;
         let window_position = service.initial_window_position;
         let hover_preference = service.initial_hover_preview;
         let search = cx.new(|cx| {
@@ -1649,6 +1663,23 @@ impl ClipboardView {
                 "Search clipboard history…",
             ))
         });
+        let group_select = cx.new(|cx| {
+            SelectState::new(
+                group_options(&[], language, None),
+                Some(IndexPath::default()),
+                window,
+                cx,
+            )
+        });
+        let group_subscription = cx.subscribe_in(
+            &group_select,
+            window,
+            |this, _, event: &SelectEvent<Vec<GroupOption>>, window, cx| {
+                if let SelectEvent::Confirm(Some(choice)) = event {
+                    this.choose_group(*choice, window, cx);
+                }
+            },
+        );
         let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.cancel_pending_row_click();
@@ -1684,7 +1715,7 @@ impl ClipboardView {
             }
         });
         let (tray_sender, tray_receiver) = async_channel::bounded(8);
-        let tray = tray::create(tray_sender.clone(), language);
+        let tray = tray::create(tray_sender.clone(), language, toolbar, false);
         tray_enabled.set(tray.is_ok());
         if startup.hidden && tray.is_err() {
             tray::set_window_visible(window, true);
@@ -1708,6 +1739,12 @@ impl ClipboardView {
                             }
                         }
                         TrayCommand::Settings => this.open_settings_window(cx),
+                        TrayCommand::ClearHistory => {
+                            this.paste_target = None;
+                            this.show_window(window, cx);
+                            this.open_clear_history(window, cx);
+                        }
+                        TrayCommand::TogglePin => this.toggle_window_pin(window, cx),
                         TrayCommand::TogglePause => {
                             if this.monitoring
                                 && !this.pause_pending
@@ -1835,15 +1872,8 @@ impl ClipboardView {
         if let Some(error) = paste_hotkey_error {
             startup_errors.push(error);
         }
-        if !paste_hotkey_warnings.is_empty() {
-            startup_errors.push(format!(
-                "部分快速粘贴快捷键不可用：{}",
-                paste_hotkey_warnings
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
+        if let Some(warning) = paste_registration_summary(language, &paste_hotkey_warnings) {
+            startup_errors.push(warning);
         }
         if let Some(error) = outside_click_error {
             startup_errors.push(error);
@@ -1869,7 +1899,6 @@ impl ClipboardView {
         let paste_close_window = service.initial_paste_close_window;
         let paste_key = service.initial_paste_key;
         let paste_move_to_top = service.initial_paste_move_to_top;
-        let toolbar = service.initial_toolbar;
         let display = service.initial_display;
         let audio = service.initial_audio;
         let monitor_types = service.initial_monitor_types;
@@ -1935,6 +1964,7 @@ impl ClipboardView {
             file_card_checked: HashMap::new(),
             groups: Vec::new(),
             search,
+            group_select,
             group_name_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(language, "分组名称", "Group name"))
             }),
@@ -1942,12 +1972,6 @@ impl ClipboardView {
             group_rename_id: None,
             group_save_pending: false,
             group_reorder_pending: false,
-            group_drop_target: None,
-            group_reorder_before: None,
-            group_feedback_ids: HashSet::new(),
-            group_feedback_revision: 0,
-            group_scroll: ScrollHandle::new(),
-            group_drag_direction: 0,
             group_delete_id: None,
             group_delete_pending: false,
             clear_confirm_open: false,
@@ -2057,12 +2081,16 @@ impl ClipboardView {
                 startup_errors.join("；")
             },
             is_error: !startup_errors.is_empty(),
-            _subscriptions: vec![subscription, appearance, activation, bounds],
+            _subscriptions: vec![
+                subscription,
+                group_subscription,
+                appearance,
+                activation,
+                bounds,
+            ],
             _events: event_task,
             search_task: None,
             feedback_task: None,
-            group_feedback_task: None,
-            group_drag_scroll_task: None,
             history_drag_scroll_task: None,
             window_size_task: None,
         }
@@ -2397,21 +2425,8 @@ impl ClipboardView {
             ) {
                 Ok((hotkeys, warnings)) => {
                     self.paste_hotkeys = Some(hotkeys);
-                    self.quick_paste_registration_warning = (!warnings.is_empty()).then(|| {
-                        format!(
-                            "{}: {}",
-                            tr(
-                                self.language,
-                                "部分快速粘贴快捷键不可用",
-                                "Some quick paste shortcuts are unavailable",
-                            ),
-                            warnings
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<_>>()
-                                .join("; ")
-                        )
-                    });
+                    self.quick_paste_registration_warning =
+                        paste_registration_summary(self.language, &warnings);
                 }
                 Err(error) => {
                     self.message = error.to_string();
@@ -2450,13 +2465,7 @@ impl ClipboardView {
         ) {
             Ok((hotkeys, warnings)) => {
                 self.paste_hotkeys = Some(hotkeys);
-                (!warnings.is_empty()).then(|| {
-                    warnings
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                })
+                paste_registration_summary(self.language, &warnings)
             }
             Err(error) => Some(error.to_string()),
         }
@@ -2533,13 +2542,8 @@ impl ClipboardView {
                         return;
                     }
                     self.paste_hotkeys = Some(hotkeys);
-                    self.quick_paste_registration_warning = (!warnings.is_empty()).then(|| {
-                        warnings
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join("; ")
-                    });
+                    self.quick_paste_registration_warning =
+                        paste_registration_summary(self.language, &warnings);
                 }
                 Err(error) => {
                     let restore_error = self.restore_paste_hotkeys();
@@ -2642,6 +2646,88 @@ impl ClipboardView {
         }
     }
 
+    fn refresh_group_select(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let choice = self
+            .history
+            .group_id
+            .map_or(GroupChoice::Default, GroupChoice::Existing);
+        let options = group_options(&self.groups, self.language, self.history.group_id);
+        self.group_select.update(cx, |select, cx| {
+            select.set_items(options, window, cx);
+            select.set_selected_value(&choice, window, cx);
+        });
+    }
+
+    fn choose_group(&mut self, choice: GroupChoice, window: &mut Window, cx: &mut Context<Self>) {
+        if self.group_save_pending
+            || self.group_delete_pending
+            || self.clear_pending
+            || self.group_reorder_pending
+        {
+            cx.defer_in(window, |this, window, cx| {
+                this.refresh_group_select(window, cx)
+            });
+            return;
+        }
+        match choice {
+            GroupChoice::Default => self.select_group(None, window, cx),
+            GroupChoice::Existing(id) => self.select_group(Some(id), window, cx),
+            GroupChoice::Create => {
+                self.group_rename_id = None;
+                self.group_editor_open = true;
+                self.group_name_input.update(cx, |input, cx| {
+                    input.set_value("", window, cx);
+                    input.focus(window, cx);
+                });
+            }
+            GroupChoice::Rename => {
+                if let Some(group) = self
+                    .groups
+                    .iter()
+                    .find(|group| Some(group.id) == self.history.group_id)
+                {
+                    self.group_rename_id = Some(group.id);
+                    self.group_editor_open = true;
+                    self.group_name_input.update(cx, |input, cx| {
+                        input.set_value(group.name.clone(), window, cx);
+                        input.focus(window, cx);
+                    });
+                }
+            }
+            GroupChoice::Delete => {
+                self.group_delete_id = self.history.group_id;
+                self.reset_selection();
+                self.clear_confirm_open = false;
+                self.group_editor_open = false;
+                self.group_rename_id = None;
+                self.group_move_id = None;
+                window.focus(&self.list_focus, cx);
+            }
+            GroupChoice::MoveUp | GroupChoice::MoveDown => {
+                if let Some(id) = self.history.group_id
+                    && let Some(index) = self.groups.iter().position(|group| group.id == id)
+                    && let Some(target_index) =
+                        index.checked_add_signed(if choice == GroupChoice::MoveUp { -1 } else { 1 })
+                    && let Some(target) = self.groups.get(target_index)
+                    && self.send(
+                        Command::ReorderGroup {
+                            from: id,
+                            to: target.id,
+                            after: choice == GroupChoice::MoveDown,
+                        },
+                        cx,
+                    )
+                {
+                    self.group_reorder_pending = true;
+                }
+            }
+        }
+        cx.defer_in(window, |this, window, cx| {
+            this.refresh_group_select(window, cx)
+        });
+        cx.notify();
+    }
+
     fn select_group(&mut self, group_id: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
         if self.history.group_id == group_id
             && !self.history.favorite_only
@@ -2657,6 +2743,9 @@ impl ClipboardView {
         self.clear_confirm_open = false;
         self.reset_selection();
         self.history.set_group(group_id);
+        cx.defer_in(window, |this, window, cx| {
+            this.refresh_group_select(window, cx)
+        });
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.query(cx);
         window.focus(&self.list_focus, cx);
@@ -2695,7 +2784,7 @@ impl ClipboardView {
         } else {
             self.history.set_favorite_filter(true);
         }
-        self.group_scroll.scroll_to_item(4);
+        self.refresh_group_select(window, cx);
         self.scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.query(cx);
         window.focus(&self.list_focus, cx);
@@ -2739,16 +2828,18 @@ impl ClipboardView {
         if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
             return;
         }
-        let ids: Vec<_> = self.groups.iter().map(|group| group.id).collect();
-        let Some(group_id) = adjacent_group_id(&ids, self.history.group_id, direction) else {
+        let index = self
+            .history
+            .group_id
+            .and_then(|id| self.groups.iter().position(|group| group.id == id))
+            .map_or(0, |index| index + 1);
+        let Some(next) = index.checked_add_signed(direction) else {
             return;
         };
-        // Four group actions and the default pill precede custom group pills.
-        let pill_index = group_id
-            .and_then(|id| ids.iter().position(|candidate| *candidate == id))
-            .map_or(4, |index| 5 + index);
-        self.group_scroll.scroll_to_item(pill_index);
-        self.select_group(group_id, window, cx);
+        if next == index || next > self.groups.len() {
+            return;
+        }
+        self.select_group((next > 0).then(|| self.groups[next - 1].id), window, cx);
     }
 
     fn save_group(&mut self, cx: &mut Context<Self>) {
@@ -2983,7 +3074,7 @@ impl ClipboardView {
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.history.set_group(None);
-            self.group_scroll.scroll_to_item(0);
+            self.refresh_group_select(window, cx);
             self.scroll.scroll_to_item(0, ScrollStrategy::Top);
             if !self.preview_editing && !self.preview_save_pending {
                 self.preview.close();
@@ -3030,8 +3121,6 @@ impl ClipboardView {
         if cx.has_active_drag() {
             cx.stop_active_drag(window);
             self.drop_target = None;
-            self.group_drop_target = None;
-            self.group_drag_direction = 0;
             self.history_drag_direction = 0;
             cx.notify();
             return;
@@ -3384,38 +3473,17 @@ impl ClipboardView {
                     self.query(cx);
                 }
                 self.groups = groups;
+                self.refresh_group_select(window, cx);
             }
-            Event::GroupReordered { from, result } => {
+            Event::GroupReordered { result, .. } => {
                 self.group_reorder_pending = false;
-                self.group_drop_target = None;
-                self.group_drag_direction = 0;
-                let before = self.group_reorder_before.take();
                 match result {
                     Ok(()) => {
-                        self.group_feedback_revision += 1;
-                        self.group_feedback_ids = before
-                            .map(|before| {
-                                let after: Vec<_> =
-                                    self.groups.iter().map(|group| group.id).collect();
-                                reorder_offsets(&before, &after).into_keys().collect()
-                            })
-                            .unwrap_or_default();
-                        self.group_feedback_ids.insert(from);
-                        self.group_feedback_task = Some(cx.spawn(async move |view, cx| {
-                            cx.background_executor()
-                                .timer(visual::MOTION_DURATION)
-                                .await;
-                            let _ = view.update(cx, |this, cx| {
-                                this.group_feedback_ids.clear();
-                                cx.notify();
-                            });
-                        }));
                         self.message =
                             tr(self.language, "分组顺序已保存", "Group order saved").into();
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.group_feedback_ids.clear();
                         self.message = format!(
                             "{}: {error}",
                             tr(self.language, "分组排序失败", "Failed to reorder groups")
@@ -3905,18 +3973,31 @@ impl ClipboardView {
                                 cx,
                             );
                         });
-                        match tray::create(self.tray_sender.clone(), language) {
+                        self.refresh_group_select(window, cx);
+                        let menu_result = if let Some(tray) = &self._tray {
+                            tray::update_menu(tray, language, self.toolbar, self.window_pinned)
+                                .map(|_| None)
+                        } else {
+                            tray::create(
+                                self.tray_sender.clone(),
+                                language,
+                                self.toolbar,
+                                self.window_pinned,
+                            )
+                            .map(Some)
+                        };
+                        match menu_result {
                             Ok(tray) => {
-                                self._tray = Some(tray);
-                                self.tray_enabled.set(true);
+                                if let Some(tray) = tray {
+                                    self._tray = Some(tray);
+                                    self.tray_enabled.set(true);
+                                }
                                 self.message =
                                     tr(language, "语言设置已保存", "Language preference saved")
                                         .into();
                                 self.is_error = false;
                             }
                             Err(error) => {
-                                self._tray = None;
-                                self.tray_enabled.set(false);
                                 self.message = format!(
                                     "{}: {error}",
                                     tr(
@@ -4315,9 +4396,28 @@ impl ClipboardView {
                 match result {
                     Ok(toolbar) => {
                         self.toolbar = toolbar;
-                        self.message =
-                            tr(self.language, "工具栏设置已保存", "Toolbar saved").into();
-                        self.is_error = false;
+                        match self.refresh_tray_menu() {
+                            Ok(()) => {
+                                self.message = tr(
+                                    self.language,
+                                    "操作入口设置已保存",
+                                    "Action visibility saved",
+                                )
+                                .into();
+                                self.is_error = false;
+                            }
+                            Err(error) => {
+                                self.message = format!(
+                                    "{}: {error}",
+                                    tr(
+                                        self.language,
+                                        "操作入口已保存，但托盘菜单更新失败",
+                                        "Action visibility saved, but the tray menu could not be updated"
+                                    )
+                                );
+                                self.is_error = true;
+                            }
+                        }
                     }
                     Err(error) => {
                         self.message = format!(
@@ -5729,6 +5829,13 @@ impl ClipboardView {
         .detach();
     }
 
+    fn refresh_tray_menu(&self) -> anyhow::Result<()> {
+        if let Some(tray) = &self._tray {
+            tray::update_menu(tray, self.language, self.toolbar, self.window_pinned)?;
+        }
+        Ok(())
+    }
+
     fn toggle_window_pin(&mut self, window: &Window, cx: &mut Context<Self>) {
         let pinned = !self.window_pinned;
         match tray::set_window_topmost(window, pinned) {
@@ -5745,6 +5852,17 @@ impl ClipboardView {
                     tr(self.language, "已取消窗口置顶", "Window unpinned").into()
                 };
                 self.is_error = false;
+                if let Err(error) = self.refresh_tray_menu() {
+                    self.message = format!(
+                        "{}: {error}",
+                        tr(
+                            self.language,
+                            "窗口状态已改变，但托盘菜单更新失败",
+                            "Window pin changed, but the tray menu could not be updated"
+                        )
+                    );
+                    self.is_error = true;
+                }
             }
             Err(error) => {
                 self.message = format!(
@@ -5756,6 +5874,7 @@ impl ClipboardView {
                     )
                 );
                 self.is_error = true;
+                let _ = self.refresh_tray_menu();
             }
         }
         cx.notify();
@@ -5772,50 +5891,6 @@ impl ClipboardView {
                 .items
                 .iter()
                 .any(|item| item.id == drag.id && item.is_pinned == drag.pinned)
-    }
-
-    fn valid_group_drag(&self, drag: &GroupDrag) -> bool {
-        !self.group_reorder_pending
-            && !self.group_delete_pending
-            && !self.group_save_pending
-            && !self.clear_pending
-            && drag.group_ids == self.groups.iter().map(|group| group.id).collect::<Vec<_>>()
-    }
-
-    fn start_group_drag_scroll(&mut self, cx: &mut Context<Self>) {
-        self.group_drag_direction = 0;
-        self.group_drag_scroll_task = Some(cx.spawn(async move |view, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(visual::DRAG_SCROLL_INTERVAL)
-                    .await;
-                let Ok(active) = view.update(cx, |this, cx| {
-                    if !cx.has_active_drag() {
-                        this.group_drag_direction = 0;
-                        this.group_drop_target = None;
-                        cx.notify();
-                        return false;
-                    }
-                    if this.group_drag_direction != 0 {
-                        let offset = this.group_scroll.offset();
-                        let next = (offset.x
-                            + px(f32::from(this.group_drag_direction)
-                                * visual::GROUP_DRAG_SCROLL_STEP))
-                        .clamp(-this.group_scroll.max_offset().x, px(0.));
-                        if next != offset.x {
-                            this.group_scroll.set_offset(point(next, offset.y));
-                            cx.notify();
-                        }
-                    }
-                    true
-                }) else {
-                    break;
-                };
-                if !active {
-                    break;
-                }
-            }
-        }));
     }
 
     fn start_history_drag_scroll(&mut self, cx: &mut Context<Self>) {
@@ -5886,158 +5961,6 @@ impl ClipboardView {
                 }
             }
         }));
-    }
-
-    fn render_group(&self, group: &Group, cx: &mut Context<Self>) -> AnyElement {
-        let id = group.id;
-        let drag = GroupDrag {
-            id,
-            name: group.name.clone(),
-            group_ids: self.groups.iter().map(|group| group.id).collect(),
-        };
-        let entity = cx.entity();
-        let active_drop = cx
-            .has_active_drag()
-            .then_some(self.group_drop_target)
-            .flatten();
-        let target = active_drop.filter(|target| target.id == id);
-        let group_id = Some(id);
-        let pill = div()
-            .id(("group-drag", id as usize))
-            .relative()
-            .flex()
-            .items_center()
-            .flex_none()
-            .h(px(CONTROL_HEIGHT))
-            .on_drag_move(
-                cx.listener(move |this, event: &DragMoveEvent<GroupDrag>, _, cx| {
-                    if !event.bounds.contains(&event.event.position) {
-                        if this.group_drop_target.is_some_and(|target| target.id == id) {
-                            this.group_drop_target = None;
-                            cx.notify();
-                        }
-                        return;
-                    }
-                    let target = (event.drag(cx).id != id).then_some(DropTarget {
-                        id,
-                        after: event.event.position.x > event.bounds.center().x,
-                        allowed: this.valid_group_drag(event.drag(cx)),
-                    });
-                    if this.group_drop_target != target {
-                        this.group_drop_target = target;
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_drop(cx.listener(move |this, drag: &GroupDrag, _, cx| {
-                if drag.id == id {
-                    this.group_drag_direction = 0;
-                    return;
-                }
-                if !this.valid_group_drag(drag) {
-                    this.group_drop_target = None;
-                    this.group_drag_direction = 0;
-                    this.message = tr(
-                        this.language,
-                        "分组列表已变化，请重新拖动",
-                        "The group list changed; drag again.",
-                    )
-                    .into();
-                    this.is_error = true;
-                    cx.notify();
-                    return;
-                }
-                let Some(target) = this.group_drop_target.filter(|target| target.id == id) else {
-                    return;
-                };
-                if this.send(
-                    Command::ReorderGroup {
-                        from: drag.id,
-                        to: id,
-                        after: target.after,
-                    },
-                    cx,
-                ) {
-                    this.group_reorder_pending = true;
-                    this.group_reorder_before =
-                        Some(this.groups.iter().map(|group| group.id).collect());
-                }
-                this.group_drop_target = None;
-                this.group_drag_direction = 0;
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id(("group-handle", id as usize))
-                    .w(px(22.))
-                    .h(px(CONTROL_HEIGHT))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(cx.theme().muted_foreground)
-                    .cursor_grab()
-                    .child("⠿")
-                    .when(self.valid_group_drag(&drag), |handle| {
-                        handle.on_drag(drag.clone(), move |drag, _, _, cx| {
-                            entity.update(cx, |this, cx| {
-                                this.group_drop_target = None;
-                                this.start_group_drag_scroll(cx);
-                                cx.notify();
-                            });
-                            cx.new(|_| drag.clone())
-                        })
-                    }),
-            )
-            .child(
-                Button::new(("group", id as usize))
-                    .small()
-                    .outline()
-                    .h(px(CONTROL_HEIGHT))
-                    .label(group.name.clone())
-                    .selected(self.history.group_id == group_id)
-                    .disabled(
-                        self.group_delete_pending
-                            || self.clear_pending
-                            || self.group_reorder_pending,
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_group(group_id, window, cx);
-                    })),
-            )
-            .when_some(target, |pill, target| {
-                pill.child(visual::reveal(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(visual::DROP_MARKER_HEIGHT))
-                        .bg(if target.allowed {
-                            cx.theme().primary
-                        } else {
-                            cx.theme().danger
-                        })
-                        .when(target.after, |line| line.right_0())
-                        .when(!target.after, |line| line.left_0()),
-                    (
-                        "group-drop-marker",
-                        id as usize * 2 + usize::from(target.after),
-                    ),
-                    cx,
-                ))
-            });
-        if self.group_feedback_ids.contains(&id) {
-            visual::reveal(
-                div().child(pill),
-                format!(
-                    "group-reorder-feedback-{}-{id}",
-                    self.group_feedback_revision
-                ),
-                cx,
-            )
-        } else {
-            pill.into_any_element()
-        }
     }
 
     fn refresh_file_card_info(&mut self, cx: &mut Context<Self>) {
@@ -7077,14 +7000,22 @@ impl Render for ClipboardView {
             .text_color(cx.theme().foreground)
             .font_family("Microsoft YaHei UI")
             .child(
-                TitleBar::new().bg(cx.theme().background).child(
-                    div()
-                        .w_full()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .child(div().text_sm().font_semibold().child("ElegantClipboard")),
-                ),
+                div()
+                    .id("window-drag-handle")
+                    .h(px(30.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_grab()
+                    .window_control_area(WindowControlArea::Drag)
+                    .child(
+                        div()
+                            .w(px(36.))
+                            .h(px(4.))
+                            .rounded_full()
+                            .bg(cx.theme().border),
+                    ),
             )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
             .child(self.render_status(cx))
@@ -7097,6 +7028,7 @@ impl ClipboardView {
         let steps = [
             (
                 IconName::Copy,
+                tr(language, "采集", "Capture"),
                 tr(
                     language,
                     "欢迎使用 ElegantClipboard",
@@ -7115,6 +7047,7 @@ impl ClipboardView {
             ),
             (
                 IconName::Eye,
+                tr(language, "搜索", "Search"),
                 tr(language, "快速搜索", "Quick search"),
                 tr(
                     language,
@@ -7129,6 +7062,7 @@ impl ClipboardView {
             ),
             (
                 IconName::Star,
+                tr(language, "收藏", "Favorites"),
                 tr(language, "置顶与收藏", "Pin and favorite"),
                 tr(
                     language,
@@ -7143,6 +7077,7 @@ impl ClipboardView {
             ),
             (
                 IconName::SquareTerminal,
+                tr(language, "快捷键", "Shortcuts"),
                 tr(language, "键盘快捷键", "Keyboard shortcuts"),
                 tr(
                     language,
@@ -7156,7 +7091,7 @@ impl ClipboardView {
                 ),
             ),
         ];
-        let (icon, title, description, tip) = steps[self.onboarding_step.min(3)].clone();
+        let (icon, _, title, description, tip) = steps[self.onboarding_step.min(3)].clone();
         let is_last = self.onboarding_step == 3;
         div()
             .key_context("ClipboardApp")
@@ -7210,21 +7145,24 @@ impl ClipboardView {
                             .text_color(cx.theme().primary)
                             .child(tip),
                     )
-                    .child(div().flex().gap_2().children((0..4).map(|index| {
-                        div()
-                            .w(px(if index == self.onboarding_step {
-                                24.
-                            } else {
-                                10.
-                            }))
-                            .h(px(6.))
-                            .rounded_md()
-                            .bg(if index <= self.onboarding_step {
-                                cx.theme().primary
-                            } else {
-                                cx.theme().muted
-                            })
-                    })))
+                    .child(
+                        Stepper::new("onboarding-steps")
+                            .small()
+                            .text_center(true)
+                            .selected_index(self.onboarding_step)
+                            .disabled(self.onboarding_pending)
+                            .items(
+                                steps
+                                    .iter()
+                                    .map(|(_, label, _, _, _)| StepperItem::new().child(*label)),
+                            )
+                            .on_click(cx.listener(|this, index, _, cx| {
+                                if this.onboarding_visible() && !this.onboarding_pending {
+                                    this.onboarding_step = *index;
+                                    cx.notify();
+                                }
+                            })),
+                    )
                     .child(
                         div()
                             .w_full()
@@ -7374,65 +7312,44 @@ impl ClipboardView {
             })
     }
 
-    fn render_toolbar_button(&self, button: ToolbarButton, cx: &mut Context<Self>) -> AnyElement {
-        match button {
-            ToolbarButton::Clear => Button::new("toolbar-clear")
-                .small()
-                .outline()
-                .label(tr(self.language, "清理历史", "Clear history"))
-                .disabled(
-                    self.group_save_pending || self.group_delete_pending || self.clear_pending,
-                )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.reset_selection();
-                    this.group_delete_id = None;
-                    this.group_editor_open = false;
-                    this.group_rename_id = None;
-                    this.group_move_id = None;
-                    window.focus(&this.list_focus, cx);
-                    if this.skip_clear_confirm {
-                        this.clear_confirm_open = false;
-                        this.clear_history(cx);
-                    } else {
-                        this.clear_confirm_open = true;
-                    }
-                    cx.notify();
-                }))
-                .into_any_element(),
-            ToolbarButton::Batch => Button::new("toolbar-batch")
-                .small()
-                .outline()
-                .label(if self.batch_mode {
-                    tr(self.language, "退出批量", "Exit batch")
-                } else {
-                    tr(self.language, "批量选择", "Batch select")
-                })
-                .selected(self.batch_mode)
-                .disabled(self.batch_pending || self.reorder_pending || self.history.loading)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.toggle_batch_mode(window, cx);
-                }))
-                .into_any_element(),
-            ToolbarButton::Pin => Button::new("toolbar-pin")
-                .small()
-                .outline()
-                .label(if self.window_pinned {
-                    tr(self.language, "已置顶", "Pinned")
-                } else {
-                    tr(self.language, "置顶窗口", "Pin window")
-                })
-                .selected(self.window_pinned)
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.toggle_window_pin(window, cx);
-                }))
-                .into_any_element(),
-            ToolbarButton::Settings => Button::new("toolbar-settings")
-                .small()
-                .outline()
-                .label(tr(self.language, "设置", "Settings"))
-                .on_click(cx.listener(|this, _, _, cx| this.open_settings_window(cx)))
-                .into_any_element(),
+    fn open_clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.group_save_pending || self.group_delete_pending || self.clear_pending {
+            return;
         }
+        self.reset_selection();
+        self.group_delete_id = None;
+        self.group_editor_open = false;
+        self.group_rename_id = None;
+        self.group_move_id = None;
+        self.clear_all_confirm_open = false;
+        self.preview.close();
+        window.focus(&self.list_focus, cx);
+        if self.skip_clear_confirm {
+            self.clear_confirm_open = false;
+            self.clear_history(cx);
+        } else {
+            self.clear_confirm_open = true;
+        }
+        cx.notify();
+    }
+
+    fn render_batch_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let label = if self.batch_mode {
+            tr(self.language, "退出批量选择", "Exit batch selection")
+        } else {
+            tr(self.language, "批量选择", "Batch select")
+        };
+        Button::new("toolbar-batch")
+            .small()
+            .outline()
+            .icon(IconName::Check)
+            .tooltip(label)
+            .accessibility_label(label)
+            .selected(self.batch_mode)
+            .disabled(self.batch_pending || self.reorder_pending || self.history.loading)
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.toggle_batch_mode(window, cx);
+            }))
     }
 
     fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -7487,13 +7404,11 @@ impl ClipboardView {
                 "No matching items. Try another search.",
             )
         };
-        let toolbar_buttons = self
+        let show_batch = self
             .toolbar
             .items
-            .into_iter()
-            .filter(|item| item.visible)
-            .map(|item| self.render_toolbar_button(item.button, cx))
-            .collect::<Vec<_>>();
+            .iter()
+            .any(|item| item.button == ToolbarButton::Batch && item.visible);
         div()
             .key_context("ClipboardApp")
             .flex()
@@ -7513,16 +7428,25 @@ impl ClipboardView {
                 div()
                     .key_context("HistorySearch")
                     .px(px(PAGE_PADDING))
-                    .pt_3()
                     .pb_2()
                     .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
                         this.focus_first_history_item(window, cx);
                     }))
-                    .child(Input::new(&self.search).cleanable(true)),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Input::new(&self.search).cleanable(true)),
+                    )
+                    .when(show_batch, |row| row.child(self.render_batch_button(cx))),
             )
             .child(
                 div()
                     .id("toolbar-row")
+                    .w_full()
                     .px(px(PAGE_PADDING))
                     .pb_2()
                     .flex_none()
@@ -7533,164 +7457,66 @@ impl ClipboardView {
                         div()
                             .w_full()
                             .flex()
-                            .flex_wrap()
                             .items_center()
                             .gap_2()
-                            .children(toolbar_buttons),
-                    )
-                    .when(self.display.show_category_filter, |bar| {
-                        let selected_index = self
-                            .history
-                            .group_id
-                            .is_none()
-                            .then(|| self.category_tab_index());
-                        bar.child(
-                            TabBar::new("history-category-tabs")
-                                .w_full()
-                                .flex_none()
-                                .small()
-                                .segmented()
-                                .when_some(selected_index, |tabs, index| tabs.selected_index(index))
-                                .on_click(cx.listener(|this, index: &usize, window, cx| {
-                                    if let Some(&category) = CATEGORY_FILTERS.get(*index) {
-                                        this.select_category(category, window, cx);
-                                    }
-                                }))
-                                .children(
-                                    [
-                                        tr(self.language, "全部", "All"),
-                                        tr(self.language, "收藏", "Favorites"),
-                                        tr(self.language, "文本", "Text"),
-                                        tr(self.language, "其他", "Other"),
-                                    ]
-                                    .map(|label| Tab::new().label(label).flex_1()),
+                            .when(self.display.show_category_filter, |row| {
+                                let selected_index = self
+                                    .history
+                                    .group_id
+                                    .is_none()
+                                    .then(|| self.category_tab_index());
+                                row.child(
+                                    div().flex_1().min_w_0().child(
+                                        TabBar::new("history-category-tabs")
+                                            .w_full()
+                                            .small()
+                                            .segmented()
+                                            .when_some(selected_index, |tabs, index| {
+                                                tabs.selected_index(index)
+                                            })
+                                            .on_click(cx.listener(
+                                                |this, index: &usize, window, cx| {
+                                                    if let Some(&category) =
+                                                        CATEGORY_FILTERS.get(*index)
+                                                    {
+                                                        this.select_category(category, window, cx);
+                                                    }
+                                                },
+                                            ))
+                                            .children(
+                                                [
+                                                    ("全部", "All", "All"),
+                                                    ("收藏", "Favs", "Favorites"),
+                                                    ("文本", "Text", "Text"),
+                                                    ("其他", "Other", "Other"),
+                                                ]
+                                                .map(|(chinese, english, accessible)| {
+                                                    Tab::new()
+                                                        .label(tr(self.language, chinese, english))
+                                                        .aria_label(tr(self.language, chinese, accessible))
+                                                        .flex_1()
+                                                }),
+                                            ),
+                                    ),
+                                )
+                            })
+                            .child(
+                                div().w(px(138.)).flex_none().child(
+                                    Select::new(&self.group_select)
+                                        .small()
+                                        .w_full()
+                                        .menu_width(px(190.))
+                                        .menu_max_h(px(300.))
+                                        .placeholder(tr(self.language, "选择分组", "Select group"))
+                                        .accessibility_label(tr(self.language, "分组", "Group"))
+                                        .disabled(
+                                            self.group_save_pending
+                                                || self.group_delete_pending
+                                                || self.clear_pending
+                                                || self.group_reorder_pending,
+                                        ),
                                 ),
-                        )
-                    })
-                    .child(
-                        div()
-                            .id("group-bar")
-                            .h(px(GROUP_BAR_HEIGHT))
-                            .w_full()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .overflow_x_scroll()
-                            .track_scroll(&self.group_scroll)
-                            .horizontal_scrollbar(&self.group_scroll)
-                            .on_drag_move(cx.listener(
-                                |this, event: &DragMoveEvent<GroupDrag>, _, cx| {
-                                    let x = event.event.position.x;
-                                    let direction = if !event.bounds.contains(&event.event.position)
-                                    {
-                                        0
-                                    } else if x < event.bounds.left() + px(visual::DRAG_EDGE_ZONE) {
-                                        1
-                                    } else if x > event.bounds.right() - px(visual::DRAG_EDGE_ZONE)
-                                    {
-                                        -1
-                                    } else {
-                                        0
-                                    };
-                                    if this.group_drag_direction != direction {
-                                        this.group_drag_direction = direction;
-                                        cx.notify();
-                                    }
-                                },
-                            ))
-                            .child(
-                                Button::new("group-create-toggle")
-                                    .small()
-                                    .ghost()
-                                    .label(tr(self.language, "＋ 新建", "+ New"))
-                                    .disabled(
-                                        self.group_save_pending
-                                            || self.group_delete_pending
-                                            || self.clear_pending,
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.group_editor_open = !this.group_editor_open
-                                            || this.group_rename_id.is_some();
-                                        this.group_rename_id = None;
-                                        if this.group_editor_open {
-                                            this.group_name_input.update(cx, |input, cx| {
-                                                input.set_value("", window, cx);
-                                                input.focus(window, cx);
-                                            });
-                                        } else {
-                                            window.focus(&this.list_focus, cx);
-                                        }
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("group-rename-toggle")
-                                    .small()
-                                    .ghost()
-                                    .label(tr(self.language, "重命名", "Rename"))
-                                    .disabled(
-                                        self.history.group_id.is_none()
-                                            || self.group_save_pending
-                                            || self.group_delete_pending
-                                            || self.clear_pending,
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        let Some(id) = this.history.group_id else {
-                                            return;
-                                        };
-                                        let Some(name) = this
-                                            .groups
-                                            .iter()
-                                            .find(|group| group.id == id)
-                                            .map(|group| group.name.clone())
-                                        else {
-                                            return;
-                                        };
-                                        this.group_rename_id = Some(id);
-                                        this.group_editor_open = true;
-                                        this.group_name_input.update(cx, |input, cx| {
-                                            input.set_value(name, window, cx);
-                                            input.focus(window, cx);
-                                        });
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("group-delete-toggle")
-                                    .small()
-                                    .ghost()
-                                    .label(tr(self.language, "删除分组", "Delete group"))
-                                    .disabled(
-                                        self.history.group_id.is_none()
-                                            || self.group_save_pending
-                                            || self.group_delete_pending
-                                            || self.clear_pending,
-                                    )
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.group_delete_id = this.history.group_id;
-                                        this.reset_selection();
-                                        this.clear_confirm_open = false;
-                                        this.group_editor_open = false;
-                                        this.group_rename_id = None;
-                                        this.group_move_id = None;
-                                        window.focus(&this.list_focus, cx);
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new("group-default")
-                                    .small()
-                                    .outline()
-                                    .h(px(CONTROL_HEIGHT))
-                                    .label(tr(self.language, "默认分组", "Default"))
-                                    .selected(self.history.group_id.is_none())
-                                    .disabled(self.group_delete_pending || self.clear_pending)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.select_group(None, window, cx);
-                                    })),
-                            )
-                            .children(self.groups.iter().map(|group| self.render_group(group, cx))),
+                            ),
                     ),
             )
             .when(self.group_editor_open, |container| {
@@ -8060,16 +7886,23 @@ impl ClipboardView {
                     .px(px(PAGE_PADDING))
                     .pb_2()
                     .flex()
-                    .flex_wrap()
-                    .justify_between()
+                    .items_center()
                     .gap_1()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(if self.language == LanguagePreference::English {
-                        format!("{} items", self.history.total)
-                    } else {
-                        format!("{} 条记录", self.history.total)
-                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .h(px(24.))
+                            .flex()
+                            .items_center()
+                            .window_control_area(WindowControlArea::Drag)
+                            .child(if self.language == LanguagePreference::English {
+                                format!("{} items", self.history.total)
+                            } else {
+                                format!("{} 条记录", self.history.total)
+                            }),
+                    )
                     .when(self.history.items.len() > 8, |bar| {
                         bar.child(
                             Button::new("history-scroll-to-top")
@@ -8081,12 +7914,7 @@ impl ClipboardView {
                                     cx.notify();
                                 })),
                         )
-                    })
-                    .child(tr(
-                        self.language,
-                        "点击卡片或 Enter 复制/粘贴 · Shift+Enter 纯文本 · ←→ 分类 · Ctrl+←→ 分组",
-                        "Click a card or Enter to copy/paste · Shift+Enter plain text · ←→ categories · Ctrl+←→ groups",
-                    )),
+                    }),
             )
             .child(
                 div()

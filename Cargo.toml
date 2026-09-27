@@ -3,13 +3,12 @@ members = ["crates/clipboard-core", "crates/clipboard-platform", "crates/clipboa
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
 
-# Direct dependencies verified against crates.io on 2026-09-18;
-# base64, clipboard-win and gpui-kit were checked again on 2026-09-19.
+# Direct dependencies checked against crates.io on 2026-09-27.
 # Commit Cargo.lock; review `cargo update` at the start of each development batch.
 [workspace.dependencies]
 anyhow = "1.0.104"
@@ -20,7 +19,7 @@ chrono = "0.4.45"
 clipboard-rs = { version = "0.3.5", default-features = false, features = ["image"] }
 clipboard-win = "5.4.1"
 directories = "6.0.0"
-gpui-kit = "0.6.4"
+gpui-kit = "0.6.6"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 raw-window-handle = "0.6.2"
 tray-icon = { version = "0.25.1", default-features = false }

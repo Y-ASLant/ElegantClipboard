@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clipboard_core::preferences::LanguagePreference;
+use clipboard_core::preferences::{LanguagePreference, ToolbarButton, ToolbarPreference};
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
@@ -8,7 +8,7 @@ use std::{
 };
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{Menu, MenuEvent, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem},
 };
 use windows::Win32::{
     Foundation::{HWND, POINT},
@@ -26,6 +26,8 @@ pub enum TrayCommand {
     Show,
     Toggle,
     Settings,
+    ClearHistory,
+    TogglePin,
     TogglePause,
     Quit,
 }
@@ -33,31 +35,10 @@ pub enum TrayCommand {
 pub fn create(
     sender: async_channel::Sender<TrayCommand>,
     language: LanguagePreference,
+    toolbar: ToolbarPreference,
+    pinned: bool,
 ) -> Result<TrayIcon> {
-    let menu = Menu::new();
-    let english = language == LanguagePreference::English;
-    let show = MenuItem::with_id("show", if english { "Open" } else { "打开" }, true, None);
-    let settings = MenuItem::with_id(
-        "settings",
-        if english { "Settings" } else { "设置" },
-        true,
-        None,
-    );
-    let pause = MenuItem::with_id(
-        "toggle-pause",
-        if english {
-            "Pause / Resume Recording"
-        } else {
-            "暂停 / 恢复记录"
-        },
-        true,
-        None,
-    );
-    let quit = MenuItem::with_id("quit", if english { "Quit" } else { "退出" }, true, None);
-    menu.append(&show).context("无法创建托盘菜单")?;
-    menu.append(&settings).context("无法创建托盘菜单")?;
-    menu.append(&pause).context("无法创建托盘菜单")?;
-    menu.append(&quit).context("无法创建托盘菜单")?;
+    let menu = create_menu(language, toolbar, pinned)?;
     let icon = Icon::from_rgba(icon_pixels(), 32, 32).context("无法创建托盘图标")?;
     let tray = TrayIconBuilder::new()
         .with_tooltip("ElegantClipboard")
@@ -70,6 +51,8 @@ pub fn create(
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
             "show" => Some(TrayCommand::Show),
+            "clear-history" => Some(TrayCommand::ClearHistory),
+            "toggle-pin" => Some(TrayCommand::TogglePin),
             "settings" => Some(TrayCommand::Settings),
             "toggle-pause" => Some(TrayCommand::TogglePause),
             "quit" => Some(TrayCommand::Quit),
@@ -98,6 +81,87 @@ pub fn create(
         }
     }));
     Ok(tray)
+}
+
+pub fn update_menu(
+    tray: &TrayIcon,
+    language: LanguagePreference,
+    toolbar: ToolbarPreference,
+    pinned: bool,
+) -> Result<()> {
+    tray.set_menu(Some(Box::new(create_menu(language, toolbar, pinned)?)));
+    Ok(())
+}
+
+fn create_menu(
+    language: LanguagePreference,
+    toolbar: ToolbarPreference,
+    pinned: bool,
+) -> Result<Menu> {
+    let menu = Menu::new();
+    let english = language == LanguagePreference::English;
+    menu.append(&MenuItem::with_id(
+        "show",
+        if english { "Open" } else { "打开" },
+        true,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
+    for item in toolbar.items {
+        if !item.visible && item.button != ToolbarButton::Settings {
+            continue;
+        }
+        match item.button {
+            ToolbarButton::Clear => menu.append(&MenuItem::with_id(
+                "clear-history",
+                if english {
+                    "Clear history"
+                } else {
+                    "清理历史"
+                },
+                true,
+                None,
+            )),
+            ToolbarButton::Pin => menu.append(&CheckMenuItem::with_id(
+                "toggle-pin",
+                if english {
+                    "Pin window"
+                } else {
+                    "置顶窗口"
+                },
+                true,
+                pinned,
+                None,
+            )),
+            ToolbarButton::Settings => menu.append(&MenuItem::with_id(
+                "settings",
+                if english { "Settings" } else { "设置" },
+                true,
+                None,
+            )),
+            ToolbarButton::Batch => continue,
+        }
+        .context("无法创建托盘菜单")?;
+    }
+    menu.append(&MenuItem::with_id(
+        "toggle-pause",
+        if english {
+            "Pause / Resume Recording"
+        } else {
+            "暂停 / 恢复记录"
+        },
+        true,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
+    menu.append(&MenuItem::with_id(
+        "quit",
+        if english { "Quit" } else { "退出" },
+        true,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
+    Ok(menu)
 }
 
 pub fn set_window_visible(window: &Window, visible: bool) {
@@ -192,4 +256,68 @@ fn icon_pixels() -> Vec<u8> {
         }
     }
     pixels
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tray_icon::menu::MenuItemKind;
+
+    fn visible_labels(menu: &Menu) -> Vec<String> {
+        menu.items()
+            .iter()
+            .map(|item| match item {
+                MenuItemKind::MenuItem(item) => item.text(),
+                MenuItemKind::Check(item) => item.text(),
+                _ => panic!("unexpected tray menu item"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tray_actions_follow_visibility_order_language_and_pin_state() -> Result<()> {
+        let toolbar = ToolbarPreference::default();
+        let chinese = create_menu(LanguagePreference::Chinese, toolbar, false)?;
+        assert_eq!(
+            visible_labels(&chinese),
+            [
+                "打开",
+                "清理历史",
+                "置顶窗口",
+                "设置",
+                "暂停 / 恢复记录",
+                "退出"
+            ]
+        );
+        assert!(
+            !chinese.items()[2]
+                .as_check_menuitem()
+                .expect("pin is a checked menu item")
+                .is_checked()
+        );
+
+        let toolbar = toolbar
+            .move_before_or_after(ToolbarButton::Pin, ToolbarButton::Clear, false)
+            .expect("pin can move before clear")
+            .with_visibility(ToolbarButton::Clear, false)
+            .expect("clear can be hidden");
+        let english = create_menu(LanguagePreference::English, toolbar, true)?;
+        assert_eq!(
+            visible_labels(&english),
+            [
+                "Open",
+                "Pin window",
+                "Settings",
+                "Pause / Resume Recording",
+                "Quit"
+            ]
+        );
+        assert!(
+            english.items()[1]
+                .as_check_menuitem()
+                .expect("pin is a checked menu item")
+                .is_checked()
+        );
+        Ok(())
+    }
 }

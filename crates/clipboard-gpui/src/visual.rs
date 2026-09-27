@@ -28,13 +28,11 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
         CardDensity::Spacious => (60., 48.),
     }
 }
-pub const CONTROL_HEIGHT: f32 = 28.;
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
 pub const DROP_MARKER_HEIGHT: f32 = 2.;
 pub const THUMBNAIL_WIDTH: f32 = 48.;
 pub const THUMBNAIL_HEIGHT: f32 = 36.;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
-pub const GROUP_DRAG_SCROLL_STEP: f32 = 18.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);
 pub const HISTORY_DRAG_SCROLL_TICKS: usize = 2;
 pub const MOTION_DURATION: Duration = Duration::from_millis(180);

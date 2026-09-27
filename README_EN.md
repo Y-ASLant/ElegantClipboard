@@ -9,19 +9,19 @@ ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, an
 - Capture and search text, URLs, HTML/RTF, images, and file paths
 - A four-step Chinese/English first-run guide for capture, search, favorites, and shortcuts, with Skip and Esc
 - Settings navigation for General, Display, Appearance, Data, App filter, Audio, Shortcuts, and About
-- General settings can skip confirmation when clearing the current group's history from the toolbar; confirmation remains the default
+- General settings can skip confirmation when clearing the current group's history from the tray menu; confirmation remains the default
 - Separate copy and controlled-paste sound settings with immediate or success timing and preview buttons
 - The About page opens the author's profile, project repository, and issue tracker in the default browser
 - Enable or disable history capture for text, URLs, HTML, RTF, images, and files in settings; at least one type stays enabled
 - Filter new captures by source app with blocklists, allowlists, manual rules, and a running-app picker; rules match names, processes, or paths and support `*` and `?`
-- Favorites, pins, groups, sorting by dragging either card edge, batch deletion, and history cleanup; drag area indicators can be hidden in Display settings
+- Favorites, pins, group creation and switching via Select (rename, delete, and Up/Down ordering), sorting by dragging either card edge, batch deletion, and history cleanup; drag area indicators can be hidden in Display settings
 - Text editing, rich text/image/file previews, single-image file card thumbnails and missing-source warnings, copy, plain-text copy, and automatic paste
 - Configurable hover previews: images on by default, with separate text and file switches, delay, position, image zoom step, zoom buttons and percentage reset, and a larger window based on image dimensions
 - Global shortcut to toggle the window, system tray, autostart, capture pause, and single-instance activation
-- Quick paste can be enabled or disabled in Settings. Each shortcut can be recorded or entered as text, and all ten recent or favorite slots can be disabled or restored to defaults together. Defaults are Alt+1 through Alt+0 for recent items and Ctrl+Alt+1 through 3 for favorites; digit keys support the numpad. Automatic paste can send Ctrl+V or Shift+Insert
+- Quick-paste shortcuts are off by default and can be enabled or disabled in Settings → Shortcuts. Record or type a shortcut for each slot, or disable or restore all ten recent or favorite slots together. When enabled, the preset keys are Alt+1 through Alt+0 for recent items and Ctrl+Alt+1 through 3 for favorites; digit keys support the numpad. Automatic paste can send Ctrl+V or Shift+Insert
 - Simplified Chinese and English UI (Chinese by default), light/dark themes, always-on-top mode, hide on outside click, and opening-position, close-after-paste, and move-to-top settings
-- Main-window toolbar with drag ordering, Up/Down ordering buttons, and configurable visibility (Settings remains available)
-- Optional category filters and compact, standard, or spacious history cards
+- Borderless main window: drag the small grip above search to move it (the top edge still resizes); a batch-selection icon beside search, category tabs and the GPUI Kit group Select on one row; Clear History, Pin Window, and Settings in the tray menu
+- Reorder tray actions by dragging or Up/Down controls and configure their visibility in Settings (Settings remains available); optional category filters and compact, standard, or spacious history cards
 - A return-to-top control in the fixed header for long history lists
 - Configurable card preview lines, absolute/relative time, character-count, size, and source-app display by name, icon, or both; source icons are cached as PNG
 - GPUI ZIP backup and restore, plus import of an older database or legacy ZIP backup
@@ -84,10 +84,10 @@ The archive and its SHA-256 file are written to `target\packages\`. Installers, 
 ## Versioning
 
 ```powershell
-.\scripts\bump-version.ps1 0.2.0
+.\scripts\bump-version.ps1 2.0.1
 ```
 
-The script updates the root Cargo workspace version and lockfile. Release tags must match the Cargo version, for example `v0.2.0`.
+The script updates the root Cargo workspace version and lockfile. The GPUI rewrite starts at `2.0.0`; subsequent release tags must match the Cargo version, for example `v2.0.1`. See the [changelog](docs/CHANGELOG.md).
 
 ## License
 

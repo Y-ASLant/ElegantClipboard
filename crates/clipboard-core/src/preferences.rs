@@ -764,9 +764,9 @@ impl Preferences {
     }
 
     pub fn quick_paste_enabled(&self) -> Result<bool> {
-        Ok(!matches!(
+        Ok(matches!(
             self.repository.get(QUICK_PASTE_ENABLED_KEY)?.as_deref(),
-            Some("false")
+            Some("true")
         ))
     }
 
@@ -1051,7 +1051,6 @@ mod tests {
         assert!(preferences.paste_close_window()?);
         assert_eq!(preferences.paste_key()?, PasteKeyPreference::CtrlV);
         assert!(preferences.paste_move_to_top()?);
-        assert!(preferences.quick_paste_enabled()?);
         let size = WindowSizePreference::new(900, 700).unwrap();
         preferences.set_window_size(size)?;
         preferences.set_persist_window_size(false)?;
@@ -1062,7 +1061,6 @@ mod tests {
         preferences.set_paste_close_window(false)?;
         preferences.set_paste_key(PasteKeyPreference::ShiftInsert)?;
         preferences.set_paste_move_to_top(false)?;
-        preferences.set_quick_paste_enabled(false)?;
         assert_eq!(preferences.window_size()?, None);
         drop(preferences);
         drop(db);
@@ -1076,11 +1074,33 @@ mod tests {
         assert!(!preferences.paste_close_window()?);
         assert_eq!(preferences.paste_key()?, PasteKeyPreference::ShiftInsert);
         assert!(!preferences.paste_move_to_top()?);
-        assert!(!preferences.quick_paste_enabled()?);
         preferences.set_persist_window_size(true)?;
         assert_eq!(preferences.window_size()?, None);
         preferences.set_window_size(size)?;
         assert_eq!(preferences.window_size()?, Some(size));
+        Ok(())
+    }
+
+    #[test]
+    fn quick_paste_is_opt_in_and_explicit_choice_survives_restart() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("clipboard.db");
+        let db = Database::new(path.clone())?;
+        let preferences = Preferences::new(&db);
+        assert!(!preferences.quick_paste_enabled()?);
+        preferences.set_quick_paste_enabled(true)?;
+        drop(preferences);
+        drop(db);
+
+        let db = Database::new(path.clone())?;
+        let preferences = Preferences::new(&db);
+        assert!(preferences.quick_paste_enabled()?);
+        preferences.set_quick_paste_enabled(false)?;
+        drop(preferences);
+        drop(db);
+
+        let db = Database::new(path)?;
+        assert!(!Preferences::new(&db).quick_paste_enabled()?);
         Ok(())
     }
 

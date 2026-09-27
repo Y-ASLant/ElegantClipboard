@@ -427,6 +427,21 @@ impl SettingsWindowView {
                     ToolbarButton::Pin => tr(language, "置顶窗口", "Pin window"),
                     ToolbarButton::Settings => tr(language, "设置", "Settings"),
                 };
+                let (previous, next) = if button == ToolbarButton::Batch {
+                    (None, None)
+                } else {
+                    (
+                        toolbar.items[..index]
+                            .iter()
+                            .rev()
+                            .find(|item| item.button != ToolbarButton::Batch)
+                            .map(|item| item.button),
+                        toolbar.items[index + 1..]
+                            .iter()
+                            .find(|item| item.button != ToolbarButton::Batch)
+                            .map(|item| item.button),
+                    )
+                };
                 let toggle_owner = self.owner.clone();
                 let up_owner = self.owner.clone();
                 let down_owner = self.owner.clone();
@@ -463,9 +478,15 @@ impl SettingsWindowView {
                                 let owner = owner.read(cx);
                                 !owner.toolbar_pending && owner.toolbar == drag.toolbar
                             });
-                            let next = (valid && drag.button != button && item.visible).then_some(
-                                (button, event.event.position.y > event.bounds.center().y),
-                            );
+                            let next = (valid
+                                && drag.button != button
+                                && drag.button != ToolbarButton::Batch
+                                && button != ToolbarButton::Batch
+                                && item.visible)
+                                .then_some((
+                                    button,
+                                    event.event.position.y > event.bounds.center().y,
+                                ));
                             if this.toolbar_drop_target != next {
                                 this.toolbar_drop_target = next;
                                 cx.notify();
@@ -506,18 +527,22 @@ impl SettingsWindowView {
                             .items_center()
                             .justify_center()
                             .text_color(cx.theme().muted_foreground)
-                            .child("⠿")
-                            .when(item.visible && !toolbar_pending, |handle| {
-                                handle
-                                    .cursor_grab()
-                                    .on_drag(drag.clone(), move |drag, _, _, cx| {
-                                        drag_entity.update(cx, |this, cx| {
-                                            this.toolbar_drop_target = None;
-                                            cx.notify();
-                                        });
-                                        cx.new(|_| drag.clone())
-                                    })
-                            }),
+                            .when(button != ToolbarButton::Batch, |handle| handle.child("⠿"))
+                            .when(
+                                item.visible && button != ToolbarButton::Batch && !toolbar_pending,
+                                |handle| {
+                                    handle.cursor_grab().on_drag(
+                                        drag.clone(),
+                                        move |drag, _, _, cx| {
+                                            drag_entity.update(cx, |this, cx| {
+                                                this.toolbar_drop_target = None;
+                                                cx.notify();
+                                            });
+                                            cx.new(|_| drag.clone())
+                                        },
+                                    )
+                                },
+                            ),
                     )
                     .child(
                         Button::new(("toolbar-visible", index))
@@ -535,13 +560,26 @@ impl SettingsWindowView {
                             }),
                     )
                     .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(if button == ToolbarButton::Batch {
+                                tr(language, "搜索框旁", "Beside search")
+                            } else {
+                                tr(language, "托盘菜单", "Tray menu")
+                            }),
+                    )
+                    .child(
                         Button::new(("toolbar-up", index))
                             .small()
                             .ghost()
                             .label(tr(language, "上移", "Up"))
-                            .disabled(toolbar_pending || index == 0)
+                            .disabled(toolbar_pending || previous.is_none())
                             .on_click(move |_, _, cx| {
-                                if let Some(next) = toolbar.move_button(button, -1) {
+                                if let Some(target) = previous
+                                    && let Some(next) =
+                                        toolbar.move_before_or_after(button, target, false)
+                                {
                                     let _ = up_owner.update(cx, |owner, cx| {
                                         owner.save_toolbar(next, cx);
                                     });
@@ -553,9 +591,12 @@ impl SettingsWindowView {
                             .small()
                             .ghost()
                             .label(tr(language, "下移", "Down"))
-                            .disabled(toolbar_pending || index + 1 == toolbar.items.len())
+                            .disabled(toolbar_pending || next.is_none())
                             .on_click(move |_, _, cx| {
-                                if let Some(next) = toolbar.move_button(button, 1) {
+                                if let Some(target) = next
+                                    && let Some(next) =
+                                        toolbar.move_before_or_after(button, target, true)
+                                {
                                     let _ = down_owner.update(cx, |owner, cx| {
                                         owner.save_toolbar(next, cx);
                                     });
