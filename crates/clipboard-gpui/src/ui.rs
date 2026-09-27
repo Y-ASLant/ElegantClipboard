@@ -25,8 +25,8 @@ use clipboard_core::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
         HotkeyPreference, HoverPreviewPosition, HoverPreviewPreference, LanguagePreference,
         MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, SoundTiming,
-        SourceAppDisplay, ThemePreference, TimeFormat, ToolbarButton, ToolbarPreference,
-        WindowPositionPreference, WindowSizePreference,
+        SourceAppDisplay, ThemePreference, TimeFormat, WindowPositionPreference,
+        WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -825,13 +825,6 @@ struct HistoryDrag {
     language: LanguagePreference,
 }
 
-#[derive(Clone)]
-struct ToolbarDrag {
-    button: ToolbarButton,
-    label: &'static str,
-    toolbar: ToolbarPreference,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct DropTarget {
     id: i64,
@@ -986,25 +979,6 @@ impl Render for HistoryDrag {
     }
 }
 
-impl Render for ToolbarDrag {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .px_3()
-            .py_2()
-            .rounded_md()
-            .border_1()
-            .border_color(cx.theme().primary)
-            .bg(cx.theme().background)
-            .shadow_md()
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_sm()
-            .child(Icon::new(gpui_kit::assets::IconName::GripVertical).xsmall())
-            .child(self.label)
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum HistoryConfirmation {
     DeleteGroup(i64),
@@ -1136,8 +1110,6 @@ struct ClipboardView {
     paste_key_pending: bool,
     paste_move_to_top: bool,
     paste_move_to_top_pending: bool,
-    toolbar: ToolbarPreference,
-    toolbar_pending: bool,
     display: DisplayPreference,
     display_pending: bool,
     audio: AudioPreference,
@@ -1257,7 +1229,6 @@ struct SettingsWindowView {
     app_picker_open: bool,
     app_filter_error: bool,
     link_error: Option<String>,
-    toolbar_drop_target: Option<(ToolbarButton, bool)>,
 }
 
 struct HoverPreviewWindowView {
@@ -1634,7 +1605,6 @@ impl SettingsWindowView {
             app_picker_open: false,
             app_filter_error: false,
             link_error: None,
-            toolbar_drop_target: None,
         }
     }
 
@@ -2050,7 +2020,6 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> Self {
         let language = service.initial_language;
-        let toolbar = service.initial_toolbar;
         let window_position = service.initial_window_position;
         let hover_preference = service.initial_hover_preview;
         let search = cx.new(|cx| {
@@ -2115,7 +2084,7 @@ impl ClipboardView {
             }
         });
         let (tray_sender, tray_receiver) = async_channel::bounded(8);
-        let tray = tray::create(tray_sender.clone(), language, toolbar, false);
+        let tray = tray::create(tray_sender.clone(), language, false);
         tray_enabled.set(tray.is_ok());
         if startup.hidden && tray.is_err() {
             tray::set_window_visible(window, true);
@@ -2457,8 +2426,6 @@ impl ClipboardView {
             paste_key_pending: false,
             paste_move_to_top,
             paste_move_to_top_pending: false,
-            toolbar,
-            toolbar_pending: false,
             display,
             display_pending: false,
             audio,
@@ -3334,16 +3301,6 @@ impl ClipboardView {
         self.selected_ids.clear();
         self.selection_anchor = None;
         self.batch_confirm_open = false;
-    }
-
-    fn save_toolbar(&mut self, toolbar: ToolbarPreference, cx: &mut Context<Self>) {
-        if !self.toolbar_pending
-            && toolbar != self.toolbar
-            && self.send(Command::SetToolbar(toolbar), cx)
-        {
-            self.toolbar_pending = true;
-            cx.notify();
-        }
     }
 
     fn save_display(&mut self, display: DisplayPreference, cx: &mut Context<Self>) {
@@ -4426,16 +4383,10 @@ impl ClipboardView {
                         });
                         self.refresh_group_select(window, cx);
                         let menu_result = if let Some(tray) = &self._tray {
-                            tray::update_menu(tray, language, self.toolbar, self.window_pinned)
-                                .map(|_| None)
+                            tray::update_menu(tray, language, self.window_pinned).map(|_| None)
                         } else {
-                            tray::create(
-                                self.tray_sender.clone(),
-                                language,
-                                self.toolbar,
-                                self.window_pinned,
-                            )
-                            .map(Some)
+                            tray::create(self.tray_sender.clone(), language, self.window_pinned)
+                                .map(Some)
                         };
                         match menu_result {
                             Ok(tray) => {
@@ -4838,43 +4789,6 @@ impl ClipboardView {
                     }
                     Err(error) => {
                         self.message = error;
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::ToolbarSaved(result) => {
-                self.toolbar_pending = false;
-                match result {
-                    Ok(toolbar) => {
-                        self.toolbar = toolbar;
-                        match self.refresh_tray_menu() {
-                            Ok(()) => {
-                                self.message = tr(
-                                    self.language,
-                                    "操作入口设置已保存",
-                                    "Action visibility saved",
-                                )
-                                .into();
-                                self.is_error = false;
-                            }
-                            Err(error) => {
-                                self.message = format!(
-                                    "{}: {error}",
-                                    tr(
-                                        self.language,
-                                        "操作入口已保存，但托盘菜单更新失败",
-                                        "Action visibility saved, but the tray menu could not be updated"
-                                    )
-                                );
-                                self.is_error = true;
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "保存工具栏失败", "Failed to save toolbar")
-                        );
                         self.is_error = true;
                     }
                 }
@@ -6340,7 +6254,7 @@ impl ClipboardView {
 
     fn refresh_tray_menu(&self) -> anyhow::Result<()> {
         if let Some(tray) = &self._tray {
-            tray::update_menu(tray, self.language, self.toolbar, self.window_pinned)?;
+            tray::update_menu(tray, self.language, self.window_pinned)?;
         }
         Ok(())
     }
@@ -8124,11 +8038,6 @@ impl ClipboardView {
                 "No matching items. Try another search.",
             )
         };
-        let show_batch = self
-            .toolbar
-            .items
-            .iter()
-            .any(|item| item.button == ToolbarButton::Batch && item.visible);
         div()
             .key_context("ClipboardApp")
             .flex()
@@ -8161,7 +8070,7 @@ impl ClipboardView {
                             .min_w_0()
                             .child(Input::new(&self.search).cleanable(true)),
                     )
-                    .when(show_batch, |row| row.child(self.render_batch_button(cx))),
+                    .child(self.render_batch_button(cx)),
             )
             .child(
                 div()

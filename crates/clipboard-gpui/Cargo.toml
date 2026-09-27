@@ -5,6 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[build-dependencies]
+embed-resource = "3.0.11"
+
 [dependencies]
 anyhow.workspace = true
 clipboard-core = { path = "../clipboard-core" }
@@ -18,6 +21,7 @@ directories.workspace = true
 raw-window-handle.workspace = true
 serde_json.workspace = true
 tray-icon.workspace = true
+image = { workspace = true, features = ["ico"] }
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Media_Audio", "Win32_System_DataExchange", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]

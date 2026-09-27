@@ -18,8 +18,8 @@ use clipboard_core::{
     preferences::{
         AppFilterPreference, AudioPreference, DisplayPreference, HotkeyPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, Preferences, ThemePreference, ToolbarPreference,
-        WindowPositionPreference, WindowSizePreference,
+        PasteShortcutConfig, Preferences, ThemePreference, WindowPositionPreference,
+        WindowSizePreference,
     },
 };
 use clipboard_rs::{
@@ -125,7 +125,6 @@ pub enum Command {
     SetPasteShortcuts(Box<PasteShortcutConfig>),
     SetWindowPosition(WindowPositionPreference),
     SetHoverPreview(HoverPreviewPreference),
-    SetToolbar(ToolbarPreference),
     SetDisplay(DisplayPreference),
     SetAudio(AudioPreference),
     SetMonitorTypes(MonitorTypesPreference),
@@ -289,7 +288,6 @@ impl Command {
             | Self::SetPasteShortcuts(_)
             | Self::SetWindowPosition(_)
             | Self::SetHoverPreview(_)
-            | Self::SetToolbar(_)
             | Self::SetDisplay(_)
             | Self::SetAudio(_)
             | Self::SetMonitorTypes(_)
@@ -385,7 +383,6 @@ pub enum Event {
     },
     WindowPositionSaved(Result<WindowPositionPreference, String>),
     HoverPreviewSaved(Result<HoverPreviewPreference, String>),
-    ToolbarSaved(Result<ToolbarPreference, String>),
     DisplaySaved(Result<DisplayPreference, String>),
     AudioSaved(Result<AudioPreference, String>),
     MonitorTypesSaved(Result<MonitorTypesPreference, String>),
@@ -613,7 +610,6 @@ pub struct Service {
     pub initial_paste_shortcuts: PasteShortcutConfig,
     pub initial_window_position: WindowPositionPreference,
     pub initial_hover_preview: HoverPreviewPreference,
-    pub initial_toolbar: ToolbarPreference,
     pub initial_display: DisplayPreference,
     pub initial_audio: AudioPreference,
     pub initial_monitor_types: MonitorTypesPreference,
@@ -704,7 +700,6 @@ impl Service {
         let initial_paste_shortcuts = preferences.paste_shortcuts()?;
         let initial_window_position = preferences.window_position()?;
         let initial_hover_preview = preferences.hover_preview()?;
-        let initial_toolbar = preferences.toolbar()?;
         let initial_display = preferences.display()?;
         let initial_audio = preferences.audio()?;
         let initial_monitor_types = preferences.monitor_types()?;
@@ -755,7 +750,6 @@ impl Service {
             initial_paste_shortcuts,
             initial_window_position,
             initial_hover_preview,
-            initial_toolbar,
             initial_display,
             initial_audio,
             initial_monitor_types,
@@ -1917,13 +1911,6 @@ impl Worker {
                     preference,
                     Preferences::set_hover_preview,
                     Event::HoverPreviewSaved,
-                );
-            }
-            Command::SetToolbar(preference) => {
-                return self.save_setting(
-                    preference,
-                    Preferences::set_toolbar,
-                    Event::ToolbarSaved,
                 );
             }
             Command::SetDisplay(preference) => {
@@ -3380,42 +3367,6 @@ mod tests {
             assert_eq!((actual_slot, actual_favorite), (slot, is_favorite));
             assert_eq!(result.ok(), expected);
         }
-        Ok(())
-    }
-
-    #[test]
-    fn toolbar_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
-        use clipboard_core::preferences::ToolbarButton;
-
-        let directory = tempfile::tempdir()?;
-        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(service.initial_toolbar, ToolbarPreference::default());
-        next_snapshot(&events, 0);
-        let toolbar = ToolbarPreference::default()
-            .move_button(ToolbarButton::Settings, -1)
-            .unwrap()
-            .with_visibility(ToolbarButton::Clear, false)
-            .unwrap();
-        service.send(Command::SetToolbar(toolbar))?;
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            match events.try_recv() {
-                Ok(Event::ToolbarSaved(result)) => {
-                    assert_eq!(result.unwrap(), toolbar);
-                    break;
-                }
-                Ok(Event::Error(message)) => panic!("{message}"),
-                _ => {}
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "toolbar save timed out"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
-        drop(service);
-        let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(reopened.initial_toolbar, toolbar);
         Ok(())
     }
 

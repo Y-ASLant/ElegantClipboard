@@ -19,7 +19,6 @@ const QUICK_PASTE_ENABLED_KEY: &str = "gpui_quick_paste_enabled";
 const PASTE_SHORTCUTS_KEY: &str = "gpui_paste_shortcuts";
 const WINDOW_POSITION_KEY: &str = "gpui_window_position";
 const HOVER_PREVIEW_KEY: &str = "gpui_hover_preview";
-const TOOLBAR_KEY: &str = "gpui_toolbar";
 const DISPLAY_KEY: &str = "gpui_display";
 const MONITOR_TYPES_KEY: &str = "gpui_monitor_types";
 const APP_FILTER_KEY: &str = "gpui_app_filter";
@@ -30,7 +29,7 @@ pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
       'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
-      'gpui_toolbar', 'gpui_display', 'gpui_monitor_types', 'gpui_app_filter',
+      'gpui_display', 'gpui_monitor_types', 'gpui_app_filter',
       'gpui_onboarding_completed', 'gpui_audio',
       '_migration_url_content_type', '_migration_backfill_semantic_hash')";
 
@@ -306,111 +305,6 @@ impl Default for DisplayPreference {
 impl DisplayPreference {
     pub fn valid(self) -> bool {
         (1..=10).contains(&self.card_max_lines)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolbarButton {
-    Clear,
-    Batch,
-    Pin,
-    Settings,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolbarItem {
-    pub button: ToolbarButton,
-    pub visible: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolbarPreference {
-    pub items: [ToolbarItem; 4],
-}
-
-impl Default for ToolbarPreference {
-    fn default() -> Self {
-        Self {
-            items: [
-                ToolbarItem {
-                    button: ToolbarButton::Clear,
-                    visible: true,
-                },
-                ToolbarItem {
-                    button: ToolbarButton::Batch,
-                    visible: true,
-                },
-                ToolbarItem {
-                    button: ToolbarButton::Pin,
-                    visible: true,
-                },
-                ToolbarItem {
-                    button: ToolbarButton::Settings,
-                    visible: true,
-                },
-            ],
-        }
-    }
-}
-
-impl ToolbarPreference {
-    pub fn valid(self) -> bool {
-        let mut seen = [false; 4];
-        for item in self.items {
-            let index = match item.button {
-                ToolbarButton::Clear => 0,
-                ToolbarButton::Batch => 1,
-                ToolbarButton::Pin => 2,
-                ToolbarButton::Settings => 3,
-            };
-            if seen[index] || (index == 3 && !item.visible) {
-                return false;
-            }
-            seen[index] = true;
-        }
-        seen.into_iter().all(|present| present)
-    }
-
-    pub fn with_visibility(mut self, button: ToolbarButton, visible: bool) -> Option<Self> {
-        let item = self.items.iter_mut().find(|item| item.button == button)?;
-        item.visible = visible;
-        self.valid().then_some(self)
-    }
-
-    pub fn move_button(mut self, button: ToolbarButton, direction: isize) -> Option<Self> {
-        let index = self.items.iter().position(|item| item.button == button)?;
-        let next = index.checked_add_signed(direction)?;
-        if next >= self.items.len() || next == index {
-            return None;
-        }
-        self.items.swap(index, next);
-        Some(self)
-    }
-
-    pub fn move_before_or_after(
-        mut self,
-        button: ToolbarButton,
-        target: ToolbarButton,
-        after: bool,
-    ) -> Option<Self> {
-        let from = self.items.iter().position(|item| item.button == button)?;
-        let to = self.items.iter().position(|item| item.button == target)?;
-        if from == to {
-            return None;
-        }
-        let destination = (to + usize::from(after)).saturating_sub(usize::from(from < to));
-        if from == destination {
-            return None;
-        }
-        let moved = self.items[from];
-        if from < destination {
-            self.items.copy_within(from + 1..=destination, from);
-        } else {
-            self.items.copy_within(destination..from, destination + 1);
-        }
-        self.items[destination] = moved;
-        Some(self)
     }
 }
 
@@ -830,23 +724,6 @@ impl Preferences {
         Ok(())
     }
 
-    pub fn toolbar(&self) -> Result<ToolbarPreference> {
-        Ok(self
-            .repository
-            .get(TOOLBAR_KEY)?
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<ToolbarPreference>(value).ok())
-            .filter(|preference| preference.valid())
-            .unwrap_or_default())
-    }
-
-    pub fn set_toolbar(&self, preference: ToolbarPreference) -> Result<()> {
-        anyhow::ensure!(preference.valid(), "工具栏配置无效");
-        self.repository
-            .set(TOOLBAR_KEY, &serde_json::to_string(&preference)?)?;
-        Ok(())
-    }
-
     pub fn display(&self) -> Result<DisplayPreference> {
         Ok(self
             .repository
@@ -1212,60 +1089,6 @@ mod tests {
             HoverPreviewPreference::default()
         );
         Ok(())
-    }
-
-    #[test]
-    fn toolbar_order_and_visibility_persist_with_settings_access() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let path = directory.path().join("clipboard.db");
-        let db = Database::new(path.clone())?;
-        let preferences = Preferences::new(&db);
-        let toolbar = preferences
-            .toolbar()?
-            .move_button(ToolbarButton::Settings, -1)
-            .unwrap()
-            .with_visibility(ToolbarButton::Clear, false)
-            .unwrap();
-        preferences.set_toolbar(toolbar)?;
-        assert!(
-            toolbar
-                .with_visibility(ToolbarButton::Settings, false)
-                .is_none()
-        );
-        let mut duplicate = toolbar;
-        duplicate.items[0].button = ToolbarButton::Settings;
-        assert!(preferences.set_toolbar(duplicate).is_err());
-        drop(preferences);
-        drop(db);
-
-        let db = Database::new(path)?;
-        let preferences = Preferences::new(&db);
-        assert_eq!(preferences.toolbar()?, toolbar);
-        SettingsRepository::new(&db).set(TOOLBAR_KEY, "invalid")?;
-        assert_eq!(preferences.toolbar()?, ToolbarPreference::default());
-        Ok(())
-    }
-
-    #[test]
-    fn toolbar_drag_reorders_on_both_sides_of_a_target() {
-        let toolbar = ToolbarPreference::default();
-        let moved = toolbar
-            .move_before_or_after(ToolbarButton::Clear, ToolbarButton::Settings, true)
-            .expect("move first to end");
-        assert_eq!(moved.items[3].button, ToolbarButton::Clear);
-        assert_eq!(moved.items[2].button, ToolbarButton::Settings);
-
-        let moved = moved
-            .move_before_or_after(ToolbarButton::Clear, ToolbarButton::Batch, false)
-            .expect("move last before batch");
-        assert_eq!(moved.items[0].button, ToolbarButton::Clear);
-        assert_eq!(moved.items[1].button, ToolbarButton::Batch);
-        assert!(moved.valid());
-        assert!(
-            moved
-                .move_before_or_after(ToolbarButton::Clear, ToolbarButton::Batch, false)
-                .is_none()
-        );
     }
 
     #[test]

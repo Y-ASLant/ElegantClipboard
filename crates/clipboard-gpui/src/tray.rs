@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clipboard_core::preferences::{LanguagePreference, ToolbarButton, ToolbarPreference};
+use clipboard_core::preferences::LanguagePreference;
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
@@ -35,11 +35,10 @@ pub enum TrayCommand {
 pub fn create(
     sender: async_channel::Sender<TrayCommand>,
     language: LanguagePreference,
-    toolbar: ToolbarPreference,
     pinned: bool,
 ) -> Result<TrayIcon> {
-    let menu = create_menu(language, toolbar, pinned)?;
-    let icon = Icon::from_rgba(icon_pixels(), 32, 32).context("无法创建托盘图标")?;
+    let menu = create_menu(language, pinned)?;
+    let icon = app_icon()?;
     let tray = TrayIconBuilder::new()
         .with_tooltip("ElegantClipboard")
         .with_icon(icon)
@@ -83,21 +82,12 @@ pub fn create(
     Ok(tray)
 }
 
-pub fn update_menu(
-    tray: &TrayIcon,
-    language: LanguagePreference,
-    toolbar: ToolbarPreference,
-    pinned: bool,
-) -> Result<()> {
-    tray.set_menu(Some(Box::new(create_menu(language, toolbar, pinned)?)));
+pub fn update_menu(tray: &TrayIcon, language: LanguagePreference, pinned: bool) -> Result<()> {
+    tray.set_menu(Some(Box::new(create_menu(language, pinned)?)));
     Ok(())
 }
 
-fn create_menu(
-    language: LanguagePreference,
-    toolbar: ToolbarPreference,
-    pinned: bool,
-) -> Result<Menu> {
+fn create_menu(language: LanguagePreference, pinned: bool) -> Result<Menu> {
     let menu = Menu::new();
     let english = language == LanguagePreference::English;
     menu.append(&MenuItem::with_id(
@@ -107,42 +97,36 @@ fn create_menu(
         None,
     ))
     .context("无法创建托盘菜单")?;
-    for item in toolbar.items {
-        if !item.visible && item.button != ToolbarButton::Settings {
-            continue;
-        }
-        match item.button {
-            ToolbarButton::Clear => menu.append(&MenuItem::with_id(
-                "clear-history",
-                if english {
-                    "Clear history"
-                } else {
-                    "清理历史"
-                },
-                true,
-                None,
-            )),
-            ToolbarButton::Pin => menu.append(&CheckMenuItem::with_id(
-                "toggle-pin",
-                if english {
-                    "Pin window"
-                } else {
-                    "置顶窗口"
-                },
-                true,
-                pinned,
-                None,
-            )),
-            ToolbarButton::Settings => menu.append(&MenuItem::with_id(
-                "settings",
-                if english { "Settings" } else { "设置" },
-                true,
-                None,
-            )),
-            ToolbarButton::Batch => continue,
-        }
-        .context("无法创建托盘菜单")?;
-    }
+    menu.append(&MenuItem::with_id(
+        "clear-history",
+        if english {
+            "Clear history"
+        } else {
+            "清理历史"
+        },
+        true,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
+    menu.append(&CheckMenuItem::with_id(
+        "toggle-pin",
+        if english {
+            "Pin window"
+        } else {
+            "置顶窗口"
+        },
+        true,
+        pinned,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
+    menu.append(&MenuItem::with_id(
+        "settings",
+        if english { "Settings" } else { "设置" },
+        true,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
     menu.append(&MenuItem::with_id(
         "toggle-pause",
         if english {
@@ -243,33 +227,30 @@ pub fn set_window_topmost(window: &Window, topmost: bool) -> Result<()> {
     Ok(())
 }
 
-fn icon_pixels() -> Vec<u8> {
-    let mut pixels = vec![0; 32 * 32 * 4];
-    for y in 0..32 {
-        for x in 0..32 {
-            let index = (y * 32 + x) * 4;
-            let color = if (5..27).contains(&x) && (4..29).contains(&y) {
-                if (10..23).contains(&x) && (10..13).contains(&y)
-                    || (10..23).contains(&x) && (16..19).contains(&y)
-                    || (10..19).contains(&x) && (22..25).contains(&y)
-                {
-                    [255, 255, 255, 255]
-                } else {
-                    [55, 96, 191, 255]
-                }
-            } else {
-                [0, 0, 0, 0]
-            };
-            pixels[index..index + 4].copy_from_slice(&color);
-        }
-    }
-    pixels
+fn app_icon() -> Result<Icon> {
+    let image = image::load_from_memory_with_format(
+        include_bytes!("../../../App.ico"),
+        image::ImageFormat::Ico,
+    )
+    .context("无法读取应用图标")?;
+    let pixels = image::imageops::resize(
+        &image.to_rgba8(),
+        32,
+        32,
+        image::imageops::FilterType::Lanczos3,
+    );
+    Icon::from_rgba(pixels.into_raw(), 32, 32).context("无法创建托盘图标")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tray_icon::menu::MenuItemKind;
+    #[test]
+    fn bundled_tray_icon_can_be_loaded() -> Result<()> {
+        app_icon()?;
+        Ok(())
+    }
 
     fn visible_labels(menu: &Menu) -> Vec<String> {
         menu.items()
@@ -283,9 +264,8 @@ mod tests {
     }
 
     #[test]
-    fn tray_actions_follow_visibility_order_language_and_pin_state() -> Result<()> {
-        let toolbar = ToolbarPreference::default();
-        let chinese = create_menu(LanguagePreference::Chinese, toolbar, false)?;
+    fn tray_actions_remain_available_in_both_languages_and_track_pin_state() -> Result<()> {
+        let chinese = create_menu(LanguagePreference::Chinese, false)?;
         assert_eq!(
             visible_labels(&chinese),
             [
@@ -304,16 +284,12 @@ mod tests {
                 .is_checked()
         );
 
-        let toolbar = toolbar
-            .move_before_or_after(ToolbarButton::Pin, ToolbarButton::Clear, false)
-            .expect("pin can move before clear")
-            .with_visibility(ToolbarButton::Clear, false)
-            .expect("clear can be hidden");
-        let english = create_menu(LanguagePreference::English, toolbar, true)?;
+        let english = create_menu(LanguagePreference::English, true)?;
         assert_eq!(
             visible_labels(&english),
             [
                 "Open",
+                "Clear history",
                 "Pin window",
                 "Settings",
                 "Pause / Resume Recording",
@@ -321,7 +297,7 @@ mod tests {
             ]
         );
         assert!(
-            english.items()[1]
+            english.items()[2]
                 .as_check_menuitem()
                 .expect("pin is a checked menu item")
                 .is_checked()

@@ -553,8 +553,7 @@ mod tests {
             AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
             HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
             PasteShortcutConfig, Preferences, SoundTiming, SourceAppDisplay, ThemePreference,
-            TimeFormat, ToolbarButton, ToolbarPreference, WindowPositionPreference,
-            WindowSizePreference,
+            TimeFormat, WindowPositionPreference, WindowSizePreference,
         },
     };
 
@@ -615,12 +614,6 @@ mod tests {
             ..HoverPreviewPreference::default()
         };
         preferences.set_hover_preview(hover_preference)?;
-        let toolbar = ToolbarPreference::default()
-            .move_button(ToolbarButton::Settings, -1)
-            .unwrap()
-            .with_visibility(ToolbarButton::Clear, false)
-            .unwrap();
-        preferences.set_toolbar(toolbar)?;
         let display = DisplayPreference {
             show_category_filter: false,
             show_drag_area_indicator: false,
@@ -654,6 +647,10 @@ mod tests {
         preferences.set_onboarding_completed()?;
         history.db.write_connection().lock().execute(
             "INSERT INTO settings (key, value) VALUES ('secret_token', 'do-not-export')",
+            [],
+        )?;
+        history.db.write_connection().lock().execute(
+            "INSERT INTO settings (key, value) VALUES ('gpui_toolbar', 'hidden-batch')",
             [],
         )?;
         let backup = dir.path().join("history.zip");
@@ -709,7 +706,6 @@ mod tests {
             Preferences::new(&restored.db).hover_preview()?,
             hover_preference
         );
-        assert_eq!(Preferences::new(&restored.db).toolbar()?, toolbar);
         assert_eq!(Preferences::new(&restored.db).display()?, display);
         assert_eq!(Preferences::new(&restored.db).audio()?, audio);
         assert_eq!(
@@ -729,7 +725,7 @@ mod tests {
         assert_eq!(fs::read(&copied[0])?, b"draft bytes");
         assert_eq!(
             restored.db.read_connection().lock().query_row(
-                "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",
+                "SELECT COUNT(*) FROM settings WHERE key IN ('secret_token', 'gpui_toolbar')",
                 [],
                 |row| row.get::<_, i64>(0),
             )?,

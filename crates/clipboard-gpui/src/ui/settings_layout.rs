@@ -40,14 +40,6 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Display,
-        chinese: "操作按钮",
-        english: "Action buttons",
-        description_chinese: "清理历史、置顶与设置位于托盘菜单；批量选择图标位于搜索框旁",
-        description_english: "Tray menu: Clear, Pin, Settings; batch icon beside search",
-        content: SettingsWindowView::settings_toolbar_content,
-    },
-    Section {
-        page: SettingsPage::Display,
         chinese: "列表显示",
         english: "List display",
         description_chinese: "调整分类栏和卡片间距",
