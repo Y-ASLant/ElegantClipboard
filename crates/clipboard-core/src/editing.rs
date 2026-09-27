@@ -33,9 +33,7 @@ impl History {
             return Ok(false);
         }
 
-        let hash = blake3::hash(format!("text:{new_text}").as_bytes())
-            .to_hex()
-            .to_string();
+        let hash = crate::clipboard::hash_with_prefix(b"text:", new_text.as_bytes());
         let semantic_hash =
             crate::clipboard::semantic_hash_from_text(new_text).unwrap_or_else(|| hash.clone());
         let preview: String = new_text.chars().take(200).collect();

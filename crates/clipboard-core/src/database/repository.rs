@@ -1,5 +1,5 @@
 use super::{ContentType, Database};
-use crate::clipboard::semantic_hash_from_text;
+use crate::clipboard::{hash_with_prefix, semantic_hash_from_text};
 use parking_lot::Mutex;
 use rusqlite::{Connection, Row, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -920,40 +920,38 @@ impl ClipboardRepository {
         }
         let to_delete = current_count - max_count;
 
-        let image_paths = ConditionBuilder::new()
-            .clearable()
-            .group(group_id)
-            .condition("image_path IS NOT NULL")
-            .param(to_delete)
-            .select_strings(
-                &conn,
-                "SELECT image_path FROM clipboard_items",
-                "ORDER BY created_at ASC LIMIT ?",
-            )?;
-
-        let file_payloads = ConditionBuilder::new()
-            .clearable()
-            .group(group_id)
-            .condition("file_payload IS NOT NULL")
-            .param(to_delete)
-            .select_strings(
-                &conn,
-                "SELECT file_payload FROM clipboard_items",
-                "ORDER BY created_at ASC LIMIT ?",
-            )?;
-
-        let del_cb = ConditionBuilder::new()
+        let candidates = ConditionBuilder::new()
             .clearable()
             .group(group_id)
             .param(to_delete);
-        let delete_sql = format!(
-            "DELETE FROM clipboard_items WHERE id IN (\
-                SELECT id FROM clipboard_items{} \
-                ORDER BY created_at ASC LIMIT ?\
-            )",
-            del_cb.where_clause()
+        let selector = format!(
+            "SELECT id FROM clipboard_items{} ORDER BY created_at ASC, id ASC LIMIT ?",
+            candidates.where_clause()
         );
-        let deleted = conn.execute(&delete_sql, del_cb.param_refs().as_slice())? as i64;
+        let params = candidates.param_refs();
+        let mut image_paths = Vec::new();
+        let mut file_payloads = Vec::new();
+        {
+            let sql = format!(
+                "SELECT image_path, file_payload FROM clipboard_items WHERE id IN ({selector})"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params.as_slice(), |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            })?;
+            for row in rows {
+                let (image, payload) = row?;
+                image_paths.extend(image);
+                file_payloads.extend(payload);
+            }
+        }
+        let deleted = conn.execute(
+            &format!("DELETE FROM clipboard_items WHERE id IN ({selector})"),
+            params.as_slice(),
+        )? as i64;
 
         debug!(
             "Enforced max count: deleted {} oldest items (group: {:?})",
@@ -993,10 +991,7 @@ impl ClipboardRepository {
         let preview: String = new_text.chars().take(200).collect();
         let byte_size = new_text.len() as i64;
         let char_count = new_text.chars().count() as i64;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"text:");
-        hasher.update(new_text.as_bytes());
-        let content_hash = hasher.finalize().to_hex().to_string();
+        let content_hash = hash_with_prefix(b"text:", new_text.as_bytes());
         let semantic_hash =
             semantic_hash_from_text(new_text).unwrap_or_else(|| content_hash.clone());
 
@@ -1206,7 +1201,6 @@ impl ClipboardRepository {
         stmt.query_map([], Self::row_to_item)?.collect()
     }
 
-    /// 更新条目的媒体相关路径（WebDAV 同步路径自愈用）
     pub fn update_item_media_paths(
         &self,
         id: i64,
@@ -2212,6 +2206,55 @@ mod tests {
         repo.insert(make_text_item("under_limit")).unwrap();
         let (deleted, _, _) = repo.enforce_max_count(10, None).unwrap();
         assert_eq!(deleted, 0);
+    }
+
+    #[test]
+    fn enforce_max_count_reports_only_media_from_evicted_rows() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let text = repo.insert(make_text_item("old text")).unwrap();
+        let image = repo.insert(make_text_item("old image")).unwrap();
+        let files = repo.insert(make_text_item("recent files")).unwrap();
+        {
+            let connection = db.write_connection();
+            let conn = connection.lock();
+            for (id, timestamp) in [
+                (text, "2020-01-01 00:00:00"),
+                (image, "2020-01-02 00:00:00"),
+                (files, "2020-01-03 00:00:00"),
+            ] {
+                conn.execute(
+                    "UPDATE clipboard_items SET created_at = ?1 WHERE id = ?2",
+                    params![timestamp, id],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "UPDATE clipboard_items SET image_path = 'evicted.png' WHERE id = ?1",
+                [image],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE clipboard_items SET file_payload = 'retained.json' WHERE id = ?1",
+                [files],
+            )
+            .unwrap();
+        }
+
+        let (deleted, images, payloads) = repo.enforce_max_count(1, None).unwrap();
+        assert_eq!(deleted, 2);
+        assert_eq!(images, vec!["evicted.png"]);
+        assert!(payloads.is_empty());
+        assert!(repo.get_by_id(text).unwrap().is_none());
+        assert!(repo.get_by_id(image).unwrap().is_none());
+        assert_eq!(
+            repo.get_by_id(files)
+                .unwrap()
+                .unwrap()
+                .file_payload
+                .as_deref(),
+            Some("retained.json")
+        );
     }
 
     // ==================== SettingsRepository ====================

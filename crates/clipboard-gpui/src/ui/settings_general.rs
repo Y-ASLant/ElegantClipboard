@@ -1,5 +1,5 @@
 use super::*;
-use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
 
 impl SettingsWindowView {
     pub(super) fn settings_shortcut_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -432,57 +432,77 @@ impl SettingsWindowView {
                     )),
             )
             .when_some(paste_shortcut_status, |panel, (message, is_error)| {
-                panel.child(
-                    div()
-                        .text_xs()
-                        .text_color(if is_error {
-                            cx.theme().danger
-                        } else {
-                            cx.theme().muted_foreground
-                        })
-                        .child(message),
-                )
+                panel.child(if is_error {
+                    Alert::error("paste-shortcut-status", message).small()
+                } else {
+                    Alert::info("paste-shortcut-status", message).small()
+                })
             })
             .child(
-                Button::new("paste-recent-expand")
-                    .outline()
+                Accordion::new("paste-shortcut-groups")
+                    .multiple(true)
                     .small()
-                    .label(tr(language, "普通记录槽位（10）", "Recent slots (10)"))
-                    .selected(self.recent_shortcuts_expanded)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.recent_shortcuts_expanded = !this.recent_shortcuts_expanded;
-                        cx.notify();
-                    })),
+                    .on_toggle_click({
+                        let settings = cx.entity().downgrade();
+                        move |indices, _, cx| {
+                            let _ = settings.update(cx, |this, cx| {
+                                let recent = indices.contains(&0);
+                                let favorite = indices.contains(&1);
+                                if this.recent_shortcuts_expanded != recent
+                                    || this.favorite_shortcuts_expanded != favorite
+                                {
+                                    this.recent_shortcuts_expanded = recent;
+                                    this.favorite_shortcuts_expanded = favorite;
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    })
+                    .item(|item| {
+                        item.title(tr(language, "普通记录槽位（10）", "Recent slots (10)"))
+                            .open(self.recent_shortcuts_expanded)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .when(self.recent_shortcuts_expanded, |content| {
+                                        content
+                                            .child(self.paste_group_actions(
+                                                false,
+                                                &paste_shortcuts,
+                                                shortcut_actions_pending,
+                                                language,
+                                            ))
+                                            .when_some(recent_shortcut_rows, |content, rows| {
+                                                content.child(rows)
+                                            })
+                                    }),
+                            )
+                    })
+                    .item(|item| {
+                        item.title(tr(language, "收藏槽位（10）", "Favorite slots (10)"))
+                            .open(self.favorite_shortcuts_expanded)
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .when(self.favorite_shortcuts_expanded, |content| {
+                                        content
+                                            .child(self.paste_group_actions(
+                                                true,
+                                                &paste_shortcuts,
+                                                shortcut_actions_pending,
+                                                language,
+                                            ))
+                                            .when_some(favorite_shortcut_rows, |content, rows| {
+                                                content.child(rows)
+                                            })
+                                    }),
+                            )
+                    }),
             )
-            .when(self.recent_shortcuts_expanded, |panel| {
-                panel.child(self.paste_group_actions(
-                    false,
-                    &paste_shortcuts,
-                    shortcut_actions_pending,
-                    language,
-                ))
-            })
-            .when_some(recent_shortcut_rows, |panel, rows| panel.child(rows))
-            .child(
-                Button::new("paste-favorite-expand")
-                    .outline()
-                    .small()
-                    .label(tr(language, "收藏槽位（10）", "Favorite slots (10)"))
-                    .selected(self.favorite_shortcuts_expanded)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.favorite_shortcuts_expanded = !this.favorite_shortcuts_expanded;
-                        cx.notify();
-                    })),
-            )
-            .when(self.favorite_shortcuts_expanded, |panel| {
-                panel.child(self.paste_group_actions(
-                    true,
-                    &paste_shortcuts,
-                    shortcut_actions_pending,
-                    language,
-                ))
-            })
-            .when_some(favorite_shortcut_rows, |panel, rows| panel.child(rows))
             .into_any_element()
     }
 }

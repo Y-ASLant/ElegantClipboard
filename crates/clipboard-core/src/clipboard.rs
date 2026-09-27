@@ -2,7 +2,7 @@ use blake3::Hasher;
 
 const ZERO_WIDTH_CHARS: [char; 5] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}'];
 
-fn hash_with_prefix(prefix: &[u8], bytes: &[u8]) -> String {
+pub(crate) fn hash_with_prefix(prefix: &[u8], bytes: &[u8]) -> String {
     let mut hasher = Hasher::new();
     hasher.update(prefix);
     hasher.update(bytes);
@@ -12,31 +12,29 @@ fn hash_with_prefix(prefix: &[u8], bytes: &[u8]) -> String {
 /// Normalize user-visible text so semantically equivalent clipboard text
 /// (line endings, zero-width chars, trailing spaces/tabs) hashes consistently.
 pub(crate) fn normalize_semantic_text(text: &str) -> String {
-    let with_lf = text.replace("\r\n", "\n").replace('\r', "\n");
-    let mut cleaned = String::with_capacity(with_lf.len());
-    for ch in with_lf.chars() {
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
         if ZERO_WIDTH_CHARS.contains(&ch) {
             continue;
         }
-        if ch == '\u{00A0}' {
-            cleaned.push(' ');
-        } else {
-            cleaned.push(ch);
-        }
-    }
-
-    let mut normalized = String::with_capacity(cleaned.len());
-    for (i, line) in cleaned.split('\n').enumerate() {
-        if i > 0 {
+        if ch == '\n' || ch == '\r' {
+            while normalized.ends_with([' ', '\t']) {
+                normalized.pop();
+            }
             normalized.push('\n');
+            if ch == '\r' {
+                chars.next_if_eq(&'\n');
+            }
+        } else if ch == '\u{00A0}' {
+            normalized.push(' ');
+        } else {
+            normalized.push(ch);
         }
-        normalized.push_str(line.trim_end_matches([' ', '\t']));
     }
-
-    while normalized.ends_with('\n') {
+    while normalized.ends_with([' ', '\t', '\n']) {
         normalized.pop();
     }
-
     normalized
 }
 
@@ -310,6 +308,14 @@ mod tests {
     #[test]
     fn normalize_mixed_line_endings() {
         assert_eq!(normalize_semantic_text("a\r\nb\rc\n"), "a\nb\nc");
+    }
+
+    #[test]
+    fn normalize_only_collapses_adjacent_crlf() {
+        assert_eq!(
+            normalize_semantic_text("a \r\u{200B}\nb\u{00A0}\n \tc"),
+            "a\n\nb\n \tc"
+        );
     }
 
     #[test]

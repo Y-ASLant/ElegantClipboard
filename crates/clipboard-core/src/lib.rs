@@ -1,6 +1,5 @@
 //! Shared clipboard-history use cases. No dependency on a desktop UI or platform API.
 pub mod backup;
-#[allow(dead_code)]
 pub(crate) mod clipboard;
 pub mod database;
 mod editing;
@@ -229,13 +228,11 @@ impl History {
         }
         let (content_type, text, hash_prefix) =
             if let Some(url) = clipboard::canonical_url_text(text) {
-                (ContentType::Url, url, "url:")
+                (ContentType::Url, url, b"url:".as_slice())
             } else {
-                (ContentType::Text, text, "text:")
+                (ContentType::Text, text, b"text:".as_slice())
             };
-        let hash = blake3::hash(format!("{hash_prefix}{text}").as_bytes())
-            .to_hex()
-            .to_string();
+        let hash = clipboard::hash_with_prefix(hash_prefix, text.as_bytes());
         // URL trimming matches the legacy database; other text keeps exact bytes.
         if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
             return Ok(Some(id));
@@ -372,9 +369,9 @@ impl History {
     fn preview_content_inner(&self, id: i64, staged_dir: Option<&Path>) -> Result<PreviewContent> {
         let item = self.item(id)?;
         if item.content_type == "files" {
-            return Ok(PreviewContent::Files(
-                self.file_preview_entries(id, staged_dir)?,
-            ));
+            return Ok(PreviewContent::Files(Self::file_preview_entries(
+                &item, staged_dir,
+            )?));
         }
         if matches!(item.content_type.as_str(), "html" | "rtf") {
             return Ok(PreviewContent::RichText(

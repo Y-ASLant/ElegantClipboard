@@ -1,6 +1,7 @@
 use super::*;
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::dialog::DialogFooter;
+use gpui_kit::component::{
+    accordion::Accordion, alert::Alert, checkbox::Checkbox, dialog::DialogFooter,
+};
 
 impl SettingsWindowView {
     pub(super) fn settings_monitor_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -348,9 +349,11 @@ impl SettingsWindowView {
             )
             .when(self.app_filter_error, |panel| {
                 panel.child(
-                    div().text_xs().text_color(cx.theme().danger).child(
+                    Alert::error(
+                        "app-filter-error",
                         tr(language, "规则无效、数量已达上限或保存尚未完成", "Invalid rule, rule limit reached, or save still in progress"),
-                    ),
+                    )
+                    .small(),
                 )
             })
             .when(app_filter.rules.is_empty(), |panel| {
@@ -383,80 +386,88 @@ impl SettingsWindowView {
                     )
             }))
             .child(
-                Button::new("app-filter-pick-running")
+                Accordion::new("app-filter-running-apps")
                     .small()
-                    .outline()
-                    .label(if self.app_picker_open {
-                        tr(language, "收起运行中应用", "Hide running apps")
-                    } else {
-                        tr(language, "选择运行中应用", "Choose a running app")
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.app_picker_open = !this.app_picker_open;
-                        if this.app_picker_open
-                            && let Some(owner) = this.owner.upgrade()
-                        {
-                            owner.update(cx, |owner, cx| owner.load_running_apps(cx));
+                    .on_toggle_click({
+                        let settings = cx.entity().downgrade();
+                        move |indices, _, cx| {
+                            let _ = settings.update(cx, |this, cx| {
+                                let open = indices.contains(&0);
+                                if this.app_picker_open != open {
+                                    this.app_picker_open = open;
+                                    if open && let Some(owner) = this.owner.upgrade() {
+                                        owner.update(cx, |owner, cx| owner.load_running_apps(cx));
+                                    }
+                                    cx.notify();
+                                }
+                            });
                         }
-                        cx.notify();
-                    })),
-            )
-            .when(self.app_picker_open, |panel| {
-                panel.child(
-                    div()
-                        .max_h(px(240.))
-                        .overflow_y_scrollbar()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .when(running_apps_pending, |list| {
-                            list.child(tr(language, "正在读取运行中应用…", "Loading running apps…"))
+                    })
+                    .item(|item| {
+                        item.title(if self.app_picker_open {
+                            tr(language, "收起运行中应用", "Hide running apps")
+                        } else {
+                            tr(language, "选择运行中应用", "Choose a running app")
                         })
-                        .when(!running_apps_pending && running_apps.is_empty(), |list| {
-                            list.child(tr(language, "没有找到可选应用", "No running apps found"))
-                        })
-                        .children(running_apps.into_iter().enumerate().map(|(index, app)| {
-                            let owner = self.owner.clone();
-                            let process = app.process.clone();
-                            let already_added = app_filter.rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
+                        .open(self.app_picker_open)
+                        .child(
                             div()
+                                .max_h(px(240.))
+                                .overflow_y_scrollbar()
                                 .flex()
-                                .items_center()
-                                .gap_2()
-                                .when_some(app.icon, |row, path| {
-                                    row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
-                                })
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .flex_col()
-                                        .child(
-                                            Button::new(format!("app-filter-pick-{index}"))
-                                                .small()
-                                                .ghost()
-                                                .label(app.process)
-                                                .disabled(app_filter_pending || already_added)
-                                                .on_click(move |_, _, cx| {
-                                                    let _ = owner.update(cx, |owner, cx| {
-                                                        if let Some(next) = owner.app_filter.clone().with_rule(&process) {
-                                                            owner.save_app_filter(next, cx);
-                                                        }
-                                                    });
-                                                }),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .text_ellipsis()
-                                                .child(app.name),
-                                        ),
-                                )
-                        })),
-                )
-            })
+                                .flex_col()
+                                .gap_1()
+                                .when(self.app_picker_open, |list| {
+                                    list.when(running_apps_pending, |list| {
+                                        list.child(tr(language, "正在读取运行中应用…", "Loading running apps…"))
+                                    })
+                                    .when(!running_apps_pending && running_apps.is_empty(), |list| {
+                                        list.child(tr(language, "没有找到可选应用", "No running apps found"))
+                                    })
+                                    .children(running_apps.into_iter().enumerate().map(|(index, app)| {
+                                        let owner = self.owner.clone();
+                                        let process = app.process.clone();
+                                        let already_added = app_filter.rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .when_some(app.icon, |row, path| {
+                                                row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
+                                            })
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .child(
+                                                        Button::new(format!("app-filter-pick-{index}"))
+                                                            .small()
+                                                            .ghost()
+                                                            .label(app.process)
+                                                            .disabled(app_filter_pending || already_added)
+                                                            .on_click(move |_, _, cx| {
+                                                                let _ = owner.update(cx, |owner, cx| {
+                                                                    if let Some(next) = owner.app_filter.clone().with_rule(&process) {
+                                                                        owner.save_app_filter(next, cx);
+                                                                    }
+                                                                });
+                                                            }),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(cx.theme().muted_foreground)
+                                                            .text_ellipsis()
+                                                            .child(app.name),
+                                                    ),
+                                            )
+                                    }))
+                                }),
+                        )
+                    }),
+            )
             .into_any_element()
     }
 
@@ -530,12 +541,7 @@ impl SettingsWindowView {
                                                 )),
                                         )
                                         .when_some(error, |content, error| {
-                                            content.child(
-                                                div()
-                                                    .text_sm()
-                                                    .text_color(cx.theme().danger)
-                                                    .child(error),
-                                            )
+                                            content.child(Alert::error("clear-all-error", error).small())
                                         }),
                                 )
                                 .footer(
@@ -627,7 +633,7 @@ impl SettingsWindowView {
                 }),
             )
             .when_some(self.link_error.clone(), |panel, error| {
-                panel.child(div().text_xs().text_color(cx.theme().danger).child(error))
+                panel.child(Alert::error("about-link-error", error).small())
             })
             .into_any_element()
     }

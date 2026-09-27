@@ -766,6 +766,7 @@ impl Service {
         let worker_state = state.clone();
         let worker_events = events.clone();
         let images_dir = service.data_dir.join("images");
+        let icons_dir = service.data_dir.join("icons");
         let staged_dir = service.data_dir.join("staged");
         let worker_data_dir = service.data_dir.clone();
         service.worker = Some(thread::Builder::new().name("history-worker".into()).spawn(
@@ -776,6 +777,7 @@ impl Service {
                     clipboard: writer,
                     images_dir,
                     staged_dir,
+                    icons_dir,
                     data_dir: worker_data_dir,
                     state: worker_state,
                     monitor_types: initial_monitor_types,
@@ -1226,6 +1228,7 @@ struct Worker {
     clipboard: ClipboardContext,
     images_dir: PathBuf,
     staged_dir: PathBuf,
+    icons_dir: PathBuf,
     data_dir: PathBuf,
     state: Arc<Mutex<CaptureState>>,
     monitor_types: MonitorTypesPreference,
@@ -1243,6 +1246,20 @@ impl Worker {
     fn send_groups(&self) -> Result<()> {
         self.events
             .send_blocking(Event::Groups(self.history.groups()?))
+            .map_err(|_| anyhow!("窗口已关闭"))
+    }
+
+    fn save_setting<T: Copy>(
+        &self,
+        value: T,
+        save: fn(&Preferences, T) -> Result<()>,
+        event: fn(std::result::Result<T, String>) -> Event,
+    ) -> Result<()> {
+        let result = save(&self.preferences, value)
+            .map(|_| value)
+            .map_err(|error| error.to_string());
+        self.events
+            .send_blocking(event(result))
             .map_err(|_| anyhow!("窗口已关闭"))
     }
 
@@ -1373,7 +1390,7 @@ impl Worker {
                 };
                 if let (Some(id), Some(source)) = (id, source) {
                     let icon = source.executable.as_deref().and_then(|executable| {
-                        source_app::extract_and_cache_icon(executable, &self.data_dir.join("icons"))
+                        source_app::extract_and_cache_icon(executable, &self.icons_dir)
                     });
                     self.history
                         .set_source_app(id, &source.name, icon.as_deref())?;
@@ -1787,26 +1804,14 @@ impl Worker {
                 return Ok(());
             }
             Command::SetTheme(theme) => {
-                let result = self
-                    .preferences
-                    .set_theme(theme)
-                    .map(|_| theme)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::ThemeSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(theme, Preferences::set_theme, Event::ThemeSaved);
             }
             Command::SetLanguage(language) => {
-                let result = self
-                    .preferences
-                    .set_language(language)
-                    .map(|_| language)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::LanguageSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    language,
+                    Preferences::set_language,
+                    Event::LanguageSaved,
+                );
             }
             Command::SetHotkey(hotkey) => {
                 let result = self
@@ -1824,114 +1829,70 @@ impl Worker {
                 return Ok(());
             }
             Command::SetWindowSize(size) => {
-                let result = self
-                    .preferences
-                    .set_window_size(size)
-                    .map(|_| size)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::WindowSizeSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    size,
+                    Preferences::set_window_size,
+                    Event::WindowSizeSaved,
+                );
             }
             Command::SetPersistWindowSize(enabled) => {
-                let result = self
-                    .preferences
-                    .set_persist_window_size(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::PersistWindowSizeSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_persist_window_size,
+                    Event::PersistWindowSizeSaved,
+                );
             }
             Command::SetAutoResetState(enabled) => {
-                let result = self
-                    .preferences
-                    .set_auto_reset_state(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::AutoResetStateSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_auto_reset_state,
+                    Event::AutoResetStateSaved,
+                );
             }
             Command::SetSearchAutoFocus(enabled) => {
-                let result = self
-                    .preferences
-                    .set_search_auto_focus(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::SearchAutoFocusSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_search_auto_focus,
+                    Event::SearchAutoFocusSaved,
+                );
             }
             Command::SetSearchAutoClear(enabled) => {
-                let result = self
-                    .preferences
-                    .set_search_auto_clear(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::SearchAutoClearSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_search_auto_clear,
+                    Event::SearchAutoClearSaved,
+                );
             }
             Command::SetSkipClearConfirm(enabled) => {
-                let result = self
-                    .preferences
-                    .set_skip_clear_confirm(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::SkipClearConfirmSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_skip_clear_confirm,
+                    Event::SkipClearConfirmSaved,
+                );
             }
             Command::SetPasteCloseWindow(enabled) => {
-                let result = self
-                    .preferences
-                    .set_paste_close_window(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::PasteCloseWindowSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_paste_close_window,
+                    Event::PasteCloseWindowSaved,
+                );
             }
             Command::SetPasteKey(key) => {
-                let result = self
-                    .preferences
-                    .set_paste_key(key)
-                    .map(|_| key)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::PasteKeySaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(key, Preferences::set_paste_key, Event::PasteKeySaved);
             }
             Command::SetPasteMoveToTop(enabled) => {
-                let result = self
-                    .preferences
-                    .set_paste_move_to_top(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::PasteMoveToTopSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_paste_move_to_top,
+                    Event::PasteMoveToTopSaved,
+                );
             }
             Command::SetQuickPasteEnabled(enabled) => {
-                let result = self
-                    .preferences
-                    .set_quick_paste_enabled(enabled)
-                    .map(|_| enabled)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::QuickPasteEnabledSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_quick_paste_enabled,
+                    Event::QuickPasteEnabledSaved,
+                );
             }
             Command::SetPasteShortcuts(shortcuts) => {
                 let result =
@@ -1945,59 +1906,35 @@ impl Worker {
                 return Ok(());
             }
             Command::SetWindowPosition(position) => {
-                let result = self
-                    .preferences
-                    .set_window_position(position)
-                    .map(|_| position)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::WindowPositionSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    position,
+                    Preferences::set_window_position,
+                    Event::WindowPositionSaved,
+                );
             }
             Command::SetHoverPreview(preference) => {
-                let result = self
-                    .preferences
-                    .set_hover_preview(preference)
-                    .map(|_| preference)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::HoverPreviewSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    preference,
+                    Preferences::set_hover_preview,
+                    Event::HoverPreviewSaved,
+                );
             }
             Command::SetToolbar(preference) => {
-                let result = self
-                    .preferences
-                    .set_toolbar(preference)
-                    .map(|_| preference)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::ToolbarSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    preference,
+                    Preferences::set_toolbar,
+                    Event::ToolbarSaved,
+                );
             }
             Command::SetDisplay(preference) => {
-                let result = self
-                    .preferences
-                    .set_display(preference)
-                    .map(|_| preference)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::DisplaySaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(
+                    preference,
+                    Preferences::set_display,
+                    Event::DisplaySaved,
+                );
             }
             Command::SetAudio(preference) => {
-                let result = self
-                    .preferences
-                    .set_audio(preference)
-                    .map(|_| preference)
-                    .map_err(|error| error.to_string());
-                self.events
-                    .send_blocking(Event::AudioSaved(result))
-                    .map_err(|_| anyhow!("窗口已关闭"))?;
-                return Ok(());
+                return self.save_setting(preference, Preferences::set_audio, Event::AudioSaved);
             }
             Command::SetMonitorTypes(preference) => {
                 let result = self
@@ -2028,7 +1965,7 @@ impl Worker {
                 return Ok(());
             }
             Command::ListRunningApps => {
-                let apps = source_app::running_apps(&self.data_dir.join("icons"));
+                let apps = source_app::running_apps(&self.icons_dir);
                 self.events
                     .send_blocking(Event::RunningApps(apps))
                     .map_err(|_| anyhow!("窗口已关闭"))?;

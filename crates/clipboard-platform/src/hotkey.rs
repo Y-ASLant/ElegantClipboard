@@ -23,6 +23,31 @@ use windows::Win32::{
 
 const HOTKEY_ID: i32 = 1;
 
+fn main_hotkey_binding(choice: HotkeyPreference) -> Option<(HOT_KEY_MODIFIERS, u32)> {
+    match choice {
+        HotkeyPreference::CtrlShiftV => Some((MOD_CONTROL | MOD_SHIFT, u32::from(b'V'))),
+        HotkeyPreference::AltC => Some((MOD_ALT, u32::from(b'C'))),
+        HotkeyPreference::CtrlAltV => Some((MOD_CONTROL | MOD_ALT, u32::from(b'V'))),
+        HotkeyPreference::Disabled => None,
+    }
+}
+
+fn foreground_target() -> (isize, u32) {
+    let foreground = unsafe { GetForegroundWindow() };
+    let mut process_id = 0;
+    unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
+    (foreground.0 as isize, process_id)
+}
+
+fn stop_hotkey_thread(thread_id: u32, worker: &mut Option<JoinHandle<()>>) {
+    unsafe {
+        let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+    }
+    if let Some(worker) = worker.take() {
+        let _ = worker.join();
+    }
+}
+
 pub struct Hotkey {
     thread_id: u32,
     worker: Option<JoinHandle<()>>,
@@ -30,12 +55,8 @@ pub struct Hotkey {
 
 impl Hotkey {
     pub fn start(choice: HotkeyPreference, events: Sender<(isize, u32)>) -> Result<Self> {
-        let (modifiers, key) = match choice {
-            HotkeyPreference::CtrlShiftV => (MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, b'V'),
-            HotkeyPreference::AltC => (MOD_ALT | MOD_NOREPEAT, b'C'),
-            HotkeyPreference::CtrlAltV => (MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, b'V'),
-            HotkeyPreference::Disabled => return Err(anyhow!("快捷键已关闭")),
-        };
+        let (modifiers, key) =
+            main_hotkey_binding(choice).ok_or_else(|| anyhow!("快捷键已关闭"))?;
         let (ready, receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("history-hotkey".into())
@@ -46,7 +67,7 @@ impl Hotkey {
                 }
                 let thread_id = unsafe { GetCurrentThreadId() };
                 let registration =
-                    unsafe { RegisterHotKey(None, HOTKEY_ID, modifiers, key as u32) };
+                    unsafe { RegisterHotKey(None, HOTKEY_ID, modifiers | MOD_NOREPEAT, key) };
                 let registered = registration.is_ok();
                 let _ = ready.send(registration.map(|_| thread_id));
                 if !registered {
@@ -54,10 +75,7 @@ impl Hotkey {
                 }
                 while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
                     if message.message == WM_HOTKEY && message.wParam.0 == HOTKEY_ID as usize {
-                        let foreground = unsafe { GetForegroundWindow() };
-                        let mut process_id = 0;
-                        unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
-                        let _ = events.try_send((foreground.0 as isize, process_id));
+                        let _ = events.try_send(foreground_target());
                     }
                 }
                 unsafe {
@@ -79,12 +97,7 @@ impl Hotkey {
 
 impl Drop for Hotkey {
     fn drop(&mut self) {
-        unsafe {
-            let _ = PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
-        }
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        stop_hotkey_thread(self.thread_id, &mut self.worker);
     }
 }
 
@@ -218,12 +231,7 @@ pub fn validate_paste_shortcuts(
     shortcuts: &PasteShortcutConfig,
     main_hotkey: HotkeyPreference,
 ) -> Result<()> {
-    let main = match main_hotkey {
-        HotkeyPreference::CtrlShiftV => Some(((MOD_CONTROL | MOD_SHIFT).0, u32::from(b'V'))),
-        HotkeyPreference::AltC => Some((MOD_ALT.0, u32::from(b'C'))),
-        HotkeyPreference::CtrlAltV => Some(((MOD_CONTROL | MOD_ALT).0, u32::from(b'V'))),
-        HotkeyPreference::Disabled => None,
-    };
+    let main = main_hotkey_binding(main_hotkey).map(|(modifiers, key)| (modifiers.0, key));
     let mut used = HashSet::new();
     for favorite in [false, true] {
         for slot in 1..=10u8 {
@@ -310,13 +318,10 @@ impl PasteHotkeys {
                             && let Some((slot, favorite)) =
                                 paste_slot_for_id(message.wParam.0 as i32)
                         {
-                            let foreground = unsafe { GetForegroundWindow() };
-                            let mut process_id = 0;
-                            unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
                             let _ = events.try_send(PasteHotkeyEvent {
                                 slot,
                                 favorite,
-                                target: (foreground.0 as isize, process_id),
+                                target: foreground_target(),
                             });
                         }
                     }
@@ -349,12 +354,7 @@ impl PasteHotkeys {
 
 impl Drop for PasteHotkeys {
     fn drop(&mut self) {
-        unsafe {
-            let _ = PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
-        }
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        stop_hotkey_thread(self.thread_id, &mut self.worker);
     }
 }
 

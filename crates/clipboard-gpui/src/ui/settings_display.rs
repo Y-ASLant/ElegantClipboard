@@ -519,7 +519,11 @@ impl SettingsWindowView {
                             .items_center()
                             .justify_center()
                             .text_color(cx.theme().muted_foreground)
-                            .when(button != ToolbarButton::Batch, |handle| handle.child("⠿"))
+                            .when(button != ToolbarButton::Batch, |handle| {
+                                handle.child(
+                                    Icon::new(gpui_kit::assets::IconName::GripVertical).xsmall(),
+                                )
+                            })
                             .when(
                                 item.visible && button != ToolbarButton::Batch && !toolbar_pending,
                                 |handle| {

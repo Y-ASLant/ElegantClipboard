@@ -12,10 +12,10 @@ use std::sync::Arc;
 use tracing::info;
 
 /// 数据库管理器（读写分离）
+#[derive(Clone)]
 pub struct Database {
     write_conn: Arc<Mutex<Connection>>,
     read_conn: Arc<Mutex<Connection>>,
-    db_path: PathBuf,
 }
 
 impl Database {
@@ -38,7 +38,6 @@ impl Database {
         let db = Self {
             write_conn: Arc::new(Mutex::new(write_conn)),
             read_conn: Arc::new(Mutex::new(read_conn)),
-            db_path,
         };
 
         db.init_schema()?;
@@ -780,16 +779,6 @@ impl Database {
         conn.execute_batch("VACUUM;")?;
         info!("Database vacuumed");
         Ok(())
-    }
-}
-
-impl Clone for Database {
-    fn clone(&self) -> Self {
-        Self {
-            write_conn: self.write_conn.clone(),
-            read_conn: self.read_conn.clone(),
-            db_path: self.db_path.clone(),
-        }
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
     FilePreviewEntry, HISTORY_LIMIT, History,
-    database::{ContentType, NewClipboardItem},
+    database::{ClipboardItem, ContentType, NewClipboardItem},
 };
 use anyhow::{Result, bail};
 use std::{
@@ -80,56 +80,25 @@ impl History {
         if item.content_type != "files" {
             bail!("记录不是文件");
         }
-        let originals = parse_file_paths(item.file_paths.as_deref())?;
-        if originals.iter().all(|path| Path::new(path).exists()) {
-            return Ok(originals);
-        }
-        let root = fs::canonicalize(staged_dir).ok();
-        let staged: HashMap<String, String> = item
-            .file_payload
-            .as_deref()
-            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-            .and_then(|value| value.get("staged")?.as_array().cloned())
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|entry| {
-                Some((
-                    entry.get("original")?.as_str()?.to_owned(),
-                    entry.get("staged")?.as_str()?.to_owned(),
-                ))
-            })
-            .collect();
-        Ok(originals
-            .into_iter()
-            .map(|original| {
-                if Path::new(&original).exists() {
-                    return original;
-                }
-                staged
-                    .get(&original)
-                    .filter(|candidate| {
-                        root.as_ref().is_some_and(|root| {
-                            fs::canonicalize(candidate)
-                                .ok()
-                                .is_some_and(|path| path.is_file() && path.parent() == Some(root))
-                        })
-                    })
-                    .cloned()
-                    .unwrap_or(original)
-            })
-            .collect())
+        Ok(resolved_file_paths(
+            parse_file_paths(item.file_paths.as_deref())?,
+            item.file_payload.as_deref(),
+            staged_dir,
+        ))
     }
 
     pub(crate) fn file_preview_entries(
-        &self,
-        id: i64,
+        item: &ClipboardItem,
         staged_dir: Option<&Path>,
     ) -> Result<Vec<FilePreviewEntry>> {
-        let originals = self.files(id)?;
+        if item.content_type != "files" {
+            bail!("记录不是文件");
+        }
+        let originals = parse_file_paths(item.file_paths.as_deref())?;
         let resolved = staged_dir.map_or_else(
-            || Ok(originals.clone()),
-            |staged_dir| self.files_for_copy(id, staged_dir),
-        )?;
+            || originals.clone(),
+            |dir| resolved_file_paths(originals.clone(), item.file_payload.as_deref(), dir),
+        );
         Ok(originals
             .into_iter()
             .zip(resolved)
@@ -196,7 +165,8 @@ impl History {
             if raw
                 .parent()
                 .and_then(|parent| fs::canonicalize(parent).ok())
-                == Some(root.clone())
+                .as_deref()
+                == Some(root.as_path())
                 && canonical.parent() == Some(root.as_path())
                 && !used.contains(&canonical)
             {
@@ -206,14 +176,64 @@ impl History {
     }
 }
 
+fn resolved_file_paths(
+    originals: Vec<String>,
+    payload: Option<&str>,
+    staged_dir: &Path,
+) -> Vec<String> {
+    if originals.iter().all(|path| Path::new(path).exists()) {
+        return originals;
+    }
+    let Ok(root) = fs::canonicalize(staged_dir) else {
+        return originals;
+    };
+    let staged: HashMap<String, String> = payload
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .and_then(|value| {
+            value.get("staged")?.as_array().map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| {
+                        Some((
+                            entry.get("original")?.as_str()?.to_owned(),
+                            entry.get("staged")?.as_str()?.to_owned(),
+                        ))
+                    })
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+    originals
+        .into_iter()
+        .map(|original| {
+            if Path::new(&original).exists() {
+                return original;
+            }
+            staged
+                .get(&original)
+                .filter(|candidate| {
+                    fs::canonicalize(candidate)
+                        .ok()
+                        .is_some_and(|path| path.is_file() && path.parent() == Some(root.as_path()))
+                })
+                .cloned()
+                .unwrap_or(original)
+        })
+        .collect()
+}
+
 fn staged_paths(raw: &str) -> Vec<String> {
     serde_json::from_str::<serde_json::Value>(raw)
         .ok()
-        .and_then(|value| value.get("staged")?.as_array().cloned())
+        .and_then(|value| {
+            value.get("staged")?.as_array().map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.get("staged")?.as_str().map(str::to_owned))
+                    .collect()
+            })
+        })
         .unwrap_or_default()
-        .into_iter()
-        .filter_map(|entry| entry.get("staged")?.as_str().map(str::to_owned))
-        .collect()
 }
 
 #[cfg(test)]

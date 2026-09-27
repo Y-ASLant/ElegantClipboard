@@ -57,16 +57,21 @@ pub fn running_apps(icons_dir: &Path) -> Vec<RunningApp> {
 
     let mut context = Context { found: Vec::new() };
     let _ = unsafe { EnumWindows(Some(visit), LPARAM((&raw mut context) as isize)) };
-    context.found.sort_by_key(|(_, path)| path.to_lowercase());
+    context
+        .found
+        .sort_by_cached_key(|(_, path)| path.to_lowercase());
     let mut seen = HashSet::new();
     context
         .found
         .into_iter()
         .filter_map(|(name, executable)| {
-            let process = executable.rsplit(['\\', '/']).next()?.to_owned();
-            seen.insert(process.to_lowercase()).then(|| RunningApp {
+            let process = executable.rsplit(['\\', '/']).next()?;
+            if !seen.insert(process.to_lowercase()) {
+                return None;
+            }
+            Some(RunningApp {
                 name,
-                process,
+                process: process.to_owned(),
                 icon: extract_and_cache_icon(&executable, icons_dir),
             })
         })

@@ -37,10 +37,12 @@ use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
 use directories::UserDirs;
+use gpui_kit::component::alert::Alert;
 use gpui_kit::component::chart::BarChart;
+use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
-use gpui_kit::component::scroll::ScrollableElement;
+use gpui_kit::component::scroll::{ScrollableElement, ScrollbarAxis};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::stepper::{Stepper, StepperItem};
@@ -66,6 +68,62 @@ use std::{
 };
 use tray_icon::TrayIcon;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_SHIFT};
+
+fn history_row_height(
+    item: &clipboard_core::database::ClipboardItem,
+    display: DisplayPreference,
+) -> f32 {
+    if item.content_type == "image" {
+        visual::image_row_height(display.card_density)
+    } else {
+        visual::row_height(display.card_density, display.card_max_lines)
+    }
+}
+
+fn history_row_layout(
+    items: &[clipboard_core::database::ClipboardItem],
+    display: DisplayPreference,
+) -> (Rc<Vec<gpui_kit::Size<Pixels>>>, Vec<Pixels>) {
+    let mut sizes = Vec::with_capacity(items.len());
+    let mut offsets = Vec::with_capacity(items.len() + 1);
+    let mut top = px(0.);
+    offsets.push(top);
+    for item in items {
+        let height = px(history_row_height(item, display));
+        sizes.push(size(px(0.), height));
+        top += height;
+        offsets.push(top);
+    }
+    (Rc::new(sizes), offsets)
+}
+
+fn history_top_row(offsets: &[Pixels], scroll_y: Pixels) -> (usize, Pixels) {
+    let top = -scroll_y;
+    let index = offsets
+        .partition_point(|offset| *offset <= top)
+        .saturating_sub(1);
+    (
+        index.min(offsets.len().saturating_sub(2)),
+        top - offsets[index],
+    )
+}
+
+#[cfg(test)]
+mod history_virtual_list_tests {
+    use super::{history_top_row, px};
+
+    #[test]
+    fn mixed_height_rows_preserve_partial_position_across_resizing_and_pagination() {
+        let old = [px(0.), px(88.), px(236.), px(324.)];
+        let (row, partial) = history_top_row(&old, px(-125.));
+        assert_eq!((row, partial), (1, px(37.)));
+
+        let resized = [px(0.), px(112.), px(260.), px(348.), px(460.)];
+        let restored = -(resized[row] + partial);
+        assert_eq!(history_top_row(&resized, restored), (1, px(37.)));
+        assert_eq!(history_top_row(&resized, px(-348.)), (3, px(0.)));
+    }
+}
 
 fn tr(language: LanguagePreference, chinese: &'static str, english: &'static str) -> &'static str {
     match language {
@@ -772,10 +830,14 @@ impl Render for HistoryDrag {
                 .gap_2()
                 .child(
                     div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
+                        .child(Icon::new(gpui_kit::assets::IconName::GripVertical).xsmall())
                         .child(format!(
-                            "⠿  {}{}",
+                            "{}{}",
                             if self.pinned {
                                 tr(self.language, "置顶 · ", "Pinned · ")
                             } else {
@@ -811,8 +873,30 @@ impl Render for ToolbarDrag {
             .border_color(cx.theme().primary)
             .bg(cx.theme().background)
             .shadow_md()
+            .flex()
+            .items_center()
+            .gap_2()
             .text_sm()
-            .child(format!("⠿  {}", self.label))
+            .child(Icon::new(gpui_kit::assets::IconName::GripVertical).xsmall())
+            .child(self.label)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HistoryConfirmation {
+    DeleteGroup(i64),
+    ClearHistory(Option<i64>),
+    DeleteSelected,
+}
+
+struct HistoryDialogLayer;
+
+impl Render for HistoryDialogLayer {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .inset_0()
+            .children(Root::render_dialog_layer(window, cx))
     }
 }
 
@@ -854,6 +938,9 @@ struct ClipboardView {
     batch_confirm_open: bool,
     batch_pending: bool,
     batch_paste_pending: Option<(isize, u32)>,
+    confirmation: Option<HistoryConfirmation>,
+    confirmation_error: Option<String>,
+    dialog_layer: Entity<HistoryDialogLayer>,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -863,6 +950,7 @@ struct ClipboardView {
     preview_edit_requested: bool,
     preview_save_pending: bool,
     image_zoom_percent: u16,
+    image_scroll: ScrollHandle,
     hover_preview: PreviewState,
     hover_popup: Option<AnyWindowHandle>,
     hover_popup_opening: Option<(i64, u64)>,
@@ -876,7 +964,9 @@ struct ClipboardView {
     row_click_task: Option<Task<()>>,
     save_as_pending: Option<i64>,
     list_focus: FocusHandle,
-    scroll: ListState,
+    scroll: VirtualListScrollHandle,
+    row_sizes: Rc<Vec<gpui_kit::Size<Pixels>>>,
+    row_offsets: Vec<Pixels>,
     monitoring: bool,
     onboarding_completed: bool,
     onboarding_step: usize,
@@ -1054,6 +1144,7 @@ struct HoverPreviewWindowView {
     content: Result<PreviewContent, String>,
     text_input: Entity<TextareaState>,
     zoom_percent: u16,
+    image_scroll: ScrollHandle,
     zoom_step: u8,
 }
 
@@ -1095,6 +1186,7 @@ impl HoverPreviewWindowView {
             content,
             text_input,
             zoom_percent: 100,
+            image_scroll: ScrollHandle::default(),
             zoom_step,
         }
     }
@@ -1116,31 +1208,42 @@ impl Render for HoverPreviewWindowView {
             );
         let body: AnyElement = match &self.content {
             Ok(PreviewContent::Image(path)) => div()
-                .id("hover-image-viewport")
+                .relative()
                 .size_full()
-                .overflow_scroll()
-                .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
-                    if event.modifiers.control {
-                        let delta = event.delta.pixel_delta(window.line_height()).y;
-                        let change = if delta > px(0.) {
-                            i32::from(this.zoom_step)
-                        } else {
-                            -i32::from(this.zoom_step)
-                        };
-                        this.change_zoom(change, cx);
-                        cx.stop_propagation();
-                    }
-                }))
-                .when(self.zoom_percent <= 100, |viewport| {
-                    viewport.flex().items_center().justify_center()
-                })
                 .child(
                     div()
-                        .w(relative(f32::from(self.zoom_percent) / 100.0))
-                        .h(relative(f32::from(self.zoom_percent) / 100.0))
-                        .flex_none()
-                        .child(img(path.clone()).size_full().object_fit(ObjectFit::Contain)),
+                        .id("hover-image-viewport")
+                        .size_full()
+                        .overflow_scroll()
+                        .track_scroll(&self.image_scroll)
+                        .on_scroll_wheel(cx.listener(
+                            |this, event: &ScrollWheelEvent, window, cx| {
+                                if event.modifiers.control {
+                                    let delta = event.delta.pixel_delta(window.line_height()).y;
+                                    let change = if delta > px(0.) {
+                                        i32::from(this.zoom_step)
+                                    } else {
+                                        -i32::from(this.zoom_step)
+                                    };
+                                    this.change_zoom(change, cx);
+                                    cx.stop_propagation();
+                                }
+                            },
+                        ))
+                        .when(self.zoom_percent <= 100, |viewport| {
+                            viewport.flex().items_center().justify_center()
+                        })
+                        .child(
+                            div()
+                                .w(relative(f32::from(self.zoom_percent) / 100.0))
+                                .h(relative(f32::from(self.zoom_percent) / 100.0))
+                                .flex_none()
+                                .child(
+                                    img(path.clone()).size_full().object_fit(ObjectFit::Contain),
+                                ),
+                        ),
                 )
+                .scrollbar(&self.image_scroll, ScrollbarAxis::Both)
                 .into_any_element(),
             Ok(PreviewContent::Files(entries)) if single_file_image_path(entries).is_some() => {
                 let path = single_file_image_path(entries).expect("checked above");
@@ -1152,41 +1255,49 @@ impl Render for HoverPreviewWindowView {
                     .gap_1()
                     .child(
                         div()
-                            .id("hover-file-image-viewport")
+                            .relative()
                             .flex_1()
                             .min_h_0()
-                            .overflow_scroll()
-                            .on_scroll_wheel(cx.listener(
-                                |this, event: &ScrollWheelEvent, window, cx| {
-                                    if event.modifiers.control {
-                                        let delta = event.delta.pixel_delta(window.line_height()).y;
-                                        let change = if delta > px(0.) {
-                                            i32::from(this.zoom_step)
-                                        } else {
-                                            -i32::from(this.zoom_step)
-                                        };
-                                        this.change_zoom(change, cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .when(self.zoom_percent <= 100, |viewport| {
-                                viewport.flex().items_center().justify_center()
-                            })
                             .child(
                                 div()
-                                    .w(relative(f32::from(self.zoom_percent) / 100.0))
-                                    .h(relative(f32::from(self.zoom_percent) / 100.0))
-                                    .flex_none()
+                                    .id("hover-file-image-viewport")
+                                    .size_full()
+                                    .overflow_scroll()
+                                    .track_scroll(&self.image_scroll)
+                                    .on_scroll_wheel(cx.listener(
+                                        |this, event: &ScrollWheelEvent, window, cx| {
+                                            if event.modifiers.control {
+                                                let delta =
+                                                    event.delta.pixel_delta(window.line_height()).y;
+                                                let change = if delta > px(0.) {
+                                                    i32::from(this.zoom_step)
+                                                } else {
+                                                    -i32::from(this.zoom_step)
+                                                };
+                                                this.change_zoom(change, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    ))
+                                    .when(self.zoom_percent <= 100, |viewport| {
+                                        viewport.flex().items_center().justify_center()
+                                    })
                                     .child(
-                                        img(path)
-                                            .size_full()
-                                            .object_fit(ObjectFit::Contain)
-                                            .with_fallback(move || {
-                                                div().child(unavailable).into_any_element()
-                                            }),
+                                        div()
+                                            .w(relative(f32::from(self.zoom_percent) / 100.0))
+                                            .h(relative(f32::from(self.zoom_percent) / 100.0))
+                                            .flex_none()
+                                            .child(
+                                                img(path)
+                                                    .size_full()
+                                                    .object_fit(ObjectFit::Contain)
+                                                    .with_fallback(move || {
+                                                        div().child(unavailable).into_any_element()
+                                                    }),
+                                            ),
                                     ),
-                            ),
+                            )
+                            .scrollbar(&self.image_scroll, ScrollbarAxis::Both),
                     )
                     .child(
                         div()
@@ -1243,7 +1354,7 @@ impl Render for HoverPreviewWindowView {
                                     Button::new("hover-zoom-out")
                                         .xsmall()
                                         .ghost()
-                                        .label("−")
+                                        .icon(IconName::Minus)
                                         .accessibility_label(tr(
                                             self.language,
                                             "缩小悬浮图片",
@@ -1274,7 +1385,7 @@ impl Render for HoverPreviewWindowView {
                                     Button::new("hover-zoom-in")
                                         .xsmall()
                                         .ghost()
-                                        .label("+")
+                                        .icon(IconName::Plus)
                                         .accessibility_label(tr(
                                             self.language,
                                             "放大悬浮图片",
@@ -1613,7 +1724,7 @@ impl SettingsWindowView {
                 )
             })
             .when_some(self.shortcut_capture_error.clone(), |panel, error| {
-                panel.child(div().text_xs().text_color(cx.theme().danger).child(error))
+                panel.child(Alert::error("shortcut-capture-error", error).small())
             })
             .child(
                 div()
@@ -1842,14 +1953,15 @@ impl ClipboardView {
                 }
             },
         );
-        let subscription = cx.subscribe_in(&search, window, |this, _, event, _, cx| {
+        let subscription = cx.subscribe_in(&search, window, |this, _, event, window, cx| {
             if matches!(event, InputEvent::Change) {
                 this.cancel_pending_row_click();
                 this.close_hover_preview(cx);
                 this.clear_confirm_open = false;
                 this.reset_selection();
+                this.sync_confirmation_dialog(window, cx);
                 this.history.begin_search();
-                this.scroll.scroll_to(ListOffset::default());
+                this.scroll_to_top();
                 this.search_task = Some(cx.spawn(async move |view, cx| {
                     cx.background_executor()
                         .timer(Duration::from_millis(150))
@@ -2146,6 +2258,9 @@ impl ClipboardView {
             batch_confirm_open: false,
             batch_pending: false,
             batch_paste_pending: None,
+            confirmation: None,
+            confirmation_error: None,
+            dialog_layer: cx.new(|_| HistoryDialogLayer),
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -2155,6 +2270,7 @@ impl ClipboardView {
             preview_edit_requested: false,
             preview_save_pending: false,
             image_zoom_percent: 100,
+            image_scroll: ScrollHandle::default(),
             hover_preview: PreviewState::default(),
             hover_popup: None,
             hover_popup_opening: None,
@@ -2168,7 +2284,9 @@ impl ClipboardView {
             row_click_task: None,
             save_as_pending: None,
             list_focus,
-            scroll: ListState::new(0, ListAlignment::Top, px(200.)),
+            scroll: VirtualListScrollHandle::new(),
+            row_sizes: Rc::new(Vec::new()),
+            row_offsets: vec![px(0.)],
             monitoring: startup.monitoring,
             onboarding_completed,
             onboarding_step: 0,
@@ -2833,6 +2951,7 @@ impl ClipboardView {
         if self.group_save_pending
             || self.group_delete_pending
             || self.clear_pending
+            || self.batch_pending
             || self.group_reorder_pending
         {
             cx.defer_in(window, |this, window, cx| {
@@ -2873,6 +2992,13 @@ impl ClipboardView {
                 self.group_rename_id = None;
                 self.group_move_id = None;
                 window.focus(&self.list_focus, cx);
+                if let Some(id) = self.group_delete_id {
+                    self.open_history_confirmation(
+                        HistoryConfirmation::DeleteGroup(id),
+                        window,
+                        cx,
+                    );
+                }
             }
             GroupChoice::MoveUp | GroupChoice::MoveDown => {
                 if let Some(id) = self.history.group_id
@@ -2913,11 +3039,12 @@ impl ClipboardView {
         self.group_delete_id = None;
         self.clear_confirm_open = false;
         self.reset_selection();
+        self.sync_confirmation_dialog(window, cx);
         self.history.set_group(group_id);
         cx.defer_in(window, |this, window, cx| {
             this.refresh_group_select(window, cx)
         });
-        self.scroll.scroll_to(ListOffset::default());
+        self.scroll_to_top();
         self.query(cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
@@ -2946,6 +3073,7 @@ impl ClipboardView {
         self.group_move_id = None;
         self.group_delete_id = None;
         self.reset_selection();
+        self.sync_confirmation_dialog(window, cx);
         self.search_task = None;
         if let Some(category) = category {
             self.history.set_category(category);
@@ -2953,7 +3081,7 @@ impl ClipboardView {
             self.history.set_favorite_filter(true);
         }
         self.refresh_group_select(window, cx);
-        self.scroll.scroll_to(ListOffset::default());
+        self.scroll_to_top();
         self.query(cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
@@ -3180,6 +3308,7 @@ impl ClipboardView {
             || self.paste_pending.is_some()
             || self.batch_paste_pending.is_some()
             || self.batch_pending
+            || self.confirmation.is_some()
             || self
                 ._tray
                 .as_ref()
@@ -3212,7 +3341,7 @@ impl ClipboardView {
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.history.begin_search();
-            self.scroll.scroll_to(ListOffset::default());
+            self.scroll_to_top();
             self.query(cx);
         }
         if self.preview_editing || self.preview_save_pending {
@@ -3226,9 +3355,17 @@ impl ClipboardView {
     }
 
     fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.paste_pending.is_some() || self.batch_paste_pending.is_some() || self.batch_pending
+        if self.paste_pending.is_some()
+            || self.batch_paste_pending.is_some()
+            || self.batch_pending
+            || self.group_delete_pending
+            || self.clear_pending
         {
             return;
+        }
+        if let Some(kind) = self.confirmation {
+            self.cancel_confirmation(kind, cx);
+            window.close_dialog(cx);
         }
         self.prepare_to_hide(window, cx);
         tray::set_window_visible(window, false);
@@ -3246,7 +3383,7 @@ impl ClipboardView {
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.history.set_group(None);
             self.refresh_group_select(window, cx);
-            self.scroll.scroll_to(ListOffset::default());
+            self.scroll_to_top();
             if !self.preview_editing && !self.preview_save_pending {
                 self.preview.close();
                 self.preview_source_hash = None;
@@ -3299,6 +3436,7 @@ impl ClipboardView {
         if self.group_delete_id.is_some() {
             if !self.group_delete_pending {
                 self.group_delete_id = None;
+                self.sync_confirmation_dialog(window, cx);
                 cx.notify();
             }
             return;
@@ -3306,6 +3444,7 @@ impl ClipboardView {
         if self.clear_confirm_open {
             if !self.clear_pending {
                 self.clear_confirm_open = false;
+                self.sync_confirmation_dialog(window, cx);
                 cx.notify();
             }
             return;
@@ -3313,6 +3452,7 @@ impl ClipboardView {
         if self.batch_confirm_open {
             if !self.batch_pending {
                 self.batch_confirm_open = false;
+                self.sync_confirmation_dialog(window, cx);
                 cx.notify();
             }
             return;
@@ -3633,7 +3773,7 @@ impl ClipboardView {
                 {
                     self.reset_selection();
                     self.history.set_group(None);
-                    self.scroll.scroll_to(ListOffset::default());
+                    self.scroll_to_top();
                     self.query(cx);
                 }
                 self.groups = groups;
@@ -3850,19 +3990,11 @@ impl ClipboardView {
             } => {
                 let applied = self.history.apply(items, total, generation);
                 if applied {
-                    let scroll_top = self.scroll.logical_scroll_top();
-                    let count = self.history.items.len();
-                    self.scroll.reset_with_uniform_height(
-                        count,
-                        px(visual::row_height(
-                            self.display.card_density,
-                            self.display.card_max_lines,
-                        )),
-                    );
-                    self.scroll.scroll_to(ListOffset {
-                        item_ix: scroll_top.item_ix.min(count.saturating_sub(1)),
-                        offset_in_item: scroll_top.offset_in_item,
-                    });
+                    let (top_index, partial) =
+                        history_top_row(&self.row_offsets, self.scroll.offset().y);
+                    self.rebuild_row_layout();
+                    let new_top = self.row_offsets[top_index.min(self.history.items.len())];
+                    self.scroll.set_offset(point(px(0.), -(new_top + partial)));
                 }
                 if applied
                     && self
@@ -3882,7 +4014,7 @@ impl ClipboardView {
                     {
                         self.selection_anchor = None;
                     }
-                    if self.selected_ids.is_empty() {
+                    if self.selected_ids.is_empty() && !self.batch_pending {
                         self.batch_confirm_open = false;
                     }
                 }
@@ -4622,8 +4754,14 @@ impl ClipboardView {
                 self.display_pending = false;
                 match result {
                     Ok(display) => {
+                        let (top_index, partial) =
+                            history_top_row(&self.row_offsets, self.scroll.offset().y);
                         self.display = display;
-                        self.scroll.remeasure();
+                        self.rebuild_row_layout();
+                        self.scroll.set_offset(point(
+                            px(0.),
+                            -(self.row_offsets[top_index.min(self.history.items.len())] + partial),
+                        ));
                         if self
                             .history
                             .should_reset_category_filter(display.show_category_filter)
@@ -4937,7 +5075,10 @@ impl ClipboardView {
                         self.group_delete_id = None;
                     }
                     FailureKind::GroupMove => self.group_move_pending = false,
-                    FailureKind::ClearHistory => self.clear_pending = false,
+                    FailureKind::ClearHistory => {
+                        self.clear_pending = false;
+                        self.confirmation_error = Some(message.clone());
+                    }
                     FailureKind::ClearAllHistory => {
                         self.clear_all_pending = false;
                         self.clear_all_error = Some(message.clone());
@@ -4969,6 +5110,10 @@ impl ClipboardView {
                 self.message = message;
                 self.is_error = true;
             }
+        }
+        self.sync_confirmation_dialog(window, cx);
+        if self.confirmation.is_some() {
+            self.dialog_layer.update(cx, |_, cx| cx.notify());
         }
         cx.notify();
     }
@@ -5555,37 +5700,46 @@ impl ClipboardView {
             }
             Some(Ok(PreviewContent::Files(entries))) => self.render_file_preview(entries, cx),
             Some(Ok(PreviewContent::Image(path))) => div()
-                .id("image-preview-viewport")
+                .relative()
                 .size_full()
-                .overflow_scroll()
-                .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
-                    if event.modifiers.control {
-                        let delta = event.delta.pixel_delta(window.line_height()).y;
-                        if delta > px(0.) {
-                            this.zoom_image(10, cx);
-                        } else if delta < px(0.) {
-                            this.zoom_image(-10, cx);
-                        }
-                        cx.stop_propagation();
-                    }
-                }))
-                .when(self.image_zoom_percent <= 100, |viewport| {
-                    viewport.flex().items_center().justify_center()
-                })
                 .child(
                     div()
-                        .w(relative(f32::from(self.image_zoom_percent) / 100.0))
-                        .h(relative(f32::from(self.image_zoom_percent) / 100.0))
-                        .flex_none()
+                        .id("image-preview-viewport")
+                        .size_full()
+                        .overflow_scroll()
+                        .track_scroll(&self.image_scroll)
+                        .on_scroll_wheel(cx.listener(
+                            |this, event: &ScrollWheelEvent, window, cx| {
+                                if event.modifiers.control {
+                                    let delta = event.delta.pixel_delta(window.line_height()).y;
+                                    if delta > px(0.) {
+                                        this.zoom_image(10, cx);
+                                    } else if delta < px(0.) {
+                                        this.zoom_image(-10, cx);
+                                    }
+                                    cx.stop_propagation();
+                                }
+                            },
+                        ))
+                        .when(self.image_zoom_percent <= 100, |viewport| {
+                            viewport.flex().items_center().justify_center()
+                        })
                         .child(
-                            img(path.clone())
-                                .size_full()
-                                .object_fit(ObjectFit::Contain)
-                                .with_fallback(move || {
-                                    div().child(image_unavailable).into_any_element()
-                                }),
+                            div()
+                                .w(relative(f32::from(self.image_zoom_percent) / 100.0))
+                                .h(relative(f32::from(self.image_zoom_percent) / 100.0))
+                                .flex_none()
+                                .child(
+                                    img(path.clone())
+                                        .size_full()
+                                        .object_fit(ObjectFit::Contain)
+                                        .with_fallback(move || {
+                                            div().child(image_unavailable).into_any_element()
+                                        }),
+                                ),
                         ),
                 )
+                .scrollbar(&self.image_scroll, ScrollbarAxis::Both)
                 .into_any_element(),
             _ => div().into_any_element(),
         };
@@ -5661,7 +5815,7 @@ impl ClipboardView {
                                     Button::new("image-zoom-out")
                                         .small()
                                         .outline()
-                                        .label("−")
+                                        .icon(IconName::Minus)
                                         .accessibility_label(tr(
                                             self.language,
                                             "缩小图片",
@@ -5692,7 +5846,7 @@ impl ClipboardView {
                                     Button::new("image-zoom-in")
                                         .small()
                                         .outline()
-                                        .label("+")
+                                        .icon(IconName::Plus)
                                         .accessibility_label(tr(
                                             self.language,
                                             "放大图片",
@@ -5829,10 +5983,24 @@ impl ClipboardView {
             )
     }
 
+    fn scroll_to_top(&self) {
+        self.scroll.set_offset(point(px(0.), px(0.)));
+    }
+
+    fn scroll_to_row(&self, index: usize) {
+        if let Some(offset) = self.row_offsets.get(index) {
+            self.scroll.set_offset(point(px(0.), -*offset));
+        }
+    }
+
+    fn rebuild_row_layout(&mut self) {
+        (self.row_sizes, self.row_offsets) = history_row_layout(&self.history.items, self.display);
+    }
+
     fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
         if let Some(index) = self.history.select_relative(direction) {
-            self.scroll.scroll_to_reveal_item(index);
+            self.scroll.scroll_to_item(index, ScrollStrategy::Top);
         }
         cx.notify();
     }
@@ -5860,23 +6028,21 @@ impl ClipboardView {
         self.cancel_pending_row_click();
         if let Some(index) = self.history.select_index(index) {
             if strategy == ScrollStrategy::Top {
-                self.scroll.scroll_to(ListOffset {
-                    item_ix: index,
-                    offset_in_item: px(0.),
-                });
+                self.scroll_to_row(index);
             } else {
-                self.scroll.scroll_to_reveal_item(index);
+                self.scroll.scroll_to_item(index, strategy);
             }
         }
         cx.notify();
     }
 
     fn page_step(&self) -> isize {
-        ((f32::from(self.scroll.viewport_bounds().size.height)
-            / visual::row_height(self.display.card_density, self.display.card_max_lines))
-        .floor() as usize)
-            .saturating_sub(1)
-            .max(1) as isize
+        let (top, _) = history_top_row(&self.row_offsets, self.scroll.offset().y);
+        let viewport_end = -self.scroll.offset().y + self.scroll.bounds().size.height;
+        let visible = self
+            .row_offsets
+            .partition_point(|offset| *offset < viewport_end);
+        visible.saturating_sub(top + 2).max(1) as isize
     }
 
     fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
@@ -6131,8 +6297,9 @@ impl ClipboardView {
                     if !ticks.is_multiple_of(visual::HISTORY_DRAG_SCROLL_TICKS) {
                         return true;
                     }
-                    let current =
-                        scroll_target.unwrap_or_else(|| this.scroll.logical_scroll_top().item_ix);
+                    let current = scroll_target.unwrap_or_else(|| {
+                        history_top_row(&this.row_offsets, this.scroll.offset().y).0
+                    });
                     let next = next_drag_scroll_index(
                         current,
                         this.history.items.len(),
@@ -6140,10 +6307,7 @@ impl ClipboardView {
                     );
                     if next != current {
                         scroll_target = Some(next);
-                        this.scroll.scroll_to(ListOffset {
-                            item_ix: next,
-                            offset_in_item: px(0.),
-                        });
+                        this.scroll_to_row(next);
                     }
                     let target = drag_edge_target_index(
                         next,
@@ -6468,11 +6632,7 @@ impl ClipboardView {
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 this.set_hover_source(id, *hovered, cx);
             }))
-            .h(px(if is_image {
-                visual::image_row_height(self.display.card_density)
-            } else {
-                visual::row_height(self.display.card_density, self.display.card_max_lines)
-            }))
+            .h(px(history_row_height(item, self.display)))
             .px(px(PAGE_PADDING))
             .on_drag_move(
                 cx.listener(move |this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
@@ -7034,7 +7194,10 @@ impl ClipboardView {
                                         .group_hover("", |handle| handle.visible())
                                         .bg(cx.theme().accent)
                                         .text_color(cx.theme().primary)
-                                        .child("⠿")
+                                        .child(
+                                            Icon::new(gpui_kit::assets::IconName::GripVertical)
+                                                .xsmall(),
+                                        )
                                 })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.cancel_pending_row_click();
@@ -7074,7 +7237,10 @@ impl ClipboardView {
                                         .group_hover("", |handle| handle.visible())
                                         .bg(cx.theme().accent)
                                         .text_color(cx.theme().primary)
-                                        .child("⠿")
+                                        .child(
+                                            Icon::new(gpui_kit::assets::IconName::GripVertical)
+                                                .xsmall(),
+                                        )
                                 })
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.cancel_pending_row_click();
@@ -7257,17 +7423,12 @@ impl ClipboardView {
             let other = index
                 .saturating_add_signed(delta)
                 .min(self.history.items.len());
-            let distance: f32 = self.history.items[index.min(other)..index.max(other)]
-                .iter()
-                .map(|item| {
-                    if item.content_type == "image" {
-                        visual::image_row_height(self.display.card_density)
-                    } else {
-                        visual::row_height(self.display.card_density, self.display.card_max_lines)
-                    }
-                })
-                .sum();
-            if delta < 0 { -distance } else { distance }
+            let distance = self.row_offsets[index.max(other)] - self.row_offsets[index.min(other)];
+            if delta < 0 {
+                -f32::from(distance)
+            } else {
+                f32::from(distance)
+            }
         };
         if let Some(offset) = self.reorder_offsets.get(&id) {
             visual::reflow(
@@ -7287,7 +7448,15 @@ impl ClipboardView {
 }
 
 impl Render for ClipboardView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self
+            .confirmation
+            .is_some_and(|kind| !self.confirmation_active(kind) && !self.confirmation_pending(kind))
+        {
+            cx.defer_in(window, |view, window, cx| {
+                view.sync_confirmation_dialog(window, cx);
+            });
+        }
         div()
             .flex()
             .flex_col()
@@ -7315,6 +7484,7 @@ impl Render for ClipboardView {
             )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
             .child(self.render_status(cx))
+            .child(self.dialog_layer.clone())
     }
 }
 
@@ -7560,8 +7730,220 @@ impl ClipboardView {
             .into_any_element()
     }
 
+    fn confirmation_active(&self, kind: HistoryConfirmation) -> bool {
+        match kind {
+            HistoryConfirmation::DeleteGroup(id) => {
+                self.group_delete_id == Some(id) && self.history.group_id == Some(id)
+            }
+            HistoryConfirmation::ClearHistory(group_id) => {
+                self.clear_confirm_open && self.history.group_id == group_id
+            }
+            HistoryConfirmation::DeleteSelected => self.batch_confirm_open,
+        }
+    }
+
+    fn confirmation_pending(&self, kind: HistoryConfirmation) -> bool {
+        match kind {
+            HistoryConfirmation::DeleteGroup(_) => self.group_delete_pending,
+            HistoryConfirmation::ClearHistory(_) => self.clear_pending,
+            HistoryConfirmation::DeleteSelected => self.batch_pending,
+        }
+    }
+
+    fn cancel_confirmation(&mut self, kind: HistoryConfirmation, cx: &mut Context<Self>) -> bool {
+        if self.confirmation != Some(kind) || self.confirmation_pending(kind) {
+            return false;
+        }
+        match kind {
+            HistoryConfirmation::DeleteGroup(_) => self.group_delete_id = None,
+            HistoryConfirmation::ClearHistory(_) => self.clear_confirm_open = false,
+            HistoryConfirmation::DeleteSelected => self.batch_confirm_open = false,
+        }
+        self.confirmation = None;
+        self.dialog_layer.update(cx, |_, cx| cx.notify());
+        cx.notify();
+        true
+    }
+
+    fn confirm_history_action(&mut self, kind: HistoryConfirmation, cx: &mut Context<Self>) {
+        if self.confirmation != Some(kind)
+            || !self.confirmation_active(kind)
+            || self.confirmation_pending(kind)
+        {
+            return;
+        }
+        match kind {
+            HistoryConfirmation::DeleteGroup(_) => self.delete_group(cx),
+            HistoryConfirmation::ClearHistory(_) => self.clear_history(cx),
+            HistoryConfirmation::DeleteSelected => self.delete_selected(cx),
+        }
+        if matches!(kind, HistoryConfirmation::ClearHistory(_))
+            && !self.clear_pending
+            && self.is_error
+        {
+            self.confirmation_error = Some(self.message.clone());
+        }
+        self.dialog_layer.update(cx, |_, cx| cx.notify());
+    }
+
+    fn sync_confirmation_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(kind) = self.confirmation
+            && !self.confirmation_active(kind)
+            && !self.confirmation_pending(kind)
+        {
+            self.confirmation = None;
+            window.close_dialog(cx);
+            self.dialog_layer.update(cx, |_, cx| cx.notify());
+        }
+    }
+
+    fn open_history_confirmation(
+        &mut self,
+        kind: HistoryConfirmation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.confirmation == Some(kind) {
+            return;
+        }
+        if self.confirmation.is_some() {
+            window.close_dialog(cx);
+        }
+        self.confirmation = Some(kind);
+        self.confirmation_error = None;
+        self.dialog_layer.update(cx, |_, cx| cx.notify());
+        let owner = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let view = owner.upgrade().expect("history dialog requires its owner");
+            let view = view.read(cx);
+            let language = view.language;
+            let pending = view.confirmation_pending(kind);
+            let error = view.confirmation_error.clone();
+            let (title, prompt, confirm_label) = match kind {
+                HistoryConfirmation::DeleteGroup(id) => {
+                    let (name, count) = view.groups.iter()
+                        .find(|group| group.id == id)
+                        .map(|group| (group.name.as_str(), group.item_count))
+                        .unwrap_or((tr(language, "该分组", "this group"), 0));
+                    let prompt = if language == LanguagePreference::English {
+                        format!("Delete “{name}”? {count} items will move to the default group.")
+                    } else {
+                        format!("删除「{name}」？{count} 条记录将移到默认分组。")
+                    };
+                    (tr(language, "删除分组", "Delete group"), prompt,
+                     tr(language, "保留记录并删除分组", "Delete group and keep items").to_owned())
+                }
+                HistoryConfirmation::ClearHistory(group_id) => {
+                    let name = group_id
+                        .and_then(|id| view.groups.iter().find(|group| group.id == id))
+                        .map(|group| group.name.as_str())
+                        .unwrap_or(tr(language, "默认分组", "Default"));
+                    let prompt = if language == LanguagePreference::English {
+                        format!("Clear unpinned, non-favorite items from “{name}”? Search, favorites, and type filters do not change the scope.")
+                    } else {
+                        format!("清理「{name}」中未置顶且未收藏的记录？搜索、收藏和类型筛选不影响清理范围。")
+                    };
+                    (tr(language, "清理历史", "Clear history"), prompt,
+                     tr(language, "确认清理", "Clear").to_owned())
+                }
+                HistoryConfirmation::DeleteSelected => {
+                    let count = view.selected_ids.len();
+                    let prompt = if language == LanguagePreference::English {
+                        format!("Delete the {count} selected items? This includes pinned and favorite items and cannot be undone.")
+                    } else {
+                        format!("确定删除选中的 {count} 条记录？包含置顶和收藏，无法撤销。")
+                    };
+                    let confirm = if language == LanguagePreference::English {
+                        format!("Delete {count} items")
+                    } else {
+                        format!("确认删除 {count} 条")
+                    };
+                    (tr(language, "删除选中", "Delete selected"), prompt, confirm)
+                }
+            };
+            let confirm_owner = owner.clone();
+            let keyboard_owner = owner.clone();
+            let cancel_owner = owner.clone();
+            dialog
+                .title(title)
+                .close_button(false)
+                .overlay_closable(false)
+                .on_ok(move |_, _, cx| {
+                    let _ = keyboard_owner.update(cx, |view, cx| view.confirm_history_action(kind, cx));
+                    false
+                })
+                .on_cancel(move |_, _, cx| {
+                    cancel_owner.update(cx, |view, cx| view.cancel_confirmation(kind, cx)).unwrap_or(true)
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(prompt)
+                        .when(matches!(kind, HistoryConfirmation::ClearHistory(_)), |body| {
+                            body.child(
+                                div()
+                                    .text_sm()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(tr(
+                                        language,
+                                        "此操作无法撤销；可先导出备份。",
+                                        "This cannot be undone. Export a backup first if needed.",
+                                    )),
+                            )
+                        })
+                        .when_some(error, |body, error| {
+                            body.child(Alert::error("history-confirm-error", error).small())
+                        }),
+                )
+                .footer(DialogFooter::new()
+                    .child(Button::new("history-confirm-cancel")
+                        .outline()
+                        .label(tr(language, "取消", "Cancel"))
+                        .disabled(pending)
+                        .on_click({
+                            let owner = owner.clone();
+                            move |_, window, cx| {
+                                if owner.update(cx, |view, cx| view.cancel_confirmation(kind, cx)).unwrap_or(false) {
+                                    window.close_dialog(cx);
+                                }
+                            }
+                        }))
+                    .child(Button::new("history-confirm-submit")
+                        .danger()
+                        .label(if pending {
+                            match kind {
+                                HistoryConfirmation::DeleteGroup(_) => tr(
+                                    language,
+                                    "正在删除分组…",
+                                    "Deleting group…",
+                                ),
+                                HistoryConfirmation::ClearHistory(_) => {
+                                    tr(language, "正在清理…", "Clearing…")
+                                }
+                                HistoryConfirmation::DeleteSelected => {
+                                    tr(language, "正在删除…", "Deleting…")
+                                }
+                            }
+                            .to_owned()
+                        } else {
+                            confirm_label
+                        })
+                        .disabled(pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = confirm_owner.update(cx, |view, cx| view.confirm_history_action(kind, cx));
+                        })))
+        });
+        cx.notify();
+    }
+
     fn open_clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.group_save_pending || self.group_delete_pending || self.clear_pending {
+        if self.group_save_pending
+            || self.group_delete_pending
+            || self.clear_pending
+            || self.batch_pending
+        {
             return;
         }
         self.reset_selection();
@@ -7573,9 +7955,15 @@ impl ClipboardView {
         window.focus(&self.list_focus, cx);
         if self.skip_clear_confirm {
             self.clear_confirm_open = false;
+            self.sync_confirmation_dialog(window, cx);
             self.clear_history(cx);
         } else {
             self.clear_confirm_open = true;
+            self.open_history_confirmation(
+                HistoryConfirmation::ClearHistory(self.history.group_id),
+                window,
+                cx,
+            );
         }
         cx.notify();
     }
@@ -7610,7 +7998,6 @@ impl ClipboardView {
                 cx,
             );
         }
-        let view = cx.entity();
         let empty_message = if self.history.loading {
             tr(self.language, "正在加载…", "Loading…")
         } else if self.search.read(cx).value().is_empty() {
@@ -7732,7 +8119,11 @@ impl ClipboardView {
                                                 .map(|(chinese, english, accessible)| {
                                                     Tab::new()
                                                         .label(tr(self.language, chinese, english))
-                                                        .aria_label(tr(self.language, chinese, accessible))
+                                                        .aria_label(tr(
+                                                            self.language,
+                                                            chinese,
+                                                            accessible,
+                                                        ))
                                                         .flex_1()
                                                 }),
                                             ),
@@ -7797,138 +8188,6 @@ impl ClipboardView {
                                 })),
                         ),
                     ("group-editor", self.group_rename_id.unwrap_or(0) as usize),
-                    cx,
-                ))
-            })
-            .when_some(self.group_delete_id, |container, id| {
-                let (name, count) = self
-                    .groups
-                    .iter()
-                    .find(|group| group.id == id)
-                    .map(|group| (group.name.clone(), group.item_count))
-                    .unwrap_or_else(|| {
-                        (tr(self.language, "该分组", "this group").into(), 0)
-                    });
-                let prompt = if self.language == LanguagePreference::English {
-                    format!("Delete “{name}”? {count} items will move to the default group.")
-                } else {
-                    format!("删除「{name}」？{count} 条记录将移到默认分组。")
-                };
-                container.child(visual::reveal(
-                    div()
-                        .px(px(PAGE_PADDING))
-                        .pb_2()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_sm()
-                                .child(prompt),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .gap_2()
-                                .child(
-                                    Button::new("group-delete-cancel")
-                                        .small()
-                                        .ghost()
-                                        .label(tr(self.language, "取消", "Cancel"))
-                                        .disabled(self.group_delete_pending)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.group_delete_id = None;
-                                            window.focus(&this.list_focus, cx);
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new("group-delete-confirm")
-                                        .small()
-                                        .danger()
-                                        .label(tr(
-                                            self.language,
-                                            "保留记录并删除分组",
-                                            "Delete group and keep items",
-                                        ))
-                                        .disabled(self.group_delete_pending)
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.delete_group(cx)),
-                                        ),
-                                ),
-                        ),
-                    ("group-delete", id as usize),
-                    cx,
-                ))
-            })
-            .when(self.clear_confirm_open, |container| {
-                let name = self
-                    .history
-                    .group_id
-                    .and_then(|id| self.groups.iter().find(|group| group.id == id))
-                    .map(|group| group.name.as_str())
-                    .unwrap_or(tr(self.language, "默认分组", "Default"));
-                let prompt = if self.language == LanguagePreference::English {
-                    format!(
-                        "Clear unpinned, non-favorite items from “{name}”? Search, favorites, and type filters do not change the scope."
-                    )
-                } else {
-                    format!(
-                        "清理「{name}」中未置顶且未收藏的记录？搜索、收藏和类型筛选不影响清理范围。"
-                    )
-                };
-                container.child(visual::reveal(
-                    div()
-                        .px(px(PAGE_PADDING))
-                        .pb_2()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(div().text_sm().child(prompt))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(
-                                    self.language,
-                                    "此操作无法撤销；可先导出备份。",
-                                    "This cannot be undone. Export a backup first if needed.",
-                                )),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .gap_2()
-                                .child(
-                                    Button::new("clear-history-cancel")
-                                        .small()
-                                        .ghost()
-                                        .label(tr(self.language, "取消", "Cancel"))
-                                        .disabled(self.clear_pending)
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.clear_confirm_open = false;
-                                            window.focus(&this.list_focus, cx);
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new("clear-history-confirm")
-                                        .small()
-                                        .danger()
-                                        .label(if self.clear_pending {
-                                            tr(self.language, "正在清理…", "Clearing…")
-                                        } else {
-                                            tr(self.language, "确认清理", "Clear")
-                                        })
-                                        .disabled(self.clear_pending)
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.clear_history(cx)),
-                                        ),
-                                ),
-                        ),
-                    ("clear-history", self.history.group_id.unwrap_or(0) as usize),
                     cx,
                 ))
             })
@@ -8051,71 +8310,18 @@ impl ClipboardView {
                                 .danger()
                                 .label(tr(self.language, "删除选中", "Delete selected"))
                                 .disabled(self.batch_pending || self.selected_ids.is_empty())
-                                .on_click(cx.listener(|this, _, _, cx| {
+                                .on_click(cx.listener(|this, _, window, cx| {
                                     this.batch_confirm_open = true;
                                     this.clear_confirm_open = false;
                                     this.group_delete_id = None;
-                                    cx.notify();
+                                    this.open_history_confirmation(
+                                        HistoryConfirmation::DeleteSelected,
+                                        window,
+                                        cx,
+                                    );
                                 })),
                         ),
                     ("batch-toolbar", self.history.group_id.unwrap_or(0) as usize),
-                    cx,
-                ))
-            })
-            .when(self.batch_confirm_open, |container| {
-                let prompt = if self.language == LanguagePreference::English {
-                    format!(
-                        "Delete the {} selected items? This includes pinned and favorite items and cannot be undone.",
-                        self.selected_ids.len()
-                    )
-                } else {
-                    format!(
-                        "确定删除选中的 {} 条记录？包含置顶和收藏，无法撤销。",
-                        self.selected_ids.len()
-                    )
-                };
-                container.child(visual::reveal(
-                    div()
-                        .px(px(PAGE_PADDING))
-                        .pb_2()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(div().text_sm().child(prompt))
-                        .child(
-                            div()
-                                .flex()
-                                .justify_end()
-                                .gap_2()
-                                .child(
-                                    Button::new("batch-delete-cancel")
-                                        .small()
-                                        .ghost()
-                                        .label(tr(self.language, "取消", "Cancel"))
-                                        .disabled(self.batch_pending)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.batch_confirm_open = false;
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new("batch-delete-confirm")
-                                        .small()
-                                        .danger()
-                                        .label(if self.batch_pending {
-                                            tr(self.language, "正在删除…", "Deleting…").to_owned()
-                                        } else if self.language == LanguagePreference::English {
-                                            format!("Delete {} items", self.selected_ids.len())
-                                        } else {
-                                            format!("确认删除 {} 条", self.selected_ids.len())
-                                        })
-                                        .disabled(self.batch_pending)
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.delete_selected(cx)),
-                                        ),
-                                ),
-                        ),
-                    ("batch-confirm", self.selected_ids.len()),
                     cx,
                 ))
             })
@@ -8148,7 +8354,7 @@ impl ClipboardView {
                                 .ghost()
                                 .label(tr(self.language, "返回顶部 ↑", "Back to top ↑"))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.scroll.scroll_to(ListOffset::default());
+                                    this.scroll_to_top();
                                     cx.notify();
                                 })),
                         )
@@ -8172,7 +8378,9 @@ impl ClipboardView {
                         }
                     }))
                     .on_action(cx.listener(|this, _: &PreviewSelected, window, cx| {
-                        if !this.batch_mode && let Some(id) = this.history.selected {
+                        if !this.batch_mode
+                            && let Some(id) = this.history.selected
+                        {
                             this.open_preview(id, window, cx);
                         }
                     }))
@@ -8233,17 +8441,23 @@ impl ClipboardView {
                         }
                     }))
                     .on_action(cx.listener(|this, _: &PastePlainTextSelected, window, cx| {
-                        if !this.batch_mode && let Some(id) = this.history.selected {
+                        if !this.batch_mode
+                            && let Some(id) = this.history.selected
+                        {
                             this.copy_or_paste_plain_text(id, window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &PasteSelected, window, cx| {
-                        if !this.batch_mode && let Some(id) = this.history.selected {
+                        if !this.batch_mode
+                            && let Some(id) = this.history.selected
+                        {
                             this.paste_selected(id, window, cx);
                         }
                     }))
                     .on_action(cx.listener(|this, _: &DeleteSelected, _, cx| {
-                        if !this.batch_mode && let Some(id) = this.history.selected {
+                        if !this.batch_mode
+                            && let Some(id) = this.history.selected
+                        {
                             this.send(Command::Delete(id), cx);
                         }
                     }))
@@ -8261,10 +8475,24 @@ impl ClipboardView {
                     })
                     .when(!self.history.items.is_empty(), |container| {
                         container.child(
-                            list(self.scroll.clone(), move |index, _, cx| {
-                                view.update(cx, |this, cx| this.render_row(index, cx))
-                            })
-                            .size_full(),
+                            div()
+                                .relative()
+                                .size_full()
+                                .child(
+                                    v_virtual_list(
+                                        cx.entity().clone(),
+                                        "history-virtual-list",
+                                        self.row_sizes.clone(),
+                                        |this, visible, _, cx| {
+                                            visible
+                                                .map(|index| this.render_row(index, cx))
+                                                .collect()
+                                        },
+                                    )
+                                    .track_scroll(&self.scroll)
+                                    .size_full(),
+                                )
+                                .vertical_scrollbar(&self.scroll),
                         )
                     }),
             )

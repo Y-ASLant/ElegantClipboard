@@ -189,7 +189,8 @@ impl History {
             if path
                 .parent()
                 .and_then(|parent| std::fs::canonicalize(parent).ok())
-                == Some(root.clone())
+                .as_deref()
+                == Some(root.as_path())
             {
                 let _ = std::fs::remove_file(path);
             }
