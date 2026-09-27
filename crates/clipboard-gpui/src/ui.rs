@@ -2202,7 +2202,7 @@ impl ClipboardView {
             let options = cx.update(|cx| WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(820.), px(500.)),
+                    size(px(1280.), px(720.)),
                     cx,
                 ))),
                 titlebar: Some(TitlebarOptions {
