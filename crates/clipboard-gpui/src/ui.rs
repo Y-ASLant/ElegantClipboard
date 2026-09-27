@@ -69,6 +69,15 @@ use std::{
 use tray_icon::TrayIcon;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_SHIFT};
 
+fn window_shell(cx: &App) -> Div {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .bg(cx.theme().background)
+        .text_color(cx.theme().foreground)
+}
+
 fn history_row_height(
     item: &clipboard_core::database::ClipboardItem,
     display: DisplayPreference,
@@ -1413,15 +1422,10 @@ impl Render for HoverPreviewWindowView {
         let owner = self.owner.clone();
         let id = self.id;
         let generation = self.generation;
-        div()
+        window_shell(cx)
             .id("hover-preview-window")
-            .size_full()
             .p_3()
-            .flex()
-            .flex_col()
             .gap_2()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
             .border_1()
             .border_color(cx.theme().border)
             .rounded_md()
@@ -5800,9 +5804,6 @@ impl ClipboardView {
             .size_full()
             .p(px(PAGE_PADDING))
             .gap_3()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .font_family("Microsoft YaHei UI")
             .on_action(
                 cx.listener(|this, _: &ClosePreview, window, cx| this.close_preview(window, cx)),
             )
@@ -7470,12 +7471,7 @@ impl Render for ClipboardView {
             None
         };
         self.drag_motion.update(drag_request, &self.history.items);
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+        window_shell(cx)
             .font_family("Microsoft YaHei UI")
             .child(
                 div()
@@ -8049,9 +8045,6 @@ impl ClipboardView {
             .flex()
             .flex_col()
             .size_full()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .font_family("Microsoft YaHei UI")
             .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
                 this.dismiss_or_hide(window, cx);
             }))

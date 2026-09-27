@@ -57,11 +57,10 @@ impl History {
             bail!("合并后的文件路径超过 256 项或 1 MiB");
         }
 
-        let text = (!text_parts.is_empty()).then(|| text_parts.join("\n"));
-        if text.is_none() && files.is_empty() {
-            bail!("选中的记录没有可合并的内容");
-        }
-        Ok(MergedContent { text, files })
+        Ok(MergedContent {
+            text: Some(text_parts.join("\n")),
+            files,
+        })
     }
 }
 

@@ -245,12 +245,7 @@ impl Render for SettingsWindowView {
                 .groups(groups)
         });
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+        window_shell(cx)
             .font_family("Microsoft YaHei UI")
             .child(
                 TitleBar::new().bg(cx.theme().background).child(

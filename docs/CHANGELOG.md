@@ -8,6 +8,7 @@
 
 - 使用 Rust、GPUI 和 gpui-kit 构建 Windows 原生应用，移除旧版前端运行时及构建链。代码划分为 `clipboard-core`（数据与业务逻辑）、`clipboard-platform`（Windows 集成）和 `clipboard-gpui`（界面）。
 - 默认数据目录改为 Windows 用户 LocalAppData 下的 `ElegantClipboard-GPUI` 应用目录；不会自动读取或覆盖旧版数据库。可按 [Windows GPUI 状态](WINDOWS_MVP.md)中的说明，向空 GPUI 数据目录显式导入旧数据库或旧版 ZIP 备份。
+- 主窗口、设置窗口与悬停预览复用 GPUI 窗口骨架；内部页面继承窗口主题，删除重复样式声明。合并记录流程移除不可达的空结果分支，保留既有返回类型与导入兼容性。
 
 ### 当前功能
 
