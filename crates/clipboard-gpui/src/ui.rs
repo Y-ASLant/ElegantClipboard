@@ -37,6 +37,7 @@ use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
 use directories::UserDirs;
+use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -618,7 +619,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                                 .timer(Duration::from_millis(250))
                                 .await;
                             settings_view.update(cx, |view, cx| {
-                                view.open_settings_window(cx);
+                                view.open_settings_window(SettingsPage::Data, cx);
                             });
                         })
                         .detach();
@@ -846,7 +847,7 @@ struct ClipboardView {
     row_click_task: Option<Task<()>>,
     save_as_pending: Option<i64>,
     list_focus: FocusHandle,
-    scroll: UniformListScrollHandle,
+    scroll: ListState,
     monitoring: bool,
     onboarding_completed: bool,
     onboarding_step: usize,
@@ -870,6 +871,7 @@ struct ClipboardView {
     autostart: bool,
     autostart_pending: bool,
     data_size: Option<DataSizeInfo>,
+    daily_counts: Option<Vec<(String, i64)>>,
     data_size_pending: bool,
     database_maintenance_pending: bool,
     export_pending: bool,
@@ -1242,7 +1244,12 @@ impl Render for HoverPreviewWindowView {
 }
 
 impl SettingsWindowView {
-    fn new(owner: WeakEntity<ClipboardView>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        owner: WeakEntity<ClipboardView>,
+        page: SettingsPage,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let entity = owner
             .upgrade()
             .expect("settings window requires its owner view");
@@ -1258,7 +1265,7 @@ impl SettingsWindowView {
         Self {
             owner,
             _owner_subscription: subscription,
-            page: SettingsPage::General,
+            page,
             shortcut_input: None,
             shortcut_editing: None,
             shortcut_capture_focus: cx.focus_handle(),
@@ -1687,7 +1694,7 @@ impl ClipboardView {
                 this.clear_confirm_open = false;
                 this.reset_selection();
                 this.history.begin_search();
-                this.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                this.scroll.scroll_to(ListOffset::default());
                 this.search_task = Some(cx.spawn(async move |view, cx| {
                     cx.background_executor()
                         .timer(Duration::from_millis(150))
@@ -1738,7 +1745,9 @@ impl ClipboardView {
                                 cx.notify();
                             }
                         }
-                        TrayCommand::Settings => this.open_settings_window(cx),
+                        TrayCommand::Settings => {
+                            this.open_settings_window(SettingsPage::General, cx)
+                        }
                         TrayCommand::ClearHistory => {
                             this.paste_target = None;
                             this.show_window(window, cx);
@@ -2006,7 +2015,7 @@ impl ClipboardView {
             row_click_task: None,
             save_as_pending: None,
             list_focus,
-            scroll: UniformListScrollHandle::new(),
+            scroll: ListState::new(0, ListAlignment::Top, px(200.)),
             monitoring: startup.monitoring,
             onboarding_completed,
             onboarding_step: 0,
@@ -2030,6 +2039,7 @@ impl ClipboardView {
             autostart: autostart.unwrap_or(false),
             autostart_pending: false,
             data_size: None,
+            daily_counts: None,
             data_size_pending: false,
             database_maintenance_pending: false,
             export_pending: false,
@@ -2158,7 +2168,12 @@ impl ClipboardView {
         }
     }
 
-    fn open_settings_window(&mut self, cx: &mut Context<Self>) {
+    fn refresh_daily_counts(&mut self, cx: &mut Context<Self>) {
+        let start = chrono::Local::now().date_naive() - chrono::Duration::days(6);
+        self.send(Command::QueryDailyCounts(start.to_string()), cx);
+    }
+
+    fn open_settings_window(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
         self.close_hover_preview(cx);
         if let Some(handle) = self.settings_window {
@@ -2176,6 +2191,7 @@ impl ClipboardView {
 
         self.settings_window_opening = true;
         self.refresh_data_size(cx);
+        self.refresh_daily_counts(cx);
         cx.notify();
         cx.spawn(async move |owner, cx| {
             let Some(owner_entity) = owner.upgrade() else {
@@ -2212,7 +2228,7 @@ impl ClipboardView {
                     true
                 });
                 let settings =
-                    cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), window, cx));
+                    cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), page, window, cx));
                 cx.new(|cx| Root::new(settings, window, cx))
             });
             owner_entity.update(cx, |owner, cx| {
@@ -2746,7 +2762,7 @@ impl ClipboardView {
         cx.defer_in(window, |this, window, cx| {
             this.refresh_group_select(window, cx)
         });
-        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.scroll.scroll_to(ListOffset::default());
         self.query(cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
@@ -2785,7 +2801,7 @@ impl ClipboardView {
             self.history.set_favorite_filter(true);
         }
         self.refresh_group_select(window, cx);
-        self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.scroll.scroll_to(ListOffset::default());
         self.query(cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
@@ -3041,7 +3057,7 @@ impl ClipboardView {
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.history.begin_search();
-            self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            self.scroll.scroll_to(ListOffset::default());
             self.query(cx);
         }
         if self.preview_editing || self.preview_save_pending {
@@ -3075,7 +3091,7 @@ impl ClipboardView {
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.history.set_group(None);
             self.refresh_group_select(window, cx);
-            self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+            self.scroll.scroll_to(ListOffset::default());
             if !self.preview_editing && !self.preview_save_pending {
                 self.preview.close();
                 self.preview_source_hash = None;
@@ -3469,7 +3485,7 @@ impl ClipboardView {
                 {
                     self.reset_selection();
                     self.history.set_group(None);
-                    self.scroll.scroll_to_item(0, ScrollStrategy::Top);
+                    self.scroll.scroll_to(ListOffset::default());
                     self.query(cx);
                 }
                 self.groups = groups;
@@ -3605,6 +3621,7 @@ impl ClipboardView {
                             format!("已删除全部 {count} 条历史，设置和分组已保留")
                         };
                         self.is_error = false;
+                        self.refresh_daily_counts(cx);
                         window.focus(&self.list_focus, cx);
                     }
                     Err(error) => {
@@ -3674,6 +3691,21 @@ impl ClipboardView {
                 generation,
             } => {
                 let applied = self.history.apply(items, total, generation);
+                if applied {
+                    let scroll_top = self.scroll.logical_scroll_top();
+                    let count = self.history.items.len();
+                    self.scroll.reset_with_uniform_height(
+                        count,
+                        px(visual::row_height(
+                            self.display.card_density,
+                            self.display.card_max_lines,
+                        )),
+                    );
+                    self.scroll.scroll_to(ListOffset {
+                        item_ix: scroll_top.item_ix.min(count.saturating_sub(1)),
+                        offset_in_item: scroll_top.offset_in_item,
+                    });
+                }
                 if applied
                     && self
                         .hover_preview
@@ -4433,6 +4465,7 @@ impl ClipboardView {
                 match result {
                     Ok(display) => {
                         self.display = display;
+                        self.scroll.remeasure();
                         if !display.show_category_filter {
                             self.select_category(Some(ContentCategory::All), window, cx);
                         }
@@ -4628,6 +4661,21 @@ impl ClipboardView {
                     }
                 }
             }
+            Event::DailyCounts(result) => match result {
+                Ok(counts) => self.daily_counts = Some(counts),
+                Err(error) => {
+                    self.daily_counts = None;
+                    self.message = format!(
+                        "{}: {error}",
+                        tr(
+                            self.language,
+                            "统计每日历史失败",
+                            "Failed to count daily history"
+                        )
+                    );
+                    self.is_error = true;
+                }
+            },
             Event::DatabaseOptimized(size) => {
                 self.database_maintenance_pending = false;
                 self.data_size = Some(size);
@@ -5620,7 +5668,7 @@ impl ClipboardView {
     fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
         if let Some(index) = self.history.select_relative(direction) {
-            self.scroll.scroll_to_item(index, ScrollStrategy::Nearest);
+            self.scroll.scroll_to_reveal_item(index);
         }
         cx.notify();
     }
@@ -5647,24 +5695,24 @@ impl ClipboardView {
     fn select_index(&mut self, index: usize, strategy: ScrollStrategy, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
         if let Some(index) = self.history.select_index(index) {
-            self.scroll.scroll_to_item(index, strategy);
+            if strategy == ScrollStrategy::Top {
+                self.scroll.scroll_to(ListOffset {
+                    item_ix: index,
+                    offset_in_item: px(0.),
+                });
+            } else {
+                self.scroll.scroll_to_reveal_item(index);
+            }
         }
         cx.notify();
     }
 
     fn page_step(&self) -> isize {
-        self.scroll
-            .0
-            .borrow()
-            .last_item_size
-            .map(|size| {
-                ((f32::from(size.item.height)
-                    / visual::row_height(self.display.card_density, self.display.card_max_lines))
-                .floor() as usize)
-                    .saturating_sub(1)
-                    .max(1) as isize
-            })
-            .unwrap_or(1)
+        ((f32::from(self.scroll.viewport_bounds().size.height)
+            / visual::row_height(self.display.card_density, self.display.card_max_lines))
+        .floor() as usize)
+            .saturating_sub(1)
+            .max(1) as isize
     }
 
     fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
@@ -5918,9 +5966,8 @@ impl ClipboardView {
                     if !ticks.is_multiple_of(visual::HISTORY_DRAG_SCROLL_TICKS) {
                         return true;
                     }
-                    let current = scroll_target.unwrap_or_else(|| {
-                        this.scroll.0.borrow().base_handle.logical_scroll_top().0
-                    });
+                    let current =
+                        scroll_target.unwrap_or_else(|| this.scroll.logical_scroll_top().item_ix);
                     let next = next_drag_scroll_index(
                         current,
                         this.history.items.len(),
@@ -5928,7 +5975,10 @@ impl ClipboardView {
                     );
                     if next != current {
                         scroll_target = Some(next);
-                        this.scroll.scroll_to_item_strict(next, ScrollStrategy::Top);
+                        this.scroll.scroll_to(ListOffset {
+                            item_ix: next,
+                            offset_in_item: px(0.),
+                        });
                     }
                     let target = drag_edge_target_index(
                         next,
@@ -6076,10 +6126,7 @@ impl ClipboardView {
         };
         let pinned = item.is_pinned;
         let detail = if is_image {
-            match (item.image_width, item.image_height) {
-                (Some(width), Some(height)) => Some(format!("{width} × {height}")),
-                _ => Some(tr(self.language, "尺寸未知", "Unknown size").into()),
-            }
+            None
         } else if is_files {
             let count = item
                 .file_paths
@@ -6103,11 +6150,26 @@ impl ClipboardView {
         } else {
             Some(format!("{} 字符", item.char_count.unwrap_or(0)))
         };
-        let mut summary = if pinned {
-            format!("{} · {kind}", tr(self.language, "置顶", "Pinned"))
+        let mut summary = if self.display.show_time {
+            format_card_time(
+                &item.created_at,
+                self.display.time_format,
+                self.language,
+                chrono::Local::now().naive_local(),
+            )
         } else {
             kind.to_owned()
         };
+        if pinned {
+            summary.push_str(tr(self.language, " · 置顶", " · Pinned"));
+        }
+        if self.display.show_time
+            && !is_image
+            && !matches!(item.content_type.as_str(), "text" | "url")
+        {
+            summary.push_str(" · ");
+            summary.push_str(kind);
+        }
         let source_icon = item
             .source_app_icon
             .as_deref()
@@ -6117,15 +6179,7 @@ impl ClipboardView {
         } else {
             (false, false)
         };
-        if show_source_name
-            && let Some(name) = item
-                .source_app_name
-                .as_deref()
-                .filter(|name| !name.is_empty())
-        {
-            summary.push_str(" · ");
-            summary.push_str(name);
-        }
+
         if let Some(detail) = detail {
             summary.push_str(" · ");
             summary.push_str(&detail);
@@ -6151,54 +6205,59 @@ impl ClipboardView {
         let selected = !self.batch_mode && self.history.selected == Some(id);
         let marked = self.selected_ids.contains(&id);
         let favorite = item.is_favorite;
-        let saved_preview = item.preview.as_deref().unwrap_or(kind);
-        let search = self.search.read(cx).value();
-        let file_names = is_files
-            .then_some(item.file_paths.as_deref())
-            .flatten()
-            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
-            .filter(|paths| paths.len() > 1)
-            .map(|paths| {
-                let mut names = paths
-                    .iter()
-                    .take(3)
-                    .map(|path| {
-                        Path::new(path)
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| path.clone())
-                    })
-                    .collect::<Vec<_>>()
-                    .join(if self.language == LanguagePreference::Chinese {
-                        "、"
-                    } else {
-                        ", "
-                    });
-                if paths.len() > 3 {
-                    names.push('…');
-                }
-                names
+        let (preview_text, highlights) = if is_image {
+            (String::new(), Vec::new())
+        } else {
+            let saved_preview = item.preview.as_deref().unwrap_or(kind);
+            let search = self.search.read(cx).value();
+            let file_names = is_files
+                .then_some(item.file_paths.as_deref())
+                .flatten()
+                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                .filter(|paths| paths.len() > 1)
+                .map(|paths| {
+                    let mut names = paths
+                        .iter()
+                        .take(3)
+                        .map(|path| {
+                            Path::new(path)
+                                .file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| path.clone())
+                        })
+                        .collect::<Vec<_>>()
+                        .join(if self.language == LanguagePreference::Chinese {
+                            "、"
+                        } else {
+                            ", "
+                        });
+                    if paths.len() > 3 {
+                        names.push('…');
+                    }
+                    names
+                });
+            let preview_text = file_names.unwrap_or_else(|| {
+                item.text_content
+                    .as_deref()
+                    .and_then(|full| search_excerpt(full, saved_preview, &search))
+                    .unwrap_or_else(|| saved_preview.to_owned())
             });
-        let preview_text = file_names.unwrap_or_else(|| {
-            item.text_content
-                .as_deref()
-                .and_then(|full| search_excerpt(full, saved_preview, &search))
-                .unwrap_or_else(|| saved_preview.to_owned())
-        });
-        let highlights = search_highlight_ranges(&preview_text, &search)
-            .into_iter()
-            .map(|range| {
-                (
-                    range,
-                    HighlightStyle {
-                        color: Some(cx.theme().primary),
-                        background_color: Some(cx.theme().primary.opacity(0.18)),
-                        font_weight: Some(FontWeight::SEMIBOLD),
-                        ..Default::default()
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
+            let highlights = search_highlight_ranges(&preview_text, &search)
+                .into_iter()
+                .map(|range| {
+                    (
+                        range,
+                        HighlightStyle {
+                            color: Some(cx.theme().primary),
+                            background_color: Some(cx.theme().primary.opacity(0.18)),
+                            font_weight: Some(FontWeight::SEMIBOLD),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect::<Vec<_>>();
+            (preview_text, highlights)
+        };
         let drag = HistoryDrag {
             id,
             pinned,
@@ -6230,7 +6289,11 @@ impl ClipboardView {
             cx.theme().background
         };
         let card_spacing = visual::card_spacing(self.display.card_density);
-        let (thumbnail_width, thumbnail_height) = visual::thumbnail_size(self.display.card_density);
+        let (thumbnail_width, thumbnail_height) = if is_image {
+            visual::thumbnail_size(self.display.card_density)
+        } else {
+            (48., 36.)
+        };
         let row = div()
             .id(("history-row", id as usize))
             .on_mouse_down(
@@ -6240,7 +6303,11 @@ impl ClipboardView {
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 this.set_hover_source(id, *hovered, cx);
             }))
-            .h(px(visual::row_height(self.display.card_density, self.display.card_max_lines)))
+            .h(px(if is_image {
+                visual::image_row_height(self.display.card_density)
+            } else {
+                visual::row_height(self.display.card_density, self.display.card_max_lines)
+            }))
             .px(px(PAGE_PADDING))
             .on_drag_move(
                 cx.listener(move |this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
@@ -6318,8 +6385,9 @@ impl ClipboardView {
             .child(
                 div()
                     .h_full()
+                    .group("")
                     .when(self.batch_mode, |card| card.px_3())
-                    .when(!self.batch_mode, |card| card.pl(px(38.)).pr(px(38.)))
+                    .when(!self.batch_mode, |card| card.pl(px(22.)).pr(px(22.)))
                     .py(px(card_spacing))
                     .rounded_md()
                     .border_1()
@@ -6362,115 +6430,15 @@ impl ClipboardView {
                     .gap(px(card_spacing))
                     .child(
                         div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(if file_warning.is_some() {
-                                        cx.theme().danger
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1()
-                                    .child(
-                                        Icon::new(IconName::EllipsisVertical)
-                                            .xsmall()
-                                            .text_color(cx.theme().muted_foreground),
-                                    )
-                                    .when_some(
-                                        show_source_icon.then_some(source_icon).flatten(),
-                                        |header, path| {
-                                            header.child(
-                                                img(std::path::PathBuf::from(path))
-                                                    .w(px(16.))
-                                                    .h(px(16.))
-                                                    .object_fit(ObjectFit::Contain)
-                                                    .with_fallback(|| div().into_any_element()),
-                                            )
-                                        },
-                                    )
-                                    .child(summary),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _, _, cx| {
-                                                    this.cancel_pending_row_click();
-                                                    cx.stop_propagation();
-                                                }),
-                                            )
-                                            .child(
-                                                Button::new(("select", id as usize))
-                                                    .ghost()
-                                                    .xsmall()
-                                                    .h(px(24.))
-                                                    .icon(IconName::Check)
-                                                    .tooltip(if marked {
-                                                        tr(self.language, "取消选择；Shift 点击可连选", "Deselect; Shift-click to select a range")
-                                                    } else {
-                                                        tr(self.language, "选择；Shift 点击可连选", "Select; Shift-click to select a range")
-                                                    })
-                                                    .accessibility_label(if marked {
-                                                        tr(self.language, "取消选择", "Deselect")
-                                                    } else {
-                                                        tr(self.language, "选择", "Select")
-                                                    })
-                                                    .selected(marked)
-                                                    .disabled(
-                                                        self.batch_pending || self.history.loading,
-                                                    )
-                                                    .on_click(cx.listener(
-                                                        move |this, event: &ClickEvent, _, cx| {
-                                                            cx.stop_propagation();
-                                                            this.toggle_selection(
-                                                                id,
-                                                                event.modifiers().shift,
-                                                                cx,
-                                                            );
-                                                        },
-                                                    )),
-                                            ),
-                                    )
-                                    .when(self.display.show_time, |header| {
-                                        header.child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(cx.theme().muted_foreground)
-                                                .child(format_card_time(
-                                                    &item.created_at,
-                                                    self.display.time_format,
-                                                    self.language,
-                                                    chrono::Local::now().naive_local(),
-                                                )),
-                                        )
-                                    }),
-                            ),
-                    )
-                    .child(
-                        div()
                             .flex_1()
                             .min_h_0()
                             .overflow_hidden()
                             .rounded_sm()
-                            .bg(cx.theme().muted)
+                            .when(is_image, |body| body.bg(cx.theme().muted))
                             .px_2()
                             .py(px(card_spacing))
                             .flex()
-                            .items_center()
+                            .when(is_image, |body| body.justify_center())
                             .gap_3()
                             .when(show_file_icon, |body| {
                                 body.child(
@@ -6496,6 +6464,9 @@ impl ClipboardView {
                                         )),
                                 )
                             })
+                            .when(is_image && thumbnail_path.is_none(), |body| {
+                                body.child(image_unavailable)
+                            })
                             .when(thumbnail_path.is_some(), |body| {
                                 body.child(
                                     div()
@@ -6518,223 +6489,367 @@ impl ClipboardView {
                                         }),
                                 )
                             })
+                            .when(!is_image, |body| {
+                                body.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_sm()
+                                        .text_color(if file_warning.is_some() {
+                                            cx.theme().danger
+                                        } else {
+                                            cx.theme().foreground
+                                        })
+                                        .line_height(px(20.))
+                                        .line_clamp(self.display.card_max_lines as usize)
+                                        .text_ellipsis()
+                                        .child(
+                                            StyledText::new(preview_text)
+                                                .with_highlights(highlights),
+                                        ),
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .h(px(24.))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .text_xs()
+                            .text_color(if file_warning.is_some() {
+                                cx.theme().danger
+                            } else {
+                                cx.theme().muted_foreground
+                            })
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
-                                    .text_sm()
-                                    .text_color(if file_warning.is_some() {
-                                        cx.theme().danger
-                                    } else {
-                                        cx.theme().foreground
-                                    })
-                                    .line_height(px(20.))
-                                    .line_clamp(self.display.card_max_lines as usize)
+                                    .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(StyledText::new(preview_text).with_highlights(highlights)),
-                            ),
+                                    .child(summary),
+                            )
+                            .when(self.display.show_source_app, |footer| {
+                                footer.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .max_w(px(118.))
+                                        .overflow_hidden()
+                                        .group_hover("", |source| source.invisible())
+                                        .when_some(
+                                            show_source_icon.then_some(source_icon).flatten(),
+                                            |source, path| {
+                                                source.child(
+                                                    img(PathBuf::from(path))
+                                                        .w(px(16.))
+                                                        .h(px(16.))
+                                                        .flex_none()
+                                                        .object_fit(ObjectFit::Contain)
+                                                        .with_fallback(|| div().into_any_element()),
+                                                )
+                                            },
+                                        )
+                                        .when(
+                                            show_source_name
+                                                && item
+                                                    .source_app_name
+                                                    .as_deref()
+                                                    .is_some_and(|name| !name.is_empty()),
+                                            |source| {
+                                                source.child(
+                                                    div()
+                                                        .min_w_0()
+                                                        .overflow_hidden()
+                                                        .text_ellipsis()
+                                                        .child(
+                                                            item.source_app_name
+                                                                .clone()
+                                                                .unwrap_or_default(),
+                                                        ),
+                                                )
+                                            },
+                                        ),
+                                )
+                            }),
                     )
-                    .when(!self.batch_mode, |card| card.child(
-                        div()
-                            .flex()
-                            .flex_none()
-                            .items_center()
-                            .gap_1()
-                            .justify_end()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.cancel_pending_row_click();
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .child(
-                                Button::new(("preview", id as usize))
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(IconName::Eye)
-                                    .tooltip(tr(self.language, "查看", "View"))
-                                    .accessibility_label(tr(self.language, "查看", "View"))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
+                    .when(!self.batch_mode, |card| {
+                        card.child(
+                            div()
+                                .absolute()
+                                .bottom(px(card_spacing))
+                                .right(px(22.))
+                                .h(px(24.))
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .rounded_sm()
+                                .bg(cx.theme().background)
+                                .invisible()
+                                .group_hover("", |bar| bar.visible())
+                                .when(selected, |bar| bar.visible())
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _, cx| {
+                                        this.cancel_pending_row_click();
                                         cx.stop_propagation();
-                                        this.open_preview(id, window, cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new(("favorite", id as usize))
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(if favorite {
-                                        IconName::HeartOff
-                                    } else {
-                                        IconName::Heart
-                                    })
-                                    .tooltip(if favorite {
-                                        tr(self.language, "取消收藏", "Unfavorite")
-                                    } else {
-                                        tr(self.language, "收藏", "Favorite")
-                                    })
-                                    .accessibility_label(if favorite {
-                                        tr(self.language, "取消收藏", "Unfavorite")
-                                    } else {
-                                        tr(self.language, "收藏", "Favorite")
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.send(Command::ToggleFavorite(id), cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new(("pin", id as usize))
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(if pinned {
-                                        IconName::StarOff
-                                    } else {
-                                        IconName::Star
-                                    })
-                                    .tooltip(if pinned {
-                                        tr(self.language, "取消置顶", "Unpin")
-                                    } else {
-                                        tr(self.language, "置顶", "Pin")
-                                    })
-                                    .accessibility_label(if pinned {
-                                        tr(self.language, "取消置顶", "Unpin")
-                                    } else {
-                                        tr(self.language, "置顶", "Pin")
-                                    })
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.send(Command::TogglePin(id), cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new(("move-group", id as usize))
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(IconName::Folder)
-                                    .tooltip(tr(self.language, "移动到分组", "Move to group"))
-                                    .accessibility_label(tr(
-                                        self.language,
-                                        "移动到分组",
-                                        "Move to group",
-                                    ))
-                                    .disabled(
-                                        self.group_move_pending
-                                            || (self.groups.is_empty()
-                                                && self.history.group_id.is_none()),
-                                    )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.group_move_id = Some(id);
-                                        this.history.selected = Some(id);
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Button::new(("delete", id as usize))
-                                    .ghost()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(IconName::Delete)
-                                    .tooltip(tr(self.language, "删除", "Delete"))
-                                    .accessibility_label(tr(self.language, "删除", "Delete"))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.send(Command::Delete(id), cx);
-                                    })),
-                            )
-                            .when(is_files, |bar| {
-                                bar.child(
-                                    Button::new(("copy-path", id as usize))
+                                    }),
+                                )
+                                .child(
+                                    Button::new(("select", id as usize))
                                         .ghost()
                                         .xsmall()
                                         .h(px(24.))
-                                        .icon(IconName::Copy)
-                                        .tooltip(
-                                            if self.paste_target.is_some() && self._tray.is_some() {
-                                                tr(self.language, "粘贴路径", "Paste paths")
-                                            } else {
-                                                tr(self.language, "复制路径", "Copy paths")
+                                        .icon(IconName::Check)
+                                        .tooltip(if marked {
+                                            tr(
+                                                self.language,
+                                                "取消选择；Shift 点击可连选",
+                                                "Deselect; Shift-click to select a range",
+                                            )
+                                        } else {
+                                            tr(
+                                                self.language,
+                                                "选择；Shift 点击可连选",
+                                                "Select; Shift-click to select a range",
+                                            )
+                                        })
+                                        .accessibility_label(if marked {
+                                            tr(self.language, "取消选择", "Deselect")
+                                        } else {
+                                            tr(self.language, "选择", "Select")
+                                        })
+                                        .selected(marked)
+                                        .disabled(self.batch_pending || self.history.loading)
+                                        .on_click(cx.listener(
+                                            move |this, event: &ClickEvent, _, cx| {
+                                                cx.stop_propagation();
+                                                this.toggle_selection(
+                                                    id,
+                                                    event.modifiers().shift,
+                                                    cx,
+                                                );
                                             },
-                                        )
-                                        .accessibility_label(
-                                            if self.paste_target.is_some() && self._tray.is_some() {
-                                                tr(self.language, "粘贴路径", "Paste paths")
-                                            } else {
-                                                tr(self.language, "复制路径", "Copy paths")
-                                            },
-                                        )
-                                        .disabled(self.paste_pending.is_some())
+                                        )),
+                                )
+                                .child(
+                                    Button::new(("preview", id as usize))
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(IconName::Eye)
+                                        .tooltip(tr(self.language, "查看", "View"))
+                                        .accessibility_label(tr(self.language, "查看", "View"))
                                         .on_click(cx.listener(move |this, _, window, cx| {
                                             cx.stop_propagation();
-                                            this.copy_or_paste_path(id, window, cx);
+                                            this.open_preview(id, window, cx);
                                         })),
                                 )
-                            })
-                            .child(
-                                Button::new(("paste", id as usize))
-                                    .outline()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(IconName::Replace)
-                                    .tooltip(tr(self.language, "粘贴", "Paste"))
-                                    .accessibility_label(tr(self.language, "粘贴", "Paste"))
-                                    .disabled(
-                                        self.paste_target.is_none()
-                                            || self.paste_pending.is_some()
-                                            || self._tray.is_none(),
-                                    )
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.paste_selected(id, window, cx);
-                                    })),
-                            )
-                            .when(
-                                matches!(item.content_type.as_str(), "html" | "rtf"),
-                                |bar| {
+                                .child(
+                                    Button::new(("favorite", id as usize))
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(if favorite {
+                                            IconName::HeartOff
+                                        } else {
+                                            IconName::Heart
+                                        })
+                                        .tooltip(if favorite {
+                                            tr(self.language, "取消收藏", "Unfavorite")
+                                        } else {
+                                            tr(self.language, "收藏", "Favorite")
+                                        })
+                                        .accessibility_label(if favorite {
+                                            tr(self.language, "取消收藏", "Unfavorite")
+                                        } else {
+                                            tr(self.language, "收藏", "Favorite")
+                                        })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.send(Command::ToggleFavorite(id), cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(("pin", id as usize))
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(if pinned {
+                                            IconName::StarOff
+                                        } else {
+                                            IconName::Star
+                                        })
+                                        .tooltip(if pinned {
+                                            tr(self.language, "取消置顶", "Unpin")
+                                        } else {
+                                            tr(self.language, "置顶", "Pin")
+                                        })
+                                        .accessibility_label(if pinned {
+                                            tr(self.language, "取消置顶", "Unpin")
+                                        } else {
+                                            tr(self.language, "置顶", "Pin")
+                                        })
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.send(Command::TogglePin(id), cx);
+                                        })),
+                                )
+                                .child(
+                                    Button::new(("move-group", id as usize))
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(IconName::Folder)
+                                        .tooltip(tr(self.language, "移动到分组", "Move to group"))
+                                        .accessibility_label(tr(
+                                            self.language,
+                                            "移动到分组",
+                                            "Move to group",
+                                        ))
+                                        .disabled(
+                                            self.group_move_pending
+                                                || (self.groups.is_empty()
+                                                    && self.history.group_id.is_none()),
+                                        )
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.group_move_id = Some(id);
+                                            this.history.selected = Some(id);
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    Button::new(("delete", id as usize))
+                                        .ghost()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(IconName::Delete)
+                                        .tooltip(tr(self.language, "删除", "Delete"))
+                                        .accessibility_label(tr(self.language, "删除", "Delete"))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.send(Command::Delete(id), cx);
+                                        })),
+                                )
+                                .when(is_files, |bar| {
                                     bar.child(
-                                        Button::new(("copy-plain", id as usize))
-                                            .outline()
+                                        Button::new(("copy-path", id as usize))
+                                            .ghost()
                                             .xsmall()
                                             .h(px(24.))
-                                            .icon(IconName::FileText)
-                                            .tooltip(if self.paste_target.is_some() {
-                                                tr(self.language, "粘贴纯文本", "Paste plain text")
-                                            } else {
-                                                tr(self.language, "复制纯文本", "Copy plain text")
-                                            })
-                                            .accessibility_label(if self.paste_target.is_some() {
-                                                tr(self.language, "粘贴纯文本", "Paste plain text")
-                                            } else {
-                                                tr(self.language, "复制纯文本", "Copy plain text")
-                                            })
+                                            .icon(IconName::Copy)
+                                            .tooltip(
+                                                if self.paste_target.is_some()
+                                                    && self._tray.is_some()
+                                                {
+                                                    tr(self.language, "粘贴路径", "Paste paths")
+                                                } else {
+                                                    tr(self.language, "复制路径", "Copy paths")
+                                                },
+                                            )
+                                            .accessibility_label(
+                                                if self.paste_target.is_some()
+                                                    && self._tray.is_some()
+                                                {
+                                                    tr(self.language, "粘贴路径", "Paste paths")
+                                                } else {
+                                                    tr(self.language, "复制路径", "Copy paths")
+                                                },
+                                            )
                                             .disabled(self.paste_pending.is_some())
                                             .on_click(cx.listener(move |this, _, window, cx| {
                                                 cx.stop_propagation();
-                                                this.copy_or_paste_plain_text(id, window, cx);
+                                                this.copy_or_paste_path(id, window, cx);
                                             })),
                                     )
-                                },
-                            )
-                            .child(
-                                Button::new(("copy", id as usize))
-                                    .outline()
-                                    .xsmall()
-                                    .h(px(24.))
-                                    .icon(IconName::Copy)
-                                    .tooltip(tr(self.language, "复制", "Copy"))
-                                    .accessibility_label(tr(self.language, "复制", "Copy"))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.send(Command::Copy(id), cx);
-                                    })),
-                            ),
-                    ))
+                                })
+                                .child(
+                                    Button::new(("paste", id as usize))
+                                        .outline()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(IconName::Replace)
+                                        .tooltip(tr(self.language, "粘贴", "Paste"))
+                                        .accessibility_label(tr(self.language, "粘贴", "Paste"))
+                                        .disabled(
+                                            self.paste_target.is_none()
+                                                || self.paste_pending.is_some()
+                                                || self._tray.is_none(),
+                                        )
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.paste_selected(id, window, cx);
+                                        })),
+                                )
+                                .when(
+                                    matches!(item.content_type.as_str(), "html" | "rtf"),
+                                    |bar| {
+                                        bar.child(
+                                            Button::new(("copy-plain", id as usize))
+                                                .outline()
+                                                .xsmall()
+                                                .h(px(24.))
+                                                .icon(IconName::FileText)
+                                                .tooltip(if self.paste_target.is_some() {
+                                                    tr(
+                                                        self.language,
+                                                        "粘贴纯文本",
+                                                        "Paste plain text",
+                                                    )
+                                                } else {
+                                                    tr(
+                                                        self.language,
+                                                        "复制纯文本",
+                                                        "Copy plain text",
+                                                    )
+                                                })
+                                                .accessibility_label(
+                                                    if self.paste_target.is_some() {
+                                                        tr(
+                                                            self.language,
+                                                            "粘贴纯文本",
+                                                            "Paste plain text",
+                                                        )
+                                                    } else {
+                                                        tr(
+                                                            self.language,
+                                                            "复制纯文本",
+                                                            "Copy plain text",
+                                                        )
+                                                    },
+                                                )
+                                                .disabled(self.paste_pending.is_some())
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        cx.stop_propagation();
+                                                        this.copy_or_paste_plain_text(
+                                                            id, window, cx,
+                                                        );
+                                                    },
+                                                )),
+                                        )
+                                    },
+                                )
+                                .child(
+                                    Button::new(("copy", id as usize))
+                                        .outline()
+                                        .xsmall()
+                                        .h(px(24.))
+                                        .icon(IconName::Copy)
+                                        .tooltip(tr(self.language, "复制", "Copy"))
+                                        .accessibility_label(tr(self.language, "复制", "Copy"))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.send(Command::Copy(id), cx);
+                                        })),
+                                ),
+                        )
+                    })
                     .when(!self.batch_mode, |card| {
                         card.child(
                             div()
@@ -6743,12 +6858,14 @@ impl ClipboardView {
                                 .left_0()
                                 .top_0()
                                 .bottom_0()
-                                .w(px(32.))
+                                .w(px(18.))
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .when(show_drag_area_indicator, |handle| {
                                     handle
+                                        .invisible()
+                                        .group_hover("", |handle| handle.visible())
                                         .bg(cx.theme().accent)
                                         .text_color(cx.theme().primary)
                                         .child("⠿")
@@ -6781,12 +6898,14 @@ impl ClipboardView {
                                 .right_0()
                                 .top_0()
                                 .bottom_0()
-                                .w(px(32.))
+                                .w(px(18.))
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .when(show_drag_area_indicator, |handle| {
                                     handle
+                                        .invisible()
+                                        .group_hover("", |handle| handle.visible())
                                         .bg(cx.theme().accent)
                                         .text_color(cx.theme().primary)
                                         .child("⠿")
@@ -6968,21 +7087,32 @@ impl ClipboardView {
         let row = div()
             .when(live_drag_source, |row| row.opacity(0.0))
             .child(row);
+        let pixel_offset = |delta: isize| {
+            let other = index
+                .saturating_add_signed(delta)
+                .min(self.history.items.len());
+            let distance: f32 = self.history.items[index.min(other)..index.max(other)]
+                .iter()
+                .map(|item| {
+                    if item.content_type == "image" {
+                        visual::image_row_height(self.display.card_density)
+                    } else {
+                        visual::row_height(self.display.card_density, self.display.card_max_lines)
+                    }
+                })
+                .sum();
+            if delta < 0 { -distance } else { distance }
+        };
         if let Some(offset) = self.reorder_offsets.get(&id) {
             visual::reflow(
                 row,
-                *offset as f32
-                    * visual::row_height(self.display.card_density, self.display.card_max_lines),
+                pixel_offset(*offset),
                 format!("reorder-feedback-{}-{id}", self.feedback_revision),
                 cx,
             )
         } else if let Some(offset) = live_offset {
             row.relative()
-                .top(px(offset as f32
-                    * visual::row_height(
-                        self.display.card_density,
-                        self.display.card_max_lines,
-                    )))
+                .top(px(pixel_offset(offset)))
                 .into_any_element()
         } else {
             row.into_any_element()
@@ -7469,7 +7599,6 @@ impl ClipboardView {
                                     div().flex_1().min_w_0().child(
                                         TabBar::new("history-category-tabs")
                                             .w_full()
-                                            .small()
                                             .segmented()
                                             .when_some(selected_index, |tabs, index| {
                                                 tabs.selected_index(index)
@@ -7503,7 +7632,6 @@ impl ClipboardView {
                             .child(
                                 div().w(px(138.)).flex_none().child(
                                     Select::new(&self.group_select)
-                                        .small()
                                         .w_full()
                                         .menu_width(px(190.))
                                         .menu_max_h(px(300.))
@@ -7910,7 +8038,7 @@ impl ClipboardView {
                                 .ghost()
                                 .label(tr(self.language, "返回顶部 ↑", "Back to top ↑"))
                                 .on_click(cx.listener(|this, _, _, cx| {
-                                    this.scroll.scroll_to_item_strict(0, ScrollStrategy::Top);
+                                    this.scroll.scroll_to(ListOffset::default());
                                     cx.notify();
                                 })),
                         )
@@ -8013,17 +8141,10 @@ impl ClipboardView {
                     })
                     .when(!self.history.items.is_empty(), |container| {
                         container.child(
-                            uniform_list(
-                                "history",
-                                self.history.items.len(),
-                                move |range, _, cx| {
-                                    view.update(cx, |this, cx| {
-                                        range.map(|index| this.render_row(index, cx)).collect()
-                                    })
-                                },
-                            )
-                            .size_full()
-                            .track_scroll(&self.scroll),
+                            list(self.scroll.clone(), move |index, _, cx| {
+                                view.update(cx, |this, cx| this.render_row(index, cx))
+                            })
+                            .size_full(),
                         )
                     }),
             )

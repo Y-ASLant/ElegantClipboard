@@ -324,6 +324,10 @@ impl History {
             ..Default::default()
         })?)
     }
+    /// Daily counts of retained history items across all groups from a local date onward.
+    pub fn daily_counts(&self, start_date: &str) -> Result<Vec<(String, i64)>> {
+        Ok(self.repo.daily_counts(start_date)?)
+    }
 
     pub fn text(&self, id: i64) -> Result<String> {
         self.repo

@@ -3,14 +3,22 @@ use clipboard_core::preferences::CardDensity;
 use gpui_kit::*;
 use std::time::Duration;
 pub const PAGE_PADDING: f32 = 20.;
-pub const ROW_HEIGHT: f32 = 116.;
+pub const ROW_HEIGHT: f32 = 96.;
 pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
     let base = match density {
-        CardDensity::Compact => 100.,
+        CardDensity::Compact => 88.,
         CardDensity::Standard => ROW_HEIGHT,
-        CardDensity::Spacious => 160.,
+        CardDensity::Spacious => 112.,
     };
-    base + f32::from(preview_lines.saturating_sub(2)) * 22.
+    base + f32::from(preview_lines.saturating_sub(2)) * 20.
+}
+
+pub fn image_row_height(density: CardDensity) -> f32 {
+    match density {
+        CardDensity::Compact => 112.,
+        CardDensity::Standard => 124.,
+        CardDensity::Spacious => 148.,
+    }
 }
 
 pub fn card_spacing(density: CardDensity) -> f32 {
@@ -23,15 +31,13 @@ pub fn card_spacing(density: CardDensity) -> f32 {
 
 pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
     match density {
-        CardDensity::Compact => (40., 30.),
-        CardDensity::Standard => (THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT),
-        CardDensity::Spacious => (60., 48.),
+        CardDensity::Compact => (96., 56.),
+        CardDensity::Standard => (120., 68.),
+        CardDensity::Spacious => (140., 88.),
     }
 }
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
 pub const DROP_MARKER_HEIGHT: f32 = 2.;
-pub const THUMBNAIL_WIDTH: f32 = 48.;
-pub const THUMBNAIL_HEIGHT: f32 = 36.;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);
 pub const HISTORY_DRAG_SCROLL_TICKS: usize = 2;

@@ -140,6 +140,7 @@ pub enum Command {
     },
     SetAutostart(bool),
     QueryDataSize,
+    QueryDailyCounts(String),
     OptimizeDatabase,
     OpenDataDirectory,
     ExportBackup(PathBuf),
@@ -260,6 +261,7 @@ impl Command {
             }),
             Self::Pause(_) => Some(FailureKind::Pause),
             Self::QueryDataSize => Some(FailureKind::DataSize),
+            Self::QueryDailyCounts(_) => Some(FailureKind::Other),
             Self::OptimizeDatabase => Some(FailureKind::DatabaseMaintenance),
             Self::Copy(_)
             | Self::CopyPlainText(_)
@@ -392,6 +394,7 @@ pub enum Event {
     OnboardingCompleted(Result<(), String>),
     AutostartSaved(Result<bool, String>),
     DataSize(Result<DataSizeInfo, String>),
+    DailyCounts(Result<Vec<(String, i64)>, String>),
     DatabaseOptimized(DataSizeInfo),
     BackupExported(Result<BackupReport, String>),
     BackgroundError(String),
@@ -2043,6 +2046,16 @@ impl Worker {
                     .map_err(|error| error.to_string());
                 self.events
                     .send_blocking(Event::DataSize(result))
+                    .map_err(|_| anyhow!("窗口已关闭"))?;
+                return Ok(());
+            }
+            Command::QueryDailyCounts(start_date) => {
+                let result = self
+                    .history
+                    .daily_counts(&start_date)
+                    .map_err(|error| error.to_string());
+                self.events
+                    .send_blocking(Event::DailyCounts(result))
                     .map_err(|_| anyhow!("窗口已关闭"))?;
                 return Ok(());
             }

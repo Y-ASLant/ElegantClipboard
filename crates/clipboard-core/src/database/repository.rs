@@ -655,6 +655,20 @@ impl ClipboardRepository {
         Ok(count)
     }
 
+    /// Counts persisted items by local calendar date, starting inclusively at `start_date`.
+    /// Dates with no items are omitted.
+    pub fn daily_counts(&self, start_date: &str) -> Result<Vec<(String, i64)>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT date(created_at), COUNT(*) FROM clipboard_items \
+             WHERE created_at >= ?1 \
+             GROUP BY date(created_at) \
+             ORDER BY date(created_at) ASC",
+        )?;
+        stmt.query_map(params![start_date], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect()
+    }
+
     pub fn toggle_pin(&self, id: i64) -> Result<bool, rusqlite::Error> {
         let conn = self.write_conn.lock();
         conn.execute(
@@ -1943,6 +1957,58 @@ mod tests {
             })
             .unwrap();
         assert_eq!(fav_count, 1);
+    }
+
+    #[test]
+    fn daily_counts_groups_all_items_from_inclusive_start_date() {
+        let db = temp_db();
+        let repo = ClipboardRepository::new(&db);
+        let group = GroupRepository::new(&db)
+            .create("Daily counts group", None)
+            .unwrap();
+
+        let entries = [
+            ("before boundary", "2026-09-19 23:59:59", false),
+            ("at boundary", "2026-09-20 00:00:00", false),
+            ("same day grouped", "2026-09-20 12:34:56", true),
+            ("same day ungrouped", "2026-09-20 23:59:59", false),
+            ("later grouped", "2026-09-22 00:00:00", true),
+            ("later deleted", "2026-09-22 16:00:00", false),
+            ("latest", "2026-09-23 23:59:59", false),
+        ];
+        let mut deleted_id = None;
+        for (label, timestamp, grouped) in entries {
+            let mut item = make_text_item(label);
+            if grouped {
+                item.group_id = Some(group.id);
+            }
+            let id = repo.insert(item).unwrap();
+            db.write_connection()
+                .lock()
+                .execute(
+                    "UPDATE clipboard_items SET created_at = ?1 WHERE id = ?2",
+                    params![timestamp, id],
+                )
+                .unwrap();
+            if label == "later deleted" {
+                deleted_id = Some(id);
+            }
+        }
+        repo.delete(deleted_id.unwrap()).unwrap();
+
+        assert_eq!(
+            repo.daily_counts("2026-09-20").unwrap(),
+            vec![
+                ("2026-09-20".to_string(), 3),
+                ("2026-09-22".to_string(), 1),
+                ("2026-09-23".to_string(), 1),
+            ]
+        );
+        assert_eq!(
+            repo.daily_counts("2026-09-22").unwrap(),
+            vec![("2026-09-22".to_string(), 1), ("2026-09-23".to_string(), 1),]
+        );
+        assert!(repo.daily_counts("2026-09-24").unwrap().is_empty());
     }
 
     #[test]

@@ -291,7 +291,7 @@ impl Default for DisplayPreference {
             show_category_filter: true,
             show_drag_area_indicator: true,
             card_density: CardDensity::Standard,
-            card_max_lines: 3,
+            card_max_lines: 2,
             show_time: true,
             time_format: TimeFormat::Absolute,
             show_char_count: true,

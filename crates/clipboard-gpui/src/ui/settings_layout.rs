@@ -80,6 +80,14 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
+        chinese: "每日历史条数",
+        english: "Daily history",
+        description_chinese: "最近 7 天每天保存的剪贴板记录数（含今天）",
+        description_english: "Retained clipboard items per day for the past 7 days, including today",
+        content: SettingsWindowView::settings_daily_counts_content,
+    },
+    Section {
+        page: SettingsPage::Data,
         chinese: "本地数据",
         english: "Storage",
         description_chinese: "数据库、受管图片和暂存文件",

@@ -89,6 +89,67 @@ impl SettingsWindowView {
             .into_any_element()
     }
 
+    pub(super) fn settings_daily_counts_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(owner_entity) = self.owner.upgrade() else {
+            return div().into_any_element();
+        };
+        let owner = owner_entity.read(cx);
+        let Some(counts) = &owner.daily_counts else {
+            return div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(
+                    owner.language,
+                    "尚未获取每日统计",
+                    "Daily counts are not available",
+                ))
+                .into_any_element();
+        };
+        let today = chrono::Local::now().date_naive();
+        let data = (0..7)
+            .rev()
+            .map(|offset| {
+                let day = (today - chrono::Duration::days(offset)).to_string();
+                let count = counts
+                    .iter()
+                    .find(|(date, _)| date == &day)
+                    .map_or(0, |(_, count)| *count);
+                (day, count)
+            })
+            .collect::<Vec<_>>();
+        let empty = data.iter().all(|(_, count)| *count == 0);
+        div()
+            .relative()
+            .w_full()
+            .h(px(152.))
+            .child(
+                BarChart::new(data)
+                    .id("daily-clipboard-counts")
+                    .name(tr(owner.language, "历史条数", "Items"))
+                    .band(|(date, _)| date[5..].to_string())
+                    .value(|(_, count)| *count as f64)
+                    .label(|(_, count)| count.to_string())
+                    .grid(false),
+            )
+            .when(empty, |panel| {
+                panel.child(
+                    div()
+                        .absolute()
+                        .top(px(40.))
+                        .w_full()
+                        .text_center()
+                        .text_xs()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(tr(
+                            owner.language,
+                            "最近 7 天没有历史记录",
+                            "No items in the past 7 days",
+                        )),
+                )
+            })
+            .into_any_element()
+    }
+
     pub(super) fn settings_storage_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(owner_entity) = self.owner.upgrade() else {
             return div().into_any_element();
@@ -163,6 +224,7 @@ impl SettingsWindowView {
                             .on_click(move |_, _, cx| {
                                 let _ = refresh_owner.update(cx, |owner, cx| {
                                     owner.refresh_data_size(cx);
+                                    owner.refresh_daily_counts(cx);
                                 });
                             }),
                     )
