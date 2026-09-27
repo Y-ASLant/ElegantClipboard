@@ -32,17 +32,21 @@ impl SettingsWindowView {
                 ]
                 .map(|(id, choice)| {
                     let owner = self.owner.clone();
-                    Button::new(id)
+                    let button = Button::new(id)
                         .outline()
                         .small()
-                        .label(hotkey_label(language, choice))
                         .selected(hotkey_choice == choice)
                         .disabled(hotkey_pending)
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |owner, cx| {
                                 owner.select_hotkey(choice, cx);
                             });
-                        })
+                        });
+                    if choice == HotkeyPreference::Disabled {
+                        button.label(hotkey_label(language, choice))
+                    } else {
+                        button.child(shortcut_kbd(choice.label()).expect("built-in hotkey"))
+                    }
                 }),
             )
             .into_any_element()
@@ -429,7 +433,7 @@ impl SettingsWindowView {
                         Button::new(id)
                             .outline()
                             .small()
-                            .label(label)
+                            .child(shortcut_kbd(label).expect("built-in paste key"))
                             .selected(paste_key == key)
                             .disabled(paste_key_pending)
                             .on_click(move |_, _, cx| {

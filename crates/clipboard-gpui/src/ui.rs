@@ -38,6 +38,7 @@ use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, InstanceBusy, Service};
 use directories::UserDirs;
 use gpui_kit::component::chart::BarChart;
+use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -365,6 +366,31 @@ fn hotkey_label(language: LanguagePreference, choice: HotkeyPreference) -> &'sta
     } else {
         choice.label()
     }
+}
+
+fn shortcut_kbd(shortcut: &str) -> Option<Kbd> {
+    let mut parts = shortcut.split('+');
+    let key = parts.next_back()?.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let mut modifiers = Modifiers::default();
+    for part in parts {
+        if part.eq_ignore_ascii_case("ctrl") || part.eq_ignore_ascii_case("control") {
+            modifiers.control = true;
+        } else if part.eq_ignore_ascii_case("alt") {
+            modifiers.alt = true;
+        } else if part.eq_ignore_ascii_case("shift") {
+            modifiers.shift = true;
+        } else {
+            return None;
+        }
+    }
+    Some(Kbd::new(Keystroke {
+        key: key.to_ascii_lowercase(),
+        modifiers,
+        ..Default::default()
+    }))
 }
 
 fn shortcut_from_keystroke(keystroke: &Keystroke, shift_down: bool) -> Result<String, String> {
@@ -1428,19 +1454,26 @@ impl SettingsWindowView {
             .rounded_md()
             .border_1()
             .border_color(cx.theme().border)
-            .child(format!(
-                "{} {slot}: {}",
-                tr(
-                    language,
-                    if favorite { "收藏" } else { "普通" },
-                    if favorite { "Favorite" } else { "Recent" }
-                ),
-                tr(
-                    language,
-                    "输入组合键，例如 Ctrl+Alt+Z",
-                    "Enter a shortcut, for example Ctrl+Alt+Z"
-                )
-            ))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .child(format!(
+                        "{} {slot}: {}",
+                        tr(
+                            language,
+                            if favorite { "收藏" } else { "普通" },
+                            if favorite { "Favorite" } else { "Recent" }
+                        ),
+                        tr(
+                            language,
+                            "输入组合键，例如",
+                            "Enter a shortcut, for example"
+                        )
+                    ))
+                    .child(shortcut_kbd("Ctrl+Alt+Z").expect("shortcut example")),
+            )
             .child(Input::new(
                 self.shortcut_input.as_ref().expect("editing input exists"),
             ))
@@ -1453,11 +1486,15 @@ impl SettingsWindowView {
                         .border_1()
                         .border_color(cx.theme().accent)
                         .p_2()
-                        .child(tr(
-                            language,
-                            "请按组合键；按 Esc 取消录制",
-                            "Press a shortcut; press Esc to cancel recording",
-                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .child(tr(language, "请按组合键；按", "Press a shortcut; press"))
+                                .child(shortcut_kbd("Esc").expect("recording cancel key"))
+                                .child(tr(language, "取消录制", "to cancel recording")),
+                        )
                         .on_key_down(cx.listener(|this, event, window, cx| {
                             this.capture_shortcut_key(event, window, cx);
                         })),
@@ -1516,6 +1553,7 @@ impl SettingsWindowView {
         language: LanguagePreference,
         cx: &mut Context<Self>,
     ) -> Div {
+        let defaults = PasteShortcutConfig::default();
         div()
             .w_full()
             .flex()
@@ -1523,15 +1561,20 @@ impl SettingsWindowView {
             .gap_1()
             .children((1..=10u8).map(|slot| {
                 let shortcut = shortcuts.slot(favorite, slot).unwrap_or_default();
-                let shortcut_label = if shortcut.is_empty() {
-                    tr(language, "未设置", "Not set").to_owned()
-                } else {
-                    shortcut.to_owned()
-                };
-                let default = PasteShortcutConfig::default()
-                    .slot(favorite, slot)
-                    .unwrap_or_default()
-                    .to_owned();
+                let shortcut_content = shortcut_kbd(shortcut).map_or_else(
+                    || {
+                        div()
+                            .text_sm()
+                            .child(if shortcut.is_empty() {
+                                tr(language, "未设置", "Not set").to_owned()
+                            } else {
+                                shortcut.to_owned()
+                            })
+                            .into_any_element()
+                    },
+                    |kbd| kbd.into_any_element(),
+                );
+                let default = defaults.slot(favorite, slot).unwrap_or_default().to_owned();
                 let owner_disable = self.owner.clone();
                 let owner_reset = self.owner.clone();
                 div()
@@ -1555,7 +1598,7 @@ impl SettingsWindowView {
                                     if favorite { "Favorite" } else { "Recent" }
                                 )
                             )))
-                            .child(div().text_sm().child(shortcut_label)),
+                            .child(shortcut_content),
                     )
                     .child(
                         div()
@@ -7192,11 +7235,7 @@ impl ClipboardView {
                     "在顶部搜索框输入关键词，历史卡片会显示匹配内容。",
                     "Search from the top field and see matches in your history cards.",
                 ),
-                tr(
-                    language,
-                    "按 Ctrl+F 可以聚焦搜索框",
-                    "Press Ctrl+F to focus search",
-                ),
+                tr(language, "聚焦搜索框", "to focus search"),
             ),
             (
                 IconName::Star,
@@ -7219,18 +7258,61 @@ impl ClipboardView {
                 tr(language, "键盘快捷键", "Keyboard shortcuts"),
                 tr(
                     language,
-                    "方向键选择记录，Enter 复制或粘贴，Delete 删除；左右键切换分类。",
-                    "Use arrows to select, Enter to copy or paste, Delete to remove, and Left/Right to switch categories.",
+                    "使用键盘管理历史",
+                    "Manage history with the keyboard",
                 ),
                 tr(
                     language,
-                    "Shift+Enter 使用纯文本表示",
-                    "Shift+Enter uses the plain-text representation",
+                    "使用纯文本表示",
+                    "uses the plain-text representation",
                 ),
             ),
         ];
         let (icon, _, title, description, tip) = steps[self.onboarding_step.min(3)].clone();
         let is_last = self.onboarding_step == 3;
+        let description_content = if self.onboarding_step == 3 {
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_1()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(language, "方向键选择记录；", "Arrow keys select items;"))
+                .child(shortcut_kbd("Enter").expect("onboarding enter key"))
+                .child(tr(language, "复制或粘贴；", "to copy or paste;"))
+                .child(shortcut_kbd("Delete").expect("onboarding delete key"))
+                .child(tr(language, "删除；", "to delete;"))
+                .child(shortcut_kbd("Left").expect("onboarding left key"))
+                .child(tr(language, "和", "and"))
+                .child(shortcut_kbd("Right").expect("onboarding right key"))
+                .child(tr(language, "切换分类。", "change categories."))
+                .into_any_element()
+        } else {
+            div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(description)
+                .into_any_element()
+        };
+        let tip_content = match self.onboarding_step {
+            1 => div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(tr(language, "按", "Press"))
+                .child(shortcut_kbd("Ctrl+F").expect("onboarding search key"))
+                .child(tip)
+                .into_any_element(),
+            3 => div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(shortcut_kbd("Shift+Enter").expect("onboarding plain text key"))
+                .child(tip)
+                .into_any_element(),
+            _ => div().child(tip).into_any_element(),
+        };
         div()
             .key_context("ClipboardApp")
             .track_focus(&self.list_focus)
@@ -7267,12 +7349,7 @@ impl ClipboardView {
                             .child(Icon::new(icon).text_color(cx.theme().primary)),
                     )
                     .child(div().text_lg().font_semibold().child(title))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(description),
-                    )
+                    .child(description_content)
                     .child(
                         div()
                             .rounded_md()
@@ -7281,7 +7358,7 @@ impl ClipboardView {
                             .py_2()
                             .text_xs()
                             .text_color(cx.theme().primary)
-                            .child(tip),
+                            .child(tip_content),
                     )
                     .child(
                         Stepper::new("onboarding-steps")
@@ -7333,9 +7410,14 @@ impl ClipboardView {
                     )
                     .child(
                         div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .child(tr(language, "按 Esc 跳过引导", "Press Esc to skip")),
+                            .child(tr(language, "按", "Press"))
+                            .child(shortcut_kbd("Esc").expect("onboarding skip key"))
+                            .child(tr(language, "跳过引导", "to skip onboarding")),
                     ),
             )
     }
