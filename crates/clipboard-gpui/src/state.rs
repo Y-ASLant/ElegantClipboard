@@ -156,64 +156,31 @@ pub fn selection_range_ids(ids: &[i64], anchor: i64, target: i64) -> Option<&[i6
     Some(&ids[from.min(to)..=from.max(to)])
 }
 
-/// Previous row positions for items displaced by a confirmed reorder.
-pub fn reorder_offsets(before: &[i64], after: &[i64]) -> HashMap<i64, isize> {
+/// Pixel offsets from the old order to the committed order, using each row's actual height.
+pub fn reorder_pixel_offsets(before: &[i64], after: &[(i64, f32)]) -> HashMap<i64, f32> {
     if before.len() != after.len() {
         return HashMap::new();
     }
-    let positions: HashMap<_, _> = before
-        .iter()
-        .enumerate()
-        .map(|(index, id)| (*id, index))
-        .collect();
-    if !after.iter().all(|id| positions.contains_key(id)) {
-        return HashMap::new();
+    let mut positions = HashMap::with_capacity(after.len());
+    let mut top = 0.;
+    for &(id, height) in after {
+        if positions.insert(id, (top, height)).is_some() {
+            return HashMap::new();
+        }
+        top += height;
     }
-    after
-        .iter()
-        .enumerate()
-        .filter_map(|(index, id)| {
-            let old = *positions.get(id)?;
-            (old != index).then_some((*id, old as isize - index as isize))
-        })
-        .collect()
-}
-
-/// Row deltas for the live preview shown while an item is dragged.
-/// Values are expressed in rows relative to the current list position.
-pub fn drag_reorder_offsets(
-    ids: &[i64],
-    source: i64,
-    target: i64,
-    after: bool,
-) -> HashMap<i64, isize> {
-    let Some(source_index) = ids.iter().position(|id| *id == source) else {
-        return HashMap::new();
-    };
-    if source == target || !ids.contains(&target) {
-        return HashMap::new();
+    let mut old_top = 0.;
+    let mut offsets = HashMap::new();
+    for id in before {
+        let Some(&(new_top, height)) = positions.get(id) else {
+            return HashMap::new();
+        };
+        if old_top != new_top {
+            offsets.insert(*id, old_top - new_top);
+        }
+        old_top += height;
     }
-
-    let mut preview = ids.to_vec();
-    preview.remove(source_index);
-    let Some(target_index) = preview.iter().position(|id| *id == target) else {
-        return HashMap::new();
-    };
-    let insert_index = target_index + usize::from(after);
-    preview.insert(insert_index, source);
-
-    let preview_positions: HashMap<_, _> = preview
-        .iter()
-        .enumerate()
-        .map(|(index, id)| (*id, index))
-        .collect();
-    ids.iter()
-        .enumerate()
-        .filter_map(|(index, id)| {
-            let preview_index = *preview_positions.get(id)?;
-            (preview_index != index).then_some((*id, preview_index as isize - index as isize))
-        })
-        .collect()
+    offsets
 }
 
 /// Advance a virtual list by one row without leaving the loaded item range.
@@ -529,29 +496,13 @@ mod tests {
     }
 
     #[test]
-    fn reorder_offsets_include_every_shifted_row() {
-        let offsets = reorder_offsets(&[4, 3, 2, 1], &[3, 2, 4, 1]);
-        assert_eq!(offsets.len(), 3);
-        assert_eq!(offsets.get(&4), Some(&-2));
-        assert_eq!(offsets.get(&3), Some(&1));
-        assert_eq!(offsets.get(&2), Some(&1));
-        assert!(!offsets.contains_key(&1));
-        assert!(reorder_offsets(&[1, 2], &[3, 2]).is_empty());
-        assert!(reorder_offsets(&[1, 2], &[3, 1, 2]).is_empty());
-    }
-
-    #[test]
-    fn drag_reorder_offsets_shift_rows_into_the_preview_gap() {
-        assert_eq!(
-            drag_reorder_offsets(&[4, 3, 2, 1], 4, 2, true),
-            HashMap::from([(4, 2), (3, -1), (2, -1)])
-        );
-        assert_eq!(
-            drag_reorder_offsets(&[4, 3, 2, 1], 1, 3, false),
-            HashMap::from([(3, 1), (2, 1), (1, -2)])
-        );
-        assert!(drag_reorder_offsets(&[1, 2], 1, 1, false).is_empty());
-        assert!(drag_reorder_offsets(&[1, 2], 3, 1, false).is_empty());
+    fn committed_reorder_animates_each_row_from_its_old_pixel_position() {
+        let offsets =
+            reorder_pixel_offsets(&[4, 3, 2, 1], &[(3, 124.), (2, 88.), (4, 96.), (1, 148.)]);
+        assert_eq!(offsets, HashMap::from([(4, -212.), (3, 96.), (2, 96.)]));
+        assert!(reorder_pixel_offsets(&[1, 2], &[(3, 96.), (2, 88.)]).is_empty());
+        assert!(reorder_pixel_offsets(&[1, 2], &[(1, 96.)]).is_empty());
+        assert!(reorder_pixel_offsets(&[1, 2], &[(1, 96.), (1, 88.)]).is_empty());
     }
 
     #[test]

@@ -69,3 +69,21 @@ pub fn reflow(element: Div, offset: f32, id: impl Into<ElementId>, cx: &App) -> 
         })
         .into_any_element()
 }
+
+pub fn drag_yield(
+    element: Div,
+    from: f32,
+    to: f32,
+    id: impl Into<ElementId>,
+    cx: &App,
+) -> AnyElement {
+    let element = element.relative();
+    if cx.reduce_motion() || from == to {
+        return element.top(px(to)).into_any_element();
+    }
+    element
+        .with_animation(id, motion(), move |element, progress| {
+            element.top(px(from + (to - from) * progress))
+        })
+        .into_any_element()
+}

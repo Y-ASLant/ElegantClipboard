@@ -13,8 +13,8 @@ use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
 use crate::{
     options::Options,
     state::{
-        HistoryState, PreviewState, drag_edge_target_index, drag_reorder_offsets, format_card_time,
-        next_drag_scroll_index, reorder_offsets, search_excerpt, search_highlight_ranges,
+        HistoryState, PreviewState, drag_edge_target_index, format_card_time,
+        next_drag_scroll_index, reorder_pixel_offsets, search_excerpt, search_highlight_ranges,
         selection_range_ids, should_hide_after_paste, source_app_parts,
     },
 };
@@ -108,9 +108,27 @@ fn history_top_row(offsets: &[Pixels], scroll_y: Pixels) -> (usize, Pixels) {
     )
 }
 
+fn history_drop_row(
+    offsets: &[Pixels],
+    scroll_y: Pixels,
+    viewport_top: Pixels,
+    pointer_y: Pixels,
+) -> Option<(usize, bool)> {
+    if offsets.len() < 2 {
+        return None;
+    }
+    let content_y = pointer_y - viewport_top - scroll_y;
+    if content_y < px(0.) || content_y >= *offsets.last()? {
+        return None;
+    }
+    let index = offsets.partition_point(|offset| *offset <= content_y) - 1;
+    let midpoint = offsets[index] + px(f32::from(offsets[index + 1] - offsets[index]) / 2.);
+    Some((index, content_y > midpoint))
+}
+
 #[cfg(test)]
 mod history_virtual_list_tests {
-    use super::{history_top_row, px};
+    use super::{DragPlacement, history_drop_row, history_top_row, px};
 
     #[test]
     fn mixed_height_rows_preserve_partial_position_across_resizing_and_pagination() {
@@ -122,6 +140,45 @@ mod history_virtual_list_tests {
         let restored = -(resized[row] + partial);
         assert_eq!(history_top_row(&resized, restored), (1, px(37.)));
         assert_eq!(history_top_row(&resized, px(-348.)), (3, px(0.)));
+    }
+
+    #[test]
+    fn dragging_text_past_an_image_yields_exactly_the_source_height() {
+        let offsets = [px(0.), px(96.), px(220.), px(308.), px(456.)];
+        let down = DragPlacement::new(0, 2, true).unwrap();
+        assert_eq!(
+            std::array::from_fn(|index| down.shift(index, &offsets)),
+            [212., -96., -96., 0.]
+        );
+        let up = DragPlacement::new(3, 1, false).unwrap();
+        assert_eq!(
+            std::array::from_fn(|index| up.shift(index, &offsets)),
+            [0., 148., 148., -212.]
+        );
+        assert!(DragPlacement::new(0, 1, false).is_none());
+        assert!(DragPlacement::new(2, 1, true).is_none());
+    }
+
+    #[test]
+    fn drop_target_uses_virtual_slots_not_displaced_card_hitboxes() {
+        let offsets = [px(0.), px(96.), px(220.), px(308.), px(456.)];
+        let scroll = px(-80.);
+        let top = px(100.);
+        assert_eq!(
+            history_drop_row(&offsets, scroll, top, px(100.)),
+            Some((0, true))
+        );
+        assert_eq!(
+            history_drop_row(&offsets, scroll, top, px(120.)),
+            Some((1, false))
+        );
+        assert_eq!(
+            history_drop_row(&offsets, scroll, top, px(200.)),
+            Some((1, true))
+        );
+        assert_eq!(history_drop_row(&offsets, scroll, top, px(19.)), None);
+        assert_eq!(history_drop_row(&offsets, scroll, top, px(476.)), None);
+        assert_eq!(history_drop_row(&[px(0.)], scroll, top, px(100.)), None);
     }
 }
 
@@ -782,6 +839,72 @@ struct DropTarget {
     allowed: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct DragPlacement {
+    source: usize,
+    insertion: usize,
+}
+
+impl DragPlacement {
+    fn new(source: usize, target: usize, after: bool) -> Option<Self> {
+        let insertion = target + usize::from(after);
+        let insertion = insertion - usize::from(source < insertion);
+        (source != insertion).then_some(Self { source, insertion })
+    }
+
+    fn shift(self, index: usize, offsets: &[Pixels]) -> f32 {
+        let source_height = f32::from(offsets[self.source + 1] - offsets[self.source]);
+        if index == self.source {
+            if self.insertion > self.source {
+                f32::from(offsets[self.insertion + 1] - offsets[self.source + 1])
+            } else {
+                f32::from(offsets[self.insertion] - offsets[self.source])
+            }
+        } else if (self.source + 1..=self.insertion).contains(&index) {
+            -source_height
+        } else if (self.insertion..self.source).contains(&index) {
+            source_height
+        } else {
+            0.
+        }
+    }
+}
+
+#[derive(Default)]
+struct DragMotionState {
+    request: Option<(i64, DropTarget)>,
+    from: Option<DragPlacement>,
+    to: Option<DragPlacement>,
+    revision: usize,
+}
+
+impl DragMotionState {
+    fn update(
+        &mut self,
+        request: Option<(i64, DropTarget)>,
+        items: &[clipboard_core::database::ClipboardItem],
+    ) {
+        if self.request == request {
+            return;
+        }
+        self.from = self.to;
+        self.to = request.and_then(|(source, target)| {
+            let source = items.iter().position(|item| item.id == source)?;
+            let target_index = items.iter().position(|item| item.id == target.id)?;
+            DragPlacement::new(source, target_index, target.after)
+        });
+        self.request = request;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    fn offsets(&self, index: usize, row_offsets: &[Pixels]) -> (f32, f32) {
+        (
+            self.from.map_or(0., |from| from.shift(index, row_offsets)),
+            self.to.map_or(0., |to| to.shift(index, row_offsets)),
+        )
+    }
+}
+
 enum HistoryMenuAction {
     Paste,
     PastePlainText,
@@ -1030,8 +1153,9 @@ struct ClipboardView {
     paste_pending: Option<(i64, (isize, u32))>,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,
+    drag_motion: DragMotionState,
     reorder_before: Option<Vec<i64>>,
-    reorder_offsets: HashMap<i64, isize>,
+    reorder_offsets: HashMap<i64, f32>,
     feedback_revision: usize,
     history_drag_direction: i8,
     paused: bool,
@@ -2350,6 +2474,7 @@ impl ClipboardView {
             paste_pending: None,
             reorder_pending: false,
             drop_target: None,
+            drag_motion: DragMotionState::default(),
             reorder_before: None,
             reorder_offsets: HashMap::new(),
             feedback_revision: 0,
@@ -4164,9 +4289,13 @@ impl ClipboardView {
                     Ok(()) if generation == self.history.generation => {
                         self.feedback_revision += 1;
                         if let Some(before) = before {
-                            let after: Vec<_> =
-                                self.history.items.iter().map(|item| item.id).collect();
-                            self.reorder_offsets = reorder_offsets(&before, &after);
+                            let after: Vec<_> = self
+                                .history
+                                .items
+                                .iter()
+                                .map(|item| (item.id, history_row_height(item, self.display)))
+                                .collect();
+                            self.reorder_offsets = reorder_pixel_offsets(&before, &after);
                         }
                         if self.history.items.iter().any(|item| item.id == from) {
                             self.history.selected = Some(from);
@@ -5995,6 +6124,7 @@ impl ClipboardView {
 
     fn rebuild_row_layout(&mut self) {
         (self.row_sizes, self.row_offsets) = history_row_layout(&self.history.items, self.display);
+        self.drag_motion = DragMotionState::default();
     }
 
     fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
@@ -6270,6 +6400,36 @@ impl ClipboardView {
                 .items
                 .iter()
                 .any(|item| item.id == drag.id && item.is_pinned == drag.pinned)
+    }
+
+    fn drop_history_card(&mut self, drag: &HistoryDrag, cx: &mut Context<Self>) {
+        self.history_drag_direction = 0;
+        let target = self.drop_target.take();
+        if !self.valid_drag(drag) {
+            self.message = tr(
+                self.language,
+                "列表已变化，请重新拖动",
+                "The list changed; drag again.",
+            )
+            .into();
+            self.is_error = true;
+        } else if let Some(target) = target.filter(|target| target.allowed && target.id != drag.id)
+            && self.send(
+                Command::Reorder {
+                    from: drag.id,
+                    to: target.id,
+                    after: target.after,
+                    favorite_only: drag.favorite_only,
+                    group_id: drag.group_id,
+                    generation: drag.generation,
+                },
+                cx,
+            )
+        {
+            self.reorder_pending = true;
+            self.reorder_before = Some(self.history.items.iter().map(|item| item.id).collect());
+        }
+        cx.notify();
     }
 
     fn start_history_drag_scroll(&mut self, cx: &mut Context<Self>) {
@@ -6602,15 +6762,6 @@ impl ClipboardView {
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
         let show_drag_area_indicator = self.display.show_drag_area_indicator;
         let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
-        let live_offset = active_drop
-            .filter(|target| target.allowed)
-            .and_then(|target| {
-                let source = self.history.selected?;
-                let ids: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
-                drag_reorder_offsets(&ids, source, target.id, target.after)
-                    .get(&id)
-                    .copied()
-            });
         let live_drag_source = cx.has_active_drag() && self.history.selected == Some(id);
         let color = if selected || marked {
             cx.theme().accent
@@ -6634,72 +6785,6 @@ impl ClipboardView {
             }))
             .h(px(history_row_height(item, self.display)))
             .px(px(PAGE_PADDING))
-            .on_drag_move(
-                cx.listener(move |this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
-                    if !event.bounds.contains(&event.event.position) {
-                        if this.drop_target.is_some_and(|target| target.id == id) {
-                            this.drop_target = None;
-                            cx.notify();
-                        }
-                        return;
-                    }
-                    let after = event.event.position.y > event.bounds.center().y;
-                    let target = (event.drag(cx).id != id).then_some(DropTarget {
-                        id,
-                        after,
-                        allowed: this.valid_drag(event.drag(cx)),
-                    });
-                    if this.drop_target != target {
-                        this.drop_target = target;
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_drop(cx.listener(move |this, drag: &HistoryDrag, _, cx| {
-                if drag.id == id {
-                    this.drop_target = None;
-                    this.history_drag_direction = 0;
-                    cx.notify();
-                    return;
-                }
-                if !this.valid_drag(drag) {
-                    this.drop_target = None;
-                    this.history_drag_direction = 0;
-                    this.message = tr(
-                        this.language,
-                        "列表已变化，请重新拖动",
-                        "The list changed; drag again.",
-                    )
-                    .into();
-                    this.is_error = true;
-                    cx.notify();
-                    return;
-                }
-                let Some(target) = this.drop_target.filter(|target| target.id == id) else {
-                    this.drop_target = None;
-                    this.history_drag_direction = 0;
-                    cx.notify();
-                    return;
-                };
-                if this.send(
-                    Command::Reorder {
-                        from: drag.id,
-                        to: id,
-                        after: target.after,
-                        favorite_only: drag.favorite_only,
-                        group_id: drag.group_id,
-                        generation: drag.generation,
-                    },
-                    cx,
-                ) {
-                    this.reorder_pending = true;
-                    this.reorder_before =
-                        Some(this.history.items.iter().map(|item| item.id).collect());
-                }
-                this.drop_target = None;
-                this.history_drag_direction = 0;
-                cx.notify();
-            }))
             .py(px(card_spacing))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
@@ -7419,30 +7504,30 @@ impl ClipboardView {
         let row = div()
             .when(live_drag_source, |row| row.opacity(0.0))
             .child(row);
-        let pixel_offset = |delta: isize| {
-            let other = index
-                .saturating_add_signed(delta)
-                .min(self.history.items.len());
-            let distance = self.row_offsets[index.max(other)] - self.row_offsets[index.min(other)];
-            if delta < 0 {
-                -f32::from(distance)
-            } else {
-                f32::from(distance)
-            }
-        };
-        if let Some(offset) = self.reorder_offsets.get(&id) {
+        if let Some(offset) = self
+            .reorder_offsets
+            .get(&id)
+            .filter(|_| !cx.has_active_drag())
+        {
             visual::reflow(
                 row,
-                pixel_offset(*offset),
+                *offset,
                 format!("reorder-feedback-{}-{id}", self.feedback_revision),
                 cx,
             )
-        } else if let Some(offset) = live_offset {
-            row.relative()
-                .top(px(pixel_offset(offset)))
-                .into_any_element()
         } else {
-            row.into_any_element()
+            let (from, to) = self.drag_motion.offsets(index, &self.row_offsets);
+            if from != 0. || to != 0. {
+                visual::drag_yield(
+                    row,
+                    from,
+                    to,
+                    format!("drag-yield-{}-{id}", self.drag_motion.revision),
+                    cx,
+                )
+            } else {
+                row.into_any_element()
+            }
         }
     }
 }
@@ -7457,6 +7542,14 @@ impl Render for ClipboardView {
                 view.sync_confirmation_dialog(window, cx);
             });
         }
+        let drag_request = if cx.has_active_drag() {
+            self.history
+                .selected
+                .zip(self.drop_target.filter(|target| target.allowed))
+        } else {
+            None
+        };
+        self.drag_motion.update(drag_request, &self.history.items);
         div()
             .flex()
             .flex_col()
@@ -8387,7 +8480,8 @@ impl ClipboardView {
                     .on_drag_move(
                         cx.listener(|this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
                             let y = event.event.position.y;
-                            let direction = if !event.bounds.contains(&event.event.position) {
+                            let inside = event.bounds.contains(&event.event.position);
+                            let direction = if !inside {
                                 0
                             } else if y < event.bounds.top() + px(visual::DRAG_EDGE_ZONE) {
                                 -1
@@ -8396,12 +8490,36 @@ impl ClipboardView {
                             } else {
                                 0
                             };
-                            if this.history_drag_direction != direction {
+                            let target = if inside {
+                                history_drop_row(
+                                    &this.row_offsets,
+                                    this.scroll.offset().y,
+                                    event.bounds.top(),
+                                    y,
+                                )
+                                .and_then(|(index, after)| {
+                                    let id = this.history.items.get(index)?.id;
+                                    (id != event.drag(cx).id).then_some(DropTarget {
+                                        id,
+                                        after,
+                                        allowed: this.valid_drag(event.drag(cx)),
+                                    })
+                                })
+                            } else {
+                                None
+                            };
+                            if this.history_drag_direction != direction
+                                || this.drop_target != target
+                            {
                                 this.history_drag_direction = direction;
+                                this.drop_target = target;
                                 cx.notify();
                             }
                         }),
                     )
+                    .on_drop(cx.listener(|this, drag: &HistoryDrag, _, cx| {
+                        this.drop_history_card(drag, cx);
+                    }))
                     .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
                     .on_action(cx.listener(|this, _: &Previous, window, cx| {
                         this.select_previous_or_focus_search(window, cx);
