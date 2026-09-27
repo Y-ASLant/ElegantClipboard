@@ -388,15 +388,6 @@ impl ClipboardRepository {
         // 已经是串行安全的，无需额外事务保护。
         let conn = self.write_conn.lock();
 
-        let max_sort_order: i64 = conn
-            .query_row(
-                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        let new_sort = max_sort_order + 1;
-
         let (group_cond, group_param) = Self::group_condition(group_id);
         let column = column.as_sql();
         let select_sql = format!(
@@ -414,6 +405,15 @@ impl ClipboardRepository {
 
         match target_id {
             Ok(id) => {
+                let max_sort_order: i64 = conn
+                    .query_row(
+                        "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                let new_sort = max_sort_order + 1;
+
                 conn.execute(
                     "UPDATE clipboard_items \
                      SET access_count = access_count + 1, \

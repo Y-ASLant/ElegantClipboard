@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dialog::DialogFooter;
 
 impl SettingsWindowView {
@@ -11,81 +12,71 @@ impl SettingsWindowView {
         let monitor_types = owner_state.monitor_types;
         let monitor_types_pending = owner_state.monitor_types_pending;
 
+        type MonitorChoice<'a> = (
+            &'a str,
+            &'a str,
+            bool,
+            fn(&mut MonitorTypesPreference, bool),
+        );
+        let choices: [MonitorChoice<'_>; 6] = [
+            (
+                "monitor-text",
+                tr(language, "文本", "Text"),
+                monitor_types.text,
+                |next, checked| next.text = checked,
+            ),
+            (
+                "monitor-url",
+                tr(language, "网址", "URL"),
+                monitor_types.url,
+                |next, checked| next.url = checked,
+            ),
+            (
+                "monitor-html",
+                "HTML",
+                monitor_types.html,
+                |next, checked| next.html = checked,
+            ),
+            ("monitor-rtf", "RTF", monitor_types.rtf, |next, checked| {
+                next.rtf = checked
+            }),
+            (
+                "monitor-image",
+                tr(language, "图片", "Images"),
+                monitor_types.image,
+                |next, checked| next.image = checked,
+            ),
+            (
+                "monitor-files",
+                tr(language, "文件", "Files"),
+                monitor_types.files,
+                |next, checked| next.files = checked,
+            ),
+        ];
         div()
             .flex()
             .flex_wrap()
             .gap_2()
             .children(
-                [
-                    (
-                        "monitor-text",
-                        tr(language, "文本", "Text"),
-                        monitor_types.text,
-                        MonitorTypesPreference {
-                            text: !monitor_types.text,
-                            ..monitor_types
-                        },
-                    ),
-                    (
-                        "monitor-url",
-                        tr(language, "网址", "URL"),
-                        monitor_types.url,
-                        MonitorTypesPreference {
-                            url: !monitor_types.url,
-                            ..monitor_types
-                        },
-                    ),
-                    (
-                        "monitor-html",
-                        "HTML",
-                        monitor_types.html,
-                        MonitorTypesPreference {
-                            html: !monitor_types.html,
-                            ..monitor_types
-                        },
-                    ),
-                    (
-                        "monitor-rtf",
-                        "RTF",
-                        monitor_types.rtf,
-                        MonitorTypesPreference {
-                            rtf: !monitor_types.rtf,
-                            ..monitor_types
-                        },
-                    ),
-                    (
-                        "monitor-image",
-                        tr(language, "图片", "Images"),
-                        monitor_types.image,
-                        MonitorTypesPreference {
-                            image: !monitor_types.image,
-                            ..monitor_types
-                        },
-                    ),
-                    (
-                        "monitor-files",
-                        tr(language, "文件", "Files"),
-                        monitor_types.files,
-                        MonitorTypesPreference {
-                            files: !monitor_types.files,
-                            ..monitor_types
-                        },
-                    ),
-                ]
-                .into_iter()
-                .map(|(id, label, selected, next)| {
-                    let owner = self.owner.clone();
-                    Button::new(id)
-                        .small()
-                        .outline()
-                        .label(label)
-                        .selected(selected)
-                        .disabled(monitor_types_pending || !next.valid())
-                        .on_click(move |_, _, cx| {
-                            let _ =
-                                owner.update(cx, |owner, cx| owner.save_monitor_types(next, cx));
-                        })
-                }),
+                choices
+                    .into_iter()
+                    .map(|(id, label, selected, set_checked)| {
+                        let owner = self.owner.clone();
+                        let mut next = monitor_types;
+                        set_checked(&mut next, !selected);
+                        Checkbox::new(id)
+                            .text_sm()
+                            .label(label)
+                            .checked(selected)
+                            .disabled(monitor_types_pending || !next.valid())
+                            .on_change(move |checked, _, cx| {
+                                let _ = owner.update(cx, |owner, cx| {
+                                    let mut next = owner.monitor_types;
+                                    set_checked(&mut next, *checked);
+                                    owner.save_monitor_types(next, cx);
+                                });
+                            })
+                    }),
             )
             .into_any_element()
     }
@@ -294,16 +285,15 @@ impl SettingsWindowView {
             .flex_col()
             .gap_2()
             .child(
-                Button::new("app-filter-enabled")
-                    .small()
-                    .outline()
+                Checkbox::new("app-filter-enabled")
+                    .text_sm()
                     .label(tr(language, "启用应用过滤", "Enable app filter"))
-                    .selected(app_filter.enabled)
+                    .checked(app_filter.enabled)
                     .disabled(app_filter_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = filter_enable_owner.update(cx, |owner, cx| {
                             let mut next = owner.app_filter.clone();
-                            next.enabled = !next.enabled;
+                            next.enabled = *checked;
                             owner.save_app_filter(next, cx);
                         });
                     }),

@@ -181,7 +181,25 @@ impl Render for SettingsWindowView {
                 .size_full()
                 .child("The main window is no longer available");
         };
-        let language = owner.read(cx).language;
+        let (language, preview_lines, display_pending) = {
+            let owner = owner.read(cx);
+            (
+                owner.language,
+                owner.display.card_max_lines,
+                owner.display_pending,
+            )
+        };
+        let sync_preview_lines = preview_lines != self.preview_lines_last_value
+            || (self.preview_lines_last_pending && !display_pending);
+        self.preview_lines_last_value = preview_lines;
+        self.preview_lines_last_pending = display_pending;
+        if sync_preview_lines {
+            let confirmed = preview_lines.to_string();
+            if self.preview_lines_input.read(cx).value() != confirmed {
+                self.preview_lines_input
+                    .update(cx, |input, cx| input.set_value(confirmed, window, cx));
+            }
+        }
         let locale = match language {
             LanguagePreference::Chinese => "zh-CN",
             LanguagePreference::English => "en",

@@ -42,13 +42,16 @@ use gpui_kit::component::kbd::Kbd;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::status_bar::StatusBar;
 use gpui_kit::component::stepper::{Stepper, StepperItem};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
         button::*,
-        input::{Input, InputEvent, InputState, Textarea, TextareaState},
+        input::{
+            Input, InputEvent, InputState, NumberInputEvent, StepAction, Textarea, TextareaState,
+        },
         *,
     },
     *,
@@ -1017,6 +1020,11 @@ struct SettingsWindowView {
     favorite_shortcuts_expanded: bool,
     app_filter_input: Entity<InputState>,
     _app_filter_input_subscription: Subscription,
+    preview_lines_input: Entity<InputState>,
+    _preview_lines_input_subscription: Subscription,
+    _preview_lines_step_subscription: Subscription,
+    preview_lines_last_value: u8,
+    preview_lines_last_pending: bool,
     app_picker_open: bool,
     app_filter_error: bool,
     link_error: Option<String>,
@@ -1288,6 +1296,73 @@ impl SettingsWindowView {
                     this.add_app_filter_rule(window, cx);
                 }
             });
+        let preview_lines_last_value = entity.read(cx).display.card_max_lines;
+        let preview_lines_input = cx.new(|cx| {
+            InputState::new(window, cx).default_value(preview_lines_last_value.to_string())
+        });
+        // Disable the input's default text-changing step so button presses emit Step events;
+        // our save handler then applies bounds and the same pending/ACK policy as typed edits.
+        preview_lines_input.update(cx, |input, cx| input.set_step(None, window, cx));
+        let preview_lines_input_subscription = cx.subscribe_in(
+            &preview_lines_input,
+            window,
+            |this, input, event, window, cx| {
+                if !matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                    return;
+                }
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                let (saved, pending) = {
+                    let owner = owner.read(cx);
+                    (owner.display.card_max_lines, owner.display_pending)
+                };
+                if pending {
+                    return;
+                }
+                let value = input.read(cx).value();
+                let parsed = value.parse::<i32>().ok();
+                let lines = parsed
+                    .map(|value| value.clamp(1, 10) as u8)
+                    .unwrap_or(saved);
+                if parsed != Some(i32::from(lines)) {
+                    input.update(cx, |input, cx| {
+                        input.set_value(lines.to_string(), window, cx)
+                    });
+                }
+                this.save_preview_lines(lines, cx);
+            },
+        );
+        let preview_lines_step_subscription = cx.subscribe_in(
+            &preview_lines_input,
+            window,
+            |this, input, event: &NumberInputEvent, window, cx| {
+                let NumberInputEvent::Step(action) = event;
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                let (saved, pending) = {
+                    let owner = owner.read(cx);
+                    (owner.display.card_max_lines, owner.display_pending)
+                };
+                if pending {
+                    return;
+                }
+                let value = input.read(cx).value();
+                let value = value.parse::<i32>().unwrap_or(i32::from(saved));
+                let lines = match action {
+                    StepAction::Increment => value.saturating_add(1),
+                    StepAction::Decrement => value.saturating_sub(1),
+                }
+                .clamp(1, 10) as u8;
+                if value != i32::from(lines) {
+                    input.update(cx, |input, cx| {
+                        input.set_value(lines.to_string(), window, cx)
+                    });
+                }
+                this.save_preview_lines(lines, cx);
+            },
+        );
         Self {
             owner,
             _owner_subscription: subscription,
@@ -1301,11 +1376,33 @@ impl SettingsWindowView {
             favorite_shortcuts_expanded: false,
             app_filter_input,
             _app_filter_input_subscription: app_filter_input_subscription,
+            preview_lines_input,
+            _preview_lines_input_subscription: preview_lines_input_subscription,
+            _preview_lines_step_subscription: preview_lines_step_subscription,
+            preview_lines_last_value,
+            preview_lines_last_pending: false,
             app_picker_open: false,
             app_filter_error: false,
             link_error: None,
             toolbar_drop_target: None,
         }
+    }
+
+    fn save_preview_lines(&mut self, lines: u8, cx: &mut Context<Self>) {
+        let Some(owner) = self.owner.upgrade() else {
+            return;
+        };
+        owner.update(cx, |owner, cx| {
+            if !owner.display_pending && owner.display.card_max_lines != lines {
+                owner.save_display(
+                    DisplayPreference {
+                        card_max_lines: lines,
+                        ..owner.display
+                    },
+                    cx,
+                );
+            }
+        });
     }
 
     fn add_app_filter_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -7422,27 +7519,27 @@ impl ClipboardView {
             )
     }
 
-    fn render_status(&self, cx: &Context<Self>) -> Div {
+    fn render_status(&self, cx: &Context<Self>) -> AnyElement {
         if self.message.is_empty() && !self.reorder_pending {
-            return div();
+            return div().into_any_element();
         }
-        div()
+        StatusBar::new()
             .flex_shrink_0()
-            .border_t_1()
-            .border_color(cx.theme().border)
             .px(px(PAGE_PADDING))
-            .py_1()
-            .text_xs()
-            .text_color(if self.is_error {
-                cx.theme().danger
-            } else {
-                cx.theme().muted_foreground
-            })
-            .child(if self.reorder_pending {
-                tr(self.language, "正在保存顺序…", "Saving order…").to_owned()
-            } else {
-                self.message.clone()
-            })
+            .left(
+                div()
+                    .text_color(if self.is_error {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(if self.reorder_pending {
+                        tr(self.language, "正在保存顺序…", "Saving order…").to_owned()
+                    } else {
+                        self.message.clone()
+                    }),
+            )
+            .into_any_element()
     }
 
     fn open_clear_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {

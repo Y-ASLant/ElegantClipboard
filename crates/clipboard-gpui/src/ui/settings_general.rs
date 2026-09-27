@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::checkbox::Checkbox;
 
 impl SettingsWindowView {
     pub(super) fn settings_shortcut_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -164,18 +165,14 @@ impl SettingsWindowView {
             .items_start()
             .gap_2()
             .child(
-                Button::new("persist-window-size")
-                    .outline()
-                    .small()
+                Checkbox::new("persist-window-size")
+                    .text_sm()
                     .label(tr(language, "记住窗口大小", "Remember window size"))
-                    .selected(persist_window_size)
+                    .checked(persist_window_size)
                     .disabled(persist_window_size_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = persist_owner.update(cx, |owner, cx| {
-                            if owner.send(
-                                Command::SetPersistWindowSize(!owner.persist_window_size),
-                                cx,
-                            ) {
+                            if owner.send(Command::SetPersistWindowSize(*checked), cx) {
                                 owner.persist_window_size_pending = true;
                                 owner.window_size_task = None;
                                 cx.notify();
@@ -184,19 +181,18 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                Button::new("auto-reset-state")
-                    .outline()
-                    .small()
+                Checkbox::new("auto-reset-state")
+                    .text_sm()
                     .label(tr(
                         language,
                         "隐藏时重置搜索、筛选和滚动",
                         "Reset search, filters and scroll on hide",
                     ))
-                    .selected(auto_reset_state)
+                    .checked(auto_reset_state)
                     .disabled(auto_reset_state_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = reset_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetAutoResetState(!owner.auto_reset_state), cx) {
+                            if owner.send(Command::SetAutoResetState(*checked), cx) {
                                 owner.auto_reset_state_pending = true;
                                 cx.notify();
                             }
@@ -204,16 +200,14 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                Button::new("search-auto-focus")
-                    .outline()
-                    .small()
+                Checkbox::new("search-auto-focus")
+                    .text_sm()
                     .label(tr(language, "唤出时聚焦搜索", "Focus search when shown"))
-                    .selected(search_auto_focus)
+                    .checked(search_auto_focus)
                     .disabled(search_auto_focus_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = search_focus_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetSearchAutoFocus(!owner.search_auto_focus), cx)
-                            {
+                            if owner.send(Command::SetSearchAutoFocus(*checked), cx) {
                                 owner.search_auto_focus_pending = true;
                                 cx.notify();
                             }
@@ -221,16 +215,14 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                Button::new("search-auto-clear")
-                    .outline()
-                    .small()
+                Checkbox::new("search-auto-clear")
+                    .text_sm()
                     .label(tr(language, "唤出时清空搜索", "Clear search when shown"))
-                    .selected(search_auto_clear)
+                    .checked(search_auto_clear)
                     .disabled(search_auto_clear_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = search_clear_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetSearchAutoClear(!owner.search_auto_clear), cx)
-                            {
+                            if owner.send(Command::SetSearchAutoClear(*checked), cx) {
                                 owner.search_auto_clear_pending = true;
                                 cx.notify();
                             }
@@ -238,21 +230,18 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                Button::new("skip-clear-confirm")
-                    .outline()
-                    .small()
+                Checkbox::new("skip-clear-confirm")
+                    .text_sm()
                     .label(tr(
                         language,
                         "清理历史免确认",
                         "Clear history without confirmation",
                     ))
-                    .selected(skip_clear_confirm)
+                    .checked(skip_clear_confirm)
                     .disabled(skip_clear_confirm_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = skip_clear_owner.update(cx, |owner, cx| {
-                            if owner
-                                .send(Command::SetSkipClearConfirm(!owner.skip_clear_confirm), cx)
-                            {
+                            if owner.send(Command::SetSkipClearConfirm(*checked), cx) {
                                 owner.skip_clear_confirm_pending = true;
                                 cx.notify();
                             }
@@ -260,17 +249,14 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                Button::new("paste-close-window")
-                    .outline()
-                    .small()
+                Checkbox::new("paste-close-window")
+                    .text_sm()
                     .label(tr(language, "粘贴后关闭窗口", "Close after paste"))
-                    .selected(paste_close_window)
+                    .checked(paste_close_window)
                     .disabled(paste_close_window_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = paste_close_owner.update(cx, |owner, cx| {
-                            if owner
-                                .send(Command::SetPasteCloseWindow(!owner.paste_close_window), cx)
-                            {
+                            if owner.send(Command::SetPasteCloseWindow(*checked), cx) {
                                 owner.paste_close_window_pending = true;
                                 cx.notify();
                             }
@@ -278,20 +264,18 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                Button::new("paste-move-to-top")
-                    .outline()
-                    .small()
+                Checkbox::new("paste-move-to-top")
+                    .text_sm()
                     .label(tr(
                         language,
                         "粘贴后移到列表首位",
                         "Move to top after paste",
                     ))
-                    .selected(paste_move_to_top)
+                    .checked(paste_move_to_top)
                     .disabled(paste_move_to_top_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = paste_move_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetPasteMoveToTop(!owner.paste_move_to_top), cx)
-                            {
+                            if owner.send(Command::SetPasteMoveToTop(*checked), cx) {
                                 owner.paste_move_to_top_pending = true;
                                 cx.notify();
                             }
@@ -312,24 +296,14 @@ impl SettingsWindowView {
         let startup_owner = self.owner.clone();
         div()
             .child(
-                Button::new("settings-window-autostart")
-                    .outline()
-                    .small()
-                    .icon(if autostart {
-                        IconName::Pause
-                    } else {
-                        IconName::Play
-                    })
-                    .label(if autostart {
-                        tr(language, "已开启", "Enabled")
-                    } else {
-                        tr(language, "已关闭", "Disabled")
-                    })
-                    .selected(autostart)
+                Checkbox::new("settings-window-autostart")
+                    .text_sm()
+                    .label(tr(language, "开机自启", "Start on login"))
+                    .checked(autostart)
                     .disabled(autostart_pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = startup_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetAutostart(!owner.autostart), cx) {
+                            if owner.send(Command::SetAutostart(*checked), cx) {
                                 owner.autostart_pending = true;
                                 cx.notify();
                             }
@@ -398,15 +372,14 @@ impl SettingsWindowView {
             .items_start()
             .gap_2()
             .child(
-                Button::new("quick-paste-enabled")
-                    .outline()
-                    .small()
+                Checkbox::new("quick-paste-enabled")
+                    .text_sm()
                     .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
-                    .selected(quick_paste_enabled)
+                    .checked(quick_paste_enabled)
                     .disabled(quick_paste_pending_setting || paste_shortcuts_pending || !monitoring)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = quick_paste_owner.update(cx, |owner, cx| {
-                            owner.select_quick_paste_enabled(!owner.quick_paste_enabled, cx);
+                            owner.select_quick_paste_enabled(*checked, cx);
                         });
                     }),
             )

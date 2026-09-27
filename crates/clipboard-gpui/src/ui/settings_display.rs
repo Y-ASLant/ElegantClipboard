@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::{checkbox::Checkbox, input::NumberInput};
 
 impl SettingsWindowView {
     pub(super) fn settings_appearance_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -117,63 +118,55 @@ impl SettingsWindowView {
                             "hover-image",
                             tr(language, "图片", "Images"),
                             hover_preference.image,
-                            HoverPreviewPreference {
-                                image: !hover_preference.image,
-                                ..hover_preference
-                            },
+                            (|next: &mut HoverPreviewPreference, checked| next.image = checked)
+                                as fn(&mut HoverPreviewPreference, bool),
                         ),
                         (
                             "hover-text",
                             tr(language, "文本", "Text"),
                             hover_preference.text,
-                            HoverPreviewPreference {
-                                text: !hover_preference.text,
-                                ..hover_preference
-                            },
+                            |next: &mut HoverPreviewPreference, checked| next.text = checked,
                         ),
                         (
                             "hover-files",
                             tr(language, "文件", "Files"),
                             hover_preference.files,
-                            HoverPreviewPreference {
-                                files: !hover_preference.files,
-                                ..hover_preference
-                            },
+                            |next: &mut HoverPreviewPreference, checked| next.files = checked,
                         ),
                     ]
-                    .map(|(id, label, selected, preference)| {
+                    .map(|(id, label, selected, set_checked)| {
                         let owner = self.owner.clone();
-                        Button::new(id)
-                            .outline()
-                            .small()
+                        Checkbox::new(id)
+                            .text_sm()
                             .label(label)
-                            .selected(selected)
+                            .checked(selected)
                             .disabled(hover_pending)
-                            .on_click(move |_, _, cx| {
+                            .on_change(move |checked, _, cx| {
                                 let _ = owner.update(cx, |owner, cx| {
-                                    owner.save_hover_preference(preference, cx);
+                                    let mut next = owner.hover_preference;
+                                    set_checked(&mut next, *checked);
+                                    owner.save_hover_preference(next, cx);
                                 });
                             })
                     }),
                 ),
             )
             .child(
-                Button::new("hover-expanded-image")
-                    .outline()
-                    .small()
+                Checkbox::new("hover-expanded-image")
+                    .text_sm()
                     .label(tr(
                         language,
                         "大图使用更大浮窗",
                         "Expand image hover window",
                     ))
-                    .selected(hover_preference.expanded_image)
+                    .checked(hover_preference.expanded_image)
                     .disabled(hover_pending || !hover_preference.image)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = expanded_hover_owner.update(cx, |owner, cx| {
                             owner.save_hover_preference(
                                 HoverPreviewPreference {
-                                    expanded_image: !hover_preference.expanded_image,
-                                    ..hover_preference
+                                    expanded_image: *checked,
+                                    ..owner.hover_preference
                                 },
                                 cx,
                             );
@@ -319,19 +312,18 @@ impl SettingsWindowView {
             .flex_col()
             .gap_2()
             .child(
-                Button::new(format!("audio-{kind}-enabled"))
-                    .outline()
-                    .small()
+                Checkbox::new(format!("audio-{kind}-enabled"))
+                    .text_sm()
                     .label(tr(language, "启用", "Enable"))
-                    .selected(enabled)
+                    .checked(enabled)
                     .disabled(pending)
-                    .on_click(move |_, _, cx| {
+                    .on_change(move |checked, _, cx| {
                         let _ = toggle_owner.update(cx, |owner, cx| {
                             let mut next = owner.audio;
                             if copy {
-                                next.copy_enabled = !next.copy_enabled;
+                                next.copy_enabled = *checked;
                             } else {
-                                next.paste_enabled = !next.paste_enabled;
+                                next.paste_enabled = *checked;
                             }
                             owner.save_audio(next, cx);
                         });
@@ -545,14 +537,13 @@ impl SettingsWindowView {
                             ),
                     )
                     .child(
-                        Button::new(("toolbar-visible", index))
-                            .small()
-                            .outline()
+                        Checkbox::new(("toolbar-visible", index))
+                            .text_sm()
                             .label(label)
-                            .selected(item.visible)
+                            .checked(item.visible)
                             .disabled(toolbar_pending || button == ToolbarButton::Settings)
-                            .on_click(move |_, _, cx| {
-                                if let Some(next) = toolbar.with_visibility(button, !item.visible) {
+                            .on_change(move |checked, _, cx| {
+                                if let Some(next) = toolbar.with_visibility(button, *checked) {
                                     let _ = toggle_owner.update(cx, |owner, cx| {
                                         owner.save_toolbar(next, cx);
                                     });
@@ -629,44 +620,44 @@ impl SettingsWindowView {
         let display_pending = owner_state.display_pending;
         let category_owner = self.owner.clone();
         let drag_indicator_owner = self.owner.clone();
-        let fewer_lines_owner = self.owner.clone();
-        let more_lines_owner = self.owner.clone();
         div()
             .flex()
             .flex_col()
             .items_start()
             .gap_2()
             .child(
-                Button::new("show-category-filter")
-                    .small()
-                    .outline()
+                Checkbox::new("show-category-filter")
+                    .text_sm()
                     .label(tr(language, "显示分类筛选", "Show category filters"))
-                    .selected(display.show_category_filter)
+                    .checked(display.show_category_filter)
                     .disabled(display_pending)
-                    .on_click(move |_, _, cx| {
-                        let next = DisplayPreference {
-                            show_category_filter: !display.show_category_filter,
-                            ..display
-                        };
+                    .on_change(move |checked, _, cx| {
                         let _ = category_owner.update(cx, |owner, cx| {
-                            owner.save_display(next, cx);
+                            owner.save_display(
+                                DisplayPreference {
+                                    show_category_filter: *checked,
+                                    ..owner.display
+                                },
+                                cx,
+                            );
                         });
                     }),
             )
             .child(
-                Button::new("show-drag-area-indicator")
-                    .small()
-                    .outline()
+                Checkbox::new("show-drag-area-indicator")
+                    .text_sm()
                     .label(tr(language, "显示卡片拖动区域", "Show card drag areas"))
-                    .selected(display.show_drag_area_indicator)
+                    .checked(display.show_drag_area_indicator)
                     .disabled(display_pending)
-                    .on_click(move |_, _, cx| {
-                        let next = DisplayPreference {
-                            show_drag_area_indicator: !display.show_drag_area_indicator,
-                            ..display
-                        };
+                    .on_change(move |checked, _, cx| {
                         let _ = drag_indicator_owner.update(cx, |owner, cx| {
-                            owner.save_display(next, cx);
+                            owner.save_display(
+                                DisplayPreference {
+                                    show_drag_area_indicator: *checked,
+                                    ..owner.display
+                                },
+                                cx,
+                            );
                         });
                     }),
             )
@@ -706,43 +697,11 @@ impl SettingsWindowView {
                     .gap_2()
                     .child(tr(language, "卡片预览行数", "Card preview lines"))
                     .child(
-                        Button::new("card-lines-less")
-                            .small()
-                            .outline()
-                            .label("−")
-                            .accessibility_label(tr(
-                                language,
-                                "减少预览行数",
-                                "Fewer preview lines",
-                            ))
-                            .disabled(display_pending || display.card_max_lines == 1)
-                            .on_click(move |_, _, cx| {
-                                let next = DisplayPreference {
-                                    card_max_lines: display.card_max_lines - 1,
-                                    ..display
-                                };
-                                let _ = fewer_lines_owner.update(cx, |owner, cx| {
-                                    owner.save_display(next, cx);
-                                });
-                            }),
-                    )
-                    .child(display.card_max_lines.to_string())
-                    .child(
-                        Button::new("card-lines-more")
-                            .small()
-                            .outline()
-                            .label("+")
-                            .accessibility_label(tr(language, "增加预览行数", "More preview lines"))
-                            .disabled(display_pending || display.card_max_lines == 10)
-                            .on_click(move |_, _, cx| {
-                                let next = DisplayPreference {
-                                    card_max_lines: display.card_max_lines + 1,
-                                    ..display
-                                };
-                                let _ = more_lines_owner.update(cx, |owner, cx| {
-                                    owner.save_display(next, cx);
-                                });
-                            }),
+                        div().w(px(120.)).flex_none().child(
+                            NumberInput::new(&self.preview_lines_input)
+                                .small()
+                                .disabled(display_pending),
+                        ),
                     ),
             )
             .child(
@@ -752,50 +711,40 @@ impl SettingsWindowView {
                             "show-card-time",
                             tr(language, "显示时间", "Show time"),
                             display.show_time,
-                            DisplayPreference {
-                                show_time: !display.show_time,
-                                ..display
-                            },
+                            (|next: &mut DisplayPreference, checked| next.show_time = checked)
+                                as fn(&mut DisplayPreference, bool),
                         ),
                         (
                             "show-card-characters",
                             tr(language, "显示字符数", "Show character count"),
                             display.show_char_count,
-                            DisplayPreference {
-                                show_char_count: !display.show_char_count,
-                                ..display
-                            },
+                            |next: &mut DisplayPreference, checked| next.show_char_count = checked,
                         ),
                         (
                             "show-card-size",
                             tr(language, "显示大小", "Show size"),
                             display.show_byte_size,
-                            DisplayPreference {
-                                show_byte_size: !display.show_byte_size,
-                                ..display
-                            },
+                            |next: &mut DisplayPreference, checked| next.show_byte_size = checked,
                         ),
                         (
                             "show-card-source",
                             tr(language, "显示来源应用", "Show source app"),
                             display.show_source_app,
-                            DisplayPreference {
-                                show_source_app: !display.show_source_app,
-                                ..display
-                            },
+                            |next: &mut DisplayPreference, checked| next.show_source_app = checked,
                         ),
                     ]
                     .into_iter()
-                    .map(|(id, label, selected, next)| {
+                    .map(|(id, label, selected, set_checked)| {
                         let owner = self.owner.clone();
-                        Button::new(id)
-                            .small()
-                            .outline()
+                        Checkbox::new(id)
+                            .text_sm()
                             .label(label)
-                            .selected(selected)
+                            .checked(selected)
                             .disabled(display_pending)
-                            .on_click(move |_, _, cx| {
+                            .on_change(move |checked, _, cx| {
                                 let _ = owner.update(cx, |owner, cx| {
+                                    let mut next = owner.display;
+                                    set_checked(&mut next, *checked);
                                     owner.save_display(next, cx);
                                 });
                             })
