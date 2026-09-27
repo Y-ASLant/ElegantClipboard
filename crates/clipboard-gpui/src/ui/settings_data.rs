@@ -114,6 +114,7 @@ impl SettingsWindowView {
         div()
             .relative()
             .w_full()
+            .min_w_0()
             .h(px(152.))
             .child(
                 BarChart::new(data)
@@ -193,10 +194,13 @@ impl SettingsWindowView {
 
         div()
             .flex()
-            .flex_col()
+            .flex_wrap()
+            .items_center()
             .gap_3()
             .child(
                 div()
+                    .flex_1()
+                    .min_w(px(240.))
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(data_size_detail),
@@ -204,8 +208,9 @@ impl SettingsWindowView {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
+                    .flex_shrink_0()
                     .gap_2()
+                    .ml_auto()
                     .child(
                         Button::new("settings-window-refresh")
                             .outline()
@@ -284,6 +289,7 @@ impl SettingsWindowView {
         div()
             .flex()
             .flex_col()
+            .min_w_0()
             .gap_2()
             .child(
                 Checkbox::new("app-filter-enabled")
@@ -610,6 +616,8 @@ impl SettingsWindowView {
                     div()
                         .w_full()
                         .flex()
+                        .flex_wrap()
+                        .gap_2()
                         .items_center()
                         .justify_between()
                         .child(

@@ -161,12 +161,14 @@ impl SettingsWindowView {
 
         div()
             .flex()
-            .flex_col()
+            .w_full()
+            .flex_wrap()
             .items_start()
-            .gap_2()
+            .gap_3()
             .child(
                 Checkbox::new("persist-window-size")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(language, "记住窗口大小", "Remember window size"))
                     .checked(persist_window_size)
                     .disabled(persist_window_size_pending)
@@ -183,6 +185,7 @@ impl SettingsWindowView {
             .child(
                 Checkbox::new("auto-reset-state")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(
                         language,
                         "隐藏时重置搜索、筛选和滚动",
@@ -202,6 +205,7 @@ impl SettingsWindowView {
             .child(
                 Checkbox::new("search-auto-focus")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(language, "唤出时聚焦搜索", "Focus search when shown"))
                     .checked(search_auto_focus)
                     .disabled(search_auto_focus_pending)
@@ -217,6 +221,7 @@ impl SettingsWindowView {
             .child(
                 Checkbox::new("search-auto-clear")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(language, "唤出时清空搜索", "Clear search when shown"))
                     .checked(search_auto_clear)
                     .disabled(search_auto_clear_pending)
@@ -232,6 +237,7 @@ impl SettingsWindowView {
             .child(
                 Checkbox::new("skip-clear-confirm")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(
                         language,
                         "清理历史免确认",
@@ -251,6 +257,7 @@ impl SettingsWindowView {
             .child(
                 Checkbox::new("paste-close-window")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(language, "粘贴后关闭窗口", "Close after paste"))
                     .checked(paste_close_window)
                     .disabled(paste_close_window_pending)
@@ -266,6 +273,7 @@ impl SettingsWindowView {
             .child(
                 Checkbox::new("paste-move-to-top")
                     .text_sm()
+                    .w(px(350.))
                     .label(tr(
                         language,
                         "粘贴后移到列表首位",
@@ -367,6 +375,8 @@ impl SettingsWindowView {
             .into_any_element()
         });
         div()
+            .w_full()
+            .min_w_0()
             .flex()
             .flex_col()
             .items_start()
@@ -440,6 +450,7 @@ impl SettingsWindowView {
             })
             .child(
                 Accordion::new("paste-shortcut-groups")
+                    .w_full()
                     .multiple(true)
                     .small()
                     .on_toggle_click({

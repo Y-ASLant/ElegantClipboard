@@ -218,17 +218,19 @@ impl Render for SettingsWindowView {
                         .description(description)
                         .item(
                             SettingItem::render(move |_, _, cx| {
-                                settings
-                                    .update(cx, |view, cx| {
-                                        if view.page != page {
-                                            view.page = page;
-                                            view.shortcut_recording = false;
-                                            view.shortcut_editing = None;
-                                            view.shortcut_capture_error = None;
-                                        }
-                                        (section.content)(view, cx)
-                                    })
-                                    .unwrap_or_else(|_| div().into_any_element())
+                                div().w_full().min_w_0().child(
+                                    settings
+                                        .update(cx, |view, cx| {
+                                            if view.page != page {
+                                                view.page = page;
+                                                view.shortcut_recording = false;
+                                                view.shortcut_editing = None;
+                                                view.shortcut_capture_error = None;
+                                            }
+                                            (section.content)(view, cx)
+                                        })
+                                        .unwrap_or_else(|_| div().into_any_element()),
+                                )
                             })
                             .keywords([
                                 page.label(language),
@@ -269,8 +271,8 @@ impl Render for SettingsWindowView {
                         page_ix: self.page as usize,
                         group_ix: None,
                     })
-                    .sidebar_width(px(200.))
-                    .sidebar_size_range(px(180.)..px(280.))
+                    .sidebar_width(px(224.))
+                    .sidebar_size_range(px(212.)..px(280.))
                     .with_group_variant(GroupBoxVariant::Outline)
                     .pages(pages),
                 ),

@@ -12,88 +12,102 @@ impl SettingsWindowView {
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
         div()
+            .w_full()
             .flex()
-            .flex_col()
-            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .gap_3()
             .child(
-                div().flex().gap_2().children(
-                    [
-                        (
-                            "settings-window-language-zh",
-                            "简体中文",
-                            LanguagePreference::Chinese,
-                        ),
-                        (
-                            "settings-window-language-en",
-                            "English",
-                            LanguagePreference::English,
-                        ),
-                    ]
-                    .map(|(id, label, preference)| {
-                        let owner = self.owner.clone();
-                        Button::new(id)
-                            .outline()
-                            .small()
-                            .label(label)
-                            .selected(language == preference)
-                            .disabled(language_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    if owner.language != preference
-                                        && owner.send(Command::SetLanguage(preference), cx)
-                                    {
-                                        owner.language_pending = true;
-                                        cx.notify();
-                                    }
-                                });
-                            })
-                    }),
-                ),
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w(px(280.))
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(tr(language, "语言", "Language"))
+                    .children(
+                        [
+                            (
+                                "settings-window-language-zh",
+                                "简体中文",
+                                LanguagePreference::Chinese,
+                            ),
+                            (
+                                "settings-window-language-en",
+                                "English",
+                                LanguagePreference::English,
+                            ),
+                        ]
+                        .map(|(id, label, preference)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(language == preference)
+                                .disabled(language_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        if owner.language != preference
+                                            && owner.send(Command::SetLanguage(preference), cx)
+                                        {
+                                            owner.language_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                })
+                        }),
+                    ),
             )
             .child(
-                div().flex().gap_2().children(
-                    [
-                        (
-                            "settings-window-theme-system",
-                            tr(language, "跟随系统", "System"),
-                            IconName::LayoutDashboard,
-                            ThemePreference::System,
-                        ),
-                        (
-                            "settings-window-theme-light",
-                            tr(language, "浅色", "Light"),
-                            IconName::Sun,
-                            ThemePreference::Light,
-                        ),
-                        (
-                            "settings-window-theme-dark",
-                            tr(language, "深色", "Dark"),
-                            IconName::Moon,
-                            ThemePreference::Dark,
-                        ),
-                    ]
-                    .map(|(id, label, icon, preference)| {
-                        let owner = self.owner.clone();
-                        Button::new(id)
-                            .outline()
-                            .small()
-                            .icon(icon)
-                            .tooltip(label)
-                            .accessibility_label(label)
-                            .selected(theme == preference)
-                            .disabled(theme_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    if owner.theme != preference
-                                        && owner.send(Command::SetTheme(preference), cx)
-                                    {
-                                        owner.theme_pending = true;
-                                        cx.notify();
-                                    }
-                                });
-                            })
-                    }),
-                ),
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w(px(280.))
+                    .flex_wrap()
+                    .items_center()
+                    .justify_end()
+                    .gap_2()
+                    .child(tr(language, "主题", "Theme"))
+                    .children(
+                        [
+                            (
+                                "settings-window-theme-system",
+                                tr(language, "跟随系统", "System"),
+                                ThemePreference::System,
+                            ),
+                            (
+                                "settings-window-theme-light",
+                                tr(language, "浅色", "Light"),
+                                ThemePreference::Light,
+                            ),
+                            (
+                                "settings-window-theme-dark",
+                                tr(language, "深色", "Dark"),
+                                ThemePreference::Dark,
+                            ),
+                        ]
+                        .map(|(id, label, preference)| {
+                            let owner = self.owner.clone();
+                            Button::new(id)
+                                .outline()
+                                .small()
+                                .label(label)
+                                .selected(theme == preference)
+                                .disabled(theme_pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        if owner.theme != preference
+                                            && owner.send(Command::SetTheme(preference), cx)
+                                        {
+                                            owner.theme_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                })
+                        }),
+                    ),
             )
             .into_any_element()
     }
@@ -112,44 +126,50 @@ impl SettingsWindowView {
             .flex_col()
             .gap_2()
             .child(
-                div().flex().flex_wrap().gap_2().children(
-                    [
-                        (
-                            "hover-image",
-                            tr(language, "图片", "Images"),
-                            hover_preference.image,
-                            (|next: &mut HoverPreviewPreference, checked| next.image = checked)
-                                as fn(&mut HoverPreviewPreference, bool),
-                        ),
-                        (
-                            "hover-text",
-                            tr(language, "文本", "Text"),
-                            hover_preference.text,
-                            |next: &mut HoverPreviewPreference, checked| next.text = checked,
-                        ),
-                        (
-                            "hover-files",
-                            tr(language, "文件", "Files"),
-                            hover_preference.files,
-                            |next: &mut HoverPreviewPreference, checked| next.files = checked,
-                        ),
-                    ]
-                    .map(|(id, label, selected, set_checked)| {
-                        let owner = self.owner.clone();
-                        Checkbox::new(id)
-                            .text_sm()
-                            .label(label)
-                            .checked(selected)
-                            .disabled(hover_pending)
-                            .on_change(move |checked, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    let mut next = owner.hover_preference;
-                                    set_checked(&mut next, *checked);
-                                    owner.save_hover_preference(next, cx);
-                                });
-                            })
-                    }),
-                ),
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(tr(language, "预览内容", "Preview content"))
+                    .children(
+                        [
+                            (
+                                "hover-image",
+                                tr(language, "图片", "Images"),
+                                hover_preference.image,
+                                (|next: &mut HoverPreviewPreference, checked| next.image = checked)
+                                    as fn(&mut HoverPreviewPreference, bool),
+                            ),
+                            (
+                                "hover-text",
+                                tr(language, "文本", "Text"),
+                                hover_preference.text,
+                                |next: &mut HoverPreviewPreference, checked| next.text = checked,
+                            ),
+                            (
+                                "hover-files",
+                                tr(language, "文件", "Files"),
+                                hover_preference.files,
+                                |next: &mut HoverPreviewPreference, checked| next.files = checked,
+                            ),
+                        ]
+                        .map(|(id, label, selected, set_checked)| {
+                            let owner = self.owner.clone();
+                            Checkbox::new(id)
+                                .text_sm()
+                                .label(label)
+                                .checked(selected)
+                                .disabled(hover_pending)
+                                .on_change(move |checked, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        let mut next = owner.hover_preference;
+                                        set_checked(&mut next, *checked);
+                                        owner.save_hover_preference(next, cx);
+                                    });
+                                })
+                        }),
+                    ),
             )
             .child(
                 Checkbox::new("hover-expanded-image")
@@ -332,6 +352,7 @@ impl SettingsWindowView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap_2()
                     .child(tr(language, "播放时机", "Timing"))
@@ -451,37 +472,44 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                div().flex().flex_wrap().gap_2().children(
-                    [
-                        (CardDensity::Compact, tr(language, "紧凑", "Compact")),
-                        (CardDensity::Standard, tr(language, "标准", "Standard")),
-                        (CardDensity::Spacious, tr(language, "宽松", "Spacious")),
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (density, label))| {
-                        let owner = self.owner.clone();
-                        Button::new(("card-density", index))
-                            .small()
-                            .outline()
-                            .label(label)
-                            .selected(display.card_density == density)
-                            .disabled(display_pending)
-                            .on_click(move |_, _, cx| {
-                                let next = DisplayPreference {
-                                    card_density: density,
-                                    ..display
-                                };
-                                let _ = owner.update(cx, |owner, cx| {
-                                    owner.save_display(next, cx);
-                                });
-                            })
-                    }),
-                ),
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(tr(language, "卡片密度", "Card density"))
+                    .children(
+                        [
+                            (CardDensity::Compact, tr(language, "紧凑", "Compact")),
+                            (CardDensity::Standard, tr(language, "标准", "Standard")),
+                            (CardDensity::Spacious, tr(language, "宽松", "Spacious")),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (density, label))| {
+                            let owner = self.owner.clone();
+                            Button::new(("card-density", index))
+                                .small()
+                                .outline()
+                                .label(label)
+                                .selected(display.card_density == density)
+                                .disabled(display_pending)
+                                .on_click(move |_, _, cx| {
+                                    let next = DisplayPreference {
+                                        card_density: density,
+                                        ..display
+                                    };
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        owner.save_display(next, cx);
+                                    });
+                                })
+                        }),
+                    ),
             )
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap_2()
                     .child(tr(language, "卡片预览行数", "Card preview lines"))

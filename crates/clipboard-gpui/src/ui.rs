@@ -1774,6 +1774,7 @@ impl SettingsWindowView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap_1()
                     .child(format!(
@@ -1806,6 +1807,7 @@ impl SettingsWindowView {
                         .child(
                             div()
                                 .flex()
+                                .flex_wrap()
                                 .items_center()
                                 .gap_1()
                                 .child(tr(language, "请按组合键；按", "Press a shortcut; press"))
@@ -1823,6 +1825,7 @@ impl SettingsWindowView {
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .gap_2()
                     .child(
                         Button::new("paste-shortcut-record")
@@ -1897,8 +1900,9 @@ impl SettingsWindowView {
                 div()
                     .w_full()
                     .flex()
-                    .flex_col()
-                    .gap_1()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
                     .py_1()
                     .border_b_1()
                     .border_color(cx.theme().border)
@@ -1906,6 +1910,8 @@ impl SettingsWindowView {
                         div()
                             .flex()
                             .items_center()
+                            .flex_1()
+                            .min_w(px(220.))
                             .gap_2()
                             .child(div().w(px(96.)).text_xs().child(format!(
                                 "{} {slot}",
