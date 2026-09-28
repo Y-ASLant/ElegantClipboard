@@ -2,7 +2,7 @@
 use clipboard_core::preferences::CardDensity;
 use gpui_kit::*;
 use std::time::Duration;
-pub const PAGE_PADDING: f32 = 20.;
+pub const PAGE_PADDING: f32 = 8.;
 pub const ROW_HEIGHT: f32 = 96.;
 pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
     let base = match density {
