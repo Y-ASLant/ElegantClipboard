@@ -1,5 +1,5 @@
 use super::*;
-use gpui_kit::component::{checkbox::Checkbox, input::NumberInput};
+use gpui_kit::component::{checkbox::Checkbox, input::NumberInput, switch::Switch};
 
 impl SettingsWindowView {
     pub(super) fn settings_appearance_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -11,6 +11,8 @@ impl SettingsWindowView {
         let language_pending = owner_state.language_pending;
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
+        let language_owner = self.owner.clone();
+        let theme_owner = self.owner.clone();
         div()
             .w_full()
             .flex()
@@ -26,38 +28,33 @@ impl SettingsWindowView {
                     .items_center()
                     .gap_2()
                     .child(tr(language, "语言", "Language"))
-                    .children(
-                        [
-                            (
-                                "settings-window-language-zh",
-                                "简体中文",
-                                LanguagePreference::Chinese,
-                            ),
-                            (
-                                "settings-window-language-en",
-                                "English",
-                                LanguagePreference::English,
-                            ),
-                        ]
-                        .map(|(id, label, preference)| {
-                            let owner = self.owner.clone();
-                            Button::new(id)
-                                .outline()
-                                .small()
-                                .label(label)
-                                .selected(language == preference)
-                                .disabled(language_pending)
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        if owner.language != preference
-                                            && owner.send(Command::SetLanguage(preference), cx)
-                                        {
-                                            owner.language_pending = true;
-                                            cx.notify();
-                                        }
-                                    });
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            TabBar::new("settings-window-language")
+                                .w_full()
+                                .segmented()
+                                .selected_index(usize::from(
+                                    language == LanguagePreference::English,
+                                ))
+                                .on_click(move |index: &usize, _, cx| {
+                                    if let Some(&preference) =
+                                        [LanguagePreference::Chinese, LanguagePreference::English]
+                                            .get(*index)
+                                    {
+                                        let _ = language_owner.update(cx, |owner, cx| {
+                                            if owner.language != preference
+                                                && owner.send(Command::SetLanguage(preference), cx)
+                                            {
+                                                owner.language_pending = true;
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
                                 })
-                        }),
+                                .children(["简体中文", "English"].map(|label| {
+                                    Tab::new().label(label).disabled(language_pending).flex_1()
+                                })),
+                        ),
                     ),
             )
             .child(
@@ -67,46 +64,52 @@ impl SettingsWindowView {
                     .min_w(px(280.))
                     .flex_wrap()
                     .items_center()
-                    .justify_end()
                     .gap_2()
                     .child(tr(language, "主题", "Theme"))
-                    .children(
-                        [
-                            (
-                                "settings-window-theme-system",
-                                tr(language, "跟随系统", "System"),
-                                ThemePreference::System,
-                            ),
-                            (
-                                "settings-window-theme-light",
-                                tr(language, "浅色", "Light"),
-                                ThemePreference::Light,
-                            ),
-                            (
-                                "settings-window-theme-dark",
-                                tr(language, "深色", "Dark"),
-                                ThemePreference::Dark,
-                            ),
-                        ]
-                        .map(|(id, label, preference)| {
-                            let owner = self.owner.clone();
-                            Button::new(id)
-                                .outline()
-                                .small()
-                                .label(label)
-                                .selected(theme == preference)
-                                .disabled(theme_pending)
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        if owner.theme != preference
-                                            && owner.send(Command::SetTheme(preference), cx)
-                                        {
-                                            owner.theme_pending = true;
-                                            cx.notify();
-                                        }
-                                    });
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            TabBar::new("settings-window-theme")
+                                .w_full()
+                                .segmented()
+                                .selected_index(
+                                    [
+                                        ThemePreference::System,
+                                        ThemePreference::Light,
+                                        ThemePreference::Dark,
+                                    ]
+                                    .iter()
+                                    .position(|&preference| preference == theme)
+                                    .unwrap_or(0),
+                                )
+                                .on_click(move |index: &usize, _, cx| {
+                                    if let Some(&preference) = [
+                                        ThemePreference::System,
+                                        ThemePreference::Light,
+                                        ThemePreference::Dark,
+                                    ]
+                                    .get(*index)
+                                    {
+                                        let _ = theme_owner.update(cx, |owner, cx| {
+                                            if owner.theme != preference
+                                                && owner.send(Command::SetTheme(preference), cx)
+                                            {
+                                                owner.theme_pending = true;
+                                                cx.notify();
+                                            }
+                                        });
+                                    }
                                 })
-                        }),
+                                .children(
+                                    [
+                                        tr(language, "跟随系统", "System"),
+                                        tr(language, "浅色", "Light"),
+                                        tr(language, "深色", "Dark"),
+                                    ]
+                                    .map(|label| {
+                                        Tab::new().label(label).disabled(theme_pending).flex_1()
+                                    }),
+                                ),
+                        ),
                     ),
             )
             .into_any_element()
@@ -122,6 +125,7 @@ impl SettingsWindowView {
         let hover_pending = owner_state.hover_preference_pending;
         let expanded_hover_owner = self.owner.clone();
         div()
+            .w_full()
             .flex()
             .flex_col()
             .gap_2()
@@ -199,76 +203,86 @@ impl SettingsWindowView {
                     .child(tr(language, "停留延时", "Hover delay")),
             )
             .child(
-                div().flex().flex_wrap().gap_2().children(
-                    [
-                        (250, "250 ms"),
-                        (500, "500 ms"),
-                        (750, "750 ms"),
-                        (1000, "1000 ms"),
-                    ]
-                    .map(|(delay, label)| {
+                TabBar::new("hover-delay")
+                    .w_full()
+                    .segmented()
+                    .selected_index(
+                        [250, 500, 750, 1000]
+                            .iter()
+                            .position(|&delay| delay == hover_preference.delay_ms)
+                            .unwrap_or(0),
+                    )
+                    .on_click({
                         let owner = self.owner.clone();
-                        Button::new(("hover-delay", usize::from(delay)))
-                            .outline()
-                            .small()
-                            .label(label)
-                            .selected(hover_preference.delay_ms == delay)
-                            .disabled(hover_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
+                        move |index: &usize, _, cx| {
+                            let Some(&delay) = [250, 500, 750, 1000].get(*index) else {
+                                return;
+                            };
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.hover_preference.delay_ms != delay {
                                     owner.save_hover_preference(
                                         HoverPreviewPreference {
                                             delay_ms: delay,
-                                            ..hover_preference
+                                            ..owner.hover_preference
                                         },
                                         cx,
                                     );
-                                });
-                            })
-                    }),
-                ),
+                                }
+                            });
+                        }
+                    })
+                    .children(
+                        ["250 ms", "500 ms", "750 ms", "1000 ms"]
+                            .map(|label| Tab::new().label(label).disabled(hover_pending).flex_1()),
+                    ),
             )
             .child(div().text_xs().child(tr(language, "浮窗位置", "Position")))
             .child(
-                div().flex().flex_wrap().gap_2().children(
-                    [
-                        (
-                            "hover-auto",
-                            tr(language, "自动", "Auto"),
+                TabBar::new("hover-position")
+                    .w_full()
+                    .segmented()
+                    .selected_index(
+                        [
                             HoverPreviewPosition::Auto,
-                        ),
-                        (
-                            "hover-left",
-                            tr(language, "左侧", "Left"),
                             HoverPreviewPosition::Left,
-                        ),
-                        (
-                            "hover-right",
-                            tr(language, "右侧", "Right"),
                             HoverPreviewPosition::Right,
-                        ),
-                    ]
-                    .map(|(id, label, position)| {
+                        ]
+                        .iter()
+                        .position(|&position| position == hover_preference.position)
+                        .unwrap_or(0),
+                    )
+                    .on_click({
                         let owner = self.owner.clone();
-                        Button::new(id)
-                            .outline()
-                            .small()
-                            .label(label)
-                            .selected(hover_preference.position == position)
-                            .disabled(hover_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
+                        move |index: &usize, _, cx| {
+                            let Some(&position) = [
+                                HoverPreviewPosition::Auto,
+                                HoverPreviewPosition::Left,
+                                HoverPreviewPosition::Right,
+                            ]
+                            .get(*index) else {
+                                return;
+                            };
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.hover_preference.position != position {
                                     owner.save_hover_preference(
                                         HoverPreviewPreference {
                                             position,
-                                            ..hover_preference
+                                            ..owner.hover_preference
                                         },
                                         cx,
                                     );
-                                });
-                            })
-                    }),
-                ),
+                                }
+                            });
+                        }
+                    })
+                    .children(
+                        [
+                            tr(language, "自动", "Auto"),
+                            tr(language, "左侧", "Left"),
+                            tr(language, "右侧", "Right"),
+                        ]
+                        .map(|label| Tab::new().label(label).disabled(hover_pending).flex_1()),
+                    ),
             )
             .child(
                 div()
@@ -276,30 +290,38 @@ impl SettingsWindowView {
                     .child(tr(language, "图片缩放步进", "Image zoom step")),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .children([5, 10, 20, 50].map(|zoom_step| {
+                TabBar::new("hover-zoom-step")
+                    .w_full()
+                    .segmented()
+                    .selected_index(
+                        [5, 10, 20, 50]
+                            .iter()
+                            .position(|&step| step == hover_preference.zoom_step)
+                            .unwrap_or(0),
+                    )
+                    .on_click({
                         let owner = self.owner.clone();
-                        Button::new(("hover-zoom-step", usize::from(zoom_step)))
-                            .outline()
-                            .small()
-                            .label(format!("{zoom_step}%"))
-                            .selected(hover_preference.zoom_step == zoom_step)
-                            .disabled(hover_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
+                        move |index: &usize, _, cx| {
+                            let Some(&zoom_step) = [5, 10, 20, 50].get(*index) else {
+                                return;
+                            };
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.hover_preference.zoom_step != zoom_step {
                                     owner.save_hover_preference(
                                         HoverPreviewPreference {
                                             zoom_step,
-                                            ..hover_preference
+                                            ..owner.hover_preference
                                         },
                                         cx,
                                     );
-                                });
-                            })
-                    })),
+                                }
+                            });
+                        }
+                    })
+                    .children(
+                        ["5%", "10%", "20%", "50%"]
+                            .map(|label| Tab::new().label(label).disabled(hover_pending).flex_1()),
+                    ),
             )
             .into_any_element()
     }
@@ -312,7 +334,19 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let audio = owner_state.audio;
         let pending = owner_state.audio_pending;
-        let kind = if copy { "copy" } else { "paste" };
+        let (switch_id, timing_id, preview_id) = if copy {
+            (
+                "audio-copy-enabled",
+                "audio-copy-timing",
+                "audio-copy-preview",
+            )
+        } else {
+            (
+                "audio-paste-enabled",
+                "audio-paste-timing",
+                "audio-paste-preview",
+            )
+        };
         let enabled = if copy {
             audio.copy_enabled
         } else {
@@ -324,16 +358,14 @@ impl SettingsWindowView {
             audio.paste_timing
         };
         let toggle_owner = self.owner.clone();
-        let immediate_owner = self.owner.clone();
-        let success_owner = self.owner.clone();
         let preview_owner = self.owner.clone();
         div()
+            .w_full()
             .flex()
             .flex_col()
             .gap_2()
             .child(
-                Checkbox::new(format!("audio-{kind}-enabled"))
-                    .text_sm()
+                Switch::new(switch_id)
                     .label(tr(language, "启用", "Enable"))
                     .checked(enabled)
                     .disabled(pending)
@@ -351,51 +383,61 @@ impl SettingsWindowView {
             )
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_wrap()
                     .items_center()
                     .gap_2()
-                    .child(tr(language, "播放时机", "Timing"))
+                    .child(div().text_xs().child(tr(language, "播放时机", "Timing")))
                     .child(
-                        Button::new(format!("audio-{kind}-immediate"))
-                            .outline()
-                            .small()
-                            .label(tr(language, "立即", "Immediate"))
-                            .selected(timing == SoundTiming::Immediate)
-                            .disabled(pending || !enabled)
-                            .on_click(move |_, _, cx| {
-                                let _ = immediate_owner.update(cx, |owner, cx| {
-                                    let mut next = owner.audio;
-                                    if copy {
-                                        next.copy_timing = SoundTiming::Immediate;
-                                    } else {
-                                        next.paste_timing = SoundTiming::Immediate;
+                        div().flex_1().min_w(px(240.)).child(
+                            TabBar::new(timing_id)
+                                .w_full()
+                                .segmented()
+                                .selected_index(usize::from(timing == SoundTiming::AfterSuccess))
+                                .on_click({
+                                    let owner = self.owner.clone();
+                                    move |index: &usize, _, cx| {
+                                        let Some(&timing) =
+                                            [SoundTiming::Immediate, SoundTiming::AfterSuccess]
+                                                .get(*index)
+                                        else {
+                                            return;
+                                        };
+                                        let _ = owner.update(cx, |owner, cx| {
+                                            let current = if copy {
+                                                owner.audio.copy_timing
+                                            } else {
+                                                owner.audio.paste_timing
+                                            };
+                                            if current != timing {
+                                                let mut next = owner.audio;
+                                                if copy {
+                                                    next.copy_timing = timing;
+                                                } else {
+                                                    next.paste_timing = timing;
+                                                }
+                                                owner.save_audio(next, cx);
+                                            }
+                                        });
                                     }
-                                    owner.save_audio(next, cx);
-                                });
-                            }),
+                                })
+                                .children(
+                                    [
+                                        tr(language, "立即", "Immediate"),
+                                        tr(language, "成功后", "After success"),
+                                    ]
+                                    .map(|label| {
+                                        Tab::new()
+                                            .label(label)
+                                            .disabled(pending || !enabled)
+                                            .flex_1()
+                                    }),
+                                ),
+                        ),
                     )
                     .child(
-                        Button::new(format!("audio-{kind}-success"))
-                            .outline()
-                            .small()
-                            .label(tr(language, "成功后", "After success"))
-                            .selected(timing == SoundTiming::AfterSuccess)
-                            .disabled(pending || !enabled)
-                            .on_click(move |_, _, cx| {
-                                let _ = success_owner.update(cx, |owner, cx| {
-                                    let mut next = owner.audio;
-                                    if copy {
-                                        next.copy_timing = SoundTiming::AfterSuccess;
-                                    } else {
-                                        next.paste_timing = SoundTiming::AfterSuccess;
-                                    }
-                                    owner.save_audio(next, cx);
-                                });
-                            }),
-                    )
-                    .child(
-                        Button::new(format!("audio-{kind}-preview"))
+                        Button::new(preview_id)
                             .outline()
                             .small()
                             .label(tr(language, "试听", "Preview"))
@@ -431,6 +473,7 @@ impl SettingsWindowView {
         let category_owner = self.owner.clone();
         let drag_indicator_owner = self.owner.clone();
         div()
+            .w_full()
             .flex()
             .flex_col()
             .items_start()
@@ -473,37 +516,54 @@ impl SettingsWindowView {
             )
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(tr(language, "卡片密度", "Card density"))
+                    .text_xs()
+                    .child(tr(language, "卡片密度", "Card density")),
+            )
+            .child(
+                TabBar::new("card-density")
+                    .w_full()
+                    .segmented()
+                    .selected_index(
+                        [
+                            CardDensity::Compact,
+                            CardDensity::Standard,
+                            CardDensity::Spacious,
+                        ]
+                        .iter()
+                        .position(|&density| density == display.card_density)
+                        .unwrap_or(0),
+                    )
+                    .on_click({
+                        let owner = self.owner.clone();
+                        move |index: &usize, _, cx| {
+                            let Some(&density) = [
+                                CardDensity::Compact,
+                                CardDensity::Standard,
+                                CardDensity::Spacious,
+                            ]
+                            .get(*index) else {
+                                return;
+                            };
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.display.card_density != density {
+                                    owner.save_display(
+                                        DisplayPreference {
+                                            card_density: density,
+                                            ..owner.display
+                                        },
+                                        cx,
+                                    );
+                                }
+                            });
+                        }
+                    })
                     .children(
                         [
-                            (CardDensity::Compact, tr(language, "紧凑", "Compact")),
-                            (CardDensity::Standard, tr(language, "标准", "Standard")),
-                            (CardDensity::Spacious, tr(language, "宽松", "Spacious")),
+                            tr(language, "紧凑", "Compact"),
+                            tr(language, "标准", "Standard"),
+                            tr(language, "宽松", "Spacious"),
                         ]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (density, label))| {
-                            let owner = self.owner.clone();
-                            Button::new(("card-density", index))
-                                .small()
-                                .outline()
-                                .label(label)
-                                .selected(display.card_density == density)
-                                .disabled(display_pending)
-                                .on_click(move |_, _, cx| {
-                                    let next = DisplayPreference {
-                                        card_density: density,
-                                        ..display
-                                    };
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        owner.save_display(next, cx);
-                                    });
-                                })
-                        }),
+                        .map(|label| Tab::new().label(label).disabled(display_pending).flex_1()),
                     ),
             )
             .child(
@@ -570,73 +630,102 @@ impl SettingsWindowView {
             )
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(tr(language, "时间格式", "Time format"))
+                    .text_xs()
+                    .child(tr(language, "时间格式", "Time format")),
+            )
+            .child(
+                TabBar::new("time-format")
+                    .w_full()
+                    .segmented()
+                    .selected_index(usize::from(display.time_format == TimeFormat::Relative))
+                    .on_click({
+                        let owner = self.owner.clone();
+                        move |index: &usize, _, cx| {
+                            let Some(&format) =
+                                [TimeFormat::Absolute, TimeFormat::Relative].get(*index)
+                            else {
+                                return;
+                            };
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.display.time_format != format {
+                                    owner.save_display(
+                                        DisplayPreference {
+                                            time_format: format,
+                                            ..owner.display
+                                        },
+                                        cx,
+                                    );
+                                }
+                            });
+                        }
+                    })
                     .children(
                         [
-                            (TimeFormat::Absolute, tr(language, "绝对时间", "Absolute")),
-                            (TimeFormat::Relative, tr(language, "相对时间", "Relative")),
+                            tr(language, "绝对时间", "Absolute"),
+                            tr(language, "相对时间", "Relative"),
                         ]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (format, label))| {
-                            let owner = self.owner.clone();
-                            Button::new(("time-format", index))
-                                .small()
-                                .outline()
+                        .map(|label| {
+                            Tab::new()
                                 .label(label)
-                                .selected(display.time_format == format)
                                 .disabled(display_pending || !display.show_time)
-                                .on_click(move |_, _, cx| {
-                                    let next = DisplayPreference {
-                                        time_format: format,
-                                        ..display
-                                    };
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        owner.save_display(next, cx);
-                                    });
-                                })
+                                .flex_1()
                         }),
                     ),
             )
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(tr(language, "来源显示", "Source display"))
+                    .text_xs()
+                    .child(tr(language, "来源显示", "Source display")),
+            )
+            .child(
+                TabBar::new("source-app-display")
+                    .w_full()
+                    .segmented()
+                    .selected_index(
+                        [
+                            SourceAppDisplay::Both,
+                            SourceAppDisplay::Name,
+                            SourceAppDisplay::Icon,
+                        ]
+                        .iter()
+                        .position(|&mode| mode == display.source_app_display)
+                        .unwrap_or(0),
+                    )
+                    .on_click({
+                        let owner = self.owner.clone();
+                        move |index: &usize, _, cx| {
+                            let Some(&mode) = [
+                                SourceAppDisplay::Both,
+                                SourceAppDisplay::Name,
+                                SourceAppDisplay::Icon,
+                            ]
+                            .get(*index) else {
+                                return;
+                            };
+                            let _ = owner.update(cx, |owner, cx| {
+                                if owner.display.source_app_display != mode {
+                                    owner.save_display(
+                                        DisplayPreference {
+                                            source_app_display: mode,
+                                            ..owner.display
+                                        },
+                                        cx,
+                                    );
+                                }
+                            });
+                        }
+                    })
                     .children(
                         [
-                            (
-                                SourceAppDisplay::Both,
-                                tr(language, "名称和图标", "Name and icon"),
-                            ),
-                            (SourceAppDisplay::Name, tr(language, "仅名称", "Name only")),
-                            (SourceAppDisplay::Icon, tr(language, "仅图标", "Icon only")),
+                            tr(language, "名称和图标", "Name and icon"),
+                            tr(language, "仅名称", "Name only"),
+                            tr(language, "仅图标", "Icon only"),
                         ]
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (mode, label))| {
-                            let owner = self.owner.clone();
-                            Button::new(("source-app-display", index))
-                                .small()
-                                .outline()
+                        .map(|label| {
+                            Tab::new()
                                 .label(label)
-                                .selected(display.source_app_display == mode)
                                 .disabled(display_pending || !display.show_source_app)
-                                .on_click(move |_, _, cx| {
-                                    let next = DisplayPreference {
-                                        source_app_display: mode,
-                                        ..display
-                                    };
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        owner.save_display(next, cx);
-                                    });
-                                })
+                                .flex_1()
                         }),
                     ),
             )

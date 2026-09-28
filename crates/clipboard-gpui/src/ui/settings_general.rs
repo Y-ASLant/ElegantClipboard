@@ -1,5 +1,5 @@
 use super::*;
-use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
+use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox, switch::Switch};
 
 impl SettingsWindowView {
     pub(super) fn settings_shortcut_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -11,45 +11,40 @@ impl SettingsWindowView {
             (state.language, state.hotkey_choice, state.hotkey_pending)
         };
 
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(
-                [
-                    (
-                        "settings-window-hotkey-ctrl-shift-v",
-                        HotkeyPreference::CtrlShiftV,
-                    ),
-                    ("settings-window-hotkey-alt-c", HotkeyPreference::AltC),
-                    (
-                        "settings-window-hotkey-ctrl-alt-v",
-                        HotkeyPreference::CtrlAltV,
-                    ),
-                    (
-                        "settings-window-hotkey-disabled",
-                        HotkeyPreference::Disabled,
-                    ),
-                ]
-                .map(|(id, choice)| {
-                    let owner = self.owner.clone();
-                    let button = Button::new(id)
-                        .outline()
-                        .small()
-                        .selected(hotkey_choice == choice)
-                        .disabled(hotkey_pending)
-                        .on_click(move |_, _, cx| {
-                            let _ = owner.update(cx, |owner, cx| {
-                                owner.select_hotkey(choice, cx);
-                            });
-                        });
-                    if choice == HotkeyPreference::Disabled {
-                        button.label(hotkey_label(language, choice))
-                    } else {
-                        button.child(shortcut_kbd(choice.label()).expect("built-in hotkey"))
-                    }
-                }),
-            )
+        let choices = [
+            HotkeyPreference::CtrlShiftV,
+            HotkeyPreference::AltC,
+            HotkeyPreference::CtrlAltV,
+            HotkeyPreference::Disabled,
+        ];
+        let selected_index = choices
+            .iter()
+            .position(|choice| *choice == hotkey_choice)
+            .expect("built-in hotkey choice");
+        let click_choices = choices;
+        let owner = self.owner.clone();
+        TabBar::new("settings-window-hotkey-tabs")
+            .w_full()
+            .segmented()
+            .selected_index(selected_index)
+            .on_click(move |index: &usize, _, cx| {
+                if let Some(&choice) = click_choices.get(*index) {
+                    let _ = owner.update(cx, |owner, cx| {
+                        if owner.hotkey_choice != choice {
+                            owner.select_hotkey(choice, cx);
+                        }
+                    });
+                }
+            })
+            .children(choices.map(|choice| {
+                let tab = Tab::new().flex_1().disabled(hotkey_pending);
+                if choice == HotkeyPreference::Disabled {
+                    tab.label(hotkey_label(language, choice))
+                } else {
+                    tab.aria_label(choice.label())
+                        .child(shortcut_kbd(choice.label()).expect("built-in hotkey"))
+                }
+            }))
             .into_any_element()
     }
 
@@ -66,48 +61,48 @@ impl SettingsWindowView {
             )
         };
 
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
-            .children(
-                [
-                    (
-                        "window-position-cursor",
-                        tr(language, "跟随光标", "Follow cursor"),
-                        WindowPositionPreference::FollowCursor,
-                    ),
-                    (
-                        "window-position-center",
-                        tr(language, "当前屏幕居中", "Center on screen"),
-                        WindowPositionPreference::ScreenCenter,
-                    ),
-                    (
-                        "window-position-fixed",
-                        tr(language, "保持位置", "Keep position"),
-                        WindowPositionPreference::FixedPosition,
-                    ),
-                ]
-                .map(|(id, label, preference)| {
-                    let owner = self.owner.clone();
-                    Button::new(id)
-                        .outline()
-                        .small()
-                        .label(label)
-                        .selected(window_position == preference)
-                        .disabled(window_position_pending)
-                        .on_click(move |_, _, cx| {
-                            let _ = owner.update(cx, |owner, cx| {
-                                if owner.window_position != preference
-                                    && owner.send(Command::SetWindowPosition(preference), cx)
-                                {
-                                    owner.window_position_pending = true;
-                                    cx.notify();
-                                }
-                            });
-                        })
-                }),
-            )
+        let choices = [
+            (
+                tr(language, "跟随光标", "Follow cursor"),
+                WindowPositionPreference::FollowCursor,
+            ),
+            (
+                tr(language, "当前屏幕居中", "Center on screen"),
+                WindowPositionPreference::ScreenCenter,
+            ),
+            (
+                tr(language, "保持位置", "Keep position"),
+                WindowPositionPreference::FixedPosition,
+            ),
+        ];
+        let selected_index = choices
+            .iter()
+            .position(|(_, preference)| *preference == window_position)
+            .expect("built-in window position");
+        let click_choices = choices;
+        let owner = self.owner.clone();
+        TabBar::new("settings-window-position-tabs")
+            .w_full()
+            .segmented()
+            .selected_index(selected_index)
+            .on_click(move |index: &usize, _, cx| {
+                if let Some(&(_, preference)) = click_choices.get(*index) {
+                    let _ = owner.update(cx, |owner, cx| {
+                        if owner.window_position != preference
+                            && owner.send(Command::SetWindowPosition(preference), cx)
+                        {
+                            owner.window_position_pending = true;
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .children(choices.map(|(label, _)| {
+                Tab::new()
+                    .label(label)
+                    .flex_1()
+                    .disabled(window_position_pending)
+            }))
             .into_any_element()
     }
 
@@ -304,8 +299,7 @@ impl SettingsWindowView {
         let startup_owner = self.owner.clone();
         div()
             .child(
-                Checkbox::new("settings-window-autostart")
-                    .text_sm()
+                Switch::new("settings-window-autostart")
                     .label(tr(language, "开机自启", "Start on login"))
                     .checked(autostart)
                     .disabled(autostart_pending)
@@ -395,6 +389,7 @@ impl SettingsWindowView {
             )
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_col()
                     .gap_1()
@@ -403,33 +398,41 @@ impl SettingsWindowView {
                         "自动粘贴使用按键",
                         "Key sent for automatic paste",
                     )))
-                    .child(div().flex().gap_2().children([
-                        ("paste-key-ctrl-v", "Ctrl+V", PasteKeyPreference::CtrlV),
-                        (
-                            "paste-key-shift-insert",
-                            "Shift+Insert",
-                            PasteKeyPreference::ShiftInsert,
-                        ),
-                    ]
-                    .map(|(id, label, key)| {
+                    .child({
+                        let choices = [
+                            ("Ctrl+V", PasteKeyPreference::CtrlV),
+                            ("Shift+Insert", PasteKeyPreference::ShiftInsert),
+                        ];
+                        let selected_index = choices
+                            .iter()
+                            .position(|(_, key)| *key == paste_key)
+                            .expect("built-in paste key");
+                        let click_choices = choices;
                         let owner = self.owner.clone();
-                        Button::new(id)
-                            .outline()
-                            .small()
-                            .child(shortcut_kbd(label).expect("built-in paste key"))
-                            .selected(paste_key == key)
-                            .disabled(paste_key_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    if owner.paste_key != key
-                                        && owner.send(Command::SetPasteKey(key), cx)
-                                    {
-                                        owner.paste_key_pending = true;
-                                        cx.notify();
-                                    }
-                                });
+                        TabBar::new("settings-paste-key-tabs")
+                            .w_full()
+                            .segmented()
+                            .selected_index(selected_index)
+                            .on_click(move |index: &usize, _, cx| {
+                                if let Some(&(_, key)) = click_choices.get(*index) {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        if owner.paste_key != key
+                                            && owner.send(Command::SetPasteKey(key), cx)
+                                        {
+                                            owner.paste_key_pending = true;
+                                            cx.notify();
+                                        }
+                                    });
+                                }
                             })
-                    }))),
+                            .children(choices.map(|(label, _)| {
+                                Tab::new()
+                                    .aria_label(label)
+                                    .child(shortcut_kbd(label).expect("built-in paste key"))
+                                    .flex_1()
+                                    .disabled(paste_key_pending)
+                            }))
+                    }),
             )
             .child(
                 div()
