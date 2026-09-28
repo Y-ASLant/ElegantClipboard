@@ -6,6 +6,8 @@
 
 2026-09-27 更新：应用已升级至 gpui-kit 0.6.6，配套 `gpui-pre-*` 依赖为 0.3.6；下文 0.6.2/0.6.4 与 0.3.5 为当时的决策记录。
 
+2026-09-28 更新：应用升级至 [gpui-kit 0.7.0](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.0)，使用配套 `gpui-pre-* 0.3.7`；窗口通过 Kit `open_window` 创建，由上游 Base Root 自动管理浮层。历史版本号与原始决策记录保留。
+
 ## 栈与依赖
 
 - 首批使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。

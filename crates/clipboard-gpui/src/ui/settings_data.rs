@@ -525,10 +525,11 @@ impl SettingsWindowView {
                                 .title(tr(language, "删除全部历史", "Delete all history"))
                                 .close_button(false)
                                 .overlay_closable(false)
-                                .on_ok(move |_, _, cx| {
+                                .on_ok(move |_, window, cx| {
                                     let _ = keyboard_owner.update(cx, |owner, cx| {
                                         owner.clear_all_history(cx);
                                     });
+                                    window.refresh();
                                     false
                                 })
                                 .on_cancel(move |_, _, cx| {
@@ -578,10 +579,11 @@ impl SettingsWindowView {
                                                     tr(language, "确认删除全部历史", "Delete all history")
                                                 })
                                                 .disabled(pending)
-                                                .on_click(move |_, _, cx| {
+                                                .on_click(move |_, window, cx| {
                                                     let _ = confirm_owner.update(cx, |owner, cx| {
                                                         owner.clear_all_history(cx);
                                                     });
+                                                    window.refresh();
                                                 }),
                                         ),
                                 )

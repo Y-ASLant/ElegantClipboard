@@ -272,6 +272,5 @@ impl Render for SettingsWindowView {
                     .pages(pages),
                 ),
             )
-            .children(Root::render_dialog_layer(window, cx))
     }
 }

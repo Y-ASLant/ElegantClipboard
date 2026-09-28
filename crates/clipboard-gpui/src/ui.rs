@@ -739,7 +739,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             let tray_enabled = Rc::new(Cell::new(false));
             let exiting = Rc::new(Cell::new(false));
             let smoke_exiting = exiting.clone();
-            if let Err(error) = cx.open_window(
+            if let Err(error) = gpui_kit::open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     titlebar: Some(TitlebarOptions {
@@ -753,6 +753,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
                     ..WindowOptions::default()
                 },
+                cx,
                 |window, cx| {
                     let view = cx.new(|cx| {
                         ClipboardView::new(
@@ -798,7 +799,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         tray::set_window_visible(window, false);
                         false
                     });
-                    cx.new(|cx| Root::new(view, window, cx))
+                    view
                 },
             ) {
                 *window_error.borrow_mut() =
@@ -995,17 +996,6 @@ enum HistoryConfirmation {
     DeleteSelected,
 }
 
-struct HistoryDialogLayer;
-
-impl Render for HistoryDialogLayer {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .children(Root::render_dialog_layer(window, cx))
-    }
-}
-
 struct ClipboardView {
     service: Service,
     _tray: Option<TrayIcon>,
@@ -1047,7 +1037,6 @@ struct ClipboardView {
     batch_paste_pending: Option<(isize, u32)>,
     confirmation: Option<HistoryConfirmation>,
     confirmation_error: Option<String>,
-    dialog_layer: Entity<HistoryDialogLayer>,
     group_move_id: Option<i64>,
     group_move_pending: bool,
     preview: PreviewState,
@@ -2365,7 +2354,6 @@ impl ClipboardView {
             batch_paste_pending: None,
             confirmation: None,
             confirmation_error: None,
-            dialog_layer: cx.new(|_| HistoryDialogLayer),
             group_move_id: None,
             group_move_pending: false,
             preview: PreviewState::default(),
@@ -2595,7 +2583,7 @@ impl ClipboardView {
             };
             let settings_owner = owner.clone();
             let close_owner = owner.clone();
-            let opened = cx.open_window(options, move |window, cx| {
+            let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 apply_theme(theme, window, cx);
                 window.set_window_title(tr(language, "设置", "Settings"));
                 window.on_window_should_close(cx, move |_, cx| {
@@ -2605,15 +2593,13 @@ impl ClipboardView {
                     });
                     true
                 });
-                let settings =
-                    cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), page, window, cx));
-                cx.new(|cx| Root::new(settings, window, cx))
+                cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), page, window, cx))
             });
             owner_entity.update(cx, |owner, cx| {
                 owner.settings_window_opening = false;
                 match opened {
-                    Ok(handle) => {
-                        owner.settings_window = Some(handle.into());
+                    Ok((handle, _)) => {
+                        owner.settings_window = Some(handle);
                         owner.is_error = false;
                     }
                     Err(error) => {
@@ -3264,8 +3250,8 @@ impl ClipboardView {
                 .margin_top((window.viewport_size().height - px(180.)) / 2.)
                 .close_button(false)
                 .overlay_closable(false)
-                .on_ok(move |_, _, cx| {
-                    let _ = keyboard_owner.update(cx, |view, cx| view.save_group(cx));
+                .on_ok(move |_, window, cx| {
+                    let _ = keyboard_owner.update(cx, |view, cx| view.save_group(window, cx));
                     false
                 })
                 .on_cancel(move |_, window, cx| {
@@ -3277,6 +3263,7 @@ impl ClipboardView {
                     div()
                         .flex()
                         .flex_col()
+                        .p_1()
                         .gap_2()
                         .child(tr(language, "分组名称", "Group name"))
                         .child(Input::new(&input))
@@ -3309,8 +3296,9 @@ impl ClipboardView {
                                     tr(language, "创建", "Create")
                                 })
                                 .disabled(pending)
-                                .on_click(move |_, _, cx| {
-                                    let _ = submit_owner.update(cx, |view, cx| view.save_group(cx));
+                                .on_click(move |_, window, cx| {
+                                    let _ = submit_owner
+                                        .update(cx, |view, cx| view.save_group(window, cx));
                                 }),
                         ),
                 )
@@ -3336,7 +3324,7 @@ impl ClipboardView {
         true
     }
 
-    fn save_group(&mut self, cx: &mut Context<Self>) {
+    fn save_group(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.group_save_pending {
             return;
         }
@@ -3351,7 +3339,7 @@ impl ClipboardView {
         } else {
             self.group_edit_error = Some(self.message.clone());
         }
-        self.dialog_layer.update(cx, |_, cx| cx.notify());
+        window.refresh();
         cx.notify();
     }
 
@@ -3994,7 +3982,7 @@ impl ClipboardView {
                         );
                         self.is_error = true;
                         self.group_edit_error = Some(self.message.clone());
-                        self.dialog_layer.update(cx, |_, cx| cx.notify());
+                        window.refresh();
                     }
                 }
             }
@@ -4024,7 +4012,7 @@ impl ClipboardView {
                         );
                         self.is_error = true;
                         self.group_edit_error = Some(self.message.clone());
-                        self.dialog_layer.update(cx, |_, cx| cx.notify());
+                        window.refresh();
                     }
                 }
             }
@@ -4112,6 +4100,7 @@ impl ClipboardView {
                         );
                         self.is_error = true;
                         self.clear_all_error = Some(self.message.clone());
+                        cx.refresh_windows();
                     }
                 }
             }
@@ -5210,7 +5199,11 @@ impl ClipboardView {
                         self.batch_pending = false;
                         self.batch_paste_pending = None;
                     }
-                    FailureKind::GroupSave => self.group_save_pending = false,
+                    FailureKind::GroupSave => {
+                        self.group_save_pending = false;
+                        self.group_edit_error = Some(message.clone());
+                        window.refresh();
+                    }
                     FailureKind::GroupDelete => {
                         self.group_delete_pending = false;
                         self.group_delete_id = None;
@@ -5223,6 +5216,7 @@ impl ClipboardView {
                     FailureKind::ClearAllHistory => {
                         self.clear_all_pending = false;
                         self.clear_all_error = Some(message.clone());
+                        cx.refresh_windows();
                     }
                     FailureKind::BatchDelete => {
                         self.batch_pending = false;
@@ -5254,7 +5248,7 @@ impl ClipboardView {
         }
         self.sync_confirmation_dialog(window, cx);
         if self.confirmation.is_some() {
-            self.dialog_layer.update(cx, |_, cx| cx.notify());
+            window.refresh();
         }
         cx.notify();
     }
@@ -5499,44 +5493,46 @@ impl ClipboardView {
                 return;
             }
             let popup_owner = owner.clone();
-            let opened = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    titlebar: None,
-                    kind: WindowKind::PopUp,
-                    focus: false,
-                    show: true,
-                    is_movable: false,
-                    is_resizable: false,
-                    app_id: Some("com.aslant.elegant-clipboard-gpui.hover".into()),
-                    ..Default::default()
-                },
-                move |window, cx| {
-                    apply_theme(theme, window, cx);
-                    let view = cx.new(|cx| {
-                        HoverPreviewWindowView::new(
-                            popup_owner.clone(),
-                            (id, generation),
-                            language,
-                            result,
-                            zoom_step,
-                            window,
-                            cx,
-                        )
-                    });
-                    cx.new(|cx| Root::new(view, window, cx))
-                },
-            );
+            let opened = cx.update(|cx| {
+                gpui_kit::open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(bounds)),
+                        titlebar: None,
+                        kind: WindowKind::PopUp,
+                        focus: false,
+                        show: true,
+                        is_movable: false,
+                        is_resizable: false,
+                        app_id: Some("com.aslant.elegant-clipboard-gpui.hover".into()),
+                        ..Default::default()
+                    },
+                    cx,
+                    move |window, cx| {
+                        apply_theme(theme, window, cx);
+                        cx.new(|cx| {
+                            HoverPreviewWindowView::new(
+                                popup_owner.clone(),
+                                (id, generation),
+                                language,
+                                result,
+                                zoom_step,
+                                window,
+                                cx,
+                            )
+                        })
+                    },
+                )
+            });
             owner_entity.update(cx, |this, cx| {
                 if this.hover_popup_opening == Some((id, generation)) {
                     this.hover_popup_opening = None;
                 }
-                if let Ok(handle) = opened {
+                if let Ok((handle, _)) = opened {
                     if this.hover_preview.id == Some(id)
                         && this.hover_preview.generation == generation
                         && (this.hover_source_active || this.hover_popup_active)
                     {
-                        this.hover_popup = Some(handle.into());
+                        this.hover_popup = Some(handle);
                     } else {
                         let _ = handle.update(cx, |_, window, _| window.remove_window());
                     }
@@ -7581,7 +7577,6 @@ impl Render for ClipboardView {
             )
             .child(div().flex_1().min_h_0().child(self.render_content(cx)))
             .child(self.render_status(cx))
-            .child(self.dialog_layer.clone())
     }
 }
 
@@ -7857,12 +7852,16 @@ impl ClipboardView {
             HistoryConfirmation::DeleteSelected => self.batch_confirm_open = false,
         }
         self.confirmation = None;
-        self.dialog_layer.update(cx, |_, cx| cx.notify());
         cx.notify();
         true
     }
 
-    fn confirm_history_action(&mut self, kind: HistoryConfirmation, cx: &mut Context<Self>) {
+    fn confirm_history_action(
+        &mut self,
+        kind: HistoryConfirmation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.confirmation != Some(kind)
             || !self.confirmation_active(kind)
             || self.confirmation_pending(kind)
@@ -7880,7 +7879,7 @@ impl ClipboardView {
         {
             self.confirmation_error = Some(self.message.clone());
         }
-        self.dialog_layer.update(cx, |_, cx| cx.notify());
+        window.refresh();
     }
 
     fn sync_confirmation_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -7890,7 +7889,6 @@ impl ClipboardView {
         {
             self.confirmation = None;
             window.close_dialog(cx);
-            self.dialog_layer.update(cx, |_, cx| cx.notify());
         }
     }
 
@@ -7908,7 +7906,6 @@ impl ClipboardView {
         }
         self.confirmation = Some(kind);
         self.confirmation_error = None;
-        self.dialog_layer.update(cx, |_, cx| cx.notify());
         let owner = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, cx| {
             let view = owner.upgrade().expect("history dialog requires its owner");
@@ -7965,8 +7962,8 @@ impl ClipboardView {
                 .title(title)
                 .close_button(false)
                 .overlay_closable(false)
-                .on_ok(move |_, _, cx| {
-                    let _ = keyboard_owner.update(cx, |view, cx| view.confirm_history_action(kind, cx));
+                .on_ok(move |_, window, cx| {
+                    let _ = keyboard_owner.update(cx, |view, cx| view.confirm_history_action(kind, window, cx));
                     false
                 })
                 .on_cancel(move |_, _, cx| {
@@ -8028,8 +8025,8 @@ impl ClipboardView {
                             confirm_label
                         })
                         .disabled(pending)
-                        .on_click(move |_, _, cx| {
-                            let _ = confirm_owner.update(cx, |view, cx| view.confirm_history_action(kind, cx));
+                        .on_click(move |_, window, cx| {
+                            let _ = confirm_owner.update(cx, |view, cx| view.confirm_history_action(kind, window, cx));
                         })))
         });
         cx.notify();

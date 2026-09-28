@@ -22,9 +22,11 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 
 2026-09-27 已查询直接依赖的 crates.io 最新稳定版本，并将 gpui-kit 从 0.6.4 升至 0.6.6；其余直接依赖保持当前最新稳定版本。执行 `cargo update` 更新锁文件中的兼容间接依赖：
 
+2026-09-28 将 gpui-kit 更新至 `0.7.0`，配套 `gpui-base`/`gpui-component` 为 `0.7.0`、`gpui-pre-*` 为 `0.3.7`。三个应用窗口使用 Kit `open_window` 建立 Base-owned Root，由 Kit 自动承载 Dialog 等浮层；不再手工渲染 Dialog 层。仅更新 Kit 及其必需的配套锁定依赖。
+
 | 直接依赖 | 当前使用版本 |
 |---|---|
-| gpui-kit | 0.6.6 |
+| gpui-kit | 0.7.0 |
 | tray-icon | 0.25.1 |
 | raw-window-handle | 0.6.2 |
 | rusqlite | 0.40.2 |
@@ -46,7 +48,7 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 
 工具链要求 Rust 1.98+；本机使用 1.98.1。Cargo.lock 固定实际解析结果。依赖升级流程：查询最新稳定版本 → 更新 workspace requirements → `cargo update` → fmt/clippy/test/build → 原生交互验收。`zip` 最新发布项 9.0.0-pre3 为预发布版，因此保留稳定版 8.6.0。间接依赖 `generic-array` 暂留 0.14.7：上游 `crypto-common 0.1.7` 固定要求 `=0.14.7`，不能强制升级至 0.14.9。
 
-**上游例外**：最新稳定 gpui-kit 0.6.6 的 Windows 依赖路径 `gpui-kit → gpui-base/gpui-component → ropey` 仍使用 ropey 2.0.0-beta.1；`gpui-pre-*` 随 Kit 升为 0.3.6。详见 [技术决策](decisions/0001-windows-gpui.md)，不宣称整个依赖树均为稳定版。
+**上游例外**：稳定版 gpui-kit 0.7.0 的 Windows 依赖路径 `gpui-kit → gpui-base/gpui-component → ropey` 仍使用 ropey 2.0.0-beta.1；`gpui-pre-*` 随 Kit 升为 0.3.7。详见 [技术决策](decisions/0001-windows-gpui.md)，不宣称整个依赖树均为稳定版。
 
 ## 启动与操作
 
