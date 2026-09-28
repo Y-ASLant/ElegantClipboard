@@ -41,8 +41,11 @@ impl SettingsWindowView {
                 if choice == HotkeyPreference::Disabled {
                     tab.label(hotkey_label(language, choice))
                 } else {
-                    tab.aria_label(choice.label())
-                        .child(shortcut_kbd(choice.label()).expect("built-in hotkey"))
+                    tab.aria_label(choice.label()).child(
+                        shortcut_kbd(choice.label())
+                            .expect("built-in hotkey")
+                            .appearance(false),
+                    )
                 }
             }))
             .into_any_element()
@@ -428,7 +431,11 @@ impl SettingsWindowView {
                             .children(choices.map(|(label, _)| {
                                 Tab::new()
                                     .aria_label(label)
-                                    .child(shortcut_kbd(label).expect("built-in paste key"))
+                                    .child(
+                                        shortcut_kbd(label)
+                                            .expect("built-in paste key")
+                                            .appearance(false),
+                                    )
                                     .flex_1()
                                     .disabled(paste_key_pending)
                             }))

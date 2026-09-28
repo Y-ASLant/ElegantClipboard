@@ -3243,7 +3243,7 @@ impl ClipboardView {
         self.group_editor_open = true;
         self.group_edit_error = None;
         let owner = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
+        window.open_dialog(cx, move |dialog, window, cx| {
             let entity = owner.upgrade().expect("group dialog requires its owner");
             let view = entity.read(cx);
             let language = view.language;
@@ -3261,6 +3261,7 @@ impl ClipboardView {
                 } else {
                     tr(language, "新建分组", "Create group")
                 })
+                .margin_top((window.viewport_size().height - px(180.)) / 2.)
                 .close_button(false)
                 .overlay_closable(false)
                 .on_ok(move |_, _, cx| {
