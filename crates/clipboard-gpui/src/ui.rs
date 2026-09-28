@@ -1031,6 +1031,7 @@ struct ClipboardView {
     group_editor_open: bool,
     group_rename_id: Option<i64>,
     group_save_pending: bool,
+    group_edit_error: Option<String>,
     group_reorder_pending: bool,
     group_delete_id: Option<i64>,
     group_delete_pending: bool,
@@ -2348,6 +2349,7 @@ impl ClipboardView {
             group_editor_open: false,
             group_rename_id: None,
             group_save_pending: false,
+            group_edit_error: None,
             group_reorder_pending: false,
             group_delete_id: None,
             group_delete_pending: false,
@@ -3066,11 +3068,9 @@ impl ClipboardView {
             GroupChoice::Existing(id) => self.select_group(Some(id), window, cx),
             GroupChoice::Create => {
                 self.group_rename_id = None;
-                self.group_editor_open = true;
-                self.group_name_input.update(cx, |input, cx| {
-                    input.set_value("", window, cx);
-                    input.focus(window, cx);
-                });
+                self.group_name_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.open_group_editor(window, cx);
             }
             GroupChoice::Rename => {
                 if let Some(group) = self
@@ -3079,11 +3079,10 @@ impl ClipboardView {
                     .find(|group| Some(group.id) == self.history.group_id)
                 {
                     self.group_rename_id = Some(group.id);
-                    self.group_editor_open = true;
                     self.group_name_input.update(cx, |input, cx| {
                         input.set_value(group.name.clone(), window, cx);
-                        input.focus(window, cx);
                     });
+                    self.open_group_editor(window, cx);
                 }
             }
             GroupChoice::Delete => {
@@ -3240,6 +3239,102 @@ impl ClipboardView {
         self.select_group((next > 0).then(|| self.groups[next - 1].id), window, cx);
     }
 
+    fn open_group_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.group_editor_open = true;
+        self.group_edit_error = None;
+        let owner = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let entity = owner.upgrade().expect("group dialog requires its owner");
+            let view = entity.read(cx);
+            let language = view.language;
+            let renaming = view.group_rename_id.is_some();
+            let pending = view.group_save_pending;
+            let input = view.group_name_input.clone();
+            let error = view.group_edit_error.clone();
+            let keyboard_owner = owner.clone();
+            let cancel_owner = owner.clone();
+            let cancel_button_owner = owner.clone();
+            let submit_owner = owner.clone();
+            dialog
+                .title(if renaming {
+                    tr(language, "重命名分组", "Rename group")
+                } else {
+                    tr(language, "新建分组", "Create group")
+                })
+                .close_button(false)
+                .overlay_closable(false)
+                .on_ok(move |_, _, cx| {
+                    let _ = keyboard_owner.update(cx, |view, cx| view.save_group(cx));
+                    false
+                })
+                .on_cancel(move |_, window, cx| {
+                    cancel_owner
+                        .update(cx, |view, cx| view.cancel_group_edit(window, cx))
+                        .unwrap_or(true)
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(tr(language, "分组名称", "Group name"))
+                        .child(Input::new(&input))
+                        .when_some(error, |body, error| {
+                            body.child(Alert::error("group-edit-error", error).small())
+                        }),
+                )
+                .footer(
+                    DialogFooter::new()
+                        .child(
+                            Button::new("group-save-cancel")
+                                .outline()
+                                .label(tr(language, "取消", "Cancel"))
+                                .disabled(pending)
+                                .on_click(move |_, window, cx| {
+                                    if cancel_button_owner
+                                        .update(cx, |view, cx| view.cancel_group_edit(window, cx))
+                                        .unwrap_or(false)
+                                    {
+                                        window.close_dialog(cx);
+                                    }
+                                }),
+                        )
+                        .child(
+                            Button::new("group-save-submit")
+                                .primary()
+                                .label(if renaming {
+                                    tr(language, "保存名称", "Save name")
+                                } else {
+                                    tr(language, "创建", "Create")
+                                })
+                                .disabled(pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = submit_owner.update(cx, |view, cx| view.save_group(cx));
+                                }),
+                        ),
+                )
+        });
+        cx.defer_in(window, |view, window, cx| {
+            view.group_name_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        });
+        cx.notify();
+    }
+
+    fn cancel_group_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.group_save_pending {
+            return false;
+        }
+        self.group_editor_open = false;
+        self.group_rename_id = None;
+        self.group_edit_error = None;
+        self.group_name_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        window.focus(&self.list_focus, cx);
+        cx.notify();
+        true
+    }
+
     fn save_group(&mut self, cx: &mut Context<Self>) {
         if self.group_save_pending {
             return;
@@ -3251,8 +3346,12 @@ impl ClipboardView {
         };
         if self.send(command, cx) {
             self.group_save_pending = true;
-            cx.notify();
+            self.group_edit_error = None;
+        } else {
+            self.group_edit_error = Some(self.message.clone());
         }
+        self.dialog_layer.update(cx, |_, cx| cx.notify());
+        cx.notify();
     }
 
     fn delete_group(&mut self, cx: &mut Context<Self>) {
@@ -3363,26 +3462,11 @@ impl ClipboardView {
         }
     }
 
-    fn toggle_batch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.batch_pending || self.reorder_pending || self.history.loading {
-            return;
-        }
-        self.cancel_pending_row_click();
-        self.close_hover_preview(cx);
-        let enabled = !self.batch_mode;
-        self.reset_selection();
-        self.batch_mode = enabled;
-        window.focus(&self.list_focus, cx);
-        cx.notify();
-    }
-
-    fn clear_batch_selection(&mut self, cx: &mut Context<Self>) {
+    fn exit_batch_mode(&mut self, cx: &mut Context<Self>) {
         if self.batch_pending {
             return;
         }
-        self.selected_ids.clear();
-        self.selection_anchor = None;
-        self.batch_confirm_open = false;
+        self.reset_selection();
         cx.notify();
     }
 
@@ -3557,13 +3641,8 @@ impl ClipboardView {
             return;
         }
         if self.group_editor_open {
-            if !self.group_save_pending {
-                self.group_editor_open = false;
-                self.group_rename_id = None;
-                self.group_name_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                window.focus(&self.list_focus, cx);
-                cx.notify();
+            if self.cancel_group_edit(window, cx) {
+                window.close_dialog(cx);
             }
             return;
         }
@@ -3894,6 +3973,8 @@ impl ClipboardView {
                     Ok(group) => {
                         self.group_editor_open = false;
                         self.group_rename_id = None;
+                        self.group_edit_error = None;
+                        window.close_dialog(cx);
                         self.group_name_input.update(cx, |input, cx| {
                             input.set_value("", window, cx);
                         });
@@ -3911,6 +3992,8 @@ impl ClipboardView {
                             tr(self.language, "创建分组失败", "Failed to create group")
                         );
                         self.is_error = true;
+                        self.group_edit_error = Some(self.message.clone());
+                        self.dialog_layer.update(cx, |_, cx| cx.notify());
                     }
                 }
             }
@@ -3920,6 +4003,8 @@ impl ClipboardView {
                     Ok(group) => {
                         self.group_editor_open = false;
                         self.group_rename_id = None;
+                        self.group_edit_error = None;
+                        window.close_dialog(cx);
                         self.group_name_input.update(cx, |input, cx| {
                             input.set_value("", window, cx);
                         });
@@ -3937,6 +4022,8 @@ impl ClipboardView {
                             tr(self.language, "重命名分组失败", "Failed to rename group")
                         );
                         self.is_error = true;
+                        self.group_edit_error = Some(self.message.clone());
+                        self.dialog_layer.update(cx, |_, cx| cx.notify());
                     }
                 }
             }
@@ -7977,25 +8064,6 @@ impl ClipboardView {
         cx.notify();
     }
 
-    fn render_batch_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let label = if self.batch_mode {
-            tr(self.language, "退出批量选择", "Exit batch selection")
-        } else {
-            tr(self.language, "批量选择", "Batch select")
-        };
-        Button::new("toolbar-batch")
-            .small()
-            .outline()
-            .icon(IconName::Check)
-            .tooltip(label)
-            .accessibility_label(label)
-            .selected(self.batch_mode)
-            .disabled(self.batch_pending || self.reorder_pending || self.history.loading)
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.toggle_batch_mode(window, cx);
-            }))
-    }
-
     fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
         if self.onboarding_visible() {
             return self.render_onboarding(cx).into_any_element();
@@ -8060,16 +8128,7 @@ impl ClipboardView {
                     .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
                         this.focus_first_history_item(window, cx);
                     }))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(Input::new(&self.search).cleanable(true)),
-                    )
-                    .child(self.render_batch_button(cx)),
+                    .child(Input::new(&self.search).cleanable(true)),
             )
             .child(
                 div()
@@ -8149,49 +8208,6 @@ impl ClipboardView {
                             ),
                     ),
             )
-            .when(self.group_editor_open, |container| {
-                container.child(visual::reveal(
-                    div()
-                        .px(px(PAGE_PADDING))
-                        .pb_2()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(Input::new(&self.group_name_input)),
-                        )
-                        .child(
-                            Button::new("group-save-submit")
-                                .small()
-                                .outline()
-                                .label(if self.group_rename_id.is_some() {
-                                    tr(self.language, "保存名称", "Save name")
-                                } else {
-                                    tr(self.language, "创建", "Create")
-                                })
-                                .disabled(self.group_save_pending)
-                                .on_click(cx.listener(|this, _, _, cx| this.save_group(cx))),
-                        )
-                        .child(
-                            Button::new("group-save-cancel")
-                                .small()
-                                .ghost()
-                                .label(tr(self.language, "取消", "Cancel"))
-                                .disabled(self.group_save_pending)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.group_editor_open = false;
-                                    this.group_rename_id = None;
-                                    window.focus(&this.list_focus, cx);
-                                    cx.notify();
-                                })),
-                        ),
-                    ("group-editor", self.group_rename_id.unwrap_or(0) as usize),
-                    cx,
-                ))
-            })
             .when_some(self.group_move_id, |container, id| {
                 container.child(visual::reveal(
                     div().child(
@@ -8278,14 +8294,12 @@ impl ClipboardView {
                                 .on_click(cx.listener(|this, _, _, cx| this.select_all_loaded(cx))),
                         )
                         .child(
-                            Button::new("batch-clear-selection")
+                            Button::new("batch-exit")
                                 .small()
                                 .ghost()
-                                .label(tr(self.language, "取消选择", "Clear selection"))
-                                .disabled(self.batch_pending || self.selected_ids.is_empty())
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.clear_batch_selection(cx);
-                                })),
+                                .label(tr(self.language, "退出多选", "Exit selection"))
+                                .disabled(self.batch_pending)
+                                .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx))),
                         )
                         .child(
                             Button::new("batch-merge")
