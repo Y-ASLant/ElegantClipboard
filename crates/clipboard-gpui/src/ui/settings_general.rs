@@ -25,7 +25,7 @@ impl SettingsWindowView {
         let owner = self.owner.clone();
         TabBar::new("settings-window-hotkey-tabs")
             .w_full()
-            .segmented()
+            .outline()
             .selected_index(selected_index)
             .on_click(move |index: &usize, _, cx| {
                 if let Some(&choice) = click_choices.get(*index) {

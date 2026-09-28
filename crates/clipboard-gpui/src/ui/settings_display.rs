@@ -362,8 +362,76 @@ impl SettingsWindowView {
         div()
             .w_full()
             .flex()
-            .flex_col()
+            .items_center()
             .gap_2()
+            .child(div().text_xs().child(tr(language, "播放时机", "Timing")))
+            .child(
+                div().flex_1().min_w(px(0.)).child(
+                    TabBar::new(timing_id)
+                        .w_full()
+                        .segmented()
+                        .selected_index(usize::from(timing == SoundTiming::AfterSuccess))
+                        .on_click({
+                            let owner = self.owner.clone();
+                            move |index: &usize, _, cx| {
+                                let Some(&timing) =
+                                    [SoundTiming::Immediate, SoundTiming::AfterSuccess].get(*index)
+                                else {
+                                    return;
+                                };
+                                let _ = owner.update(cx, |owner, cx| {
+                                    let current = if copy {
+                                        owner.audio.copy_timing
+                                    } else {
+                                        owner.audio.paste_timing
+                                    };
+                                    if current != timing {
+                                        let mut next = owner.audio;
+                                        if copy {
+                                            next.copy_timing = timing;
+                                        } else {
+                                            next.paste_timing = timing;
+                                        }
+                                        owner.save_audio(next, cx);
+                                    }
+                                });
+                            }
+                        })
+                        .children(
+                            [
+                                tr(language, "立即", "Immediate"),
+                                tr(language, "成功后", "After success"),
+                            ]
+                            .map(|label| {
+                                Tab::new()
+                                    .label(label)
+                                    .disabled(pending || !enabled)
+                                    .flex_1()
+                            }),
+                        ),
+                ),
+            )
+            .child(
+                Button::new(preview_id)
+                    .outline()
+                    .small()
+                    .label(tr(language, "试听", "Preview"))
+                    .on_click(move |_, _, cx| {
+                        let played = sound::play(if copy { Sound::Copy } else { Sound::Paste });
+                        if !played {
+                            let _ = preview_owner.update(cx, |owner, cx| {
+                                owner.message = tr(
+                                    owner.language,
+                                    "音频设备不可用，无法试听",
+                                    "Audio device unavailable; preview could not play",
+                                )
+                                .into();
+                                owner.is_error = true;
+                                cx.notify();
+                            });
+                        }
+                    }),
+            )
             .child(
                 Switch::new(switch_id)
                     .label(tr(language, "启用", "Enable"))
@@ -380,84 +448,6 @@ impl SettingsWindowView {
                             owner.save_audio(next, cx);
                         });
                     }),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(div().text_xs().child(tr(language, "播放时机", "Timing")))
-                    .child(
-                        div().flex_1().min_w(px(240.)).child(
-                            TabBar::new(timing_id)
-                                .w_full()
-                                .segmented()
-                                .selected_index(usize::from(timing == SoundTiming::AfterSuccess))
-                                .on_click({
-                                    let owner = self.owner.clone();
-                                    move |index: &usize, _, cx| {
-                                        let Some(&timing) =
-                                            [SoundTiming::Immediate, SoundTiming::AfterSuccess]
-                                                .get(*index)
-                                        else {
-                                            return;
-                                        };
-                                        let _ = owner.update(cx, |owner, cx| {
-                                            let current = if copy {
-                                                owner.audio.copy_timing
-                                            } else {
-                                                owner.audio.paste_timing
-                                            };
-                                            if current != timing {
-                                                let mut next = owner.audio;
-                                                if copy {
-                                                    next.copy_timing = timing;
-                                                } else {
-                                                    next.paste_timing = timing;
-                                                }
-                                                owner.save_audio(next, cx);
-                                            }
-                                        });
-                                    }
-                                })
-                                .children(
-                                    [
-                                        tr(language, "立即", "Immediate"),
-                                        tr(language, "成功后", "After success"),
-                                    ]
-                                    .map(|label| {
-                                        Tab::new()
-                                            .label(label)
-                                            .disabled(pending || !enabled)
-                                            .flex_1()
-                                    }),
-                                ),
-                        ),
-                    )
-                    .child(
-                        Button::new(preview_id)
-                            .outline()
-                            .small()
-                            .label(tr(language, "试听", "Preview"))
-                            .on_click(move |_, _, cx| {
-                                let played =
-                                    sound::play(if copy { Sound::Copy } else { Sound::Paste });
-                                if !played {
-                                    let _ = preview_owner.update(cx, |owner, cx| {
-                                        owner.message = tr(
-                                            owner.language,
-                                            "音频设备不可用，无法试听",
-                                            "Audio device unavailable; preview could not play",
-                                        )
-                                        .into();
-                                        owner.is_error = true;
-                                        cx.notify();
-                                    });
-                                }
-                            }),
-                    ),
             )
             .into_any_element()
     }
