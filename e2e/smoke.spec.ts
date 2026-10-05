@@ -151,11 +151,10 @@ test("resource markers survive virtual scrolling and refresh without authorizing
     };
     const invoke = fixture.__fixtureInvoke;
     fixture.__fixtureInvoke = async (command, args) => {
-      if (command === "batch_get_item_file_status") await fixture.__holdResourceCheck();
+      if (command !== "batch_get_item_file_status") return invoke(command, args);
+      await fixture.__holdResourceCheck();
       const result = await invoke(command, args);
-      if (command === "batch_get_item_file_status") {
-        fixture.__resourceChecksCompleted = (fixture.__resourceChecksCompleted ?? 0) + 1;
-      }
+      fixture.__resourceChecksCompleted = (fixture.__resourceChecksCompleted ?? 0) + 1;
       return result;
     };
   });
@@ -169,7 +168,6 @@ test("resource markers survive virtual scrolling and refresh without authorizing
   await expect(invalid).toBeVisible();
   const copy = page.getByRole("button", { name: "复制", exact: true }).first();
   await expect(copy).toBeDisabled();
-  await page.screenshot({ path: "test-results/resource-status-remount.png" });
   release();
   // Wait for the completed result before starting a distinct window-show refresh.
   await expect.poll(async () => {

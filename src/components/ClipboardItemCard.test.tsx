@@ -106,7 +106,6 @@ describe("file card validity", () => {
     act(() => onWindowShown!({ event: "window-shown", id: 1, payload: null }));
     expect(await screen.findByText(t("cardContent.invalid"))).toBeInTheDocument();
     exists = true;
-    expect(screen.getByText(t("cardContent.invalid"))).toBeInTheDocument();
     act(() => onWindowShown!({ event: "window-shown", id: 1, payload: null }));
     expect(screen.getByText(t("cardContent.invalid"))).toBeInTheDocument();
     expect(screen.queryByText(t("cardContent.resourceChecking"))).not.toBeInTheDocument();

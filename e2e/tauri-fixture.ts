@@ -27,7 +27,6 @@ export interface FixtureItem {
   group_id: null;
 }
 
-// A shared test boundary constructs complete native list payloads for app scenarios.
 export function fixtureItem(id: number, type: FixtureItem["content_type"], content: string): FixtureItem {
   return {
     id, content_type: type, text_content: type === "text" ? content : null,

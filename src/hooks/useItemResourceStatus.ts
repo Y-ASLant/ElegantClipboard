@@ -108,14 +108,26 @@ type ResourceItem = Pick<ClipboardItem, "id" | "content_type" | "file_paths" | "
 
 export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemResourceStatus {
   const source = useMemo(() => {
-    const originalPaths = item.content_type === "files"
-      ? parseFilePaths(item.file_paths)
-      : item.content_type === "image" && item.image_path ? [item.image_path] : [];
+    let originalPaths: string[];
+    if (item.content_type === "files") {
+      originalPaths = parseFilePaths(item.file_paths);
+    } else if (item.content_type === "image" && item.image_path) {
+      originalPaths = [item.image_path];
+    } else {
+      originalPaths = [];
+    }
+
     const needsCheck = item.content_type === "files" || item.content_type === "image";
-    const availability: ResourceAvailability = !needsCheck
-      ? "available"
-      : !enabled ? "unknown"
-        : item.content_type === "image" && !item.image_path ? "unavailable" : "checking";
+    let availability: ResourceAvailability;
+    if (!needsCheck) {
+      availability = "available";
+    } else if (!enabled) {
+      availability = "unknown";
+    } else if (item.content_type === "image" && !item.image_path) {
+      availability = "unavailable";
+    } else {
+      availability = "checking";
+    }
     const key = JSON.stringify([item.id, item.content_type, item.file_paths, item.image_path, item.byte_size, item.content_hash]);
     return { id: item.id, key, contentType: item.content_type, originalPaths, needsCheck, availability };
   }, [item.id, item.content_type, item.file_paths, item.image_path, item.byte_size, item.content_hash, enabled]);
@@ -154,31 +166,29 @@ export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemR
     }
 
     const request = source.contentType === "files"
-      ? batchGetItemFileStatus(source.id).then((status) => ({
-        availability: status.all_exist ? "available" as const : "unavailable" as const,
+      ? batchGetItemFileStatus(source.id).then((status): ResourceSnapshot => ({
+        availability: status.all_exist ? "available" : "unavailable",
         paths: status.resolved_paths,
         tooLarge: status.too_large ?? false,
         clipboardUsable: status.clipboard_usable,
       }))
-      : batchCheckImagePath(source.originalPaths[0]).then((status) => ({
-        availability: status.exists ? "available" as const : "unavailable" as const,
+      : batchCheckImagePath(source.originalPaths[0]).then((status): ResourceSnapshot => ({
+        availability: status.exists ? "available" : "unavailable",
         paths: source.originalPaths,
         tooLarge: false,
         clipboardUsable: status.exists,
       }));
     void request
       .then((result) => {
-        if (activeSource.current === source && requestGeneration.current === generation) {
-          if (resourceCache.get(source.key) === entry) entry.snapshot = result;
-          setSnapshot({ source, ...result, isChecking: false });
-        }
+        if (activeSource.current !== source || requestGeneration.current !== generation) return;
+        if (resourceCache.get(source.key) === entry) entry.snapshot = result;
+        setSnapshot({ source, ...result, isChecking: false });
       })
       .catch((error: unknown) => {
-        if (activeSource.current === source && requestGeneration.current === generation) {
-          if (resourceCache.get(source.key) === entry) resourceCache.delete(source.key);
-          setSnapshot({ ...initialSnapshot, availability: "unknown", isChecking: false });
-          logError("Failed to check item resource status:", error);
-        }
+        if (activeSource.current !== source || requestGeneration.current !== generation) return;
+        if (resourceCache.get(source.key) === entry) resourceCache.delete(source.key);
+        setSnapshot({ ...initialSnapshot, availability: "unknown", isChecking: false });
+        logError("Failed to check item resource status:", error);
       });
   }, [source, initialSnapshot, mountSnapshot, enabled]);
 
@@ -203,8 +213,7 @@ export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemR
     };
   }, [source, enabled, refresh]);
 
-  // Source changes must never expose the previous item's paths or authorization,
-  // even during the render before its new effect has started.
+  // A changed source must not inherit old paths or authorization before effects run.
   const current = snapshot.source === source ? snapshot : mountSnapshot;
   return {
     availability: current.availability,
