@@ -7,7 +7,7 @@ fn main() {
 
 	let contents: Vec<ClipboardContent> = vec![
 		ClipboardContent::Text("hell@$#%^&U都98好的😊o Rust!!!".to_string()),
-		ClipboardContent::Rtf("\x1b[1m\x1b[4m\x1b[31mHello, Rust!\x1b[0m".to_string()),
+		ClipboardContent::Rtf("{\\rtf1\\ansi Hello, Rust!}".to_string()),
 		ClipboardContent::Html("<html><body><h1>Hello, Rust!</h1></body></html>".to_string()),
 	];
 

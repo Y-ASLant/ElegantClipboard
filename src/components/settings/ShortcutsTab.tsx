@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { getOperationErrorMessage, reportUserError } from "@/lib/operation-feedback";
 import { KEY_CODE_MAP } from "@/lib/shortcut-helpers";
 import { cn } from "@/lib/utils";
 import { useUISettings } from "@/stores/ui-settings";
@@ -107,7 +108,7 @@ export function ShortcutsTab({
     try {
       await invoke("set_setting", { key: "paste_key", value });
     } catch (error) {
-      logError("Failed to save paste key setting:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save paste key setting");
     }
   };
 
@@ -261,7 +262,8 @@ export function ShortcutsTab({
     };
     const disable = (idx: number) => {
       apply(idx, "").catch((error) => {
-        setErrors((prev) => ({ ...prev, [idx]: String(error) }));
+        logError("Failed to disable paste shortcut", error);
+        setErrors((prev) => ({ ...prev, [idx]: getOperationErrorMessage(error) }));
       }).finally(() => setLoadingSlot(null));
     };
     const batchReset = async (defaults: string[], currentShortcuts: string[]) => {
@@ -273,7 +275,8 @@ export function ShortcutsTab({
           continue;
         }
         try { await apply(i, defaults[i]); } catch (error) {
-          setErrors((prev) => ({ ...prev, [i]: String(error) }));
+          logError("Failed to reset paste shortcut", error);
+          setErrors((prev) => ({ ...prev, [i]: getOperationErrorMessage(error) }));
         }
       }
       setLoadingSlot(null);
@@ -282,7 +285,8 @@ export function ShortcutsTab({
       for (let i = 0; i < QUICK_PASTE_SLOT_COUNT; i++) {
         if (!currentShortcuts[i]) continue;
         try { await apply(i, ""); } catch (error) {
-          setErrors((prev) => ({ ...prev, [i]: String(error) }));
+          logError("Failed to disable paste shortcut", error);
+          setErrors((prev) => ({ ...prev, [i]: getOperationErrorMessage(error) }));
         }
       }
       setLoadingSlot(null);
@@ -328,11 +332,12 @@ export function ShortcutsTab({
       setTempShortcut("");
       setEditTarget(null);
     } catch (error) {
-      setShortcutError(t("settings.shortcuts.saveFailed", { error: String(error) }));
+      logError("Failed to save shortcut", error);
+      setShortcutError(t("settings.shortcuts.saveFailed", { error: getOperationErrorMessage(error) }));
       if (editTarget.type === "quick-paste") {
-        setSlotErrors((prev) => ({ ...prev, [editTarget.slot]: String(error) }));
+        setSlotErrors((prev) => ({ ...prev, [editTarget.slot]: getOperationErrorMessage(error) }));
       } else if (editTarget.type === "favorite-paste") {
-        setFavSlotErrors((prev) => ({ ...prev, [editTarget.slot]: String(error) }));
+        setFavSlotErrors((prev) => ({ ...prev, [editTarget.slot]: getOperationErrorMessage(error) }));
       }
     } finally {
       setLoadingSlot(null);
@@ -360,7 +365,7 @@ export function ShortcutsTab({
       }
     } catch (error) {
       logError("Failed to toggle Win+V replacement:", error);
-      setWinvError(String(error));
+      setWinvError(getOperationErrorMessage(error));
     } finally {
       setWinvLoading(false);
       setWinvPendingAction(null);

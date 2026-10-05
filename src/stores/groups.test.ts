@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useClipboardStore } from "./clipboard";
 import { useGroupStore } from "./groups";
 
 vi.mock("@tauri-apps/api/core", () => ({

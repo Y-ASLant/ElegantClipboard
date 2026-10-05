@@ -2,7 +2,6 @@ import { useMemo, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
-import { logError } from "@/lib/logger";
 import {
   applyDocumentLocale,
   createTranslator,
@@ -51,9 +50,9 @@ export const useLocaleStore = create<LocaleState>((set, get) => ({
       invoke("update_tray_language", { locale }).catch(() => {});
       await emit(SYNC_EVENT, locale);
     } catch (error) {
-      logError("Failed to save language setting:", error);
       set({ locale: previous });
       applyDocumentLocale(previous);
+      throw error;
     }
   },
 }));

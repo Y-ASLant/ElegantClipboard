@@ -4,6 +4,9 @@ SHELL := powershell.exe
 
 .PHONY: help clean build run check format test
 
+RUST_SYSROOT := $(shell rustc --print sysroot)
+RUST_ENV = $$env:Path = "$(RUST_SYSROOT)\bin;" + $$env:Path;
+
 help:
 	@Write-Host "Usage: make <target>"
 	@Write-Host ""
@@ -11,9 +14,9 @@ help:
 	@Write-Host "  make clean   Remove frontend dist and Rust target artifacts"
 	@Write-Host "  make build   Build Tauri release installer"
 	@Write-Host "  make run     Build frontend and run backend"
-	@Write-Host "  make check   Run lint, TypeScript, and cargo check"
-	@Write-Host "  make test    Run frontend (vitest) and backend (cargo test) tests"
-	@Write-Host "  make format  Run frontend autofix and Rust formatter"
+	@Write-Host "  make check   Frontend types/lint and app/fork fmt/check/Clippy (zero warnings)"
+	@Write-Host "  make test    Frontend, backend, and fork pure tests (default/no-default features)"
+	@Write-Host "  make format  Frontend import autofix and app/fork Rust formatting"
 
 clean:
 	@Write-Host "[clean] remove frontend dist"
@@ -38,24 +41,33 @@ run:
 check:
 	@Write-Host "[check] eslint"
 	npm run lint
-	@Write-Host "[check] typescript"
-	npx tsc --noEmit
+	@Write-Host "[check] application, test, and configuration TypeScript"
+	npm run typecheck
+	@Write-Host "[check] Rust formatting"
+	$(RUST_ENV) cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+	$(RUST_ENV) cargo fmt --manifest-path clipboard-rs/Cargo.toml --all -- --check
 	@Write-Host "[check] cargo"
-	cargo check --manifest-path src-tauri/Cargo.toml
-	@Write-Host "[check] clippy (correctness gate; other warnings are advisory)"
-	cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D clippy::correctness
+	cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+	@Write-Host "[check] Clippy (zero warning gate)"
+	$(RUST_ENV) cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+	$(RUST_ENV) cargo clippy --manifest-path clipboard-rs/Cargo.toml --all-targets -- -D warnings
+	$(RUST_ENV) cargo clippy --manifest-path clipboard-rs/Cargo.toml --all-targets --no-default-features -- -D warnings
 	@Write-Host "[check] done"
 
 test:
-	@Write-Host "[test] frontend: unit, component, perf"
-	npx vitest run --reporter=verbose
-	@Write-Host "[test] backend: cargo test"
-	cargo test --manifest-path src-tauri/Cargo.toml
+	@Write-Host "[test] frontend behavioral regressions"
+	npm test
+	@Write-Host "[test] backend"
+	cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+	@Write-Host "[test] clipboard fork pure tests (native clipboard tests are explicit opt-in)"
+	cargo test --manifest-path clipboard-rs/Cargo.toml --all-targets
+	cargo test --manifest-path clipboard-rs/Cargo.toml --all-targets --no-default-features
 	@Write-Host "[test] done"
 
 format:
 	@Write-Host "[format] eslint autofix"
 	npm run lint:fix
 	@Write-Host "[format] rustfmt"
-	@Set-Location src-tauri; Get-ChildItem -Path src -Recurse -Filter *.rs | ForEach-Object { rustup run stable rustfmt --edition 2024 $$_.FullName }
+	$(RUST_ENV) cargo fmt --manifest-path src-tauri/Cargo.toml --all
+	$(RUST_ENV) cargo fmt --manifest-path clipboard-rs/Cargo.toml --all
 	@Write-Host "[format] done"

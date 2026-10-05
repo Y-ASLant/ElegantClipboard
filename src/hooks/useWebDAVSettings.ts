@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 import { notifyWebDAVAvailabilityChanged } from "@/lib/webdav-availability";
 
 export type ProxyMode = "system" | "none" | "custom";
@@ -84,7 +86,7 @@ export function useWebDAVSettings() {
         notifyWebDAVAvailabilityChanged();
       }
     } catch (error) {
-      logError(`保存 ${key} 失败:`, error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, `Failed to save ${key}`);
     }
   }, []);
 

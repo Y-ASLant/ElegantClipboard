@@ -195,12 +195,17 @@ pub(crate) fn with_paused_monitor<F, R>(state: &Arc<AppState>, f: F) -> R
 where
     F: FnOnce() -> R,
 {
+    struct ResumeGuard<'a>(&'a crate::clipboard::ClipboardMonitor);
+    impl Drop for ResumeGuard<'_> {
+        fn drop(&mut self) {
+            if RESUME_TX.send(self.0.clone()).is_err() {
+                self.0.resume();
+            }
+        }
+    }
     state.monitor.pause();
-    let result = f();
-
-    let _ = RESUME_TX.send(state.monitor.clone());
-
-    result
+    let _resume = ResumeGuard(&state.monitor);
+    f()
 }
 
 /// 用系统文件管理器打开指定路径。

@@ -2132,7 +2132,6 @@ mod tests {
             source_app_name: None,
             source_app_icon: None,
             group_id: None,
-            files_valid: None,
         }
     }
 

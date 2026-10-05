@@ -27,7 +27,7 @@ jobs:
         run: npm run lint -- --max-warnings=0
 
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Production build
         run: npm run build
@@ -56,18 +56,35 @@ jobs:
         working-directory: src-tauri
         run: cargo fmt --all -- --check
 
-      - name: Clippy (correctness gate)
+      - name: Clippy (zero warning gate)
         working-directory: src-tauri
-        # Keep advisory warnings visible; compilation and correctness errors remain fatal.
-        run: cargo clippy --all-targets -- -D clippy::correctness
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Cargo test
         working-directory: src-tauri
         run: cargo test
 
-      - name: Clipboard HTML parser regressions
-        working-directory: src-tauri
-        run: cargo test -p clipboard-rs --lib html_tests
+      - name: Clipboard fork formatting
+        working-directory: clipboard-rs
+        run: cargo fmt --all -- --check
+
+      - name: Clipboard fork Clippy (default features)
+        working-directory: clipboard-rs
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Clipboard fork Clippy (no default features)
+        working-directory: clipboard-rs
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+      # Native clipboard tests are opt-in and require an exclusive desktop
+      # session: cargo test --all-targets -- --ignored --test-threads=1
+      - name: Clipboard fork pure tests (default features)
+        working-directory: clipboard-rs
+        run: cargo test --all-targets
+
+      - name: Clipboard fork pure tests (no default features)
+        working-directory: clipboard-rs
+        run: cargo test --all-targets --no-default-features
 
   # ── E2E smoke tests (Playwright via Vite dev server) ──
   e2e:

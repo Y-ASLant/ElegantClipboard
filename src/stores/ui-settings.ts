@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { t } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 
 export type ColorTheme = "default" | "emerald" | "cyan" | "system";
 export type DarkMode = "light" | "dark" | "auto";
@@ -285,7 +287,7 @@ function updateAndPersist(
   broadcastChange(patch);
   const snapshot = { ...pickUISettingsData(get()), ...patch };
   saveUISettings(snapshot).catch((error) => {
-    logError("Failed to save UI settings:", error);
+    reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save UI settings");
   });
 }
 
@@ -354,10 +356,18 @@ export const useUISettings = create<UISettings>()((set, get) => {
 
     setKeyboardNavigation: (enabled) => {
       const previous = get().keyboardNavigation;
-      updateAndPersist(set, get, { keyboardNavigation: enabled });
-      invoke("set_keyboard_nav_enabled", { enabled }).catch((error) => {
-        logError("Failed to set keyboard navigation:", error);
-        updateAndPersist(set, get, { keyboardNavigation: previous });
+      set({ keyboardNavigation: enabled });
+      broadcastChange({ keyboardNavigation: enabled });
+      void Promise.all([
+        saveUISettings({ ...pickUISettingsData(get()), keyboardNavigation: enabled }),
+        invoke("set_keyboard_nav_enabled", { enabled }),
+      ]).catch((error: unknown) => {
+        reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to set keyboard navigation");
+        set({ keyboardNavigation: previous });
+        broadcastChange({ keyboardNavigation: previous });
+        void saveUISettings(pickUISettingsData(get())).catch((rollbackError: unknown) => {
+          logError("Failed to restore keyboard navigation setting", rollbackError);
+        });
       });
     },
     setWindowEffect: (effect) => {
@@ -365,38 +375,44 @@ export const useUISettings = create<UISettings>()((set, get) => {
       set({ windowEffect: effect });
       broadcastChange({ windowEffect: effect });
       document.documentElement.setAttribute("data-window-effect", effect);
-      saveUISettings({ ...pickUISettingsData(get()), windowEffect: effect }).catch((error) => {
-        logError("Failed to save window effect:", error);
-      });
-      invoke("set_window_effect", { effect }).catch((error) => {
-        logError("Failed to set window effect:", error);
-        updateAndPersist(set, get, { windowEffect: previous });
+      void Promise.all([
+        saveUISettings({ ...pickUISettingsData(get()), windowEffect: effect }),
+        invoke("set_window_effect", { effect }),
+      ]).catch((error: unknown) => {
+        reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to set window effect");
+        set({ windowEffect: previous });
+        broadcastChange({ windowEffect: previous });
         document.documentElement.setAttribute("data-window-effect", previous);
+        void saveUISettings(pickUISettingsData(get())).catch((rollbackError: unknown) => {
+          logError("Failed to restore window effect setting", rollbackError);
+        });
       });
     },
   };
 });
 
 async function repairSettingsAccess() {
+  let repairedToolbarButtons: ToolbarButton[] | undefined;
   try {
     const trayIconVisible =
       (await invoke<string | null>("get_setting", {
         key: "tray_icon_visible",
       })) !== "false";
-    const { toolbarButtons, setToolbarButtons } = useUISettings.getState();
-    const repairedToolbarButtons = resolveSettingsAccess(
-      toolbarButtons,
-      trayIconVisible,
-    ).toolbarButtons;
-    if (repairedToolbarButtons !== toolbarButtons) {
-      setToolbarButtons(repairedToolbarButtons);
-    }
+    const { toolbarButtons } = useUISettings.getState();
+    const resolved = resolveSettingsAccess(toolbarButtons, trayIconVisible).toolbarButtons;
+    if (resolved !== toolbarButtons) repairedToolbarButtons = resolved;
   } catch (error) {
     logError("Failed to repair settings access:", error);
-    const { toolbarButtons, setToolbarButtons } = useUISettings.getState();
-    if (!toolbarButtons.includes("settings")) {
-      setToolbarButtons([...toolbarButtons, "settings"]);
-    }
+    const { toolbarButtons } = useUISettings.getState();
+    if (!toolbarButtons.includes("settings")) repairedToolbarButtons = [...toolbarButtons, "settings"];
+  }
+  if (!repairedToolbarButtons) return;
+  useUISettings.setState({ toolbarButtons: repairedToolbarButtons });
+  broadcastChange({ toolbarButtons: repairedToolbarButtons });
+  try {
+    await saveUISettings(pickUISettingsData(useUISettings.getState()));
+  } catch (error) {
+    logError("Failed to persist settings access repair", error);
   }
 }
 

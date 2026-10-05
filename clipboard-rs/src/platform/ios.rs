@@ -22,10 +22,16 @@ pub struct ClipboardWatcherContext<T: ClipboardHandler> {
 	running: bool,
 	stop_signal: Sender<()>,
 	stop_receiver: Receiver<()>,
+	interval: Duration,
 }
 
 impl<T: ClipboardHandler> ClipboardWatcherContext<T> {
 	pub fn new() -> Result<Self> {
+		Self::new_with_interval(Duration::from_millis(500))
+	}
+
+	/// Creates a watcher that polls the pasteboard at the supplied interval.
+	pub fn new_with_interval(interval: Duration) -> Result<Self> {
 		let clipboard = unsafe { UIPasteboard::generalPasteboard() };
 		let (tx, rx) = mpsc::channel();
 		Ok(Self {
@@ -34,13 +40,14 @@ impl<T: ClipboardHandler> ClipboardWatcherContext<T> {
 			running: false,
 			stop_signal: tx,
 			stop_receiver: rx,
+			interval,
 		})
 	}
 }
 
-unsafe impl<T: ClipboardHandler> Send for ClipboardWatcherContext<T> {}
+unsafe impl<T: ClipboardHandler + Send> Send for ClipboardWatcherContext<T> {}
 
-impl<T: ClipboardHandler> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
+impl<T: ClipboardHandler + Send> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
 	fn add_handler(&mut self, handler: T) -> &mut Self {
 		self.handlers.push(handler);
 		self
@@ -59,11 +66,7 @@ impl<T: ClipboardHandler> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
 		let mut last_change_count = unsafe { self.clipboard.changeCount() };
 		loop {
 			// if receive stop signal, break loop
-			if self
-				.stop_receiver
-				.recv_timeout(Duration::from_millis(500))
-				.is_ok()
-			{
+			if self.stop_receiver.recv_timeout(self.interval).is_ok() {
 				break;
 			}
 			let change_count = unsafe { self.clipboard.changeCount() };
@@ -302,7 +305,10 @@ impl Clipboard for ClipboardContext {
 	}
 
 	#[cfg(feature = "image")]
-	fn set_image_with_dib(&self, image: RustImageData, _dib_data: Option<&[u8]>) -> Result<()> {
+	fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()> {
+		if dib_data.is_some() {
+			return Err("CF_DIB is only supported on Windows".into());
+		}
 		self.set_image(image)
 	}
 

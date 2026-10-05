@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { logError } from "@/lib/logger";
 
 const FOCUS_DEBOUNCE_DELAY = 50;
 
@@ -44,7 +45,7 @@ async function debouncedEnableFocus() {
       await invoke("focus_clipboard_window");
       currentFocusState = "focused";
     } catch (error) {
-      console.error("启用窗口焦点失败:", error);
+      logError("Failed to enable window focus", error);
     }
     focusDebounceTimer = null;
   }, FOCUS_DEBOUNCE_DELAY);
@@ -90,7 +91,7 @@ async function debouncedRestoreFocus() {
       await invoke("restore_last_focus");
       currentFocusState = "normal";
     } catch (error) {
-      console.error("恢复非聚焦模式失败:", error);
+      logError("Failed to restore non-focusable mode", error);
     }
     blurDebounceTimer = null;
   }, FOCUS_DEBOUNCE_DELAY);
@@ -161,6 +162,6 @@ export async function focusWindowImmediately() {
     await invoke("focus_clipboard_window");
     currentFocusState = "focused";
   } catch (error) {
-    console.error("立即启用窗口焦点失败:", error);
+    logError("Failed to immediately enable window focus", error);
   }
 }

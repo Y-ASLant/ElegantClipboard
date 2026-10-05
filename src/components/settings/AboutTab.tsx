@@ -7,7 +7,7 @@ import {
 import { openUrl as tauriOpenUrl } from "@tauri-apps/plugin-opener";
 import { SettingsCard, SettingsCardHeader } from "@/components/settings/SettingSection";
 import { useTranslation } from "@/i18n";
-import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 
 export function AboutTab() {
   const { t } = useTranslation();
@@ -16,7 +16,7 @@ export function AboutTab() {
     try {
       await tauriOpenUrl(url);
     } catch (error) {
-      logError("Failed to open URL:", error);
+      reportUserError(t("operationFeedback.userActions.openLink"), error, "Failed to open URL");
     }
   };
 

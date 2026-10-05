@@ -3,7 +3,7 @@ import importPlugin from "eslint-plugin-import-x";
 
 export default [
   {
-    files: ["src/**/*.{ts,tsx}"],
+    files: ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "*.config.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -18,6 +18,14 @@ export default [
       import: importPlugin,
     },
     rules: {
+      "no-constant-binary-expression": "error",
+      "no-dupe-args": "error",
+      "no-duplicate-case": "error",
+      "no-self-assign": "error",
+      "no-sparse-arrays": "error",
+      "no-unreachable": "error",
+      "no-unsafe-finally": "error",
+      "no-unsafe-negation": "error",
       // Import order rules
       "import/order": [
         "error",

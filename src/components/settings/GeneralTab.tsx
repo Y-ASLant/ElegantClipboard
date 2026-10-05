@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { LOCALE_OPTIONS, useTranslation, type Locale } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 import { resolveSettingsAccess, useUISettings } from "@/stores/ui-settings";
 
 export type PositionMode = "follow_cursor" | "screen_center" | "fixed_position";
@@ -87,7 +88,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
     try {
       await invoke("set_setting", { key: "position_mode", value: mode });
     } catch (error) {
-      logError("Failed to save position_mode:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save position_mode");
     }
   };
 
@@ -101,7 +102,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
         await invoke("set_setting", { key: "window_height", value: "" });
       }
     } catch (error) {
-      logError("Failed to save persist_window_size:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save persist_window_size");
     }
   };
 
@@ -110,7 +111,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
     try {
       await invoke("set_setting", { key: "auto_check_update", value: String(enabled) });
     } catch (error) {
-      logError("Failed to save auto_check_update:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save auto_check_update");
     }
   };
 
@@ -121,7 +122,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
       await invoke("set_tray_icon_visibility", { visible: enabled });
     } catch (error) {
       setTrayIconVisible(!enabled);
-      logError("Failed to set tray icon visibility:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to set tray icon visibility");
     }
   };
 
@@ -129,7 +130,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
     try {
       await invoke("open_log_file");
     } catch (error) {
-      logError("Failed to open log file:", error);
+      reportUserError(t("operationFeedback.userActions.openLog"), error, "Failed to open log file");
     }
   };
 
@@ -142,7 +143,11 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
               <Label className="text-xs">{t("language.label")}</Label>
               <p className="text-xs text-muted-foreground">{t("language.desc")}</p>
             </div>
-            <Select value={locale} onValueChange={(v) => void setLocale(v as Locale)}>
+            <Select value={locale} onValueChange={(value) => {
+              void setLocale(value as Locale).catch((error: unknown) => {
+                reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to change interface language");
+              });
+            }}>
               <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {LOCALE_OPTIONS.map((option) => (
@@ -433,7 +438,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                     }
                     onSettingsChange({ ...settings, admin_launch: pendingAdminLaunch });
                   } catch (error) {
-                    alert(t("common.operationFailed", { error: String(error) }));
+                    reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to change administrator launch");
                   }
                 }
                 setAdminRestartDialogOpen(false);
@@ -455,7 +460,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                     onSettingsChange({ ...settings, admin_launch: pendingAdminLaunch });
                     await invoke("restart_app");
                   } catch (error) {
-                    alert(t("common.operationFailed", { error: String(error) }));
+                    reportUserError(t("operationFeedback.userActions.restart"), error, "Failed to restart after administrator setting change");
                     setAdminRestartDialogOpen(false);
                     setPendingAdminLaunch(null);
                   }
@@ -496,7 +501,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                     await invoke("set_log_to_file", { enabled: pendingLogToFile });
                     onSettingsChange({ ...settings, log_to_file: pendingLogToFile });
                   } catch (error) {
-                    alert(t("common.operationFailed", { error: String(error) }));
+                    reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to update file logging setting");
                   }
                 }
                 setLogRestartDialogOpen(false);
@@ -513,7 +518,7 @@ export function GeneralTab({ settings, onSettingsChange }: GeneralTabProps) {
                     onSettingsChange({ ...settings, log_to_file: pendingLogToFile });
                     await invoke("restart_app");
                   } catch (error) {
-                    alert(t("common.operationFailed", { error: String(error) }));
+                    reportUserError(t("operationFeedback.userActions.restart"), error, "Failed to restart after file logging setting change");
                     setLogRestartDialogOpen(false);
                     setPendingLogToFile(null);
                   }

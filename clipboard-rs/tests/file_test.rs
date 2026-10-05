@@ -1,89 +1,58 @@
 use clipboard_rs::{Clipboard, ClipboardContent, ClipboardContext, ContentFormat};
 
-#[cfg(target_os = "macos")]
-const TMP_PATH: &str = "/tmp/";
-#[cfg(target_os = "windows")]
-const TMP_PATH: &str = "C:\\Windows\\Temp\\";
-#[cfg(all(
-	unix,
-	not(any(
-		target_os = "macos",
-		target_os = "ios",
-		target_os = "android",
-		target_os = "emscripten"
-	))
-))]
-const TMP_PATH: &str = "/tmp/";
-
-// ios
-#[cfg(any(target_os = "ios", target_os = "android"))]
-const TMP_PATH: &str = "/tmp/";
-
 #[test]
+#[ignore = "requires exclusive access to the system clipboard; run with --ignored --test-threads=1"]
 fn test_file() {
+	let directory = tempfile::tempdir().unwrap();
+	let file_list: Vec<String> = ["clipboard_rs_test_file1.txt", "clipboard_rs_test_file2.txt"]
+		.iter()
+		.map(|name| {
+			let path = directory.path().join(name);
+			std::fs::write(&path, "hello world").unwrap();
+			path.to_str().unwrap().to_string()
+		})
+		.collect();
 	let ctx = ClipboardContext::new().unwrap();
 
-	let file_list = get_files();
-
 	ctx.set_files(file_list.clone()).unwrap();
-
-	let types = ctx.available_formats().unwrap();
-	println!("{:?}", types);
-
-	let has = ctx.has(ContentFormat::Files);
-	assert!(has);
-
-	let files = ctx.get_files().unwrap();
-	assert_eq!(files.len(), 2);
-
-	for file in files {
-		println!("{:?}", file);
+	assert!(ctx.has(ContentFormat::Files));
+	assert_eq!(ctx.get_files().unwrap(), file_list);
+	#[cfg(target_os = "windows")]
+	{
+		let raw_hdrop = ctx.get_hdrop_raw().unwrap();
+		ctx.clear().unwrap();
+		ctx.set_hdrop_raw(&raw_hdrop).unwrap();
+		ctx.set_raw_no_clear("Preferred DropEffect", &1_u32.to_le_bytes())
+			.unwrap();
+		assert_eq!(ctx.get_hdrop_raw().unwrap(), raw_hdrop);
+		assert_eq!(ctx.get_files().unwrap(), file_list);
+		assert_eq!(
+			ctx.get_buffer("Preferred DropEffect").unwrap(),
+			1_u32.to_le_bytes()
+		);
 	}
 
 	ctx.clear().unwrap();
+	assert!(!ctx.has(ContentFormat::Files));
 
-	let has = ctx.has(ContentFormat::Files);
-	assert!(!has);
-
+	let text = file_list.join("\n");
 	ctx.set(vec![
-		ClipboardContent::Text(file_list.clone().join("\n").to_string()),
+		ClipboardContent::Text(text.clone()),
 		ClipboardContent::Files(file_list.clone()),
 	])
 	.unwrap();
-
-	let has = ctx.has(ContentFormat::Files);
-	assert!(has);
-
-	let types = ctx.available_formats().unwrap();
-	println!("{:?}", types);
+	assert!(ctx.has(ContentFormat::Files));
 
 	let contents = ctx
 		.get(&[ContentFormat::Text, ContentFormat::Files])
 		.unwrap();
-
 	assert_eq!(contents.len(), 2);
-
-	for c in contents {
-		match c {
-			ClipboardContent::Text(data) => {
-				assert_eq!(data, file_list.clone().join("\n"));
-				println!("ClipboardContent::Text = {}", data);
-			}
-			ClipboardContent::Files(files) => {
-				assert_eq!(files.len(), 2);
-				for file in files {
-					println!("ClipboardContent::Files = {:?}", file);
-				}
-			}
+	for content in contents {
+		match content {
+			ClipboardContent::Text(data) => assert_eq!(data, text),
+			ClipboardContent::Files(files) => assert_eq!(files, file_list),
 			_ => panic!("unexpected format"),
 		}
 	}
-}
-
-fn get_files() -> Vec<String> {
-	let test_file1 = format!("{}clipboard_rs_test_file1.txt", TMP_PATH);
-	let test_file2 = format!("{}clipboard_rs_test_file2.txt", TMP_PATH);
-	std::fs::write(&test_file1, "hello world").unwrap();
-	std::fs::write(&test_file2, "hello world").unwrap();
-	vec![test_file1, test_file2]
+	ctx.clear().unwrap();
 }

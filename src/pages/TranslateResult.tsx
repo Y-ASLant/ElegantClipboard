@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { useTranslation } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { runClipboardOperation, reportUserError } from "@/lib/operation-feedback";
 import { initTheme } from "@/lib/theme-applier";
 import { translateText } from "@/lib/translate";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,19 @@ export function TranslateResult() {
   const recordTranslation = useTranslateSettings((s) => s.recordTranslation);
   const translateLoaded = useTranslateSettings((s) => s.loaded);
   const requestIdRef = useRef(0);
+  const copyRequestRef = useRef(0);
+  const copyTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    copyRequestRef.current++;
+    setCopied(false);
+    setTranslatedCopied(false);
+    return () => {
+      copyRequestRef.current++;
+      window.clearTimeout(copyTimerRef.current);
+    };
+  }, [text, translatedText]);
+
+  useEffect(() => () => { requestIdRef.current++; }, []);
 
   useEffect(() => {
     if (!translateLoaded) useTranslateSettings.getState().loadSettings();
@@ -49,11 +63,11 @@ export function TranslateResult() {
       setTranslatedText(result);
     } catch (error) {
       if (reqId !== requestIdRef.current) return;
-      setTranslateError(String(error));
+      setTranslateError(error instanceof Error ? error.message : t("operationFeedback.unknownReason"));
     } finally {
       if (reqId === requestIdRef.current) setTranslating(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     invoke<boolean>("is_translate_window_pinned")
@@ -72,8 +86,8 @@ export function TranslateResult() {
           setText(pending);
           doTranslate(pending);
         }
-      } catch (e) {
-        console.error("获取待翻译文本失败:", e);
+      } catch (error) {
+        logError("Failed to load pending translate text:", error);
       }
     };
     load();
@@ -102,12 +116,12 @@ export function TranslateResult() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !isPinned) {
-        getCurrentWindow().close();
+        void getCurrentWindow().close().catch((error) => reportUserError(t("common.close"), error, "Failed to close translate window"));
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPinned]);
+  }, [isPinned, t]);
 
   const togglePinned = useCallback(async () => {
     const next = !isPinned;
@@ -115,25 +129,28 @@ export function TranslateResult() {
       await invoke("set_translate_window_pinned", { pinned: next });
       setIsPinned(next);
     } catch (error) {
-      logError("Failed to toggle translate pin state:", error);
+      reportUserError(t("toolbar.pinWindow"), error, "Failed to toggle translate pin state");
     }
-  }, [isPinned]);
+  }, [isPinned, t]);
 
-  const handleCopy = useCallback(async () => {
-    try {
-      await invoke("write_text_to_clipboard", { text, record: false });
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (error) { logError("复制失败:", error); }
-  }, [text]);
-
-  const handleCopyTranslation = useCallback(async () => {
-    try {
-      await invoke("write_text_to_clipboard", { text: translatedText, record: recordTranslation });
-      setTranslatedCopied(true);
-      setTimeout(() => setTranslatedCopied(false), 1500);
-    } catch (error) { logError("复制翻译结果失败:", error); }
-  }, [translatedText, recordTranslation]);
+  const handleCopy = async (translation = false) => {
+    const request = ++copyRequestRef.current;
+    window.clearTimeout(copyTimerRef.current);
+    setCopied(false);
+    setTranslatedCopied(false);
+    const result = await runClipboardOperation(translation ? "copyTranslation" : "copyText", {
+      text: translation ? translatedText : text,
+      record: translation ? recordTranslation : false,
+    });
+    if (result.status !== "success" || request !== copyRequestRef.current) return;
+    if (translation) setTranslatedCopied(true);
+    else setCopied(true);
+    copyTimerRef.current = window.setTimeout(() => {
+      if (request !== copyRequestRef.current) return;
+      setCopied(false);
+      setTranslatedCopied(false);
+    }, 1500);
+  };
 
   return (
     <div className={cn("h-screen flex flex-col bg-page-shell overflow-hidden p-3 gap-3", !themeReady ? "opacity-0 **:transition-none!" : "opacity-100")}>
@@ -152,10 +169,11 @@ export function TranslateResult() {
       <Card className="flex-1 overflow-hidden flex flex-col min-h-0">
         <div className="flex items-center justify-between px-4 pt-3 pb-1">
           <span className="text-xs font-medium text-muted-foreground">{t("translateResult.original")}</span>
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleCopy}>
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleCopy()}>
             <Copy16Regular className="w-3 h-3 mr-1" />
             {copied ? t("translateResult.copied") : t("translateResult.copy")}
           </Button>
+          {copied && <span className="sr-only" role="status">{t("operationFeedback.copySucceeded")}</span>}
         </div>
         <textarea
           value={text}
@@ -173,11 +191,12 @@ export function TranslateResult() {
             {translating ? t("translateResult.translating") : t("translateResult.result")}
           </span>
           {translatedText && (
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={handleCopyTranslation}>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => handleCopy(true)}>
               <Copy16Regular className="w-3 h-3 mr-1" />
               {translatedCopied ? t("translateResult.copied") : t("translateResult.copy")}
             </Button>
           )}
+          {translatedCopied && <span className="sr-only" role="status">{t("operationFeedback.copySucceeded")}</span>}
         </div>
         <div className="flex-1 overflow-auto px-4 pb-3">
           {translating && <p className="text-sm text-muted-foreground">{t("translateResult.translatingProgress")}</p>}

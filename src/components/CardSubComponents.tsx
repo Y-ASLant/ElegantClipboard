@@ -180,6 +180,7 @@ export function MoveToGroupSection({
 
 interface ActionToolbarProps {
   item: ClipboardItem;
+  copyDisabled: boolean;
   onTogglePin: (e: React.MouseEvent) => void;
   onToggleFavorite: (e: React.MouseEvent) => void;
   onCopy: (e: React.MouseEvent) => void;
@@ -190,6 +191,7 @@ interface ActionToolbarProps {
 
 export const ActionToolbar = ({
   item,
+  copyDisabled,
   onTogglePin,
   onToggleFavorite,
   onCopy,
@@ -229,7 +231,7 @@ export const ActionToolbar = ({
     </Tooltip>
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon" onClick={onCopy} className="h-7 w-7">
+        <Button variant="ghost" size="icon" onClick={onCopy} disabled={copyDisabled} aria-label={t("clipboard.copy")} className="h-7 w-7">
           <Copy16Regular className="w-3.5 h-3.5" />
         </Button>
       </TooltipTrigger>

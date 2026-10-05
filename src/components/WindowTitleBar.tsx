@@ -2,6 +2,11 @@ import { Pin16Filled, Pin16Regular } from "@fluentui/react-icons";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTranslation } from "@/i18n";
+import { reportUserError } from "@/lib/operation-feedback";
+
+// Chromium's app-region style is supported by Tauri but absent from csstype.
+const noDragStyle: React.CSSProperties & { WebkitAppRegion: "no-drag" } = { WebkitAppRegion: "no-drag" };
 
 interface WindowTitleBarProps {
   icon: React.ReactNode;
@@ -20,6 +25,7 @@ interface WindowTitleBarProps {
 }
 
 export function WindowTitleBar({ icon, title, extra, center, pinControl }: WindowTitleBarProps) {
+  const { t } = useTranslation();
   return (
     <Card className="shrink-0">
       <div
@@ -32,13 +38,13 @@ export function WindowTitleBar({ icon, title, extra, center, pinControl }: Windo
           {extra}
         </div>
         {center && (
-          <div className="absolute left-1/2 -translate-x-1/2" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+          <div className="absolute left-1/2 -translate-x-1/2" style={noDragStyle}>
             {center}
           </div>
         )}
         <div
           className="flex gap-1"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
+          style={noDragStyle}
         >
           {pinControl ? (
             <Tooltip>
@@ -65,7 +71,14 @@ export function WindowTitleBar({ icon, title, extra, center, pinControl }: Windo
           ) : (
             <>
               <button
-                onClick={() => getCurrentWindow().minimize()}
+                aria-label={t("operationFeedback.userActions.minimizeWindow")}
+                onClick={async () => {
+                  try {
+                    await getCurrentWindow().minimize();
+                  } catch (error) {
+                    reportUserError(t("operationFeedback.userActions.minimizeWindow"), error);
+                  }
+                }}
                 className="interactive-surface w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-accent rounded-md transition-surface"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -80,7 +93,14 @@ export function WindowTitleBar({ icon, title, extra, center, pinControl }: Windo
                 </svg>
               </button>
               <button
-                onClick={() => getCurrentWindow().close()}
+                aria-label={t("operationFeedback.userActions.closeWindow")}
+                onClick={async () => {
+                  try {
+                    await getCurrentWindow().close();
+                  } catch (error) {
+                    reportUserError(t("operationFeedback.userActions.closeWindow"), error);
+                  }
+                }}
                 className="interactive-surface w-8 h-8 flex items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground rounded-md transition-surface"
               >
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">

@@ -8,18 +8,18 @@ fn main() {
 	let has_rtf = ctx.has(ContentFormat::Rtf);
 	println!("has_rtf={}", has_rtf);
 
-	let rtf = ctx.get_rich_text().unwrap_or("".to_string());
+	let rtf = ctx.get_rich_text().unwrap_or_default();
 
 	println!("rtf={}", rtf);
 
 	let has_html = ctx.has(ContentFormat::Html);
 	println!("has_html={}", has_html);
 
-	let html = ctx.get_html().unwrap_or("".to_string());
+	let html = ctx.get_html().unwrap_or_default();
 
 	println!("html={}", html);
 
-	let content = ctx.get_text().unwrap_or("".to_string());
+	let content = ctx.get_text().unwrap_or_default();
 
 	println!("txt={}", content);
 }

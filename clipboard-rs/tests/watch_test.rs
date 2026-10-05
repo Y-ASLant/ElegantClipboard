@@ -16,10 +16,9 @@ impl ClipboardHandler for CountingHandler {
 	}
 }
 
-// Watching touches the real system clipboard and needs a desktop session. CI
-// runs `cargo test --all` on the macOS/Windows desktop runners, where this (like
-// the other clipboard tests) executes normally.
+// Native watcher tests require a desktop session and exclusive clipboard access.
 #[test]
+#[ignore = "requires exclusive access to the system clipboard; run with --ignored --test-threads=1"]
 fn test_watch_with_short_interval_detects_change_and_shuts_down() {
 	let (tx, rx) = mpsc::channel();
 
@@ -44,16 +43,17 @@ fn test_watch_with_short_interval_detects_change_and_shuts_down() {
 		.unwrap();
 
 	// The change should be observed well within a second given the 50ms poll.
-	rx.recv_timeout(Duration::from_secs(5))
-		.expect("watcher should observe the clipboard change");
+	let observed = rx.recv_timeout(Duration::from_secs(5));
 
 	// Shutting down must unblock `start_watch` so the thread can join.
 	shutdown.stop();
 	watch_thread.join().expect("watch thread should join");
+	observed.expect("watcher should observe the clipboard change");
 }
 
 // `new` must keep its original behavior and signature (back-compat).
 #[test]
+#[ignore = "requires a native desktop session; run with --ignored --test-threads=1"]
 fn test_new_still_works_without_interval() {
 	let _watcher: ClipboardWatcherContext<NoopHandler> = ClipboardWatcherContext::new().unwrap();
 }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::io::Cursor;
+#[cfg(feature = "image")]
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{mem, ptr};
 
 use crate::common::{ContentData, Result};
 #[cfg(feature = "image")]
@@ -11,19 +11,56 @@ use crate::{Clipboard, ClipboardContent, ClipboardHandler, ClipboardWatcher, Con
 use clipboard_win::raw::{set_file_list_with, set_string_with, set_without_clear};
 use clipboard_win::types::c_uint;
 use clipboard_win::{
-	formats, get, get_clipboard, options, raw, set_clipboard, Clipboard as ClipboardWin, Monitor,
-	SysResult,
+	formats, get, options, raw, set, Clipboard as ClipboardWin, ErrorCode, Monitor, SysResult,
 };
 #[cfg(feature = "image")]
 use image::codecs::bmp::BmpDecoder;
 #[cfg(feature = "image")]
 use image::DynamicImage;
-use windows::Win32::Foundation::{HANDLE, HWND};
-use windows::Win32::Graphics::Gdi::{
-	CreateDIBitmap, DeleteObject, GetDC, ReleaseDC, BITMAPFILEHEADER, BITMAPINFO, BITMAPINFOHEADER,
-	BITMAPV5HEADER, CBM_INIT, DIB_RGB_COLORS, HDC, HGDIOBJ,
-};
-use windows::Win32::System::DataExchange::SetClipboardData;
+
+/// The system clipboard could not be opened for an operation.
+/// Distinct from format registration, decoding, and clipboard write failures.
+#[derive(Debug)]
+pub struct ClipboardAccessError {
+	source: ErrorCode,
+}
+
+impl std::fmt::Display for ClipboardAccessError {
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(formatter, "Open clipboard error, code = {}", self.source)
+	}
+}
+
+impl std::error::Error for ClipboardAccessError {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		Some(&self.source)
+	}
+}
+
+fn open_clipboard() -> Result<ClipboardWin> {
+	Ok(ClipboardWin::new_attempts(10).map_err(|source| ClipboardAccessError { source })?)
+}
+
+/// This native HGLOBAL clipboard API cannot publish zero-byte raw formats.
+#[derive(Debug)]
+pub struct ClipboardFormatUnsupportedError;
+
+impl std::fmt::Display for ClipboardFormatUnsupportedError {
+	fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		formatter.write_str(
+			"Windows HGLOBAL clipboard publication does not support zero-byte raw formats",
+		)
+	}
+}
+
+impl std::error::Error for ClipboardFormatUnsupportedError {}
+
+fn require_raw_payload(bytes: &[u8]) -> Result<()> {
+	if bytes.is_empty() {
+		return Err(ClipboardFormatUnsupportedError.into());
+	}
+	Ok(())
+}
 
 pub struct WatcherShutdown {
 	state: Arc<Mutex<ShutdownState>>,
@@ -32,6 +69,7 @@ pub struct WatcherShutdown {
 static UNKNOWN_FORMAT: &str = "unknown format";
 static CF_RTF: &str = "Rich Text Format";
 static CF_HTML: &str = "HTML Format";
+#[cfg(feature = "image")]
 static CF_PNG: &str = "PNG";
 
 pub struct ClipboardContext {
@@ -62,27 +100,21 @@ pub struct ClipboardWatcherContext<T: ClipboardHandler> {
 	running: bool,
 }
 
-unsafe impl Send for ClipboardContext {}
-unsafe impl Sync for ClipboardContext {}
-unsafe impl<T: ClipboardHandler> Send for ClipboardWatcherContext<T> {}
-unsafe impl<T: ClipboardHandler> Sync for ClipboardWatcherContext<T> {}
-
 impl ClipboardContext {
 	pub fn new() -> Result<ClipboardContext> {
 		let (format_map, html_format) = {
 			let cf_html_format = formats::Html::new();
-			let cf_rtf_uint = clipboard_win::register_format(CF_RTF);
-			let cf_png_uint = clipboard_win::register_format(CF_PNG);
+			let cf_rtf_uint =
+				clipboard_win::register_format(CF_RTF).ok_or("register rich text format error")?;
+			#[cfg(feature = "image")]
+			let cf_png_uint = clipboard_win::register_format(CF_PNG).ok_or("register PNG format error")?;
 			let mut m: HashMap<&str, c_uint> = HashMap::new();
 			if let Some(cf_html) = cf_html_format {
 				m.insert(CF_HTML, cf_html.code());
 			}
-			if let Some(cf_rtf) = cf_rtf_uint {
-				m.insert(CF_RTF, cf_rtf.get());
-			}
-			if let Some(cf_png) = cf_png_uint {
-				m.insert(CF_PNG, cf_png.get());
-			}
+			m.insert(CF_RTF, cf_rtf_uint.get());
+			#[cfg(feature = "image")]
+			m.insert(CF_PNG, cf_png_uint.get());
 			(m, cf_html_format)
 		};
 		Ok(ClipboardContext {
@@ -91,16 +123,18 @@ impl ClipboardContext {
 		})
 	}
 
-	fn get_format(&self, format: &ContentFormat) -> c_uint {
-		match format {
+	fn get_format(&self, format: &ContentFormat) -> Result<c_uint> {
+		Ok(match format {
 			ContentFormat::Text => formats::CF_UNICODETEXT,
 			ContentFormat::Rtf => *self.format_map.get(CF_RTF).unwrap(),
-			ContentFormat::Html => *self.format_map.get(CF_HTML).unwrap(),
+			ContentFormat::Html => self.html_format.code(),
 			#[cfg(feature = "image")]
 			ContentFormat::Image => formats::CF_DIB,
 			ContentFormat::Files => formats::CF_HDROP,
-			ContentFormat::Other(format) => clipboard_win::register_format(format).unwrap().get(),
-		}
+			ContentFormat::Other(format) => clipboard_win::register_format(format)
+				.ok_or("register format error")?
+				.get(),
+		})
 	}
 }
 
@@ -123,8 +157,7 @@ impl<T: ClipboardHandler> ClipboardWatcherContext<T> {
 
 impl Clipboard for ClipboardContext {
 	fn available_formats(&self) -> Result<Vec<String>> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
+		let _clip = open_clipboard()?;
 		let format_count = clipboard_win::count_formats();
 		if format_count.is_none() {
 			return Ok(Vec::new());
@@ -156,10 +189,10 @@ impl Clipboard for ClipboardContext {
 			}
 			#[cfg(feature = "image")]
 			ContentFormat::Image => {
-				// Currently only judge whether there is a png format
 				let cf_png_uint = self.format_map.get(CF_PNG).unwrap();
 				clipboard_win::is_format_avail(*cf_png_uint)
 					|| clipboard_win::is_format_avail(formats::CF_DIB)
+					|| clipboard_win::is_format_avail(formats::CF_DIBV5)
 			}
 			ContentFormat::Files => clipboard_win::is_format_avail(formats::CF_HDROP),
 			ContentFormat::Other(format) => {
@@ -173,8 +206,7 @@ impl Clipboard for ClipboardContext {
 	}
 
 	fn clear(&self) -> Result<()> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
+		let _clip = open_clipboard()?;
 		let res = clipboard_win::empty();
 		if let Err(e) = res {
 			return Err(format!("Empty clipboard error, code = {e}").into());
@@ -188,7 +220,8 @@ impl Clipboard for ClipboardContext {
 			return Err("register format error".into());
 		}
 		let format_uint = format_uint.unwrap().get();
-		let buffer = get_clipboard(formats::RawData(format_uint));
+		let _clip = open_clipboard()?;
+		let buffer = get(formats::RawData(format_uint));
 		match buffer {
 			Ok(data) => Ok(data),
 			Err(e) => Err(format!("Get buffer error, code = {e}").into()),
@@ -196,7 +229,8 @@ impl Clipboard for ClipboardContext {
 	}
 
 	fn get_text(&self) -> Result<String> {
-		let string: SysResult<String> = get_clipboard(formats::Unicode);
+		let _clip = open_clipboard()?;
+		let string: SysResult<String> = get(formats::Unicode);
 		match string {
 			Ok(s) => Ok(s),
 			Err(e) => Err(format!("Get text error, code = {e}").into()),
@@ -209,7 +243,8 @@ impl Clipboard for ClipboardContext {
 	}
 
 	fn get_html(&self) -> Result<String> {
-		let buffer = get_clipboard(formats::RawData(self.html_format.code()));
+		let _clip = open_clipboard()?;
+		let buffer = get(formats::RawData(self.html_format.code()));
 		match buffer {
 			Ok(data) => {
 				let html_res = String::from_utf8(data);
@@ -227,41 +262,13 @@ impl Clipboard for ClipboardContext {
 
 	#[cfg(feature = "image")]
 	fn get_image(&self) -> Result<RustImageData> {
-		let cf_png_format = self.format_map.get(CF_PNG);
-		if cf_png_format.is_some() && clipboard_win::is_format_avail(*cf_png_format.unwrap()) {
-			let image_raw_data = self.get_buffer(CF_PNG)?;
-			RustImageData::from_bytes(&image_raw_data)
-		} else if clipboard_win::is_format_avail(formats::CF_DIBV5) {
-			let res = get_clipboard(formats::RawData(formats::CF_DIBV5));
-			match res {
-				Ok(data) => {
-					let decoder = {
-						// if data.as_slice().starts_with(b"BM") {
-						// 	BmpDecoder::new(Cursor::new(data.as_slice()))
-						// } else {
-						BmpDecoder::new_without_file_header(Cursor::new(data.as_slice()))
-						// }
-					};
-					let decoder = decoder.map_err(|e| format!("{e}"))?;
-					let dynamic_image =
-						DynamicImage::from_decoder(decoder).map_err(|e| format!("{e}"))?;
-					Ok(RustImageData::from_dynamic_image(dynamic_image))
-				}
-				Err(e) => Err(format!("Get image error, code = {e}").into()),
-			}
-		} else if clipboard_win::is_format_avail(formats::CF_DIB) {
-			let res = get_clipboard(formats::Bitmap);
-			match res {
-				Ok(data) => RustImageData::from_bytes(&data),
-				Err(e) => Err(format!("Get image error, code = {e}").into()),
-			}
-		} else {
-			Err("No image data in clipboard".into())
-		}
+		let _clip = open_clipboard()?;
+		self.get_image_inner()
 	}
 
 	fn get_files(&self) -> Result<Vec<String>> {
-		let files: SysResult<Vec<String>> = get_clipboard(formats::FileList);
+		let _clip = open_clipboard()?;
+		let files: SysResult<Vec<String>> = get(formats::FileList);
 		match files {
 			Ok(f) => Ok(f),
 			Err(e) => Err(format!("Get files error, code = {e}").into()),
@@ -269,8 +276,7 @@ impl Clipboard for ClipboardContext {
 	}
 
 	fn get(&self, formats: &[ContentFormat]) -> Result<Vec<ClipboardContent>> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
+		let _clip = open_clipboard()?;
 		let mut res = Vec::new();
 		for format in formats {
 			match format {
@@ -284,7 +290,7 @@ impl Clipboard for ClipboardContext {
 					}
 				}
 				ContentFormat::Rtf => {
-					let format_uint = self.get_format(format);
+					let format_uint = self.get_format(format)?;
 					let buffer = get(formats::RawData(format_uint));
 					match buffer {
 						Ok(buffer) => {
@@ -311,7 +317,7 @@ impl Clipboard for ClipboardContext {
 				}
 				#[cfg(feature = "image")]
 				ContentFormat::Image => {
-					let img = self.get_image();
+					let img = self.get_image_inner();
 					match img {
 						Ok(img) => {
 							res.push(ClipboardContent::Image(img));
@@ -320,7 +326,7 @@ impl Clipboard for ClipboardContext {
 					}
 				}
 				ContentFormat::Other(fmt) => {
-					let format_uint = self.get_format(format);
+					let format_uint = self.get_format(format)?;
 					let buffer = get(formats::RawData(format_uint));
 					match buffer {
 						Ok(buffer) => {
@@ -330,7 +336,7 @@ impl Clipboard for ClipboardContext {
 					}
 				}
 				ContentFormat::Files => {
-					let files = self.get_files();
+					let files: SysResult<Vec<String>> = get(formats::FileList);
 					match files {
 						Ok(files) => {
 							res.push(ClipboardContent::Files(files));
@@ -344,31 +350,32 @@ impl Clipboard for ClipboardContext {
 	}
 
 	fn set_buffer(&self, format: &str, buffer: Vec<u8>) -> Result<()> {
+		require_raw_payload(&buffer)?;
 		let format_uint = clipboard_win::register_format(format);
 		if format_uint.is_none() {
 			return Err("register format error".into());
 		}
 		let format_uint = format_uint.unwrap().get();
-		let res = set_clipboard(formats::RawData(format_uint), buffer);
-		if res.is_err() {
-			return Err("set buffer error".into());
-		}
-		Ok(())
+		let _clip = open_clipboard()?;
+		clipboard_win::empty().map_err(|e| format!("Empty clipboard error, code = {e}"))?;
+		set_without_clear(format_uint, &buffer)
+			.map_err(|e| format!("Set buffer error, code = {e}").into())
 	}
 
 	fn set_text(&self, text: String) -> Result<()> {
-		let res = set_clipboard(formats::Unicode, text);
+		let _clip = open_clipboard()?;
+		let res = set(formats::Unicode, text);
 		res.map_err(|e| format!("set text error, code = {e}").into())
 	}
 
 	fn set_rich_text(&self, text: String) -> Result<()> {
-		let res = self.set_buffer(CF_RTF, text.as_bytes().to_vec());
-		res.map_err(|e| format!("set rich text error, code = {e}").into())
+		self.set_buffer(CF_RTF, text.into_bytes())
 	}
 
 	fn set_html(&self, html: String) -> Result<()> {
 		let cf_html = plain_html_to_cf_html(&html);
-		let res = set_clipboard(
+		let _clip = open_clipboard()?;
+		let res = set(
 			formats::RawData(self.html_format.code()),
 			cf_html.as_bytes(),
 		);
@@ -377,112 +384,86 @@ impl Clipboard for ClipboardContext {
 
 	#[cfg(feature = "image")]
 	fn set_image(&self, image: RustImageData) -> Result<()> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
-		let res = clipboard_win::empty();
-		if let Err(e) = res {
-			return Err(format!("Empty clipboard error, code = {e}").into());
-		}
-		// chromium source code
-		// @link {https://source.chromium.org/chromium/chromium/src/+/main:ui/base/clipboard/clipboard_win.cc;l=771;drc=2a5aaed0ff3a0895c8551495c2656ed49baf742c;bpv=0;bpt=1}
-		let cf_png_format = self.format_map.get(CF_PNG);
-		if let Some(cf_png) = cf_png_format {
-			let png = image.to_png()?;
-			if let Err(e) = set_without_clear(*cf_png, png.get_bytes()) {
-				eprintln!("set png image error, code = {e}");
-				// continue set bmp image
-			}
-		}
-		// 转换为 BMP 并设置到剪贴板
-		let bmp = image
-			.to_bitmap()
-			.map_err(|e| format!("transform to bitmap error, code = {e}"))?;
-
-		set_bitmap_inner(bmp.get_bytes()).map_err(|e| format!("set image error, code = {e}").into())
+		self.set_image_with_dib(image, None)
 	}
 
 	#[cfg(feature = "image")]
 	fn get_image_dib(&self) -> Result<(RustImageData, Option<Vec<u8>>)> {
-		let cf_png_format = self.format_map.get(CF_PNG);
-		if cf_png_format.is_some() && clipboard_win::is_format_avail(*cf_png_format.unwrap()) {
-			let image_raw_data = self.get_buffer(CF_PNG)?;
-			let img = RustImageData::from_bytes(&image_raw_data)?;
-			let dib = if clipboard_win::is_format_avail(formats::CF_DIB) {
-				get_clipboard(formats::RawData(formats::CF_DIB)).ok()
-			} else {
-				None
-			};
-			return Ok((img, dib));
-		}
-		if clipboard_win::is_format_avail(formats::CF_DIBV5) {
-			let res = get_clipboard(formats::RawData(formats::CF_DIBV5));
-			match res {
-				Ok(data) => {
-					let dib = if clipboard_win::is_format_avail(formats::CF_DIB) {
-						get_clipboard(formats::RawData(formats::CF_DIB)).ok()
-					} else {
-						Some(data.clone())
-					};
-					let decoder = BmpDecoder::new_without_file_header(Cursor::new(data.as_slice()))
-						.map_err(|e| format!("{e}"))?;
-					let dynamic_image =
-						DynamicImage::from_decoder(decoder).map_err(|e| format!("{e}"))?;
-					Ok((RustImageData::from_dynamic_image(dynamic_image), dib))
-				}
-				Err(e) => Err(format!("Get image error, code = {e}").into()),
-			}
-		} else if clipboard_win::is_format_avail(formats::CF_DIB) {
-			let res = get_clipboard(formats::RawData(formats::CF_DIB));
-			match res {
-				Ok(data) => {
-					let dib = Some(data.clone());
-					let img = RustImageData::from_bytes(&data)?;
-					Ok((img, dib))
-				}
-				Err(e) => Err(format!("Get image error, code = {e}").into()),
-			}
+		let _clip = open_clipboard()?;
+		let png_format = *self.format_map.get(CF_PNG).unwrap();
+		let has_png = clipboard_win::is_format_avail(png_format);
+		let has_dib = clipboard_win::is_format_avail(formats::CF_DIB);
+		let has_dib_v5 = clipboard_win::is_format_avail(formats::CF_DIBV5);
+		let image_format = if has_png {
+			png_format
+		} else if has_dib_v5 {
+			formats::CF_DIBV5
+		} else if has_dib {
+			formats::CF_DIB
 		} else {
-			Err("No image data in clipboard".into())
-		}
+			return Err("No image data in clipboard".into());
+		};
+		let data: Vec<u8> = get(formats::RawData(image_format))
+			.map_err(|e| format!("Get image error, code = {e}"))?;
+		let image = if has_png {
+			RustImageData::from_bytes(&data)?
+		} else {
+			decode_dib(&data)?
+		};
+		let dib_format = if has_dib {
+			Some(formats::CF_DIB)
+		} else if has_dib_v5 {
+			Some(formats::CF_DIBV5)
+		} else {
+			None
+		};
+		let dib = if dib_format == Some(image_format) {
+			Some(data)
+		} else {
+			dib_format
+				.map(|format| get(formats::RawData(format)))
+				.transpose()
+				.map_err(|e| format!("Get CF_DIB error, code = {e}"))?
+		};
+		Ok((image, dib))
 	}
 
 	#[cfg(feature = "image")]
 	fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
-		let res = clipboard_win::empty();
-		if let Err(e) = res {
-			return Err(format!("Empty clipboard error, code = {e}").into());
+		if let Some(dib) = dib_data {
+			require_raw_payload(dib)?;
 		}
-		let cf_png_format = self.format_map.get(CF_PNG);
-		if let Some(cf_png) = cf_png_format {
-			let png = image.to_png()?;
-			if let Err(e) = set_without_clear(*cf_png, png.get_bytes()) {
-				eprintln!("set png image error, code = {e}");
-			}
-		}
-		let bmp = image
-			.to_bitmap()
-			.map_err(|e| format!("transform to bitmap error, code = {e}"))?;
+		let png = image.to_png()?;
+		let bmp = image.to_bitmap()?;
+		let _clip = open_clipboard()?;
+		clipboard_win::empty().map_err(|e| format!("Empty clipboard error, code = {e}"))?;
+		let cf_png = self.format_map.get(CF_PNG).unwrap();
+		set_without_clear(*cf_png, png.get_bytes())
+			.map_err(|e| format!("Set PNG error, code = {e}"))?;
 		set_bitmap_inner(bmp.get_bytes())?;
 		if let Some(dib) = dib_data {
-			if let Err(e) = set_without_clear(formats::CF_DIB, dib) {
-				eprintln!("set CF_DIB error, code = {e}");
-			}
+			set_without_clear(formats::CF_DIB, dib)
+				.map_err(|e| format!("Set CF_DIB error, code = {e}"))?;
 		}
 		Ok(())
 	}
 
 	fn set_files(&self, files: Vec<String>) -> Result<()> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
+		let _clip = open_clipboard()?;
 		let res = set_file_list_with(&files, options::DoClear);
 		res.map_err(|e| format!("set files error, code = {e}").into())
 	}
 
 	fn set(&self, contents: Vec<ClipboardContent>) -> Result<()> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
+		for content in &contents {
+			if matches!(
+				content,
+				ClipboardContent::Rtf(_) | ClipboardContent::Other(_, _)
+			) {
+				require_raw_payload(content.as_bytes())?;
+			}
+		}
+		let _clip = open_clipboard()?;
 		let res = clipboard_win::empty();
 		if let Err(e) = res {
 			return Err(format!("Empty clipboard error, code = {e}").into());
@@ -490,39 +471,30 @@ impl Clipboard for ClipboardContext {
 		for content in contents {
 			match content {
 				ClipboardContent::Text(txt) => {
-					let res = set_string_with(txt.as_str(), options::NoClear);
-					if res.is_err() {
-						continue;
-					}
+					set_string_with(txt.as_str(), options::NoClear)
+						.map_err(|e| format!("Set text error, code = {e}"))?;
 				}
 				ClipboardContent::Html(html) => {
-					let format_uint_html = self.html_format.code();
 					let cf_html = plain_html_to_cf_html(&html);
-					let res = set_without_clear(format_uint_html, cf_html.as_bytes());
-					if res.is_err() {
-						continue;
-					}
+					set_without_clear(self.html_format.code(), cf_html.as_bytes())
+						.map_err(|e| format!("Set HTML error, code = {e}"))?;
 				}
 				#[cfg(feature = "image")]
-				ClipboardContent::Image(img) => {
-					// set image will clear clipboard
-					let res = self.set_image(img);
-					if res.is_err() {
-						continue;
-					}
+				ClipboardContent::Image(image) => {
+					let png = image.to_png()?;
+					let bmp = image.to_bitmap()?;
+					set_without_clear(*self.format_map.get(CF_PNG).unwrap(), png.get_bytes())
+						.map_err(|e| format!("Set PNG error, code = {e}"))?;
+					set_bitmap_inner(bmp.get_bytes())?;
 				}
 				ClipboardContent::Rtf(_) | ClipboardContent::Other(_, _) => {
-					let format_uint = self.get_format(&content.get_format());
-					let res = set_without_clear(format_uint, content.as_bytes());
-					if res.is_err() {
-						continue;
-					}
+					let format_uint = self.get_format(&content.get_format())?;
+					set_without_clear(format_uint, content.as_bytes())
+						.map_err(|e| format!("Set buffer error, code = {e}"))?;
 				}
 				ClipboardContent::Files(file_list) => {
-					let res = set_file_list_with(&file_list, options::NoClear);
-					if res.is_err() {
-						continue;
-					}
+					set_file_list_with(&file_list, options::NoClear)
+						.map_err(|e| format!("Set files error, code = {e}"))?;
 				}
 			}
 		}
@@ -531,22 +503,46 @@ impl Clipboard for ClipboardContext {
 }
 
 impl ClipboardContext {
+	// The caller holds the clipboard open for the entire snapshot.
+	#[cfg(feature = "image")]
+	fn get_image_inner(&self) -> Result<RustImageData> {
+		let png_format = *self.format_map.get(CF_PNG).unwrap();
+		if clipboard_win::is_format_avail(png_format) {
+			let data: Vec<u8> = get(formats::RawData(png_format))
+				.map_err(|e| format!("Get PNG error, code = {e}"))?;
+			return RustImageData::from_bytes(&data);
+		}
+		let dib_format = if clipboard_win::is_format_avail(formats::CF_DIBV5) {
+			formats::CF_DIBV5
+		} else if clipboard_win::is_format_avail(formats::CF_DIB) {
+			formats::CF_DIB
+		} else {
+			return Err("No image data in clipboard".into());
+		};
+		let data: Vec<u8> = get(formats::RawData(dib_format))
+			.map_err(|e| format!("Get CF_DIB error, code = {e}"))?;
+		decode_dib(&data)
+	}
+
 	/// Read raw CF_HDROP bytes for lossless file clipboard round-trips.
 	pub fn get_hdrop_raw(&self) -> Result<Vec<u8>> {
-		let _clip = ClipboardWin::new_attempts(10)
-			.map_err(|code| format!("Open clipboard error, code = {code}"));
-		get_clipboard(formats::RawData(formats::CF_HDROP))
+		let _clip = open_clipboard()?;
+		get(formats::RawData(formats::CF_HDROP))
 			.map_err(|e| format!("Get CF_HDROP error, code = {e}").into())
 	}
 
 	/// Write raw CF_HDROP bytes without clearing the clipboard.
 	pub fn set_hdrop_raw(&self, data: &[u8]) -> Result<()> {
+		require_raw_payload(data)?;
+		let _clip = open_clipboard()?;
 		set_without_clear(formats::CF_HDROP, data)
 			.map_err(|e| format!("Set CF_HDROP error, code = {e}").into())
 	}
 
 	/// Write a registered or standard format without clearing the clipboard.
 	pub fn set_raw_no_clear(&self, format: &str, data: &[u8]) -> Result<()> {
+		require_raw_payload(data)?;
+		let _clip = open_clipboard()?;
 		let format_uint = clipboard_win::register_format(format)
 			.ok_or_else(|| "register format error".to_string())?
 			.get();
@@ -555,7 +551,7 @@ impl ClipboardContext {
 	}
 }
 
-impl<T: ClipboardHandler> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
+impl<T: ClipboardHandler + Send> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
 	fn add_handler(&mut self, f: T) -> &mut Self {
 		self.handlers.push(f);
 		self
@@ -806,80 +802,292 @@ mod html_tests {
 	}
 }
 
-fn set_bitmap_inner(data: &[u8]) -> Result<()> {
-	const FILE_HEADER_LEN: usize = mem::size_of::<BITMAPFILEHEADER>();
-	const INFO_HEADER_LEN: usize = mem::size_of::<BITMAPV5HEADER>();
-
-	if data.len() <= (FILE_HEADER_LEN + INFO_HEADER_LEN) {
-		return Err("Invalid bitmap data".into());
-	}
-
-	let mut file_header = mem::MaybeUninit::<BITMAPFILEHEADER>::uninit();
-	let mut info_header = mem::MaybeUninit::<BITMAPV5HEADER>::uninit();
-
-	let (file_header, info_header) = unsafe {
-		ptr::copy_nonoverlapping(
-			data.as_ptr(),
-			file_header.as_mut_ptr() as _,
-			FILE_HEADER_LEN,
-		);
-		ptr::copy_nonoverlapping(
-			data.as_ptr().add(FILE_HEADER_LEN),
-			info_header.as_mut_ptr() as _,
-			INFO_HEADER_LEN,
-		);
-		(file_header.assume_init(), info_header.assume_init())
-	};
-
-	if data.len() <= file_header.bfOffBits as usize {
-		return Err("Invalid bitmap data".into());
-	}
-
-	let bitmap = &data[file_header.bfOffBits as _..];
-
-	if bitmap.len() < info_header.bV5SizeImage as usize {
-		return Err("Invalid bitmap data".into());
-	}
-
-	let dc = DeviceContext::new()?;
-
-	let handle = unsafe {
-		CreateDIBitmap(
-			dc.0,
-			Some(&info_header as *const _ as *const BITMAPINFOHEADER),
-			CBM_INIT as u32,
-			Some(bitmap.as_ptr() as _),
-			Some(&info_header as *const _ as *const BITMAPINFO),
-			DIB_RGB_COLORS,
-		)
-	};
-
-	if handle.is_invalid() {
-		return Err("Failed to create DIB".into());
-	}
-
-	if let Err(err) = unsafe { SetClipboardData(formats::CF_BITMAP, Some(HANDLE(handle.0))) } {
-		let _ = unsafe { DeleteObject(HGDIOBJ(handle.0)) };
-		Err(err.into())
-	} else {
-		Ok(())
-	}
-}
-
-struct DeviceContext(HDC);
-
-impl DeviceContext {
-	fn new() -> Result<Self> {
-		let dc = unsafe { GetDC(Some(HWND::default())) };
-		if dc.is_invalid() {
-			return Err("Failed to get DC".into());
+#[cfg(feature = "image")]
+fn decode_dib(data: &[u8]) -> Result<RustImageData> {
+	let size_bytes: [u8; 4] = data.get(..4).ok_or("Invalid DIB header")?.try_into()?;
+	let header_size = u32::from_le_bytes(size_bytes);
+	let header = data
+		.get(..header_size as usize)
+		.ok_or("Truncated DIB header")?;
+	let (bits, colors, palette_entry_size, external_masks) = match header_size {
+		12 => (u16::from_le_bytes(header[10..12].try_into()?), 0, 3, 0),
+		40 | 52 | 56 | 108 | 124 => {
+			let bits = u16::from_le_bytes(header[14..16].try_into()?);
+			let compression = u32::from_le_bytes(header[16..20].try_into()?);
+			let colors = u32::from_le_bytes(header[32..36].try_into()?);
+			let masks = if header_size == 40 {
+				match compression {
+					3 => 12,
+					6 => 16,
+					_ => 0,
+				}
+			} else {
+				0
+			};
+			(bits, colors, 4, masks)
 		}
-		Ok(Self(dc))
+		_ => return Err("Unsupported DIB header".into()),
+	};
+	let colors = if colors == 0 && bits <= 8 {
+		1_u32 << bits
+	} else {
+		colors
+	};
+	let pixel_offset = colors
+		.checked_mul(palette_entry_size)
+		.and_then(|palette| {
+			header_size
+				.checked_add(external_masks)?
+				.checked_add(palette)
+		})
+		.ok_or("DIB metadata size overflow")?;
+	if pixel_offset as usize > data.len() {
+		return Err("Truncated DIB metadata".into());
+	}
+	let file_size = u32::try_from(data.len())?
+		.checked_add(14)
+		.ok_or("DIB size overflow")?;
+	let mut file_header = [0_u8; 14];
+	file_header[..2].copy_from_slice(b"BM");
+	file_header[2..6].copy_from_slice(&file_size.to_le_bytes());
+	file_header[10..14].copy_from_slice(&(pixel_offset + 14).to_le_bytes());
+	// The normal BMP decoder honors bfOffBits. The headerless decoder incorrectly
+	// skips external masks for V4/V5 even though their masks are inside the header.
+	let decoder = BmpDecoder::new(DibBitmapReader {
+		header: file_header,
+		data,
+		position: 0,
+	})?;
+	Ok(RustImageData::from_dynamic_image(
+		DynamicImage::from_decoder(decoder)?,
+	))
+}
+
+// Present a BMP file header before borrowed DIB bytes without allocating or
+// copying the clipboard payload. The image decoder requires BufRead + Seek.
+#[cfg(feature = "image")]
+struct DibBitmapReader<'a> {
+	header: [u8; 14],
+	data: &'a [u8],
+	position: u64,
+}
+
+#[cfg(feature = "image")]
+impl Read for DibBitmapReader<'_> {
+	fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+		let bytes = self.fill_buf()?;
+		let count = output.len().min(bytes.len());
+		output[..count].copy_from_slice(&bytes[..count]);
+		self.consume(count);
+		Ok(count)
 	}
 }
 
-impl Drop for DeviceContext {
-	fn drop(&mut self) {
-		unsafe { ReleaseDC(Some(HWND::default()), self.0) };
+#[cfg(feature = "image")]
+impl BufRead for DibBitmapReader<'_> {
+	fn fill_buf(&mut self) -> io::Result<&[u8]> {
+		let Ok(position) = usize::try_from(self.position) else {
+			return Ok(&[]);
+		};
+		Ok(if position < self.header.len() {
+			&self.header[position..]
+		} else {
+			self.data
+				.get(position - self.header.len()..)
+				.unwrap_or_default()
+		})
+	}
+
+	fn consume(&mut self, count: usize) {
+		self.position = self.position.saturating_add(count as u64);
+	}
+}
+
+#[cfg(feature = "image")]
+impl Seek for DibBitmapReader<'_> {
+	fn seek(&mut self, offset: SeekFrom) -> io::Result<u64> {
+		let position = match offset {
+			SeekFrom::Start(position) => Some(position),
+			SeekFrom::Current(offset) => self.position.checked_add_signed(offset),
+			SeekFrom::End(offset) => {
+				(self.header.len() as u64 + self.data.len() as u64).checked_add_signed(offset)
+			}
+		}
+		.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid bitmap seek"))?;
+		self.position = position;
+		Ok(position)
+	}
+}
+
+#[cfg(feature = "image")]
+fn set_bitmap_inner(data: &[u8]) -> Result<()> {
+	// BMP differs from CF_DIB only by its 14-byte file header. Preserve the
+	// complete encoded DIB header and masks, including for tiny images.
+	let dib = data
+		.strip_prefix(b"BM")
+		.and_then(|data| data.get(12..))
+		.ok_or("Invalid bitmap data")?;
+	set_without_clear(formats::CF_DIB, dib)
+		.map_err(|e| format!("Set CF_DIB error, code = {e}").into())
+}
+
+#[cfg(all(test, feature = "image"))]
+mod dib_tests {
+	use super::decode_dib;
+	use crate::common::{RustImage, RustImageData};
+	use image::{DynamicImage, Rgba, RgbaImage};
+
+	#[test]
+	fn decodes_headerless_dib_preserving_masks_dimensions_and_rgba_rows() {
+		for (width, height) in [(1, 1), (3, 2)] {
+			let pixels = RgbaImage::from_fn(width, height, |x, y| {
+				Rgba([
+					(32 + x * 64) as u8,
+					(64 + y * 64) as u8,
+					128,
+					(16 + (x + y) * 32) as u8,
+				])
+			});
+			let image = RustImageData::from_dynamic_image(DynamicImage::ImageRgba8(pixels.clone()));
+			let bitmap = image.to_bitmap().unwrap();
+			let dib = &bitmap.get_bytes()[14..];
+			assert_eq!(u32::from_le_bytes(dib[0..4].try_into().unwrap()), 108);
+			assert_eq!(u32::from_le_bytes(dib[4..8].try_into().unwrap()), width);
+			assert_eq!(u32::from_le_bytes(dib[8..12].try_into().unwrap()), height);
+			assert_eq!(u32::from_le_bytes(dib[16..20].try_into().unwrap()), 3);
+			for (bytes, expected_mask) in dib[40..56].chunks_exact(4).zip([
+				0x00ff_0000_u32,
+				0x0000_ff00,
+				0x0000_00ff,
+				0xff00_0000,
+			]) {
+				assert_eq!(u32::from_le_bytes(bytes.try_into().unwrap()), expected_mask);
+			}
+			assert_eq!(decode_dib(dib).unwrap().to_rgba8().unwrap(), pixels);
+			let mut v5 = Vec::with_capacity(dib.len() + 16);
+			v5.extend_from_slice(&dib[..108]);
+			v5[..4].copy_from_slice(&124_u32.to_le_bytes());
+			v5.extend_from_slice(&[0; 16]);
+			v5.extend_from_slice(&dib[108..]);
+			assert_eq!(decode_dib(&v5).unwrap().to_rgba8().unwrap(), pixels);
+			for header_size in [52_u32, 56] {
+				let mut embedded_masks = dib[..header_size as usize].to_vec();
+				embedded_masks[..4].copy_from_slice(&header_size.to_le_bytes());
+				embedded_masks.extend_from_slice(&dib[108..]);
+				let mut expected = pixels.clone();
+				if header_size == 52 {
+					for pixel in expected.pixels_mut() {
+						pixel[3] = 255;
+					}
+				}
+				assert_eq!(
+					decode_dib(&embedded_masks).unwrap().to_rgba8().unwrap(),
+					expected
+				);
+			}
+			let mut top_down = dib[..108].to_vec();
+			top_down[8..12].copy_from_slice(&(-(height as i32)).to_le_bytes());
+			for row in dib[108..].chunks_exact((width * 4) as usize).rev() {
+				top_down.extend_from_slice(row);
+			}
+			assert_eq!(decode_dib(&top_down).unwrap().to_rgba8().unwrap(), pixels);
+		}
+	}
+
+	#[test]
+	fn decodes_info_header_with_external_rgb565_masks() {
+		let mut dib = vec![0; 40];
+		dib[..4].copy_from_slice(&40_u32.to_le_bytes());
+		dib[4..8].copy_from_slice(&2_i32.to_le_bytes());
+		dib[8..12].copy_from_slice(&1_i32.to_le_bytes());
+		dib[12..14].copy_from_slice(&1_u16.to_le_bytes());
+		dib[14..16].copy_from_slice(&16_u16.to_le_bytes());
+		dib[16..20].copy_from_slice(&3_u32.to_le_bytes());
+		dib[20..24].copy_from_slice(&4_u32.to_le_bytes());
+		for mask in [0xf800_u32, 0x07e0, 0x001f] {
+			dib.extend_from_slice(&mask.to_le_bytes());
+		}
+		dib.extend_from_slice(&[0x00, 0xf8, 0x1f, 0x00]);
+		let pixels = decode_dib(&dib).unwrap().to_rgba8().unwrap();
+		assert_eq!(pixels.dimensions(), (2, 1));
+		assert_eq!(*pixels.get_pixel(0, 0), Rgba([255, 0, 0, 255]));
+		assert_eq!(*pixels.get_pixel(1, 0), Rgba([0, 0, 255, 255]));
+	}
+
+	#[test]
+	fn decodes_core_header_with_three_byte_palette_entries() {
+		let mut dib = vec![0; 12];
+		dib[..4].copy_from_slice(&12_u32.to_le_bytes());
+		dib[4..6].copy_from_slice(&2_u16.to_le_bytes());
+		dib[6..8].copy_from_slice(&1_u16.to_le_bytes());
+		dib[8..10].copy_from_slice(&1_u16.to_le_bytes());
+		dib[10..12].copy_from_slice(&1_u16.to_le_bytes());
+		dib.extend_from_slice(&[0, 0, 0, 255, 255, 255]);
+		dib.extend_from_slice(&[0x40, 0, 0, 0]);
+		let pixels = decode_dib(&dib).unwrap().to_rgba8().unwrap();
+		assert_eq!(pixels.dimensions(), (2, 1));
+		assert_eq!(*pixels.get_pixel(0, 0), Rgba([0, 0, 0, 255]));
+		assert_eq!(*pixels.get_pixel(1, 0), Rgba([255, 255, 255, 255]));
+	}
+
+	#[test]
+	fn decodes_top_down_info_header_with_explicit_palette_size() {
+		let mut dib = vec![0; 40];
+		dib[..4].copy_from_slice(&40_u32.to_le_bytes());
+		dib[4..8].copy_from_slice(&2_i32.to_le_bytes());
+		dib[8..12].copy_from_slice(&(-2_i32).to_le_bytes());
+		dib[12..14].copy_from_slice(&1_u16.to_le_bytes());
+		dib[14..16].copy_from_slice(&8_u16.to_le_bytes());
+		dib[20..24].copy_from_slice(&8_u32.to_le_bytes());
+		dib[32..36].copy_from_slice(&2_u32.to_le_bytes());
+		dib.extend_from_slice(&[0, 0, 255, 0, 255, 0, 0, 0]);
+		dib.extend_from_slice(&[0, 1, 0, 0, 1, 0, 0, 0]);
+		let pixels = decode_dib(&dib).unwrap().to_rgba8().unwrap();
+		assert_eq!(pixels.dimensions(), (2, 2));
+		assert_eq!(*pixels.get_pixel(0, 0), Rgba([255, 0, 0, 255]));
+		assert_eq!(*pixels.get_pixel(1, 0), Rgba([0, 0, 255, 255]));
+		assert_eq!(*pixels.get_pixel(0, 1), Rgba([0, 0, 255, 255]));
+		assert_eq!(*pixels.get_pixel(1, 1), Rgba([255, 0, 0, 255]));
+	}
+
+	#[test]
+	fn rejects_overflowed_palette_metadata() {
+		let mut dib = vec![0; 40];
+		dib[..4].copy_from_slice(&40_u32.to_le_bytes());
+		dib[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
+		assert!(decode_dib(&dib).is_err());
+	}
+
+	#[test]
+	fn rejects_truncated_dib_headers() {
+		for data in [b"".as_slice(), b"BM".as_slice(), &[40, 0, 0, 0]] {
+			assert!(decode_dib(data).is_err());
+		}
+	}
+}
+
+#[cfg(test)]
+mod access_error_tests {
+	use super::{ClipboardAccessError, ErrorCode};
+
+	#[test]
+	fn boxed_access_error_preserves_native_cause_without_classifying_text() {
+		let error: Box<dyn std::error::Error + Send + Sync> = ClipboardAccessError {
+			source: ErrorCode::new_system(5),
+		}
+		.into();
+		assert!(error.is::<ClipboardAccessError>());
+		assert_eq!(
+			error
+				.source()
+				.unwrap()
+				.downcast_ref::<ErrorCode>()
+				.unwrap()
+				.raw_code(),
+			5
+		);
+		let diagnostic: Box<dyn std::error::Error + Send + Sync> =
+			"Open clipboard error, code = 5".into();
+		assert!(!diagnostic.is::<ClipboardAccessError>());
 	}
 }

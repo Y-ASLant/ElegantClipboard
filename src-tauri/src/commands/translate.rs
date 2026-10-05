@@ -388,19 +388,18 @@ pub async fn write_text_to_clipboard(
     state: State<'_, Arc<AppState>>,
     text: String,
     record: Option<bool>,
-) -> Result<(), String> {
-    let write_fn = || {
-        let clipboard = clipboard_rs::ClipboardContext::new()
-            .map_err(|e| format!("CLIPBOARD:ACCESS_FAILED:{e}"))?;
-        clipboard
-            .set_text(text.clone())
-            .map_err(|e| format!("CLIPBOARD:WRITE_FAILED:{e}"))?;
-        Ok(())
-    };
+) -> Result<(), crate::operation_error::OperationError> {
+    let prepared = crate::clipboard::format_write::prepare_text(text)?;
     if record.unwrap_or(false) {
-        write_fn()
+        let mut clipboard = clipboard_rs::ClipboardContext::new().map_err(|error| {
+            crate::operation_error::OperationError::new(
+                crate::operation_error::OperationErrorCode::ClipboardUnavailable,
+                format!("open clipboard: {error}"),
+            )
+        })?;
+        prepared.write(&mut clipboard)
     } else {
-        super::with_paused_monitor(&state, write_fn)
+        super::clipboard::write_prepared(&state, prepared)
     }
 }
 

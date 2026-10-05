@@ -1,5 +1,36 @@
 /** Extended zh-TW keys */
 export const extended = {
+  operationFeedback: {
+    operations: {
+      copy: "複製失敗", paste: "貼上失敗", pastePlain: "貼上純文字失敗",
+      pastePath: "貼上路徑失敗", pasteText: "貼上文字失敗", mergePaste: "合併貼上失敗",
+      save: "儲存檔案失敗", showInExplorer: "在檔案總管中顯示失敗", details: "載入檔案詳情失敗",
+      reorder: "調整項目順序失敗", copyText: "複製文字失敗", copyTranslation: "複製譯文失敗",
+      pin: "修改置頂狀態失敗", favorite: "修改收藏狀態失敗", move: "移動項目失敗",
+      moveFavorite: "移動收藏失敗", delete: "刪除項目失敗", batchDelete: "批次刪除失敗",
+      clear: "清空歷史失敗", editText: "儲存文字失敗",
+    },
+    reasons: {
+      item_not_found: "此剪貼簿項目已不存在。", resource_missing: "來源檔案或圖片已不存在。",
+      resource_unreadable: "無法讀取來源檔案或圖片。", permission_denied: "存取遭拒，請檢查檔案或應用程式權限。",
+      invalid_content: "剪貼簿內容無效。", unsupported_content: "此操作不支援該內容類型。",
+      image_decode_failed: "無法解碼此圖片。", clipboard_unavailable: "系統剪貼簿目前無法使用。",
+      clipboard_write_failed: "無法將內容寫入系統剪貼簿。", paste_failed: "無法向目標應用程式傳送貼上操作。",
+      save_failed: "無法儲存檔案。", invalid_destination: "選擇的目標位置無效。",
+      explorer_failed: "無法開啟檔案總管。", internal: "發生內部錯誤，詳情請查看應用程式日誌。",
+    },
+    unknownReason: "操作未能完成，詳情請查看應用程式日誌。",
+    copySucceeded: "已複製", pasteSucceeded: "已貼上",
+    refreshAfterSuccess: "操作已完成，但項目清單重新整理失敗",
+    userActions: {
+      saveSettings: "儲存設定失敗", openLink: "開啟連結失敗", loadApps: "載入執行中的應用程式失敗",
+      loadContent: "載入內容失敗", loadSize: "計算資料大小失敗", selectFolder: "選擇資料夾失敗",
+      createGroup: "建立群組失敗", renameGroup: "重新命名群組失敗", colorGroup: "修改群組顏色失敗",
+      deleteGroup: "刪除群組失敗", moveGroup: "移動項目到群組失敗", updateShortcut: "更新快捷鍵失敗",
+      openLog: "開啟日誌失敗", restart: "重新啟動應用程式失敗",
+      minimizeWindow: "最小化視窗失敗", closeWindow: "關閉視窗失敗",
+    },
+  },
   common: {
     add: "新增",
     close: "關閉",
@@ -44,7 +75,9 @@ export const extended = {
     },
   },
   cardContent: {
-    imageLoadFailed: "圖片載入失敗",
+    previewLoadFailed: "預覽載入失敗",
+    resourceChecking: "正在檢查資源",
+    resourceUnknown: "資源狀態未知",
     fileCount: "{{count}} 個檔案",
     invalid: "(已失效)",
     fileTooLarge: "(檔案過大)",

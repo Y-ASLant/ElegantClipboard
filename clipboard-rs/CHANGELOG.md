@@ -1,4 +1,30 @@
-# Changelog
+# Upstream Changelog
+
+The versioned entries below preserve the upstream release history, issue links and contributor attribution supplied with this vendored crate. Only the explicitly labeled local-fork maintenance section describes ElegantClipboard changes. The checked-in package declares version `0.3.5`; no missing upstream release notes are inferred or reconstructed here. Local APIs and platform limitations are documented in [README.md](README.md) / [README_ZH.md](README_ZH.md).
+
+下列带版本号的条目保留随库提供的上游历史发布记录、issue 链接与贡献者归属；只有明确标记的本地分叉维护章节描述 ElegantClipboard 修改。当前包声明版本 `0.3.5`；这里不推测或补写缺失的上游发布内容。本地 API 与平台限制见中英文 README。
+
+## Local Fork Maintenance / 本地分叉维护（非上游发布）
+
+These notes describe the checked-in fork, not a new upstream `v0.3.5` release or cross-platform verification report.
+
+### en
+
+- Windows image publication uses PNG plus raw `CF_DIB`, preserving the complete DIB header and masks; Windows synthesizes `CF_BITMAP`. Removed the separate unsafe GDI bitmap writer and its Windows API dependency.
+- Decode headerless DIB through a borrowed reader with a 14-byte BMP prefix and explicit pixel offset, avoiding a whole-DIB copy solely to add the prefix and accounting for palettes, external masks and V4/V5 headers.
+- Export Windows `ClipboardAccessError` for actual guarded `OpenClipboard` failures, preserving the native source without classifying errors by display text.
+- Restore Linux dispatcher forwarding for `get_image_dib()` / `set_image_with_dib()`. Non-Windows image writers reject supplied raw DIB before modifying the clipboard instead of silently dropping it; ordinary `None` image writes remain supported.
+- Reject zero-byte Windows raw payloads before clipboard mutation with exported `ClipboardFormatUnsupportedError`; zero-size movable `HGLOBAL` publication via `SetClipboardData` failed on Windows. ElegantClipboard preflight maps empty raw formats, including virtual `FileContents`, to `unsupported_content`. Nonempty raw formats and the clearing/no-clear distinction remain supported; no padding, successful no-op, delayed-rendering substitution or OLE expansion is introduced. Final native nonempty/empty-rejection verification is not claimed here.
+- Keep native OS-global clipboard/watcher tests opt-in and serial in an isolated desktop session. Pure content/image/header/error tests remain automatic; document current-host `--all-targets`, default/no-default-feature and strict Clippy checks in both READMEs. No Linux/macOS/iOS runtime proof is asserted.
+
+### zh
+
+- Windows 图片发布采用 PNG 与原始 `CF_DIB`，保留完整 DIB 头及掩码，由 Windows 合成 `CF_BITMAP`。移除单独的非安全 GDI 位图写入器及其 Windows API 依赖。
+- 用借用原始 DIB 的 reader 提供 14 字节 BMP 文件头与明确像素偏移，避免仅为加文件头复制完整 DIB，并正确计算调色板、外置掩码及 V4/V5 头。
+- 为真实的守卫式 `OpenClipboard` 失败导出 Windows `ClipboardAccessError`，保留原生原因，不通过显示文本匹配错误类型。
+- 恢复 Linux 分发层对 `get_image_dib()` / `set_image_with_dib()` 的转发。非 Windows 图片写入器在修改剪贴板前拒绝传入的原始 DIB，不再静默丢弃；普通 `None` 图片写入仍支持。
+- 在修改剪贴板前以导出的 `ClipboardFormatUnsupportedError` 拒绝 Windows 零字节原始 payload；实际通过 `SetClipboardData` 发布零字节可移动 `HGLOBAL` 在 Windows 上失败。ElegantClipboard 预检将空原始格式（包括虚拟文件 `FileContents`）映射为 `unsupported_content`。非空原始格式及清空/不清空区别仍支持；不填充、不成功但无操作、不替换为延迟渲染，也不另加 OLE 实现。这里不宣称已完成非空写入/空数据拒绝的最终原生验证。
+- 系统全局剪贴板/watcher 原生测试改为显式启用，并在隔离桌面会话串行运行；纯内容、图片、头及错误测试仍自动运行。中英文 README 说明当前主机的 `--all-targets`、默认/禁用默认 feature 与严格 Clippy 检查，不宣称 Linux/macOS/iOS 运行验证。
 
 ## v0.3.4 (2026-04-02) [released]
 

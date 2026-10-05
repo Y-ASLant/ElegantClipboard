@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { t } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 import { useClipboardStore } from "@/stores/clipboard";
 
 export interface Group {
@@ -48,7 +50,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       set((state) => ({ groups: [...state.groups, group] }));
       return group;
     } catch (error) {
-      logError("Failed to create group:", error);
+      reportUserError(t("operationFeedback.userActions.createGroup"), error, "Failed to create group");
       return null;
     }
   },
@@ -60,7 +62,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         groups: state.groups.map((g) => (g.id === id ? { ...g, name } : g)),
       }));
     } catch (error) {
-      logError("Failed to rename group:", error);
+      reportUserError(t("operationFeedback.userActions.renameGroup"), error, "Failed to rename group");
     }
   },
 
@@ -71,7 +73,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         groups: state.groups.map((g) => (g.id === id ? { ...g, color } : g)),
       }));
     } catch (error) {
-      logError("Failed to update group color:", error);
+      reportUserError(t("operationFeedback.userActions.colorGroup"), error, "Failed to update group color");
     }
   },
 
@@ -82,7 +84,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
         groups: state.groups.filter((g) => g.id !== id),
       }));
     } catch (error) {
-      logError("Failed to delete group:", error);
+      reportUserError(t("operationFeedback.userActions.deleteGroup"), error, "Failed to delete group");
     }
   },
 
@@ -93,7 +95,7 @@ export const useGroupStore = create<GroupState>((set, get) => ({
       get().fetchGroups();
       useClipboardStore.getState().fetchItems();
     } catch (error) {
-      logError("Failed to move item to group:", error);
+      reportUserError(t("operationFeedback.userActions.moveGroup"), error, "Failed to move item to group");
     }
   },
 }));

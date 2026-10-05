@@ -1,18 +1,11 @@
+use crate::clipboard::format_write::{PreparedClipboard, prepare_item, prepare_text};
 use crate::database::{ClipboardItem, ClipboardRepository};
-use clipboard_rs::Clipboard as ClipboardTrait;
+use crate::operation_error::{OperationError, OperationErrorCode};
 use std::sync::Arc;
-use tauri::State;
-use tracing::{debug, info};
+use tauri::{Emitter, Manager, State};
+use tracing::debug;
 
 use super::{AppState, hide_main_window_if_not_pinned, with_paused_monitor};
-
-/// 将 ClipboardItem 内容写入系统剪贴板（保留 HTML/RTF 等格式）
-pub(super) fn set_clipboard_content(
-    item: &ClipboardItem,
-    clipboard: &mut clipboard_rs::ClipboardContext,
-) -> Result<(), String> {
-    crate::clipboard::format_write::write_item_to_clipboard(item, clipboard)
-}
 
 /// 提取以 keyword 首次出现为中心的上下文片段（`...前缀 关键词 后缀...`）。
 /// 快速路径 O(n)：整体小写后字节级搜索转字符索引（CJK/ASCII 通用）。
@@ -423,18 +416,21 @@ pub async fn get_clipboard_count(
 
 /// 切换固定状态
 #[tauri::command]
-pub async fn toggle_pin(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
+pub async fn toggle_pin(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, OperationError> {
     let repo = ClipboardRepository::new(&state.db);
-    let new_state = repo.toggle_pin(id).map_err(|e| e.to_string())?;
+    let new_state = repo.toggle_pin(id).map_err(OperationError::database)?;
     debug!("Toggle pin: id={}, pinned={}", id, new_state);
     Ok(new_state)
 }
 
 /// 切换收藏状态
 #[tauri::command]
-pub async fn toggle_favorite(state: State<'_, Arc<AppState>>, id: i64) -> Result<bool, String> {
+pub async fn toggle_favorite(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<bool, OperationError> {
     let repo = ClipboardRepository::new(&state.db);
-    let new_state = repo.toggle_favorite(id).map_err(|e| e.to_string())?;
+    let new_state = repo.toggle_favorite(id).map_err(OperationError::database)?;
     debug!("Toggle favorite: id={}, favorite={}", id, new_state);
     Ok(new_state)
 }
@@ -445,10 +441,10 @@ pub async fn move_clipboard_item(
     state: State<'_, Arc<AppState>>,
     from_id: i64,
     to_id: i64,
-) -> Result<(), String> {
+) -> Result<(), OperationError> {
     let repo = ClipboardRepository::new(&state.db);
     repo.move_item_by_id(from_id, to_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(OperationError::database)?;
     debug!("Moved clipboard item {} to position of {}", from_id, to_id);
     Ok(())
 }
@@ -459,10 +455,10 @@ pub async fn move_favorite_clipboard_item(
     state: State<'_, Arc<AppState>>,
     from_id: i64,
     to_id: i64,
-) -> Result<(), String> {
+) -> Result<(), OperationError> {
     let repo = ClipboardRepository::new(&state.db);
     repo.move_favorite_item_by_id(from_id, to_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(OperationError::database)?;
     debug!(
         "Moved favorite clipboard item {} to position of {}",
         from_id, to_id
@@ -472,34 +468,34 @@ pub async fn move_favorite_clipboard_item(
 
 /// 粘贴后置顶：将条目移到非置顶区最前面（sort_order 设为全表最大值 + 1）
 #[tauri::command]
-pub async fn bump_item_to_top(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
+pub async fn bump_item_to_top(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<(), OperationError> {
     let repo = ClipboardRepository::new(&state.db);
-    repo.bump_to_top(id).map_err(|e| e.to_string())?;
+    repo.bump_to_top(id).map_err(OperationError::database)?;
     debug!("Bumped clipboard item {} to top", id);
     Ok(())
 }
 
 /// 删除剪贴板条目（同时删除关联图片文件）
 #[tauri::command]
-pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
+pub async fn delete_clipboard_item(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<(), OperationError> {
     let repo = ClipboardRepository::new(&state.db);
-
-    if let Ok(Some(item)) = repo.get_by_id(id) {
-        repo.delete(id).map_err(|e| e.to_string())?;
-        let payloads: Vec<String> = item.file_payload.map(|p| vec![p]).unwrap_or_default();
-        crate::clipboard::cleanup_deleted_assets(
-            &item.image_path.map(|p| vec![p]).unwrap_or_default(),
-            &payloads,
-        );
-        debug!(
-            "Deleted clipboard item: id={}, type={}",
-            id, item.content_type
-        );
-    } else {
-        repo.delete(id).map_err(|e| e.to_string())?;
-        debug!("Deleted clipboard item: id={}", id);
-    }
-
+    let item = resolve_item(&state, id)?;
+    repo.delete(id).map_err(OperationError::database)?;
+    let payloads: Vec<String> = item
+        .file_payload
+        .map(|payload| vec![payload])
+        .unwrap_or_default();
+    crate::clipboard::cleanup_deleted_assets(
+        &item.image_path.map(|path| vec![path]).unwrap_or_default(),
+        &payloads,
+    );
+    debug!(id, content_type = %item.content_type, "deleted clipboard item");
     Ok(())
 }
 
@@ -508,10 +504,10 @@ pub async fn delete_clipboard_item(state: State<'_, Arc<AppState>>, id: i64) -> 
 pub async fn batch_delete_clipboard_items(
     state: State<'_, Arc<AppState>>,
     ids: Vec<i64>,
-) -> Result<i64, String> {
+) -> Result<i64, OperationError> {
     let repo = ClipboardRepository::new(&state.db);
     let (deleted, image_paths, file_payloads) =
-        repo.batch_delete(&ids).map_err(|e| e.to_string())?;
+        repo.batch_delete(&ids).map_err(OperationError::database)?;
     crate::clipboard::cleanup_deleted_assets(&image_paths, &file_payloads);
     debug!("Batch deleted {} clipboard items", deleted);
     Ok(deleted)
@@ -519,15 +515,21 @@ pub async fn batch_delete_clipboard_items(
 
 /// 清空所有历史（包括置顶/收藏，同时删除图片文件）
 #[tauri::command]
-pub async fn clear_all_history(state: State<'_, Arc<AppState>>) -> Result<i64, String> {
+pub async fn clear_all_history(state: State<'_, Arc<AppState>>) -> Result<i64, OperationError> {
     use tracing::info;
 
     let repo = ClipboardRepository::new(&state.db);
-    let image_paths = repo.get_all_image_paths().unwrap_or_default();
-    let file_payloads = repo.get_all_file_payloads().unwrap_or_default();
-    let deleted = repo.clear_all().map_err(|e| e.to_string())?;
+    let image_paths = repo
+        .get_all_image_paths()
+        .map_err(OperationError::database)?;
+    let file_payloads = repo
+        .get_all_file_payloads()
+        .map_err(OperationError::database)?;
+    let deleted = repo.clear_all().map_err(OperationError::database)?;
     crate::clipboard::cleanup_deleted_assets(&image_paths, &file_payloads);
-    state.db.vacuum().ok();
+    if let Err(error) = state.db.vacuum() {
+        tracing::warn!(error = %error, "post-clear database vacuum failed");
+    }
 
     info!(
         "Cleared all {} clipboard items ({} image files)",
@@ -543,19 +545,19 @@ pub async fn clear_history(
     state: State<'_, Arc<AppState>>,
     group_id: Option<i64>,
     content_type: Option<String>,
-) -> Result<i64, String> {
+) -> Result<i64, OperationError> {
     use tracing::info;
 
     let repo = ClipboardRepository::new(&state.db);
     let image_paths = repo
         .get_clearable_image_paths(group_id, content_type.as_deref())
-        .unwrap_or_default();
+        .map_err(OperationError::database)?;
     let file_payloads = repo
         .get_clearable_file_payloads(group_id, content_type.as_deref())
-        .unwrap_or_default();
+        .map_err(OperationError::database)?;
     let deleted = repo
         .clear_history(group_id, content_type.as_deref())
-        .map_err(|e| e.to_string())?;
+        .map_err(OperationError::database)?;
     crate::clipboard::cleanup_deleted_assets(&image_paths, &file_payloads);
 
     info!(
@@ -585,217 +587,200 @@ pub async fn update_text_content(
     state: State<'_, Arc<AppState>>,
     id: i64,
     new_text: String,
-) -> Result<bool, String> {
+) -> Result<bool, OperationError> {
     let repo = ClipboardRepository::new(&state.db);
+    let item = resolve_item(&state, id)?;
     if new_text.trim().is_empty() {
-        repo.delete(id).map_err(|e| e.to_string())?;
-        debug!("Deleted empty item {}", id);
+        repo.delete(id).map_err(OperationError::database)?;
+        debug!(id, "deleted empty item");
         Ok(true)
     } else {
-        if let Ok(Some(item)) = repo.get_by_id(id) {
-            let payloads: Vec<String> = item.file_payload.map(|p| vec![p]).unwrap_or_default();
-            repo.update_text_content(id, &new_text)
-                .map_err(|e| e.to_string())?;
-            if !payloads.is_empty() {
-                crate::clipboard::cleanup_deleted_assets(&[], &payloads);
-            }
-        } else {
-            repo.update_text_content(id, &new_text)
-                .map_err(|e| e.to_string())?;
+        repo.update_text_content(id, &new_text)
+            .map_err(OperationError::database)?;
+        if let Some(payload) = item.file_payload {
+            crate::clipboard::cleanup_deleted_assets(&[], &[payload]);
         }
         debug!("Updated text content for item {}", id);
         Ok(false)
     }
 }
 
-/// 将条目复制到系统剪贴板
-#[tauri::command]
-pub async fn copy_to_clipboard(state: State<'_, Arc<AppState>>, id: i64) -> Result<(), String> {
-    let repo = ClipboardRepository::new(&state.db);
-    let item = repo
+pub(super) fn resolve_item(
+    state: &Arc<AppState>,
+    id: i64,
+) -> Result<ClipboardItem, OperationError> {
+    ClipboardRepository::new(&state.db)
         .get_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "条目未找到".to_string())?;
-
-    let result = with_paused_monitor(&state, || {
-        let mut clipboard = clipboard_rs::ClipboardContext::new()
-            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-        set_clipboard_content(&item, &mut clipboard)?;
-        debug!("Copied item {} to clipboard", id);
-        Ok(())
-    });
-    if let Err(ref e) = result {
-        tracing::warn!(id, error = %e, content_type = %item.content_type, "copy_to_clipboard failed");
-    }
-    result
+        .map_err(OperationError::database)?
+        .ok_or_else(|| {
+            OperationError::new(
+                OperationErrorCode::ItemNotFound,
+                format!("item {id} absent"),
+            )
+        })
 }
 
-/// 直接粘贴剪贴板条目（写入系统剪贴板 → 隐藏窗口 → 模拟 Ctrl+V）
+pub(super) fn write_prepared(
+    state: &Arc<AppState>,
+    prepared: PreparedClipboard,
+) -> Result<(), OperationError> {
+    with_paused_monitor(state, || {
+        let mut clipboard = clipboard_rs::ClipboardContext::new().map_err(|error| {
+            OperationError::new(
+                OperationErrorCode::ClipboardUnavailable,
+                format!("open clipboard: {error}"),
+            )
+        })?;
+        prepared.write(&mut clipboard)
+    })
+}
+
+#[tauri::command]
+pub async fn copy_to_clipboard(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<(), OperationError> {
+    let item = resolve_item(&state, id)?;
+    let prepared = prepare_item(&item)?;
+    write_prepared(&state, prepared)
+}
+
 #[tauri::command]
 pub async fn paste_content(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     id: i64,
     close_window: Option<bool>,
-) -> Result<(), String> {
-    let repo = ClipboardRepository::new(&state.db);
-    let item = repo
-        .get_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "条目未找到".to_string())?;
-
-    paste_item_to_active_window(&state, &app, &item, close_window.unwrap_or(true))?;
-    debug!("Pasted item {} to active window", id);
-    Ok(())
+) -> Result<(), OperationError> {
+    let item = resolve_item(&state, id)?;
+    paste_item_to_active_window(&state, &app, &item, close_window.unwrap_or(true))
 }
 
-/// 以纯文本粘贴条目内容（去除 html/rtf 格式）
 #[tauri::command]
 pub async fn paste_content_as_plain(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     id: i64,
     close_window: Option<bool>,
-) -> Result<(), String> {
-    let repo = ClipboardRepository::new(&state.db);
-    let item = repo
-        .get_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "条目未找到".to_string())?;
-
+) -> Result<(), OperationError> {
+    let item = resolve_item(&state, id)?;
     let text = crate::clipboard::format_write::item_plain_text(&item)?;
-
-    paste_plain_text_to_active_window(&state, &app, &text, close_window.unwrap_or(true))?;
-    debug!("Pasted item {} as plain text", id);
-    Ok(())
+    paste_plain_text_to_active_window(&state, &app, text, close_window.unwrap_or(true))
 }
 
-/// 将任意文本直接粘贴到当前活动窗口（用于表情、片段等功能）
 #[tauri::command]
 pub async fn paste_text_direct(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     text: String,
-) -> Result<(), String> {
-    paste_plain_text_to_active_window(&state, &app, &text, true)?;
-    debug!("Pasted direct text ({} chars)", text.len());
-    Ok(())
+) -> Result<(), OperationError> {
+    paste_plain_text_to_active_window(&state, &app, text, true)
 }
 
-/// 合并粘贴：将多条记录的文本内容合并后粘贴
 #[tauri::command]
 pub async fn merge_paste_content(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     ids: Vec<i64>,
     separator: Option<String>,
-) -> Result<(), String> {
-    if ids.is_empty() {
-        return Err("未选择条目".to_string());
+) -> Result<(), OperationError> {
+    let mut items = Vec::with_capacity(ids.len());
+    for id in ids {
+        items.push(resolve_item(&state, id)?);
     }
-
-    let repo = ClipboardRepository::new(&state.db);
-    let sep = separator.as_deref().unwrap_or("\n");
-
-    let mut items: Vec<ClipboardItem> = Vec::with_capacity(ids.len());
-    for id in &ids {
-        let item = repo
-            .get_by_id(*id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("条目 {id} 未找到"))?;
-        items.push(item);
-    }
-
-    with_paused_monitor(&state, || {
-        let mut clipboard = clipboard_rs::ClipboardContext::new()
-            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-        crate::clipboard::merge_paste::merge_items_to_clipboard(&items, sep, &mut clipboard)?;
-
-        super::hide_preview_windows(&app);
-        hide_main_window_if_not_pinned(&app);
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        super::run_simulate_paste_with_sound(&app)?;
-        super::hide_preview_windows(&app);
-
-        debug!("Merge pasted {} items", items.len());
-        Ok(())
-    })
+    let prepared =
+        crate::clipboard::merge_paste::prepare_merge(&items, separator.as_deref().unwrap_or("\n"))?;
+    execute_paste_flow(&state, &app, true, prepared)
 }
 
-/// 粘贴快速槽位（1-9）对应条目到活动窗口。
 pub fn quick_paste_by_slot(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     slot: u8,
-) -> Result<(), String> {
-    if !(1..=10).contains(&slot) {
-        return Err("Quick paste slot must be between 1 and 10".to_string());
-    }
-
-    let repo = ClipboardRepository::new(&state.db);
-    let active_group = *state.active_group_id.lock();
-    let item = repo
-        .get_by_position((slot - 1) as usize, active_group)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("No clipboard item available for slot {slot}"))?;
-
-    paste_item_to_active_window(state, app, &item, true)?;
-    debug!("Quick pasted slot {} with item {}", slot, item.id);
-    Ok(())
+) -> Result<(), OperationError> {
+    quick_paste_slot(state, app, slot, false)
 }
 
-/// 粘贴收藏快速槽位（1-9）对应条目到活动窗口。
 pub fn quick_paste_favorite_by_slot(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     slot: u8,
-) -> Result<(), String> {
-    if !(1..=10).contains(&slot) {
-        return Err("收藏槽位必须在 1-10 之间".to_string());
-    }
-
-    let repo = ClipboardRepository::new(&state.db);
-    let active_group = *state.active_group_id.lock();
-    let item = repo
-        .get_favorite_by_position((slot - 1) as usize, active_group)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("收藏槽位 {slot} 没有可用的收藏条目"))?;
-
-    paste_item_to_active_window(state, app, &item, true)?;
-    debug!("Quick pasted favorite slot {} with item {}", slot, item.id);
-    Ok(())
+) -> Result<(), OperationError> {
+    quick_paste_slot(state, app, slot, true)
 }
 
-/// 公共粘贴执行：写剪贴板 → 隐藏窗口 → 模拟粘贴
-fn execute_paste_flow<F>(
+fn quick_paste_slot(
+    state: &Arc<AppState>,
+    app: &tauri::AppHandle,
+    slot: u8,
+    favorite: bool,
+) -> Result<(), OperationError> {
+    if !(1..=10).contains(&slot) {
+        return Err(OperationError::new(
+            OperationErrorCode::InvalidContent,
+            "slot must be 1-10",
+        ));
+    }
+    let repo = ClipboardRepository::new(&state.db);
+    let group = *state.active_group_id.lock();
+    let item = if favorite {
+        repo.get_favorite_by_position((slot - 1) as usize, group)
+    } else {
+        repo.get_by_position((slot - 1) as usize, group)
+    }
+    .map_err(OperationError::database)?
+    .ok_or_else(|| {
+        OperationError::new(
+            OperationErrorCode::ItemNotFound,
+            format!("slot {slot} absent"),
+        )
+    })?;
+    paste_item_to_active_window(state, app, &item, true)
+}
+
+fn execute_paste_flow(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
     close_window: bool,
-    log_label: &str,
-    write_fn: F,
-) -> Result<(), String>
-where
-    F: FnOnce(&mut clipboard_rs::ClipboardContext) -> Result<(), String>,
-{
+    prepared: PreparedClipboard,
+) -> Result<(), OperationError> {
     with_paused_monitor(state, || {
-        let mut clipboard = clipboard_rs::ClipboardContext::new()
-            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-        write_fn(&mut clipboard)?;
-        debug!("{log_label}: clipboard set ok");
-
+        let mut clipboard = clipboard_rs::ClipboardContext::new().map_err(|error| {
+            OperationError::new(
+                OperationErrorCode::ClipboardUnavailable,
+                format!("open clipboard: {error}"),
+            )
+        })?;
+        prepared.write(&mut clipboard)?;
+        let main = app.get_webview_window("main");
+        let was_visible = main
+            .as_ref()
+            .is_some_and(|window| window.is_visible().unwrap_or(false));
         super::hide_preview_windows(app);
-
         if close_window {
             hide_main_window_if_not_pinned(app);
         }
-
         std::thread::sleep(std::time::Duration::from_millis(50));
-        super::run_simulate_paste_with_sound(app)?;
-
+        if let Err(error) = super::run_simulate_paste_with_sound(app) {
+            if was_visible && let Some(window) = main {
+                let restored = crate::main_thread::run_on_ui_thread(app, move || {
+                    if !window.is_visible()? {
+                        window.show()?;
+                        crate::keyboard_hook::set_window_state(
+                            crate::keyboard_hook::WindowState::Visible,
+                        );
+                        crate::input_monitor::enable_mouse_monitoring();
+                        window.emit("window-shown", ())?;
+                    }
+                    Ok::<(), tauri::Error>(())
+                });
+                if !matches!(restored, Ok(Ok(()))) {
+                    tracing::error!("failed to restore main window after paste input failure");
+                }
+            }
+            return Err(OperationError::new(OperationErrorCode::PasteFailed, error));
+        }
         super::hide_preview_windows(app);
-
-        debug!("{log_label}: simulate_paste ok");
         Ok(())
     })
 }
@@ -805,37 +790,19 @@ fn paste_item_to_active_window(
     app: &tauri::AppHandle,
     item: &ClipboardItem,
     close_window: bool,
-) -> Result<(), String> {
-    info!("paste_item: id={}, close_window={}", item.id, close_window);
-    execute_paste_flow(state, app, close_window, "paste_item", |clipboard| {
-        set_clipboard_content(item, clipboard)
-    })
+) -> Result<(), OperationError> {
+    let prepared = prepare_item(item)?;
+    execute_paste_flow(state, app, close_window, prepared)
 }
 
-/// 纯文本粘贴：写剪贴板 → 隐藏窗口 → 模拟 Ctrl+V
-fn paste_plain_text_to_active_window(
+pub(super) fn paste_plain_text_to_active_window(
     state: &Arc<AppState>,
     app: &tauri::AppHandle,
-    text: &str,
+    text: String,
     close_window: bool,
-) -> Result<(), String> {
-    info!(
-        "paste_plain_text: len={}, close_window={}",
-        text.len(),
-        close_window
-    );
-    let text = text.to_string();
-    execute_paste_flow(
-        state,
-        app,
-        close_window,
-        "paste_plain_text",
-        move |clipboard| {
-            clipboard
-                .set_text(text)
-                .map_err(|e| format!("Failed to set clipboard text: {e}"))
-        },
-    )
+) -> Result<(), OperationError> {
+    let prepared = prepare_text(text)?;
+    execute_paste_flow(state, app, close_window, prepared)
 }
 
 #[cfg(test)]

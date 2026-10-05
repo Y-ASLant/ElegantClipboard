@@ -19,9 +19,7 @@ function makeItem(id: number, content_type: ClipboardItem["content_type"]): Clip
     rtf_content: null,
     image_path: null,
     file_paths: null,
-    file_payload: null,
     content_hash: `hash-${id}`,
-    semantic_hash: `hash-${id}`,
     preview: "preview",
     byte_size: 0,
     image_width: null,
@@ -38,7 +36,6 @@ function makeItem(id: number, content_type: ClipboardItem["content_type"]): Clip
     source_app_name: null,
     source_app_icon: null,
     group_id: null,
-    files_valid: null,
   };
 }
 

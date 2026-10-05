@@ -79,8 +79,6 @@ plist = "1.10"
 # Clipboard: unified read/write/listen (local fork with CF_DIB support)
 clipboard-rs = { path = "../clipboard-rs" }
 
-# Keyboard simulation for paste
-enigo = "0.6"
 # Window backdrop effects (Mica/Acrylic)
 window-vibrancy = "0.5"
 

@@ -8,6 +8,7 @@ mod hotkey;
 mod input_monitor;
 mod keyboard_hook;
 mod main_thread;
+mod operation_error;
 mod positioning;
 mod proxy;
 mod shortcut;
@@ -41,6 +42,117 @@ impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
             "{}",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
         )
+    }
+}
+
+fn report_shortcut_paste_failure(
+    app: &tauri::AppHandle,
+    state: &Arc<AppState>,
+    error: operation_error::OperationError,
+) {
+    use operation_error::OperationErrorCode as Code;
+    use tauri::Emitter;
+    use tauri_plugin_notification::NotificationExt;
+    tracing::error!(error = %error, "shortcut paste failed");
+    if app
+        .get_webview_window("main")
+        .is_some_and(|window| window.is_visible().unwrap_or(false))
+    {
+        #[derive(serde::Serialize, Clone)]
+        struct Failure<'a> {
+            operation: &'static str,
+            error: &'a operation_error::OperationError,
+        }
+        match app.emit_to(
+            "main",
+            "clipboard-operation-failed",
+            Failure {
+                operation: "paste",
+                error: &error,
+            },
+        ) {
+            Ok(()) => return,
+            Err(emit_error) => {
+                tracing::error!(error = %emit_error, "failed to emit shortcut error")
+            }
+        }
+    }
+    let language = SettingsRepository::new(&state.db)
+        .get("language")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let (zh, en, tw) = match error.code {
+        Code::ItemNotFound => ("条目已不存在", "The item no longer exists", "項目已不存在"),
+        Code::ResourceMissing => (
+            "源文件已不存在",
+            "A source file is missing",
+            "來源檔案已不存在",
+        ),
+        Code::ResourceUnreadable => (
+            "无法读取源文件",
+            "A source file cannot be read",
+            "無法讀取來源檔案",
+        ),
+        Code::PermissionDenied => (
+            "没有执行此操作的权限",
+            "Permission was denied",
+            "沒有執行此操作的權限",
+        ),
+        Code::InvalidContent => (
+            "条目内容为空或无效",
+            "The item content is empty or invalid",
+            "項目內容為空或無效",
+        ),
+        Code::UnsupportedContent => (
+            "此内容不支持该操作",
+            "This content does not support this operation",
+            "此內容不支援該操作",
+        ),
+        Code::ImageDecodeFailed => (
+            "无法解码图片",
+            "The image cannot be decoded",
+            "無法解碼圖片",
+        ),
+        Code::ClipboardUnavailable => (
+            "暂时无法访问剪贴板",
+            "The clipboard is unavailable",
+            "暫時無法存取剪貼簿",
+        ),
+        Code::ClipboardWriteFailed => (
+            "无法写入剪贴板",
+            "Writing to the clipboard failed",
+            "無法寫入剪貼簿",
+        ),
+        Code::PasteFailed => (
+            "无法向目标窗口发送粘贴按键",
+            "Sending paste keys to the target window failed",
+            "無法向目標視窗傳送貼上按鍵",
+        ),
+        Code::SaveFailed => ("无法保存文件", "Saving the file failed", "無法儲存檔案"),
+        Code::InvalidDestination => (
+            "保存位置无效",
+            "The save location is invalid",
+            "儲存位置無效",
+        ),
+        Code::ExplorerFailed => (
+            "无法打开文件管理器",
+            "Opening the file manager failed",
+            "無法開啟檔案管理員",
+        ),
+        Code::Internal => (
+            "操作失败，请查看日志",
+            "The operation failed; see the logs",
+            "操作失敗，請查看日誌",
+        ),
+    };
+    let (title, body) = match language.as_str() {
+        "en" => ("Paste failed", en),
+        "zh-TW" => ("貼上失敗", tw),
+        _ => ("粘贴失败", zh),
+    };
+    if let Err(notification_error) = app.notification().builder().title(title).body(body).show() {
+        tracing::error!(error = %notification_error, "failed to display shortcut notification");
     }
 }
 static CURRENT_SHORTCUT: parking_lot::RwLock<Option<String>> = parking_lot::RwLock::new(None);
@@ -331,50 +443,37 @@ fn apply_paste_shortcuts(
                         // catch_unwind 确保 panic 时也能重置标志，避免快捷键永久失效
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             let _guard = QUICK_PASTE_LOCK.lock();
-                            if is_first {
-                                let result = match kind {
-                                    PasteKind::Quick => commands::clipboard::quick_paste_by_slot(
+                            if !is_first {
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                            }
+                            let result = match kind {
+                                PasteKind::Quick => commands::clipboard::quick_paste_by_slot(
+                                    &state,
+                                    &app_handle,
+                                    slot,
+                                ),
+                                PasteKind::Favorite => {
+                                    commands::clipboard::quick_paste_favorite_by_slot(
                                         &state,
                                         &app_handle,
                                         slot,
-                                    ),
-                                    PasteKind::Favorite => {
-                                        commands::clipboard::quick_paste_favorite_by_slot(
-                                            &state,
-                                            &app_handle,
-                                            slot,
-                                        )
-                                    }
-                                };
-                                if let Err(err) = result {
-                                    tracing::warn!(
-                                        "{} {} paste failed: {}",
-                                        kind.label(),
-                                        slot,
-                                        err
-                                    );
-                                    active_slots.lock().remove(&slot);
+                                    )
                                 }
-                            } else {
-                                std::thread::sleep(std::time::Duration::from_millis(50));
-                                if let Err(err) =
-                                    commands::run_simulate_paste_with_sound(&app_handle)
-                                {
-                                    tracing::warn!(
-                                        "{} {} repeat paste failed: {}",
-                                        kind.label(),
-                                        slot,
-                                        err
-                                    );
-                                }
+                            };
+                            if let Err(error) = result {
+                                report_shortcut_paste_failure(&app_handle, &state, error);
+                                active_slots.lock().remove(&slot);
                             }
                         }));
-                        if let Err(panic) = result {
-                            tracing::error!(
-                                "{} {} paste thread panicked: {:?}",
-                                kind.label(),
-                                slot,
-                                panic
+                        if result.is_err() {
+                            active_slots.lock().remove(&slot);
+                            report_shortcut_paste_failure(
+                                &app_handle,
+                                &state,
+                                operation_error::OperationError::new(
+                                    operation_error::OperationErrorCode::Internal,
+                                    format!("{} slot {slot} worker panicked", kind.label()),
+                                ),
                             );
                         }
                         PASTE_IN_PROGRESS.store(false, std::sync::atomic::Ordering::Release);

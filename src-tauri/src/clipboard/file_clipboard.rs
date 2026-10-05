@@ -1,10 +1,11 @@
 //! Windows 文件剪贴板：捕获/还原 CF_HDROP 与伴生格式，支持文件内容 staging。
 
+use crate::operation_error::{OperationError, OperationErrorCode, readable_resource};
 use base64::Engine;
 use clipboard_rs::{Clipboard as ClipboardTrait, ClipboardContext, ContentFormat};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// 复制时从剪贴板捕获的文件数据（尚未 staging）
 #[derive(Debug, Clone, Default)]
@@ -59,13 +60,41 @@ pub fn staged_paths_from_payload(raw: Option<&str>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub fn originals_all_exist(paths: &[String]) -> bool {
-    !paths.is_empty() && paths.iter().all(|p| Path::new(p).exists())
+fn parse_file_resources(
+    file_paths: Option<&str>,
+    file_payload: Option<&str>,
+) -> Result<(Vec<String>, Option<FilePayload>), OperationError> {
+    let paths = file_paths
+        .filter(|raw| !raw.is_empty())
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| {
+            OperationError::new(OperationErrorCode::InvalidContent, "invalid file path list")
+        })?
+        .unwrap_or_default();
+    let payload = file_payload
+        .filter(|raw| !raw.is_empty())
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|_| {
+            OperationError::new(OperationErrorCode::InvalidContent, "invalid file payload")
+        })?;
+    Ok((paths, payload))
 }
 
-/// 仅当原始路径均存在时才还原 capture 时的 CF_HDROP blob。
-pub fn should_use_raw_hdrop(original_paths: &[String], payload: Option<&FilePayload>) -> bool {
-    payload.and_then(|p| p.hdrop_b64.as_ref()).is_some() && originals_all_exist(original_paths)
+pub fn prepare_path_text(
+    file_paths: Option<&str>,
+    file_payload: Option<&str>,
+) -> Result<String, OperationError> {
+    let (paths, payload) = parse_file_resources(file_paths, file_payload)?;
+    let resolved = resolve_paths(&paths, payload.as_ref());
+    if resolved.is_empty() || resolved.iter().any(|path| path.is_empty()) {
+        return Err(OperationError::new(
+            OperationErrorCode::InvalidContent,
+            "no file path text",
+        ));
+    }
+    Ok(resolved.join("\n"))
 }
 
 pub fn resolve_item_paths(file_paths: Option<&str>, file_payload: Option<&str>) -> Vec<String> {
@@ -74,22 +103,154 @@ pub fn resolve_item_paths(file_paths: Option<&str>, file_payload: Option<&str>) 
     resolve_paths(&paths, payload.as_ref())
 }
 
-pub fn item_files_all_exist(file_paths: Option<&str>, file_payload: Option<&str>) -> bool {
-    let originals = parse_file_paths(file_paths);
-    if originals.is_empty() {
-        return decode_payload(file_payload)
-            .is_some_and(|p| p.hdrop_b64.is_some() || !p.extra.is_empty());
+pub fn file_status_resources(
+    file_paths: Option<&str>,
+    file_payload: Option<&str>,
+) -> (Vec<String>, Vec<String>, bool) {
+    let (originals, payload) = match parse_file_resources(file_paths, file_payload) {
+        Ok(resources) => resources,
+        Err(_) => {
+            let originals = parse_file_paths(file_paths);
+            let resolved = originals.clone();
+            return (originals, resolved, false);
+        }
+    };
+    let mut descriptors = Vec::new();
+    let mut has_contents = false;
+    let mut formats_usable = true;
+    if let Some(payload) = &payload {
+        for extra in &payload.extra {
+            if extra.name.is_empty() || extra.b64.is_empty() {
+                formats_usable = false;
+                break;
+            }
+            if extra.name == "FileGroupDescriptorW" || extra.name == "FileGroupDescriptor" {
+                let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&extra.b64) else {
+                    formats_usable = false;
+                    break;
+                };
+                if !valid_descriptor(&extra.name, &bytes) {
+                    formats_usable = false;
+                    break;
+                }
+                descriptors.push((extra.name.clone(), bytes));
+            } else {
+                // Validate content without allocating or copying its decoded bytes.
+                let mut decoder = base64::read::DecoderReader::new(
+                    extra.b64.as_bytes(),
+                    &base64::engine::general_purpose::STANDARD,
+                );
+                if std::io::copy(&mut decoder, &mut std::io::sink()).is_err() {
+                    formats_usable = false;
+                    break;
+                }
+                has_contents |= extra.name == "FileContents";
+            }
+        }
     }
-    resolve_item_paths(file_paths, file_payload)
-        .iter()
-        .all(|p| Path::new(p).exists())
+    let names = descriptor_file_names(&descriptors);
+    if formats_usable && usable_virtual_files(&originals, &names, has_contents, payload.as_ref()) {
+        return (originals, Vec::new(), true);
+    }
+    let staged_originals;
+    let paths = if originals.is_empty() {
+        staged_originals = payload
+            .as_ref()
+            .map(|payload| {
+                payload
+                    .staged
+                    .iter()
+                    .map(|entry| entry.staged.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        &staged_originals
+    } else {
+        &originals
+    };
+    let resolved = resolve_paths(paths, payload.as_ref());
+    let mut usable =
+        formats_usable && !resolved.is_empty() && resolved.iter().all(|path| !path.is_empty());
+    if !originals.is_empty()
+        && paths == &resolved
+        && let Some(raw) = payload
+            .as_ref()
+            .and_then(|payload| payload.hdrop_b64.as_ref())
+    {
+        usable &= base64::engine::general_purpose::STANDARD
+            .decode(raw)
+            .is_ok_and(|raw| {
+                valid_hdrop(&raw)
+                    && (raw[16..20] == [0, 0, 0, 0] || hdrop_matches_paths(&raw, paths))
+            });
+    }
+    (originals, resolved, usable)
 }
 
-pub fn write_payload_extras(
-    ctx: &mut ClipboardContext,
+fn valid_descriptor(name: &str, bytes: &[u8]) -> bool {
+    let count = bytes
+        .get(..4)
+        .map(|count| u32::from_le_bytes(count.try_into().expect("four bytes")) as usize)
+        .unwrap_or(0);
+    let size = if name == "FileGroupDescriptorW" {
+        FILEDESCRIPTORW_SIZE
+    } else {
+        FILEDESCRIPTORA_SIZE
+    };
+    count > 0 && count <= bytes.len().saturating_sub(4) / size
+}
+
+fn usable_virtual_files(
+    paths: &[String],
+    names: &[String],
+    has_contents: bool,
     payload: Option<&FilePayload>,
-) -> Result<(), String> {
-    write_extra_formats(ctx, payload)
+) -> bool {
+    !names.is_empty()
+        && has_contents
+        && (paths.is_empty() || paths == names)
+        && payload.is_none_or(|payload| payload.staged.is_empty())
+}
+
+fn valid_hdrop(raw: &[u8]) -> bool {
+    let offset = raw
+        .get(..4)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four bytes")) as usize)
+        .unwrap_or(0);
+    let wide = raw
+        .get(16..20)
+        .map(|bytes| u32::from_le_bytes(bytes.try_into().expect("four bytes")) != 0)
+        .unwrap_or(false);
+    let terminated = if wide {
+        raw.len() >= 4
+            && raw.ends_with(&[0, 0, 0, 0])
+            && (raw.len() - offset.min(raw.len())).is_multiple_of(2)
+    } else {
+        raw.ends_with(&[0, 0])
+    };
+    offset >= 20 && offset < raw.len() && terminated
+}
+
+fn hdrop_matches_paths(raw: &[u8], paths: &[String]) -> bool {
+    if !valid_hdrop(raw) {
+        return false;
+    }
+    let offset = u32::from_le_bytes(raw[..4].try_into().expect("valid header")) as usize;
+    let mut remaining = &raw[offset..];
+    for path in paths {
+        let units = remaining.as_chunks::<2>().0;
+        let Some(end) = units.iter().position(|unit| *unit == [0, 0]) else {
+            return false;
+        };
+        if !path
+            .encode_utf16()
+            .eq(units[..end].iter().map(|unit| u16::from_le_bytes(*unit)))
+        {
+            return false;
+        }
+        remaining = &remaining[end * 2 + 2..];
+    }
+    !remaining.is_empty() && remaining.iter().all(|byte| *byte == 0)
 }
 
 pub fn encode_payload(payload: &FilePayload) -> String {
@@ -355,84 +516,201 @@ pub fn resolve_paths(paths: &[String], payload: Option<&FilePayload>) -> Vec<Str
         .collect()
 }
 
-pub fn write_files_to_clipboard(
+pub struct PreparedFiles {
+    pub paths: Vec<String>,
+    pub raw_hdrop: Option<Vec<u8>>,
+    pub extras: Vec<(String, Vec<u8>)>,
+}
+
+pub fn prepare_resource_paths(
     file_paths: Option<&str>,
     file_payload: Option<&str>,
-    ctx: &mut ClipboardContext,
-) -> Result<(), String> {
-    let paths = parse_file_paths(file_paths);
-    let payload = decode_payload(file_payload);
-    let resolved = resolve_paths(&paths, payload.as_ref());
-
-    if resolved.is_empty() && payload.as_ref().is_none_or(|p| p.hdrop_b64.is_none()) {
-        return Err("Item has no file paths".to_string());
-    }
-
-    ctx.clear()
-        .map_err(|e| format!("Failed to clear clipboard: {e}"))?;
-
-    if should_use_raw_hdrop(&paths, payload.as_ref())
-        && let Some(raw) = decode_b64(payload.as_ref().and_then(|p| p.hdrop_b64.as_ref()))
+) -> Result<Vec<String>, OperationError> {
+    let (paths, payload) = parse_file_resources(file_paths, file_payload)?;
+    if paths.is_empty()
+        && payload.as_ref().is_some_and(|payload| {
+            payload.staged.is_empty()
+                && payload
+                    .extra
+                    .iter()
+                    .any(|format| format.name == "FileContents")
+        })
     {
-        if ctx.set_hdrop_raw(&raw).is_ok() {
-            write_extra_formats(ctx, payload.as_ref())?;
-            debug!(
-                "Restored file clipboard from raw CF_HDROP ({} paths)",
-                resolved.len()
-            );
-            return Ok(());
-        }
-        warn!("Raw CF_HDROP restore failed, falling back to path list");
+        return Err(OperationError::new(
+            OperationErrorCode::UnsupportedContent,
+            "virtual file has no disk path",
+        ));
     }
-
-    if !resolved.is_empty() {
-        ctx.set_files(resolved.clone())
-            .map_err(|e| format!("Failed to set clipboard files: {e}"))?;
-        write_extra_formats(ctx, payload.as_ref())?;
-        debug!("Restored file clipboard from {} path(s)", resolved.len());
-        return Ok(());
-    }
-
-    write_extra_formats(ctx, payload.as_ref())?;
-    Ok(())
+    resolve_readable_paths(paths, payload.as_ref()).map(|(paths, _)| paths)
 }
 
-fn write_extra_formats(
-    ctx: &mut ClipboardContext,
+fn resolve_readable_paths(
+    mut paths: Vec<String>,
     payload: Option<&FilePayload>,
-) -> Result<(), String> {
-    let Some(payload) = payload else {
-        return Ok(());
-    };
-    for extra in &payload.extra {
-        let Some(bytes) = decode_b64(Some(&extra.b64)) else {
-            continue;
-        };
-        if let Err(e) = ctx.set_raw_no_clear(&extra.name, &bytes) {
-            debug!("Skip extra format {}: {}", extra.name, e);
+) -> Result<(Vec<String>, bool), OperationError> {
+    let mut all_originals = true;
+    if paths.is_empty() {
+        paths = payload
+            .map(|payload| {
+                payload
+                    .staged
+                    .iter()
+                    .map(|entry| entry.staged.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        all_originals = false;
+    }
+    if paths.is_empty() {
+        return Err(OperationError::new(
+            OperationErrorCode::InvalidContent,
+            "file item has no disk resources",
+        ));
+    }
+    for path in &mut paths {
+        if path.is_empty() {
+            return Err(OperationError::new(
+                OperationErrorCode::InvalidContent,
+                "empty source path",
+            ));
+        }
+        if let Err(error) = readable_resource(Path::new(path)) {
+            let staged = payload
+                .and_then(|payload| payload.staged.iter().find(|entry| entry.original == *path));
+            let Some(staged) = staged else {
+                return Err(error);
+            };
+            readable_resource(Path::new(&staged.staged))?;
+            all_originals = false;
+            *path = staged.staged.clone();
         }
     }
-    Ok(())
+    Ok((paths, all_originals))
 }
 
-fn decode_b64(raw: Option<&String>) -> Option<Vec<u8>> {
-    let raw = raw?;
-    base64::engine::general_purpose::STANDARD.decode(raw).ok()
-}
-
-pub fn merge_file_paths(items: &[(Option<&str>, Option<&str>)]) -> Vec<String> {
-    let mut merged = Vec::new();
-    for (paths_json, payload_raw) in items {
-        let paths = parse_file_paths(*paths_json);
-        let payload = decode_payload(*payload_raw);
-        let resolved = resolve_paths(&paths, payload.as_ref());
-        for path in resolved {
-            if !merged.iter().any(|p| p == &path) {
-                merged.push(path);
+pub fn prepare_files(
+    file_paths: Option<&str>,
+    file_payload: Option<&str>,
+) -> Result<PreparedFiles, OperationError> {
+    let (paths, payload) = parse_file_resources(file_paths, file_payload)?;
+    let mut extras = Vec::new();
+    if let Some(payload) = &payload {
+        for extra in &payload.extra {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&extra.b64)
+                .map_err(|_| {
+                    OperationError::new(
+                        OperationErrorCode::InvalidContent,
+                        "invalid file format encoding",
+                    )
+                })?;
+            if extra.name.is_empty() {
+                return Err(OperationError::new(
+                    OperationErrorCode::InvalidContent,
+                    "empty file format name",
+                ));
             }
+            if bytes.is_empty() {
+                return Err(OperationError::new(
+                    OperationErrorCode::UnsupportedContent,
+                    "zero-byte native file formats cannot be published",
+                ));
+            }
+            if (extra.name == "FileGroupDescriptorW" || extra.name == "FileGroupDescriptor")
+                && !valid_descriptor(&extra.name, &bytes)
+            {
+                return Err(OperationError::new(
+                    OperationErrorCode::InvalidContent,
+                    "truncated virtual file descriptor",
+                ));
+            }
+            extras.push((extra.name.clone(), bytes));
         }
     }
-    merged
+    let names = descriptor_file_names(&extras);
+    let virtual_files = usable_virtual_files(
+        &paths,
+        &names,
+        extras.iter().any(|(name, _)| name == "FileContents"),
+        payload.as_ref(),
+    );
+    if virtual_files {
+        return Ok(PreparedFiles {
+            paths: Vec::new(),
+            raw_hdrop: None,
+            extras,
+        });
+    }
+    let (resolved, all_originals) = resolve_readable_paths(paths, payload.as_ref())?;
+    let mut raw_hdrop = if all_originals {
+        payload
+            .as_ref()
+            .and_then(|payload| payload.hdrop_b64.as_ref())
+            .map(|raw| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(raw)
+                    .map_err(|_| {
+                        OperationError::new(
+                            OperationErrorCode::InvalidContent,
+                            "invalid HDROP encoding",
+                        )
+                    })
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    if raw_hdrop.as_ref().is_some_and(Vec::is_empty) {
+        return Err(OperationError::new(
+            OperationErrorCode::UnsupportedContent,
+            "zero-byte native HDROP cannot be published",
+        ));
+    }
+    if raw_hdrop.as_ref().is_some_and(|raw| !valid_hdrop(raw)) {
+        return Err(OperationError::new(
+            OperationErrorCode::InvalidContent,
+            "invalid HDROP data",
+        ));
+    }
+    if let Some(raw) = &raw_hdrop {
+        if raw[16..20] == [0, 0, 0, 0] {
+            // Rebuild ANSI HDROP from authoritative Unicode paths, retaining companion formats.
+            raw_hdrop = None;
+        } else if !hdrop_matches_paths(raw, &resolved) {
+            return Err(OperationError::new(
+                OperationErrorCode::InvalidContent,
+                "HDROP paths do not match source resources",
+            ));
+        }
+    }
+    Ok(PreparedFiles {
+        paths: resolved,
+        raw_hdrop,
+        extras,
+    })
+}
+
+impl PreparedFiles {
+    pub fn write(self, ctx: &mut ClipboardContext) -> Result<(), OperationError> {
+        if let Some(raw) = self.raw_hdrop {
+            ctx.clear()
+                .map_err(|error| OperationError::clipboard("clear files", error))?;
+            ctx.set_hdrop_raw(&raw)
+                .map_err(|error| OperationError::clipboard("write HDROP", error))?;
+        } else if !self.paths.is_empty() {
+            ctx.set_files(self.paths)
+                .map_err(|error| OperationError::clipboard("write files", error))?;
+        } else {
+            ctx.clear()
+                .map_err(|error| OperationError::clipboard("clear virtual files", error))?;
+        }
+        for (name, bytes) in self.extras {
+            ctx.set_raw_no_clear(&name, &bytes).map_err(|error| {
+                OperationError::clipboard(format_args!("write file format {name}"), error)
+            })?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -517,38 +795,137 @@ mod tests {
     }
 
     #[test]
-    fn merge_paths_dedupes() {
-        let items = [
-            (Some(r#"["C:\\a.txt","C:\\b.txt"]"#), None as Option<&str>),
-            (Some(r#"["C:\\b.txt","C:\\c.txt"]"#), None),
-        ];
-        let merged = merge_file_paths(&items);
-        assert_eq!(
-            merged,
-            vec![
-                "C:\\a.txt".to_string(),
-                "C:\\b.txt".to_string(),
-                "C:\\c.txt".to_string()
-            ]
-        );
+    fn preparation_uses_staged_source_and_rejects_missing_member() {
+        let staged =
+            std::env::temp_dir().join(format!("ec_preflight_stage_{}.txt", std::process::id()));
+        std::fs::write(&staged, b"source").unwrap();
+        let original = staged
+            .with_file_name("__ec_missing_original__.txt")
+            .to_string_lossy()
+            .into_owned();
+        let payload = encode_payload(&FilePayload {
+            hdrop_b64: Some("invalid raw should not be used for staged paths".into()),
+            staged: vec![StagedFile {
+                original: original.clone(),
+                staged: staged.to_string_lossy().into_owned(),
+                size: 6,
+            }],
+            ..Default::default()
+        });
+        let paths = serde_json::to_string(&vec![original.clone()]).unwrap();
+        let prepared = prepare_files(Some(&paths), Some(&payload)).unwrap();
+        assert_eq!(prepared.paths, vec![staged.to_string_lossy().into_owned()]);
+        assert!(prepared.raw_hdrop.is_none());
+        let multiple = serde_json::to_string(&vec![
+            original,
+            staged
+                .with_file_name("__ec_missing_member__.txt")
+                .to_string_lossy()
+                .into_owned(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            prepare_files(Some(&multiple), Some(&payload)),
+            Err(OperationError {
+                code: OperationErrorCode::ResourceMissing,
+                ..
+            })
+        ));
+        let disk_paths =
+            serde_json::to_string(&vec![staged.to_string_lossy().into_owned()]).unwrap();
+        let broken_formats = r#"{"extra":[{"name":"FileContents","b64":"!"}]}"#;
+        assert!(prepare_files(Some(&disk_paths), Some(broken_formats)).is_err());
+        assert!(prepare_resource_paths(Some(&disk_paths), Some(broken_formats)).is_ok());
+        for empty_format in [
+            r#"{"extra":[{"name":"Preferred DropEffect","b64":""}]}"#,
+            r#"{"hdrop_b64":""}"#,
+        ] {
+            assert!(matches!(
+                prepare_files(Some(&disk_paths), Some(empty_format)),
+                Err(OperationError {
+                    code: OperationErrorCode::UnsupportedContent,
+                    ..
+                })
+            ));
+            let (_, resolved, clipboard_available) =
+                file_status_resources(Some(&disk_paths), Some(empty_format));
+            assert!(!clipboard_available);
+            assert_eq!(resolved, vec![staged.to_string_lossy().into_owned()]);
+            assert!(prepare_resource_paths(Some(&disk_paths), Some(empty_format)).is_ok());
+        }
+        std::fs::remove_file(staged).unwrap();
     }
 
     #[test]
-    fn should_use_raw_hdrop_only_when_originals_exist() {
-        let payload = FilePayload {
-            hdrop_b64: Some("aGk=".into()),
+    fn preparation_preserves_virtual_empty_path_payload_and_rejects_broken_encoding() {
+        let mut descriptor = vec![1, 0, 0, 0];
+        descriptor.resize(4 + FILEDESCRIPTORW_SIZE, 0);
+        let start = 4 + FILEDESCRIPTORW_NAME_OFFSET;
+        descriptor[start..start + 2].copy_from_slice(&('a' as u16).to_le_bytes());
+        let payload = encode_payload(&FilePayload {
+            extra: vec![
+                FormatBlob {
+                    name: "FileGroupDescriptorW".into(),
+                    b64: base64::engine::general_purpose::STANDARD.encode(descriptor),
+                },
+                FormatBlob {
+                    name: "FileContents".into(),
+                    b64: base64::engine::general_purpose::STANDARD.encode(b"contents"),
+                },
+            ],
             ..Default::default()
-        };
-        assert!(!should_use_raw_hdrop(
-            &["C:\\__ec_test_missing__\\nope.txt".to_string()],
-            Some(&payload)
+        });
+        let prepared = prepare_files(Some("[]"), Some(&payload)).unwrap();
+        assert!(prepared.paths.is_empty());
+        assert_eq!(prepared.extras.len(), 2);
+        assert!(file_status_resources(Some("[]"), Some(&payload)).2);
+        let mut empty_contents = decode_payload(Some(&payload)).unwrap();
+        empty_contents.extra[1].b64.clear();
+        let empty_contents = encode_payload(&empty_contents);
+        assert!(!file_status_resources(Some("[]"), Some(&empty_contents)).2);
+        assert!(matches!(
+            prepare_files(Some("[]"), Some(&empty_contents)),
+            Err(OperationError {
+                code: OperationErrorCode::UnsupportedContent,
+                ..
+            })
         ));
+        let mut descriptor_only = decode_payload(Some(&payload)).unwrap();
+        descriptor_only.extra.pop();
+        let descriptor_only = encode_payload(&descriptor_only);
+        assert!(!file_status_resources(Some("[]"), Some(&descriptor_only)).2);
+        assert!(prepare_files(Some("[]"), Some(&descriptor_only)).is_err());
+        assert!(
+            prepare_files(
+                Some("[]"),
+                Some(r#"{"extra":[{"name":"FileContents","b64":"!"}]}"#)
+            )
+            .is_err()
+        );
+        assert!(prepare_files(Some("[]"), None).is_err());
+        assert!(prepare_files(Some("not json"), None).is_err());
+    }
 
-        let temp = std::env::temp_dir().join(format!("ec_hdrop_test_{}.txt", std::process::id()));
-        std::fs::write(&temp, b"1").unwrap();
-        let path = temp.to_string_lossy().to_string();
-        assert!(should_use_raw_hdrop(&[path], Some(&payload)));
-        let _ = std::fs::remove_file(temp);
+    #[test]
+    fn path_text_does_not_require_original_files_to_exist() {
+        let paths = r#"["C:\\__ec_path_text_missing__\\file.txt"]"#;
+        assert_eq!(
+            prepare_path_text(Some(paths), None).unwrap(),
+            "C:\\__ec_path_text_missing__\\file.txt"
+        );
+        assert!(prepare_files(Some(paths), None).is_err());
+        assert!(prepare_path_text(Some("[]"), None).is_err());
+    }
+
+    #[test]
+    fn raw_hdrop_rejects_truncated_and_unterminated_data() {
+        assert!(!valid_hdrop(&[0; 4]));
+        let mut raw = vec![0; 24];
+        raw[..4].copy_from_slice(&20u32.to_le_bytes());
+        raw[16..20].copy_from_slice(&1u32.to_le_bytes());
+        assert!(valid_hdrop(&raw));
+        raw[23] = 1;
+        assert!(!valid_hdrop(&raw));
     }
 
     #[test]

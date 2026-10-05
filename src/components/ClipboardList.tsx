@@ -15,6 +15,7 @@ import { useSortableList } from "@/hooks/useSortableList";
 import { useTranslation } from "@/i18n";
 import { GROUP_VALUES } from "@/lib/constants";
 import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 import { useClipboardStore, ClipboardItem } from "@/stores/clipboard";
 import { useUISettings } from "@/stores/ui-settings";
 import { ClipboardItemCard } from "./ClipboardItemCard";
@@ -145,10 +146,10 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
     fetchItems();
     if (listenerRef.current) return;
     let mounted = true;
-    setupListener().then((unlisten) => {
+    void setupListener().then((unlisten) => {
       if (mounted) listenerRef.current = unlisten;
       else unlisten();
-    });
+    }).catch((error) => logError("Failed to set up clipboard listeners:", error));
     return () => {
       mounted = false;
       if (listenerRef.current) {
@@ -205,12 +206,11 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
 
       try {
         if (fromIsPinned !== toIsPinned) {
-          await togglePin(fromItem.id);
+          const result = await togglePin(fromItem.id);
+          if (result.status !== "success") return;
         }
         if (isFavoritesView) await moveFavoriteItem(fromItem.id, toItem.id);
         else await moveItem(fromItem.id, toItem.id);
-      } catch {
-        // store 内部已记录错误
       } finally {
         setOptimisticItems(null);
       }
@@ -345,14 +345,14 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
       });
     })()
       .catch((error) => {
-        logError("Failed to focus search input:", error);
+        reportUserError(t("settings.general.searchTitle"), error, "Failed to focus search input");
       })
       .finally(() => {
         focusSearchInFlightRef.current = null;
       });
 
     focusSearchInFlightRef.current = task;
-  }, [searchInputRef]);
+  }, [searchInputRef, t]);
 
   // 键盘导航共用处理函数
   const handleNavKey = useCallback(
@@ -425,10 +425,13 @@ export function ClipboardList({ searchInputRef }: ClipboardListProps) {
         case "Delete": {
           const { activeIndex: idx, items: list } = useClipboardStore.getState();
           if (idx < 0 || idx >= list.length) return;
-          deleteItem(list[idx].id);
-          if (idx >= list.length - 1) {
-            setActiveIndex(Math.max(0, list.length - 2));
-          }
+          void deleteItem(list[idx].id).then((result) => {
+            if (result.status !== "success") return;
+            const current = useClipboardStore.getState();
+            if (current.activeIndex >= current.items.length) {
+              setActiveIndex(Math.max(-1, current.items.length - 1));
+            }
+          });
           break;
         }
       }

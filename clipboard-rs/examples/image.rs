@@ -2,24 +2,6 @@
 use clipboard_rs::ClipboardContextX11Options;
 use clipboard_rs::{common::RustImage, Clipboard, ClipboardContext};
 
-#[cfg(target_os = "macos")]
-const TMP_PATH: &str = "/tmp/";
-#[cfg(target_os = "windows")]
-const TMP_PATH: &str = "C:\\Windows\\Temp\\";
-#[cfg(all(
-	unix,
-	not(any(
-		target_os = "macos",
-		target_os = "ios",
-		target_os = "android",
-		target_os = "emscripten"
-	))
-))]
-const TMP_PATH: &str = "/tmp/";
-// ios
-#[cfg(any(target_os = "ios", target_os = "android"))]
-const TMP_PATH: &str = "/tmp/";
-
 #[cfg(target_os = "linux")]
 fn setup_clipboard() -> ClipboardContext {
 	ClipboardContext::new_with_options(ClipboardContextX11Options { read_timeout: None }).unwrap()
@@ -32,6 +14,7 @@ fn setup_clipboard() -> ClipboardContext {
 
 fn main() {
 	let ctx = setup_clipboard();
+	let temporary_directory = std::env::temp_dir();
 
 	let types = ctx.available_formats().unwrap();
 	println!("{:?}", types);
@@ -40,8 +23,9 @@ fn main() {
 
 	match img {
 		Ok(img) => {
+			let path = temporary_directory.join("clipboard-rs-test.png");
 			let _ = img
-				.save_to_path(format!("{}test.png", TMP_PATH).as_str())
+				.save_to_path(path.to_str().unwrap())
 				.map_err(|e| println!("save test.png err={}", e));
 
 			let resize_img = img
@@ -49,8 +33,9 @@ fn main() {
 				.map_err(|e| println!("thumbnail err={}", e))
 				.unwrap();
 
+			let path = temporary_directory.join("clipboard-rs-test-thumbnail.png");
 			let _ = resize_img
-				.save_to_path(format!("{}test_thumbnail.png", TMP_PATH).as_str())
+				.save_to_path(path.to_str().unwrap())
 				.map_err(|e| println!("save test_thumbnail.png err={}", e));
 		}
 		Err(err) => {

@@ -9,7 +9,10 @@ pub use macos::{ClipboardContext, ClipboardWatcherContext, WatcherShutdown};
 #[cfg(target_os = "windows")]
 mod win;
 #[cfg(target_os = "windows")]
-pub use win::{ClipboardContext, ClipboardWatcherContext, WatcherShutdown};
+pub use win::{
+	ClipboardAccessError, ClipboardContext, ClipboardFormatUnsupportedError,
+	ClipboardWatcherContext, WatcherShutdown,
+};
 
 // Linux: runtime detection between Wayland and X11
 #[cfg(all(
@@ -81,6 +84,13 @@ mod linux_clipboard {
 			}
 			Ok(Self::X11(super::x11::ClipboardContext::new()?))
 		}
+
+		/// Creates an X11 context with explicit read options.
+		pub fn new_with_options(options: super::x11::ClipboardContextX11Options) -> Result<Self> {
+			Ok(Self::X11(super::x11::ClipboardContext::new_with_options(
+				options,
+			)?))
+		}
 	}
 
 	macro_rules! dispatch {
@@ -127,6 +137,11 @@ mod linux_clipboard {
 			dispatch!(self, get_image)
 		}
 
+		#[cfg(feature = "image")]
+		fn get_image_dib(&self) -> Result<(RustImageData, Option<Vec<u8>>)> {
+			dispatch!(self, get_image_dib)
+		}
+
 		fn get_files(&self) -> Result<Vec<String>> {
 			dispatch!(self, get_files)
 		}
@@ -156,6 +171,11 @@ mod linux_clipboard {
 			dispatch!(self, set_image, image)
 		}
 
+		#[cfg(feature = "image")]
+		fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()> {
+			dispatch!(self, set_image_with_dib, image, dib_data)
+		}
+
 		fn set_files(&self, files: Vec<String>) -> Result<()> {
 			dispatch!(self, set_files, files)
 		}
@@ -164,8 +184,6 @@ mod linux_clipboard {
 			dispatch!(self, set, contents)
 		}
 	}
-
-	unsafe impl Send for ClipboardContext {}
 
 	pub enum ClipboardWatcherContext<T: ClipboardHandler> {
 		X11(super::x11::ClipboardWatcherContext<T>),
@@ -243,8 +261,6 @@ mod linux_clipboard {
 			}
 		}
 	}
-
-	unsafe impl<T: ClipboardHandler + Send> Send for ClipboardWatcherContext<T> {}
 
 	pub struct WatcherShutdown {
 		_shutdown: Box<dyn std::any::Any + Send>,

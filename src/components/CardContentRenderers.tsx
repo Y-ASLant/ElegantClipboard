@@ -10,6 +10,7 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emitTo, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { HighlightText } from "@/components/HighlightText";
+import type { ResourceAvailability } from "@/hooks/useItemResourceStatus";
 import { useNonPassiveWheel } from "@/hooks/useNonPassiveWheel";
 import { useTranslation } from "@/i18n";
 import {
@@ -594,7 +595,8 @@ const ImagePreview = memo(function ImagePreview({
 // ============ 图片卡片（带缩略图 + 底部元数据） ============
 
 interface ImageCardProps {
-  image_path: string;
+  image_path: string | null;
+  availability: ResourceAvailability;
   metaItems: string[];
   index?: number;
   showBadge?: boolean;
@@ -607,6 +609,7 @@ interface ImageCardProps {
 
 export const ImageCard = memo(function ImageCard({
   image_path,
+  availability,
   metaItems,
   index,
   showBadge,
@@ -617,24 +620,37 @@ export const ImageCard = memo(function ImageCard({
   imageHeight,
 }: ImageCardProps) {
   const { t } = useTranslation();
-  const [error, setError] = useState(false);
-
-  useEffect(() => setError(false), [image_path]);
+  const [failedPath, setFailedPath] = useState<string | null>(null);
+  const unavailable = availability === "unavailable";
+  const canPreview = availability === "available" && image_path !== null;
+  const previewFailed = image_path !== null && failedPath === image_path;
+  const statusLabel = unavailable
+    ? t("cardContent.invalid")
+    : availability === "checking"
+      ? t("cardContent.resourceChecking")
+      : t("cardContent.resourceUnknown");
 
   return (
     <div className="flex-1 min-w-0 px-3 py-2.5">
-      {error ? (
+      {!canPreview || previewFailed ? (
         <div className="relative w-full h-32 rounded-md overflow-hidden bg-muted-surface-faint flex items-center justify-center">
           <div className="text-center">
-            <Warning16Regular className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
-            <p className="text-xs text-muted-foreground/60">{t("cardContent.imageLoadFailed")}</p>
+            {unavailable || previewFailed ? (
+              <Warning16Regular className={cn("w-6 h-6 mx-auto mb-1", unavailable ? "text-destructive" : "text-muted-foreground/40")} />
+            ) : (
+              <Document16Regular className="w-6 h-6 text-muted-foreground/40 mx-auto mb-1" />
+            )}
+            <p className={cn("text-xs", unavailable ? "text-destructive" : "text-muted-foreground/60")}>
+              {canPreview && previewFailed ? t("cardContent.previewLoadFailed") : statusLabel}
+            </p>
           </div>
         </div>
       ) : (
         <ImagePreview
+          key={image_path}
           src={convertFileSrc(image_path)}
           alt="Preview"
-          onError={() => setError(true)}
+          onError={() => setFailedPath(image_path)}
           imagePath={image_path}
           imageWidth={imageWidth}
           imageHeight={imageHeight}
@@ -694,8 +710,7 @@ const FileImagePreview = memo(function FileImagePreview({
   const showImageFileName = useUISettings((s) => s.showImageFileName);
   const fileName = getFileNameFromPath(filePath);
 
-  // 虚拟列表复用组件时，filePath 变化需重置错误状态（检查 sessionStorage 缓存）
-  useEffect(() => setImgError(wasPreviewFailed(filePath)), [filePath]);
+  // 文件路径作为组件 key，复用卡片时重新读取当前路径的失败缓存。
 
   const handleError = useCallback(() => {
     markPreviewFailed(filePath);
@@ -706,15 +721,15 @@ const FileImagePreview = memo(function FileImagePreview({
     return (
       <div className="flex-1 min-w-0 px-3 py-2.5">
         <div className="flex items-start gap-2.5">
-          <div className="shrink-0 w-10 h-10 rounded-md flex items-center justify-center bg-destructive-subtle">
-            <Warning16Regular className="w-5 h-5 text-destructive" />
+          <div className="shrink-0 w-10 h-10 rounded-md flex items-center justify-center bg-muted-surface-faint">
+            <Warning16Regular className="w-5 h-5 text-muted-foreground/60" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-destructive">
+            <p className="text-sm font-medium truncate text-foreground">
               <HighlightText text={fileName} />
-              <span className="ml-1.5 text-xs font-normal">{t("cardContent.invalid")}</span>
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">{t("cardContent.previewLoadFailed")}</span>
             </p>
-            <p className="text-xs truncate mt-0.5 text-destructive/70 line-through">
+            <p className="text-xs truncate mt-0.5 text-muted-foreground">
               <HighlightText text={filePath} />
             </p>
           </div>
@@ -762,7 +777,7 @@ const FileImagePreview = memo(function FileImagePreview({
 
 interface FileContentProps {
   filePaths: string[];
-  filesInvalid: boolean;
+  availability: ResourceAvailability;
   preview: string | null;
   metaItems: string[];
   index?: number;
@@ -778,7 +793,7 @@ interface FileContentProps {
 
 export const FileContent = memo(function FileContent({
   filePaths,
-  filesInvalid,
+  availability,
   preview,
   metaItems,
   index,
@@ -791,11 +806,19 @@ export const FileContent = memo(function FileContent({
 }: FileContentProps) {
   const { t } = useTranslation();
   const isMultiple = filePaths.length > 1;
+  const filesUnavailable = availability === "unavailable";
+  const statusLabel = filesUnavailable
+    ? t("cardContent.invalid")
+    : availability === "checking"
+      ? t("cardContent.resourceChecking")
+      : availability === "unknown"
+        ? t("cardContent.resourceUnknown")
+        : null;
   const skipImagePreview =
     filePaths.length === 1 &&
     shouldSkipFileImagePreview(filePaths[0], byteSize, backendTooLarge ?? false);
   const isSingleImage =
-    !filesInvalid &&
+    availability === "available" &&
     !skipImagePreview &&
     filePaths.length === 1 &&
     isImageFile(filePaths[0]);
@@ -803,6 +826,7 @@ export const FileContent = memo(function FileContent({
   if (isSingleImage) {
     return (
       <FileImagePreview
+        key={filePaths[0]}
         filePath={filePaths[0]}
         metaItems={metaItems}
         index={index}
@@ -820,14 +844,14 @@ export const FileContent = memo(function FileContent({
         <div
           className={cn(
             "shrink-0 w-10 h-10 rounded-md flex items-center justify-center",
-            filesInvalid
+            filesUnavailable
               ? "bg-destructive-subtle"
-              : "bg-primary-subtle",
+              : availability === "available" ? "bg-primary-subtle" : "bg-muted-surface-faint",
           )}
         >
-          {filesInvalid ? (
+          {filesUnavailable ? (
             <Warning16Regular className="w-5 h-5 text-destructive" />
-          ) : skipImagePreview ? (
+          ) : skipImagePreview || availability !== "available" ? (
             <Document16Regular className="w-5 h-5 text-muted-foreground/60" />
           ) : isMultiple ? (
             <Folder16Regular className="w-5 h-5 text-primary" />
@@ -841,18 +865,18 @@ export const FileContent = memo(function FileContent({
               <p
                 className={cn(
                   "text-sm font-medium",
-                  filesInvalid ? "text-destructive" : "text-foreground",
+                  filesUnavailable ? "text-destructive" : "text-foreground",
                 )}
               >
                 {t("cardContent.fileCount", { count: filePaths.length })}
-                {filesInvalid && (
-                  <span className="ml-1.5 text-xs font-normal">{t("cardContent.invalid")}</span>
+                {statusLabel && (
+                  <span className={cn("ml-1.5 text-xs font-normal", !filesUnavailable && "text-muted-foreground")}>{statusLabel}</span>
                 )}
               </p>
               <p
                 className={cn(
                   "text-xs truncate mt-0.5",
-                  filesInvalid ? "text-destructive/70" : "text-muted-foreground",
+                  filesUnavailable ? "text-destructive/70" : "text-muted-foreground",
                 )}
               >
                 <HighlightText
@@ -870,23 +894,23 @@ export const FileContent = memo(function FileContent({
               <p
                 className={cn(
                   "text-sm font-medium truncate",
-                  filesInvalid ? "text-destructive" : "text-foreground",
+                  filesUnavailable ? "text-destructive" : "text-foreground",
                 )}
               >
                 <HighlightText
                   text={getFileNameFromPath(filePaths[0] || preview || "")}
                 />
-                {filesInvalid && (
-                  <span className="ml-1.5 text-xs font-normal">{t("cardContent.invalid")}</span>
+                {statusLabel && (
+                  <span className={cn("ml-1.5 text-xs font-normal", !filesUnavailable && "text-muted-foreground")}>{statusLabel}</span>
                 )}
-                {skipImagePreview && !filesInvalid && (
+                {skipImagePreview && availability === "available" && (
                   <span className="ml-1.5 text-xs font-normal text-muted-foreground/70">{t("cardContent.fileTooLarge")}</span>
                 )}
               </p>
               <p
                 className={cn(
                   "text-xs truncate mt-0.5",
-                  filesInvalid
+                  filesUnavailable
                     ? "text-destructive/70 line-through"
                     : "text-muted-foreground",
                 )}

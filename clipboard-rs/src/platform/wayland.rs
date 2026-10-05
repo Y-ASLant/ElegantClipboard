@@ -149,7 +149,6 @@ impl Clipboard for ClipboardContext {
 	fn get(&self, formats: &[ContentFormat]) -> Result<Vec<ClipboardContent>> {
 		let mut contents = Vec::new();
 		for format in formats {
-			#[allow(unreachable_patterns)]
 			match format {
 				ContentFormat::Text => {
 					if let Ok(text) = self.get_text() {
@@ -182,8 +181,6 @@ impl Clipboard for ClipboardContext {
 						contents.push(ClipboardContent::Other(mime.clone(), data));
 					}
 				}
-				#[cfg(not(feature = "image"))]
-				_ => {}
 			}
 		}
 		Ok(contents)
@@ -227,7 +224,10 @@ impl Clipboard for ClipboardContext {
 	}
 
 	#[cfg(feature = "image")]
-	fn set_image_with_dib(&self, image: RustImageData, _dib_data: Option<&[u8]>) -> Result<()> {
+	fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()> {
+		if dib_data.is_some() {
+			return Err("CF_DIB is only supported on Windows".into());
+		}
 		self.set_image(image)
 	}
 
@@ -253,7 +253,6 @@ impl Clipboard for ClipboardContext {
 	fn set(&self, contents: Vec<ClipboardContent>) -> Result<()> {
 		let mut sources = Vec::new();
 		for content in contents {
-			#[allow(unreachable_patterns)]
 			match content {
 				ClipboardContent::Text(text) => {
 					sources.push(MimeSource {
@@ -304,15 +303,11 @@ impl Clipboard for ClipboardContext {
 						mime_type: MimeType::Specific(mime),
 					});
 				}
-				#[cfg(not(feature = "image"))]
-				_ => {}
 			}
 		}
 		write_wayland_clipboard(sources)
 	}
 }
-
-unsafe impl Send for ClipboardContext {}
 
 // Polling-based clipboard watcher for Wayland
 pub struct ClipboardWatcherContext<T: ClipboardHandler> {
@@ -321,8 +316,6 @@ pub struct ClipboardWatcherContext<T: ClipboardHandler> {
 	stop_receiver: Receiver<()>,
 	interval: Duration,
 }
-
-unsafe impl<T: ClipboardHandler + Send> Send for ClipboardWatcherContext<T> {}
 
 /// Default polling interval. The Wayland backend has no change-notification
 /// protocol, so it polls the clipboard; this is the wait between polls.

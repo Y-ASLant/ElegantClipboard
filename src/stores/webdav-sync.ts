@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { t } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { getOperationErrorMessage } from "@/lib/operation-feedback";
 import { useClipboardStore } from "@/stores/clipboard";
 import { loadUISettingsFromBackend } from "@/stores/ui-settings";
 
@@ -41,11 +42,10 @@ function stripMediaPendingLines(msg: string): string {
 }
 
 function localizeWebDAVError(error: unknown): string {
-  if (typeof error !== "string") return String(error);
   if (error === "WEBDAV:SYNC_IN_PROGRESS") {
     return t("settings.sync.errors.syncInProgress");
   }
-  return error;
+  return getOperationErrorMessage(error);
 }
 
 export const useWebDAVSyncStore = create<WebDAVSyncState>((set, get) => ({
@@ -68,6 +68,7 @@ export const useWebDAVSyncStore = create<WebDAVSyncState>((set, get) => ({
       const msg = await invoke<string>("webdav_test_connection");
       set({ statusMsg: msg, statusType: "success" });
     } catch (error) {
+      logError("WebDAV connection test failed", error);
       set({
         statusMsg: localizeWebDAVError(error),
         statusType: "error",
@@ -88,6 +89,7 @@ export const useWebDAVSyncStore = create<WebDAVSyncState>((set, get) => ({
         pendingMediaWorkers: res.pending_media_workers,
       });
     } catch (error) {
+      logError("WebDAV upload failed", error);
       set({
         statusMsg: localizeWebDAVError(error),
         statusType: "error",
@@ -109,6 +111,7 @@ export const useWebDAVSyncStore = create<WebDAVSyncState>((set, get) => ({
       pendingMediaWorkers = res.pending_media_workers;
       set({ statusMsg: msg, statusType: "success", pendingMediaWorkers });
     } catch (error) {
+      logError("WebDAV download failed", error);
       set({
         statusMsg: localizeWebDAVError(error),
         statusType: "error",

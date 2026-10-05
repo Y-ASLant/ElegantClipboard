@@ -1,5 +1,8 @@
+import { createElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { act, render, screen } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { Toaster } from "@/components/ui/toast";
 import {
   loadUISettingsFromBackend,
   resolveSettingsAccess,
@@ -171,6 +174,20 @@ describe("ui-settings store", () => {
         key: "ui_settings_json",
         value: expect.stringContaining("\"settings\""),
       });
+    });
+
+    it("keeps a repaired Settings entry without a user toast when background persistence fails", async () => {
+      const diagnostic = vi.spyOn(console, "error").mockImplementation(() => {});
+      render(createElement(Toaster));
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(JSON.stringify({ toolbarButtons: ["clear", "batch"] }))
+        .mockResolvedValueOnce("false")
+        .mockRejectedValueOnce(new Error("settings storage unavailable"));
+      await act(async () => { await loadUISettingsFromBackend(); });
+      expect(useUISettings.getState().toolbarButtons).toEqual(["clear", "batch", "settings"]);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(diagnostic).toHaveBeenCalledTimes(1);
+      diagnostic.mockRestore();
     });
   });
 

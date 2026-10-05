@@ -255,7 +255,7 @@ impl ClipboardMonitor {
     pub fn resume(&self) {
         if let Ok(prev) =
             self.pause_count
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
                     if current > 0 { Some(current - 1) } else { None }
                 })
         {

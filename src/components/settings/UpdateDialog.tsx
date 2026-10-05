@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import {
   ArrowDownload16Regular,
   ArrowSync16Regular,
@@ -17,9 +17,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useTranslation } from "@/i18n";
+import { t, useTranslation } from "@/i18n";
 import { formatSize } from "@/lib/format";
 import { logError } from "@/lib/logger";
+import { getOperationErrorMessage, reportUserError } from "@/lib/operation-feedback";
 
 // ── 类型定义 ──
 
@@ -98,6 +99,7 @@ interface UpdateDialogProps {
 export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<UpdateStatus>("checking");
+  const downloadCancelled = useRef(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [progress, setProgress] = useState<DownloadProgress>({
     downloaded: 0,
@@ -135,7 +137,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       setUpdateInfo(info);
       setStatus(info.has_update ? "update-available" : "no-update");
     } catch (e) {
-      setErrorMsg(String(e));
+      logError("Failed to check for updates", e);
+      setErrorMsg(getOperationErrorMessage(e));
       setStatus("error");
     }
   }, []);
@@ -163,6 +166,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
   const startDownload = async () => {
     if (!updateInfo) return;
+    downloadCancelled.current = false;
     setStatus("downloading");
     setProgress({ downloaded: 0, total: 0 });
     setErrorMsg("");
@@ -174,24 +178,22 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
       setInstallerPath(path);
       setStatus("downloaded");
     } catch (e) {
-      // 取消后 status 已被 cancelDownload 立即设为 update-available，
-      // 此处仅处理非取消的真实错误（且仅当仍为 downloading 时才更新）
-      const msg = String(e);
-      if (!msg.includes("取消")) {
-        setStatus((prev) => {
-          if (prev === "downloading") {
-            setErrorMsg(msg);
-            return "error";
-          }
-          return prev;
-        });
+      if (!downloadCancelled.current) {
+        logError("Failed to download update", e);
+        setErrorMsg(getOperationErrorMessage(e));
+        setStatus("error");
       }
     }
   };
 
   const cancelDownload = () => {
+    downloadCancelled.current = true;
     setStatus("update-available");
-    invoke("cancel_update_download");
+    void invoke("cancel_update_download").catch((error) => {
+      logError("Failed to cancel update download", error);
+      setErrorMsg(getOperationErrorMessage(error));
+      setStatus("error");
+    });
   };
 
   const installUpdate = async () => {
@@ -200,7 +202,8 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     try {
       await invoke("install_update", { installerPath });
     } catch (e) {
-      setErrorMsg(String(e));
+      logError("Failed to install update", e);
+      setErrorMsg(getOperationErrorMessage(e));
       setStatus("error");
     }
   };
@@ -439,7 +442,7 @@ function formatLinkLabel(url: string, explicitLabel?: string, attachmentLabel = 
 
 function openExternalUrl(url: string) {
   void openUrl(url).catch((error) => {
-    logError("Failed to open release note URL:", error);
+    reportUserError(t("operationFeedback.userActions.openLink"), error, "Failed to open release note URL");
   });
 }
 

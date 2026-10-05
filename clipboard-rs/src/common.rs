@@ -3,6 +3,7 @@ use image::imageops::FilterType;
 #[cfg(feature = "image")]
 use image::{ColorType, DynamicImage, GenericImageView, ImageFormat, RgbaImage};
 use std::error::Error;
+#[cfg(feature = "image")]
 use std::io::Cursor;
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync + 'static>>;
 
@@ -256,7 +257,7 @@ impl RustImage for RustImageData {
 		}
 	}
 
-	// 私有辅助函数，处理图像格式转换和编码
+	// Convert only when the encoder's target color differs from the source.
 	fn encode_image(
 		&self,
 		target_color_type: ColorType,
@@ -266,10 +267,10 @@ impl RustImage for RustImageData {
 
 		let mut bytes = Vec::new();
 		match (image.color(), target_color_type) {
-			(ColorType::Rgba8, ColorType::Rgb8) => image
+			(color, ColorType::Rgb8) if color != ColorType::Rgb8 => image
 				.to_rgb8()
 				.write_to(&mut Cursor::new(&mut bytes), format)?,
-			(_, ColorType::Rgba8) => image
+			(color, ColorType::Rgba8) if color != ColorType::Rgba8 => image
 				.to_rgba8()
 				.write_to(&mut Cursor::new(&mut bytes), format)?,
 			_ => image.write_to(&mut Cursor::new(&mut bytes), format)?,

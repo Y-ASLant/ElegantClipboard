@@ -1,5 +1,36 @@
 /** Extended en keys */
 export const extended = {
+  operationFeedback: {
+    operations: {
+      copy: "Could not copy", paste: "Could not paste", pastePlain: "Could not paste plain text",
+      pastePath: "Could not paste the path", pasteText: "Could not paste text", mergePaste: "Could not paste selected items",
+      save: "Could not save the file", showInExplorer: "Could not show in Explorer", details: "Could not load file details",
+      reorder: "Could not reorder the item", copyText: "Could not copy text", copyTranslation: "Could not copy the translation",
+      pin: "Could not change pinned status", favorite: "Could not change favorite status", move: "Could not move the item",
+      moveFavorite: "Could not move the favorite", delete: "Could not delete the item", batchDelete: "Could not delete selected items",
+      clear: "Could not clear history", editText: "Could not save text",
+    },
+    reasons: {
+      item_not_found: "This clipboard item no longer exists.", resource_missing: "The source file or image no longer exists.",
+      resource_unreadable: "The source file or image cannot be read.", permission_denied: "Access was denied. Check the file or application permissions.",
+      invalid_content: "The clipboard content is invalid.", unsupported_content: "This content type is not supported for this operation.",
+      image_decode_failed: "The image cannot be decoded.", clipboard_unavailable: "The system clipboard is currently unavailable.",
+      clipboard_write_failed: "The content could not be written to the system clipboard.", paste_failed: "The paste action could not be sent to the target application.",
+      save_failed: "The file could not be saved.", invalid_destination: "The selected destination is invalid.",
+      explorer_failed: "File Explorer could not be opened.", internal: "An internal error occurred. See the application log for details.",
+    },
+    unknownReason: "The operation could not be completed. See the application log for details.",
+    copySucceeded: "Copied", pasteSucceeded: "Pasted",
+    refreshAfterSuccess: "The operation completed, but the item list could not be refreshed",
+    userActions: {
+      saveSettings: "Could not save settings", openLink: "Could not open the link", loadApps: "Could not load running applications",
+      loadContent: "Could not load content", loadSize: "Could not calculate data size", selectFolder: "Could not select a folder",
+      createGroup: "Could not create the group", renameGroup: "Could not rename the group", colorGroup: "Could not change the group color",
+      deleteGroup: "Could not delete the group", moveGroup: "Could not move the item to the group", updateShortcut: "Could not update the shortcut",
+      openLog: "Could not open the log", restart: "Could not restart the application",
+      minimizeWindow: "Could not minimize the window", closeWindow: "Could not close the window",
+    },
+  },
   common: {
     add: "Add",
     close: "Close",
@@ -44,7 +75,9 @@ export const extended = {
     },
   },
   cardContent: {
-    imageLoadFailed: "Failed to load image",
+    previewLoadFailed: "Failed to load preview",
+    resourceChecking: "Checking resource",
+    resourceUnknown: "Resource status unknown",
     fileCount: "{{count}} files",
     invalid: "(invalid)",
     fileTooLarge: "(file too large)",

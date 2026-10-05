@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { getOperationErrorMessage, reportUserError } from "@/lib/operation-feedback";
 import { KEY_CODE_MAP } from "@/lib/shortcut-helpers";
 import { getProviderOptions, getLanguages, translateText } from "@/lib/translate";
 import { useTranslateSettings, type TranslateProvider, type LanguageMode } from "@/stores/translate-settings";
@@ -113,7 +114,8 @@ export function TranslateTab() {
       setTranslateSelectionShortcut(tsTempShortcut);
       setTsRecording(false); setTsTempShortcut("");
     } catch (error) {
-      setTsShortcutError(t("settings.translate.shortcutSaveFailed", { error: String(error) }));
+      logError("Failed to save translation shortcut", error);
+      setTsShortcutError(t("settings.translate.shortcutSaveFailed", { error: getOperationErrorMessage(error) }));
     } finally { setTsSaving(false); }
   };
 
@@ -122,16 +124,16 @@ export function TranslateTab() {
     try {
       await invoke("update_translate_selection_shortcut", { newShortcut: "" });
       setTranslateSelectionShortcut(""); setTsTempShortcut(""); setTsRecording(false);
-    } catch (error) { logError("清除翻译快捷键失败:", error); }
+    } catch (error) { reportUserError(t("operationFeedback.userActions.updateShortcut"), error, "Failed to clear translation shortcut"); }
     finally { setTsSaving(false); }
   };
 
   const handleToggleTranslateSelection = async (value: boolean) => {
     setTranslateSelectionEnabled(value);
     if (value && translateSelectionShortcut) {
-      try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch (e) { logError("更新划词翻译快捷键失败:", e); }
+      try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch (error) { reportUserError(t("operationFeedback.userActions.updateShortcut"), error); }
     } else if (!value) {
-      try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch (e) { logError("清除划词翻译快捷键失败:", e); }
+      try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch (error) { reportUserError(t("operationFeedback.userActions.updateShortcut"), error); }
     }
   };
 
@@ -153,9 +155,9 @@ export function TranslateTab() {
           <Switch checked={enabled} onCheckedChange={async (value) => {
             setEnabled(value);
             if (!value && translateSelectionShortcut) {
-              try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch (e) { logError("清除划词翻译快捷键失败:", e); }
+              try { await invoke("update_translate_selection_shortcut", { newShortcut: "" }); } catch (error) { reportUserError(t("operationFeedback.userActions.updateShortcut"), error); }
             } else if (value && translateSelectionEnabled && translateSelectionShortcut) {
-              try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch (e) { logError("更新划词翻译快捷键失败:", e); }
+              try { await invoke("update_translate_selection_shortcut", { newShortcut: translateSelectionShortcut }); } catch (error) { reportUserError(t("operationFeedback.userActions.updateShortcut"), error); }
             }
           }} />
         </div>
@@ -318,7 +320,7 @@ export function TranslateTab() {
                       const result = await translateText("Hello");
                       setTestResult({ ok: true, msg: t("settings.translate.testSuccess", { result }) });
                     } catch (error) {
-                      setTestResult({ ok: false, msg: String(error) });
+                      setTestResult({ ok: false, msg: error instanceof Error ? error.message : getOperationErrorMessage(error) });
                     } finally { setTesting(false); }
                   }}>
                   {testing ? t("settings.translate.testing") : t("settings.translate.testConnection")}

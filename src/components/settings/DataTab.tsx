@@ -21,16 +21,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useTranslation } from "@/i18n";
 import { logError } from "@/lib/logger";
-
-function isUserCancelled(error: unknown): boolean {
-  const msg = String(error).toLowerCase();
-  return msg.includes("cancel") || msg.includes("取消");
-}
-
-function isErrorMessage(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return lower.includes("fail") || lower.includes("失败") || lower.includes("error");
-}
+import { getOperationErrorMessage, reportUserError } from "@/lib/operation-feedback";
 
 export interface DataSettings {
   data_path: string;
@@ -172,7 +163,7 @@ function TextDedupModeCard({ dedupStrategy }: { dedupStrategy: DedupStrategy }) 
     try {
       await invoke("set_setting", { key: "text_dedup_mode", value });
     } catch (error) {
-      logError("Failed to save text dedup mode:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save text dedup mode");
     }
   };
 
@@ -257,6 +248,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [exportImportMsg, setExportImportMsg] = useState<string | null>(null);
+  const [exportImportFailed, setExportImportFailed] = useState(false);
   const [dedupStrategy, setDedupStrategy] = useState<DedupStrategy>("move_to_top");
 
   // 数据清理
@@ -264,6 +256,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const [cleanDialogAction, setCleanDialogAction] = useState<CleanAction | null>(null);
   const [cleanLoading, setCleanLoading] = useState(false);
   const [cleanMsg, setCleanMsg] = useState<string | null>(null);
+  const [cleanFailed, setCleanFailed] = useState(false);
 
   const cleanActionConfig = useMemo(() => ({
     clear_history: {
@@ -297,6 +290,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     const config = cleanActionConfig[cleanDialogAction];
     setCleanLoading(true);
     setCleanMsg(null);
+    setCleanFailed(false);
     try {
       await invoke(config.command);
       setCleanDialogAction(null);
@@ -308,13 +302,15 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         await refreshDataSize();
       }
     } catch (error) {
-      setCleanMsg(t("common.operationFailed", { error: String(error) }));
+      setCleanFailed(true);
+      logError("Failed to clean application data", error);
+      setCleanMsg(t("common.operationFailed", { error: getOperationErrorMessage(error) }));
     } finally {
       setCleanLoading(false);
     }
   };
 
-  const refreshDataSize = useCallback(async () => {
+  const refreshDataSize = useCallback(async (userRequested = false) => {
     setDataSizeLoading(true);
     try {
       const info = await invoke<DataSizeInfo>("get_data_size");
@@ -323,10 +319,11 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       setDataSizeTime(time);
       sessionStorage.setItem("data-size-cache", JSON.stringify({ info, time }));
     } catch (error) {
-      logError("Failed to refresh data size:", error);
+      if (userRequested) reportUserError(t("operationFeedback.userActions.loadSize"), error, "Failed to refresh data size");
+      else logError("Failed to refresh data size", error);
     }
     setDataSizeLoading(false);
-  }, []);
+  }, [t]);
 
   // 进入页面时自动加载数据统计（无缓存时）
   useEffect(() => {
@@ -352,7 +349,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     try {
       await invoke("set_setting", { key: "dedup_strategy", value });
     } catch (error) {
-      logError("Failed to save dedup strategy:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save dedup strategy");
     }
   };
 
@@ -375,7 +372,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         }
       }
     } catch (error) {
-      logError("Failed to select folder:", error);
+      reportUserError(t("operationFeedback.userActions.selectFolder"), error, "Failed to select data folder");
     }
   };
 
@@ -391,7 +388,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       });
       
       if (result.errors.length > 0) {
-        setMigrationError(t("settings.data.migrationErrors", { errors: result.errors.join(", ") }));
+        logError("Data migration reported errors", result.errors);
+        setMigrationError(t("settings.data.migrationErrors", { errors: t("operationFeedback.unknownReason") }));
       } else {
         // 成功，重启应用
         setMigrationDialogOpen(false);
@@ -399,7 +397,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         await invoke("restart_app");
       }
     } catch (error) {
-      setMigrationError(t("settings.data.migrationFailed", { error: String(error) }));
+      logError("Failed to migrate data", error);
+      setMigrationError(t("settings.data.migrationFailed", { error: getOperationErrorMessage(error) }));
     } finally {
       setMigrating(false);
     }
@@ -417,19 +416,23 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
       // 重启以使用新路径
       await invoke("restart_app");
     } catch (error) {
-      setMigrationError(t("settings.data.setPathFailed", { error: String(error) }));
+      logError("Failed to change data path", error);
+      setMigrationError(t("settings.data.setPathFailed", { error: getOperationErrorMessage(error) }));
     }
   };
 
   const handleExport = async () => {
     setExporting(true);
     setExportImportMsg(null);
+    setExportImportFailed(false);
     try {
       const msg = await invoke<string>("export_data");
       setExportImportMsg(msg);
     } catch (error) {
-      if (!isUserCancelled(error)) {
-        setExportImportMsg(t("settings.data.exportFailed", { error: String(error) }));
+      if (error !== "用户取消了导出") {
+        setExportImportFailed(true);
+        logError("Failed to export data", error);
+        setExportImportMsg(t("settings.data.exportFailed", { error: getOperationErrorMessage(error) }));
       }
     } finally {
       setExporting(false);
@@ -439,14 +442,17 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
   const handleImport = async () => {
     setImporting(true);
     setExportImportMsg(null);
+    setExportImportFailed(false);
     try {
       const msg = await invoke<string>("import_data");
       setExportImportMsg(msg);
       // 导入成功后重启应用
       await invoke("restart_app");
     } catch (error) {
-      if (!isUserCancelled(error)) {
-        setExportImportMsg(t("settings.data.importFailed", { error: String(error) }));
+      if (error !== "用户取消了导入") {
+        setExportImportFailed(true);
+        logError("Failed to import data", error);
+        setExportImportMsg(t("settings.data.importFailed", { error: getOperationErrorMessage(error) }));
       }
     } finally {
       setImporting(false);
@@ -457,7 +463,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
     try {
       await invoke("open_data_folder");
     } catch (error) {
-      logError("Failed to open folder:", error);
+      reportUserError(t("operationFeedback.operations.showInExplorer"), error, "Failed to open data folder");
     }
   };
 
@@ -470,7 +476,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
         setMigrationDialogOpen(true);
       }
     } catch (error) {
-      logError("Failed to reset path:", error);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to reset data path");
     }
   };
 
@@ -489,7 +495,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={refreshDataSize}
+                  onClick={() => { void refreshDataSize(true); }}
                   disabled={dataSizeLoading}
                   className="h-6 w-6"
                 >
@@ -594,7 +600,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
             </Button>
           </div>
           {exportImportMsg && (
-            <p className={`text-xs mt-2 ${isErrorMessage(exportImportMsg) ? "text-destructive" : "text-muted-foreground"}`}>
+            <p role={exportImportFailed ? "alert" : "status"} className={`text-xs mt-2 ${exportImportFailed ? "text-destructive" : "text-muted-foreground"}`}>
               {exportImportMsg}
             </p>
           )}
@@ -655,8 +661,8 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
               </Button>
             </div>
           </div>
-          {cleanMsg && (
-            <p className={`text-xs mt-3 ${isErrorMessage(cleanMsg) ? "text-destructive" : "text-muted-foreground"}`}>
+          {cleanMsg && !cleanDialogAction && (
+            <p role={cleanFailed ? "alert" : "status"} className={`text-xs mt-3 ${cleanFailed ? "text-destructive" : "text-muted-foreground"}`}>
               {cleanMsg}
             </p>
           )}
@@ -765,7 +771,7 @@ export function DataTab({ settings, onSettingsChange }: DataTabProps) {
             </DialogDescription>
           </DialogHeader>
           {cleanMsg && (
-            <p className="text-sm text-destructive">{cleanMsg}</p>
+            <p role="alert" className="text-sm text-destructive">{cleanMsg}</p>
           )}
           <DialogFooter>
             <Button

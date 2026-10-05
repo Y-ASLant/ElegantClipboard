@@ -36,6 +36,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { useTranslation } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { reportUserError } from "@/lib/operation-feedback";
 import { notifyTranslateAvailabilityChanged } from "@/lib/translate-availability";
 import { cn } from "@/lib/utils";
 import { notifyWebDAVAvailabilityChanged } from "@/lib/webdav-availability";
@@ -110,19 +111,19 @@ export function Settings() {
           try {
             await invoke("update_translate_selection_shortcut", { newShortcut: "" });
           } catch (error) {
-            logError("Failed to unregister translate shortcut:", error);
+            reportUserError(t("operationFeedback.userActions.updateShortcut"), error, "Failed to unregister translate shortcut");
           }
         }
       }
     } catch (e) {
-      logError(`保存插件 ${id} 设置失败:`, e);
+      reportUserError(t("operationFeedback.userActions.saveSettings"), e, `Failed to save plugin ${id} settings`);
     }
     if (id === "webdav") {
       notifyWebDAVAvailabilityChanged();
     } else if (id === "translate") {
       notifyTranslateAvailabilityChanged();
     }
-  }, [activeTab]);
+  }, [activeTab, t]);
   const navItems = useMemo(
     () => {
       const findNav = (id: TabType) => BASE_NAV_ITEMS.find((item) => item.id === id)!;
@@ -234,8 +235,8 @@ export function Settings() {
   }, []);
 
   useEffect(() => {
-    invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
-    invoke<string>("get_build_time").then(setBuildTime).catch(console.error);
+    invoke<string>("get_app_version").then(setAppVersion).catch((error: unknown) => logError("Failed to load app version", error));
+    invoke<string>("get_build_time").then(setBuildTime).catch((error: unknown) => logError("Failed to load build time", error));
   }, []);
 
   // 加载插件启用状态
@@ -390,8 +391,7 @@ export function Settings() {
         await invoke("disable_admin_launch");
       }
     } catch (error) {
-      logError("Failed to save settings:", error);
-      alert(t("common.settingsSaveFailed", { error: String(error) }));
+      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save settings");
     }
   };
 

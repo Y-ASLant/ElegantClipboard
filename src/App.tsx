@@ -42,6 +42,7 @@ import { useTranslation } from "@/i18n";
 import { GROUP_VALUES, getGroups } from "@/lib/constants";
 import { syncFilePreviewLimitsFromSettings } from "@/lib/file-preview-limits";
 import { logError } from "@/lib/logger";
+import { runClipboardOperation, reportUserError } from "@/lib/operation-feedback";
 import { cn } from "@/lib/utils";
 import { filterToolbarButtonsForWebDAV } from "@/lib/webdav-availability";
 import { useClipboardStore } from "@/stores/clipboard";
@@ -263,7 +264,7 @@ function App() {
 
   // 加载锁定状态（键盘导航由 initUISettingsStore 在设置加载完成后同步到后端）
   useEffect(() => {
-    invoke<boolean>("is_window_pinned").then(setIsPinned);
+    void invoke<boolean>("is_window_pinned").then(setIsPinned).catch((error) => logError("Failed to load window pin state:", error));
   }, []);
 
   // 窗口出现时短暂抑制工具栏提示，防止闪烁
@@ -290,7 +291,7 @@ function App() {
         setSearchQuery("");
         fetchItems({ search: "" });
       } else if (clipboardDirtyRef.current) {
-        // 有变化时刷新以更新 files_valid
+        // 剪贴板内容有变化时刷新权威列表，资源状态由可见卡片独立检查。
         refresh();
       }
       clipboardDirtyRef.current = false;
@@ -342,9 +343,9 @@ function App() {
     try {
       await invoke("hide_window");
     } catch (error) {
-      logError("Failed to hide window:", error);
+      reportUserError(t("common.close"), error, "Failed to hide window");
     }
-  }, [setBatchMode, uiSettingsReady, onboardingCompleted, setOnboardingCompleted]);
+  }, [setBatchMode, uiSettingsReady, onboardingCompleted, setOnboardingCompleted, t]);
 
   // 通道1：后端键盘钩子
   useEffect(() => {
@@ -399,9 +400,9 @@ function App() {
   }, [selectedGroup, t]);
 
   const performClearHistory = async () => {
-    const deleted = await clearHistory(selectedGroup);
-    if (deleted !== null) {
-      showToast(t("app.clearHistoryDone", { count: deleted }), "success");
+    const result = await clearHistory(selectedGroup);
+    if (result.status === "success") {
+      showToast(t("app.clearHistoryDone", { count: result.value }), "success");
     }
   };
 
@@ -435,7 +436,7 @@ function App() {
     try {
       await invoke("open_settings_window");
     } catch (error) {
-      logError("Failed to open settings:", error);
+      reportUserError(t("toolbar.settings"), error, "Failed to open settings");
     }
   };
 
@@ -445,7 +446,7 @@ function App() {
       await invoke("set_window_pinned", { pinned: newState });
       setIsPinned(newState);
     } catch (error) {
-      logError("Failed to toggle pinned state:", error);
+      reportUserError(t("toolbar.pinWindow"), error, "Failed to toggle pinned state");
     }
   };
   const handleWebdavUpload = async () => {
@@ -453,9 +454,9 @@ function App() {
     try {
       const res = await invoke<{ message: string }>("webdav_upload");
       await refresh();
-      logError("WebDAV upload:", res.message);
+      showToast(res.message, "success");
     } catch (error) {
-      logError("WebDAV upload failed:", error);
+      reportUserError(t("settings.sync.upload"), error, "WebDAV upload failed");
     } finally {
       setWebdavSyncing(false);
     }
@@ -466,9 +467,9 @@ function App() {
     try {
       const res = await invoke<{ message: string }>("webdav_download");
       await refresh();
-      logError("WebDAV download:", res.message);
+      showToast(res.message, "success");
     } catch (error) {
-      logError("WebDAV download failed:", error);
+      reportUserError(t("settings.sync.download"), error, "WebDAV download failed");
     } finally {
       setWebdavSyncing(false);
     }
@@ -633,12 +634,8 @@ function App() {
           <div className="flex items-center gap-1">
             <button
               onClick={async () => {
-                try {
-                  await invoke("merge_paste_content", { ids: Array.from(selectedIds) });
-                  setBatchMode(false);
-                } catch (error) {
-                  logError("Merge paste failed:", error);
-                }
+                const result = await runClipboardOperation("mergePaste", { ids: Array.from(selectedIds) });
+                if (result.status === "success") setBatchMode(false);
               }}
               disabled={selectedIds.size < 2}
               className="text-xs px-2 py-1 rounded-md bg-primary-subtle text-primary hover:bg-primary-subtle-hover transition-surface disabled:opacity-40 disabled:cursor-not-allowed"
@@ -804,8 +801,8 @@ function App() {
             <Button
               variant="destructive"
               onClick={async () => {
-                setBatchDeleteDialogOpen(false);
-                await batchDelete();
+                const result = await batchDelete();
+                if (result.status === "success") setBatchDeleteDialogOpen(false);
               }}
             >
               {t("common.delete")}

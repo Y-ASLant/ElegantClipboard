@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card";
 import { WindowTitleBar } from "@/components/WindowTitleBar";
 import { useTranslation } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { reportUserError, runClipboardOperation } from "@/lib/operation-feedback";
 import { initTheme } from "@/lib/theme-applier";
 import { cn } from "@/lib/utils";
 
@@ -46,22 +47,34 @@ export function TextEditor() {
 
   // 加载条目内容
   useEffect(() => {
-    if (!id) return;
-    invoke<{ text_content: string | null }>("get_clipboard_item", { id }).then(
-      (item) => {
-        const content = item?.text_content ?? "";
-        setText(content);
-        setOriginalText(content);
-        setLoading(false);
-      },
-    );
+    if (!id) {
+      setLoading(false);
+      reportUserError(t("operationFeedback.userActions.loadContent"), { code: "invalid_content", detail: "Invalid editor item id" });
+      return;
+    }
+    let active = true;
+    void invoke<{ text_content: string | null } | null>("get_clipboard_item", { id }).then((item) => {
+      if (!active) return;
+      if (!item) {
+        reportUserError(t("operationFeedback.userActions.loadContent"), { code: "item_not_found", detail: `Editor item ${id} does not exist` });
+        return;
+      }
+      const content = item.text_content ?? "";
+      setText(content);
+      setOriginalText(content);
+    }).catch((error: unknown) => {
+      if (active) reportUserError(t("operationFeedback.userActions.loadContent"), error, "Failed to load editor content");
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
   }, [id]);
 
   // ESC 关闭
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        getCurrentWindow().close();
+        void closeEditor();
       }
       // Ctrl+S 保存
       if (e.ctrlKey && e.key === "s") {
@@ -71,40 +84,36 @@ export function TextEditor() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [text, originalText]);
+  }, [text, originalText, saving, loading, t]);
 
   const hasChanges = text !== originalText;
 
-  const handleSave = async () => {
-    if (!hasChanges || saving) return;
-    setSaving(true);
+  const closeEditor = async () => {
     try {
-      const deleted = await invoke<boolean>("update_text_content", { id, newText: text });
-      if (deleted) {
-        getCurrentWindow().close();
-        return;
-      }
-      setOriginalText(text);
+      await getCurrentWindow().close();
     } catch (error) {
-      logError("Failed to save:", error);
+      reportUserError(t("operationFeedback.userActions.closeWindow"), error, "Failed to close text editor");
+    }
+  };
+
+  const handleSave = async (): Promise<boolean> => {
+    if (saving || loading) return false;
+    if (!hasChanges) return true;
+    setSaving(true);
+    const savedText = text;
+    try {
+      const result = await runClipboardOperation<boolean>("editText", { id, newText: savedText });
+      if (result.status !== "success") return false;
+      setOriginalText(savedText);
+      if (result.value) await closeEditor();
+      return !result.value;
     } finally {
       setSaving(false);
     }
   };
 
   const handleSaveAndClose = async () => {
-    if (saving) return;
-    if (hasChanges) {
-      setSaving(true);
-      try {
-        await invoke<boolean>("update_text_content", { id, newText: text });
-      } catch (error) {
-        logError("Failed to save:", error);
-        setSaving(false);
-        return;
-      }
-    }
-    getCurrentWindow().close();
+    if (await handleSave()) await closeEditor();
   };
 
   return (

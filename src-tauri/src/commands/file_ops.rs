@@ -1,17 +1,18 @@
 use crate::clipboard::file_clipboard::{
-    item_files_all_exist, parse_file_paths, resolve_item_paths,
+    file_status_resources, prepare_path_text, prepare_resource_paths, resolve_item_paths,
 };
 use crate::database::ClipboardRepository;
 use crate::file_preview_limits::{
     DEFAULT_MAX_IMAGE_SIZE_KB, is_too_large_for_preview, is_unc_path, preview_limit_bytes,
 };
-use clipboard_rs::Clipboard as ClipboardTrait;
+use crate::operation_error::{OperationError, OperationErrorCode, readable_resource};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
-use tracing::{debug, info};
+use tracing::info;
 
-use super::{AppState, hide_main_window_if_not_pinned, with_paused_monitor};
+use super::AppState;
 
 // ============ 文件校验命令 ============
 
@@ -76,6 +77,7 @@ pub async fn check_files_exist(
 #[derive(serde::Serialize, Clone)]
 pub struct ItemFileStatus {
     pub all_exist: bool,
+    pub clipboard_usable: bool,
     pub resolved_paths: Vec<String>,
     pub checks: HashMap<String, FileCheckResult>,
     /// 单文件图片超过预览阈值时为 true，前端据此跳过图片预览
@@ -125,32 +127,38 @@ fn build_item_file_status(
         return Err("Item is not a file type".to_string());
     }
 
-    let originals = parse_file_paths(item.file_paths.as_deref());
-    let resolved = resolve_item_paths(item.file_paths.as_deref(), item.file_payload.as_deref());
-    let all_exist = item_files_all_exist(item.file_paths.as_deref(), item.file_payload.as_deref());
+    let (originals, resolved, usable_payload) =
+        file_status_resources(item.file_paths.as_deref(), item.file_payload.as_deref());
 
     let resolved_checks: HashMap<String, FileCheckResult> = resolved
         .par_iter()
         .map(|path| {
-            let p = Path::new(path);
-            let exists = p.exists();
+            let metadata = Path::new(path).metadata().ok();
+            let exists = metadata.is_some();
             (
                 path.clone(),
                 FileCheckResult {
                     exists,
-                    is_dir: exists && p.is_dir(),
+                    is_dir: metadata.is_some_and(|metadata| metadata.is_dir()),
                 },
             )
         })
         .collect();
+    let all_exist = if resolved.is_empty() {
+        usable_payload
+    } else {
+        resolved.iter().all(|path| !path.is_empty())
+            && resolved_checks.values().all(|check| check.exists)
+    };
+    let clipboard_usable = all_exist && usable_payload;
 
     let checks: HashMap<String, FileCheckResult> = originals
         .into_iter()
         .enumerate()
         .map(|(i, orig)| {
-            let resolved_path = resolved.get(i).cloned().unwrap_or_else(|| orig.clone());
+            let resolved_path = resolved.get(i).unwrap_or(&orig);
             let info = resolved_checks
-                .get(&resolved_path)
+                .get(resolved_path)
                 .cloned()
                 .unwrap_or(FileCheckResult {
                     exists: false,
@@ -164,6 +172,7 @@ fn build_item_file_status(
 
     Ok(ItemFileStatus {
         all_exist,
+        clipboard_usable,
         resolved_paths: resolved,
         checks,
         too_large,
@@ -174,14 +183,11 @@ fn build_item_file_status(
 pub async fn get_item_file_status(
     state: State<'_, Arc<AppState>>,
     id: i64,
-) -> Result<ItemFileStatus, String> {
-    let repo = ClipboardRepository::new(&state.db);
-    let item = repo
-        .get_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "条目未找到".to_string())?;
+) -> Result<ItemFileStatus, OperationError> {
+    let item = super::clipboard::resolve_item(&state, id)?;
     let max_image_size_kb = read_max_image_size_kb(&state.db);
     build_item_file_status(&item, max_image_size_kb)
+        .map_err(|error| OperationError::new(OperationErrorCode::UnsupportedContent, error))
 }
 
 #[tauri::command]
@@ -204,119 +210,182 @@ pub async fn batch_get_item_file_status(
 
 // ============ 文件操作命令 ============
 
-/// 在系统文件管理器中定位并高亮显示文件
-#[tauri::command]
-pub async fn show_in_explorer(path: String) -> Result<(), String> {
-    use std::path::Path;
-
-    let path = Path::new(&path);
-
-    // 使用 /select 参数在资源管理器中高亮文件
-    #[cfg(target_os = "windows")]
-    {
-        let path_str = path.to_string_lossy();
-        debug!("show_in_explorer: {}", path_str);
-        std::process::Command::new("explorer.exe")
-            .args(["/select,", &path_str])
-            .spawn()
-            .map_err(|e| format!("Failed to open explorer: {e}"))?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .args(["-R", &path.to_string_lossy()])
-            .spawn()
-            .map_err(|e| format!("Failed to open Finder: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let parent = path.parent().unwrap_or(path);
-        if std::process::Command::new("xdg-open")
-            .arg(parent)
-            .spawn()
-            .is_err()
-        {
-            std::process::Command::new("nautilus")
-                .arg(&path.to_string_lossy().to_string())
-                .spawn()
-                .map_err(|e| format!("Failed to open file manager: {}", e))?;
+fn item_resource_paths(
+    item: &crate::database::ClipboardItem,
+) -> Result<Vec<String>, OperationError> {
+    match item.content_type.as_str() {
+        "files" => prepare_resource_paths(item.file_paths.as_deref(), item.file_payload.as_deref()),
+        "image" => {
+            let path = item
+                .image_path
+                .as_ref()
+                .filter(|path| !path.is_empty())
+                .ok_or_else(|| {
+                    OperationError::new(OperationErrorCode::InvalidContent, "image source absent")
+                })?;
+            readable_resource(Path::new(path))?;
+            Ok(vec![path.clone()])
         }
+        _ => Err(OperationError::new(
+            OperationErrorCode::UnsupportedContent,
+            "item has no file resource",
+        )),
     }
+}
 
+#[tauri::command]
+pub async fn show_in_explorer(
+    state: State<'_, Arc<AppState>>,
+    id: i64,
+) -> Result<(), OperationError> {
+    let item = super::clipboard::resolve_item(&state, id)?;
+    let paths = item_resource_paths(&item)?;
+    let path = Path::new(&paths[0]);
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer.exe")
+        .arg("/select,")
+        .arg(path)
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open")
+        .arg(path.parent().unwrap_or(path))
+        .spawn();
+    result.map_err(|error| {
+        let code = if error.kind() == std::io::ErrorKind::PermissionDenied {
+            OperationErrorCode::PermissionDenied
+        } else {
+            OperationErrorCode::ExplorerFailed
+        };
+        OperationError::new(code, format!("launch file manager: {error}"))
+    })?;
     Ok(())
 }
 
-/// 将文件路径作为文本写入剪贴板并粘贴
 #[tauri::command]
 pub async fn paste_as_path(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
     id: i64,
-) -> Result<(), String> {
-    let repo = ClipboardRepository::new(&state.db);
-    let item = repo
-        .get_by_id(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "条目未找到".to_string())?;
-
-    let paths_text = if item.content_type == "files" {
-        let resolved = resolve_item_paths(item.file_paths.as_deref(), item.file_payload.as_deref());
-        if resolved.is_empty() {
-            return Err("未找到文件路径".to_string());
-        }
-        resolved.join("\n")
-    } else {
-        return Err("Item is not a file type".to_string());
-    };
-
-    with_paused_monitor(&state, || {
-        let clipboard = clipboard_rs::ClipboardContext::new()
-            .map_err(|e| format!("Failed to access clipboard: {e}"))?;
-        clipboard
-            .set_text(paths_text)
-            .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
-
-        hide_main_window_if_not_pinned(&app);
-
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        super::run_simulate_paste_with_sound(&app)?;
-
-        debug!("Pasted file path as text for item {}", id);
-        Ok(())
-    })
+) -> Result<(), OperationError> {
+    let item = super::clipboard::resolve_item(&state, id)?;
+    if item.content_type != "files" {
+        return Err(OperationError::new(
+            OperationErrorCode::UnsupportedContent,
+            "item is not a file type",
+        ));
+    }
+    let text = prepare_path_text(item.file_paths.as_deref(), item.file_payload.as_deref())?;
+    super::clipboard::paste_plain_text_to_active_window(&state, &app, text, true)
 }
 
-/// 通过系统另存为对话框保存文件
-#[tauri::command]
-pub async fn save_file_as(app: tauri::AppHandle, source_path: String) -> Result<bool, String> {
-    use std::path::Path;
-    use tauri_plugin_dialog::DialogExt;
-
-    let src = Path::new(&source_path);
-    if !src.exists() {
-        return Err("源文件不存在".to_string());
+fn save_source(item: &crate::database::ClipboardItem) -> Result<PathBuf, OperationError> {
+    let mut paths = item_resource_paths(item)?;
+    if paths.len() != 1 {
+        return Err(OperationError::new(
+            OperationErrorCode::UnsupportedContent,
+            "save requires one file",
+        ));
     }
+    let source = PathBuf::from(paths.pop().expect("one source"));
+    if !readable_resource(&source)?.is_file() {
+        return Err(OperationError::new(
+            OperationErrorCode::UnsupportedContent,
+            "save source is not a regular file",
+        ));
+    }
+    Ok(source)
+}
 
-    let file_name = src
+pub(crate) fn copy_file_to_destination(
+    source: &Path,
+    destination: &Path,
+) -> Result<(), OperationError> {
+    readable_resource(source)?;
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .ok_or_else(|| {
+            OperationError::new(
+                OperationErrorCode::InvalidDestination,
+                "destination has no parent",
+            )
+        })?;
+    let parent_metadata = std::fs::metadata(parent).map_err(|error| {
+        let code = if error.kind() == std::io::ErrorKind::PermissionDenied {
+            OperationErrorCode::PermissionDenied
+        } else {
+            OperationErrorCode::InvalidDestination
+        };
+        OperationError::new(code, format!("destination parent: {error}"))
+    })?;
+    if !parent_metadata.is_dir() || destination.is_dir() {
+        return Err(OperationError::new(
+            OperationErrorCode::InvalidDestination,
+            "destination is not a file path",
+        ));
+    }
+    std::fs::copy(source, destination).map_err(|error| {
+        if let Err(source_error) = readable_resource(source) {
+            return source_error;
+        }
+        if error.kind() == std::io::ErrorKind::NotFound {
+            OperationError::new(
+                OperationErrorCode::InvalidDestination,
+                format!("copy destination missing: {error}"),
+            )
+        } else {
+            OperationError::io("copy to destination", error, OperationErrorCode::SaveFailed)
+        }
+    })?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn save_file_as(
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+    id: i64,
+) -> Result<bool, OperationError> {
+    use tauri_plugin_dialog::DialogExt;
+    let source = save_source(&super::clipboard::resolve_item(&state, id)?)?;
+    let file_name = source
         .file_name()
-        .map_or_else(|| "file".to_string(), |n| n.to_string_lossy().to_string());
-
-    let dest = app
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "file".into());
+    let language = crate::database::SettingsRepository::new(&state.db)
+        .get("language")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let title = match language.as_str() {
+        "en" => "Save as",
+        "zh-TW" => "另存為",
+        _ => "另存为",
+    };
+    let Some(destination) = app
         .dialog()
         .file()
-        .set_title("另存为")
+        .set_title(title)
         .set_file_name(&file_name)
-        .blocking_save_file();
-
-    if let Some(dest_path) = dest {
-        let dest_str = dest_path.to_string();
-        std::fs::copy(&source_path, &dest_str).map_err(|e| format!("保存失败: {e}"))?;
-        info!("File saved: {} -> {}", source_path, dest_str);
-        Ok(true)
-    } else {
-        debug!("save_file_as: user cancelled");
-        Ok(false)
-    }
+        .blocking_save_file()
+    else {
+        return Ok(false);
+    };
+    let destination = destination.into_path().map_err(|error| {
+        OperationError::new(
+            OperationErrorCode::InvalidDestination,
+            format!("dialog destination: {error}"),
+        )
+    })?;
+    let source = save_source(&super::clipboard::resolve_item(&state, id)?)?;
+    copy_file_to_destination(&source, &destination)?;
+    info!(id, "file saved");
+    Ok(true)
 }
 
 /// 获取数据目录大小明细（数据库+图片）
@@ -381,12 +450,18 @@ pub struct DataSizeInfo {
 
 /// 获取文件详情
 #[tauri::command]
-pub async fn get_file_details(path: String) -> Result<FileDetails, String> {
+pub async fn get_file_details(path: String) -> Result<FileDetails, OperationError> {
     use std::fs;
     use std::path::Path;
 
     let path = Path::new(&path);
-    let metadata = fs::metadata(path).map_err(|e| format!("Failed to get file metadata: {e}"))?;
+    let metadata = fs::metadata(path).map_err(|error| {
+        OperationError::io(
+            "file details metadata",
+            error,
+            OperationErrorCode::ResourceUnreadable,
+        )
+    })?;
 
     let file_type = if metadata.is_dir() {
         "folder".to_string()
@@ -434,4 +509,169 @@ pub struct FileDetails {
     is_dir: bool,
     modified_at: Option<i64>,
     created_at: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_copies_bytes_without_image_decoding_and_missing_source_preserves_destination() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_save_preflight_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("source.png");
+        let destination = directory.join("saved.png");
+        std::fs::write(&source, b"undecodable image bytes").unwrap();
+        copy_file_to_destination(&source, &destination).unwrap();
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"undecodable image bytes"
+        );
+        std::fs::remove_file(&source).unwrap();
+        assert!(matches!(
+            copy_file_to_destination(&source, &destination),
+            Err(OperationError {
+                code: OperationErrorCode::ResourceMissing,
+                ..
+            })
+        ));
+        assert_eq!(
+            std::fs::read(&destination).unwrap(),
+            b"undecodable image bytes"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn invalid_destination_does_not_change_source() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_save_destination_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("source.txt");
+        std::fs::write(&source, b"original").unwrap();
+        let destination = directory.join("missing").join("target.txt");
+        assert!(matches!(
+            copy_file_to_destination(&source, &destination),
+            Err(OperationError {
+                code: OperationErrorCode::InvalidDestination,
+                ..
+            })
+        ));
+        assert_eq!(std::fs::read(&source).unwrap(), b"original");
+        assert!(!destination.exists());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn file_status_distinguishes_real_sources_from_clipboard_payload_support() {
+        use crate::clipboard::file_clipboard::{
+            FilePayload, FormatBlob, StagedFile, encode_payload,
+        };
+        use base64::Engine;
+
+        let directory = std::env::temp_dir().join(format!("ec_file_status_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("source.txt");
+        std::fs::write(&source, b"source").unwrap();
+        let source_path = source.to_string_lossy().into_owned();
+        let mut item = crate::database::ClipboardItem {
+            id: 1,
+            content_type: "files".into(),
+            text_content: None,
+            html_content: None,
+            rtf_content: None,
+            image_path: None,
+            file_paths: Some(serde_json::to_string(&vec![source_path.clone()]).unwrap()),
+            file_payload: None,
+            content_hash: "status".into(),
+            semantic_hash: "status".into(),
+            preview: None,
+            byte_size: 6,
+            image_width: None,
+            image_height: None,
+            is_pinned: false,
+            is_favorite: false,
+            favorite_order: 0,
+            sort_order: 0,
+            created_at: String::new(),
+            updated_at: String::new(),
+            access_count: 0,
+            last_accessed_at: None,
+            char_count: None,
+            source_app_name: None,
+            source_app_icon: None,
+            group_id: None,
+        };
+        let normal = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(normal.all_exist && normal.clipboard_usable);
+
+        item.file_payload = Some(r#"{"extra":[{"name":"Preferred DropEffect","b64":""}]}"#.into());
+        let unsupported = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(unsupported.all_exist);
+        assert!(!unsupported.clipboard_usable);
+        assert_eq!(unsupported.resolved_paths, vec![source_path.clone()]);
+        assert!(unsupported.checks[&source_path].exists);
+        assert!(!unsupported.checks[&source_path].is_dir);
+        assert!(save_source(&item).is_ok());
+        assert_eq!(
+            serde_json::to_value(&unsupported).unwrap()["clipboard_usable"],
+            false
+        );
+
+        let missing = directory
+            .join("missing-source.txt")
+            .to_string_lossy()
+            .into_owned();
+        item.file_paths = Some(serde_json::to_string(&vec![missing.clone()]).unwrap());
+        item.file_payload = Some(encode_payload(&FilePayload {
+            staged: vec![StagedFile {
+                original: missing.clone(),
+                staged: source_path.clone(),
+                size: 6,
+            }],
+            ..Default::default()
+        }));
+        let staged = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(staged.all_exist && staged.clipboard_usable);
+        assert_eq!(staged.resolved_paths, vec![source_path]);
+        assert!(staged.checks[&missing].exists);
+        item.file_payload = None;
+        let absent = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(!absent.all_exist && !absent.clipboard_usable);
+        assert!(!absent.checks[&missing].exists);
+
+        let mut descriptor = vec![0; 4 + 592];
+        descriptor[..4].copy_from_slice(&1u32.to_le_bytes());
+        descriptor[4 + 72..4 + 74].copy_from_slice(&('a' as u16).to_le_bytes());
+        let mut virtual_payload = FilePayload {
+            extra: vec![
+                FormatBlob {
+                    name: "FileGroupDescriptorW".into(),
+                    b64: base64::engine::general_purpose::STANDARD.encode(descriptor),
+                },
+                FormatBlob {
+                    name: "FileContents".into(),
+                    b64: base64::engine::general_purpose::STANDARD.encode(b"contents"),
+                },
+            ],
+            ..Default::default()
+        };
+        item.file_paths = Some("[]".into());
+        item.file_payload = Some(encode_payload(&virtual_payload));
+        let virtual_status = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(virtual_status.all_exist && virtual_status.clipboard_usable);
+        assert!(virtual_status.resolved_paths.is_empty());
+
+        virtual_payload.extra[1].b64.clear();
+        item.file_payload = Some(encode_payload(&virtual_payload));
+        let empty_virtual = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(!empty_virtual.all_exist && !empty_virtual.clipboard_usable);
+        virtual_payload.extra.pop();
+        item.file_payload = Some(encode_payload(&virtual_payload));
+        let legacy_virtual = build_item_file_status(&item, DEFAULT_MAX_IMAGE_SIZE_KB).unwrap();
+        assert!(!legacy_virtual.all_exist && !legacy_virtual.clipboard_usable);
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }

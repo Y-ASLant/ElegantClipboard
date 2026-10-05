@@ -65,15 +65,14 @@ function resolveLanguages(text: string): { from: string; to: string } {
 
 /** 解析后端结构化错误码，返回本地化错误消息 */
 function localizeTranslateError(error: unknown): string {
-  if (typeof error !== "string") return String(error);
-  // 格式: "TRANSLATE:CODE" 或 "TRANSLATE:CODE:detail"
-  if (!error.startsWith("TRANSLATE:")) return error;
-  const parts = error.split(":");
-  const code = parts[1];
-  const detail = parts.slice(2).join(":");
+  if (typeof error !== "string" || !error.startsWith("TRANSLATE:")) {
+    return t("operationFeedback.unknownReason");
+  }
+  const code = error.split(":", 2)[1];
   const i18nKey = `translate.errors.${code}`;
-  const localized = detail ? t(i18nKey, { detail }) : t(i18nKey);
-  return localized !== i18nKey ? localized : error;
+  // Provider details can contain response bodies, URLs or credentials.
+  const localized = t(i18nKey, { detail: t("operationFeedback.unknownReason") });
+  return localized !== i18nKey ? localized : t("operationFeedback.unknownReason");
 }
 
 export async function translateText(text: string): Promise<string> {

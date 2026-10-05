@@ -51,11 +51,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { useItemResourceStatus, type ItemFileStatus } from "@/hooks/useItemResourceStatus";
 import { useNonPassiveWheel } from "@/hooks/useNonPassiveWheel";
 import { useSortable, CSS } from "@/hooks/useSortableList";
 import { useTranslateAvailable } from "@/hooks/useTranslateAvailable";
 import { useTranslation } from "@/i18n";
-import { shouldSkipFileImagePreview, isKnownTooLargeForPreview } from "@/lib/file-preview-limits";
 import { resolvePreviewFontFamilyCss } from "@/lib/fonts";
 import {
   contentTypeConfig,
@@ -63,10 +63,10 @@ import {
   formatCharCount,
   formatSize,
   getFileNameFromPath,
-  parseFilePaths,
 } from "@/lib/format";
 import { createLeaseManager } from "@/lib/lease-manager";
 import { logError } from "@/lib/logger";
+import { runClipboardOperation, reportOperationError, type OperationResult } from "@/lib/operation-feedback";
 import { getPreviewPresentation } from "@/lib/preview-presentation";
 import { translateText } from "@/lib/translate";
 import { cn } from "@/lib/utils";
@@ -86,57 +86,6 @@ interface ClipboardItemCardProps {
 
 const clipboardActions = () => useClipboardStore.getState();
 
-// 批量检查队列：按 item id 请求后端解析 staged 路径
-interface ItemFileStatus {
-  all_exist: boolean;
-  resolved_paths: string[];
-  checks: Record<string, { exists: boolean; is_dir: boolean }>;
-  /** 文件超过阈值时为 true，前端据此跳过图片预览 */
-  too_large?: boolean;
-}
-
-interface PendingCheck {
-  id: number;
-  resolve: (result: ItemFileStatus) => void;
-  reject: (error: unknown) => void;
-}
-let pendingItemChecks: PendingCheck[] = [];
-let itemBatchTimer: ReturnType<typeof setTimeout> | null = null;
-const ITEM_BATCH_DELAY_MS = 50;
-const TEXT_LIKE_TYPES = new Set(["text", "html", "rtf", "url"]);
-
-function flushItemFileStatusBatch() {
-  if (pendingItemChecks.length === 0) return;
-  const batch = pendingItemChecks;
-  pendingItemChecks = [];
-
-  const ids = [...new Set(batch.map((c) => c.id))];
-  invoke<Record<string, ItemFileStatus>>("batch_get_item_file_status", { ids })
-    .then((results) => {
-      for (const check of batch) {
-        const status = results[String(check.id)] ?? results[check.id as unknown as keyof typeof results];
-        if (status) {
-          check.resolve(status);
-        } else {
-          check.reject(new Error(`No file status for item ${check.id}`));
-        }
-      }
-    })
-    .catch((error) => {
-      logError("batch_get_item_file_status failed:", error);
-      for (const check of batch) {
-        check.reject(error);
-      }
-    });
-}
-
-function batchGetItemFileStatus(id: number): Promise<ItemFileStatus> {
-  return new Promise((resolve, reject) => {
-    pendingItemChecks.push({ id, resolve, reject });
-    if (itemBatchTimer) clearTimeout(itemBatchTimer);
-    itemBatchTimer = setTimeout(flushItemFileStatusBatch, ITEM_BATCH_DELAY_MS);
-  });
-}
 const textPreviewLM = createLeaseManager("allocate_text_preview_lease");
 
 // ============ 主卡片组件 ============
@@ -160,11 +109,15 @@ const arePropsEqual = (
     item.is_pinned === nextItem.is_pinned &&
     item.is_favorite === nextItem.is_favorite &&
     item.content_type === nextItem.content_type &&
+    item.content_hash === nextItem.content_hash &&
+    item.text_content === nextItem.text_content &&
+    item.html_content === nextItem.html_content &&
+    item.rtf_content === nextItem.rtf_content &&
     item.created_at === nextItem.created_at &&
     item.byte_size === nextItem.byte_size &&
     item.char_count === nextItem.char_count &&
     item.image_path === nextItem.image_path &&
-    item.files_valid === nextItem.files_valid &&
+    item.file_paths === nextItem.file_paths &&
     item.preview === nextItem.preview &&
     item.source_app_name === nextItem.source_app_name &&
     item.source_app_icon === nextItem.source_app_icon
@@ -239,6 +192,39 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const [justPasted, setJustPasted] = useState(false);
   const [justCopied, setJustCopied] = useState(false);
+  const operationRequestRef = useRef(0);
+  const translateRequestRef = useRef(0);
+  const feedbackTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    operationRequestRef.current++;
+    translateRequestRef.current++;
+    setTranslateStatus("idle");
+    setTranslatedText("");
+    setJustCopied(false);
+    setJustPasted(false);
+    setDetailsOpen(false);
+    return () => {
+      operationRequestRef.current++;
+      translateRequestRef.current++;
+      window.clearTimeout(feedbackTimerRef.current);
+    };
+  }, [item.id, item.content_hash, item.content_type, item.text_content, item.html_content, item.rtf_content, item.image_path, item.file_paths]);
+
+  const showOperationFeedback = async (action: () => Promise<OperationResult>, kind: "copy" | "paste") => {
+    const request = ++operationRequestRef.current;
+    window.clearTimeout(feedbackTimerRef.current);
+    setJustCopied(false);
+    setJustPasted(false);
+    const result = await action();
+    if (result.status !== "success" || request !== operationRequestRef.current) return;
+    if (kind === "copy") setJustCopied(true);
+    else setJustPasted(true);
+    feedbackTimerRef.current = window.setTimeout(() => {
+      if (request !== operationRequestRef.current) return;
+      setJustCopied(false);
+      setJustPasted(false);
+    }, kind === "copy" ? 700 : 300);
+  };
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [fileListItems, setFileListItems] = useState<FileListItem[]>([]);
   const { groups, moveItemToGroup } = useGroupStore(
@@ -254,108 +240,17 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const textScrollEmitRafRef = useRef<number | null>(null);
   const textScrollPendingDeltaRef = useRef(0);
 
-  const filePaths = useMemo(
-    () => item.content_type === "files" ? parseFilePaths(item.file_paths) : [],
-    [item.content_type, item.file_paths],
-  );
-  const [runtimeFilesValid, setRuntimeFilesValid] = useState<
-    boolean | undefined
-  >(undefined);
-  const [resolvedFilePaths, setResolvedFilePaths] = useState<string[]>([]);
-  const [backendTooLarge, setBackendTooLarge] = useState<boolean | undefined>(
-    undefined,
-  );
-
-  useEffect(() => {
-    setBackendTooLarge(undefined);
-
-    if (item.content_type !== "files") {
-      setRuntimeFilesValid(undefined);
-      setResolvedFilePaths([]);
-      return;
-    }
-
-    const needsBatchForExistence = item.files_valid === undefined;
-    const needsBatchForSize =
-      filePaths.length === 1 && (!item.byte_size || item.byte_size <= 0);
-
-    if (!needsBatchForExistence && !needsBatchForSize) {
-      setRuntimeFilesValid(item.files_valid);
-      setResolvedFilePaths(filePaths);
-      return;
-    }
-
-    if (filePaths.length === 0) {
-      setRuntimeFilesValid(false);
-      setResolvedFilePaths([]);
-      return;
-    }
-
-    // byte_size 已确认超限：同步判定即可，跳过 batch IPC（避免 NAS exists/metadata）
-    if (
-      filePaths.length === 1 &&
-      isKnownTooLargeForPreview(filePaths[0], item.byte_size)
-    ) {
-      setRuntimeFilesValid(item.files_valid);
-      setResolvedFilePaths(filePaths);
-      return;
-    }
-
-    let cancelled = false;
-    batchGetItemFileStatus(item.id)
-      .then((status) => {
-        if (!cancelled) {
-          if (needsBatchForExistence) {
-            setRuntimeFilesValid(status.all_exist);
-            setResolvedFilePaths(status.resolved_paths);
-          } else {
-            setRuntimeFilesValid(item.files_valid);
-            setResolvedFilePaths(filePaths);
-          }
-          setBackendTooLarge(status.too_large ?? false);
-        }
-      })
-      .catch((error) => {
-        logError("Failed to check item file status:", error);
-        if (!cancelled) {
-          setRuntimeFilesValid(item.files_valid ?? undefined);
-          setResolvedFilePaths(filePaths);
-          setBackendTooLarge(undefined);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    item.content_type,
-    item.files_valid,
-    item.file_paths,
-    item.id,
-    item.byte_size,
-    filePaths,
-  ]);
-
-  const effectiveFilesValid = item.files_valid ?? runtimeFilesValid;
-  const effectiveFilePaths = resolvedFilePaths.length > 0 ? resolvedFilePaths : filePaths;
-  const previewTooLarge = useMemo(() => {
-    if (item.content_type !== "files" || effectiveFilePaths.length !== 1) {
-      return false;
-    }
-    return shouldSkipFileImagePreview(
-      effectiveFilePaths[0],
-      item.byte_size,
-      backendTooLarge ?? false,
-    );
-  }, [
-    item.content_type,
-    item.byte_size,
-    effectiveFilePaths,
-    backendTooLarge,
-  ]);
-  const filesInvalid =
-    item.content_type === "files" && effectiveFilesValid === false;
-  const isTextLikeContent = TEXT_LIKE_TYPES.has(item.content_type);
+  const {
+    availability,
+    clipboardUsable,
+    paths: effectiveFilePaths,
+    originalPaths: filePaths,
+    tooLarge,
+    refresh: refreshResourceStatus,
+  } = useItemResourceStatus(item, !isDragOverlay);
+  const contentOperationsDisabled = availability !== "available" || !clipboardUsable;
+  const pathOperationsDisabled = availability !== "available" || effectiveFilePaths.length === 0;
+  const isTextLikeContent = item.content_type !== "files" && item.content_type !== "image";
 
   const {
     attributes,
@@ -612,24 +507,30 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   }, [hideTextPreview]);
 
   const triggerTranslate = useCallback(async (forceRedo = false) => {
-    let shouldTranslate = true;
-    setTranslateStatus((prev) => {
-      if (prev !== "idle" && !forceRedo) { shouldTranslate = false; return "idle"; }
-      return "loading";
-    });
+    const request = ++translateRequestRef.current;
     setTranslatedText("");
-    if (!shouldTranslate) return;
+    if (translateStatus !== "idle" && !forceRedo) {
+      setTranslateStatus("idle");
+      return;
+    }
+    setTranslateStatus("loading");
+    let translationStarted = false;
     try {
       const text = await resolveTextPreviewContent();
+      if (request !== translateRequestRef.current) return;
       if (!text.trim()) { setTranslateStatus("idle"); return; }
+      translationStarted = true;
       const result = await translateText(text);
+      if (request !== translateRequestRef.current) return;
       setTranslatedText(result);
       setTranslateStatus("done");
     } catch (error) {
-      setTranslatedText(String(error));
+      if (request !== translateRequestRef.current) return;
+      if (!translationStarted) logError("Failed to load card translation source:", error);
+      setTranslatedText(translationStarted && error instanceof Error ? error.message : t("operationFeedback.unknownReason"));
       setTranslateStatus("error");
     }
-  }, [resolveTextPreviewContent]);
+  }, [resolveTextPreviewContent, translateStatus, t]);
 
   const handleTranslateClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -641,20 +542,19 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
       toggleSelect(item.id, index ?? 0, e.shiftKey);
       return;
     }
-    if (!isDragging && !isDragOverlay) {
+    if (!isDragging && !isDragOverlay && !contentOperationsDisabled) {
       hideTextPreview();
-      pasteContent(item.id);
-      setJustPasted(true);
-      setTimeout(() => setJustPasted(false), 300);
+      void showOperationFeedback(() => pasteContent(item.id), "paste");
     }
   };
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    copyToClipboard(item.id);
-    setJustCopied(true);
-    setTimeout(() => setJustCopied(false), 700);
+    if (contentOperationsDisabled) return;
+    void showOperationFeedback(() => copyToClipboard(item.id), "copy");
   };
-  const handleCopyCtxMenu = () => copyToClipboard(item.id);
+  const handleCopyCtxMenu = () => {
+    if (!contentOperationsDisabled) void showOperationFeedback(() => copyToClipboard(item.id), "copy");
+  };
   const handleTogglePin = (e: React.MouseEvent) => {
     e.stopPropagation();
     togglePin(item.id);
@@ -668,60 +568,45 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     deleteItem(item.id);
   };
 
-  const handleShowInExplorer = async () => {
-    if (effectiveFilePaths.length > 0) {
-      try {
-        await invoke("show_in_explorer", { path: effectiveFilePaths[0] });
-      } catch (error) {
-        logError("Failed to show in explorer:", error);
-      }
-    }
+  const handlePasteCtxMenu = () => {
+    if (!contentOperationsDisabled) void showOperationFeedback(() => pasteContent(item.id), "paste");
   };
 
-  const handlePasteAsPath = async () => {
-    try {
-      await invoke("paste_as_path", { id: item.id });
-    } catch (error) {
-      logError("Failed to paste as path:", error);
-    }
+  const handlePastePlain = () => {
+    if (!contentOperationsDisabled) void showOperationFeedback(() => pasteAsPlainText(item.id), "paste");
+  };
+
+  const handleShowInExplorer = async () => {
+    if (pathOperationsDisabled) return;
+    await runClipboardOperation("showInExplorer", { id: item.id });
+  };
+
+  const handlePasteAsPath = () => {
+    void showOperationFeedback(() => runClipboardOperation("pastePath", { id: item.id }), "paste");
   };
 
   const handleShowDetails = async () => {
     if (filePaths.length === 0) return;
-    try {
-      const status = await invoke<ItemFileStatus>("get_item_file_status", { id: item.id });
-      const items: FileListItem[] = filePaths.map((path) => {
-        const name = getFileNameFromPath(path);
-        const info = status.checks[path] ?? { exists: false, is_dir: false };
-        return { name, path, isDir: info.is_dir, exists: info.exists };
-      });
-      setFileListItems(items);
-      setDetailsOpen(true);
-    } catch (error) {
-      logError("Failed to get file details:", error);
-    }
+    window.clearTimeout(feedbackTimerRef.current);
+    setJustCopied(false);
+    setJustPasted(false);
+    const request = ++operationRequestRef.current;
+    const result = await runClipboardOperation<ItemFileStatus>("details", { id: item.id });
+    if (result.status !== "success" || request !== operationRequestRef.current) return;
+    const items: FileListItem[] = filePaths.map((path) => {
+      const name = getFileNameFromPath(path);
+      const info = result.value.checks[path] ?? { exists: false, is_dir: false };
+      return { name, path, isDir: info.is_dir, exists: info.exists };
+    });
+    setFileListItems(items);
+    setDetailsOpen(true);
   };
 
   const handleSaveAs = async () => {
-    // 图片从 image_path 保存，文件取第一个 resolved 路径
-    const sourcePath =
-      item.content_type === "image" ? item.image_path : effectiveFilePaths[0];
-    if (!sourcePath) return;
-    try {
-      await invoke("save_file_as", { sourcePath });
-    } catch (error) {
-      logError("Failed to save file:", error);
-    }
+    if (pathOperationsDisabled) return;
+    await runClipboardOperation<boolean>("save", { id: item.id });
   };
 
-  const handleShowImageInExplorer = async () => {
-    if (!item.image_path) return;
-    try {
-      await invoke("show_in_explorer", { path: item.image_path });
-    } catch (error) {
-      logError("Failed to show in explorer:", error);
-    }
-  };
 
   // ---- 卡片内容 ----
 
@@ -739,9 +624,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
         )}
         onClick={handlePaste}
       >
-        {justPasted && <div className="paste-flash-overlay" />}
+        {justPasted && <div className="paste-flash-overlay" role="status" aria-label={t("operationFeedback.pasteSucceeded")} />}
         {justCopied && (
-          <div className="copy-success-overlay">
+          <div className="copy-success-overlay" role="status" aria-label={t("operationFeedback.copySucceeded")}>
             <CheckmarkCircle16Filled className="copy-success-icon w-8 h-8 text-primary" />
           </div>
         )}
@@ -821,9 +706,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               : <Circle16Regular className="w-4.5 h-4.5 text-muted-foreground/30" />
             }
           </div>
-          {item.content_type === "image" && item.image_path ? (
+          {item.content_type === "image" ? (
             <ImageCard
               image_path={item.image_path}
+              availability={availability}
               metaItems={metaItems}
               index={index}
               showBadge={showBadge}
@@ -836,7 +722,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
           ) : item.content_type === "files" ? (
             <FileContent
               filePaths={effectiveFilePaths}
-              filesInvalid={filesInvalid}
+              availability={availability}
               preview={item.preview}
               metaItems={metaItems}
               index={index}
@@ -845,7 +731,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
               sourceAppName={effectiveSourceName}
               sourceAppIcon={effectiveSourceIcon}
               byteSize={item.byte_size}
-              tooLarge={previewTooLarge}
+              tooLarge={tooLarge}
             />
           ) : (
             <div
@@ -879,6 +765,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
           {!isDragging && !isDragOverlay && !batchMode && (
             <ActionToolbar
               item={item}
+              copyDisabled={contentOperationsDisabled}
               onTogglePin={handleTogglePin}
               onToggleFavorite={handleToggleFavorite}
               onCopy={handleCopy}
@@ -922,7 +809,7 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     try {
       await invoke("open_text_editor_window", { id: item.id });
     } catch (error) {
-      logError("Failed to open editor:", error);
+      reportOperationError("editText", error);
     }
   };
 
@@ -930,10 +817,10 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   const contextMenuItems: ContextMenuItemConfig[] | null = (() => {
     if (isDragOverlay || batchMode) return null;
     // 文本类内容（text/html/rtf/url）可编辑
-    if (TEXT_LIKE_TYPES.has(item.content_type)) {
+    if (isTextLikeContent) {
       return [
-        { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: () => pasteContent(item.id) },
-        { icon: TextDescription16Regular, label: t("clipboard.contextMenu.pastePlainText"), onClick: () => pasteAsPlainText(item.id) },
+        { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: handlePasteCtxMenu },
+        { icon: TextDescription16Regular, label: t("clipboard.contextMenu.pastePlainText"), onClick: handlePastePlain },
         { icon: Copy16Regular, label: t("clipboard.contextMenu.copy"), onClick: handleCopyCtxMenu },
         ...(translateAvailable ? [{ icon: Translate16Regular, label: t("clipboard.contextMenu.translate"), onClick: () => triggerTranslate(true) }] : []),
         { icon: Edit16Regular, label: t("clipboard.contextMenu.edit"), onClick: handleEdit },
@@ -942,20 +829,20 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
     }
     if (item.content_type === "files") {
       return [
-        { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: () => pasteContent(item.id) },
+        { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: handlePasteCtxMenu, disabled: contentOperationsDisabled },
         { icon: TextDescription16Regular, label: t("clipboard.contextMenu.pasteAsPath"), onClick: handlePasteAsPath },
-        { icon: FolderOpen16Regular, label: t("clipboard.contextMenu.showInExplorer"), onClick: handleShowInExplorer, disabled: filesInvalid },
-        { icon: ArrowDownload16Regular, label: t("clipboard.contextMenu.saveAs"), onClick: handleSaveAs, disabled: filesInvalid },
-        { icon: Info16Regular, label: t("clipboard.contextMenu.viewDetails"), onClick: handleShowDetails, disabled: filesInvalid },
+        { icon: FolderOpen16Regular, label: t("clipboard.contextMenu.showInExplorer"), onClick: handleShowInExplorer, disabled: pathOperationsDisabled },
+        { icon: ArrowDownload16Regular, label: t("clipboard.contextMenu.saveAs"), onClick: handleSaveAs, disabled: pathOperationsDisabled },
+        { icon: Info16Regular, label: t("clipboard.contextMenu.viewDetails"), onClick: handleShowDetails, disabled: pathOperationsDisabled },
         { icon: Delete16Regular, label: t("clipboard.contextMenu.delete"), onClick: () => deleteItem(item.id), destructive: true, separator: true },
       ];
     }
-    if (item.content_type === "image" && item.image_path) {
+    if (item.content_type === "image") {
       return [
-        { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: () => pasteContent(item.id) },
-        { icon: Copy16Regular, label: t("clipboard.contextMenu.copy"), onClick: handleCopyCtxMenu },
-        { icon: FolderOpen16Regular, label: t("clipboard.contextMenu.showInExplorer"), onClick: handleShowImageInExplorer },
-        { icon: ArrowDownload16Regular, label: t("clipboard.contextMenu.saveAs"), onClick: handleSaveAs },
+        { icon: ClipboardPaste16Regular, label: t("clipboard.contextMenu.paste"), onClick: handlePasteCtxMenu, disabled: contentOperationsDisabled },
+        { icon: Copy16Regular, label: t("clipboard.contextMenu.copy"), onClick: handleCopyCtxMenu, disabled: contentOperationsDisabled },
+        { icon: FolderOpen16Regular, label: t("clipboard.contextMenu.showInExplorer"), onClick: handleShowInExplorer, disabled: pathOperationsDisabled },
+        { icon: ArrowDownload16Regular, label: t("clipboard.contextMenu.saveAs"), onClick: handleSaveAs, disabled: pathOperationsDisabled },
         { icon: Delete16Regular, label: t("clipboard.contextMenu.delete"), onClick: () => deleteItem(item.id), destructive: true, separator: true },
       ];
     }
@@ -965,7 +852,9 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
   if (contextMenuItems) {
     return (
       <>
-        <ContextMenu>
+        <ContextMenu onOpenChange={(open) => {
+          if (open) refreshResourceStatus();
+        }}>
           <ContextMenuTrigger asChild>{cardContent}</ContextMenuTrigger>
           <ContextMenuContent className="w-48">
             {contextMenuItems.map((mi, idx) => (

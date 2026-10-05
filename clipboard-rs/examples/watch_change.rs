@@ -18,7 +18,7 @@ impl ClipboardHandler for Manager {
 	fn on_clipboard_change(&mut self) {
 		println!(
 			"on_clipboard_change, txt = {}",
-			self.ctx.get_text().unwrap_or("".to_string())
+			self.ctx.get_text().unwrap_or_default()
 		);
 	}
 }

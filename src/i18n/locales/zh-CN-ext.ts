@@ -1,5 +1,36 @@
 /** Extended zh-CN keys: settings pages, card UI, editors */
 export const extended = {
+  operationFeedback: {
+    operations: {
+      copy: "复制失败", paste: "粘贴失败", pastePlain: "粘贴纯文本失败",
+      pastePath: "粘贴路径失败", pasteText: "粘贴文本失败", mergePaste: "合并粘贴失败",
+      save: "保存文件失败", showInExplorer: "在资源管理器中显示失败", details: "加载文件详情失败",
+      reorder: "调整条目顺序失败", copyText: "复制文本失败", copyTranslation: "复制译文失败",
+      pin: "修改置顶状态失败", favorite: "修改收藏状态失败", move: "移动条目失败",
+      moveFavorite: "移动收藏失败", delete: "删除条目失败", batchDelete: "批量删除失败",
+      clear: "清空历史失败", editText: "保存文本失败",
+    },
+    reasons: {
+      item_not_found: "此剪贴板条目已不存在。", resource_missing: "源文件或图片已不存在。",
+      resource_unreadable: "无法读取源文件或图片。", permission_denied: "访问被拒绝，请检查文件或应用权限。",
+      invalid_content: "剪贴板内容无效。", unsupported_content: "此操作不支持该内容类型。",
+      image_decode_failed: "无法解码此图片。", clipboard_unavailable: "系统剪贴板当前不可用。",
+      clipboard_write_failed: "无法将内容写入系统剪贴板。", paste_failed: "无法向目标应用发送粘贴操作。",
+      save_failed: "无法保存文件。", invalid_destination: "选择的目标位置无效。",
+      explorer_failed: "无法打开资源管理器。", internal: "发生内部错误，详情请查看应用日志。",
+    },
+    unknownReason: "操作未能完成，详情请查看应用日志。",
+    copySucceeded: "已复制", pasteSucceeded: "已粘贴",
+    refreshAfterSuccess: "操作已完成，但条目列表刷新失败",
+    userActions: {
+      saveSettings: "保存设置失败", openLink: "打开链接失败", loadApps: "加载运行中的应用失败",
+      loadContent: "加载内容失败", loadSize: "计算数据大小失败", selectFolder: "选择文件夹失败",
+      createGroup: "创建分组失败", renameGroup: "重命名分组失败", colorGroup: "修改分组颜色失败",
+      deleteGroup: "删除分组失败", moveGroup: "移动条目到分组失败", updateShortcut: "更新快捷键失败",
+      openLog: "打开日志失败", restart: "重启应用失败",
+      minimizeWindow: "最小化窗口失败", closeWindow: "关闭窗口失败",
+    },
+  },
   common: {
     add: "添加",
     close: "关闭",
@@ -44,7 +75,9 @@ export const extended = {
     },
   },
   cardContent: {
-    imageLoadFailed: "图片加载失败",
+    previewLoadFailed: "预览加载失败",
+    resourceChecking: "正在检查资源",
+    resourceUnknown: "资源状态未知",
     fileCount: "{{count}} 个文件",
     invalid: "(已失效)",
     fileTooLarge: "(文件过大)",

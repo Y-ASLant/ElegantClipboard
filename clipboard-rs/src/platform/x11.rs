@@ -656,7 +656,10 @@ impl Clipboard for ClipboardContext {
 	}
 
 	#[cfg(feature = "image")]
-	fn set_image_with_dib(&self, image: RustImageData, _dib_data: Option<&[u8]>) -> Result<()> {
+	fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()> {
+		if dib_data.is_some() {
+			return Err("CF_DIB is only supported on Windows".into());
+		}
 		self.set_image(image)
 	}
 
@@ -720,8 +723,6 @@ pub struct ClipboardWatcherContext<T: ClipboardHandler> {
 	stop_receiver: Receiver<()>,
 	interval: Duration,
 }
-
-unsafe impl<T: ClipboardHandler> Send for ClipboardWatcherContext<T> {}
 
 /// Default interval between checks for a stop signal. X11 delivers clipboard
 /// changes via XFixes events; this only bounds how quickly a stop request is

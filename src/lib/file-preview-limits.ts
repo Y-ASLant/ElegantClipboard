@@ -77,11 +77,3 @@ export function shouldSkipFileImagePreview(
     isFileTooLargeForPreview(filePath, byteSize, true)
   );
 }
-
-/** byte_size 已确认超限时，无需 batch IPC 查 exists/metadata */
-export function isKnownTooLargeForPreview(
-  filePath: string,
-  byteSize: number,
-): boolean {
-  return byteSize > 0 && isFileTooLargeForPreview(filePath, byteSize, true);
-}

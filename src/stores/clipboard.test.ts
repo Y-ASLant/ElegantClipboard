@@ -1,6 +1,12 @@
+import { createElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type EventCallback } from "@tauri-apps/api/event";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Toaster } from "@/components/ui/toast";
+import { t } from "@/i18n";
+import type { OperationResult } from "@/lib/operation-feedback";
+import { useUISettings } from "@/stores/ui-settings";
 import { useClipboardStore, type ClipboardItem } from "./clipboard";
 
 function listItem(id: number): ClipboardItem {
@@ -36,6 +42,7 @@ function listItem(id: number): ClipboardItem {
 beforeEach(() => {
   vi.mocked(invoke).mockReset().mockResolvedValue(undefined);
   vi.mocked(listen).mockReset().mockResolvedValue(() => {});
+  useUISettings.setState({ pasteMoveToTop: false });
   useClipboardStore.setState({
     items: [],
     isLoading: false,
@@ -50,6 +57,8 @@ beforeEach(() => {
     _resetToken: 0,
   });
 });
+
+afterEach(cleanup);
 
 describe("clipboard store", () => {
   describe("setSearchQuery", () => {
@@ -148,20 +157,106 @@ describe("clipboard store", () => {
 
       const deleted = await useClipboardStore.getState().clearHistory(null);
 
-      expect(deleted).toBe(5);
+      expect(deleted).toEqual({ status: "success", value: 5 });
       expect(invoke).toHaveBeenCalledWith("clear_history", {
         groupId: null,
         contentType: null,
       });
     });
 
-    it("returns null on failure", async () => {
+    it("returns an explicit failed outcome", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       vi.mocked(invoke).mockRejectedValueOnce(new Error("db error"));
 
       const deleted = await useClipboardStore.getState().clearHistory(null);
 
-      expect(deleted).toBeNull();
+      expect(deleted).toEqual({ status: "failed" });
+    });
+  });
+
+  describe("operation outcomes", () => {
+    it("keeps a failed deletion visible and exposes the failed outcome", async () => {
+      const visible = listItem(7);
+      useClipboardStore.setState({ items: [visible] });
+      vi.mocked(invoke).mockRejectedValueOnce({ code: "permission_denied", detail: "database denied" });
+      const result = await useClipboardStore.getState().deleteItem(7);
+      expect(result).toEqual({ status: "failed" });
+      expect(useClipboardStore.getState().items).toEqual([visible]);
+    });
+
+    it("keeps batch selection open after failure and closes it after success", async () => {
+      useClipboardStore.setState({ items: [listItem(7)], batchMode: true, selectedIds: new Set([7]) });
+      vi.mocked(invoke).mockRejectedValueOnce({ code: "permission_denied", detail: "delete denied" });
+      expect(await useClipboardStore.getState().batchDelete()).toEqual({ status: "failed" });
+      expect(useClipboardStore.getState().batchMode).toBe(true);
+      expect([...useClipboardStore.getState().selectedIds]).toEqual([7]);
+      vi.mocked(invoke).mockResolvedValueOnce(undefined).mockResolvedValueOnce([]);
+      expect(await useClipboardStore.getState().batchDelete()).toEqual({ status: "success", value: undefined });
+      expect(useClipboardStore.getState().batchMode).toBe(false);
+      expect(useClipboardStore.getState().selectedIds.size).toBe(0);
+      expect(useClipboardStore.getState().items).toEqual([]);
+    });
+
+    it("treats toggling favorite off as success and removes it from favorites view", async () => {
+      useClipboardStore.setState({ items: [{ ...listItem(7), is_favorite: true }], selectedGroup: "__favorites__" });
+      vi.mocked(invoke).mockResolvedValueOnce(false).mockResolvedValueOnce([]);
+      expect(await useClipboardStore.getState().toggleFavorite(7)).toEqual({ status: "success", value: false });
+      expect(useClipboardStore.getState().items).toEqual([]);
+    });
+
+    it("keeps a committed favorite change successful when only list refresh fails", async () => {
+      render(createElement(Toaster));
+      const visible = { ...listItem(7), is_favorite: true };
+      useClipboardStore.setState({ items: [visible], selectedGroup: "__favorites__" });
+      vi.mocked(invoke).mockResolvedValueOnce(false).mockRejectedValueOnce({ code: "internal", detail: "private refresh failure" });
+      let outcome: OperationResult<boolean> | undefined;
+      await act(async () => { outcome = await useClipboardStore.getState().toggleFavorite(7); });
+      expect(outcome).toEqual({ status: "success", value: false });
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(t("operationFeedback.refreshAfterSuccess"));
+      expect(alert).not.toHaveTextContent(t("operationFeedback.operations.favorite"));
+      expect(alert).not.toHaveTextContent("private refresh failure");
+    });
+
+    it("preserves paste success while reporting a separately failed reorder", async () => {
+      render(createElement(Toaster));
+      useUISettings.setState({ pasteMoveToTop: true });
+      vi.mocked(invoke).mockResolvedValueOnce(undefined).mockRejectedValueOnce({ code: "internal", detail: "reorder failed" });
+      let result: OperationResult | undefined;
+      await act(async () => { result = await useClipboardStore.getState().pasteContent(7); });
+      expect(result).toEqual({ status: "success", value: undefined });
+      expect(await screen.findByRole("alert")).toHaveTextContent(t("operationFeedback.operations.reorder"));
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
+    });
+
+    it("does not refresh or reorder after native paste failure", async () => {
+      const visible = listItem(7);
+      useClipboardStore.setState({ items: [visible] });
+      useUISettings.setState({ pasteMoveToTop: true });
+      vi.mocked(invoke).mockRejectedValueOnce({ code: "paste_failed", detail: "target rejected" });
+      expect(await useClipboardStore.getState().pasteContent(7)).toEqual({ status: "failed" });
+      expect(useClipboardStore.getState().items).toEqual([visible]);
+      expect(useClipboardStore.getState()._fetchId).toBe(0);
+    });
+
+    it("validates native shortcut failures, reports once, and stops on cleanup", async () => {
+      render(createElement(Toaster));
+      let onFailure!: EventCallback<unknown>;
+      vi.mocked(listen).mockImplementation(async (event, handler) => {
+        if (event === "clipboard-operation-failed") onFailure = handler as EventCallback<unknown>;
+        return () => {};
+      });
+      const stop = await useClipboardStore.getState().setupListener();
+      act(() => onFailure({ event: "clipboard-operation-failed", id: 1, payload: { operation: "paste", error: "raw unsafe" } }));
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      const failure = { operation: "paste", error: { code: "resource_missing", detail: "private path" } };
+      act(() => onFailure({ event: "clipboard-operation-failed", id: 1, payload: failure }));
+      await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+      expect(screen.getByRole("alert")).toHaveTextContent(t("operationFeedback.reasons.resource_missing"));
+      expect(screen.getByRole("alert")).not.toHaveTextContent("private path");
+      stop();
+      act(() => onFailure({ event: "clipboard-operation-failed", id: 1, payload: failure }));
+      expect(screen.getAllByRole("alert")).toHaveLength(1);
     });
   });
 

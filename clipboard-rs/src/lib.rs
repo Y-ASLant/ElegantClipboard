@@ -7,6 +7,8 @@ pub use common::{ClipboardContent, ClipboardHandler, ContentFormat, Result};
 pub use image::imageops::FilterType;
 #[cfg(target_os = "linux")]
 pub use platform::ClipboardContextX11Options;
+#[cfg(target_os = "windows")]
+pub use platform::{ClipboardAccessError, ClipboardFormatUnsupportedError};
 pub use platform::{ClipboardContext, ClipboardWatcherContext, WatcherShutdown};
 
 pub trait Clipboard: Send {
@@ -39,8 +41,8 @@ pub trait Clipboard: Send {
 	#[cfg(feature = "image")]
 	fn get_image(&self) -> Result<RustImageData>;
 
-	/// Like `get_image`, but also returns the raw CF_DIB bytes (if available)
-	/// so the caller can preserve the original DIB data for lossless round-trips.
+	/// Like `get_image`, but also returns the raw Windows CF_DIB bytes (if available)
+	/// for lossless round-trips. Other platforms return the decoded image and `None`.
 	#[cfg(feature = "image")]
 	fn get_image_dib(&self) -> Result<(RustImageData, Option<Vec<u8>>)>;
 
@@ -48,6 +50,7 @@ pub trait Clipboard: Send {
 
 	fn get(&self, formats: &[ContentFormat]) -> Result<Vec<ClipboardContent>>;
 
+	/// Windows rejects empty raw buffers before changing the clipboard.
 	fn set_buffer(&self, format: &str, buffer: Vec<u8>) -> Result<()>;
 
 	fn set_text(&self, text: String) -> Result<()>;
@@ -59,8 +62,8 @@ pub trait Clipboard: Send {
 	#[cfg(feature = "image")]
 	fn set_image(&self, image: RustImageData) -> Result<()>;
 
-	/// Like `set_image`, but also writes the original CF_DIB bytes (if provided)
-	/// so that Photoshop and other professional apps can read the image.
+	/// Like `set_image`, but also writes the original Windows CF_DIB bytes (if provided).
+	/// Other platforms reject `Some` DIB data without modifying the clipboard.
 	#[cfg(feature = "image")]
 	fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()>;
 

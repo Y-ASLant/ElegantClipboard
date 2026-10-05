@@ -1,26 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createElement } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { act, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Toaster } from "@/components/ui/toast";
+import { t } from "@/i18n";
 import { translateText, getLanguages, getProviderOptions } from "./translate";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn((command: string, args?: Record<string, unknown>) => {
+  invoke: vi.fn((command: string) => {
     if (command === "translate_text") {
       return Promise.resolve("Translated text");
     }
     return Promise.resolve();
   }),
-}));
-
-vi.mock("@/i18n", () => ({
-  t: (key: string, params?: Record<string, string>) => {
-    if (params) {
-      return Object.entries(params).reduce((acc, [k, v]) => acc.replace(`{{${k}}}`, v), key);
-    }
-    return key;
-  },
-}));
-
-vi.mock("@/lib/logger", () => ({
-  logError: vi.fn(),
 }));
 
 const mockGetState = vi.fn().mockReturnValue({
@@ -77,6 +69,8 @@ describe("translate", () => {
 
   describe("translateText", () => {
     beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      vi.mocked(invoke).mockResolvedValue("Translated text");
       mockGetState.mockReturnValue({
         enabled: true,
         languageMode: "auto",
@@ -95,6 +89,8 @@ describe("translate", () => {
       });
     });
 
+    afterEach(() => vi.restoreAllMocks());
+
     it("translates text successfully", async () => {
       const result = await translateText("Hello");
       expect(result).toBe("Translated text");
@@ -105,8 +101,25 @@ describe("translate", () => {
         ...mockGetState(),
         enabled: false,
       });
-      await expect(translateText("Hello")).rejects.toThrow("translate.errors.FEATURE_DISABLED");
+      await expect(translateText("Hello")).rejects.toThrow(t("translate.errors.FEATURE_DISABLED"));
     });
+
+    it("preserves localized provider errors without exposing their diagnostic details or showing a second notification", async () => {
+      render(createElement(Toaster));
+      vi.mocked(invoke).mockRejectedValue("TRANSLATE:FEATURE_DISABLED:password=secret");
+      await act(async () => {
+        await expect(translateText("Hello")).rejects.toThrow(t("translate.errors.FEATURE_DISABLED"));
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(console.error).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["password=secret", "TRANSLATE:UNKNOWN_CODE:password=secret", new Error("password=secret"), { credentials: "secret" }])(
+      "localizes unrecognized translation failures safely: %j", async (error) => {
+        vi.mocked(invoke).mockRejectedValue(error);
+        await expect(translateText("Hello")).rejects.toThrow(t("operationFeedback.unknownReason"));
+      },
+    );
 
     it("uses manual language mode", async () => {
       mockGetState.mockReturnValue({

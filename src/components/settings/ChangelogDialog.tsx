@@ -14,6 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useTranslation } from "@/i18n";
+import { logError } from "@/lib/logger";
+import { getOperationErrorMessage } from "@/lib/operation-feedback";
 
 interface VersionReleaseNotes {
   version: string;
@@ -51,7 +53,8 @@ export function ChangelogDialog({
       setNotes(result);
       setStatus("ready");
     } catch (e) {
-      setErrorMsg(String(e));
+      logError("Failed to load release notes", e);
+      setErrorMsg(getOperationErrorMessage(e));
       setStatus("error");
     }
   }, [version]);

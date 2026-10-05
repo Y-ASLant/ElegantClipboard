@@ -3,7 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import debounce from "lodash.debounce";
 import { create } from "zustand";
 import { cancelPendingFocusRestore } from "@/hooks/useInputFocus";
+import { t } from "@/i18n";
 import { logError } from "@/lib/logger";
+import { runClipboardOperation, reportOperationError, reportUserError, isOperationError, type ClipboardOperation, type OperationResult } from "@/lib/operation-feedback";
 import { playCopySound, setupPasteSoundListeners } from "@/lib/sounds";
 import { useUISettings } from "@/stores/ui-settings";
 
@@ -37,8 +39,6 @@ export interface ClipboardItem {
   source_app_icon: string | null;
   /** 所属自定义分组 ID（null = 默认分组） */
   group_id: number | null;
-  /** 所有文件是否存在（仅 files 类型，查询时计算） */
-  files_valid?: boolean;
 }
 
 interface ClipboardState {
@@ -61,22 +61,23 @@ interface ClipboardState {
     content_type?: string;
     limit?: number;
     offset?: number;
+    feedbackOperation?: ClipboardOperation;
   }) => Promise<void>;
   setSearchQuery: (query: string) => void;
   setSelectedGroup: (group: string | null) => void;
   setSelectedGroupId: (groupId: number | null) => void;
   setActiveIndex: (index: number) => void;
-  togglePin: (id: number) => Promise<void>;
-  toggleFavorite: (id: number) => Promise<void>;
-  moveItem: (fromId: number, toId: number) => Promise<void>;
-  moveFavoriteItem: (fromId: number, toId: number) => Promise<void>;
-  deleteItem: (id: number) => Promise<void>;
-  copyToClipboard: (id: number) => Promise<void>;
-  pasteContent: (id: number) => Promise<void>;
-  pasteAsPlainText: (id: number) => Promise<void>;
-  /** 清空当前分组历史，返回删除条数；失败返回 null */
-  clearHistory: (contentType?: string | null) => Promise<number | null>;
-  refresh: () => Promise<void>;
+  togglePin: (id: number) => Promise<OperationResult<boolean>>;
+  toggleFavorite: (id: number) => Promise<OperationResult<boolean>>;
+  moveItem: (fromId: number, toId: number) => Promise<OperationResult>;
+  moveFavoriteItem: (fromId: number, toId: number) => Promise<OperationResult>;
+  deleteItem: (id: number) => Promise<OperationResult>;
+  copyToClipboard: (id: number) => Promise<OperationResult>;
+  pasteContent: (id: number) => Promise<OperationResult>;
+  pasteAsPlainText: (id: number) => Promise<OperationResult>;
+  /** 清空当前分组历史，成功时返回删除条数 */
+  clearHistory: (contentType?: string | null) => Promise<OperationResult<number>>;
+  refresh: (feedbackOperation?: ClipboardOperation) => Promise<void>;
   /** 重置视图：清除搜索、类型筛选，滚动到顶部，刷新 */
   resetView: () => Promise<void>;
   setupListener: () => Promise<() => void>;
@@ -89,24 +90,23 @@ interface ClipboardState {
   toggleSelect: (id: number, index: number, shiftKey: boolean) => void;
   selectAll: () => void;
   deselectAll: () => void;
-  batchDelete: () => Promise<void>;
+  batchDelete: () => Promise<OperationResult>;
 }
 
 async function doPaste(
   get: () => ClipboardState,
   id: number,
-  command: "paste_content" | "paste_content_as_plain",
-) {
-  try {
-    cancelPendingFocusRestore();
-    const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
-    await invoke(command, { id, closeWindow: pasteCloseWindow });
-    if (pasteMoveToTop) {
-      invoke("bump_item_to_top", { id }).then(() => get().refresh()).catch((e) => logError("Failed to bump item to top:", e));
-    }
-  } catch (error) {
-    logError(`Failed to ${command}:`, error);
+  operation: "paste" | "pastePlain",
+): Promise<OperationResult> {
+  cancelPendingFocusRestore();
+  const { pasteCloseWindow, pasteMoveToTop } = useUISettings.getState();
+  const result = await runClipboardOperation(operation, { id, closeWindow: pasteCloseWindow });
+  if (result.status === "success" && pasteMoveToTop) {
+    void runClipboardOperation("reorder", { id }).then((reordered) => {
+      if (reordered.status === "success") return get().refresh("reorder");
+    }).catch((error) => reportOperationError("reorder", error));
   }
+  return result;
 }
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
@@ -140,7 +140,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }
     } catch (error) {
       if (get()._fetchId === fetchId) {
-        logError("Failed to fetch items:", error);
+        if (options.feedbackOperation) reportUserError(t("operationFeedback.refreshAfterSuccess"), error, `Refresh after '${options.feedbackOperation}' failed`);
+        else logError("Failed to fetch items:", error);
         set({ isLoading: false });
       }
     }
@@ -180,97 +181,66 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     set({ activeIndex: index });
   },
 
-  togglePin: async (id: number) => {
-    try {
-      await invoke<boolean>("toggle_pin", { id });
-      // 刷新以获取正确排序（置顶优先）
-      await get().refresh();
-    } catch (error) {
-      logError("Failed to toggle pin:", error);
-    }
+  togglePin: async (id) => {
+    const result = await runClipboardOperation<boolean>("pin", { id });
+    if (result.status === "success") await get().refresh("pin");
+    return result;
   },
 
-  toggleFavorite: async (id: number) => {
-    try {
-      const newState = await invoke<boolean>("toggle_favorite", { id });
-      // 在收藏视图中取消收藏时，需要刷新列表以移除该条目
-      if (!newState && get().selectedGroup === "__favorites__") {
-        await get().refresh();
+  toggleFavorite: async (id) => {
+    const result = await runClipboardOperation<boolean>("favorite", { id });
+    if (result.status === "success") {
+      if (!result.value && get().selectedGroup === "__favorites__") {
+        await get().refresh("favorite");
       } else {
         set((state) => ({
           items: state.items.map((item) =>
-            item.id === id ? { ...item, is_favorite: newState } : item
+            item.id === id ? { ...item, is_favorite: result.value } : item
           ),
         }));
       }
-    } catch (error) {
-      logError("Failed to toggle favorite:", error);
     }
+    return result;
   },
 
-  moveItem: async (fromId: number, toId: number) => {
-    try {
-      await invoke("move_clipboard_item", { fromId, toId });
-      // 刷新以获取更新后的顺序
-      await get().refresh();
-    } catch (error) {
-      logError("Failed to move item:", error);
+  moveItem: async (fromId, toId) => {
+    const result = await runClipboardOperation("move", { fromId, toId });
+    if (result.status === "success") await get().refresh("move");
+    return result;
+  },
+
+  moveFavoriteItem: async (fromId, toId) => {
+    const result = await runClipboardOperation("moveFavorite", { fromId, toId });
+    if (result.status === "success") await get().refresh("moveFavorite");
+    return result;
+  },
+
+  deleteItem: async (id) => {
+    const result = await runClipboardOperation("delete", { id });
+    if (result.status === "success") {
+      set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
     }
+    return result;
   },
 
-  moveFavoriteItem: async (fromId: number, toId: number) => {
-    try {
-      await invoke("move_favorite_clipboard_item", { fromId, toId });
-      await get().refresh();
-    } catch (error) {
-      logError("Failed to move favorite item:", error);
-    }
-  },
+  copyToClipboard: (id) => runClipboardOperation("copy", { id }),
 
-  deleteItem: async (id: number) => {
-    try {
-      await invoke("delete_clipboard_item", { id });
-      set((state) => ({
-        items: state.items.filter((item) => item.id !== id),
-      }));
-    } catch (error) {
-      logError("Failed to delete item:", error);
-    }
-  },
+  pasteContent: (id) => doPaste(get, id, "paste"),
 
-  copyToClipboard: async (id: number) => {
-    try {
-      await invoke("copy_to_clipboard", { id });
-    } catch (error) {
-      logError("Failed to copy to clipboard:", error);
-    }
-  },
-
-  pasteContent: async (id: number) => {
-    await doPaste(get, id, "paste_content");
-  },
-
-  pasteAsPlainText: async (id: number) => {
-    await doPaste(get, id, "paste_content_as_plain");
-  },
+  pasteAsPlainText: (id) => doPaste(get, id, "pastePlain"),
 
   // contentType=null 时后端 Option<String> 为 None，清除所有类型（正确行为）
   clearHistory: async (contentType = null) => {
-    try {
-      const deleted = await invoke<number>("clear_history", {
-        groupId: get().selectedGroupId,
-        contentType,
-      });
-      await get().refresh();
-      return deleted;
-    } catch (error) {
-      logError("Failed to clear history:", error);
-      return null;
-    }
+    const result = await runClipboardOperation<number>("clear", {
+      groupId: get().selectedGroupId,
+      contentType,
+    });
+    if (result.status === "success") await get().refresh("clear");
+    return result;
   },
 
-  refresh: async () => {
-    await get().fetchItems();
+  refresh: async (feedbackOperation) => {
+    await get().fetchItems({ feedbackOperation });
   },
 
   resetView: async () => {
@@ -310,17 +280,33 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
     const unlisten = await listen<number>("clipboard-updated", (event) => {
       const id = event.payload;
-      if (typeof id !== "number" || !Number.isFinite(id)) {
+      if (disposed || typeof id !== "number" || !Number.isFinite(id)) {
         return;
       }
       playCopySound("immediate");
       void debouncedCaptureUpdate();
+    }).catch((error) => {
+      unlistenPasteSound();
+      throw error;
+    });
+    const unlistenFailure = await listen<unknown>("clipboard-operation-failed", ({ payload }) => {
+      if (disposed || typeof payload !== "object" || payload === null ||
+          !("operation" in payload) || payload.operation !== "paste" ||
+          !("error" in payload) || !isOperationError(payload.error)) return;
+      reportOperationError("paste", payload.error);
+    }).catch((error) => {
+      disposed = true;
+      debouncedCaptureUpdate.cancel();
+      unlistenPasteSound();
+      unlisten();
+      throw error;
     });
     return () => {
       disposed = true;
       debouncedCaptureUpdate.cancel();
       unlistenPasteSound();
       unlisten();
+      unlistenFailure();
     };
   },
 
@@ -361,14 +347,13 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   batchDelete: async () => {
     const { selectedIds } = get();
-    if (selectedIds.size === 0) return;
-    try {
-      await invoke("batch_delete_clipboard_items", { ids: Array.from(selectedIds) });
+    if (selectedIds.size === 0) return { status: "cancelled" };
+    const result = await runClipboardOperation("batchDelete", { ids: Array.from(selectedIds) });
+    if (result.status === "success") {
       set({ ...batchResetState() });
-      await get().refresh();
-    } catch (error) {
-      logError("Failed to batch delete:", error);
+      await get().refresh("batchDelete");
     }
+    return result;
   },
 }));
 

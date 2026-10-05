@@ -3,13 +3,15 @@ use crate::common::Result;
 use crate::common::{RustImage, RustImageData};
 use crate::{Clipboard, ClipboardContent, ClipboardHandler, ClipboardWatcher, ContentFormat};
 use objc2::rc::Retained;
+#[cfg(feature = "image")]
 use objc2::AllocAnyThread;
 use objc2::ClassType;
 use objc2::{rc::autoreleasepool, runtime::ProtocolObject};
+#[cfg(feature = "image")]
+use objc2_app_kit::{NSImage, NSPasteboardTypePNG, NSPasteboardTypeTIFF};
 use objc2_app_kit::{
-	NSImage, NSPasteboard, NSPasteboardItem, NSPasteboardType, NSPasteboardTypeFileURL,
-	NSPasteboardTypeHTML, NSPasteboardTypePNG, NSPasteboardTypeRTF, NSPasteboardTypeString,
-	NSPasteboardTypeTIFF,
+	NSPasteboard, NSPasteboardItem, NSPasteboardType, NSPasteboardTypeFileURL,
+	NSPasteboardTypeHTML, NSPasteboardTypeRTF, NSPasteboardTypeString,
 };
 use objc2_foundation::{NSArray, NSData, NSString, NSURL};
 use std::ffi::c_void;
@@ -30,7 +32,7 @@ pub struct ClipboardWatcherContext<T: ClipboardHandler> {
 	interval: Duration,
 }
 
-unsafe impl<T: ClipboardHandler> Send for ClipboardWatcherContext<T> {}
+unsafe impl<T: ClipboardHandler + Send> Send for ClipboardWatcherContext<T> {}
 
 /// Default polling interval. macOS exposes no clipboard-change event, so the
 /// watcher polls `NSPasteboard.changeCount`; this is the wait between polls.
@@ -60,7 +62,7 @@ impl<T: ClipboardHandler> ClipboardWatcherContext<T> {
 	}
 }
 
-impl<T: ClipboardHandler> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
+impl<T: ClipboardHandler + Send> ClipboardWatcher<T> for ClipboardWatcherContext<T> {
 	fn add_handler(&mut self, handler: T) -> &mut Self {
 		self.handlers.push(handler);
 		self
@@ -196,17 +198,16 @@ impl ClipboardContext {
 					}
 					#[cfg(feature = "image")]
 					ClipboardContent::Image(image) => {
-						if let Ok(png_buffer) = image.to_png() {
-							let bytes = png_buffer.get_bytes();
-							let ns_data = unsafe {
-								NSData::dataWithBytes_length(
-									bytes.as_ptr() as *mut c_void,
-									bytes.len(),
-								)
-							};
-							item.setData_forType(&ns_data, unsafe { NSPasteboardTypePNG });
-							has_content_other_than_files = true;
+						let png_buffer = image.to_png()?;
+						let bytes = png_buffer.get_bytes();
+						let ns_data = unsafe {
+							NSData::dataWithBytes_length(
+								bytes.as_ptr() as *const c_void,
+								bytes.len(),
+							)
 						};
+						item.setData_forType(&ns_data, unsafe { NSPasteboardTypePNG });
+						has_content_other_than_files = true;
 					}
 					ClipboardContent::Files(files) => {
 						// Files are set seperately
@@ -466,7 +467,10 @@ impl Clipboard for ClipboardContext {
 	}
 
 	#[cfg(feature = "image")]
-	fn set_image_with_dib(&self, image: RustImageData, _dib_data: Option<&[u8]>) -> Result<()> {
+	fn set_image_with_dib(&self, image: RustImageData, dib_data: Option<&[u8]>) -> Result<()> {
+		if dib_data.is_some() {
+			return Err("CF_DIB is only supported on Windows".into());
+		}
 		self.set_image(image)
 	}
 
