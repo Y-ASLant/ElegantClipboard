@@ -1,6 +1,6 @@
 # Features
 
-Main features of the current `main` branch. Defaults refer to fresh settings; saved preferences may differ.
+Main features of the current `main` branch (Tauri + React, preparing v1.2.9). Defaults refer to fresh settings; saved preferences may differ. See the [release changelog](docs/Changlog.md#v129) for this version's changes; the separate GPUI 2.0 implementation is not included.
 For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may differ from the latest version).
 
 ## Terminology
@@ -146,6 +146,7 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Download progress** - Show download progress, cancelable
 - **Changelog** - Display release notes
 - **System proxy support** - Update checks and downloads read Windows system proxy configuration; connectivity still depends on the network and proxy
+- **GPUI rewrite entry** - Settings → About provides a “Discover the 2.0 rewrite · GPUI” link that opens the [GPUI branch](https://github.com/Y-ASLant/ElegantClipboard/tree/gpui) in the default browser; it does not download, install, or automatically switch architectures
 
 ## System Integration
 

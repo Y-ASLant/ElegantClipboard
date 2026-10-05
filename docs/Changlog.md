@@ -1,9 +1,11 @@
 # ElegantClipboard 更新日志
 
-## v1.2.8
+## v1.2.9
 **状态：** 待发布
 
-- feat: 关于软件页底部新增「全新 2.0 重构版本 · GPUI」入口，通过默认浏览器打开 GPUI 分支；同步简体中文、繁体中文和英文文案
+本次为 Tauri + React 1.x 分支的可靠性修复版本，变更范围为 `v1.2.8` 标签之后的改动。GPUI 2.0 为独立重构分支，本版本仅新增入口，不切换架构。
+
+- feat: 关于软件页底部新增「全新 2.0 重构版本 · GPUI」入口，通过默认浏览器打开 [GPUI 分支](https://github.com/Y-ASLant/ElegantClipboard/tree/gpui)；同步简体中文、繁体中文和英文文案
 - test: 清理 WebDAV 操作测试中的未使用导入，修复 TypeScript 检查失败；移除要求向用户显示原始诊断文本的过时用例，错误脱敏继续由独立回归测试覆盖
 - fix: 文件预览大小限制不再跳过有效性检查；窗口显示和打开右键菜单时批量复查可见文件卡片，原文件与暂存副本均不可用时显示「已失效」并禁用另存为等文件操作，检查期间不使用旧状态放行
 - fix: 文件与缓存图片的资源结果增加有容量上限的会话缓存，虚拟滚动重新挂载、窗口显示及右键复查保留上次标签，避免「已失效 → 检测中 → 已失效」闪烁；复查状态与显示结果分离，检查期间仍禁用资源操作，失败清除缓存并显示未知
@@ -16,6 +18,11 @@
 - fix: Windows 原始空格式明确在写入前拒绝，不再把未发布的数据当成功；资源存在性与剪贴板 payload 能力独立，已有文件仍可保存/定位
 - chore: 应用、测试、配置/E2E 类型检查和全量 lint 纳入质量门禁；应用及分叉默认/无默认 feature 格式、Clippy 与测试统一，警告均阻断验收
 - docs: 核对并更新中英文使用与功能文档、项目架构说明、i18n 和 clipboard-rs 分叉文档；移除过时实现、已完成待办、失效示例及未经测量的性能承诺，保留明确标注版本的历史发布记录
+
+## v1.2.8
+
+以下改动已包含在 [v1.2.8 标签](https://github.com/Y-ASLant/ElegantClipboard/tree/v1.2.8)中，不属于 v1.2.9 新增内容。
+
 - fix: 修复 Shift+Insert 粘贴未标记独立 Insert 扩展键而导致 Shift 状态丢失；检查 SendInput 返回值，并在注入失败时释放本次补按的修饰键 https://github.com/Y-ASLant/ElegantClipboard/issues/149
 - fix: 浏览器复制单张图片时按图片记录，保留带文字内容的富文本优先策略 https://github.com/Y-ASLant/ElegantClipboard/issues/163
 - fix: 应用内更新使用标准 UAC 提权启动安装器，取消授权或启动失败时保留当前会话 https://github.com/Y-ASLant/ElegantClipboard/issues/156
@@ -33,7 +40,6 @@
 - chore: 更新现有兼容范围内的前后端依赖（React 19.3、Tauri 2.12.1、Radix UI、Tailwind CSS 4.3.3、Playwright 1.63）；保留 TypeScript 6、Vitest 4、jsdom 29 与本地 clipboard-rs 分叉
 - chore: 配套 Tauri 2.12 同步 Windows/windows-core 0.62 与 webview2-com 0.39，避免不同 COM 绑定版本造成类型不兼容；上游依赖更新移除 unic-* 停止维护告警
 - fix: 自定义 NSIS 模板适配新版 Tauri 的 Restart Manager 进程检查，加载所需宏并传入安装目录下可执行文件的完整路径，修复安装包生成失败
-- ci: Clippy 与本地 `make check` 改为仅将正确性 lint 作为错误门禁，保留普通警告输出；编译错误、格式检查和测试失败仍阻断验收
 
 ## v1.2.7
 **发布日期：** 2026年8月9日

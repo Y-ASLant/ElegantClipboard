@@ -27,6 +27,18 @@
   <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
+## v1.2.9（发布准备）
+
+本次是 Tauri + React 1.x 分支的可靠性修复版本，相比 v1.2.8：
+
+- **操作结果可信**：复制、粘贴、合并和快捷键统一执行前检查；失败不再显示成功，取消另存为不误报，操作成功后的刷新失败单独提示。
+- **资源状态更稳定**：区分资源缺失与预览失败；窗口显示、右键菜单和虚拟滚动重新挂载时复查，最多记住 512 个资源来源的结果，保留旧标签直至检查完成，避免「已失效」反复闪烁。复查期间仍禁用相关资源操作。
+- **文件操作更安全**：另存为与资源管理器定位按条目 ID 重新解析当前资源，不信任卡片缓存的旧路径；已有文件不会因不支持的剪贴板载荷而无法保存或定位。
+- **图片与错误处理修复**：修复 DIB V4/V5 解码，明确报告剪贴板访问失败，并在写入前拒绝 Windows 不支持的零字节原始格式；用户错误提示支持三语，内部诊断不直接展示。
+- **GPUI 2.0 入口**：设置 → 关于软件可打开独立的 [GPUI 重构分支](https://github.com/Y-ASLant/ElegantClipboard/tree/gpui)，本次更新不切换到 GPUI。
+
+完整变更见 [v1.2.9 更新日志](docs/Changlog.md#v129)。发布准备不代表安装包已经发布；可下载版本以 [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) 为准。
+
 ## 界面截图（v0.5.0）
 
 ### 外观主题
@@ -229,15 +241,19 @@ npm run test:e2e
 
 ```powershell
 # 统一修改三处版本号（package.json, tauri.conf.json, Cargo.toml）
-.\scripts\bump-version.ps1 0.5.0
+.\scripts\bump-version.ps1 1.2.9
 ```
 
-或直接推送 tag，Release workflow 自动同步版本号并构建：
+也可以不预先修改本地版本号：确认要发布的改动已提交后，推送 tag，Release workflow 会在构建工作区自动同步版本号并构建：
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v1.2.9
+git push origin v1.2.9
 ```
+
+发布前执行 `make check`、`make test`、`make build`，并在原生 Windows 桌面验证复制/粘贴、两种粘贴按键、失效文件复查、另存为取消与从上一版本升级。若本地验收安装包需要显示 `1.2.9`，先运行上面的版本脚本再构建；不要把开发占位版本的包作为正式包上传。
+
+工作流创建的是 **Release 草稿**，正文不会自动读取更新日志。待 x64 / arm64 安装版和便携版产物齐全后，将 [v1.2.9 更新日志](docs/Changlog.md#v129)中的本版内容填入草稿，核对版本与产物，完成验收后再发布，并把日志中的「待发布」改为实际发布日期。GPUI 2.0 不是本次 1.2.9 的安装包或自动更新目标。
 
 ## 数据存储
 
