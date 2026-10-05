@@ -27,18 +27,6 @@ The features, screenshots, and build instructions below apply to the `main` bran
   <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-## v1.2.9 (Release Preparation)
-
-This is a reliability update for the Tauri + React 1.x branch. Changes since v1.2.8:
-
-- **Trustworthy operation results**: Copy, paste, merge, and shortcut actions share preflight checks. Failures no longer appear successful, cancelling Save As stays silent, and a refresh failure after a successful operation is reported separately.
-- **Stable resource status**: Missing resources are distinct from failed previews. Window reopening, context menus, and virtualized remounts recheck resources while retaining previous labels for up to 512 cached resource sources, avoiding repeated invalid-marker flicker. Related resource actions remain disabled during rechecks.
-- **Safer file actions**: Save As and Show in Explorer resolve current resources by item ID rather than trusting a card's cached path. An unsupported clipboard payload no longer prevents saving or locating an existing file.
-- **Image and error-handling fixes**: Correct DIB V4/V5 decoding, report clipboard access failures, and reject unsupported zero-byte raw Windows formats before writing. User-facing errors support all three languages without exposing internal diagnostics.
-- **GPUI 2.0 entry**: Settings → About links to the separate [GPUI rewrite branch](https://github.com/Y-ASLant/ElegantClipboard/tree/gpui). This update does not switch to GPUI.
-
-See the [full v1.2.9 changelog (Chinese)](docs/Changlog.md#v129). Release preparation does not mean installers have been published; check [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) for available downloads.
-
 ## UI Screenshots (v0.5.0)
 
 ### Themes

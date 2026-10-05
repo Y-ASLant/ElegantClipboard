@@ -27,18 +27,6 @@
   <a href="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml"><img src="https://github.com/Y-ASLant/ElegantClipboard/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
-## v1.2.9（发布准备）
-
-本次是 Tauri + React 1.x 分支的可靠性修复版本，相比 v1.2.8：
-
-- **操作结果可信**：复制、粘贴、合并和快捷键统一执行前检查；失败不再显示成功，取消另存为不误报，操作成功后的刷新失败单独提示。
-- **资源状态更稳定**：区分资源缺失与预览失败；窗口显示、右键菜单和虚拟滚动重新挂载时复查，最多记住 512 个资源来源的结果，保留旧标签直至检查完成，避免「已失效」反复闪烁。复查期间仍禁用相关资源操作。
-- **文件操作更安全**：另存为与资源管理器定位按条目 ID 重新解析当前资源，不信任卡片缓存的旧路径；已有文件不会因不支持的剪贴板载荷而无法保存或定位。
-- **图片与错误处理修复**：修复 DIB V4/V5 解码，明确报告剪贴板访问失败，并在写入前拒绝 Windows 不支持的零字节原始格式；用户错误提示支持三语，内部诊断不直接展示。
-- **GPUI 2.0 入口**：设置 → 关于软件可打开独立的 [GPUI 重构分支](https://github.com/Y-ASLant/ElegantClipboard/tree/gpui)，本次更新不切换到 GPUI。
-
-完整变更见 [v1.2.9 更新日志](docs/Changlog.md#v129)。发布准备不代表安装包已经发布；可下载版本以 [Releases](https://github.com/Y-ASLant/ElegantClipboard/releases) 为准。
-
 ## 界面截图（v0.5.0）
 
 ### 外观主题
