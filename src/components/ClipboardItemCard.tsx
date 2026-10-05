@@ -242,14 +242,15 @@ export const ClipboardItemCard = memo(function ClipboardItemCard({
 
   const {
     availability,
+    isChecking,
     clipboardUsable,
     paths: effectiveFilePaths,
     originalPaths: filePaths,
     tooLarge,
     refresh: refreshResourceStatus,
   } = useItemResourceStatus(item, !isDragOverlay);
-  const contentOperationsDisabled = availability !== "available" || !clipboardUsable;
-  const pathOperationsDisabled = availability !== "available" || effectiveFilePaths.length === 0;
+  const contentOperationsDisabled = isChecking || availability !== "available" || !clipboardUsable;
+  const pathOperationsDisabled = isChecking || availability !== "available" || effectiveFilePaths.length === 0;
   const isTextLikeContent = item.content_type !== "files" && item.content_type !== "image";
 
   const {

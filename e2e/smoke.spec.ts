@@ -121,3 +121,85 @@ test("failed keyboard deletion keeps the chosen item and both records", async ({
   await page.keyboard.press("Enter");
   await expect.poll(() => selected).toBe(2);
 });
+
+test("resource markers survive virtual scrolling and refresh without authorizing stale operations", async ({ page }) => {
+  const missingIds = [1];
+  await installTauriFixture(page, {
+    items: [
+      fixtureItem(1, "files", "E:\\fixture\\remembered.exe"),
+      ...Array.from({ length: 80 }, (_, index) => fixtureItem(index + 2, "text", `scroll entry ${index}`)),
+    ],
+    missingIds,
+  });
+  await page.goto("/");
+  const invalid = page.getByText("(已失效)", { exact: true });
+  await expect(invalid).toBeVisible();
+
+  let release!: () => void;
+  let pending = new Promise<void>((resolve) => { release = resolve; });
+  let checks = 0;
+  await page.exposeFunction("__holdResourceCheck", async () => {
+    checks++;
+    await pending;
+  });
+  await page.evaluate(() => {
+    // The fixture and gate are installed above, before wrapping this transport.
+    const fixture = window as unknown as Window & {
+      __fixtureInvoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+      __holdResourceCheck: () => Promise<void>;
+      __resourceChecksCompleted?: number;
+    };
+    const invoke = fixture.__fixtureInvoke;
+    fixture.__fixtureInvoke = async (command, args) => {
+      if (command === "batch_get_item_file_status") await fixture.__holdResourceCheck();
+      const result = await invoke(command, args);
+      if (command === "batch_get_item_file_status") {
+        fixture.__resourceChecksCompleted = (fixture.__resourceChecksCompleted ?? 0) + 1;
+      }
+      return result;
+    };
+  });
+
+  const viewport = page.locator(".scroll-fade-container [data-overlayscrollbars-viewport]");
+  await viewport.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  await expect(invalid).toHaveCount(0);
+  await expect(page.getByText("scroll entry 79", { exact: true })).toBeVisible();
+  await viewport.evaluate((element) => { element.scrollTop = 0; });
+  await expect.poll(() => checks).toBeGreaterThan(0);
+  await expect(invalid).toBeVisible();
+  const copy = page.getByRole("button", { name: "复制", exact: true }).first();
+  await expect(copy).toBeDisabled();
+  await page.screenshot({ path: "test-results/resource-status-remount.png" });
+  release();
+  // Wait for the completed result before starting a distinct window-show refresh.
+  await expect.poll(async () => {
+    const completed = await page.evaluate(() =>
+      "__resourceChecksCompleted" in window ? window.__resourceChecksCompleted : 0,
+    );
+    return completed === checks;
+  }).toBe(true);
+
+  missingIds.length = 0;
+  const beforeWindowShown = checks;
+  pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.evaluate(() => {
+    const fixture = window as unknown as Window & { __fixtureEmit: (event: string, payload: unknown) => void };
+    fixture.__fixtureEmit("window-shown", null);
+  });
+  await expect.poll(() => checks).toBeGreaterThan(beforeWindowShown);
+  await expect(invalid).toBeVisible();
+  await expect(copy).toBeDisabled();
+  release();
+  await expect(invalid).toHaveCount(0);
+  await expect(copy).toBeEnabled();
+
+  const beforeMenuOpen = checks;
+  pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.locator("p").filter({ hasText: /^remembered\.exe/ }).first().click({ button: "right" });
+  await expect.poll(() => checks).toBeGreaterThan(beforeMenuOpen);
+  const save = page.getByRole("menuitem", { name: "另存为", exact: true });
+  await expect(save).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByRole("menuitem", { name: "粘贴", exact: true })).toHaveAttribute("aria-disabled", "true");
+  release();
+  await expect(save).not.toHaveAttribute("aria-disabled", "true");
+});

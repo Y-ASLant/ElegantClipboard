@@ -45,7 +45,8 @@ async function selectFileMenu(key: string) {
   fireEvent.keyDown(action, { key: "Enter" });
 }
 
-beforeEach(() => {
+beforeEach(({ task }) => {
+  item.content_hash = task.name;
   exists = true;
   resolvedPath = originalPath;
   tooLarge = true;
@@ -105,7 +106,11 @@ describe("file card validity", () => {
     act(() => onWindowShown!({ event: "window-shown", id: 1, payload: null }));
     expect(await screen.findByText(t("cardContent.invalid"))).toBeInTheDocument();
     exists = true;
+    expect(screen.getByText(t("cardContent.invalid"))).toBeInTheDocument();
     act(() => onWindowShown!({ event: "window-shown", id: 1, payload: null }));
+    expect(screen.getByText(t("cardContent.invalid"))).toBeInTheDocument();
+    expect(screen.queryByText(t("cardContent.resourceChecking"))).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: t("clipboard.copy") })).toBeDisabled();
     expect(await screen.findByText(t("cardContent.fileTooLarge"))).toBeInTheDocument();
     expect(screen.queryByText(t("cardContent.invalid"))).not.toBeInTheDocument();
   });
@@ -117,6 +122,13 @@ describe("file card validity", () => {
     const save = await openMenu();
     expect(await screen.findByText(t("cardContent.invalid"))).toBeInTheDocument();
     expect(save).toHaveAttribute("aria-disabled", "true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    exists = true;
+    const recoveringSave = await openMenu();
+    expect(screen.getByText(t("cardContent.invalid"))).toBeInTheDocument();
+    expect(screen.queryByText(t("cardContent.resourceChecking"))).not.toBeInTheDocument();
+    expect(recoveringSave).toHaveAttribute("aria-disabled", "true");
+    await waitFor(() => expect(recoveringSave).not.toHaveAttribute("aria-disabled", "true"));
   });
 
   it("keeps a staged fallback usable but reports fresh save failure without success", async () => {

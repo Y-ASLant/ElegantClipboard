@@ -527,6 +527,7 @@ export const extended = {
       star: "Star on GitHub",
       feedback: "Feedback",
       submitIssue: "Submit issue",
+      gpuiRewrite: "Discover the 2.0 rewrite · GPUI",
     },
     update: {
       title: "Check for updates",

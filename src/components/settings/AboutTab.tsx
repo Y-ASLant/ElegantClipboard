@@ -92,6 +92,16 @@ export function AboutTab() {
           </div>
         </div>
       </SettingsCard>
+
+      <div className="shrink-0 py-1 text-center">
+        <button
+          type="button"
+          onClick={() => openUrl("https://github.com/Y-ASLant/ElegantClipboard/tree/gpui")}
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          {t("settings.about.gpuiRewrite")}
+        </button>
+      </div>
     </>
   );
 }

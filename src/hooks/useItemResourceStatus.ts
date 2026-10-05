@@ -22,6 +22,7 @@ export interface ItemFileStatus {
 
 export interface ItemResourceStatus {
   availability: ResourceAvailability;
+  isChecking: boolean;
   clipboardUsable: boolean;
   paths: string[];
   originalPaths: string[];
@@ -46,6 +47,14 @@ let pendingItemChecks: PendingItemCheck[] = [];
 let itemBatchTimer: number | null = null;
 let pendingImageChecks: PendingImageCheck[] = [];
 let imageBatchTimer: number | null = null;
+
+type ResourceSnapshot = Pick<ItemResourceStatus, "availability" | "paths" | "tooLarge" | "clipboardUsable">;
+interface CachedResource {
+  snapshot?: ResourceSnapshot;
+}
+// Display-only, bounded session memory. Every mount still checks native resources.
+const resourceCache = new Map<string, CachedResource>();
+const MAX_CACHED_RESOURCES = 512;
 
 function batchGetItemFileStatus(id: number): Promise<ItemFileStatus> {
   return new Promise((resolve, reject) => {
@@ -95,7 +104,7 @@ function batchCheckImagePath(path: string): Promise<FileCheckResult> {
   });
 }
 
-type ResourceItem = Pick<ClipboardItem, "id" | "content_type" | "file_paths" | "image_path" | "byte_size">;
+type ResourceItem = Pick<ClipboardItem, "id" | "content_type" | "file_paths" | "image_path" | "byte_size" | "content_hash">;
 
 export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemResourceStatus {
   const source = useMemo(() => {
@@ -107,8 +116,9 @@ export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemR
       ? "available"
       : !enabled ? "unknown"
         : item.content_type === "image" && !item.image_path ? "unavailable" : "checking";
-    return { id: item.id, contentType: item.content_type, originalPaths, needsCheck, availability };
-  }, [item.id, item.content_type, item.file_paths, item.image_path, item.byte_size, enabled]);
+    const key = JSON.stringify([item.id, item.content_type, item.file_paths, item.image_path, item.byte_size, item.content_hash]);
+    return { id: item.id, key, contentType: item.content_type, originalPaths, needsCheck, availability };
+  }, [item.id, item.content_type, item.file_paths, item.image_path, item.byte_size, item.content_hash, enabled]);
   const initialSnapshot = useMemo(() => ({
     source,
     availability: source.availability,
@@ -116,16 +126,32 @@ export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemR
     tooLarge: false,
     clipboardUsable: !source.needsCheck,
   }), [source]);
-  const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const mountSnapshot = useMemo(() => ({
+    ...initialSnapshot,
+    ...(enabled && source.needsCheck ? resourceCache.get(source.key)?.snapshot : undefined),
+    isChecking: source.availability === "checking",
+  }), [initialSnapshot, source, enabled]);
+  const [snapshot, setSnapshot] = useState(mountSnapshot);
   const activeSource = useRef<typeof source | null>(null);
   const requestGeneration = useRef(0);
 
   const refresh = useCallback(() => {
     if (activeSource.current !== source || !enabled || !source.needsCheck) return;
     const generation = ++requestGeneration.current;
-    // Drop the previous authorization before awaiting either native command.
-    setSnapshot(initialSnapshot);
-    if (source.contentType === "image" && source.originalPaths.length === 0) return;
+    const isChecking = source.availability === "checking";
+    // Preserve presentation, but revoke operation authorization until revalidated.
+    setSnapshot((previous) => ({
+      ...(previous.source === source ? previous : mountSnapshot),
+      isChecking,
+    }));
+    if (!isChecking) return;
+    const entry: CachedResource = { snapshot: resourceCache.get(source.key)?.snapshot };
+    resourceCache.delete(source.key);
+    resourceCache.set(source.key, entry);
+    if (resourceCache.size > MAX_CACHED_RESOURCES) {
+      const oldestKey = resourceCache.keys().next().value;
+      if (oldestKey !== undefined) resourceCache.delete(oldestKey);
+    }
 
     const request = source.contentType === "files"
       ? batchGetItemFileStatus(source.id).then((status) => ({
@@ -143,16 +169,18 @@ export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemR
     void request
       .then((result) => {
         if (activeSource.current === source && requestGeneration.current === generation) {
-          setSnapshot({ source, ...result });
+          if (resourceCache.get(source.key) === entry) entry.snapshot = result;
+          setSnapshot({ source, ...result, isChecking: false });
         }
       })
       .catch((error: unknown) => {
         if (activeSource.current === source && requestGeneration.current === generation) {
-          setSnapshot({ ...initialSnapshot, availability: "unknown" });
+          if (resourceCache.get(source.key) === entry) resourceCache.delete(source.key);
+          setSnapshot({ ...initialSnapshot, availability: "unknown", isChecking: false });
           logError("Failed to check item resource status:", error);
         }
       });
-  }, [source, initialSnapshot, enabled]);
+  }, [source, initialSnapshot, mountSnapshot, enabled]);
 
   useEffect(() => {
     activeSource.current = source;
@@ -177,10 +205,11 @@ export function useItemResourceStatus(item: ResourceItem, enabled = true): ItemR
 
   // Source changes must never expose the previous item's paths or authorization,
   // even during the render before its new effect has started.
-  const current = snapshot.source === source ? snapshot : initialSnapshot;
+  const current = snapshot.source === source ? snapshot : mountSnapshot;
   return {
     availability: current.availability,
-    clipboardUsable: current.clipboardUsable,
+    isChecking: current.isChecking,
+    clipboardUsable: !current.isChecking && current.clipboardUsable,
     paths: current.paths,
     originalPaths: source.originalPaths,
     tooLarge: current.tooLarge,

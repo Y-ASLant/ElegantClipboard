@@ -527,6 +527,7 @@ export const extended = {
       star: "给个Star",
       feedback: "反馈问题",
       submitIssue: "提交Issue",
+      gpuiRewrite: "全新 2.0 重构版本 · GPUI",
     },
     update: {
       title: "检查更新",
