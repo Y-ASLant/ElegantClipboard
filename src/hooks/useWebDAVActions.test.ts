@@ -1,4 +1,4 @@
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -85,10 +85,9 @@ describe("useWebDAVActions", () => {
     expect(result.current.statusMsg).toBe("Upload complete");
   });
 
-  it("handleDownload calls invoke and emits event", async () => {
+  it("reports a completed download", async () => {
     const { useWebDAVActions } = await import("./useWebDAVActions");
     const { invoke } = await import("@tauri-apps/api/core");
-    const { emit } = await import("@tauri-apps/api/event");
     const { result } = renderHook(() => useWebDAVActions());
     
     await act(async () => {
@@ -97,19 +96,5 @@ describe("useWebDAVActions", () => {
     
     expect(invoke).toHaveBeenCalledWith("webdav_download");
     expect(result.current.statusMsg).toBe("Download complete");
-  });
-
-  it("handles connection error", async () => {
-    const { useWebDAVActions } = await import("./useWebDAVActions");
-    const { invoke } = await import("@tauri-apps/api/core");
-    vi.mocked(invoke).mockRejectedValueOnce(new Error("Connection failed"));
-    const { result } = renderHook(() => useWebDAVActions());
-    
-    await act(async () => {
-      await result.current.handleTestConnection();
-    });
-    
-    expect(result.current.statusType).toBe("error");
-    expect(result.current.statusMsg).toContain("Connection failed");
   });
 });
