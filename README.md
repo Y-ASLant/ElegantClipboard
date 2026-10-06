@@ -46,6 +46,7 @@ docs/                  架构决策、功能状态和验收证据
 - Windows 10/11 x64
 - Rust 1.98 或更高版本，MSVC 工具链
 - 打包时需要 PowerShell 7（`pwsh`）
+- [`just`](https://github.com/casey/just)（可选，用于下文的快捷命令）
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked
@@ -54,7 +55,7 @@ cargo run -p elegant-clipboard-gpui --locked
 也可以使用：
 
 ```powershell
-make run
+just run
 ```
 
 默认数据位于当前用户 LocalAppData 下的 `ElegantClipboard-GPUI` 应用目录。测试或隔离运行可显式指定目录：
@@ -66,9 +67,9 @@ cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target
 ## 构建与验证
 
 ```powershell
-make check
-make test
-make build
+just check
+just test
+just build
 ```
 
 对应的 Release 可执行文件为 `target\release\elegant-clipboard-gpui.exe`。
@@ -76,7 +77,7 @@ make build
 生成未经签名的 Windows x64 独立 ZIP：
 
 ```powershell
-make package
+just package
 ```
 
 产物与 SHA-256 文件写入 `target\packages\`。当前不提供安装器、自动更新或 ARM64 制品。

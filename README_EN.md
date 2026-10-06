@@ -46,6 +46,7 @@ Requirements:
 - Windows 10/11 x64
 - Rust 1.98 or newer with the MSVC toolchain
 - PowerShell 7 (`pwsh`) for packaging
+- [`just`](https://github.com/casey/just) (optional, for the shortcut commands below)
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked
@@ -54,7 +55,7 @@ cargo run -p elegant-clipboard-gpui --locked
 Or use:
 
 ```powershell
-make run
+just run
 ```
 
 By default, data is stored in the `ElegantClipboard-GPUI` application directory under the current user's LocalAppData. For an isolated run, specify a directory explicitly:
@@ -66,9 +67,9 @@ cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target
 ## Build and verify
 
 ```powershell
-make check
-make test
-make build
+just check
+just test
+just build
 ```
 
 The release executable is written to `target\release\elegant-clipboard-gpui.exe`.
@@ -76,7 +77,7 @@ The release executable is written to `target\release\elegant-clipboard-gpui.exe`
 Create an unsigned Windows x64 standalone ZIP:
 
 ```powershell
-make package
+just package
 ```
 
 The archive and its SHA-256 file are written to `target\packages\`. Installers, automatic updates, and ARM64 artifacts are not currently provided.

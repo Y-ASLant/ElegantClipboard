@@ -26,6 +26,6 @@ cargo test --workspace --locked
 cargo build -p elegant-clipboard-gpui --release --locked
 ```
 
-Use `make check`, `make test`, and `make build` for the same normal workflow. Package only on Windows x64 with `make package`.
+Use `just check`, `just test`, and `just build` for the same normal workflow. Package only on Windows x64 with `just package`.
 
 Tests must use isolated temporary data and must not write to the user's real clipboard unless the test explicitly documents and contains that scope.
