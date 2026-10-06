@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.98"
 license = "MIT"
 
-# Direct dependencies checked against crates.io on 2026-09-27; gpui-kit on 2026-09-28.
+# Direct dependencies checked against crates.io on 2026-10-06.
 # Commit Cargo.lock; review `cargo update` at the start of each development batch.
 [workspace.dependencies]
 anyhow = "1.0.104"
@@ -19,10 +19,10 @@ chrono = "0.4.45"
 clipboard-rs = { version = "0.3.5", default-features = false, features = ["image"] }
 clipboard-win = "5.4.1"
 directories = "6.0.0"
-gpui-kit = "0.7.0"
+gpui-kit = "0.7.1"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 raw-window-handle = "0.6.2"
-tray-icon = { version = "0.25.1", default-features = false }
+tray-icon = { version = "0.26.0", default-features = false }
 parking_lot = "0.12.5"
 rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
 serde = { version = "1.0.229", features = ["derive"] }
