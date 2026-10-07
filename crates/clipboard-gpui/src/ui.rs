@@ -8407,7 +8407,27 @@ impl ClipboardView {
                     .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
                         this.focus_first_history_item(window, cx);
                     }))
-                    .child(Input::new(&self.search).cleanable(true)),
+                    .child(
+                        Input::new(&self.search)
+                            .cleanable(true)
+                            .prefix(Icon::new(IconName::Search).small())
+                            .suffix(
+                                Button::new("history-search-info")
+                                    .text()
+                                    .icon(IconName::Info)
+                                    .xsmall()
+                                    .accessibility_label(tr(
+                                        self.language,
+                                        "搜索说明",
+                                        "Search help",
+                                    ))
+                                    .tooltip(tr(
+                                        self.language,
+                                        "输入关键词搜索剪贴板历史；点击 × 清空搜索。",
+                                        "Search clipboard history by keyword; click × to clear.",
+                                    )),
+                            ),
+                    ),
             )
             .child(
                 div()
@@ -8645,19 +8665,7 @@ impl ClipboardView {
                             } else {
                                 format!("{} 条记录", self.history.total)
                             }),
-                    )
-                    .when(self.history.items.len() > 8, |bar| {
-                        bar.child(
-                            Button::new("history-scroll-to-top")
-                                .small()
-                                .ghost()
-                                .label(tr(self.language, "返回顶部 ↑", "Back to top ↑"))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.scroll_to_top();
-                                    cx.notify();
-                                })),
-                        )
-                    }),
+                    ),
             )
             .child(
                 div()
@@ -8816,7 +8824,38 @@ impl ClipboardView {
                                     .track_scroll(&self.scroll)
                                     .size_full(),
                                 )
-                                .vertical_scrollbar(&self.scroll),
+                                .vertical_scrollbar(&self.scroll)
+                                .when(self.history.items.len() > 8, |container| {
+                                    container.child(
+                                        div()
+                                            .absolute()
+                                            .right(px(20.))
+                                            .bottom(px(16.))
+                                            .rounded_full()
+                                            .shadow_md()
+                                            .child(
+                                                Button::new("history-scroll-to-top")
+                                                    .size(px(36.))
+                                                    .rounded_full()
+                                                    .label("↑")
+                                                    .tooltip(tr(
+                                                        self.language,
+                                                        "返回顶部",
+                                                        "Back to top",
+                                                    ))
+                                                    .accessibility_label(tr(
+                                                        self.language,
+                                                        "返回顶部",
+                                                        "Back to top",
+                                                    ))
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        cx.stop_propagation();
+                                                        this.scroll_to_top();
+                                                        cx.notify();
+                                                    })),
+                                            ),
+                                    )
+                                }),
                         )
                     }),
             )
