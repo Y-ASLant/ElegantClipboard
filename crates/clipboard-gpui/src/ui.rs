@@ -6911,8 +6911,11 @@ impl ClipboardView {
                 handle
                     .invisible()
                     .group_hover("", |handle| handle.visible())
-                    .bg(cx.theme().accent)
-                    .text_color(cx.theme().primary)
+                    .border_dashed()
+                    .border_color(rgb(0x3b82f6))
+                    .when(anchored_left, |handle| handle.border_r_1())
+                    .when(!anchored_left, |handle| handle.border_l_1())
+                    .text_color(rgb(0x3b82f6))
                     .child(Icon::new(gpui_kit::assets::IconName::GripVertical).xsmall())
             })
             .on_click(cx.listener(|this, _, _, cx| {
