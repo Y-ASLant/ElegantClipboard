@@ -36,11 +36,13 @@ pub fn create(
     sender: async_channel::Sender<TrayCommand>,
     language: LanguagePreference,
     pinned: bool,
+    paused: bool,
+    monitoring: bool,
 ) -> Result<TrayIcon> {
-    let menu = create_menu(language, pinned)?;
+    let menu = create_menu(language, pinned, paused, monitoring)?;
     let icon = app_icon()?;
     let tray = TrayIconBuilder::new()
-        .with_tooltip("ElegantClipboard")
+        .with_tooltip(tooltip_text(language, paused, monitoring))
         .with_icon(icon)
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
@@ -82,12 +84,81 @@ pub fn create(
     Ok(tray)
 }
 
-pub fn update_menu(tray: &TrayIcon, language: LanguagePreference, pinned: bool) -> Result<()> {
-    tray.set_menu(Some(Box::new(create_menu(language, pinned)?)));
+pub fn update_menu(
+    tray: &TrayIcon,
+    language: LanguagePreference,
+    pinned: bool,
+    paused: bool,
+    monitoring: bool,
+) -> Result<()> {
+    tray.set_menu(Some(Box::new(create_menu(
+        language, pinned, paused, monitoring,
+    )?)));
     Ok(())
 }
 
-fn create_menu(language: LanguagePreference, pinned: bool) -> Result<Menu> {
+/// 托盘悬浮提示随监听状态变化，避免“图标在却没在记录”的误判。
+fn tooltip_text(language: LanguagePreference, paused: bool, monitoring: bool) -> String {
+    if !monitoring {
+        if language == LanguagePreference::English {
+            "ElegantClipboard (clipboard monitoring off)".into()
+        } else {
+            "ElegantClipboard（未监听剪贴板）".into()
+        }
+    } else if paused {
+        if language == LanguagePreference::English {
+            "ElegantClipboard (recording paused)".into()
+        } else {
+            "ElegantClipboard（已暂停记录）".into()
+        }
+    } else {
+        "ElegantClipboard".into()
+    }
+}
+
+/// 暂停菜单项按状态显示将要执行的动作；未监听时禁用并如实标注。
+fn pause_item_label(
+    language: LanguagePreference,
+    paused: bool,
+    monitoring: bool,
+) -> (&'static str, bool) {
+    let english = language == LanguagePreference::English;
+    if !monitoring {
+        (
+            if english {
+                "Monitoring disabled"
+            } else {
+                "监听未启用"
+            },
+            false,
+        )
+    } else if paused {
+        (
+            if english {
+                "Resume recording"
+            } else {
+                "恢复记录"
+            },
+            true,
+        )
+    } else {
+        (
+            if english {
+                "Pause recording"
+            } else {
+                "暂停记录"
+            },
+            true,
+        )
+    }
+}
+
+fn create_menu(
+    language: LanguagePreference,
+    pinned: bool,
+    paused: bool,
+    monitoring: bool,
+) -> Result<Menu> {
     let menu = Menu::new();
     let english = language == LanguagePreference::English;
     menu.append(&MenuItem::with_id(
@@ -127,14 +198,11 @@ fn create_menu(language: LanguagePreference, pinned: bool) -> Result<Menu> {
         None,
     ))
     .context("无法创建托盘菜单")?;
+    let (pause_label, pause_enabled) = pause_item_label(language, paused, monitoring);
     menu.append(&MenuItem::with_id(
         "toggle-pause",
-        if english {
-            "Pause / Resume Recording"
-        } else {
-            "暂停 / 恢复记录"
-        },
-        true,
+        pause_label,
+        pause_enabled,
         None,
     ))
     .context("无法创建托盘菜单")?;
@@ -264,18 +332,12 @@ mod tests {
     }
 
     #[test]
-    fn tray_actions_remain_available_in_both_languages_and_track_pin_state() -> Result<()> {
-        let chinese = create_menu(LanguagePreference::Chinese, false)?;
+    fn tray_actions_remain_available_in_both_languages_and_track_pin_and_pause_state() -> Result<()>
+    {
+        let chinese = create_menu(LanguagePreference::Chinese, false, false, true)?;
         assert_eq!(
             visible_labels(&chinese),
-            [
-                "打开",
-                "清理历史",
-                "置顶窗口",
-                "设置",
-                "暂停 / 恢复记录",
-                "退出"
-            ]
+            ["打开", "清理历史", "置顶窗口", "设置", "暂停记录", "退出"]
         );
         assert!(
             !chinese.items()[2]
@@ -284,7 +346,7 @@ mod tests {
                 .is_checked()
         );
 
-        let english = create_menu(LanguagePreference::English, true)?;
+        let english = create_menu(LanguagePreference::English, true, false, true)?;
         assert_eq!(
             visible_labels(&english),
             [
@@ -292,7 +354,7 @@ mod tests {
                 "Clear history",
                 "Pin window",
                 "Settings",
-                "Pause / Resume Recording",
+                "Pause recording",
                 "Quit"
             ]
         );
@@ -301,6 +363,18 @@ mod tests {
                 .as_check_menuitem()
                 .expect("pin is a checked menu item")
                 .is_checked()
+        );
+
+        let paused = create_menu(LanguagePreference::Chinese, false, true, true)?;
+        assert_eq!(visible_labels(&paused)[4], "恢复记录");
+
+        let unmonitored = create_menu(LanguagePreference::Chinese, false, true, false)?;
+        assert_eq!(visible_labels(&unmonitored)[4], "监听未启用");
+        assert!(
+            !unmonitored.items()[4]
+                .as_menuitem()
+                .expect("pause is a plain menu item")
+                .is_enabled()
         );
         Ok(())
     }

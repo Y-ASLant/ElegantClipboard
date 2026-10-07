@@ -2159,7 +2159,13 @@ impl ClipboardView {
             }
         });
         let (tray_sender, tray_receiver) = async_channel::bounded(8);
-        let tray = tray::create(tray_sender.clone(), language, false);
+        let tray = tray::create(
+            tray_sender.clone(),
+            language,
+            false,
+            service.initial_paused,
+            startup.monitoring,
+        );
         tray_enabled.set(tray.is_ok());
         if startup.hidden && tray.is_err() {
             tray::set_window_visible(window, true);
@@ -4252,6 +4258,7 @@ impl ClipboardView {
                     tr(self.language, "已恢复记录", "Recording resumed")
                 }
                 .into();
+                let _ = self.refresh_tray_menu();
                 true
             }
             Event::BackupExported(result) => self.apply_backup_exported(result),
@@ -4904,9 +4911,23 @@ impl ClipboardView {
                 });
                 self.refresh_group_select(window, cx);
                 let menu_result = if let Some(tray) = &self._tray {
-                    tray::update_menu(tray, language, self.window_pinned).map(|_| None)
+                    tray::update_menu(
+                        tray,
+                        language,
+                        self.window_pinned,
+                        self.paused,
+                        self.monitoring,
+                    )
+                    .map(|_| None)
                 } else {
-                    tray::create(self.tray_sender.clone(), language, self.window_pinned).map(Some)
+                    tray::create(
+                        self.tray_sender.clone(),
+                        language,
+                        self.window_pinned,
+                        self.paused,
+                        self.monitoring,
+                    )
+                    .map(Some)
                 };
                 match menu_result {
                     Ok(tray) => {
@@ -6614,7 +6635,13 @@ impl ClipboardView {
 
     fn refresh_tray_menu(&self) -> anyhow::Result<()> {
         if let Some(tray) = &self._tray {
-            tray::update_menu(tray, self.language, self.window_pinned)?;
+            tray::update_menu(
+                tray,
+                self.language,
+                self.window_pinned,
+                self.paused,
+                self.monitoring,
+            )?;
         }
         Ok(())
     }
