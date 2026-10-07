@@ -1077,7 +1077,11 @@ fn save_item_as(
     })
 }
 
-fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Result<()> {
+fn write_rich_clipboard(
+    item: &ClipboardItem,
+    rtf: Option<&[u8]>,
+    ignored_sequence: &mut u32,
+) -> Result<()> {
     let text = item
         .text_content
         .as_deref()
@@ -1086,10 +1090,6 @@ fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Res
         .html_content
         .as_deref()
         .filter(|value| !value.is_empty());
-    let rtf = item
-        .rtf_content
-        .as_deref()
-        .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
     if text.is_none() && html.is_none() && rtf.is_none() {
         bail!("富文本记录没有可写回的有效格式");
     }
@@ -1113,7 +1113,7 @@ fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Res
             clipboard_win::raw::set_html_with(format, html, clipboard_win::options::NoClear)
                 .map_err(|error| anyhow!("写入 HTML 格式失败：{error}"))?;
         }
-        if let Some(rtf) = &rtf {
+        if let Some(rtf) = rtf {
             let format = clipboard_win::register_format("Rich Text Format")
                 .context("注册 RTF 剪贴板格式失败")?
                 .get();
@@ -1131,15 +1131,15 @@ fn write_rich_clipboard(item: &ClipboardItem, ignored_sequence: &mut u32) -> Res
     result
 }
 
-fn rich_clipboard_matches(clipboard: &ClipboardContext, item: &ClipboardItem) -> bool {
+fn rich_clipboard_matches(
+    clipboard: &ClipboardContext,
+    item: &ClipboardItem,
+    rtf: Option<&[u8]>,
+) -> bool {
     let html = item
         .html_content
         .as_deref()
         .filter(|value| !value.is_empty());
-    let rtf = item
-        .rtf_content
-        .as_deref()
-        .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
     let text = item
         .text_content
         .as_deref()
@@ -1150,7 +1150,7 @@ fn rich_clipboard_matches(clipboard: &ClipboardContext, item: &ClipboardItem) ->
             .ok()
             .is_some_and(|actual| actual.contains(expected))
     });
-    let rtf_matches = rtf.as_deref().is_none_or(|expected| {
+    let rtf_matches = rtf.is_none_or(|expected| {
         clipboard
             .get_buffer("Rich Text Format")
             .ok()
@@ -1165,10 +1165,14 @@ fn rich_clipboard_matches(clipboard: &ClipboardContext, item: &ClipboardItem) ->
     html_matches && rtf_matches && text_matches
 }
 
-fn verified_rich_sequence(clipboard: &ClipboardContext, item: &ClipboardItem) -> Result<u32> {
+fn verified_rich_sequence(
+    clipboard: &ClipboardContext,
+    item: &ClipboardItem,
+    rtf: Option<&[u8]>,
+) -> Result<u32> {
     for _ in 0..4 {
         let before = unsafe { GetClipboardSequenceNumber() };
-        if !rich_clipboard_matches(clipboard, item) {
+        if !rich_clipboard_matches(clipboard, item, rtf) {
             bail!("富文本写回后格式校验失败，请重试");
         }
         let after = unsafe { GetClipboardSequenceNumber() };
@@ -1780,12 +1784,13 @@ impl Worker {
         } else if is_rich {
             // Record partial self-writes as ignored before an error is
             // returned, so the listener cannot add them to history.
-            write_rich_clipboard(&item, &mut state.ignored_sequence)?;
             let rtf = item
                 .rtf_content
                 .as_deref()
                 .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
-            state.ignored_sequence = verified_rich_sequence(&self.clipboard, &item)?;
+            write_rich_clipboard(&item, rtf.as_deref(), &mut state.ignored_sequence)?;
+            state.ignored_sequence =
+                verified_rich_sequence(&self.clipboard, &item, rtf.as_deref())?;
             rich_preserved = item
                 .html_content
                 .as_deref()

@@ -417,16 +417,17 @@ impl ClipboardRepository {
             && !search.is_empty()
         {
             conditions.push(
-                "(text_content LIKE ? ESCAPE '\\' OR file_paths LIKE ? ESCAPE '\\')".to_string(),
+                "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\')".to_string(),
             );
-            let pattern = format!(
-                "%{}%",
-                search
-                    .replace('\\', "\\\\")
-                    .replace('%', "\\%")
-                    .replace('_', "\\_")
-            );
-            params_vec.push(Box::new(pattern.clone()));
+            let mut pattern = String::with_capacity(search.len() + 2);
+            pattern.push('%');
+            for ch in search.chars() {
+                if matches!(ch, '\\' | '%' | '_') {
+                    pattern.push('\\');
+                }
+                pattern.push(ch);
+            }
+            pattern.push('%');
             params_vec.push(Box::new(pattern));
         }
 
@@ -1239,6 +1240,52 @@ mod tests {
             })
             .unwrap();
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn search_reuses_escaped_pattern_with_filters_and_pagination() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = Database::new(directory.path().join("clipboard.db")).unwrap();
+        let repo = ClipboardRepository::new(&db);
+        let group_id = GroupRepository::new(&db).create("search", None).unwrap().id;
+        let mut text = make_text_item(r"中文%_\text");
+        text.group_id = Some(group_id);
+        repo.insert(text).unwrap();
+        repo.insert(NewClipboardItem {
+            content_type: ContentType::Files,
+            file_paths: Some(vec![r"C:\中文%_\file".into()]),
+            content_hash: "search-files".into(),
+            semantic_hash: "search-files".into(),
+            group_id: Some(group_id),
+            ..Default::default()
+        })
+        .unwrap();
+        repo.insert(make_text_item(r"中文%_\other group")).unwrap();
+        let mut nonmatch = make_text_item("中文ab");
+        nonmatch.group_id = Some(group_id);
+        repo.insert(nonmatch).unwrap();
+
+        for search in ["%", "_", "\\", "中文%_"] {
+            let options = QueryOptions {
+                search: Some(search.into()),
+                content_type: Some("text,files".into()),
+                group_id: Some(group_id),
+                limit: Some(1),
+                offset: Some(0),
+                ..Default::default()
+            };
+            assert_eq!(repo.count(options.clone()).unwrap(), 2);
+            let first = repo.list(options.clone()).unwrap();
+            let second = repo
+                .list(QueryOptions {
+                    offset: Some(1),
+                    ..options
+                })
+                .unwrap();
+            assert_eq!(first.len(), 1);
+            assert_eq!(second.len(), 1);
+            assert_ne!(first[0].id, second[0].id);
+        }
     }
 
     #[test]

@@ -64,8 +64,13 @@ fn extract_host(authority: &str) -> &str {
 }
 
 fn is_valid_ipv4(host: &str) -> bool {
-    let parts: Vec<&str> = host.split('.').collect();
-    parts.len() == 4 && parts.iter().all(|part| part.parse::<u8>().is_ok())
+    let mut parts = host.split('.');
+    for _ in 0..4 {
+        if !parts.next().is_some_and(|part| part.parse::<u8>().is_ok()) {
+            return false;
+        }
+    }
+    parts.next().is_none()
 }
 
 fn is_valid_ipv6(host: &str) -> bool {
@@ -84,12 +89,11 @@ fn is_valid_domain_host(host: &str) -> bool {
         return false;
     }
 
-    let labels: Vec<&str> = host.split('.').collect();
-    if labels.len() < 2 {
+    let Some((_, tld)) = host.rsplit_once('.') else {
         return false;
-    }
+    };
 
-    for label in &labels {
+    for label in host.split('.') {
         if label.is_empty() || label.len() > 63 {
             return false;
         }
@@ -104,7 +108,6 @@ fn is_valid_domain_host(host: &str) -> bool {
         }
     }
 
-    let tld = labels.last().unwrap();
     // TLD 至少 2 字符且包含至少一个字母（兼容 punycode 如 xn--g6q252g）
     tld.len() >= 2 && tld.bytes().any(|b| b.is_ascii_alphabetic())
 }

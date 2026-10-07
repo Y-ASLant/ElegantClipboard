@@ -292,10 +292,9 @@ fn supported_image_file(path: &str) -> bool {
     let Some(extension) = Path::new(path).extension().and_then(|value| value.to_str()) else {
         return false;
     };
-    matches!(
-        extension.to_ascii_lowercase().as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
-    )
+    ["png", "jpg", "jpeg", "gif", "webp", "bmp"]
+        .iter()
+        .any(|supported| extension.eq_ignore_ascii_case(supported))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -394,7 +393,7 @@ fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
 mod file_image_preview_tests {
     use super::{
         FileCardAvailability, FileCardKind, FilePreviewEntry, inspect_file_card,
-        single_file_image_path,
+        single_file_image_path, supported_image_file,
     };
     use std::path::PathBuf;
 
@@ -407,6 +406,25 @@ mod file_image_preview_tests {
             size,
             recovered: false,
             metadata_error: None,
+        }
+    }
+
+    #[test]
+    fn supported_image_extensions_are_ascii_case_insensitive() {
+        for extension in ["png", "jpg", "jpeg", "gif", "webp", "bmp"] {
+            assert!(supported_image_file(&format!(r"C:\sample.{extension}")));
+            assert!(supported_image_file(&format!(
+                r"C:\sample.{}",
+                extension.to_ascii_uppercase()
+            )));
+        }
+        for path in [
+            r"C:\sample",
+            r"C:\sample.txt",
+            r"C:\sample.pngx",
+            r"C:\sample.ＰＮＧ",
+        ] {
+            assert!(!supported_image_file(path));
         }
     }
 
@@ -1290,11 +1308,12 @@ impl Render for HoverPreviewWindowView {
             Ok(PreviewContent::Files(_)) => tr(self.language, "文件预览", "File preview"),
             Err(_) => tr(self.language, "预览失败", "Preview unavailable"),
         };
-        let image_preview = matches!(&self.content, Ok(PreviewContent::Image(_)))
-            || matches!(
-                &self.content,
-                Ok(PreviewContent::Files(entries)) if single_file_image_path(entries).is_some()
-            );
+        let file_image_path = match &self.content {
+            Ok(PreviewContent::Files(entries)) => single_file_image_path(entries),
+            _ => None,
+        };
+        let image_preview =
+            matches!(&self.content, Ok(PreviewContent::Image(_))) || file_image_path.is_some();
         let body: AnyElement = match &self.content {
             Ok(PreviewContent::Image(path)) => div()
                 .relative()
@@ -1334,8 +1353,8 @@ impl Render for HoverPreviewWindowView {
                 )
                 .scrollbar(&self.image_scroll, ScrollbarAxis::Both)
                 .into_any_element(),
-            Ok(PreviewContent::Files(entries)) if single_file_image_path(entries).is_some() => {
-                let path = single_file_image_path(entries).expect("checked above");
+            Ok(PreviewContent::Files(entries)) if file_image_path.is_some() => {
+                let path = file_image_path.expect("checked above");
                 let unavailable = tr(self.language, "图片无法显示", "Image unavailable");
                 div()
                     .size_full()
@@ -6769,13 +6788,17 @@ impl ClipboardView {
                 });
             let local_results: Vec<_> = local
                 .into_iter()
-                .map(|(id, raw)| (id, raw.clone(), inspect_file_card(&raw)))
+                .map(|(id, raw)| {
+                    let info = inspect_file_card(&raw);
+                    (id, raw, info)
+                })
                 .collect();
             if !local_results.is_empty() && sender.send_blocking(local_results).is_err() {
                 return;
             }
             for (id, raw) in network {
-                let result = (id, raw.clone(), inspect_file_card(&raw));
+                let info = inspect_file_card(&raw);
+                let result = (id, raw, info);
                 if sender.send_blocking(vec![result]).is_err() {
                     return;
                 }
@@ -6872,6 +6895,7 @@ impl ClipboardView {
         &self,
         item: &DbClipboardItem,
         kind: &'static str,
+        file_count: usize,
         file_warning: Option<&'static str>,
         image_too_large: bool,
         file_total_size: Option<u64>,
@@ -6881,17 +6905,12 @@ impl ClipboardView {
         let detail = if is_image {
             None
         } else if is_files {
-            let count = item
-                .file_paths
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
-                .map_or(0, |paths| paths.len());
-            if count == 0 {
+            if file_count == 0 {
                 Some(tr(self.language, "路径不可用", "Paths unavailable").into())
             } else if self.language == LanguagePreference::English {
-                Some(format!("{count} items"))
+                Some(format!("{file_count} items"))
             } else {
-                Some(format!("{count} 项"))
+                Some(format!("{file_count} 项"))
             }
         } else if !self.display.show_char_count {
             None
@@ -7197,6 +7216,10 @@ impl ClipboardView {
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
+        let file_paths = is_files
+            .then_some(item.file_paths.as_deref())
+            .flatten()
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok());
         let file_info = self.file_card_info.get(&id);
         let thumbnail_path = if is_image {
             item.image_path.as_ref().map(PathBuf::from)
@@ -7236,6 +7259,7 @@ impl ClipboardView {
         let summary = self.row_summary(
             item,
             kind,
+            file_paths.as_ref().map_or(0, Vec::len),
             file_warning,
             image_too_large,
             file_info.and_then(|info| info.total_size),
@@ -7257,10 +7281,8 @@ impl ClipboardView {
         } else {
             let saved_preview = item.preview.as_deref().unwrap_or(kind);
             let search = self.search.read(cx).value();
-            let file_names = is_files
-                .then_some(item.file_paths.as_deref())
-                .flatten()
-                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+            let file_names = file_paths
+                .as_deref()
                 .filter(|paths| paths.len() > 1)
                 .map(|paths| {
                     let mut names = paths
