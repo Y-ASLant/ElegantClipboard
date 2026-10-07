@@ -16,7 +16,7 @@ use crate::{
     state::{
         HistoryState, PreviewState, drag_edge_target_index, format_card_time,
         next_drag_scroll_index, reorder_pixel_offsets, search_excerpt, search_highlight_ranges,
-        selection_range_ids, should_hide_after_paste, source_app_parts,
+        selection_range_ids, source_app_parts,
     },
 };
 use clipboard_core::{
@@ -1092,7 +1092,6 @@ struct ClipboardView {
     data_size_pending: bool,
     database_maintenance_pending: bool,
     export_pending: bool,
-    window_pinned: bool,
     window_position: WindowPositionPreference,
     window_position_pending: bool,
     persist_window_size: bool,
@@ -2162,7 +2161,6 @@ impl ClipboardView {
         let tray = tray::create(
             tray_sender.clone(),
             language,
-            false,
             service.initial_paused,
             startup.monitoring,
         );
@@ -2174,11 +2172,6 @@ impl ClipboardView {
             while let Ok(command) = tray_receiver.recv().await {
                 if update_clipboard_window(&view, main_window, cx, |this, window, cx| match command
                 {
-                    TrayCommand::Show => {
-                        this.paste_target = None;
-                        this.show_window(window, cx);
-                        cx.notify();
-                    }
                     TrayCommand::Toggle => {
                         if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
                             this.hide_visible_window(window, cx);
@@ -2194,7 +2187,6 @@ impl ClipboardView {
                         this.show_window(window, cx);
                         this.open_clear_history(window, cx);
                     }
-                    TrayCommand::TogglePin => this.toggle_window_pin(window, cx),
                     TrayCommand::TogglePause => {
                         if this.monitoring
                             && !this.pause_pending
@@ -2488,7 +2480,6 @@ impl ClipboardView {
             data_size_pending: false,
             database_maintenance_pending: false,
             export_pending: false,
-            window_pinned: false,
             window_position,
             window_position_pending: false,
             persist_window_size,
@@ -3561,7 +3552,6 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if !tray::is_window_shown(window)
-            || self.window_pinned
             || self._tray.is_none()
             || self.settings_window.is_some()
             || self.settings_window_opening
@@ -4911,19 +4901,11 @@ impl ClipboardView {
                 });
                 self.refresh_group_select(window, cx);
                 let menu_result = if let Some(tray) = &self._tray {
-                    tray::update_menu(
-                        tray,
-                        language,
-                        self.window_pinned,
-                        self.paused,
-                        self.monitoring,
-                    )
-                    .map(|_| None)
+                    tray::update_menu(tray, language, self.paused, self.monitoring).map(|_| None)
                 } else {
                     tray::create(
                         self.tray_sender.clone(),
                         language,
-                        self.window_pinned,
                         self.paused,
                         self.monitoring,
                     )
@@ -6587,9 +6569,7 @@ impl ClipboardView {
             self.is_error = true;
             return;
         }
-        let hide_window =
-            should_hide_after_paste(self.paste_close_window.value, self.window_pinned)
-                && tray::is_window_shown(window);
+        let hide_window = self.paste_close_window.value && tray::is_window_shown(window);
         if hide_window {
             self.prepare_to_hide(window, cx);
             tray::set_window_visible(window, false);
@@ -6635,59 +6615,9 @@ impl ClipboardView {
 
     fn refresh_tray_menu(&self) -> anyhow::Result<()> {
         if let Some(tray) = &self._tray {
-            tray::update_menu(
-                tray,
-                self.language,
-                self.window_pinned,
-                self.paused,
-                self.monitoring,
-            )?;
+            tray::update_menu(tray, self.language, self.paused, self.monitoring)?;
         }
         Ok(())
-    }
-
-    fn toggle_window_pin(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let pinned = !self.window_pinned;
-        match tray::set_window_topmost(window, pinned) {
-            Ok(()) => {
-                self.window_pinned = pinned;
-                self.message = if pinned {
-                    tr(
-                        self.language,
-                        "窗口已置顶；粘贴后保持可见",
-                        "Window pinned; it will stay visible after pasting.",
-                    )
-                    .into()
-                } else {
-                    tr(self.language, "已取消窗口置顶", "Window unpinned").into()
-                };
-                self.is_error = false;
-                if let Err(error) = self.refresh_tray_menu() {
-                    self.message = format!(
-                        "{}: {error}",
-                        tr(
-                            self.language,
-                            "窗口状态已改变，但托盘菜单更新失败",
-                            "Window pin changed, but the tray menu could not be updated"
-                        )
-                    );
-                    self.is_error = true;
-                }
-            }
-            Err(error) => {
-                self.message = format!(
-                    "{}: {error}",
-                    tr(
-                        self.language,
-                        "更新窗口置顶失败",
-                        "Failed to update window pinning"
-                    )
-                );
-                self.is_error = true;
-                let _ = self.refresh_tray_menu();
-            }
-        }
-        cx.notify();
     }
 
     fn valid_drag(&self, drag: &HistoryDrag) -> bool {
@@ -8676,8 +8606,7 @@ impl ClipboardView {
                     .min_h_0()
                     .overflow_hidden()
                     .on_click(cx.listener(|this, _, window, cx| {
-                        if !this.window_pinned
-                            && this._tray.is_some()
+                        if this._tray.is_some()
                             && this.settings_window.is_none()
                             && !this.settings_window_opening
                         {

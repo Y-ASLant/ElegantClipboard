@@ -8,26 +8,24 @@ use std::{
 };
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
-    menu::{CheckMenuItem, Menu, MenuEvent, MenuItem},
+    menu::{Menu, MenuEvent, MenuItem},
 };
 use windows::Win32::{
     Foundation::{HWND, POINT},
     UI::{
         Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_MENU},
         WindowsAndMessaging::{
-            HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOW,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, ShowWindow,
+            IsIconic, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow,
+            ShowWindow,
         },
     },
 };
 
 #[derive(Clone, Copy)]
 pub enum TrayCommand {
-    Show,
     Toggle,
     Settings,
     ClearHistory,
-    TogglePin,
     TogglePause,
     Quit,
 }
@@ -35,11 +33,10 @@ pub enum TrayCommand {
 pub fn create(
     sender: async_channel::Sender<TrayCommand>,
     language: LanguagePreference,
-    pinned: bool,
     paused: bool,
     monitoring: bool,
 ) -> Result<TrayIcon> {
-    let menu = create_menu(language, pinned, paused, monitoring)?;
+    let menu = create_menu(language, paused, monitoring)?;
     let icon = app_icon()?;
     let tray = TrayIconBuilder::new()
         .with_tooltip(tooltip_text(language, paused, monitoring))
@@ -51,9 +48,7 @@ pub fn create(
     let menu_sender = sender.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
-            "show" => Some(TrayCommand::Show),
             "clear-history" => Some(TrayCommand::ClearHistory),
-            "toggle-pin" => Some(TrayCommand::TogglePin),
             "settings" => Some(TrayCommand::Settings),
             "toggle-pause" => Some(TrayCommand::TogglePause),
             "quit" => Some(TrayCommand::Quit),
@@ -87,13 +82,10 @@ pub fn create(
 pub fn update_menu(
     tray: &TrayIcon,
     language: LanguagePreference,
-    pinned: bool,
     paused: bool,
     monitoring: bool,
 ) -> Result<()> {
-    tray.set_menu(Some(Box::new(create_menu(
-        language, pinned, paused, monitoring,
-    )?)));
+    tray.set_menu(Some(Box::new(create_menu(language, paused, monitoring)?)));
     Ok(())
 }
 
@@ -153,18 +145,14 @@ fn pause_item_label(
     }
 }
 
-fn create_menu(
-    language: LanguagePreference,
-    pinned: bool,
-    paused: bool,
-    monitoring: bool,
-) -> Result<Menu> {
+fn create_menu(language: LanguagePreference, paused: bool, monitoring: bool) -> Result<Menu> {
     let menu = Menu::new();
     let english = language == LanguagePreference::English;
+    let (pause_label, pause_enabled) = pause_item_label(language, paused, monitoring);
     menu.append(&MenuItem::with_id(
-        "show",
-        if english { "Open" } else { "打开" },
-        true,
+        "toggle-pause",
+        pause_label,
+        pause_enabled,
         None,
     ))
     .context("无法创建托盘菜单")?;
@@ -179,18 +167,6 @@ fn create_menu(
         None,
     ))
     .context("无法创建托盘菜单")?;
-    menu.append(&CheckMenuItem::with_id(
-        "toggle-pin",
-        if english {
-            "Pin window"
-        } else {
-            "置顶窗口"
-        },
-        true,
-        pinned,
-        None,
-    ))
-    .context("无法创建托盘菜单")?;
     menu.append(&MenuItem::with_id(
         "settings",
         if english { "Settings" } else { "设置" },
@@ -198,17 +174,13 @@ fn create_menu(
         None,
     ))
     .context("无法创建托盘菜单")?;
-    let (pause_label, pause_enabled) = pause_item_label(language, paused, monitoring);
-    menu.append(&MenuItem::with_id(
-        "toggle-pause",
-        pause_label,
-        pause_enabled,
-        None,
-    ))
-    .context("无法创建托盘菜单")?;
     menu.append(&MenuItem::with_id(
         "quit",
-        if english { "Quit" } else { "退出" },
+        if english {
+            "Exit application"
+        } else {
+            "退出程序"
+        },
         true,
         None,
     ))
@@ -269,32 +241,6 @@ pub fn is_tray_click(tray: &TrayIcon, position: POINT) -> bool {
     })
 }
 
-pub fn set_window_topmost(window: &Window, topmost: bool) -> Result<()> {
-    let handle = HasWindowHandle::window_handle(window)
-        .map_err(|error| anyhow::anyhow!("无法读取窗口句柄：{error}"))?;
-    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-        anyhow::bail!("当前窗口不是 Win32 窗口");
-    };
-    let hwnd = HWND(handle.hwnd.get() as *mut _);
-    unsafe {
-        SetWindowPos(
-            hwnd,
-            Some(if topmost {
-                HWND_TOPMOST
-            } else {
-                HWND_NOTOPMOST
-            }),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-        )
-        .context("无法更新窗口置顶状态")?;
-    }
-    Ok(())
-}
-
 fn app_icon() -> Result<Icon> {
     let image = image::load_from_memory_with_format(
         include_bytes!("../../../App.ico"),
@@ -313,69 +259,28 @@ fn app_icon() -> Result<Icon> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tray_icon::menu::MenuItemKind;
     #[test]
     fn bundled_tray_icon_can_be_loaded() -> Result<()> {
         app_icon()?;
         Ok(())
     }
 
-    fn visible_labels(menu: &Menu) -> Vec<String> {
-        menu.items()
-            .iter()
-            .map(|item| match item {
-                MenuItemKind::MenuItem(item) => item.text(),
-                MenuItemKind::Check(item) => item.text(),
-                _ => panic!("unexpected tray menu item"),
-            })
-            .collect()
-    }
-
     #[test]
-    fn tray_actions_remain_available_in_both_languages_and_track_pin_and_pause_state() -> Result<()>
-    {
-        let chinese = create_menu(LanguagePreference::Chinese, false, false, true)?;
-        assert_eq!(
-            visible_labels(&chinese),
-            ["打开", "清理历史", "置顶窗口", "设置", "暂停记录", "退出"]
-        );
-        assert!(
-            !chinese.items()[2]
-                .as_check_menuitem()
-                .expect("pin is a checked menu item")
-                .is_checked()
-        );
-
-        let english = create_menu(LanguagePreference::English, true, false, true)?;
-        assert_eq!(
-            visible_labels(&english),
-            [
-                "Open",
-                "Clear history",
-                "Pin window",
-                "Settings",
-                "Pause recording",
-                "Quit"
-            ]
-        );
-        assert!(
-            english.items()[2]
-                .as_check_menuitem()
-                .expect("pin is a checked menu item")
-                .is_checked()
-        );
-
-        let paused = create_menu(LanguagePreference::Chinese, false, true, true)?;
-        assert_eq!(visible_labels(&paused)[4], "恢复记录");
-
-        let unmonitored = create_menu(LanguagePreference::Chinese, false, true, false)?;
-        assert_eq!(visible_labels(&unmonitored)[4], "监听未启用");
-        assert!(
-            !unmonitored.items()[4]
-                .as_menuitem()
-                .expect("pause is a plain menu item")
-                .is_enabled()
-        );
+    fn tray_recording_control_tracks_monitoring_availability() -> Result<()> {
+        for language in [LanguagePreference::Chinese, LanguagePreference::English] {
+            for monitoring in [false, true] {
+                for paused in [false, true] {
+                    let menu = create_menu(language, paused, monitoring)?;
+                    let items = menu.items();
+                    let pause = items
+                        .iter()
+                        .find(|item| item.id().as_ref() == "toggle-pause")
+                        .and_then(|item| item.as_menuitem())
+                        .expect("recording control");
+                    assert_eq!(pause.is_enabled(), monitoring);
+                }
+            }
+        }
         Ok(())
     }
 }

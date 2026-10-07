@@ -15,10 +15,6 @@ pub fn source_app_parts(mode: SourceAppDisplay, has_icon: bool) -> (bool, bool) 
     }
 }
 
-pub fn should_hide_after_paste(close_after_paste: bool, pinned: bool) -> bool {
-    close_after_paste && !pinned
-}
-
 pub fn format_card_time(
     created_at: &str,
     format: TimeFormat,
@@ -399,14 +395,6 @@ mod tests {
             source_app_parts(SourceAppDisplay::Icon, false),
             (true, false)
         );
-    }
-
-    #[test]
-    fn paste_window_stays_visible_when_disabled_or_pinned() {
-        assert!(should_hide_after_paste(true, false));
-        assert!(!should_hide_after_paste(false, false));
-        assert!(!should_hide_after_paste(true, true));
-        assert!(!should_hide_after_paste(false, true));
     }
 
     #[test]
