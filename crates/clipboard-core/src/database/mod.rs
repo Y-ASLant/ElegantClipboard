@@ -782,22 +782,6 @@ impl Database {
     }
 }
 
-/// 获取应用安装目录（可执行文件所在目录）
-pub fn get_app_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-pub fn get_default_db_path() -> PathBuf {
-    get_app_dir().join("clipboard.db")
-}
-
-pub fn get_default_images_path() -> PathBuf {
-    get_app_dir().join("images")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

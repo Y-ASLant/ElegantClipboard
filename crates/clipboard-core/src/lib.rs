@@ -1,5 +1,6 @@
 //! Shared clipboard-history use cases. No dependency on a desktop UI or platform API.
 pub mod backup;
+pub(crate) mod backup_common;
 pub(crate) mod clipboard;
 pub mod database;
 mod editing;

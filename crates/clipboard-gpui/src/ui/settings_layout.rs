@@ -156,14 +156,14 @@ fn copy_audio_content(
     view: &SettingsWindowView,
     cx: &mut Context<SettingsWindowView>,
 ) -> AnyElement {
-    view.settings_audio_content(true, cx)
+    view.settings_audio_content(SoundChannel::Copy, cx)
 }
 
 fn paste_audio_content(
     view: &SettingsWindowView,
     cx: &mut Context<SettingsWindowView>,
 ) -> AnyElement {
-    view.settings_audio_content(false, cx)
+    view.settings_audio_content(SoundChannel::Paste, cx)
 }
 
 impl Render for SettingsWindowView {

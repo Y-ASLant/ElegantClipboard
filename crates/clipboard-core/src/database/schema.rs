@@ -85,9 +85,10 @@ INSERT OR IGNORE INTO settings (key, value) VALUES
     ('paste_key', 'ctrl_v');
 "#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentType {
+    #[default]
     Text,
     Image,
     Html,

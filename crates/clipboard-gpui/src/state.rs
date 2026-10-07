@@ -246,6 +246,15 @@ impl PreviewState {
     }
 }
 
+/// 历史列表的互斥筛选维度：任意时刻只作用于一个维度。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryFilter {
+    All,
+    Favorites,
+    Category(ContentCategory),
+    Group(i64),
+}
+
 /// View state kept independent of GPUI so asynchronous ordering can be tested.
 pub struct HistoryState {
     pub items: Vec<ClipboardItem>,
@@ -254,9 +263,7 @@ pub struct HistoryState {
     pub limit: i64,
     pub selected: Option<i64>,
     pub loading: bool,
-    pub favorite_only: bool,
-    pub category: ContentCategory,
-    pub group_id: Option<i64>,
+    filter: HistoryFilter,
 }
 
 impl Default for HistoryState {
@@ -268,39 +275,55 @@ impl Default for HistoryState {
             limit: PAGE_SIZE,
             selected: None,
             loading: true,
-            favorite_only: false,
-            category: ContentCategory::All,
-            group_id: None,
+            filter: HistoryFilter::All,
         }
     }
 }
 
 impl HistoryState {
+    pub fn favorite_only(&self) -> bool {
+        matches!(self.filter, HistoryFilter::Favorites)
+    }
+
+    pub fn category(&self) -> ContentCategory {
+        match self.filter {
+            HistoryFilter::Category(category) => category,
+            _ => ContentCategory::All,
+        }
+    }
+
+    pub fn group_id(&self) -> Option<i64> {
+        match self.filter {
+            HistoryFilter::Group(id) => Some(id),
+            _ => None,
+        }
+    }
+
     pub fn should_reset_category_filter(&self, show_category_filter: bool) -> bool {
         !show_category_filter
-            && self.group_id.is_none()
-            && (self.favorite_only || self.category != ContentCategory::All)
+            && self.group_id().is_none()
+            && (self.favorite_only() || self.category() != ContentCategory::All)
+    }
+
+    pub fn set_filter(&mut self, filter: HistoryFilter) {
+        self.filter = filter;
+        self.begin_search();
     }
 
     pub fn set_favorite_filter(&mut self, favorite_only: bool) {
-        self.favorite_only = favorite_only;
-        self.category = ContentCategory::All;
-        self.group_id = None;
-        self.begin_search();
+        self.set_filter(if favorite_only {
+            HistoryFilter::Favorites
+        } else {
+            HistoryFilter::All
+        });
     }
 
     pub fn set_category(&mut self, category: ContentCategory) {
-        self.favorite_only = false;
-        self.category = category;
-        self.group_id = None;
-        self.begin_search();
+        self.set_filter(HistoryFilter::Category(category));
     }
 
     pub fn set_group(&mut self, group_id: Option<i64>) {
-        self.favorite_only = false;
-        self.category = ContentCategory::All;
-        self.group_id = group_id;
-        self.begin_search();
+        self.set_filter(group_id.map_or(HistoryFilter::All, HistoryFilter::Group));
     }
 
     pub fn begin_search(&mut self) {
@@ -529,37 +552,37 @@ mod tests {
         };
         let old = state.generation;
         state.set_favorite_filter(true);
-        assert!(state.favorite_only);
+        assert!(state.favorite_only());
         assert_eq!(state.limit, PAGE_SIZE);
         assert_eq!(state.selected, None);
         assert!(!state.apply(vec![], 100, old));
         state.begin_search();
-        assert!(state.favorite_only);
+        assert!(state.favorite_only());
         assert!(state.apply(vec![], 0, state.generation));
         state.set_favorite_filter(false);
-        assert!(!state.favorite_only);
+        assert!(!state.favorite_only());
         assert!(state.loading);
         let old = state.generation;
         state.set_group(Some(7));
-        assert_eq!(state.group_id, Some(7));
+        assert_eq!(state.group_id(), Some(7));
         assert!(!state.apply(vec![], 1, old));
         assert!(!state.fail_query(old));
         assert!(state.loading);
         assert!(state.fail_query(state.generation));
         assert!(!state.loading);
         state.set_group(None);
-        assert_eq!(state.group_id, None);
+        assert_eq!(state.group_id(), None);
         let old = state.generation;
         state.set_category(ContentCategory::Other);
-        assert_eq!(state.category, ContentCategory::Other);
-        assert!(!state.favorite_only);
+        assert_eq!(state.category(), ContentCategory::Other);
+        assert!(!state.favorite_only());
         assert!(!state.apply(vec![], 0, old));
         state.set_favorite_filter(true);
-        assert_eq!(state.category, ContentCategory::All);
-        assert!(state.favorite_only);
+        assert_eq!(state.category(), ContentCategory::All);
+        assert!(state.favorite_only());
         state.set_group(Some(7));
-        assert!(!state.favorite_only);
-        assert_eq!(state.category, ContentCategory::All);
+        assert!(!state.favorite_only());
+        assert_eq!(state.category(), ContentCategory::All);
     }
 
     #[test]
@@ -578,7 +601,7 @@ mod tests {
         let group_generation = state.generation;
         for _ in 0..2 {
             assert!(!state.should_reset_category_filter(false));
-            assert_eq!(state.group_id, Some(group.id));
+            assert_eq!(state.group_id(), Some(group.id));
             assert_eq!(state.selected, Some(id));
             assert_eq!(state.items.len(), 1);
             assert_eq!(state.generation, group_generation);
@@ -587,19 +610,19 @@ mod tests {
         for category in [ContentCategory::Text, ContentCategory::Other] {
             state.set_category(category);
             assert!(!state.should_reset_category_filter(true));
-            assert_eq!(state.category, category);
+            assert_eq!(state.category(), category);
             assert!(state.should_reset_category_filter(false));
             state.set_category(ContentCategory::All);
-            assert_eq!(state.category, ContentCategory::All);
+            assert_eq!(state.category(), ContentCategory::All);
             assert!(!state.should_reset_category_filter(false));
         }
 
         state.set_favorite_filter(true);
         assert!(!state.should_reset_category_filter(true));
-        assert!(state.favorite_only);
+        assert!(state.favorite_only());
         assert!(state.should_reset_category_filter(false));
         state.set_category(ContentCategory::All);
-        assert!(!state.favorite_only);
+        assert!(!state.favorite_only());
         assert!(!state.should_reset_category_filter(false));
         Ok(())
     }

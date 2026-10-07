@@ -1,3 +1,4 @@
+use super::settings_common::command_checkbox;
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox, switch::Switch};
 
@@ -113,180 +114,122 @@ impl SettingsWindowView {
         let Some(owner_entity) = self.owner.upgrade() else {
             return div().into_any_element();
         };
-        let (
-            language,
-            persist_window_size,
-            persist_window_size_pending,
-            auto_reset_state,
-            auto_reset_state_pending,
-            search_auto_focus,
-            search_auto_focus_pending,
-            search_auto_clear,
-            search_auto_clear_pending,
-            skip_clear_confirm,
-            skip_clear_confirm_pending,
-            paste_close_window,
-            paste_close_window_pending,
-            paste_move_to_top,
-            paste_move_to_top_pending,
-        ) = {
-            let state = owner_entity.read(cx);
+        let owner_state = owner_entity.read(cx);
+        let language = owner_state.language;
+        // (id, 中文标签, 英文标签, 命令, (选中值, pending) 读取器, 发送成功后的回调)
+        type BehaviorToggle = (
+            &'static str,
+            &'static str,
+            &'static str,
+            fn(bool) -> Command,
+            fn(&ClipboardView) -> (bool, bool),
+            fn(&mut ClipboardView),
+        );
+        let behavior_toggles: [BehaviorToggle; 7] = [
             (
-                state.language,
-                state.persist_window_size,
-                state.persist_window_size_pending,
-                state.auto_reset_state,
-                state.auto_reset_state_pending,
-                state.search_auto_focus,
-                state.search_auto_focus_pending,
-                state.search_auto_clear,
-                state.search_auto_clear_pending,
-                state.skip_clear_confirm,
-                state.skip_clear_confirm_pending,
-                state.paste_close_window,
-                state.paste_close_window_pending,
-                state.paste_move_to_top,
-                state.paste_move_to_top_pending,
-            )
-        };
-        let persist_owner = self.owner.clone();
-        let reset_owner = self.owner.clone();
-        let search_focus_owner = self.owner.clone();
-        let search_clear_owner = self.owner.clone();
-        let skip_clear_owner = self.owner.clone();
-        let paste_close_owner = self.owner.clone();
-        let paste_move_owner = self.owner.clone();
-
+                "persist-window-size",
+                "记住窗口大小",
+                "Remember window size",
+                Command::SetPersistWindowSize,
+                |state| (state.persist_window_size, state.persist_window_size_pending),
+                |owner| {
+                    owner.persist_window_size_pending = true;
+                    owner.window_size_task = None;
+                },
+            ),
+            (
+                "auto-reset-state",
+                "隐藏时重置搜索、筛选和滚动",
+                "Reset search, filters and scroll on hide",
+                Command::SetAutoResetState,
+                |state| (state.auto_reset_state.value, state.auto_reset_state.pending),
+                |owner| owner.auto_reset_state.pending = true,
+            ),
+            (
+                "search-auto-focus",
+                "唤出时聚焦搜索",
+                "Focus search when shown",
+                Command::SetSearchAutoFocus,
+                |state| {
+                    (
+                        state.search_auto_focus.value,
+                        state.search_auto_focus.pending,
+                    )
+                },
+                |owner| owner.search_auto_focus.pending = true,
+            ),
+            (
+                "search-auto-clear",
+                "唤出时清空搜索",
+                "Clear search when shown",
+                Command::SetSearchAutoClear,
+                |state| {
+                    (
+                        state.search_auto_clear.value,
+                        state.search_auto_clear.pending,
+                    )
+                },
+                |owner| owner.search_auto_clear.pending = true,
+            ),
+            (
+                "skip-clear-confirm",
+                "清理历史免确认",
+                "Clear history without confirmation",
+                Command::SetSkipClearConfirm,
+                |state| {
+                    (
+                        state.skip_clear_confirm.value,
+                        state.skip_clear_confirm.pending,
+                    )
+                },
+                |owner| owner.skip_clear_confirm.pending = true,
+            ),
+            (
+                "paste-close-window",
+                "粘贴后关闭窗口",
+                "Close after paste",
+                Command::SetPasteCloseWindow,
+                |state| {
+                    (
+                        state.paste_close_window.value,
+                        state.paste_close_window.pending,
+                    )
+                },
+                |owner| owner.paste_close_window.pending = true,
+            ),
+            (
+                "paste-move-to-top",
+                "粘贴后移到列表首位",
+                "Move to top after paste",
+                Command::SetPasteMoveToTop,
+                |state| {
+                    (
+                        state.paste_move_to_top.value,
+                        state.paste_move_to_top.pending,
+                    )
+                },
+                |owner| owner.paste_move_to_top.pending = true,
+            ),
+        ];
         div()
             .flex()
             .w_full()
             .flex_wrap()
             .items_start()
             .gap_3()
-            .child(
-                Checkbox::new("persist-window-size")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(language, "记住窗口大小", "Remember window size"))
-                    .checked(persist_window_size)
-                    .disabled(persist_window_size_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = persist_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetPersistWindowSize(*checked), cx) {
-                                owner.persist_window_size_pending = true;
-                                owner.window_size_task = None;
-                                cx.notify();
-                            }
-                        });
-                    }),
-            )
-            .child(
-                Checkbox::new("auto-reset-state")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(
-                        language,
-                        "隐藏时重置搜索、筛选和滚动",
-                        "Reset search, filters and scroll on hide",
-                    ))
-                    .checked(auto_reset_state)
-                    .disabled(auto_reset_state_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = reset_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetAutoResetState(*checked), cx) {
-                                owner.auto_reset_state_pending = true;
-                                cx.notify();
-                            }
-                        });
-                    }),
-            )
-            .child(
-                Checkbox::new("search-auto-focus")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(language, "唤出时聚焦搜索", "Focus search when shown"))
-                    .checked(search_auto_focus)
-                    .disabled(search_auto_focus_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = search_focus_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetSearchAutoFocus(*checked), cx) {
-                                owner.search_auto_focus_pending = true;
-                                cx.notify();
-                            }
-                        });
-                    }),
-            )
-            .child(
-                Checkbox::new("search-auto-clear")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(language, "唤出时清空搜索", "Clear search when shown"))
-                    .checked(search_auto_clear)
-                    .disabled(search_auto_clear_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = search_clear_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetSearchAutoClear(*checked), cx) {
-                                owner.search_auto_clear_pending = true;
-                                cx.notify();
-                            }
-                        });
-                    }),
-            )
-            .child(
-                Checkbox::new("skip-clear-confirm")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(
-                        language,
-                        "清理历史免确认",
-                        "Clear history without confirmation",
-                    ))
-                    .checked(skip_clear_confirm)
-                    .disabled(skip_clear_confirm_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = skip_clear_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetSkipClearConfirm(*checked), cx) {
-                                owner.skip_clear_confirm_pending = true;
-                                cx.notify();
-                            }
-                        });
-                    }),
-            )
-            .child(
-                Checkbox::new("paste-close-window")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(language, "粘贴后关闭窗口", "Close after paste"))
-                    .checked(paste_close_window)
-                    .disabled(paste_close_window_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = paste_close_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetPasteCloseWindow(*checked), cx) {
-                                owner.paste_close_window_pending = true;
-                                cx.notify();
-                            }
-                        });
-                    }),
-            )
-            .child(
-                Checkbox::new("paste-move-to-top")
-                    .text_sm()
-                    .w(px(350.))
-                    .label(tr(
-                        language,
-                        "粘贴后移到列表首位",
-                        "Move to top after paste",
-                    ))
-                    .checked(paste_move_to_top)
-                    .disabled(paste_move_to_top_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = paste_move_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetPasteMoveToTop(*checked), cx) {
-                                owner.paste_move_to_top_pending = true;
-                                cx.notify();
-                            }
-                        });
-                    }),
+            .children(
+                behavior_toggles.map(|(id, chinese, english, command, state_of, on_sent)| {
+                    let (checked, pending) = state_of(owner_state);
+                    command_checkbox(
+                        id,
+                        tr(language, chinese, english),
+                        checked,
+                        pending,
+                        &self.owner,
+                        command,
+                        on_sent,
+                    )
+                }),
             )
             .into_any_element()
     }

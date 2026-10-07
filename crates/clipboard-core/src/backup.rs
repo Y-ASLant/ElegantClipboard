@@ -1,4 +1,8 @@
 use crate::History;
+use crate::backup_common::{
+    MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES, ensure_destination_unused,
+    install_staged_tree, remap_media_rows, verify_staged_database,
+};
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, backup::Backup, params};
 use serde::{Deserialize, Serialize};
@@ -13,10 +17,6 @@ use std::{
 use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 const FORMAT_VERSION: u32 = 2;
-const MAX_DATABASE_BYTES: u64 = 20 * 1024 * 1024 * 1024;
-const MAX_ASSET_BYTES: u64 = 1024 * 1024 * 1024;
-const MAX_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024 * 1024;
-const MAX_ENTRIES: usize = 100_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
@@ -54,13 +54,6 @@ pub struct RestoreReport {
 }
 
 type AssetMap = HashMap<String, (String, PathBuf)>;
-
-struct BackupMediaRow {
-    id: i64,
-    image: Option<String>,
-    icon: Option<String>,
-    payload: Option<String>,
-}
 
 fn register_asset(
     raw_path: &str,
@@ -211,12 +204,7 @@ impl History {
                 )?;
             }
         }
-        let integrity: String = snapshot.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-        if integrity != "ok" {
-            bail!("备份副本校验失败：{integrity}");
-        }
-        let total_items: i64 =
-            snapshot.query_row("SELECT COUNT(*) FROM clipboard_items", [], |row| row.get(0))?;
+        let total_items = verify_staged_database(&snapshot, "备份副本校验失败")?;
         crate::import::checkpoint_staged_database(&snapshot)?;
         drop(snapshot);
 
@@ -276,13 +264,7 @@ impl History {
 /// Restore a GPUI ZIP backup into an unused data directory. The caller holds
 /// the destination instance lock and must not have an open database there.
 pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreReport> {
-    let destination = data_dir.join("clipboard.db");
-    if ["clipboard.db", "images", "icons", "staged"]
-        .into_iter()
-        .any(|name| data_dir.join(name).exists())
-    {
-        bail!("目标数据目录已有数据库或媒体文件，恢复不会覆盖现有数据");
-    }
+    ensure_destination_unused(data_dir, "恢复")?;
     let source = File::open(archive_path).context("无法打开备份文件")?;
     let mut raw_source = source.try_clone()?;
     let mut archive = ZipArchive::new(source).context("所选文件不是有效的 ZIP 备份")?;
@@ -362,27 +344,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     let mut restored_db = Connection::open(&staged_db)?;
     let tx = restored_db.transaction()?;
     tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
-    let media_rows: Vec<BackupMediaRow> = {
-        let mut query = tx
-            .prepare("SELECT id, image_path, source_app_icon, file_payload FROM clipboard_items")?;
-        query
-            .query_map([], |row| {
-                Ok(BackupMediaRow {
-                    id: row.get(0)?,
-                    image: row.get(1)?,
-                    icon: row.get(2)?,
-                    payload: row.get(3)?,
-                })
-            })?
-            .collect::<Result<_, _>>()?
-    };
-    for BackupMediaRow {
-        id,
-        image,
-        icon,
-        payload,
-    } in media_rows
-    {
+    remap_media_rows(&tx, |_id, image, icon, payload| {
         let mapped_image = image
             .as_deref()
             .map(|raw| rebase_archive_path(raw, "images", &extracted, data_dir))
@@ -412,52 +374,23 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
                 mapped_payload = Some(value.to_string());
             }
         }
-        if mapped_image.is_some() || mapped_icon.is_some() || mapped_payload.is_some() {
-            tx.execute(
-                "UPDATE clipboard_items SET image_path = ?1, source_app_icon = ?2,
-                 file_payload = ?3 WHERE id = ?4",
-                params![
-                    mapped_image.or(image),
-                    mapped_icon.or(icon),
-                    mapped_payload.or(payload),
-                    id
-                ],
-            )?;
-        }
-    }
+        Ok((mapped_image, mapped_icon, mapped_payload))
+    })?;
     tx.commit()?;
-    let integrity: String = restored_db.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-    if integrity != "ok" {
-        bail!("恢复数据库校验失败：{integrity}");
-    }
-    let total_items: i64 =
-        restored_db.query_row("SELECT COUNT(*) FROM clipboard_items", [], |row| row.get(0))?;
+    let total_items = verify_staged_database(&restored_db, "恢复数据库校验失败")?;
     if total_items != manifest.total_items {
         bail!("备份记录数量与格式说明不一致");
     }
     crate::import::checkpoint_staged_database(&restored_db)?;
     drop(restored_db);
 
-    let mut installed = Vec::new();
-    for category in ["images", "icons", "staged"] {
-        let source = stage.path().join(category);
-        if source.exists() {
-            let final_path = data_dir.join(category);
-            if let Err(error) = fs::rename(&source, &final_path) {
-                for (installed_path, original_path) in installed.into_iter().rev() {
-                    let _ = fs::rename(installed_path, original_path);
-                }
-                return Err(error).context("无法安装备份媒体文件");
-            }
-            installed.push((final_path, source));
-        }
-    }
-    if let Err(error) = fs::rename(&staged_db, &destination) {
-        for (installed_path, original_path) in installed.into_iter().rev() {
-            let _ = fs::rename(installed_path, original_path);
-        }
-        return Err(error).context("无法安装备份数据库");
-    }
+    install_staged_tree(
+        stage.path(),
+        &staged_db,
+        data_dir,
+        "无法安装备份媒体文件",
+        "无法安装备份数据库",
+    )?;
     Ok(RestoreReport {
         total_items,
         restored_images: extracted.get("images").map_or(0, HashSet::len),

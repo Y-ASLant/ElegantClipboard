@@ -1,3 +1,4 @@
+use super::settings_common::choice_tabs;
 use super::*;
 use gpui_kit::component::{
     accordion::Accordion, alert::Alert, checkbox::Checkbox, dialog::DialogFooter,
@@ -305,39 +306,23 @@ impl SettingsWindowView {
                         });
                     }),
             )
-            .child(
-                TabBar::new("app-filter-mode")
-                    .w_full()
-                    .segmented()
-                    .selected_index(usize::from(app_filter.mode == AppFilterMode::Whitelist))
-                    .on_click({
-                        let owner = self.owner.clone();
-                        move |index: &usize, _, cx| {
-                            let Some(&mode) =
-                                [AppFilterMode::Blacklist, AppFilterMode::Whitelist].get(*index)
-                            else {
-                                return;
-                            };
-                            let _ = owner.update(cx, |owner, cx| {
-                                if owner.app_filter.mode != mode {
-                                    let mut next = owner.app_filter.clone();
-                                    next.mode = mode;
-                                    owner.save_app_filter(next, cx);
-                                }
-                            });
-                        }
-                    })
-                    .children([
-                        Tab::new()
-                            .label(tr(language, "黑名单", "Blocklist"))
-                            .disabled(app_filter_pending)
-                            .flex_1(),
-                        Tab::new()
-                            .label(tr(language, "白名单", "Allowlist"))
-                            .disabled(app_filter_pending)
-                            .flex_1(),
-                    ]),
-            )
+            .child(choice_tabs(
+                "app-filter-mode",
+                &self.owner,
+                [AppFilterMode::Blacklist, AppFilterMode::Whitelist],
+                [
+                    tr(language, "黑名单", "Blocklist"),
+                    tr(language, "白名单", "Allowlist"),
+                ],
+                app_filter.mode,
+                app_filter_pending,
+                |owner| owner.app_filter.mode,
+                |owner, mode, cx| {
+                    let mut next = owner.app_filter.clone();
+                    next.mode = mode;
+                    owner.save_app_filter(next, cx);
+                },
+            ))
             .child(
                 div().text_xs().text_color(cx.theme().muted_foreground).child(
                     if app_filter.mode == AppFilterMode::Blacklist {

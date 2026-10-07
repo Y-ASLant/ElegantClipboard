@@ -1,4 +1,5 @@
 mod group_select;
+mod settings_common;
 mod settings_data;
 mod settings_display;
 mod settings_general;
@@ -20,7 +21,8 @@ use crate::{
 };
 use clipboard_core::{
     ContentCategory, FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
-    database::Group,
+    backup::BackupReport,
+    database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
         HotkeyPreference, HoverPreviewPosition, HoverPreviewPreference, LanguagePreference,
@@ -1095,20 +1097,14 @@ struct ClipboardView {
     window_position_pending: bool,
     persist_window_size: bool,
     persist_window_size_pending: bool,
-    auto_reset_state: bool,
-    auto_reset_state_pending: bool,
-    search_auto_focus: bool,
-    search_auto_focus_pending: bool,
-    search_auto_clear: bool,
-    search_auto_clear_pending: bool,
-    skip_clear_confirm: bool,
-    skip_clear_confirm_pending: bool,
-    paste_close_window: bool,
-    paste_close_window_pending: bool,
+    auto_reset_state: PendingPref<bool>,
+    search_auto_focus: PendingPref<bool>,
+    search_auto_clear: PendingPref<bool>,
+    skip_clear_confirm: PendingPref<bool>,
+    paste_close_window: PendingPref<bool>,
     paste_key: PasteKeyPreference,
     paste_key_pending: bool,
-    paste_move_to_top: bool,
-    paste_move_to_top_pending: bool,
+    paste_move_to_top: PendingPref<bool>,
     display: DisplayPreference,
     display_pending: bool,
     audio: AudioPreference,
@@ -1489,6 +1485,85 @@ impl Render for HoverPreviewWindowView {
                     }),
             )
             .child(div().flex_1().min_h_0().child(body))
+    }
+}
+
+/// 单值偏好及其在途保存标记：`value` 是当前生效值，
+/// `pending` 表示保存命令已发出但尚未收到确认。
+#[derive(Debug, Clone, Copy)]
+struct PendingPref<T> {
+    value: T,
+    pending: bool,
+}
+
+/// 主窗口上可被 Esc 逐层关闭的覆盖层。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Overlay {
+    GroupDelete,
+    ClearConfirm,
+    BatchConfirm,
+    GroupMove,
+    GroupEditor,
+    BatchMode,
+}
+
+/// 音效设置的通道：复制与粘贴音效共用同一套界面，仅 id、
+/// 字段与试听音不同。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SoundChannel {
+    Copy,
+    Paste,
+}
+
+impl SoundChannel {
+    fn ids(self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            SoundChannel::Copy => (
+                "audio-copy-enabled",
+                "audio-copy-timing",
+                "audio-copy-preview",
+            ),
+            SoundChannel::Paste => (
+                "audio-paste-enabled",
+                "audio-paste-timing",
+                "audio-paste-preview",
+            ),
+        }
+    }
+
+    fn enabled(self, audio: AudioPreference) -> bool {
+        match self {
+            SoundChannel::Copy => audio.copy_enabled,
+            SoundChannel::Paste => audio.paste_enabled,
+        }
+    }
+
+    fn timing(self, audio: AudioPreference) -> SoundTiming {
+        match self {
+            SoundChannel::Copy => audio.copy_timing,
+            SoundChannel::Paste => audio.paste_timing,
+        }
+    }
+
+    fn set_timing(self, audio: &mut AudioPreference, timing: SoundTiming) {
+        match self {
+            SoundChannel::Copy => audio.copy_timing = timing,
+            SoundChannel::Paste => audio.paste_timing = timing,
+        }
+    }
+
+    fn set_enabled(self, audio: &mut AudioPreference, enabled: bool) {
+        match self {
+            SoundChannel::Copy => audio.copy_enabled = enabled,
+            SoundChannel::Paste => audio.paste_enabled = enabled,
+        }
+    }
+
+    fn sound(self) -> Sound {
+        match self {
+            SoundChannel::Copy => Sound::Copy,
+            SoundChannel::Paste => Sound::Paste,
+        }
     }
 }
 
@@ -2412,20 +2487,32 @@ impl ClipboardView {
             window_position_pending: false,
             persist_window_size,
             persist_window_size_pending: false,
-            auto_reset_state,
-            auto_reset_state_pending: false,
-            search_auto_focus,
-            search_auto_focus_pending: false,
-            search_auto_clear,
-            search_auto_clear_pending: false,
-            skip_clear_confirm,
-            skip_clear_confirm_pending: false,
-            paste_close_window,
-            paste_close_window_pending: false,
+            auto_reset_state: PendingPref {
+                value: auto_reset_state,
+                pending: false,
+            },
+            search_auto_focus: PendingPref {
+                value: search_auto_focus,
+                pending: false,
+            },
+            search_auto_clear: PendingPref {
+                value: search_auto_clear,
+                pending: false,
+            },
+            skip_clear_confirm: PendingPref {
+                value: skip_clear_confirm,
+                pending: false,
+            },
+            paste_close_window: PendingPref {
+                value: paste_close_window,
+                pending: false,
+            },
             paste_key,
             paste_key_pending: false,
-            paste_move_to_top,
-            paste_move_to_top_pending: false,
+            paste_move_to_top: PendingPref {
+                value: paste_move_to_top,
+                pending: false,
+            },
             display,
             display_pending: false,
             audio,
@@ -3000,7 +3087,7 @@ impl ClipboardView {
             Command::ResolveQuickPaste {
                 slot: event.slot,
                 favorite: event.favorite,
-                group_id: self.history.group_id,
+                group_id: self.history.group_id(),
             },
             cx,
         ) {
@@ -3014,9 +3101,9 @@ impl ClipboardView {
             Command::Query {
                 search: self.search.read(cx).value().to_string(),
                 limit: self.history.limit,
-                favorite_only: self.history.favorite_only,
-                category: self.history.category,
-                group_id: self.history.group_id,
+                favorite_only: self.history.favorite_only(),
+                category: self.history.category(),
+                group_id: self.history.group_id(),
                 generation,
             },
             cx,
@@ -3028,9 +3115,9 @@ impl ClipboardView {
     fn refresh_group_select(&self, window: &mut Window, cx: &mut Context<Self>) {
         let choice = self
             .history
-            .group_id
+            .group_id()
             .map_or(GroupChoice::Default, GroupChoice::Existing);
-        let options = group_options(&self.groups, self.language, self.history.group_id);
+        let options = group_options(&self.groups, self.language, self.history.group_id());
         self.group_select.update(cx, |select, cx| {
             select.set_items(options, window, cx);
             select.set_selected_value(&choice, window, cx);
@@ -3062,7 +3149,7 @@ impl ClipboardView {
                 if let Some(group) = self
                     .groups
                     .iter()
-                    .find(|group| Some(group.id) == self.history.group_id)
+                    .find(|group| Some(group.id) == self.history.group_id())
                 {
                     self.group_rename_id = Some(group.id);
                     self.group_name_input.update(cx, |input, cx| {
@@ -3072,7 +3159,7 @@ impl ClipboardView {
                 }
             }
             GroupChoice::Delete => {
-                self.group_delete_id = self.history.group_id;
+                self.group_delete_id = self.history.group_id();
                 self.reset_selection();
                 self.clear_confirm_open = false;
                 self.group_editor_open = false;
@@ -3088,7 +3175,7 @@ impl ClipboardView {
                 }
             }
             GroupChoice::MoveUp | GroupChoice::MoveDown => {
-                if let Some(id) = self.history.group_id
+                if let Some(id) = self.history.group_id()
                     && let Some(index) = self.groups.iter().position(|group| group.id == id)
                     && let Some(target_index) =
                         index.checked_add_signed(if choice == GroupChoice::MoveUp { -1 } else { 1 })
@@ -3113,9 +3200,9 @@ impl ClipboardView {
     }
 
     fn select_group(&mut self, group_id: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.history.group_id == group_id
-            && !self.history.favorite_only
-            && self.history.category == ContentCategory::All
+        if self.history.group_id() == group_id
+            && !self.history.favorite_only()
+            && self.history.category() == ContentCategory::All
         {
             return;
         }
@@ -3146,10 +3233,12 @@ impl ClipboardView {
         if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
             return;
         }
-        let selected = self.history.group_id.is_none()
+        let selected = self.history.group_id().is_none()
             && match category {
-                None => self.history.favorite_only,
-                Some(category) => !self.history.favorite_only && self.history.category == category,
+                None => self.history.favorite_only(),
+                Some(category) => {
+                    !self.history.favorite_only() && self.history.category() == category
+                }
             };
         if selected {
             return;
@@ -3175,10 +3264,10 @@ impl ClipboardView {
     }
 
     fn category_tab_index(&self) -> usize {
-        if self.history.favorite_only {
+        if self.history.favorite_only() {
             1
         } else {
-            match self.history.category {
+            match self.history.category() {
                 ContentCategory::All => 0,
                 ContentCategory::Text => 2,
                 ContentCategory::Other => 3,
@@ -3213,7 +3302,7 @@ impl ClipboardView {
         }
         let index = self
             .history
-            .group_id
+            .group_id()
             .and_then(|id| self.groups.iter().position(|group| group.id == id))
             .map_or(0, |index| index + 1);
         let Some(next) = index.checked_add_signed(direction) else {
@@ -3349,7 +3438,7 @@ impl ClipboardView {
         }
         let Some(id) = self
             .group_delete_id
-            .filter(|id| self.history.group_id == Some(*id))
+            .filter(|id| self.history.group_id() == Some(*id))
         else {
             return;
         };
@@ -3366,12 +3455,12 @@ impl ClipboardView {
     }
 
     fn clear_history(&mut self, cx: &mut Context<Self>) {
-        if (!self.clear_confirm_open && !self.skip_clear_confirm) || self.clear_pending {
+        if (!self.clear_confirm_open && !self.skip_clear_confirm.value) || self.clear_pending {
             return;
         }
         if self.send(
             Command::ClearHistory {
-                group_id: self.history.group_id,
+                group_id: self.history.group_id(),
                 generation: self.history.generation,
             },
             cx,
@@ -3501,7 +3590,7 @@ impl ClipboardView {
         if !was_minimized {
             tray::set_window_visible(window, true);
         }
-        if self.search_auto_clear && !self.search.read(cx).value().is_empty() {
+        if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
             self.search_task = None;
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -3512,7 +3601,7 @@ impl ClipboardView {
         if self.preview_editing || self.preview_save_pending {
             return;
         }
-        if self.search_auto_focus {
+        if self.search_auto_focus.value {
             self.search.update(cx, |input, cx| input.focus(window, cx));
         } else if self.preview.id.is_none() {
             window.focus(&self.list_focus, cx);
@@ -3542,7 +3631,7 @@ impl ClipboardView {
         self.close_hover_preview(cx);
         self.paste_target = None;
         self.reset_selection();
-        if self.auto_reset_state {
+        if self.auto_reset_state.value {
             self.search_task = None;
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -3584,6 +3673,25 @@ impl ClipboardView {
         }
     }
 
+    /// 当前打开的覆盖层，按 Esc 关闭优先级排列（同时至多一层）。
+    fn active_overlay(&self) -> Option<Overlay> {
+        if self.group_delete_id.is_some() {
+            Some(Overlay::GroupDelete)
+        } else if self.clear_confirm_open {
+            Some(Overlay::ClearConfirm)
+        } else if self.batch_confirm_open {
+            Some(Overlay::BatchConfirm)
+        } else if self.group_move_id.is_some() {
+            Some(Overlay::GroupMove)
+        } else if self.group_editor_open {
+            Some(Overlay::GroupEditor)
+        } else if self.batch_mode {
+            Some(Overlay::BatchMode)
+        } else {
+            None
+        }
+    }
+
     fn dismiss_or_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.onboarding_visible() {
             self.complete_onboarding(cx);
@@ -3598,61 +3706,59 @@ impl ClipboardView {
             cx.notify();
             return;
         }
-        if self.group_delete_id.is_some() {
-            if !self.group_delete_pending {
-                self.group_delete_id = None;
-                self.sync_confirmation_dialog(window, cx);
-                cx.notify();
+        match self.active_overlay() {
+            Some(Overlay::GroupDelete) => {
+                if !self.group_delete_pending {
+                    self.group_delete_id = None;
+                    self.sync_confirmation_dialog(window, cx);
+                    cx.notify();
+                }
             }
-            return;
-        }
-        if self.clear_confirm_open {
-            if !self.clear_pending {
-                self.clear_confirm_open = false;
-                self.sync_confirmation_dialog(window, cx);
-                cx.notify();
+            Some(Overlay::ClearConfirm) => {
+                if !self.clear_pending {
+                    self.clear_confirm_open = false;
+                    self.sync_confirmation_dialog(window, cx);
+                    cx.notify();
+                }
             }
-            return;
-        }
-        if self.batch_confirm_open {
-            if !self.batch_pending {
-                self.batch_confirm_open = false;
-                self.sync_confirmation_dialog(window, cx);
-                cx.notify();
+            Some(Overlay::BatchConfirm) => {
+                if !self.batch_pending {
+                    self.batch_confirm_open = false;
+                    self.sync_confirmation_dialog(window, cx);
+                    cx.notify();
+                }
             }
-            return;
-        }
-        if self.group_move_id.is_some() {
-            if !self.group_move_pending {
-                self.group_move_id = None;
-                cx.notify();
+            Some(Overlay::GroupMove) => {
+                if !self.group_move_pending {
+                    self.group_move_id = None;
+                    cx.notify();
+                }
             }
-            return;
-        }
-        if self.group_editor_open {
-            if self.cancel_group_edit(window, cx) {
-                window.close_dialog(cx);
+            Some(Overlay::GroupEditor) => {
+                if self.cancel_group_edit(window, cx) {
+                    window.close_dialog(cx);
+                }
             }
-            return;
-        }
-        if self.batch_mode {
-            if !self.batch_pending {
-                self.reset_selection();
-                cx.notify();
+            Some(Overlay::BatchMode) => {
+                if !self.batch_pending {
+                    self.reset_selection();
+                    cx.notify();
+                }
             }
-            return;
-        }
-        if self.paste_pending.is_some() || self.batch_paste_pending.is_some() {
-            return;
-        }
-        self.paste_target = None;
-        if self._tray.is_some() {
-            self.prepare_to_hide(window, cx);
-            tray::set_window_visible(window, false);
-            cx.notify();
-        } else {
-            self.exiting.set(true);
-            window.remove_window();
+            None => {
+                if self.paste_pending.is_some() || self.batch_paste_pending.is_some() {
+                    return;
+                }
+                self.paste_target = None;
+                if self._tray.is_some() {
+                    self.prepare_to_hide(window, cx);
+                    tray::set_window_visible(window, false);
+                    cx.notify();
+                } else {
+                    self.exiting.set(true);
+                    window.remove_window();
+                }
+            }
         }
     }
 
@@ -3891,7 +3997,7 @@ impl ClipboardView {
         if self.send(
             Command::DeleteBatch {
                 ids,
-                group_id: self.history.group_id,
+                group_id: self.history.group_id(),
                 generation: self.history.generation,
             },
             cx,
@@ -3902,13 +4008,13 @@ impl ClipboardView {
     }
 
     fn move_to_group(&mut self, id: i64, target_group_id: Option<i64>, cx: &mut Context<Self>) {
-        if self.group_move_pending || target_group_id == self.history.group_id {
+        if self.group_move_pending || target_group_id == self.history.group_id() {
             return;
         }
         if self.send(
             Command::MoveToGroup {
                 id,
-                source_group_id: self.history.group_id,
+                source_group_id: self.history.group_id(),
                 target_group_id,
                 generation: self.history.generation,
             },
@@ -3919,1192 +4025,207 @@ impl ClipboardView {
         }
     }
 
+    /// 统一处理“设置已保存”确认：清除 pending 标记、回写新值并按结果
+    /// 设置状态栏消息。仅适用于形状完全一致的单值偏好确认。
+    fn acknowledge_save<T: Copy>(
+        &mut self,
+        result: Result<T, String>,
+        set_pending: impl FnOnce(&mut Self, bool),
+        set_value: impl FnOnce(&mut Self, T),
+        saved_message: (&'static str, &'static str),
+        failure_message: (&'static str, &'static str),
+    ) {
+        set_pending(self, false);
+        match result {
+            Ok(value) => {
+                set_value(self, value);
+                self.message = tr(self.language, saved_message.0, saved_message.1).into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, failure_message.0, failure_message.1)
+                );
+                self.is_error = true;
+            }
+        }
+    }
+
     fn apply_event(&mut self, event: Event, window: &mut Window, cx: &mut Context<Self>) {
-        match event {
+        let handled: bool = match event {
             Event::ShowWindow => {
                 self.paste_target = None;
                 self.show_window(window, cx);
+                true
             }
-            Event::Groups(groups) => {
-                if self.history.group_id.is_some()
-                    && !groups
-                        .iter()
-                        .any(|group| Some(group.id) == self.history.group_id)
-                {
-                    self.reset_selection();
-                    self.history.set_group(None);
-                    self.scroll_to_top();
-                    self.query(cx);
-                }
-                self.groups = groups;
-                self.refresh_group_select(window, cx);
-            }
-            Event::GroupReordered { result, .. } => {
-                self.group_reorder_pending = false;
-                match result {
-                    Ok(()) => {
-                        self.message =
-                            tr(self.language, "分组顺序已保存", "Group order saved").into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "分组排序失败", "Failed to reorder groups")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::GroupCreated(result) => {
-                self.group_save_pending = false;
-                match result {
-                    Ok(group) => {
-                        self.group_editor_open = false;
-                        self.group_rename_id = None;
-                        self.group_edit_error = None;
-                        window.close_dialog(cx);
-                        self.group_name_input.update(cx, |input, cx| {
-                            input.set_value("", window, cx);
-                        });
-                        self.select_group(Some(group.id), window, cx);
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Group created: {}", group.name)
-                        } else {
-                            format!("已创建分组：{}", group.name)
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "创建分组失败", "Failed to create group")
-                        );
-                        self.is_error = true;
-                        self.group_edit_error = Some(self.message.clone());
-                        window.refresh();
-                    }
-                }
-            }
-            Event::GroupRenamed(result) => {
-                self.group_save_pending = false;
-                match result {
-                    Ok(group) => {
-                        self.group_editor_open = false;
-                        self.group_rename_id = None;
-                        self.group_edit_error = None;
-                        window.close_dialog(cx);
-                        self.group_name_input.update(cx, |input, cx| {
-                            input.set_value("", window, cx);
-                        });
-                        window.focus(&self.list_focus, cx);
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Group renamed to: {}", group.name)
-                        } else {
-                            format!("分组已重命名为：{}", group.name)
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "重命名分组失败", "Failed to rename group")
-                        );
-                        self.is_error = true;
-                        self.group_edit_error = Some(self.message.clone());
-                        window.refresh();
-                    }
-                }
-            }
-            Event::GroupDeleted(result) => {
-                self.group_delete_pending = false;
-                self.group_delete_id = None;
-                match result {
-                    Ok(count) => {
-                        window.focus(&self.list_focus, cx);
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Group deleted; {count} items moved to the default group")
-                        } else {
-                            format!("已删除分组，{count} 条记录移至默认分组")
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "删除分组失败", "Failed to delete group")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::HistoryCleared(result) => {
-                self.clear_pending = false;
-                self.clear_confirm_open = false;
-                match result {
-                    Ok(count) => {
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Cleared {count} unpinned, non-favorite items")
-                        } else {
-                            format!("已清理 {count} 条未置顶且未收藏的记录")
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "清理历史失败", "Failed to clear history")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::AllHistoryCleared(result) => {
-                self.clear_all_pending = false;
-                match result {
-                    Ok(count) => {
-                        self.reset_selection();
-                        self.group_move_id = None;
-                        self.preview.close();
-                        self.preview_source_hash = None;
-                        self.preview_editing = false;
-                        self.preview_edit_requested = false;
-                        self.preview_save_pending = false;
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Deleted all {count} items; settings and groups were kept")
-                        } else {
-                            format!("已删除全部 {count} 条历史，设置和分组已保留")
-                        };
-                        self.is_error = false;
-                        self.clear_all_error = None;
-                        if let Some(handle) = self.settings_window {
-                            cx.spawn(async move |_, cx| {
-                                cx.update(|cx| {
-                                    let _ =
-                                        handle.update(cx, |_, window, cx| window.close_dialog(cx));
-                                });
-                            })
-                            .detach();
-                        }
-                        self.refresh_daily_counts(cx);
-                        window.focus(&self.list_focus, cx);
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "删除全部历史失败",
-                                "Failed to delete all history"
-                            )
-                        );
-                        self.is_error = true;
-                        self.clear_all_error = Some(self.message.clone());
-                        cx.refresh_windows();
-                    }
-                }
-            }
-            Event::BatchDeleted(result) => {
-                self.batch_pending = false;
-                self.batch_confirm_open = false;
-                match result {
-                    Ok(count) => {
-                        self.reset_selection();
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Deleted {count} selected items")
-                        } else {
-                            format!("已删除 {count} 条选中记录")
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "批量删除失败",
-                                "Failed to delete selected items"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::ItemMoved { result, .. } => {
-                self.group_move_pending = false;
-                match result {
-                    Ok(()) => {
-                        self.group_move_id = None;
-                        self.message = tr(
-                            self.language,
-                            "已移动到目标分组",
-                            "Moved to the selected group",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "移动分组失败", "Failed to move item")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
+            Event::Groups(groups) => self.apply_groups(groups, window, cx),
+            Event::GroupReordered { result, .. } => self.apply_group_reordered(result),
+            Event::GroupCreated(result) => self.apply_group_created(result, window, cx),
+            Event::GroupRenamed(result) => self.apply_group_renamed(result, window, cx),
+            Event::GroupDeleted(result) => self.apply_group_deleted(result, window, cx),
+            Event::HistoryCleared(result) => self.apply_history_cleared(result),
+            Event::AllHistoryCleared(result) => self.apply_all_history_cleared(result, window, cx),
+            Event::BatchDeleted(result) => self.apply_batch_deleted(result),
+            Event::ItemMoved { result, .. } => self.apply_item_moved(result),
             Event::Snapshot {
                 items,
                 total,
                 generation,
-            } => {
-                let applied = self.history.apply(items, total, generation);
-                if applied {
-                    let (top_index, partial) =
-                        history_top_row(&self.row_offsets, self.scroll.offset().y);
-                    self.rebuild_row_layout();
-                    let new_top = self.row_offsets[top_index.min(self.history.items.len())];
-                    self.scroll.set_offset(point(px(0.), -(new_top + partial)));
-                }
-                if applied
-                    && self
-                        .hover_preview
-                        .id
-                        .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
-                {
-                    self.close_hover_preview(cx);
-                }
-                if applied {
-                    self.refresh_file_card_info(cx);
-                    self.selected_ids
-                        .retain(|id| self.history.items.iter().any(|item| item.id == *id));
-                    if self
-                        .selection_anchor
-                        .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
-                    {
-                        self.selection_anchor = None;
-                    }
-                    if self.selected_ids.is_empty() && !self.batch_pending {
-                        self.batch_confirm_open = false;
-                    }
-                }
-                if applied
-                    && !self.group_move_pending
-                    && self
-                        .group_move_id
-                        .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
-                {
-                    self.group_move_id = None;
-                }
-            }
+            } => self.apply_snapshot(items, total, generation, cx),
             Event::Preview {
                 id,
                 generation,
                 result,
-            } => {
-                if self.preview.apply(id, generation, result) {
-                    let text = match &self.preview.result {
-                        Some(Ok(PreviewContent::Text(text))) => Some(text.clone()),
-                        Some(Ok(PreviewContent::RichText(text))) => Some(text.clone()),
-                        _ => None,
-                    };
-                    if let Some(text) = text {
-                        self.preview_input.update(cx, |input, cx| {
-                            input.set_value(text, window, cx);
-                            input.focus(window, cx);
-                        });
-                        if self.preview_edit_requested {
-                            self.begin_preview_edit(window, cx);
-                        }
-                    }
-                    self.preview_edit_requested = false;
-                }
-            }
+            } => self.apply_preview_result(id, generation, result, window, cx),
             Event::HoverPreview {
                 id,
                 generation,
                 result,
-            } => {
-                if self.hover_preview.apply(id, generation, result)
-                    && self.hover_source_active
-                    && self.preview.id.is_none()
-                {
-                    self.open_hover_popup(window, cx);
-                }
-            }
-            Event::HoverPreviewSaved(result) => {
-                self.hover_preference_pending = false;
-                match result {
-                    Ok(preference) => {
-                        self.hover_preference = preference;
-                        self.close_hover_preview(cx);
-                        self.message = tr(
-                            self.language,
-                            "悬停预览设置已保存",
-                            "Hover preview preferences saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "悬停预览设置保存失败",
-                                "Failed to save hover preview preferences",
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
+            } => self.apply_hover_preview_result(id, generation, result, window, cx),
+            Event::HoverPreviewSaved(result) => self.apply_hover_preview_saved(result, cx),
             Event::TextEdited {
                 id,
                 generation,
                 result,
-            } => {
-                if self.preview.id != Some(id) || self.preview.generation != generation {
-                    return;
-                }
-                self.preview_save_pending = false;
-                match result {
-                    Ok(changed) => {
-                        self.preview.close();
-                        self.preview_source_hash = None;
-                        self.preview_editing = false;
-                        self.preview_edit_requested = false;
-                        self.preview_input
-                            .update(cx, |input, cx| input.set_value("", window, cx));
-                        window.focus(&self.list_focus, cx);
-                        self.message = if changed {
-                            tr(
-                                self.language,
-                                "内容已保存为纯文本",
-                                "Content saved as plain text",
-                            )
-                        } else {
-                            tr(self.language, "内容未修改", "Content was not changed")
-                        }
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "保存编辑失败", "Failed to save changes")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::SavedAs { id, result } => {
-                if self.save_as_pending != Some(id) {
-                    return;
-                }
-                self.save_as_pending = None;
-                match result {
-                    Ok(destination) => {
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Saved to {}", destination.display())
-                        } else {
-                            format!("已另存到 {}", destination.display())
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "另存为失败", "Save as failed")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
+            } => self.apply_text_edited(id, generation, result, window, cx),
+            Event::SavedAs { id, result } => self.apply_saved_as(id, result),
             Event::Reordered {
                 from,
                 generation,
                 result,
-            } => {
-                self.reorder_pending = false;
-                self.drop_target = None;
-                self.history_drag_direction = 0;
-                let before = self.reorder_before.take();
-                match result {
-                    Ok(()) if generation == self.history.generation => {
-                        self.feedback_revision += 1;
-                        if let Some(before) = before {
-                            let after: Vec<_> = self
-                                .history
-                                .items
-                                .iter()
-                                .map(|item| (item.id, history_row_height(item, self.display)))
-                                .collect();
-                            self.reorder_offsets = reorder_pixel_offsets(&before, &after);
-                        }
-                        if self.history.items.iter().any(|item| item.id == from) {
-                            self.history.selected = Some(from);
-                        }
-                        self.feedback_task = Some(cx.spawn(async move |view, cx| {
-                            cx.background_executor()
-                                .timer(visual::MOTION_DURATION)
-                                .await;
-                            let _ = view.update(cx, |this, cx| {
-                                this.reorder_offsets.clear();
-                                cx.notify();
-                            });
-                        }));
-                        self.message = tr(self.language, "顺序已保存", "Order saved").into();
-                        self.is_error = false;
-                    }
-                    Ok(()) => {}
-                    Err(error) => {
-                        self.message = error;
-                        self.is_error = true;
-                    }
-                }
-            }
+            } => self.apply_reordered(from, generation, result, cx),
             Event::Status(message) => {
                 self.message = localize_service_message(self.language, message);
                 self.is_error = false;
+                true
             }
             Event::Copied {
                 id,
                 for_paste,
                 clipboard_sequence,
                 message,
-            } => {
-                self.message = localize_service_message(self.language, message);
-                self.is_error = false;
-                if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
-                    sound::play(Sound::Copy);
-                }
-                if let Some((pending_id, target)) = self.paste_pending.take() {
-                    if pending_id == id && for_paste {
-                        self.return_to_paste_target(
-                            target,
-                            clipboard_sequence,
-                            Some(id),
-                            window,
-                            cx,
-                        );
-                    } else {
-                        self.paste_pending = Some((pending_id, target));
-                    }
-                }
-            }
+            } => self.apply_copied(id, for_paste, clipboard_sequence, message, window, cx),
             Event::Merged {
                 for_paste,
                 clipboard_sequence,
                 item_count,
-            } => {
-                self.batch_pending = false;
-                self.batch_confirm_open = false;
-                self.reset_selection();
-                if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
-                    sound::play(Sound::Copy);
-                }
-                let target = self.batch_paste_pending.take();
-                if for_paste {
-                    if let Some(target) = target {
-                        self.return_to_paste_target(target, clipboard_sequence, None, window, cx);
-                    } else {
-                        self.message = if self.language == LanguagePreference::English {
-                            format!("Merged and copied {item_count} items; paste manually")
-                        } else {
-                            format!("已合并 {item_count} 条记录并复制，请手动粘贴")
-                        };
-                        self.is_error = true;
-                    }
-                } else {
-                    self.message = if self.language == LanguagePreference::English {
-                        format!("Merged and copied {item_count} items")
-                    } else {
-                        format!("已合并 {item_count} 条记录并复制")
-                    };
-                    self.is_error = false;
-                }
-            }
-            Event::ThemeSaved(result) => {
-                self.theme_pending = false;
-                match result {
-                    Ok(theme) => {
-                        self.close_hover_preview(cx);
-                        self.theme = theme;
-                        apply_theme(theme, window, cx);
-                        self.message = tr(
-                            self.language,
-                            "外观设置已保存",
-                            "Appearance preference saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "外观保存失败", "Failed to save appearance")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::LanguageSaved(result) => {
-                self.language_pending = false;
-                match result {
-                    Ok(language) => {
-                        self.close_hover_preview(cx);
-                        self.language = language;
-                        self.search.update(cx, |input, cx| {
-                            input.set_placeholder(
-                                tr(language, "搜索剪贴板历史…", "Search clipboard history…"),
-                                window,
-                                cx,
-                            );
-                        });
-                        self.group_name_input.update(cx, |input, cx| {
-                            input.set_placeholder(
-                                tr(language, "分组名称", "Group name"),
-                                window,
-                                cx,
-                            );
-                        });
-                        self.refresh_group_select(window, cx);
-                        let menu_result = if let Some(tray) = &self._tray {
-                            tray::update_menu(tray, language, self.window_pinned).map(|_| None)
-                        } else {
-                            tray::create(self.tray_sender.clone(), language, self.window_pinned)
-                                .map(Some)
-                        };
-                        match menu_result {
-                            Ok(tray) => {
-                                if let Some(tray) = tray {
-                                    self._tray = Some(tray);
-                                    self.tray_enabled.set(true);
-                                }
-                                self.message =
-                                    tr(language, "语言设置已保存", "Language preference saved")
-                                        .into();
-                                self.is_error = false;
-                            }
-                            Err(error) => {
-                                self.message = format!(
-                                    "{}: {error}",
-                                    tr(
-                                        language,
-                                        "语言已保存，但托盘菜单更新失败",
-                                        "Language saved, but the tray menu could not be updated"
-                                    )
-                                );
-                                self.is_error = true;
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "语言保存失败", "Failed to save language")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::HotkeySaved(result) => {
-                self.hotkey_pending = false;
-                match result {
-                    Ok(choice) => {
-                        self.hotkey_choice = choice;
-                        self.message = if choice == HotkeyPreference::Disabled {
-                            tr(
-                                self.language,
-                                "全局快捷键已关闭，可从托盘唤出窗口",
-                                "The global shortcut is disabled; open the window from the tray.",
-                            )
-                            .into()
-                        } else if self.language == LanguagePreference::English {
-                            format!("Shortcut saved: {}", hotkey_label(self.language, choice))
-                        } else {
-                            format!("已保存唤出快捷键：{}", choice.label())
-                        };
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.hotkey = None;
-                        let restore_error = self.restore_hotkey();
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "快捷键保存失败", "Failed to save shortcut")
-                        );
-                        if let Some(restore_error) = restore_error {
-                            self.message.push_str(&format!("; {restore_error}"));
-                        }
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::WindowSizeSaved(result) => match result {
-                Ok(size) => self.last_window_size = Some(size),
-                Err(error) => {
-                    self.message = format!(
-                        "{}: {error}",
-                        tr(
-                            self.language,
-                            "保存窗口大小失败",
-                            "Failed to save window size"
-                        )
-                    );
-                    self.is_error = true;
-                }
-            },
+            } => self.apply_merged(for_paste, clipboard_sequence, item_count, window, cx),
+            Event::ThemeSaved(result) => self.apply_theme_saved(result, window, cx),
+            Event::LanguageSaved(result) => self.apply_language_saved(result, window, cx),
+            Event::HotkeySaved(result) => self.apply_hotkey_saved(result),
+            Event::WindowSizeSaved(result) => self.apply_window_size_saved(result),
             Event::PersistWindowSizeSaved(result) => {
-                self.persist_window_size_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.persist_window_size = enabled;
-                        self.last_window_size = None;
-                        if enabled {
-                            self.window_bounds_changed(window, cx);
-                        }
-                        self.message = tr(
-                            self.language,
-                            "窗口大小设置已保存",
-                            "Window size setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存窗口大小设置失败",
-                                "Failed to save window size setting"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.apply_persist_window_size_saved(result, window, cx)
             }
             Event::AutoResetStateSaved(result) => {
-                self.auto_reset_state_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.auto_reset_state = enabled;
-                        self.message = tr(
-                            self.language,
-                            "隐藏时重置设置已保存",
-                            "Reset-on-hide setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存隐藏设置失败",
-                                "Failed to save hide setting"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.auto_reset_state.pending = pending,
+                    |this, value| this.auto_reset_state.value = value,
+                    ("隐藏时重置设置已保存", "Reset-on-hide setting saved"),
+                    ("保存隐藏设置失败", "Failed to save hide setting"),
+                );
+                true
             }
             Event::SearchAutoFocusSaved(result) => {
-                self.search_auto_focus_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.search_auto_focus = enabled;
-                        self.message = tr(
-                            self.language,
-                            "搜索焦点设置已保存",
-                            "Search focus setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存搜索焦点失败",
-                                "Failed to save search focus"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.search_auto_focus.pending = pending,
+                    |this, value| this.search_auto_focus.value = value,
+                    ("搜索焦点设置已保存", "Search focus setting saved"),
+                    ("保存搜索焦点失败", "Failed to save search focus"),
+                );
+                true
             }
             Event::SearchAutoClearSaved(result) => {
-                self.search_auto_clear_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.search_auto_clear = enabled;
-                        self.message = tr(
-                            self.language,
-                            "搜索清空设置已保存",
-                            "Search clearing setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存搜索清空失败",
-                                "Failed to save search clearing"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.search_auto_clear.pending = pending,
+                    |this, value| this.search_auto_clear.value = value,
+                    ("搜索清空设置已保存", "Search clearing setting saved"),
+                    ("保存搜索清空失败", "Failed to save search clearing"),
+                );
+                true
             }
             Event::SkipClearConfirmSaved(result) => {
-                self.skip_clear_confirm_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.skip_clear_confirm = enabled;
-                        self.message = tr(
-                            self.language,
-                            "清理确认设置已保存",
-                            "Clear confirmation setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存清理确认设置失败",
-                                "Failed to save clear confirmation setting"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.skip_clear_confirm.pending = pending,
+                    |this, value| this.skip_clear_confirm.value = value,
+                    ("清理确认设置已保存", "Clear confirmation setting saved"),
+                    (
+                        "保存清理确认设置失败",
+                        "Failed to save clear confirmation setting",
+                    ),
+                );
+                true
             }
             Event::PasteCloseWindowSaved(result) => {
-                self.paste_close_window_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.paste_close_window = enabled;
-                        self.message = tr(
-                            self.language,
-                            "粘贴后关闭窗口设置已保存",
-                            "Close-after-paste setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存粘贴后窗口行为失败",
-                                "Failed to save paste window behavior",
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.paste_close_window.pending = pending,
+                    |this, value| this.paste_close_window.value = value,
+                    (
+                        "粘贴后关闭窗口设置已保存",
+                        "Close-after-paste setting saved",
+                    ),
+                    (
+                        "保存粘贴后窗口行为失败",
+                        "Failed to save paste window behavior",
+                    ),
+                );
+                true
             }
             Event::PasteKeySaved(result) => {
-                self.paste_key_pending = false;
-                match result {
-                    Ok(key) => {
-                        self.paste_key = key;
-                        self.message = tr(
-                            self.language,
-                            "粘贴按键设置已保存",
-                            "Paste key setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存粘贴按键失败",
-                                "Failed to save paste key"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.paste_key_pending = pending,
+                    |this, value| this.paste_key = value,
+                    ("粘贴按键设置已保存", "Paste key setting saved"),
+                    ("保存粘贴按键失败", "Failed to save paste key"),
+                );
+                true
             }
             Event::PasteMoveToTopSaved(result) => {
-                self.paste_move_to_top_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.paste_move_to_top = enabled;
-                        self.message = tr(
-                            self.language,
-                            "粘贴后移到首位设置已保存",
-                            "Move-to-top-after-paste setting saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存粘贴后排序设置失败",
-                                "Failed to save paste sorting setting",
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.acknowledge_save(
+                    result,
+                    |this, pending| this.paste_move_to_top.pending = pending,
+                    |this, value| this.paste_move_to_top.value = value,
+                    (
+                        "粘贴后移到首位设置已保存",
+                        "Move-to-top-after-paste setting saved",
+                    ),
+                    (
+                        "保存粘贴后排序设置失败",
+                        "Failed to save paste sorting setting",
+                    ),
+                );
+                true
             }
-            Event::QuickPasteEnabledSaved(result) => {
-                self.quick_paste_pending_setting = false;
-                match result {
-                    Ok(enabled) => {
-                        self.quick_paste_enabled = enabled;
-                        if let Some(warning) = self.quick_paste_registration_warning.take() {
-                            self.message = warning;
-                            self.is_error = true;
-                        } else {
-                            self.message = tr(
-                                self.language,
-                                "快速粘贴快捷键设置已保存",
-                                "Quick paste shortcuts setting saved",
-                            )
-                            .into();
-                            self.is_error = false;
-                        }
-                    }
-                    Err(error) => {
-                        self.quick_paste_registration_warning = None;
-                        if self.quick_paste_enabled && self.paste_hotkeys.is_none() {
-                            if let Ok((hotkeys, _)) = PasteHotkeys::start(
-                                self.paste_hotkey_sender.clone(),
-                                &self.paste_shortcuts,
-                                self.hotkey_choice,
-                            ) {
-                                self.paste_hotkeys = Some(hotkeys);
-                            }
-                        } else if !self.quick_paste_enabled {
-                            self.paste_hotkeys = None;
-                        }
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存快速粘贴快捷键设置失败",
-                                "Failed to save quick paste shortcuts setting",
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::PasteShortcutsSaved(result) => {
-                let Some(previous) = self.paste_shortcuts_pending.take() else {
-                    return;
-                };
-                match result {
-                    Ok(shortcuts) => {
-                        self.paste_shortcuts = *shortcuts;
-                        if let Some(warning) = self.quick_paste_registration_warning.take() {
-                            self.message = warning;
-                            self.is_error = true;
-                        } else {
-                            self.message = tr(
-                                self.language,
-                                "快速粘贴槽位快捷键已保存",
-                                "Quick paste slot shortcut saved",
-                            )
-                            .into();
-                            self.is_error = false;
-                        }
-                        self.paste_shortcut_status = Some((self.message.clone(), self.is_error));
-                    }
-                    Err(error) => {
-                        self.paste_shortcuts = previous;
-                        self.paste_hotkeys = None;
-                        self.quick_paste_registration_warning = None;
-                        let restore_error = self.restore_paste_hotkeys();
-                        self.message = error;
-                        if let Some(error) = restore_error {
-                            self.message.push_str(&format!("; {error}"));
-                        }
-                        self.is_error = true;
-                        self.paste_shortcut_status = Some((self.message.clone(), true));
-                    }
-                }
-            }
+            Event::QuickPasteEnabledSaved(result) => self.apply_quick_paste_enabled_saved(result),
+            Event::PasteShortcutsSaved(result) => self.apply_paste_shortcuts_saved(result),
             Event::QuickPasteResolved {
                 slot,
                 favorite,
                 result,
-            } => {
-                let Some((pending_slot, pending_favorite, target)) =
-                    self.quick_paste_pending.take()
-                else {
-                    return;
-                };
-                if slot != pending_slot || favorite != pending_favorite {
-                    self.quick_paste_pending = Some((pending_slot, pending_favorite, target));
-                    return;
-                }
-                match result {
-                    Ok(id) if paste::is_external_target(window, target) => {
-                        if self.send(Command::CopyForPaste(id), cx) {
-                            self.paste_pending = Some((id, target));
-                        }
-                    }
-                    Ok(_) => {
-                        self.message = tr(
-                            self.language,
-                            "目标窗口已变化，快速粘贴已取消",
-                            "Target window changed; quick paste was canceled",
-                        )
-                        .into();
-                        self.is_error = true;
-                    }
-                    Err(error) => {
-                        self.message = error;
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::DisplaySaved(result) => {
-                self.display_pending = false;
-                match result {
-                    Ok(display) => {
-                        let (top_index, partial) =
-                            history_top_row(&self.row_offsets, self.scroll.offset().y);
-                        self.display = display;
-                        self.rebuild_row_layout();
-                        self.scroll.set_offset(point(
-                            px(0.),
-                            -(self.row_offsets[top_index.min(self.history.items.len())] + partial),
-                        ));
-                        if self
-                            .history
-                            .should_reset_category_filter(display.show_category_filter)
-                        {
-                            self.select_category(Some(ContentCategory::All), window, cx);
-                        }
-                        self.message =
-                            tr(self.language, "显示设置已保存", "Display settings saved").into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存显示设置失败",
-                                "Failed to save display settings"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::AudioSaved(result) => {
-                self.audio_pending = false;
-                match result {
-                    Ok(audio) => {
-                        self.audio = audio;
-                        self.message =
-                            tr(self.language, "音效设置已保存", "Audio settings saved").into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存音效设置失败",
-                                "Failed to save audio settings"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::MonitorTypesSaved(result) => {
-                self.monitor_types_pending = false;
-                match result {
-                    Ok(preference) => {
-                        self.monitor_types = preference;
-                        self.message =
-                            tr(self.language, "监听类型已保存", "Capture types saved").into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存监听类型失败",
-                                "Failed to save capture types"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::AppFilterSaved(result) => {
-                self.app_filter_pending = false;
-                match result {
-                    Ok(preference) => {
-                        self.app_filter = *preference;
-                        self.message =
-                            tr(self.language, "应用过滤设置已保存", "App filter saved").into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存应用过滤失败",
-                                "Failed to save app filter"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
+            } => self.apply_quick_paste_resolved(slot, favorite, result, window, cx),
+            Event::DisplaySaved(result) => self.apply_display_saved(result, window, cx),
+            Event::AudioSaved(result) => self.apply_audio_saved(result),
+            Event::MonitorTypesSaved(result) => self.apply_monitor_types_saved(result),
+            Event::AppFilterSaved(result) => self.apply_app_filter_saved(result),
             Event::RunningApps(apps) => {
                 self.running_apps_pending = false;
                 self.running_apps = apps;
+                true
             }
             Event::OnboardingCompleted(result) => {
-                self.onboarding_pending = false;
-                match result {
-                    Ok(()) => {
-                        self.onboarding_completed = true;
-                        self.message = tr(
-                            self.language,
-                            "欢迎使用 ElegantClipboard",
-                            "Welcome to ElegantClipboard",
-                        )
-                        .into();
-                        self.is_error = false;
-                        if self.search_auto_focus {
-                            self.search.update(cx, |input, cx| input.focus(window, cx));
-                        } else {
-                            window.focus(&self.list_focus, cx);
-                        }
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存引导状态失败",
-                                "Failed to save onboarding state"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
+                self.apply_onboarding_completed(result, window, cx)
             }
-            Event::WindowPositionSaved(result) => {
-                self.window_position_pending = false;
-                match result {
-                    Ok(position) => {
-                        self.window_position = position;
-                        self.message = tr(
-                            self.language,
-                            "窗口唤出位置已保存",
-                            "Window position mode saved",
-                        )
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存窗口位置失败",
-                                "Failed to save window position"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::AutostartSaved(result) => {
-                self.autostart_pending = false;
-                match result {
-                    Ok(enabled) => {
-                        self.autostart = enabled;
-                        self.message = if enabled {
-                            tr(self.language, "已开启开机启动", "Startup enabled")
-                        } else {
-                            tr(self.language, "已关闭开机启动", "Startup disabled")
-                        }
-                        .into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "开机启动设置失败",
-                                "Failed to update startup"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::DataSize(result) => {
-                self.data_size_pending = false;
-                match result {
-                    Ok(size) => {
-                        self.data_size = Some(size);
-                        self.message =
-                            tr(self.language, "数据占用已更新", "Storage usage updated").into();
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "统计数据占用失败",
-                                "Failed to calculate storage usage"
-                            )
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
-            Event::DailyCounts(result) => match result {
-                Ok(counts) => self.daily_counts = Some(counts),
-                Err(error) => {
-                    self.daily_counts = None;
-                    self.message = format!(
-                        "{}: {error}",
-                        tr(
-                            self.language,
-                            "统计每日历史失败",
-                            "Failed to count daily history"
-                        )
-                    );
-                    self.is_error = true;
-                }
-            },
+            Event::WindowPositionSaved(result) => self.apply_window_position_saved(result),
+            Event::AutostartSaved(result) => self.apply_autostart_saved(result),
+            Event::DataSize(result) => self.apply_data_size(result),
+            Event::DailyCounts(result) => self.apply_daily_counts(result),
             Event::DatabaseOptimized(size) => {
                 self.database_maintenance_pending = false;
                 self.data_size = Some(size);
@@ -5115,6 +4236,7 @@ impl ClipboardView {
                 )
                 .into();
                 self.is_error = false;
+                true
             }
             Event::Paused(paused) => {
                 self.paused = paused;
@@ -5130,127 +4252,1273 @@ impl ClipboardView {
                     tr(self.language, "已恢复记录", "Recording resumed")
                 }
                 .into();
+                true
             }
-            Event::BackupExported(result) => {
-                self.export_pending = false;
-                match result {
-                    Ok(report) => {
-                        let included =
-                            report.included_images + report.included_icons + report.included_staged;
-                        let missing =
-                            report.missing_images + report.missing_icons + report.missing_staged;
-                        self.message = if self.language == LanguagePreference::English {
-                            format!(
-                                "Backed up {} items and {} attachments to {}{}",
-                                report.total_items,
-                                included,
-                                report.destination.display(),
-                                if missing == 0 {
-                                    String::new()
-                                } else {
-                                    format!("; {missing} source attachments were not included")
-                                }
-                            )
-                        } else {
-                            format!(
-                                "已备份 {} 条记录、{} 个附件到 {}{}",
-                                report.total_items,
-                                included,
-                                report.destination.display(),
-                                if missing == 0 {
-                                    String::new()
-                                } else {
-                                    format!("；{missing} 个源附件未包含在备份中")
-                                }
-                            )
-                        };
-                        self.is_error = missing != 0;
-                    }
-                    Err(error) => {
-                        self.message = format!(
-                            "{}: {error}",
-                            tr(self.language, "导出备份失败", "Failed to export backup")
-                        );
-                        self.is_error = true;
-                    }
-                }
-            }
+            Event::BackupExported(result) => self.apply_backup_exported(result),
             Event::CommandFailed { kind, message } => {
-                if let FailureKind::Query(generation) = kind
-                    && !self.history.fail_query(generation)
-                {
-                    return;
-                }
-                if let FailureKind::EditText { id, generation } = kind
-                    && (self.preview.id != Some(id) || self.preview.generation != generation)
-                {
-                    return;
-                }
-                match kind {
-                    FailureKind::Query(_) => {}
-                    FailureKind::Paste(id)
-                        if self
-                            .paste_pending
-                            .is_some_and(|(pending_id, _)| pending_id == id) =>
-                    {
-                        self.paste_pending = None;
-                    }
-                    FailureKind::Merge => {
-                        self.batch_pending = false;
-                        self.batch_paste_pending = None;
-                    }
-                    FailureKind::GroupSave => {
-                        self.group_save_pending = false;
-                        self.group_edit_error = Some(message.clone());
-                        window.refresh();
-                    }
-                    FailureKind::GroupDelete => {
-                        self.group_delete_pending = false;
-                        self.group_delete_id = None;
-                    }
-                    FailureKind::GroupMove => self.group_move_pending = false,
-                    FailureKind::ClearHistory => {
-                        self.clear_pending = false;
-                        self.confirmation_error = Some(message.clone());
-                    }
-                    FailureKind::ClearAllHistory => {
-                        self.clear_all_pending = false;
-                        self.clear_all_error = Some(message.clone());
-                        cx.refresh_windows();
-                    }
-                    FailureKind::BatchDelete => {
-                        self.batch_pending = false;
-                        self.batch_confirm_open = false;
-                    }
-                    FailureKind::EditText { .. } => self.preview_save_pending = false,
-                    FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
-                        self.save_as_pending = None;
-                    }
-                    FailureKind::DataSize => self.data_size_pending = false,
-                    FailureKind::DatabaseMaintenance => {
-                        self.database_maintenance_pending = false;
-                    }
-                    FailureKind::Pause => self.pause_pending = false,
-                    FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
-                }
-                self.message = message;
-                self.is_error = true;
+                self.apply_command_failed(kind, message, window, cx)
             }
             Event::Error(message) => {
                 self.message = message;
                 self.is_error = true;
                 self.history.loading = false;
+                true
             }
             Event::BackgroundError(message) => {
                 self.message = message;
                 self.is_error = true;
+                true
             }
+        };
+        if !handled {
+            return;
         }
         self.sync_confirmation_dialog(window, cx);
         if self.confirmation.is_some() {
             window.refresh();
         }
         cx.notify();
+    }
+
+    /// 以下 `apply_*` 为 `apply_event` 按事件域拆分的处理函数；
+    /// 返回 `false` 表示该事件在此提前结束（跳过末尾的确认弹窗同步）。
+    fn apply_groups(
+        &mut self,
+        groups: Vec<Group>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.history.group_id().is_some()
+            && !groups
+                .iter()
+                .any(|group| Some(group.id) == self.history.group_id())
+        {
+            self.reset_selection();
+            self.history.set_group(None);
+            self.scroll_to_top();
+            self.query(cx);
+        }
+        self.groups = groups;
+        self.refresh_group_select(window, cx);
+        true
+    }
+
+    fn apply_group_reordered(&mut self, result: Result<(), String>) -> bool {
+        self.group_reorder_pending = false;
+        match result {
+            Ok(()) => {
+                self.message = tr(self.language, "分组顺序已保存", "Group order saved").into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "分组排序失败", "Failed to reorder groups")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_group_created(
+        &mut self,
+        result: Result<Group, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.group_save_pending = false;
+        match result {
+            Ok(group) => {
+                self.group_editor_open = false;
+                self.group_rename_id = None;
+                self.group_edit_error = None;
+                window.close_dialog(cx);
+                self.group_name_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.select_group(Some(group.id), window, cx);
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Group created: {}", group.name)
+                } else {
+                    format!("已创建分组：{}", group.name)
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "创建分组失败", "Failed to create group")
+                );
+                self.is_error = true;
+                self.group_edit_error = Some(self.message.clone());
+                window.refresh();
+            }
+        }
+        true
+    }
+
+    fn apply_group_renamed(
+        &mut self,
+        result: Result<Group, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.group_save_pending = false;
+        match result {
+            Ok(group) => {
+                self.group_editor_open = false;
+                self.group_rename_id = None;
+                self.group_edit_error = None;
+                window.close_dialog(cx);
+                self.group_name_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                window.focus(&self.list_focus, cx);
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Group renamed to: {}", group.name)
+                } else {
+                    format!("分组已重命名为：{}", group.name)
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "重命名分组失败", "Failed to rename group")
+                );
+                self.is_error = true;
+                self.group_edit_error = Some(self.message.clone());
+                window.refresh();
+            }
+        }
+        true
+    }
+
+    fn apply_group_deleted(
+        &mut self,
+        result: Result<usize, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.group_delete_pending = false;
+        self.group_delete_id = None;
+        match result {
+            Ok(count) => {
+                window.focus(&self.list_focus, cx);
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Group deleted; {count} items moved to the default group")
+                } else {
+                    format!("已删除分组，{count} 条记录移至默认分组")
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "删除分组失败", "Failed to delete group")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_history_cleared(&mut self, result: Result<i64, String>) -> bool {
+        self.clear_pending = false;
+        self.clear_confirm_open = false;
+        match result {
+            Ok(count) => {
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Cleared {count} unpinned, non-favorite items")
+                } else {
+                    format!("已清理 {count} 条未置顶且未收藏的记录")
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "清理历史失败", "Failed to clear history")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_all_history_cleared(
+        &mut self,
+        result: Result<i64, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.clear_all_pending = false;
+        match result {
+            Ok(count) => {
+                self.reset_selection();
+                self.group_move_id = None;
+                self.preview.close();
+                self.preview_source_hash = None;
+                self.preview_editing = false;
+                self.preview_edit_requested = false;
+                self.preview_save_pending = false;
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Deleted all {count} items; settings and groups were kept")
+                } else {
+                    format!("已删除全部 {count} 条历史，设置和分组已保留")
+                };
+                self.is_error = false;
+                self.clear_all_error = None;
+                if let Some(handle) = self.settings_window {
+                    cx.spawn(async move |_, cx| {
+                        cx.update(|cx| {
+                            let _ = handle.update(cx, |_, window, cx| window.close_dialog(cx));
+                        });
+                    })
+                    .detach();
+                }
+                self.refresh_daily_counts(cx);
+                window.focus(&self.list_focus, cx);
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "删除全部历史失败",
+                        "Failed to delete all history"
+                    )
+                );
+                self.is_error = true;
+                self.clear_all_error = Some(self.message.clone());
+                cx.refresh_windows();
+            }
+        }
+        true
+    }
+
+    fn apply_batch_deleted(&mut self, result: Result<i64, String>) -> bool {
+        self.batch_pending = false;
+        self.batch_confirm_open = false;
+        match result {
+            Ok(count) => {
+                self.reset_selection();
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Deleted {count} selected items")
+                } else {
+                    format!("已删除 {count} 条选中记录")
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "批量删除失败",
+                        "Failed to delete selected items"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_item_moved(&mut self, result: Result<(), String>) -> bool {
+        self.group_move_pending = false;
+        match result {
+            Ok(()) => {
+                self.group_move_id = None;
+                self.message = tr(
+                    self.language,
+                    "已移动到目标分组",
+                    "Moved to the selected group",
+                )
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "移动分组失败", "Failed to move item")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_snapshot(
+        &mut self,
+        items: Vec<DbClipboardItem>,
+        total: i64,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let applied = self.history.apply(items, total, generation);
+        if applied {
+            let (top_index, partial) = history_top_row(&self.row_offsets, self.scroll.offset().y);
+            self.rebuild_row_layout();
+            let new_top = self.row_offsets[top_index.min(self.history.items.len())];
+            self.scroll.set_offset(point(px(0.), -(new_top + partial)));
+        }
+        if applied
+            && self
+                .hover_preview
+                .id
+                .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+        {
+            self.close_hover_preview(cx);
+        }
+        if applied {
+            self.refresh_file_card_info(cx);
+            self.selected_ids
+                .retain(|id| self.history.items.iter().any(|item| item.id == *id));
+            if self
+                .selection_anchor
+                .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+            {
+                self.selection_anchor = None;
+            }
+            if self.selected_ids.is_empty() && !self.batch_pending {
+                self.batch_confirm_open = false;
+            }
+        }
+        if applied
+            && !self.group_move_pending
+            && self
+                .group_move_id
+                .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+        {
+            self.group_move_id = None;
+        }
+        true
+    }
+
+    fn apply_preview_result(
+        &mut self,
+        id: i64,
+        generation: u64,
+        result: Result<PreviewContent, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.preview.apply(id, generation, result) {
+            let text = match &self.preview.result {
+                Some(Ok(PreviewContent::Text(text))) => Some(text.clone()),
+                Some(Ok(PreviewContent::RichText(text))) => Some(text.clone()),
+                _ => None,
+            };
+            if let Some(text) = text {
+                self.preview_input.update(cx, |input, cx| {
+                    input.set_value(text, window, cx);
+                    input.focus(window, cx);
+                });
+                if self.preview_edit_requested {
+                    self.begin_preview_edit(window, cx);
+                }
+            }
+            self.preview_edit_requested = false;
+        }
+        true
+    }
+
+    fn apply_hover_preview_result(
+        &mut self,
+        id: i64,
+        generation: u64,
+        result: Result<PreviewContent, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.hover_preview.apply(id, generation, result)
+            && self.hover_source_active
+            && self.preview.id.is_none()
+        {
+            self.open_hover_popup(window, cx);
+        }
+        true
+    }
+
+    fn apply_hover_preview_saved(
+        &mut self,
+        result: Result<HoverPreviewPreference, String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.hover_preference_pending = false;
+        match result {
+            Ok(preference) => {
+                self.hover_preference = preference;
+                self.close_hover_preview(cx);
+                self.message = tr(
+                    self.language,
+                    "悬停预览设置已保存",
+                    "Hover preview preferences saved",
+                )
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "悬停预览设置保存失败",
+                        "Failed to save hover preview preferences",
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_text_edited(
+        &mut self,
+        id: i64,
+        generation: u64,
+        result: Result<bool, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.preview.id != Some(id) || self.preview.generation != generation {
+            return false;
+        }
+        self.preview_save_pending = false;
+        match result {
+            Ok(changed) => {
+                self.preview.close();
+                self.preview_source_hash = None;
+                self.preview_editing = false;
+                self.preview_edit_requested = false;
+                self.preview_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                window.focus(&self.list_focus, cx);
+                self.message = if changed {
+                    tr(
+                        self.language,
+                        "内容已保存为纯文本",
+                        "Content saved as plain text",
+                    )
+                } else {
+                    tr(self.language, "内容未修改", "Content was not changed")
+                }
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "保存编辑失败", "Failed to save changes")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_saved_as(&mut self, id: i64, result: Result<std::path::PathBuf, String>) -> bool {
+        if self.save_as_pending != Some(id) {
+            return false;
+        }
+        self.save_as_pending = None;
+        match result {
+            Ok(destination) => {
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Saved to {}", destination.display())
+                } else {
+                    format!("已另存到 {}", destination.display())
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "另存为失败", "Save as failed")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_reordered(
+        &mut self,
+        from: i64,
+        generation: u64,
+        result: Result<(), String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.reorder_pending = false;
+        self.drop_target = None;
+        self.history_drag_direction = 0;
+        let before = self.reorder_before.take();
+        match result {
+            Ok(()) if generation == self.history.generation => {
+                self.feedback_revision += 1;
+                if let Some(before) = before {
+                    let after: Vec<_> = self
+                        .history
+                        .items
+                        .iter()
+                        .map(|item| (item.id, history_row_height(item, self.display)))
+                        .collect();
+                    self.reorder_offsets = reorder_pixel_offsets(&before, &after);
+                }
+                if self.history.items.iter().any(|item| item.id == from) {
+                    self.history.selected = Some(from);
+                }
+                self.feedback_task = Some(cx.spawn(async move |view, cx| {
+                    cx.background_executor()
+                        .timer(visual::MOTION_DURATION)
+                        .await;
+                    let _ = view.update(cx, |this, cx| {
+                        this.reorder_offsets.clear();
+                        cx.notify();
+                    });
+                }));
+                self.message = tr(self.language, "顺序已保存", "Order saved").into();
+                self.is_error = false;
+            }
+            Ok(()) => {}
+            Err(error) => {
+                self.message = error;
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_copied(
+        &mut self,
+        id: i64,
+        for_paste: bool,
+        clipboard_sequence: u32,
+        message: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.message = localize_service_message(self.language, message);
+        self.is_error = false;
+        if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
+            sound::play(Sound::Copy);
+        }
+        if let Some((pending_id, target)) = self.paste_pending.take() {
+            if pending_id == id && for_paste {
+                self.return_to_paste_target(target, clipboard_sequence, Some(id), window, cx);
+            } else {
+                self.paste_pending = Some((pending_id, target));
+            }
+        }
+        true
+    }
+
+    fn apply_merged(
+        &mut self,
+        for_paste: bool,
+        clipboard_sequence: u32,
+        item_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.batch_pending = false;
+        self.batch_confirm_open = false;
+        self.reset_selection();
+        if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
+            sound::play(Sound::Copy);
+        }
+        let target = self.batch_paste_pending.take();
+        if for_paste {
+            if let Some(target) = target {
+                self.return_to_paste_target(target, clipboard_sequence, None, window, cx);
+            } else {
+                self.message = if self.language == LanguagePreference::English {
+                    format!("Merged and copied {item_count} items; paste manually")
+                } else {
+                    format!("已合并 {item_count} 条记录并复制，请手动粘贴")
+                };
+                self.is_error = true;
+            }
+        } else {
+            self.message = if self.language == LanguagePreference::English {
+                format!("Merged and copied {item_count} items")
+            } else {
+                format!("已合并 {item_count} 条记录并复制")
+            };
+            self.is_error = false;
+        }
+        true
+    }
+
+    fn apply_theme_saved(
+        &mut self,
+        result: Result<ThemePreference, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.theme_pending = false;
+        match result {
+            Ok(theme) => {
+                self.close_hover_preview(cx);
+                self.theme = theme;
+                apply_theme(theme, window, cx);
+                self.message = tr(
+                    self.language,
+                    "外观设置已保存",
+                    "Appearance preference saved",
+                )
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "外观保存失败", "Failed to save appearance")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_language_saved(
+        &mut self,
+        result: Result<LanguagePreference, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.language_pending = false;
+        match result {
+            Ok(language) => {
+                self.close_hover_preview(cx);
+                self.language = language;
+                self.search.update(cx, |input, cx| {
+                    input.set_placeholder(
+                        tr(language, "搜索剪贴板历史…", "Search clipboard history…"),
+                        window,
+                        cx,
+                    );
+                });
+                self.group_name_input.update(cx, |input, cx| {
+                    input.set_placeholder(tr(language, "分组名称", "Group name"), window, cx);
+                });
+                self.refresh_group_select(window, cx);
+                let menu_result = if let Some(tray) = &self._tray {
+                    tray::update_menu(tray, language, self.window_pinned).map(|_| None)
+                } else {
+                    tray::create(self.tray_sender.clone(), language, self.window_pinned).map(Some)
+                };
+                match menu_result {
+                    Ok(tray) => {
+                        if let Some(tray) = tray {
+                            self._tray = Some(tray);
+                            self.tray_enabled.set(true);
+                        }
+                        self.message =
+                            tr(language, "语言设置已保存", "Language preference saved").into();
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.message = format!(
+                            "{}: {error}",
+                            tr(
+                                language,
+                                "语言已保存，但托盘菜单更新失败",
+                                "Language saved, but the tray menu could not be updated"
+                            )
+                        );
+                        self.is_error = true;
+                    }
+                }
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "语言保存失败", "Failed to save language")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_hotkey_saved(&mut self, result: Result<HotkeyPreference, String>) -> bool {
+        self.hotkey_pending = false;
+        match result {
+            Ok(choice) => {
+                self.hotkey_choice = choice;
+                self.message = if choice == HotkeyPreference::Disabled {
+                    tr(
+                        self.language,
+                        "全局快捷键已关闭，可从托盘唤出窗口",
+                        "The global shortcut is disabled; open the window from the tray.",
+                    )
+                    .into()
+                } else if self.language == LanguagePreference::English {
+                    format!("Shortcut saved: {}", hotkey_label(self.language, choice))
+                } else {
+                    format!("已保存唤出快捷键：{}", choice.label())
+                };
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.hotkey = None;
+                let restore_error = self.restore_hotkey();
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "快捷键保存失败", "Failed to save shortcut")
+                );
+                if let Some(restore_error) = restore_error {
+                    self.message.push_str(&format!("; {restore_error}"));
+                }
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_window_size_saved(&mut self, result: Result<WindowSizePreference, String>) -> bool {
+        match result {
+            Ok(size) => self.last_window_size = Some(size),
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存窗口大小失败",
+                        "Failed to save window size"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_persist_window_size_saved(
+        &mut self,
+        result: Result<bool, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.persist_window_size_pending = false;
+        match result {
+            Ok(enabled) => {
+                self.persist_window_size = enabled;
+                self.last_window_size = None;
+                if enabled {
+                    self.window_bounds_changed(window, cx);
+                }
+                self.message = tr(
+                    self.language,
+                    "窗口大小设置已保存",
+                    "Window size setting saved",
+                )
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存窗口大小设置失败",
+                        "Failed to save window size setting"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_quick_paste_enabled_saved(&mut self, result: Result<bool, String>) -> bool {
+        self.quick_paste_pending_setting = false;
+        match result {
+            Ok(enabled) => {
+                self.quick_paste_enabled = enabled;
+                if let Some(warning) = self.quick_paste_registration_warning.take() {
+                    self.message = warning;
+                    self.is_error = true;
+                } else {
+                    self.message = tr(
+                        self.language,
+                        "快速粘贴快捷键设置已保存",
+                        "Quick paste shortcuts setting saved",
+                    )
+                    .into();
+                    self.is_error = false;
+                }
+            }
+            Err(error) => {
+                self.quick_paste_registration_warning = None;
+                if self.quick_paste_enabled && self.paste_hotkeys.is_none() {
+                    if let Ok((hotkeys, _)) = PasteHotkeys::start(
+                        self.paste_hotkey_sender.clone(),
+                        &self.paste_shortcuts,
+                        self.hotkey_choice,
+                    ) {
+                        self.paste_hotkeys = Some(hotkeys);
+                    }
+                } else if !self.quick_paste_enabled {
+                    self.paste_hotkeys = None;
+                }
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存快速粘贴快捷键设置失败",
+                        "Failed to save quick paste shortcuts setting",
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_paste_shortcuts_saved(
+        &mut self,
+        result: Result<Box<PasteShortcutConfig>, String>,
+    ) -> bool {
+        let Some(previous) = self.paste_shortcuts_pending.take() else {
+            return false;
+        };
+        match result {
+            Ok(shortcuts) => {
+                self.paste_shortcuts = *shortcuts;
+                if let Some(warning) = self.quick_paste_registration_warning.take() {
+                    self.message = warning;
+                    self.is_error = true;
+                } else {
+                    self.message = tr(
+                        self.language,
+                        "快速粘贴槽位快捷键已保存",
+                        "Quick paste slot shortcut saved",
+                    )
+                    .into();
+                    self.is_error = false;
+                }
+                self.paste_shortcut_status = Some((self.message.clone(), self.is_error));
+            }
+            Err(error) => {
+                self.paste_shortcuts = previous;
+                self.paste_hotkeys = None;
+                self.quick_paste_registration_warning = None;
+                let restore_error = self.restore_paste_hotkeys();
+                self.message = error;
+                if let Some(error) = restore_error {
+                    self.message.push_str(&format!("; {error}"));
+                }
+                self.is_error = true;
+                self.paste_shortcut_status = Some((self.message.clone(), true));
+            }
+        }
+        true
+    }
+
+    fn apply_quick_paste_resolved(
+        &mut self,
+        slot: u8,
+        favorite: bool,
+        result: Result<i64, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((pending_slot, pending_favorite, target)) = self.quick_paste_pending.take() else {
+            return false;
+        };
+        if slot != pending_slot || favorite != pending_favorite {
+            self.quick_paste_pending = Some((pending_slot, pending_favorite, target));
+            return false;
+        }
+        match result {
+            Ok(id) if paste::is_external_target(window, target) => {
+                if self.send(Command::CopyForPaste(id), cx) {
+                    self.paste_pending = Some((id, target));
+                }
+            }
+            Ok(_) => {
+                self.message = tr(
+                    self.language,
+                    "目标窗口已变化，快速粘贴已取消",
+                    "Target window changed; quick paste was canceled",
+                )
+                .into();
+                self.is_error = true;
+            }
+            Err(error) => {
+                self.message = error;
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_display_saved(
+        &mut self,
+        result: Result<DisplayPreference, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.display_pending = false;
+        match result {
+            Ok(display) => {
+                let (top_index, partial) =
+                    history_top_row(&self.row_offsets, self.scroll.offset().y);
+                self.display = display;
+                self.rebuild_row_layout();
+                self.scroll.set_offset(point(
+                    px(0.),
+                    -(self.row_offsets[top_index.min(self.history.items.len())] + partial),
+                ));
+                if self
+                    .history
+                    .should_reset_category_filter(display.show_category_filter)
+                {
+                    self.select_category(Some(ContentCategory::All), window, cx);
+                }
+                self.message = tr(self.language, "显示设置已保存", "Display settings saved").into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存显示设置失败",
+                        "Failed to save display settings"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_audio_saved(&mut self, result: Result<AudioPreference, String>) -> bool {
+        self.audio_pending = false;
+        match result {
+            Ok(audio) => {
+                self.audio = audio;
+                self.message = tr(self.language, "音效设置已保存", "Audio settings saved").into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存音效设置失败",
+                        "Failed to save audio settings"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_monitor_types_saved(
+        &mut self,
+        result: Result<MonitorTypesPreference, String>,
+    ) -> bool {
+        self.monitor_types_pending = false;
+        match result {
+            Ok(preference) => {
+                self.monitor_types = preference;
+                self.message = tr(self.language, "监听类型已保存", "Capture types saved").into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存监听类型失败",
+                        "Failed to save capture types"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_app_filter_saved(&mut self, result: Result<Box<AppFilterPreference>, String>) -> bool {
+        self.app_filter_pending = false;
+        match result {
+            Ok(preference) => {
+                self.app_filter = *preference;
+                self.message = tr(self.language, "应用过滤设置已保存", "App filter saved").into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存应用过滤失败",
+                        "Failed to save app filter"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_onboarding_completed(
+        &mut self,
+        result: Result<(), String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.onboarding_pending = false;
+        match result {
+            Ok(()) => {
+                self.onboarding_completed = true;
+                self.message = tr(
+                    self.language,
+                    "欢迎使用 ElegantClipboard",
+                    "Welcome to ElegantClipboard",
+                )
+                .into();
+                self.is_error = false;
+                if self.search_auto_focus.value {
+                    self.search.update(cx, |input, cx| input.focus(window, cx));
+                } else {
+                    window.focus(&self.list_focus, cx);
+                }
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存引导状态失败",
+                        "Failed to save onboarding state"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_window_position_saved(
+        &mut self,
+        result: Result<WindowPositionPreference, String>,
+    ) -> bool {
+        self.window_position_pending = false;
+        match result {
+            Ok(position) => {
+                self.window_position = position;
+                self.message = tr(
+                    self.language,
+                    "窗口唤出位置已保存",
+                    "Window position mode saved",
+                )
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "保存窗口位置失败",
+                        "Failed to save window position"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_autostart_saved(&mut self, result: Result<bool, String>) -> bool {
+        self.autostart_pending = false;
+        match result {
+            Ok(enabled) => {
+                self.autostart = enabled;
+                self.message = if enabled {
+                    tr(self.language, "已开启开机启动", "Startup enabled")
+                } else {
+                    tr(self.language, "已关闭开机启动", "Startup disabled")
+                }
+                .into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "开机启动设置失败",
+                        "Failed to update startup"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_data_size(&mut self, result: Result<DataSizeInfo, String>) -> bool {
+        self.data_size_pending = false;
+        match result {
+            Ok(size) => {
+                self.data_size = Some(size);
+                self.message = tr(self.language, "数据占用已更新", "Storage usage updated").into();
+                self.is_error = false;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "统计数据占用失败",
+                        "Failed to calculate storage usage"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_daily_counts(&mut self, result: Result<Vec<(String, i64)>, String>) -> bool {
+        match result {
+            Ok(counts) => self.daily_counts = Some(counts),
+            Err(error) => {
+                self.daily_counts = None;
+                self.message = format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "统计每日历史失败",
+                        "Failed to count daily history"
+                    )
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_backup_exported(&mut self, result: Result<BackupReport, String>) -> bool {
+        self.export_pending = false;
+        match result {
+            Ok(report) => {
+                let included =
+                    report.included_images + report.included_icons + report.included_staged;
+                let missing = report.missing_images + report.missing_icons + report.missing_staged;
+                self.message = if self.language == LanguagePreference::English {
+                    format!(
+                        "Backed up {} items and {} attachments to {}{}",
+                        report.total_items,
+                        included,
+                        report.destination.display(),
+                        if missing == 0 {
+                            String::new()
+                        } else {
+                            format!("; {missing} source attachments were not included")
+                        }
+                    )
+                } else {
+                    format!(
+                        "已备份 {} 条记录、{} 个附件到 {}{}",
+                        report.total_items,
+                        included,
+                        report.destination.display(),
+                        if missing == 0 {
+                            String::new()
+                        } else {
+                            format!("；{missing} 个源附件未包含在备份中")
+                        }
+                    )
+                };
+                self.is_error = missing != 0;
+            }
+            Err(error) => {
+                self.message = format!(
+                    "{}: {error}",
+                    tr(self.language, "导出备份失败", "Failed to export backup")
+                );
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
+    fn apply_command_failed(
+        &mut self,
+        kind: FailureKind,
+        message: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let FailureKind::Query(generation) = kind
+            && !self.history.fail_query(generation)
+        {
+            return false;
+        }
+        if let FailureKind::EditText { id, generation } = kind
+            && (self.preview.id != Some(id) || self.preview.generation != generation)
+        {
+            return false;
+        }
+        match kind {
+            FailureKind::Query(_) => {}
+            FailureKind::Paste(id)
+                if self
+                    .paste_pending
+                    .is_some_and(|(pending_id, _)| pending_id == id) =>
+            {
+                self.paste_pending = None;
+            }
+            FailureKind::Merge => {
+                self.batch_pending = false;
+                self.batch_paste_pending = None;
+            }
+            FailureKind::GroupSave => {
+                self.group_save_pending = false;
+                self.group_edit_error = Some(message.clone());
+                window.refresh();
+            }
+            FailureKind::GroupDelete => {
+                self.group_delete_pending = false;
+                self.group_delete_id = None;
+            }
+            FailureKind::GroupMove => self.group_move_pending = false,
+            FailureKind::ClearHistory => {
+                self.clear_pending = false;
+                self.confirmation_error = Some(message.clone());
+            }
+            FailureKind::ClearAllHistory => {
+                self.clear_all_pending = false;
+                self.clear_all_error = Some(message.clone());
+                cx.refresh_windows();
+            }
+            FailureKind::BatchDelete => {
+                self.batch_pending = false;
+                self.batch_confirm_open = false;
+            }
+            FailureKind::EditText { .. } => self.preview_save_pending = false,
+            FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
+                self.save_as_pending = None;
+            }
+            FailureKind::DataSize => self.data_size_pending = false,
+            FailureKind::DatabaseMaintenance => {
+                self.database_maintenance_pending = false;
+            }
+            FailureKind::Pause => self.pause_pending = false,
+            FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
+        }
+        self.message = message;
+        self.is_error = true;
+        true
     }
 
     fn open_preview(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
@@ -6298,8 +6566,9 @@ impl ClipboardView {
             self.is_error = true;
             return;
         }
-        let hide_window = should_hide_after_paste(self.paste_close_window, self.window_pinned)
-            && tray::is_window_shown(window);
+        let hide_window =
+            should_hide_after_paste(self.paste_close_window.value, self.window_pinned)
+                && tray::is_window_shown(window);
         if hide_window {
             self.prepare_to_hide(window, cx);
             tray::set_window_visible(window, false);
@@ -6325,7 +6594,7 @@ impl ClipboardView {
                         )
                         .into();
                         this.is_error = false;
-                        if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top) {
+                        if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top.value) {
                             this.send(Command::BumpToTop(id), cx);
                         }
                     }
@@ -6398,8 +6667,8 @@ impl ClipboardView {
         !self.reorder_pending
             && !self.history.loading
             && drag.generation == self.history.generation
-            && drag.favorite_only == self.history.favorite_only
-            && drag.group_id == self.history.group_id
+            && drag.favorite_only == self.history.favorite_only()
+            && drag.group_id == self.history.group_id()
             && self
                 .history
                 .items
@@ -6578,6 +6847,391 @@ impl ClipboardView {
         .detach();
     }
 
+    /// 卡片两侧的拖拽把手：除锚定边与元素 id 外逐行一致。
+    fn drag_handle(
+        &self,
+        id: i64,
+        anchored_left: bool,
+        drag: HistoryDrag,
+        drag_enabled: bool,
+        show_drag_area_indicator: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let entity = cx.entity();
+        let mut handle = div()
+            .id((
+                if anchored_left {
+                    "history-drag-left"
+                } else {
+                    "history-drag-right"
+                },
+                id as usize,
+            ))
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .w(px(18.))
+            .flex()
+            .items_center()
+            .justify_center();
+        handle = if anchored_left {
+            handle.left_0()
+        } else {
+            handle.right_0()
+        };
+        handle
+            .when(show_drag_area_indicator, |handle| {
+                handle
+                    .invisible()
+                    .group_hover("", |handle| handle.visible())
+                    .bg(cx.theme().accent)
+                    .text_color(cx.theme().primary)
+                    .child(Icon::new(gpui_kit::assets::IconName::GripVertical).xsmall())
+            })
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.cancel_pending_row_click();
+                cx.stop_propagation();
+            }))
+            .when(drag_enabled, |handle| {
+                handle.cursor_grab().on_drag(drag, move |drag, _, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.cancel_pending_row_click();
+                        this.close_hover_preview(cx);
+                        this.history.selected = Some(drag.id);
+                        this.drop_target = None;
+                        this.start_history_drag_scroll(cx);
+                        cx.notify();
+                    });
+                    cx.new(|_| drag.clone())
+                })
+            })
+    }
+
+    /// 卡片摘要行文本：时间/类型、置顶标记、字符数、大小与失效提示。
+    fn row_summary(
+        &self,
+        item: &DbClipboardItem,
+        kind: &'static str,
+        file_warning: Option<&'static str>,
+        image_too_large: bool,
+        file_total_size: Option<u64>,
+    ) -> String {
+        let is_image = item.content_type == "image";
+        let is_files = item.content_type == "files";
+        let detail = if is_image {
+            None
+        } else if is_files {
+            let count = item
+                .file_paths
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                .map_or(0, |paths| paths.len());
+            if count == 0 {
+                Some(tr(self.language, "路径不可用", "Paths unavailable").into())
+            } else if self.language == LanguagePreference::English {
+                Some(format!("{count} items"))
+            } else {
+                Some(format!("{count} 项"))
+            }
+        } else if !self.display.show_char_count {
+            None
+        } else if matches!(item.content_type.as_str(), "html" | "rtf") && item.char_count.is_none()
+        {
+            Some(tr(self.language, "纯文本未知", "Plain text unavailable").into())
+        } else if self.language == LanguagePreference::English {
+            Some(format!("{} characters", item.char_count.unwrap_or(0)))
+        } else {
+            Some(format!("{} 字符", item.char_count.unwrap_or(0)))
+        };
+        let mut summary = if self.display.show_time {
+            format_card_time(
+                &item.created_at,
+                self.display.time_format,
+                self.language,
+                chrono::Local::now().naive_local(),
+            )
+        } else {
+            kind.to_owned()
+        };
+        if item.is_pinned {
+            summary.push_str(tr(self.language, " · 置顶", " · Pinned"));
+        }
+        if self.display.show_time
+            && !is_image
+            && !matches!(item.content_type.as_str(), "text" | "url")
+        {
+            summary.push_str(" · ");
+            summary.push_str(kind);
+        }
+        if let Some(detail) = detail {
+            summary.push_str(" · ");
+            summary.push_str(&detail);
+        }
+        if self.display.show_byte_size {
+            let size = if is_files {
+                file_total_size
+            } else {
+                Some(item.byte_size.max(0) as u64)
+            };
+            if let Some(size) = size {
+                summary.push_str(" · ");
+                summary.push_str(&format_bytes(size));
+            }
+        }
+        if let Some(warning) = file_warning {
+            summary.push_str(" · ");
+            summary.push_str(warning);
+        } else if image_too_large {
+            summary.push_str(" · ");
+            summary.push_str(tr(self.language, "图片过大", "Image too large"));
+        }
+        summary
+    }
+
+    /// 卡片右下角的悬浮操作栏（选择/查看/收藏/置顶/移动/删除/复制等）。
+    fn render_row_action_bar(
+        &self,
+        id: i64,
+        item: &DbClipboardItem,
+        card_spacing: f32,
+        cx: &Context<Self>,
+    ) -> Div {
+        let selected = !self.batch_mode && self.history.selected == Some(id);
+        let marked = self.selected_ids.contains(&id);
+        let favorite = item.is_favorite;
+        let pinned = item.is_pinned;
+        div()
+            .absolute()
+            .bottom(px(card_spacing))
+            .right(px(22.))
+            .h(px(24.))
+            .flex()
+            .items_center()
+            .gap_1()
+            .rounded_sm()
+            .bg(cx.theme().background)
+            .invisible()
+            .group_hover("", |bar| bar.visible())
+            .when(selected, |bar| bar.visible())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.cancel_pending_row_click();
+                    cx.stop_propagation();
+                }),
+            )
+            .child(
+                Button::new(("select", id as usize))
+                    .ghost()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(IconName::Check)
+                    .tooltip(if marked {
+                        tr(
+                            self.language,
+                            "取消选择；Shift 点击可连选",
+                            "Deselect; Shift-click to select a range",
+                        )
+                    } else {
+                        tr(
+                            self.language,
+                            "选择；Shift 点击可连选",
+                            "Select; Shift-click to select a range",
+                        )
+                    })
+                    .accessibility_label(if marked {
+                        tr(self.language, "取消选择", "Deselect")
+                    } else {
+                        tr(self.language, "选择", "Select")
+                    })
+                    .selected(marked)
+                    .disabled(self.batch_pending || self.history.loading)
+                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                        cx.stop_propagation();
+                        this.toggle_selection(id, event.modifiers().shift, cx);
+                    })),
+            )
+            .child(
+                Button::new(("preview", id as usize))
+                    .ghost()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(IconName::Eye)
+                    .tooltip(tr(self.language, "查看", "View"))
+                    .accessibility_label(tr(self.language, "查看", "View"))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.open_preview(id, window, cx);
+                    })),
+            )
+            .child(
+                Button::new(("favorite", id as usize))
+                    .ghost()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(if favorite {
+                        IconName::HeartOff
+                    } else {
+                        IconName::Heart
+                    })
+                    .tooltip(if favorite {
+                        tr(self.language, "取消收藏", "Unfavorite")
+                    } else {
+                        tr(self.language, "收藏", "Favorite")
+                    })
+                    .accessibility_label(if favorite {
+                        tr(self.language, "取消收藏", "Unfavorite")
+                    } else {
+                        tr(self.language, "收藏", "Favorite")
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.send(Command::ToggleFavorite(id), cx);
+                    })),
+            )
+            .child(
+                Button::new(("pin", id as usize))
+                    .ghost()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(if pinned {
+                        IconName::StarOff
+                    } else {
+                        IconName::Star
+                    })
+                    .tooltip(if pinned {
+                        tr(self.language, "取消置顶", "Unpin")
+                    } else {
+                        tr(self.language, "置顶", "Pin")
+                    })
+                    .accessibility_label(if pinned {
+                        tr(self.language, "取消置顶", "Unpin")
+                    } else {
+                        tr(self.language, "置顶", "Pin")
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.send(Command::TogglePin(id), cx);
+                    })),
+            )
+            .child(
+                Button::new(("move-group", id as usize))
+                    .ghost()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(IconName::Folder)
+                    .tooltip(tr(self.language, "移动到分组", "Move to group"))
+                    .accessibility_label(tr(self.language, "移动到分组", "Move to group"))
+                    .disabled(
+                        self.group_move_pending
+                            || (self.groups.is_empty() && self.history.group_id().is_none()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.group_move_id = Some(id);
+                        this.history.selected = Some(id);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new(("delete", id as usize))
+                    .ghost()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(IconName::Delete)
+                    .tooltip(tr(self.language, "删除", "Delete"))
+                    .accessibility_label(tr(self.language, "删除", "Delete"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.send(Command::Delete(id), cx);
+                    })),
+            )
+            .when(item.content_type == "files", |bar| {
+                bar.child(
+                    Button::new(("copy-path", id as usize))
+                        .ghost()
+                        .xsmall()
+                        .h(px(24.))
+                        .icon(IconName::Copy)
+                        .tooltip(if self.paste_target.is_some() && self._tray.is_some() {
+                            tr(self.language, "粘贴路径", "Paste paths")
+                        } else {
+                            tr(self.language, "复制路径", "Copy paths")
+                        })
+                        .accessibility_label(
+                            if self.paste_target.is_some() && self._tray.is_some() {
+                                tr(self.language, "粘贴路径", "Paste paths")
+                            } else {
+                                tr(self.language, "复制路径", "Copy paths")
+                            },
+                        )
+                        .disabled(self.paste_pending.is_some())
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.copy_or_paste_path(id, window, cx);
+                        })),
+                )
+            })
+            .child(
+                Button::new(("paste", id as usize))
+                    .outline()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(IconName::Replace)
+                    .tooltip(tr(self.language, "粘贴", "Paste"))
+                    .accessibility_label(tr(self.language, "粘贴", "Paste"))
+                    .disabled(
+                        self.paste_target.is_none()
+                            || self.paste_pending.is_some()
+                            || self._tray.is_none(),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.paste_selected(id, window, cx);
+                    })),
+            )
+            .when(
+                matches!(item.content_type.as_str(), "html" | "rtf"),
+                |bar| {
+                    bar.child(
+                        Button::new(("copy-plain", id as usize))
+                            .outline()
+                            .xsmall()
+                            .h(px(24.))
+                            .icon(IconName::FileText)
+                            .tooltip(if self.paste_target.is_some() {
+                                tr(self.language, "粘贴纯文本", "Paste plain text")
+                            } else {
+                                tr(self.language, "复制纯文本", "Copy plain text")
+                            })
+                            .accessibility_label(if self.paste_target.is_some() {
+                                tr(self.language, "粘贴纯文本", "Paste plain text")
+                            } else {
+                                tr(self.language, "复制纯文本", "Copy plain text")
+                            })
+                            .disabled(self.paste_pending.is_some())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.copy_or_paste_plain_text(id, window, cx);
+                            })),
+                    )
+                },
+            )
+            .child(
+                Button::new(("copy", id as usize))
+                    .outline()
+                    .xsmall()
+                    .h(px(24.))
+                    .icon(IconName::Copy)
+                    .tooltip(tr(self.language, "复制", "Copy"))
+                    .accessibility_label(tr(self.language, "复制", "Copy"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.send(Command::Copy(id), cx);
+                    })),
+            )
+    }
+
     fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let item = &self.history.items[index];
         let id = item.id;
@@ -6619,51 +7273,13 @@ impl ClipboardView {
             _ => tr(self.language, "文本", "Text"),
         };
         let pinned = item.is_pinned;
-        let detail = if is_image {
-            None
-        } else if is_files {
-            let count = item
-                .file_paths
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
-                .map_or(0, |paths| paths.len());
-            if count == 0 {
-                Some(tr(self.language, "路径不可用", "Paths unavailable").into())
-            } else if self.language == LanguagePreference::English {
-                Some(format!("{count} items"))
-            } else {
-                Some(format!("{count} 项"))
-            }
-        } else if !self.display.show_char_count {
-            None
-        } else if matches!(item.content_type.as_str(), "html" | "rtf") && item.char_count.is_none()
-        {
-            Some(tr(self.language, "纯文本未知", "Plain text unavailable").into())
-        } else if self.language == LanguagePreference::English {
-            Some(format!("{} characters", item.char_count.unwrap_or(0)))
-        } else {
-            Some(format!("{} 字符", item.char_count.unwrap_or(0)))
-        };
-        let mut summary = if self.display.show_time {
-            format_card_time(
-                &item.created_at,
-                self.display.time_format,
-                self.language,
-                chrono::Local::now().naive_local(),
-            )
-        } else {
-            kind.to_owned()
-        };
-        if pinned {
-            summary.push_str(tr(self.language, " · 置顶", " · Pinned"));
-        }
-        if self.display.show_time
-            && !is_image
-            && !matches!(item.content_type.as_str(), "text" | "url")
-        {
-            summary.push_str(" · ");
-            summary.push_str(kind);
-        }
+        let summary = self.row_summary(
+            item,
+            kind,
+            file_warning,
+            image_too_large,
+            file_info.and_then(|info| info.total_size),
+        );
         let source_icon = item
             .source_app_icon
             .as_deref()
@@ -6673,29 +7289,6 @@ impl ClipboardView {
         } else {
             (false, false)
         };
-
-        if let Some(detail) = detail {
-            summary.push_str(" · ");
-            summary.push_str(&detail);
-        }
-        if self.display.show_byte_size {
-            let size = if is_files {
-                file_info.and_then(|info| info.total_size)
-            } else {
-                Some(item.byte_size.max(0) as u64)
-            };
-            if let Some(size) = size {
-                summary.push_str(" · ");
-                summary.push_str(&format_bytes(size));
-            }
-        }
-        if let Some(warning) = file_warning {
-            summary.push_str(" · ");
-            summary.push_str(warning);
-        } else if image_too_large {
-            summary.push_str(" · ");
-            summary.push_str(tr(self.language, "图片过大", "Image too large"));
-        }
         let selected = !self.batch_mode && self.history.selected == Some(id);
         let marked = self.selected_ids.contains(&id);
         let favorite = item.is_favorite;
@@ -6755,15 +7348,13 @@ impl ClipboardView {
         let drag = HistoryDrag {
             id,
             pinned,
-            favorite_only: self.history.favorite_only,
-            group_id: self.history.group_id,
+            favorite_only: self.history.favorite_only(),
+            group_id: self.history.group_id(),
             generation: self.history.generation,
             kind,
             preview: item.preview.clone().unwrap_or_else(|| kind.to_owned()),
             language: self.language,
         };
-        let left_drag_entity = cx.entity();
-        let right_drag_entity = cx.entity();
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
         let show_drag_area_indicator = self.display.show_drag_area_indicator;
         let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
@@ -6994,365 +7585,25 @@ impl ClipboardView {
                             }),
                     )
                     .when(!self.batch_mode, |card| {
-                        card.child(
-                            div()
-                                .absolute()
-                                .bottom(px(card_spacing))
-                                .right(px(22.))
-                                .h(px(24.))
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .rounded_sm()
-                                .bg(cx.theme().background)
-                                .invisible()
-                                .group_hover("", |bar| bar.visible())
-                                .when(selected, |bar| bar.visible())
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _, _, cx| {
-                                        this.cancel_pending_row_click();
-                                        cx.stop_propagation();
-                                    }),
-                                )
-                                .child(
-                                    Button::new(("select", id as usize))
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(IconName::Check)
-                                        .tooltip(if marked {
-                                            tr(
-                                                self.language,
-                                                "取消选择；Shift 点击可连选",
-                                                "Deselect; Shift-click to select a range",
-                                            )
-                                        } else {
-                                            tr(
-                                                self.language,
-                                                "选择；Shift 点击可连选",
-                                                "Select; Shift-click to select a range",
-                                            )
-                                        })
-                                        .accessibility_label(if marked {
-                                            tr(self.language, "取消选择", "Deselect")
-                                        } else {
-                                            tr(self.language, "选择", "Select")
-                                        })
-                                        .selected(marked)
-                                        .disabled(self.batch_pending || self.history.loading)
-                                        .on_click(cx.listener(
-                                            move |this, event: &ClickEvent, _, cx| {
-                                                cx.stop_propagation();
-                                                this.toggle_selection(
-                                                    id,
-                                                    event.modifiers().shift,
-                                                    cx,
-                                                );
-                                            },
-                                        )),
-                                )
-                                .child(
-                                    Button::new(("preview", id as usize))
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(IconName::Eye)
-                                        .tooltip(tr(self.language, "查看", "View"))
-                                        .accessibility_label(tr(self.language, "查看", "View"))
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            cx.stop_propagation();
-                                            this.open_preview(id, window, cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(("favorite", id as usize))
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(if favorite {
-                                            IconName::HeartOff
-                                        } else {
-                                            IconName::Heart
-                                        })
-                                        .tooltip(if favorite {
-                                            tr(self.language, "取消收藏", "Unfavorite")
-                                        } else {
-                                            tr(self.language, "收藏", "Favorite")
-                                        })
-                                        .accessibility_label(if favorite {
-                                            tr(self.language, "取消收藏", "Unfavorite")
-                                        } else {
-                                            tr(self.language, "收藏", "Favorite")
-                                        })
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.send(Command::ToggleFavorite(id), cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(("pin", id as usize))
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(if pinned {
-                                            IconName::StarOff
-                                        } else {
-                                            IconName::Star
-                                        })
-                                        .tooltip(if pinned {
-                                            tr(self.language, "取消置顶", "Unpin")
-                                        } else {
-                                            tr(self.language, "置顶", "Pin")
-                                        })
-                                        .accessibility_label(if pinned {
-                                            tr(self.language, "取消置顶", "Unpin")
-                                        } else {
-                                            tr(self.language, "置顶", "Pin")
-                                        })
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.send(Command::TogglePin(id), cx);
-                                        })),
-                                )
-                                .child(
-                                    Button::new(("move-group", id as usize))
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(IconName::Folder)
-                                        .tooltip(tr(self.language, "移动到分组", "Move to group"))
-                                        .accessibility_label(tr(
-                                            self.language,
-                                            "移动到分组",
-                                            "Move to group",
-                                        ))
-                                        .disabled(
-                                            self.group_move_pending
-                                                || (self.groups.is_empty()
-                                                    && self.history.group_id.is_none()),
-                                        )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.group_move_id = Some(id);
-                                            this.history.selected = Some(id);
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    Button::new(("delete", id as usize))
-                                        .ghost()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(IconName::Delete)
-                                        .tooltip(tr(self.language, "删除", "Delete"))
-                                        .accessibility_label(tr(self.language, "删除", "Delete"))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.send(Command::Delete(id), cx);
-                                        })),
-                                )
-                                .when(is_files, |bar| {
-                                    bar.child(
-                                        Button::new(("copy-path", id as usize))
-                                            .ghost()
-                                            .xsmall()
-                                            .h(px(24.))
-                                            .icon(IconName::Copy)
-                                            .tooltip(
-                                                if self.paste_target.is_some()
-                                                    && self._tray.is_some()
-                                                {
-                                                    tr(self.language, "粘贴路径", "Paste paths")
-                                                } else {
-                                                    tr(self.language, "复制路径", "Copy paths")
-                                                },
-                                            )
-                                            .accessibility_label(
-                                                if self.paste_target.is_some()
-                                                    && self._tray.is_some()
-                                                {
-                                                    tr(self.language, "粘贴路径", "Paste paths")
-                                                } else {
-                                                    tr(self.language, "复制路径", "Copy paths")
-                                                },
-                                            )
-                                            .disabled(self.paste_pending.is_some())
-                                            .on_click(cx.listener(move |this, _, window, cx| {
-                                                cx.stop_propagation();
-                                                this.copy_or_paste_path(id, window, cx);
-                                            })),
-                                    )
-                                })
-                                .child(
-                                    Button::new(("paste", id as usize))
-                                        .outline()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(IconName::Replace)
-                                        .tooltip(tr(self.language, "粘贴", "Paste"))
-                                        .accessibility_label(tr(self.language, "粘贴", "Paste"))
-                                        .disabled(
-                                            self.paste_target.is_none()
-                                                || self.paste_pending.is_some()
-                                                || self._tray.is_none(),
-                                        )
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            cx.stop_propagation();
-                                            this.paste_selected(id, window, cx);
-                                        })),
-                                )
-                                .when(
-                                    matches!(item.content_type.as_str(), "html" | "rtf"),
-                                    |bar| {
-                                        bar.child(
-                                            Button::new(("copy-plain", id as usize))
-                                                .outline()
-                                                .xsmall()
-                                                .h(px(24.))
-                                                .icon(IconName::FileText)
-                                                .tooltip(if self.paste_target.is_some() {
-                                                    tr(
-                                                        self.language,
-                                                        "粘贴纯文本",
-                                                        "Paste plain text",
-                                                    )
-                                                } else {
-                                                    tr(
-                                                        self.language,
-                                                        "复制纯文本",
-                                                        "Copy plain text",
-                                                    )
-                                                })
-                                                .accessibility_label(
-                                                    if self.paste_target.is_some() {
-                                                        tr(
-                                                            self.language,
-                                                            "粘贴纯文本",
-                                                            "Paste plain text",
-                                                        )
-                                                    } else {
-                                                        tr(
-                                                            self.language,
-                                                            "复制纯文本",
-                                                            "Copy plain text",
-                                                        )
-                                                    },
-                                                )
-                                                .disabled(self.paste_pending.is_some())
-                                                .on_click(cx.listener(
-                                                    move |this, _, window, cx| {
-                                                        cx.stop_propagation();
-                                                        this.copy_or_paste_plain_text(
-                                                            id, window, cx,
-                                                        );
-                                                    },
-                                                )),
-                                        )
-                                    },
-                                )
-                                .child(
-                                    Button::new(("copy", id as usize))
-                                        .outline()
-                                        .xsmall()
-                                        .h(px(24.))
-                                        .icon(IconName::Copy)
-                                        .tooltip(tr(self.language, "复制", "Copy"))
-                                        .accessibility_label(tr(self.language, "复制", "Copy"))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.send(Command::Copy(id), cx);
-                                        })),
-                                ),
-                        )
+                        card.child(self.render_row_action_bar(id, item, card_spacing, cx))
                     })
                     .when(!self.batch_mode, |card| {
-                        card.child(
-                            div()
-                                .id(("history-drag-left", id as usize))
-                                .absolute()
-                                .left_0()
-                                .top_0()
-                                .bottom_0()
-                                .w(px(18.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .when(show_drag_area_indicator, |handle| {
-                                    handle
-                                        .invisible()
-                                        .group_hover("", |handle| handle.visible())
-                                        .bg(cx.theme().accent)
-                                        .text_color(cx.theme().primary)
-                                        .child(
-                                            Icon::new(gpui_kit::assets::IconName::GripVertical)
-                                                .xsmall(),
-                                        )
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.cancel_pending_row_click();
-                                    cx.stop_propagation();
-                                }))
-                                .when(drag_enabled, |handle| {
-                                    handle.cursor_grab().on_drag(
-                                        drag.clone(),
-                                        move |drag, _, _, cx| {
-                                            left_drag_entity.update(cx, |this, cx| {
-                                                this.cancel_pending_row_click();
-                                                this.close_hover_preview(cx);
-                                                this.history.selected = Some(drag.id);
-                                                this.drop_target = None;
-                                                this.start_history_drag_scroll(cx);
-                                                cx.notify();
-                                            });
-                                            cx.new(|_| drag.clone())
-                                        },
-                                    )
-                                }),
-                        )
-                        .child(
-                            div()
-                                .id(("history-drag-right", id as usize))
-                                .absolute()
-                                .right_0()
-                                .top_0()
-                                .bottom_0()
-                                .w(px(18.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .when(show_drag_area_indicator, |handle| {
-                                    handle
-                                        .invisible()
-                                        .group_hover("", |handle| handle.visible())
-                                        .bg(cx.theme().accent)
-                                        .text_color(cx.theme().primary)
-                                        .child(
-                                            Icon::new(gpui_kit::assets::IconName::GripVertical)
-                                                .xsmall(),
-                                        )
-                                })
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.cancel_pending_row_click();
-                                    cx.stop_propagation();
-                                }))
-                                .when(drag_enabled, |handle| {
-                                    handle.cursor_grab().on_drag(
-                                        drag.clone(),
-                                        move |drag, _, _, cx| {
-                                            right_drag_entity.update(cx, |this, cx| {
-                                                this.cancel_pending_row_click();
-                                                this.close_hover_preview(cx);
-                                                this.history.selected = Some(drag.id);
-                                                this.drop_target = None;
-                                                this.start_history_drag_scroll(cx);
-                                                cx.notify();
-                                            });
-                                            cx.new(|_| drag.clone())
-                                        },
-                                    )
-                                }),
-                        )
+                        card.child(self.drag_handle(
+                            id,
+                            true,
+                            drag.clone(),
+                            drag_enabled,
+                            show_drag_area_indicator,
+                            cx,
+                        ))
+                        .child(self.drag_handle(
+                            id,
+                            false,
+                            drag.clone(),
+                            drag_enabled,
+                            show_drag_area_indicator,
+                            cx,
+                        ))
                     }),
             );
         let entity = cx.entity();
@@ -7362,8 +7613,8 @@ impl ClipboardView {
         let can_paste = self.paste_target.is_some() && self._tray.is_some();
         let paste_pending = self.paste_pending.is_some();
         let save_as_pending = self.save_as_pending.is_some();
-        let group_move_disabled =
-            self.group_move_pending || (self.groups.is_empty() && self.history.group_id.is_none());
+        let group_move_disabled = self.group_move_pending
+            || (self.groups.is_empty() && self.history.group_id().is_none());
         let save_as_name = if is_image {
             item.image_path.as_deref().and_then(|path| {
                 std::path::Path::new(path)
@@ -7825,10 +8076,10 @@ impl ClipboardView {
     fn confirmation_active(&self, kind: HistoryConfirmation) -> bool {
         match kind {
             HistoryConfirmation::DeleteGroup(id) => {
-                self.group_delete_id == Some(id) && self.history.group_id == Some(id)
+                self.group_delete_id == Some(id) && self.history.group_id() == Some(id)
             }
             HistoryConfirmation::ClearHistory(group_id) => {
-                self.clear_confirm_open && self.history.group_id == group_id
+                self.clear_confirm_open && self.history.group_id() == group_id
             }
             HistoryConfirmation::DeleteSelected => self.batch_confirm_open,
         }
@@ -8047,14 +8298,14 @@ impl ClipboardView {
         self.group_move_id = None;
         self.preview.close();
         window.focus(&self.list_focus, cx);
-        if self.skip_clear_confirm {
+        if self.skip_clear_confirm.value {
             self.clear_confirm_open = false;
             self.sync_confirmation_dialog(window, cx);
             self.clear_history(cx);
         } else {
             self.clear_confirm_open = true;
             self.open_history_confirmation(
-                HistoryConfirmation::ClearHistory(self.history.group_id),
+                HistoryConfirmation::ClearHistory(self.history.group_id()),
                 window,
                 cx,
             );
@@ -8076,21 +8327,21 @@ impl ClipboardView {
         let empty_message = if self.history.loading {
             tr(self.language, "正在加载…", "Loading…")
         } else if self.search.read(cx).value().is_empty() {
-            if self.history.favorite_only {
+            if self.history.favorite_only() {
                 tr(
                     self.language,
                     "还没有收藏，点击记录上的“收藏”保留常用文本",
                     "No favorites yet. Mark an item as a favorite to keep it handy.",
                 )
-            } else if self.history.group_id.is_some() {
+            } else if self.history.group_id().is_some() {
                 tr(
                     self.language,
                     "该分组暂无可显示的记录",
                     "There are no items in this group.",
                 )
-            } else if self.history.category == ContentCategory::Text {
+            } else if self.history.category() == ContentCategory::Text {
                 tr(self.language, "还没有文本记录", "No text items yet.")
-            } else if self.history.category == ContentCategory::Other {
+            } else if self.history.category() == ContentCategory::Other {
                 tr(self.language, "还没有其他类型记录", "No other items yet.")
             } else {
                 tr(
@@ -8147,7 +8398,7 @@ impl ClipboardView {
                             .when(self.display.show_category_filter, |row| {
                                 let selected_index = self
                                     .history
-                                    .group_id
+                                    .group_id()
                                     .is_none()
                                     .then(|| self.category_tab_index());
                                 row.child(
@@ -8236,7 +8487,8 @@ impl ClipboardView {
                                     .outline()
                                     .label(tr(self.language, "默认分组", "Default"))
                                     .disabled(
-                                        self.group_move_pending || self.history.group_id.is_none(),
+                                        self.group_move_pending
+                                            || self.history.group_id().is_none(),
                                     )
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.move_to_group(id, None, cx);
@@ -8249,7 +8501,8 @@ impl ClipboardView {
                                     .outline()
                                     .label(group.name.clone())
                                     .disabled(
-                                        self.group_move_pending || self.history.group_id == target,
+                                        self.group_move_pending
+                                            || self.history.group_id() == target,
                                     )
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         this.move_to_group(id, target, cx);
@@ -8334,7 +8587,10 @@ impl ClipboardView {
                                     );
                                 })),
                         ),
-                    ("batch-toolbar", self.history.group_id.unwrap_or(0) as usize),
+                    (
+                        "batch-toolbar",
+                        self.history.group_id().unwrap_or(0) as usize,
+                    ),
                     cx,
                 ))
             })

@@ -17,7 +17,7 @@ clipboard-win.workspace = true
 directories.workspace = true
 image.workspace = true
 tempfile.workspace = true
-windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_DataExchange", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(windows)'.dev-dependencies]
-windows = { workspace = true, features = ["Win32_Graphics_Gdi", "Win32_Security", "Win32_System_StationsAndDesktops"] }
+windows = { workspace = true, features = ["Win32_Graphics_Gdi", "Win32_System_StationsAndDesktops"] }
