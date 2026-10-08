@@ -1,12 +1,11 @@
 use crate::History;
 use crate::backup_common::{
     MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES, ensure_destination_unused,
-    install_staged_tree, remap_media_rows, verify_staged_database,
+    install_staged_tree, remap_media_rows, remap_staged_payload, verify_staged_database,
 };
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, backup::Backup, params};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
@@ -130,10 +129,13 @@ impl History {
                 .context("数据库在线备份失败")?;
         }
 
+        // Keep snapshot settings and media rewrites in one transaction; the
+        // source database has already been released by the online backup.
+        let tx = snapshot.transaction()?;
         // The GPUI backup contains only settings this application consumes.
-        snapshot.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
+        tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
         let image_rows: Vec<(i64, String)> = {
-            let mut query = snapshot.prepare(
+            let mut query = tx.prepare(
                 "SELECT id, image_path FROM clipboard_items WHERE image_path IS NOT NULL",
             )?;
             query
@@ -142,18 +144,19 @@ impl History {
         };
         let mut images = AssetMap::new();
         let mut missing_images = 0;
-        for (id, raw_path) in image_rows {
-            let Some(name) = register_asset(&raw_path, &mut images, "png") else {
-                missing_images += 1;
-                continue;
-            };
-            snapshot.execute(
-                "UPDATE clipboard_items SET image_path = ?1 WHERE id = ?2",
-                params![format!("images/{name}"), id],
-            )?;
+        {
+            let mut update =
+                tx.prepare("UPDATE clipboard_items SET image_path = ?1 WHERE id = ?2")?;
+            for (id, raw_path) in image_rows {
+                let Some(name) = register_asset(&raw_path, &mut images, "png") else {
+                    missing_images += 1;
+                    continue;
+                };
+                update.execute(params![format!("images/{name}"), id])?;
+            }
         }
         let media_rows: Vec<(i64, Option<String>, Option<String>)> = {
-            let mut query = snapshot.prepare(
+            let mut query = tx.prepare(
                 "SELECT id, source_app_icon, file_payload FROM clipboard_items
                  WHERE source_app_icon IS NOT NULL OR file_payload IS NOT NULL",
             )?;
@@ -165,45 +168,34 @@ impl History {
         let mut staged = AssetMap::new();
         let mut missing_icons = 0;
         let mut missing_staged = 0;
-        for (id, icon, payload) in media_rows {
-            if let Some(raw_icon) = icon {
-                if let Some(name) = register_asset(&raw_icon, &mut icons, "bin") {
-                    snapshot.execute(
-                        "UPDATE clipboard_items SET source_app_icon = ?1 WHERE id = ?2",
-                        params![format!("icons/{name}"), id],
-                    )?;
-                } else {
-                    missing_icons += 1;
+        {
+            let mut update_icon =
+                tx.prepare("UPDATE clipboard_items SET source_app_icon = ?1 WHERE id = ?2")?;
+            let mut update_payload =
+                tx.prepare("UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2")?;
+            for (id, icon, payload) in media_rows {
+                if let Some(raw_icon) = icon {
+                    if let Some(name) = register_asset(&raw_icon, &mut icons, "bin") {
+                        update_icon.execute(params![format!("icons/{name}"), id])?;
+                    } else {
+                        missing_icons += 1;
+                    }
                 }
-            }
-            let Some(raw_payload) = payload else {
-                continue;
-            };
-            let Ok(mut value) = serde_json::from_str::<Value>(&raw_payload) else {
-                continue;
-            };
-            let Some(entries) = value.get_mut("staged").and_then(Value::as_array_mut) else {
-                continue;
-            };
-            let mut changed = false;
-            for entry in entries {
-                let Some(raw_path) = entry.get("staged").and_then(Value::as_str) else {
-                    continue;
-                };
-                if let Some(name) = register_asset(raw_path, &mut staged, "bin") {
-                    entry["staged"] = Value::String(format!("staged/{name}"));
-                    changed = true;
-                } else {
-                    missing_staged += 1;
+                if let Some(raw_payload) = payload
+                    && let Some(mapped) = remap_staged_payload(&raw_payload, |raw_path| {
+                        if let Some(name) = register_asset(raw_path, &mut staged, "bin") {
+                            Ok(Some(format!("staged/{name}")))
+                        } else {
+                            missing_staged += 1;
+                            Ok(None)
+                        }
+                    })?
+                {
+                    update_payload.execute(params![mapped, id])?;
                 }
-            }
-            if changed {
-                snapshot.execute(
-                    "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
-                    params![value.to_string(), id],
-                )?;
             }
         }
+        tx.commit()?;
         let total_items = verify_staged_database(&snapshot, "备份副本校验失败")?;
         crate::import::checkpoint_staged_database(&snapshot)?;
         drop(snapshot);
@@ -355,25 +347,15 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
             .map(|raw| rebase_archive_path(raw, "icons", &extracted, data_dir))
             .transpose()?
             .flatten();
-        let mut mapped_payload = None;
-        if let Some(raw_payload) = payload.as_deref()
-            && let Ok(mut value) = serde_json::from_str::<Value>(raw_payload)
-            && let Some(entries) = value.get_mut("staged").and_then(Value::as_array_mut)
-        {
-            let mut changed = false;
-            for entry in entries {
-                let Some(raw_path) = entry.get("staged").and_then(Value::as_str) else {
-                    continue;
-                };
-                if let Some(path) = rebase_archive_path(raw_path, "staged", &extracted, data_dir)? {
-                    entry["staged"] = Value::String(path);
-                    changed = true;
-                }
-            }
-            if changed {
-                mapped_payload = Some(value.to_string());
-            }
-        }
+        let mapped_payload = payload
+            .as_deref()
+            .map(|raw| {
+                remap_staged_payload(raw, |path| {
+                    rebase_archive_path(path, "staged", &extracted, data_dir)
+                })
+            })
+            .transpose()?
+            .flatten();
         Ok((mapped_image, mapped_icon, mapped_payload))
     })?;
     tx.commit()?;

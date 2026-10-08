@@ -4571,40 +4571,36 @@ impl ClipboardView {
         generation: u64,
         cx: &mut Context<Self>,
     ) -> bool {
-        let applied = self.history.apply(items, total, generation);
-        if applied {
-            let (top_index, partial) = history_top_row(&self.row_offsets, self.scroll.offset().y);
-            self.rebuild_row_layout();
-            let new_top = self.row_offsets[top_index.min(self.history.items.len())];
-            self.scroll.set_offset(point(px(0.), -(new_top + partial)));
+        if !self.history.apply(items, total, generation) {
+            return true;
         }
-        if applied
-            && self
-                .hover_preview
-                .id
-                .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+        let loaded_ids: HashSet<_> = self.history.items.iter().map(|item| item.id).collect();
+        let (top_index, partial) = history_top_row(&self.row_offsets, self.scroll.offset().y);
+        self.rebuild_row_layout();
+        let new_top = self.row_offsets[top_index.min(self.history.items.len())];
+        self.scroll.set_offset(point(px(0.), -(new_top + partial)));
+        if self
+            .hover_preview
+            .id
+            .is_some_and(|id| !loaded_ids.contains(&id))
         {
             self.close_hover_preview(cx);
         }
-        if applied {
-            self.refresh_file_card_info(cx);
-            self.selected_ids
-                .retain(|id| self.history.items.iter().any(|item| item.id == *id));
-            if self
-                .selection_anchor
-                .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
-            {
-                self.selection_anchor = None;
-            }
-            if self.selected_ids.is_empty() && !self.batch_pending {
-                self.batch_confirm_open = false;
-            }
+        self.refresh_file_card_info(cx);
+        self.selected_ids.retain(|id| loaded_ids.contains(id));
+        if self
+            .selection_anchor
+            .is_some_and(|id| !loaded_ids.contains(&id))
+        {
+            self.selection_anchor = None;
         }
-        if applied
-            && !self.group_move_pending
+        if self.selected_ids.is_empty() && !self.batch_pending {
+            self.batch_confirm_open = false;
+        }
+        if !self.group_move_pending
             && self
                 .group_move_id
-                .is_some_and(|id| !self.history.items.iter().any(|item| item.id == id))
+                .is_some_and(|id| !loaded_ids.contains(&id))
         {
             self.group_move_id = None;
         }
@@ -5219,25 +5215,13 @@ impl ClipboardView {
     }
 
     fn apply_audio_saved(&mut self, result: Result<AudioPreference, String>) -> bool {
-        self.audio_pending = false;
-        match result {
-            Ok(audio) => {
-                self.audio = audio;
-                self.message = tr(self.language, "音效设置已保存", "Audio settings saved").into();
-                self.is_error = false;
-            }
-            Err(error) => {
-                self.message = format!(
-                    "{}: {error}",
-                    tr(
-                        self.language,
-                        "保存音效设置失败",
-                        "Failed to save audio settings"
-                    )
-                );
-                self.is_error = true;
-            }
-        }
+        self.acknowledge_save(
+            result,
+            |this, pending| this.audio_pending = pending,
+            |this, audio| this.audio = audio,
+            ("音效设置已保存", "Audio settings saved"),
+            ("保存音效设置失败", "Failed to save audio settings"),
+        );
         true
     }
 
@@ -5245,25 +5229,13 @@ impl ClipboardView {
         &mut self,
         result: Result<MonitorTypesPreference, String>,
     ) -> bool {
-        self.monitor_types_pending = false;
-        match result {
-            Ok(preference) => {
-                self.monitor_types = preference;
-                self.message = tr(self.language, "监听类型已保存", "Capture types saved").into();
-                self.is_error = false;
-            }
-            Err(error) => {
-                self.message = format!(
-                    "{}: {error}",
-                    tr(
-                        self.language,
-                        "保存监听类型失败",
-                        "Failed to save capture types"
-                    )
-                );
-                self.is_error = true;
-            }
-        }
+        self.acknowledge_save(
+            result,
+            |this, pending| this.monitor_types_pending = pending,
+            |this, preference| this.monitor_types = preference,
+            ("监听类型已保存", "Capture types saved"),
+            ("保存监听类型失败", "Failed to save capture types"),
+        );
         true
     }
 
@@ -5332,30 +5304,13 @@ impl ClipboardView {
         &mut self,
         result: Result<WindowPositionPreference, String>,
     ) -> bool {
-        self.window_position_pending = false;
-        match result {
-            Ok(position) => {
-                self.window_position = position;
-                self.message = tr(
-                    self.language,
-                    "窗口唤出位置已保存",
-                    "Window position mode saved",
-                )
-                .into();
-                self.is_error = false;
-            }
-            Err(error) => {
-                self.message = format!(
-                    "{}: {error}",
-                    tr(
-                        self.language,
-                        "保存窗口位置失败",
-                        "Failed to save window position"
-                    )
-                );
-                self.is_error = true;
-            }
-        }
+        self.acknowledge_save(
+            result,
+            |this, pending| this.window_position_pending = pending,
+            |this, position| this.window_position = position,
+            ("窗口唤出位置已保存", "Window position mode saved"),
+            ("保存窗口位置失败", "Failed to save window position"),
+        );
         true
     }
 
@@ -6509,37 +6464,42 @@ impl ClipboardView {
     }
 
     fn copy_or_paste_plain_text(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
-        self.cancel_pending_row_click();
-        if self.paste_pending.is_some() {
-            return;
-        }
-        let target = self
-            .paste_target
-            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
-        if self.paste_target.is_some() && target.is_none() {
-            self.paste_target = None;
-        }
-        let command = if target.is_some() {
-            Command::CopyPlainTextForPaste(id)
-        } else {
-            Command::CopyPlainText(id)
-        };
-        if self.send(command, cx)
-            && let Some(target) = target
-        {
-            self.paste_pending = Some((id, target));
-            self.message = tr(
-                self.language,
+        self.copy_or_paste_variant(
+            id,
+            (
+                Command::CopyPlainText(id),
+                Command::CopyPlainTextForPaste(id),
+            ),
+            (
                 "正在复制纯文本并返回原窗口…",
                 "Copying plain text and returning to the previous window…",
-            )
-            .into();
-            self.is_error = false;
-            cx.notify();
-        }
+            ),
+            window,
+            cx,
+        );
     }
 
     fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
+        self.copy_or_paste_variant(
+            id,
+            (Command::CopyPath(id), Command::CopyPathForPaste(id)),
+            (
+                "正在复制路径并返回原窗口…",
+                "Copying paths and returning to the previous window…",
+            ),
+            window,
+            cx,
+        );
+    }
+
+    fn copy_or_paste_variant(
+        &mut self,
+        id: i64,
+        commands: (Command, Command),
+        paste_message: (&'static str, &'static str),
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_pending_row_click();
         if self.paste_pending.is_some() {
             return;
@@ -6551,20 +6511,15 @@ impl ClipboardView {
             self.paste_target = None;
         }
         let command = if target.is_some() {
-            Command::CopyPathForPaste(id)
+            commands.1
         } else {
-            Command::CopyPath(id)
+            commands.0
         };
         if self.send(command, cx)
             && let Some(target) = target
         {
             self.paste_pending = Some((id, target));
-            self.message = tr(
-                self.language,
-                "正在复制路径并返回原窗口…",
-                "Copying paths and returning to the previous window…",
-            )
-            .into();
+            self.message = tr(self.language, paste_message.0, paste_message.1).into();
             self.is_error = false;
             cx.notify();
         }

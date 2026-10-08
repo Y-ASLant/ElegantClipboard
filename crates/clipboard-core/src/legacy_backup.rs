@@ -2,12 +2,11 @@
 
 use crate::backup_common::{
     MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES, ensure_destination_unused,
-    install_staged_tree, remap_media_rows, verify_staged_database,
+    install_staged_tree, remap_media_rows, remap_staged_payload, verify_staged_database,
 };
 use crate::import::{ImportReport, import_legacy_database};
 use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
-use serde_json::Value;
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -136,7 +135,13 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
                 .and_then(|raw| rebase_path(raw, "icons", &assets.icons, &data_dir));
             let mapped_payload = payload
                 .as_deref()
-                .and_then(|raw| rebase_staged_payload(raw, &assets.staged, &data_dir));
+                .map(|raw| {
+                    remap_staged_payload(raw, |path| {
+                        Ok(rebase_path(path, "staged", &assets.staged, &data_dir))
+                    })
+                })
+                .transpose()?
+                .flatten();
             Ok((mapped_image, mapped_icon, mapped_payload))
         })?;
         tx.commit()?;
@@ -200,31 +205,12 @@ fn rebase_path(
     )
 }
 
-fn rebase_staged_payload(
-    raw: &str,
-    names: &HashMap<String, String>,
-    data_dir: &Path,
-) -> Option<String> {
-    let mut value: Value = serde_json::from_str(raw).ok()?;
-    let staged = value.get_mut("staged")?.as_array_mut()?;
-    let mut changed = false;
-    for item in staged {
-        let Some(path) = item.get("staged").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(new_path) = rebase_path(path, "staged", names, data_dir) {
-            item["staged"] = Value::String(new_path);
-            changed = true;
-        }
-    }
-    changed.then(|| value.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{History, PreviewContent};
     use rusqlite::{backup::Backup, params};
+    use serde_json::Value;
     use std::{io::Write, path::PathBuf, time::Duration};
     use zip::{ZipWriter, write::SimpleFileOptions};
 

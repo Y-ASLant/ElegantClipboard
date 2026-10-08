@@ -27,8 +27,7 @@ impl History {
                 .with_context(|| format!("无法读取待合并记录 {id}"))?;
             match item.content_type.as_str() {
                 "files" => {
-                    let paths = self
-                        .files_for_copy(*id, staged_dir)
+                    let paths = Self::file_paths_for_copy(&item, staged_dir)
                         .with_context(|| format!("无法读取记录 {id} 的文件路径"))?;
                     if paths.iter().any(|path| !Path::new(path).exists()) {
                         bail!("记录 {id} 的源文件或文件夹已不存在，无法合并");

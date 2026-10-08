@@ -1,5 +1,5 @@
 use crate::{
-    FilePreviewEntry, HISTORY_LIMIT, History,
+    FilePreviewEntry, History,
     database::{ClipboardItem, ContentType, NewClipboardItem},
 };
 use anyhow::{Result, bail};
@@ -34,10 +34,7 @@ impl History {
         if serialized.len() > MAX_PATH_LIST_BYTES {
             bail!("文件路径列表超过 1 MiB");
         }
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"files:");
-        hasher.update(&serialized);
-        let hash = hasher.finalize().to_hex().to_string();
+        let hash = crate::clipboard::hash_with_prefix(b"files:", &serialized);
         if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
             return Ok(id);
         }
@@ -58,10 +55,7 @@ impl History {
             byte_size: serialized.len() as i64,
             ..Default::default()
         })?;
-        let (_, deleted_images, deleted_payloads) =
-            self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
-        self.cleanup_images(deleted_images, images_dir);
-        self.cleanup_staged(deleted_payloads, images_dir);
+        self.enforce_history_limit(Some(images_dir))?;
         Ok(id)
     }
 
@@ -73,10 +67,13 @@ impl History {
         parse_file_paths(item.file_paths.as_deref())
     }
 
+    pub fn files_for_copy(&self, id: i64, staged_dir: &Path) -> Result<Vec<String>> {
+        Self::file_paths_for_copy(&self.item(id)?, staged_dir)
+    }
+
     /// Prefer original files; use a recovered staged copy only when it is
     /// still contained in this GPUI data directory's staged folder.
-    pub fn files_for_copy(&self, id: i64, staged_dir: &Path) -> Result<Vec<String>> {
-        let item = self.item(id)?;
+    pub fn file_paths_for_copy(item: &ClipboardItem, staged_dir: &Path) -> Result<Vec<String>> {
         if item.content_type != "files" {
             bail!("记录不是文件");
         }

@@ -236,11 +236,7 @@ fn file_path_actions_use_resolved_existing_sources() -> Result<()> {
         &directory.path().join("images"),
     )?;
     assert_eq!(
-        item_paths_for_action(
-            &history,
-            &history.item(id)?,
-            &directory.path().join("staged")
-        )?,
+        item_paths_for_action(&history.item(id)?, &directory.path().join("staged"))?,
         vec![source.to_string_lossy().into_owned()]
     );
 
@@ -252,23 +248,9 @@ fn file_path_actions_use_resolved_existing_sources() -> Result<()> {
     );
 
     std::fs::remove_file(&source)?;
-    assert!(
-        item_paths_for_action(
-            &history,
-            &history.item(id)?,
-            &directory.path().join("staged")
-        )
-        .is_err()
-    );
+    assert!(item_paths_for_action(&history.item(id)?, &directory.path().join("staged")).is_err());
     let text = history.capture("not a file")?.unwrap();
-    assert!(
-        item_paths_for_action(
-            &history,
-            &history.item(text)?,
-            &directory.path().join("staged")
-        )
-        .is_err()
-    );
+    assert!(item_paths_for_action(&history.item(text)?, &directory.path().join("staged")).is_err());
     Ok(())
 }
 
@@ -283,18 +265,17 @@ fn save_as_copies_the_first_resolved_file_and_rejects_unsafe_targets() -> Result
     let file_id = history.capture_files(&[source.to_string_lossy().into_owned()], &images)?;
     let destination = directory.path().join("另存 file.txt");
     assert_eq!(
-        save_item_as(&history, &history.item(file_id)?, &staged, &destination)?,
+        save_item_as(&history.item(file_id)?, &staged, &destination)?,
         13
     );
     assert_eq!(std::fs::read_to_string(&destination)?, "saved content");
-    assert!(save_item_as(&history, &history.item(file_id)?, &staged, &source).is_err());
+    assert!(save_item_as(&history.item(file_id)?, &staged, &source).is_err());
 
     let folder = directory.path().join("folder");
     std::fs::create_dir(&folder)?;
     let folder_id = history.capture_files(&[folder.to_string_lossy().into_owned()], &images)?;
     assert!(
         save_item_as(
-            &history,
             &history.item(folder_id)?,
             &staged,
             &directory.path().join("folder-copy")
@@ -304,12 +285,7 @@ fn save_as_copies_the_first_resolved_file_and_rejects_unsafe_targets() -> Result
 
     let image_id = history.capture_image(b"\x89PNG\r\n\x1a\nsynthetic", 1, 1, &images)?;
     let image_destination = directory.path().join("image-copy.png");
-    save_item_as(
-        &history,
-        &history.item(image_id)?,
-        &staged,
-        &image_destination,
-    )?;
+    save_item_as(&history.item(image_id)?, &staged, &image_destination)?;
     assert_eq!(
         std::fs::read(&image_destination)?,
         b"\x89PNG\r\n\x1a\nsynthetic"

@@ -1,6 +1,6 @@
 use crate::database::{Database, SettingsRepository};
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 const THEME_KEY: &str = "gpui_theme_mode";
 const LANGUAGE_KEY: &str = "gpui_language";
@@ -673,18 +673,31 @@ impl Preferences {
         Ok(())
     }
 
-    pub fn paste_shortcuts(&self) -> Result<PasteShortcutConfig> {
+    fn read_json<T: DeserializeOwned + Default>(
+        &self,
+        key: &str,
+        valid: impl FnOnce(&T) -> bool,
+    ) -> Result<T> {
         Ok(self
             .repository
-            .get(PASTE_SHORTCUTS_KEY)?
-            .and_then(|value| serde_json::from_str(&value).ok())
+            .get(key)?
+            .as_deref()
+            .and_then(|value| serde_json::from_str(value).ok())
+            .filter(valid)
             .unwrap_or_default())
     }
 
-    pub fn set_paste_shortcuts(&self, shortcuts: &PasteShortcutConfig) -> Result<()> {
-        self.repository
-            .set(PASTE_SHORTCUTS_KEY, &serde_json::to_string(shortcuts)?)?;
+    fn write_json<T: Serialize + ?Sized>(&self, key: &str, value: &T) -> Result<()> {
+        self.repository.set(key, &serde_json::to_string(value)?)?;
         Ok(())
+    }
+
+    pub fn paste_shortcuts(&self) -> Result<PasteShortcutConfig> {
+        self.read_json(PASTE_SHORTCUTS_KEY, |_| true)
+    }
+
+    pub fn set_paste_shortcuts(&self, shortcuts: &PasteShortcutConfig) -> Result<()> {
+        self.write_json(PASTE_SHORTCUTS_KEY, shortcuts)
     }
 
     pub fn window_position(&self) -> Result<WindowPositionPreference> {
@@ -708,86 +721,53 @@ impl Preferences {
     }
 
     pub fn hover_preview(&self) -> Result<HoverPreviewPreference> {
-        Ok(self
-            .repository
-            .get(HOVER_PREVIEW_KEY)?
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<HoverPreviewPreference>(value).ok())
-            .filter(|preference| preference.valid())
-            .unwrap_or_default())
+        self.read_json(HOVER_PREVIEW_KEY, |preference: &HoverPreviewPreference| {
+            preference.valid()
+        })
     }
 
     pub fn set_hover_preview(&self, preference: HoverPreviewPreference) -> Result<()> {
         anyhow::ensure!(preference.valid(), "悬停预览设置超出允许范围");
-        self.repository
-            .set(HOVER_PREVIEW_KEY, &serde_json::to_string(&preference)?)?;
-        Ok(())
+        self.write_json(HOVER_PREVIEW_KEY, &preference)
     }
 
     pub fn display(&self) -> Result<DisplayPreference> {
-        Ok(self
-            .repository
-            .get(DISPLAY_KEY)?
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<DisplayPreference>(value).ok())
-            .filter(|preference| preference.valid())
-            .unwrap_or_default())
+        self.read_json(DISPLAY_KEY, |preference: &DisplayPreference| {
+            preference.valid()
+        })
     }
 
     pub fn set_display(&self, preference: DisplayPreference) -> Result<()> {
         anyhow::ensure!(preference.valid(), "显示设置超出允许范围");
-        self.repository
-            .set(DISPLAY_KEY, &serde_json::to_string(&preference)?)?;
-        Ok(())
+        self.write_json(DISPLAY_KEY, &preference)
     }
 
     pub fn audio(&self) -> Result<AudioPreference> {
-        Ok(self
-            .repository
-            .get(AUDIO_KEY)?
-            .as_deref()
-            .and_then(|value| serde_json::from_str(value).ok())
-            .unwrap_or_default())
+        self.read_json(AUDIO_KEY, |_| true)
     }
 
     pub fn set_audio(&self, preference: AudioPreference) -> Result<()> {
-        self.repository
-            .set(AUDIO_KEY, &serde_json::to_string(&preference)?)?;
-        Ok(())
+        self.write_json(AUDIO_KEY, &preference)
     }
 
     pub fn monitor_types(&self) -> Result<MonitorTypesPreference> {
-        Ok(self
-            .repository
-            .get(MONITOR_TYPES_KEY)?
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<MonitorTypesPreference>(value).ok())
-            .filter(|preference| preference.valid())
-            .unwrap_or_default())
+        self.read_json(MONITOR_TYPES_KEY, |preference: &MonitorTypesPreference| {
+            preference.valid()
+        })
     }
 
     pub fn set_monitor_types(&self, preference: MonitorTypesPreference) -> Result<()> {
         anyhow::ensure!(preference.valid(), "至少需要监听一种内容类型");
-        self.repository
-            .set(MONITOR_TYPES_KEY, &serde_json::to_string(&preference)?)?;
-        Ok(())
+        self.write_json(MONITOR_TYPES_KEY, &preference)
     }
 
     pub fn app_filter(&self) -> Result<AppFilterPreference> {
-        Ok(self
-            .repository
-            .get(APP_FILTER_KEY)?
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<AppFilterPreference>(value).ok())
-            .filter(AppFilterPreference::valid)
-            .unwrap_or_default())
+        self.read_json(APP_FILTER_KEY, AppFilterPreference::valid)
     }
 
     pub fn set_app_filter(&self, preference: &AppFilterPreference) -> Result<()> {
         anyhow::ensure!(preference.valid(), "应用过滤规则无效");
-        self.repository
-            .set(APP_FILTER_KEY, &serde_json::to_string(preference)?)?;
-        Ok(())
+        self.write_json(APP_FILTER_KEY, preference)
     }
 
     pub fn onboarding_completed(&self) -> Result<bool> {

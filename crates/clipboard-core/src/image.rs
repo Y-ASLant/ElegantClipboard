@@ -28,10 +28,7 @@ impl History {
         if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
             bail!("图片尺寸无效或超过 2500 万像素");
         }
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"image:");
-        hasher.update(png);
-        let hash = hasher.finalize().to_hex().to_string();
+        let hash = crate::clipboard::hash_with_prefix(b"image:", png);
         if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
             let item = self.repo.get_by_id(id)?.context("图片记录已不存在")?;
             if item
@@ -72,10 +69,7 @@ impl History {
             let _ = std::fs::remove_file(&saved.path);
         }
         let id = inserted?;
-        let (_, deleted_images, deleted_payloads) =
-            self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
-        self.cleanup_images(deleted_images, images_dir);
-        self.cleanup_staged(deleted_payloads, images_dir);
+        self.enforce_history_limit(Some(images_dir))?;
         Ok(id)
     }
 

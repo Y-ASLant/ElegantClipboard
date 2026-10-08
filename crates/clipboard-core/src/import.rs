@@ -78,16 +78,10 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
         let report = {
             let reader = database.read_connection();
             let connection = reader.lock();
-            let integrity: String =
-                connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-            if integrity != "ok" {
-                bail!("导入副本校验失败：{integrity}");
-            }
             ImportReport {
-                total_items: connection.query_row(
-                    "SELECT COUNT(*) FROM clipboard_items",
-                    [],
-                    |row| row.get(0),
+                total_items: crate::backup_common::verify_staged_database(
+                    &connection,
+                    "导入副本校验失败",
                 )?,
             }
         };

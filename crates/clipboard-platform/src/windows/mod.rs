@@ -904,13 +904,9 @@ fn plain_text_for_copy(item: &ClipboardItem) -> Result<&str> {
         .context("记录没有可复制的纯文本")
 }
 
-fn item_paths_for_action(
-    history: &History,
-    item: &ClipboardItem,
-    staged_dir: &Path,
-) -> Result<Vec<String>> {
+fn item_paths_for_action(item: &ClipboardItem, staged_dir: &Path) -> Result<Vec<String>> {
     let paths = match item.content_type.as_str() {
-        "files" => history.files_for_copy(item.id, staged_dir)?,
+        "files" => History::file_paths_for_copy(item, staged_dir)?,
         "image" => vec![item.image_path.clone().context("图片文件路径缺失")?],
         _ => bail!("该记录不是文件或图片"),
     };
@@ -1031,12 +1027,7 @@ fn data_size_info(data_dir: &Path, images_dir: &Path, staged_dir: &Path) -> Resu
     })
 }
 
-fn save_item_as(
-    history: &History,
-    item: &ClipboardItem,
-    staged_dir: &Path,
-    destination: &Path,
-) -> Result<u64> {
+fn save_item_as(item: &ClipboardItem, staged_dir: &Path, destination: &Path) -> Result<u64> {
     if !destination.is_absolute() {
         bail!("另存为目标必须是绝对路径");
     }
@@ -1049,7 +1040,7 @@ fn save_item_as(
         bail!("另存为目标不能是文件夹");
     }
 
-    let paths = item_paths_for_action(history, item, staged_dir)?;
+    let paths = item_paths_for_action(item, staged_dir)?;
     let source = Path::new(&paths[0]);
     if !source.is_file() {
         bail!("文件夹不支持另存为，请先在资源管理器中复制");
@@ -1231,6 +1222,13 @@ fn write_merged_clipboard(
     bail!("合并内容写回后剪贴板持续变化，请重试")
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CopyMode {
+    Original,
+    PlainText,
+    Paths,
+}
+
 struct Worker {
     history: History,
     preferences: Preferences,
@@ -1329,13 +1327,7 @@ impl Worker {
                 self.history.capture_files(&paths, &self.images_dir)?;
             }
             Command::CaptureImage { png, width, height } => {
-                let result = self
-                    .history
-                    .capture_image(&png, width, height, &self.images_dir);
-                let mut state = lock_capture_state(&self.state)?;
-                state.pending_image_bytes = state.pending_image_bytes.saturating_sub(png.len());
-                drop(state);
-                result?;
+                self.capture_image(&png, width, height)?;
             }
             Command::ObservedCapture { content, source } => {
                 self.handle_observed_capture(content, source)?;
@@ -1344,7 +1336,7 @@ impl Worker {
             Command::MergeForPaste(ids) => return self.handle_merge(ids, true),
             Command::RevealInExplorer(id) => {
                 let item = self.history.item(id)?;
-                let paths = item_paths_for_action(&self.history, &item, &self.staged_dir)?;
+                let paths = item_paths_for_action(&item, &self.staged_dir)?;
                 reveal_in_explorer(Path::new(&paths[0]))?;
                 self.send_event(Event::Status(if paths.len() == 1 {
                     "已在资源管理器中定位".into()
@@ -1357,20 +1349,20 @@ impl Worker {
                 let result = self
                     .history
                     .item(id)
-                    .and_then(|item| {
-                        save_item_as(&self.history, &item, &self.staged_dir, &destination)
-                    })
+                    .and_then(|item| save_item_as(&item, &self.staged_dir, &destination))
                     .map(|_| destination)
                     .map_err(|error| error.to_string());
                 self.send_event(Event::SavedAs { id, result })?;
                 return Ok(());
             }
-            Command::Copy(id) => return self.handle_copy(id, false, false, false),
-            Command::CopyPlainText(id) => return self.handle_copy(id, false, true, false),
-            Command::CopyPlainTextForPaste(id) => return self.handle_copy(id, true, true, false),
-            Command::CopyForPaste(id) => return self.handle_copy(id, true, false, false),
-            Command::CopyPath(id) => return self.handle_copy(id, false, false, true),
-            Command::CopyPathForPaste(id) => return self.handle_copy(id, true, false, true),
+            Command::Copy(id) => return self.handle_copy(id, false, CopyMode::Original),
+            Command::CopyPlainText(id) => return self.handle_copy(id, false, CopyMode::PlainText),
+            Command::CopyPlainTextForPaste(id) => {
+                return self.handle_copy(id, true, CopyMode::PlainText);
+            }
+            Command::CopyForPaste(id) => return self.handle_copy(id, true, CopyMode::Original),
+            Command::CopyPath(id) => return self.handle_copy(id, false, CopyMode::Paths),
+            Command::CopyPathForPaste(id) => return self.handle_copy(id, true, CopyMode::Paths),
             Command::Preview { id, generation } => {
                 self.send_event(Event::Preview {
                     id,
@@ -1650,6 +1642,20 @@ impl Worker {
         group_id == self.group_id && generation == self.generation
     }
 
+    fn release_pending_image_bytes(&self, bytes: usize) -> Result<()> {
+        let mut state = lock_capture_state(&self.state)?;
+        state.pending_image_bytes = state.pending_image_bytes.saturating_sub(bytes);
+        Ok(())
+    }
+
+    fn capture_image(&self, png: &[u8], width: u32, height: u32) -> Result<i64> {
+        let result = self
+            .history
+            .capture_image(png, width, height, &self.images_dir);
+        self.release_pending_image_bytes(png.len())?;
+        result
+    }
+
     fn handle_observed_capture(
         &mut self,
         content: CapturedClipboard,
@@ -1668,8 +1674,7 @@ impl Worker {
             .flatten();
         let Some(content) = filtered else {
             if image_bytes != 0 {
-                let mut state = lock_capture_state(&self.state)?;
-                state.pending_image_bytes = state.pending_image_bytes.saturating_sub(image_bytes);
+                self.release_pending_image_bytes(image_bytes)?;
             }
             return Ok(());
         };
@@ -1687,13 +1692,7 @@ impl Worker {
                 Some(self.history.capture_files(&paths, &self.images_dir)?)
             }
             CapturedClipboard::Image { png, width, height } => {
-                let result = self
-                    .history
-                    .capture_image(&png, width, height, &self.images_dir);
-                let mut state = lock_capture_state(&self.state)?;
-                state.pending_image_bytes = state.pending_image_bytes.saturating_sub(png.len());
-                drop(state);
-                Some(result?)
+                Some(self.capture_image(&png, width, height)?)
             }
         };
         if let (Some(id), Some(source)) = (id, source) {
@@ -1720,27 +1719,18 @@ impl Worker {
         })
     }
 
-    fn handle_copy(
-        &mut self,
-        id: i64,
-        for_paste: bool,
-        plain_only: bool,
-        path_only: bool,
-    ) -> Result<()> {
+    fn handle_copy(&mut self, id: i64, for_paste: bool, mode: CopyMode) -> Result<()> {
         let item = self.history.item(id)?;
-        let plain_text = plain_only
+        let plain_text = (mode == CopyMode::PlainText)
             .then(|| plain_text_for_copy(&item).map(str::to_owned))
             .transpose()?;
-        let path_text = path_only
-            .then(|| {
-                item_paths_for_action(&self.history, &item, &self.staged_dir)
-                    .map(|paths| paths.join("\n"))
-            })
+        let path_text = (mode == CopyMode::Paths)
+            .then(|| item_paths_for_action(&item, &self.staged_dir).map(|paths| paths.join("\n")))
             .transpose()?;
         let is_rich =
-            !plain_only && !path_only && matches!(item.content_type.as_str(), "html" | "rtf");
-        let files = if !path_only && item.content_type == "files" {
-            let paths = self.history.files_for_copy(id, &self.staged_dir)?;
+            mode == CopyMode::Original && matches!(item.content_type.as_str(), "html" | "rtf");
+        let files = if mode == CopyMode::Original && item.content_type == "files" {
+            let paths = History::file_paths_for_copy(&item, &self.staged_dir)?;
             if paths.iter().any(|path| !Path::new(path).exists()) {
                 bail!("源文件或文件夹已不存在，无法复制");
             }
@@ -1748,7 +1738,7 @@ impl Worker {
         } else {
             None
         };
-        let image = if !path_only && item.content_type == "image" {
+        let image = if mode == CopyMode::Original && item.content_type == "image" {
             let path = item.image_path.as_deref().context("图片文件路径缺失")?;
             if !Path::new(path).is_file() {
                 bail!("图片文件已丢失，无法复制");
@@ -1820,8 +1810,8 @@ impl Worker {
             for_paste,
             clipboard_sequence,
             message: match item.content_type.as_str() {
-                _ if path_only => "路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
-                _ if plain_only => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                _ if mode == CopyMode::Paths => "路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                _ if mode == CopyMode::PlainText => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 "html" | "rtf" if rich_preserved => "富文本已复制，可切换到目标应用按 Ctrl+V 粘贴",

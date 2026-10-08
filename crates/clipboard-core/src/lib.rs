@@ -212,12 +212,11 @@ impl History {
             bail!("快速粘贴槽位必须在 1 到 10 之间");
         }
         let index = usize::from(slot - 1);
-        let item = if favorite {
-            self.repo.get_favorite_by_position(index, group_id)?
+        Ok(if favorite {
+            self.repo.get_favorite_id_by_position(index, group_id)?
         } else {
-            self.repo.get_by_position(index, group_id)?
-        };
-        Ok(item.map(|item| item.id))
+            self.repo.get_id_by_position(index, group_id)?
+        })
     }
 
     fn capture_inner(&self, text: &str, images_dir: Option<&Path>) -> Result<Option<i64>> {
@@ -248,13 +247,18 @@ impl History {
             char_count: Some(text.chars().count() as i64),
             ..Default::default()
         })?;
+        self.enforce_history_limit(images_dir)?;
+        Ok(Some(id))
+    }
+
+    fn enforce_history_limit(&self, images_dir: Option<&Path>) -> Result<()> {
         let (_, deleted_images, deleted_payloads) =
             self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
         if let Some(images_dir) = images_dir {
             self.cleanup_images(deleted_images, images_dir);
             self.cleanup_staged(deleted_payloads, images_dir);
         }
-        Ok(Some(id))
+        Ok(())
     }
 
     pub fn list(

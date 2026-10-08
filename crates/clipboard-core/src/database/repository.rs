@@ -1,6 +1,6 @@
 use super::{ContentType, Database};
 use parking_lot::Mutex;
-use rusqlite::{Connection, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::debug;
@@ -104,6 +104,38 @@ impl ConditionBuilder {
             conditions: Vec::new(),
             params: Vec::new(),
         }
+    }
+
+    /// Search uses the first parameter for both columns; add other filters afterward.
+    fn filtered(options: &QueryOptions) -> Self {
+        let mut builder = Self::new();
+        if let Some(search) = options
+            .search
+            .as_deref()
+            .filter(|search| !search.is_empty())
+        {
+            let mut pattern = String::with_capacity(search.len() + 2);
+            pattern.push('%');
+            for ch in search.chars() {
+                if matches!(ch, '\\' | '%' | '_') {
+                    pattern.push('\\');
+                }
+                pattern.push(ch);
+            }
+            pattern.push('%');
+            builder = builder.condition_with_param(
+                "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\')",
+                pattern,
+            );
+        }
+        builder = builder.content_type(options.content_type.as_deref());
+        if options.pinned_only {
+            builder = builder.condition("is_pinned = 1");
+        }
+        if options.favorite_only {
+            builder = builder.condition("is_favorite = 1");
+        }
+        builder.group(options.group_id)
     }
 
     /// Add non-pinned + non-favorite conditions (clearable items).
@@ -326,71 +358,75 @@ impl ClipboardRepository {
 
     pub fn get_by_id(&self, id: i64) -> Result<Option<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let result = conn.query_row(
+        conn.query_row(
             "SELECT * FROM clipboard_items WHERE id = ?1",
             params![id],
             Self::row_to_item,
-        );
-
-        match result {
-            Ok(item) => Ok(Some(item)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
+        )
+        .optional()
     }
 
-    /// 按默认排序位置获取完整条目（含文本内容），供快速粘贴使用。
+    /// 按默认排序位置获取完整条目（含文本内容）。
     pub fn get_by_position(
         &self,
         index: usize,
         group_id: Option<i64>,
     ) -> Result<Option<ClipboardItem>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        let sql = format!(
-            "SELECT * FROM clipboard_items \
-             WHERE {group_cond} \
-             ORDER BY is_pinned DESC, sort_order DESC, created_at DESC \
-             LIMIT 1 OFFSET ?"
-        );
-        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
-            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
-        } else {
-            conn.query_row(&sql, params![index as i64], Self::row_to_item)
-        };
-
-        match result {
-            Ok(item) => Ok(Some(item)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
+        self.query_by_position(index, group_id, false, "*", Self::row_to_item)
     }
 
-    /// 按收藏列表位置获取完整条目，供收藏快速粘贴使用。
+    /// 按收藏列表位置获取完整条目。
     pub fn get_favorite_by_position(
         &self,
         index: usize,
         group_id: Option<i64>,
     ) -> Result<Option<ClipboardItem>, rusqlite::Error> {
-        let conn = self.read_conn.lock();
-        let (group_cond, group_param) = Self::group_condition(group_id);
-        let sql = format!(
-            "SELECT * FROM clipboard_items \
-             WHERE {group_cond} AND is_favorite = 1 \
-             ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC \
-             LIMIT 1 OFFSET ?"
-        );
-        let result: Result<ClipboardItem, _> = if let Some(gid) = group_param {
-            conn.query_row(&sql, params![gid, index as i64], Self::row_to_item)
-        } else {
-            conn.query_row(&sql, params![index as i64], Self::row_to_item)
-        };
+        self.query_by_position(index, group_id, true, "*", Self::row_to_item)
+    }
 
-        match result {
-            Ok(item) => Ok(Some(item)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
+    /// Resolve a quick-paste slot without loading the item's contents.
+    pub fn get_id_by_position(
+        &self,
+        index: usize,
+        group_id: Option<i64>,
+    ) -> Result<Option<i64>, rusqlite::Error> {
+        self.query_by_position(index, group_id, false, "id", |row| row.get(0))
+    }
+
+    pub fn get_favorite_id_by_position(
+        &self,
+        index: usize,
+        group_id: Option<i64>,
+    ) -> Result<Option<i64>, rusqlite::Error> {
+        self.query_by_position(index, group_id, true, "id", |row| row.get(0))
+    }
+
+    fn query_by_position<T>(
+        &self,
+        index: usize,
+        group_id: Option<i64>,
+        favorite_only: bool,
+        columns: &str,
+        map: impl FnOnce(&Row<'_>) -> Result<T, rusqlite::Error>,
+    ) -> Result<Option<T>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        let builder = ConditionBuilder::filtered(&QueryOptions {
+            favorite_only,
+            group_id,
+            ..Default::default()
+        })
+        .param(index as i64);
+        let order = if favorite_only {
+            "is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC"
+        } else {
+            "is_pinned DESC, sort_order DESC, created_at DESC"
+        };
+        let sql = format!(
+            "SELECT {columns} FROM clipboard_items{} ORDER BY {order} LIMIT 1 OFFSET ?",
+            builder.where_clause()
+        );
+        conn.query_row(&sql, builder.param_refs().as_slice(), map)
+            .optional()
     }
 
     /// 列表查询列（排除大文本字段以减少 IPC 传输）
@@ -404,57 +440,6 @@ impl ClipboardRepository {
          image_path, file_paths, NULL AS file_payload, content_hash, semantic_hash, preview, byte_size, image_width, image_height, \
          is_pinned, is_favorite, favorite_order, sort_order, created_at, updated_at, access_count, last_accessed_at, char_count, \
          source_app_name, source_app_icon, group_id";
-
-    /// 构建通用的 WHERE 条件（content_type / pinned_only / favorite_only / search）
-    fn build_filter_conditions(
-        options: &QueryOptions,
-    ) -> (Vec<String>, Vec<Box<dyn rusqlite::ToSql>>) {
-        let mut conditions = Vec::new();
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-        // LIKE 搜索（支持中文，匹配全文任意位置）
-        if let Some(ref search) = options.search
-            && !search.is_empty()
-        {
-            conditions.push(
-                "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\')".to_string(),
-            );
-            let mut pattern = String::with_capacity(search.len() + 2);
-            pattern.push('%');
-            for ch in search.chars() {
-                if matches!(ch, '\\' | '%' | '_') {
-                    pattern.push('\\');
-                }
-                pattern.push(ch);
-            }
-            pattern.push('%');
-            params_vec.push(Box::new(pattern));
-        }
-
-        // 多类型筛选（逗号分隔）
-        Self::append_content_type_condition(
-            options.content_type.as_deref(),
-            &mut conditions,
-            &mut params_vec,
-        );
-
-        if options.pinned_only {
-            conditions.push("is_pinned = 1".to_string());
-        }
-
-        if options.favorite_only {
-            conditions.push("is_favorite = 1".to_string());
-        }
-
-        // 分组过滤：None = 默认分组（group_id IS NULL），Some(id) = 自定义分组
-        let (group_cond, group_param) = Self::group_condition(options.group_id);
-        conditions.push(group_cond.to_string());
-        if let Some(gid) = group_param {
-            params_vec.push(Box::new(gid));
-        }
-
-        (conditions, params_vec)
-    }
 
     /// 将 group_id 转换为 SQL 条件片段和可选参数
     fn group_condition(group_id: Option<i64>) -> (&'static str, Option<i64>) {
@@ -493,14 +478,6 @@ impl ClipboardRepository {
         }
     }
 
-    /// 将条件拼接到 SQL 语句
-    fn append_where(sql: &mut String, conditions: &[String]) {
-        if !conditions.is_empty() {
-            sql.push_str(" WHERE ");
-            sql.push_str(&conditions.join(" AND "));
-        }
-    }
-
     pub fn list(&self, options: QueryOptions) -> Result<Vec<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
 
@@ -511,9 +488,11 @@ impl ClipboardRepository {
             Self::LIST_COLUMNS
         };
 
-        let mut sql = format!("SELECT {columns} FROM clipboard_items");
-        let (conditions, mut params_vec) = Self::build_filter_conditions(&options);
-        Self::append_where(&mut sql, &conditions);
+        let mut builder = ConditionBuilder::filtered(&options);
+        let mut sql = format!(
+            "SELECT {columns} FROM clipboard_items{}",
+            builder.where_clause()
+        );
 
         if options.favorite_only {
             sql.push_str(
@@ -526,12 +505,10 @@ impl ClipboardRepository {
 
         if let Some(limit) = options.limit {
             sql.push_str(" LIMIT ? OFFSET ?");
-            params_vec.push(Box::new(limit));
-            params_vec.push(Box::new(options.offset.unwrap_or(0)));
+            builder = builder.param(limit).param(options.offset.unwrap_or(0));
         }
 
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
+        let params_refs = builder.param_refs();
         let mut stmt = conn.prepare(&sql)?;
         stmt.query_map(params_refs.as_slice(), Self::row_to_item)?
             .collect()
@@ -540,14 +517,7 @@ impl ClipboardRepository {
     pub fn count(&self, options: QueryOptions) -> Result<i64, rusqlite::Error> {
         let conn = self.read_conn.lock();
 
-        let mut sql = "SELECT COUNT(*) FROM clipboard_items".to_string();
-        let (conditions, params_vec) = Self::build_filter_conditions(&options);
-        Self::append_where(&mut sql, &conditions);
-
-        let params_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
-        let count: i64 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
-        Ok(count)
+        ConditionBuilder::filtered(&options).count_items(&conn)
     }
 
     /// Counts persisted items by local calendar date, starting inclusively at `start_date`.
@@ -879,17 +849,12 @@ impl SettingsRepository {
 
     pub fn get(&self, key: &str) -> Result<Option<String>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        let result = conn.query_row(
+        conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![key],
             |row| row.get(0),
-        );
-
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
+        )
+        .optional()
     }
 
     pub fn set(&self, key: &str, value: &str) -> Result<(), rusqlite::Error> {
@@ -1467,15 +1432,77 @@ mod tests {
 
     #[test]
     fn get_by_position() {
-        let db = temp_db();
+        let directory = tempfile::tempdir().unwrap();
+        let db = Database::new(directory.path().join("positions.db")).unwrap();
         let repo = ClipboardRepository::new(&db);
-        repo.insert(make_text_item("pos0")).unwrap();
-        repo.insert(make_text_item("pos1")).unwrap();
+        let pinned = repo.insert(make_text_item("pinned")).unwrap();
+        let favorite = repo.insert(make_text_item("favorite")).unwrap();
+        let recent = repo.insert(make_text_item("recent")).unwrap();
+        repo.toggle_pin(pinned).unwrap();
+        repo.toggle_favorite(pinned).unwrap();
+        repo.toggle_favorite(favorite).unwrap();
+        let group = GroupRepository::new(&db).create("positions", None).unwrap();
+        let grouped_old = repo
+            .insert(NewClipboardItem {
+                group_id: Some(group.id),
+                ..make_text_item("grouped old")
+            })
+            .unwrap();
+        let grouped_recent = repo
+            .insert(NewClipboardItem {
+                group_id: Some(group.id),
+                ..make_text_item("grouped recent")
+            })
+            .unwrap();
+        repo.toggle_favorite(grouped_recent).unwrap();
+        repo.toggle_favorite(grouped_old).unwrap();
 
-        let first = repo.get_by_position(0, None).unwrap().unwrap();
-        assert_eq!(first.preview.as_deref(), Some("pos1"));
-        let second = repo.get_by_position(1, None).unwrap().unwrap();
-        assert_eq!(second.preview.as_deref(), Some("pos0"));
+        for (group_id, expected_recent, expected_favorites) in [
+            (None, vec![pinned, recent, favorite], vec![pinned, favorite]),
+            (
+                Some(group.id),
+                vec![grouped_recent, grouped_old],
+                vec![grouped_old, grouped_recent],
+            ),
+        ] {
+            for (favorite_only, expected) in [(false, expected_recent), (true, expected_favorites)]
+            {
+                for index in 0..=expected.len() {
+                    let expected_id = expected.get(index).copied();
+                    let item = if favorite_only {
+                        repo.get_favorite_by_position(index, group_id)
+                    } else {
+                        repo.get_by_position(index, group_id)
+                    }
+                    .unwrap();
+                    let id = if favorite_only {
+                        repo.get_favorite_id_by_position(index, group_id)
+                    } else {
+                        repo.get_id_by_position(index, group_id)
+                    }
+                    .unwrap();
+                    assert_eq!(item.map(|item| item.id), expected_id);
+                    assert_eq!(id, expected_id);
+                }
+            }
+        }
+
+        // Slot resolution must not decode body fields that the copy stage will read later.
+        db.write_connection()
+            .lock()
+            .execute(
+                "UPDATE clipboard_items SET html_content = x'ff' WHERE id = ?1",
+                params![pinned],
+            )
+            .unwrap();
+        assert_eq!(repo.get_id_by_position(0, None).unwrap(), Some(pinned));
+        assert_eq!(
+            repo.get_favorite_id_by_position(0, None).unwrap(),
+            Some(pinned)
+        );
+        assert!(repo.get_by_id(pinned).is_err());
+        assert!(repo.get_by_position(0, None).is_err());
+        assert!(repo.get_favorite_by_position(0, None).is_err());
     }
 
     #[test]

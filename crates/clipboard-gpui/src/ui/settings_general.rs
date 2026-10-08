@@ -1,4 +1,4 @@
-use super::settings_common::command_checkbox;
+use super::settings_common::{choice_tabs, command_checkbox};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox, switch::Switch};
 
@@ -65,49 +65,30 @@ impl SettingsWindowView {
             )
         };
 
-        let choices = [
-            (
-                tr(language, "跟随光标", "Follow cursor"),
+        choice_tabs(
+            "settings-window-position-tabs",
+            &self.owner,
+            [
                 WindowPositionPreference::FollowCursor,
-            ),
-            (
-                tr(language, "当前屏幕居中", "Center on screen"),
                 WindowPositionPreference::ScreenCenter,
-            ),
-            (
-                tr(language, "保持位置", "Keep position"),
                 WindowPositionPreference::FixedPosition,
-            ),
-        ];
-        let selected_index = choices
-            .iter()
-            .position(|(_, preference)| *preference == window_position)
-            .expect("built-in window position");
-        let click_choices = choices;
-        let owner = self.owner.clone();
-        TabBar::new("settings-window-position-tabs")
-            .w_full()
-            .segmented()
-            .selected_index(selected_index)
-            .on_click(move |index: &usize, _, cx| {
-                if let Some(&(_, preference)) = click_choices.get(*index) {
-                    let _ = owner.update(cx, |owner, cx| {
-                        if owner.window_position != preference
-                            && owner.send(Command::SetWindowPosition(preference), cx)
-                        {
-                            owner.window_position_pending = true;
-                            cx.notify();
-                        }
-                    });
+            ],
+            [
+                tr(language, "跟随光标", "Follow cursor"),
+                tr(language, "当前屏幕居中", "Center on screen"),
+                tr(language, "保持位置", "Keep position"),
+            ],
+            window_position,
+            window_position_pending,
+            |owner| owner.window_position,
+            |owner, preference, cx| {
+                if owner.send(Command::SetWindowPosition(preference), cx) {
+                    owner.window_position_pending = true;
+                    cx.notify();
                 }
-            })
-            .children(choices.map(|(label, _)| {
-                Tab::new()
-                    .label(label)
-                    .flex_1()
-                    .disabled(window_position_pending)
-            }))
-            .into_any_element()
+            },
+        )
+        .into_any_element()
     }
 
     pub(super) fn settings_behavior_content(&self, cx: &mut Context<Self>) -> AnyElement {
