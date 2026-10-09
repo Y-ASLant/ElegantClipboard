@@ -44,6 +44,7 @@ import { useTranslateSettings } from "@/stores/translate-settings";
 
 interface AppSettings extends GeneralSettings, ShortcutSettings, DataSettings {}
 
+const AUTO_SAVE_KEYS = ["max_history_count", "max_content_size_kb", "max_image_size_kb", "auto_cleanup_days"] as const;
 const VALID_POSITION_MODES = new Set(["follow_cursor", "screen_center", "fixed_position"]);
 function normalizePositionMode(raw: string | null | undefined): import("@/components/settings/GeneralTab").PositionMode {
   if (raw && VALID_POSITION_MODES.has(raw)) return raw as import("@/components/settings/GeneralTab").PositionMode;
@@ -218,6 +219,11 @@ export function Settings() {
     log_file_path: "",
   });
   const settingsLoadedRef = useRef(false);
+  const savedSettingsRef = useRef(settings);
+  const currentSettingsRef = useRef(settings);
+  currentSettingsRef.current = settings;
+  const savingSettingsRef = useRef(false);
+  const savePendingRef = useRef(false);
   const [appVersion, setAppVersion] = useState("0.0.0");
   const [buildTime, setBuildTime] = useState("—");
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
@@ -276,7 +282,6 @@ export function Settings() {
     settings.max_image_size_kb,
     settings.auto_cleanup_days,
     settings.auto_start,
-    settings.admin_launch,
   ]);
 
   const loadSettings = useCallback(async () => {
@@ -313,7 +318,7 @@ export function Settings() {
         invoke<string>("get_log_file_path"),
       ]);
 
-      setSettings({
+      const loadedSettings: AppSettings = {
         data_path: dataPath || "",
         max_history_count: maxHistoryCount ? parseInt(maxHistoryCount) : 10000,
         max_content_size_kb: maxContentSize ? parseInt(maxContentSize) : 1024,
@@ -328,7 +333,9 @@ export function Settings() {
         winv_replacement: winvReplacement,
         log_to_file: logToFile,
         log_file_path: logFilePath || "",
-      });
+      };
+      savedSettingsRef.current = { ...loadedSettings };
+      setSettings(loadedSettings);
       requestAnimationFrame(() => {
         settingsLoadedRef.current = true;
       });
@@ -358,40 +365,35 @@ export function Settings() {
   }, [loadSettings]);
 
   const saveSettings = async () => {
+    if (savingSettingsRef.current) {
+      savePendingRef.current = true;
+      return;
+    }
+    savingSettingsRef.current = true;
     try {
-      // 保存设置到数据库（data_path 由 GeneralTab 单独处理迁移）
-      await Promise.all([
-        invoke("set_setting", {
-          key: "max_history_count",
-          value: settings.max_history_count.toString(),
-        }),
-        invoke("set_setting", {
-          key: "max_content_size_kb",
-          value: settings.max_content_size_kb.toString(),
-        }),
-        invoke("set_setting", {
-          key: "max_image_size_kb",
-          value: settings.max_image_size_kb.toString(),
-        }),
-        invoke("set_setting", {
-          key: "auto_cleanup_days",
-          value: settings.auto_cleanup_days.toString(),
-        }),
-      ]);
-      if (settings.auto_start) {
-        await invoke("enable_autostart");
-      } else {
-        await invoke("disable_autostart");
-      }
-
-      // 处理管理员启动设置
-      if (settings.admin_launch) {
-        await invoke("enable_admin_launch");
-      } else {
-        await invoke("disable_admin_launch");
-      }
-    } catch (error) {
-      reportUserError(t("operationFeedback.userActions.saveSettings"), error, "Failed to save settings");
+      do {
+        savePendingRef.current = false;
+        const current = currentSettingsRef.current;
+        const saved = savedSettingsRef.current;
+        // data_path 和管理员偏好由对应的确认流程直接保存。
+        const writes = AUTO_SAVE_KEYS.filter((key) => current[key] !== saved[key]).map(async (key) => {
+          await invoke("set_setting", { key, value: current[key].toString() });
+          saved[key] = current[key];
+        });
+        if (current.auto_start !== saved.auto_start) {
+          writes.push((async () => {
+            await invoke(current.auto_start ? "enable_autostart" : "disable_autostart");
+            saved.auto_start = current.auto_start;
+          })());
+        }
+        const results = await Promise.allSettled(writes);
+        const failed = results.find((result) => result.status === "rejected");
+        if (failed?.status === "rejected") {
+          reportUserError(t("operationFeedback.userActions.saveSettings"), failed.reason, "Failed to save settings");
+        }
+      } while (savePendingRef.current);
+    } finally {
+      savingSettingsRef.current = false;
     }
   };
 

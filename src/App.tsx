@@ -211,14 +211,30 @@ function App() {
     return () => ro.disconnect();
   }, [updateIndicator]);
 
+  // 防抖搜索（fetchItems 是 zustand store 方法，引用稳定，debounce 实例仅创建一次）
+  const debouncedSearch = useMemo(
+    () => debounce(() => {
+      fetchItems();
+    }, 300),
+    [fetchItems]
+  );
+
+  // 卸载或切换筛选时取消待执行的搜索
+  useEffect(() => {
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [debouncedSearch, selectedGroup, selectedGroupId]);
+
   // 分类栏隐藏时重置筛选
   useEffect(() => {
     if (!showCategoryFilter) {
+      debouncedSearch.cancel();
       // 同步前后端分组状态
       useClipboardStore.setState({ selectedGroup: null });
       setSelectedGroupId(null);
     }
-  }, [showCategoryFilter, setSelectedGroupId]);
+  }, [showCategoryFilter, setSelectedGroupId, debouncedSearch]);
 
   // ---- 分组操作 handlers ----
   const handleCreateGroup = async () => {
@@ -288,6 +304,7 @@ function App() {
       // loadUISettingsFromBackend 和 loadSettings 已通过 SYNC_EVENT 自动同步，
       // 不需要在 window-shown 时重复 IPC 调用
       if (searchAutoClear) {
+        debouncedSearch.cancel();
         setSearchQuery("");
         fetchItems({ search: "" });
       } else if (clipboardDirtyRef.current) {
@@ -308,7 +325,7 @@ function App() {
       unlisten.then((fn) => fn());
       if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
     };
-  }, [refresh, fetchItems, setSearchQuery, searchAutoFocus, searchAutoClear]);
+  }, [refresh, fetchItems, setSearchQuery, searchAutoFocus, searchAutoClear, debouncedSearch]);
 
   // 窗口隐藏时关闭弹出层并可选重置状态
   useEffect(() => {
@@ -319,13 +336,14 @@ function App() {
       setGroupDropdownOpen(false);
       setBatchMode(false);
       if (autoResetState) {
+        debouncedSearch.cancel();
         resetView();
       }
     });
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [resetView, autoResetState]);
+  }, [resetView, autoResetState, debouncedSearch]);
 
   // ESC 键处理（后端钩子 + DOM 双通道）
   const handleEscape = useCallback(async () => {
@@ -364,21 +382,6 @@ function App() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [handleEscape]);
-
-  // 防抖搜索（fetchItems 是 zustand store 方法，引用稳定，debounce 实例仅创建一次）
-  const debouncedSearch = useMemo(
-    () => debounce(() => {
-      fetchItems();
-    }, 300),
-    [fetchItems]
-  );
-
-  // 卸载时取消防抖
-  useEffect(() => {
-    return () => {
-      debouncedSearch.cancel();
-    };
-  }, [debouncedSearch]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -605,7 +608,7 @@ function App() {
           )}
           {searchQuery && (
             <button
-              onClick={() => { setSearchQuery(""); fetchItems({ search: "" }); }}
+              onClick={() => { debouncedSearch.cancel(); setSearchQuery(""); fetchItems({ search: "" }); }}
               className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-muted-foreground hover:text-foreground rounded-md transition-surface z-10"
             >
               <Dismiss16Regular className="w-3.5 h-3.5" />
@@ -687,7 +690,7 @@ function App() {
               <button
                 key={g.label}
                 ref={(el) => { segmentRefs.current[i] = el; }}
-                onClick={() => setSelectedGroup(g.value)}
+                onClick={() => { debouncedSearch.cancel(); setSelectedGroup(g.value); }}
                 className={cn(
                   "relative z-1 flex-1 h-full rounded-md text-xs font-medium transition-surface",
                   selectedGroup === g.value
@@ -723,7 +726,7 @@ function App() {
                 <div className="absolute bottom-full right-0 mb-1 z-50 min-w-[160px] rounded-md border bg-popover p-1 elevation-floating">
                   {/* 默认选项 */}
                   <div
-                    onClick={() => { setSelectedGroupId(null); setGroupDropdownOpen(false); }}
+                    onClick={() => { debouncedSearch.cancel(); setSelectedGroupId(null); setGroupDropdownOpen(false); }}
                     className={cn(
                       "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs cursor-default hover:bg-accent hover:text-accent-foreground",
                       selectedGroupId === null && "bg-accent/50 text-foreground"
@@ -740,7 +743,7 @@ function App() {
                         {groups.map((g) => (
                           <div
                             key={g.id}
-                            onClick={() => { setSelectedGroupId(g.id); setGroupDropdownOpen(false); }}
+                            onClick={() => { debouncedSearch.cancel(); setSelectedGroupId(g.id); setGroupDropdownOpen(false); }}
                             className={cn(
                               "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs cursor-default hover:bg-accent hover:text-accent-foreground group/row",
                               selectedGroupId === g.id && "bg-accent/50 text-foreground"
