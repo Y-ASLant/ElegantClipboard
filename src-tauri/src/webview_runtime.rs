@@ -13,7 +13,6 @@ use tokio::sync::Notify;
 
 const WINDOW_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const VERSION_POLL_INTERVAL: Duration = Duration::from_secs(10 * 60);
-const RECOVERY_WINDOW_SECS: u64 = 10 * 60;
 const MAX_RECOVERY_ATTEMPTS: u8 = 2;
 const RENDER_UNRESPONSIVE_WINDOW_SECS: u64 = 30;
 const MAX_RENDER_UNRESPONSIVE_EVENTS: u8 = 2;
@@ -24,6 +23,7 @@ static NATIVE_EVENTS_REGISTERED: AtomicBool = AtomicBool::new(false);
 static INTENTIONAL_EXIT: AtomicBool = AtomicBool::new(false);
 // 0 = none, 1 = restart when safe, 2 = restart immediately, 3 = recovery fuse open.
 static RESTART_LEVEL: AtomicU8 = AtomicU8::new(0);
+static RECOVERY_MARKER_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 static MANAGED_WINDOWS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<WindowReadiness>>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 static UNRESPONSIVE_RENDERERS: LazyLock<parking_lot::Mutex<HashMap<String, UnresponsiveMarker>>> =
@@ -189,6 +189,10 @@ pub(crate) fn initialize(app: &tauri::AppHandle, main_window: &tauri::WebviewWin
 }
 
 pub(crate) fn ensure_runtime_current(app: &tauri::AppHandle) -> Result<(), String> {
+    check_runtime_current(app).map(|_| ())
+}
+
+fn check_runtime_current(app: &tauri::AppHandle) -> Result<bool, String> {
     match RESTART_LEVEL.load(Ordering::Acquire) {
         1 | 2 => {
             return Err("WebView2 正在恢复，ElegantClipboard 即将重启".to_string());
@@ -203,21 +207,40 @@ pub(crate) fn ensure_runtime_current(app: &tauri::AppHandle) -> Result<(), Strin
         .to_string();
     let loaded = LOADED_VERSION.read().clone();
 
-    if runtime_version_changed(loaded.as_deref(), &available) {
+    let changed = runtime_version_changed(loaded.as_deref(), &available);
+    if changed == Some(true) {
         tracing::warn!(
             loaded_version = ?loaded,
             available_version = %available,
-            "A newer WebView2 runtime is available; dynamic window creation is suspended"
+            "A different WebView2 runtime version is available; dynamic window creation is suspended"
         );
         schedule_restart(app, "runtime_version_changed", false);
         return Err("WebView2 运行时已更新，ElegantClipboard 正在重启".to_string());
     }
 
-    Ok(())
+    Ok(changed == Some(false))
 }
 
-fn runtime_version_changed(loaded: Option<&str>, available: &str) -> bool {
-    loaded.is_some_and(|loaded| loaded != available)
+#[cfg(target_os = "windows")]
+fn runtime_version_changed(loaded: Option<&str>, available: &str) -> Option<bool> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::CompareBrowserVersions;
+    use windows_core::HSTRING;
+
+    let loaded = HSTRING::from(loaded?);
+    let available = HSTRING::from(available);
+    let mut comparison = 0;
+    match unsafe { CompareBrowserVersions(&loaded, &available, &mut comparison) } {
+        Ok(()) => Some(comparison != 0),
+        Err(error) => {
+            tracing::warn!(%error, "Failed to compare WebView2 runtime versions");
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn runtime_version_changed(loaded: Option<&str>, available: &str) -> Option<bool> {
+    loaded.map(|loaded| loaded != available)
 }
 
 #[tauri::command]
@@ -312,9 +335,11 @@ fn start_version_poll(app: tauri::AppHandle) {
             if INTENTIONAL_EXIT.load(Ordering::Acquire) {
                 return;
             }
-            if ensure_runtime_current(&app).is_err() {
-                return;
-            }
+            let runtime_current = match check_runtime_current(&app) {
+                Ok(current) => current,
+                Err(_) => return,
+            };
+            clear_recovery_marker(&recovery_marker_path(), runtime_current, &RESTART_LEVEL);
         }
     });
 }
@@ -408,9 +433,12 @@ fn recovery_marker_path() -> std::path::PathBuf {
 }
 
 fn record_recovery_attempt() -> bool {
-    let path = recovery_marker_path();
-    let now = epoch_secs();
-    let current = std::fs::read_to_string(&path)
+    record_recovery_attempt_at(&recovery_marker_path(), epoch_secs())
+}
+
+fn record_recovery_attempt_at(path: &std::path::Path, now: u64) -> bool {
+    let _marker_lock = RECOVERY_MARKER_LOCK.lock();
+    let current = std::fs::read_to_string(path)
         .ok()
         .and_then(|raw| serde_json::from_str::<RecoveryMarker>(&raw).ok());
     let Some(marker) = next_recovery_marker(current, now) else {
@@ -424,22 +452,31 @@ fn record_recovery_attempt() -> bool {
         return true;
     }
     if let Ok(raw) = serde_json::to_string(&marker)
-        && let Err(error) = std::fs::write(&path, raw)
+        && let Err(error) = std::fs::write(path, raw)
     {
         tracing::warn!(%error, "Failed to persist WebView recovery marker");
     }
     true
 }
 
+fn clear_recovery_marker(path: &std::path::Path, runtime_current: bool, restart_level: &AtomicU8) {
+    let _marker_lock = RECOVERY_MARKER_LOCK.lock();
+    if !runtime_current || restart_level.load(Ordering::Acquire) != 0 {
+        return;
+    }
+    if let Err(error) = std::fs::remove_file(path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(%error, "Failed to clear WebView recovery marker");
+    }
+}
+
 fn next_recovery_marker(current: Option<RecoveryMarker>, now: u64) -> Option<RecoveryMarker> {
-    let mut marker = current
-        .filter(|marker| {
-            now.saturating_sub(marker.first_attempt_epoch_secs) <= RECOVERY_WINDOW_SECS
-        })
-        .unwrap_or(RecoveryMarker {
-            first_attempt_epoch_secs: now,
-            attempts: 0,
-        });
+    // 计数跨启动保留，只在定时运行时检查通过后清除。
+    let mut marker = current.unwrap_or(RecoveryMarker {
+        first_attempt_epoch_secs: now,
+        attempts: 0,
+    });
     if marker.attempts >= MAX_RECOVERY_ATTEMPTS {
         return None;
     }
@@ -661,27 +698,171 @@ mod tests {
 
     #[test]
     fn runtime_version_change_requires_restart() {
-        assert!(!runtime_version_changed(None, "151.0"));
-        assert!(!runtime_version_changed(Some("151.0"), "151.0"));
-        assert!(runtime_version_changed(Some("150.0"), "151.0"));
+        assert_eq!(runtime_version_changed(None, "152.0.4191.19"), None);
+        assert_eq!(
+            runtime_version_changed(Some("152.0.4191.19"), "152.0.4191.19"),
+            Some(false)
+        );
+        assert_eq!(
+            runtime_version_changed(Some("151.0.4191.19 beta"), "152.0.4191.19"),
+            Some(true)
+        );
+        assert_eq!(
+            runtime_version_changed(Some("152.0.4191.9"), "152.0.4191.19"),
+            Some(true)
+        );
+        assert_eq!(
+            runtime_version_changed(Some("152.0.4191.19"), "152.0.4191.9"),
+            Some(true)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn runtime_version_comparison_ignores_channel_suffixes() {
+        for channel in ["beta", "dev", "canary"] {
+            let version = format!("152.0.4191.19 {channel}");
+            assert_eq!(
+                runtime_version_changed(Some(&version), "152.0.4191.19"),
+                Some(false)
+            );
+            assert_eq!(
+                runtime_version_changed(Some("152.0.4191.19"), &version),
+                Some(false)
+            );
+        }
+        assert_eq!(
+            runtime_version_changed(Some("152.0.4191.19 beta"), "152.0.4191.19 dev"),
+            Some(false)
+        );
     }
 
     #[test]
-    fn recovery_attempts_reset_after_window_and_then_fuse() {
-        let now = RECOVERY_WINDOW_SECS + 100;
-        let expired = RecoveryMarker {
-            first_attempt_epoch_secs: 1,
-            attempts: MAX_RECOVERY_ATTEMPTS,
-        };
-        let reset = next_recovery_marker(Some(expired), now).unwrap();
-        assert_eq!(reset.attempts, 1);
-        assert_eq!(reset.first_attempt_epoch_secs, now);
+    fn recovery_attempts_do_not_expire_between_version_polls() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        let started = 1_000;
+        let interval = VERSION_POLL_INTERVAL.as_secs() + 5;
+        assert!(record_recovery_attempt_at(&path, started));
+        assert!(record_recovery_attempt_at(&path, started + interval));
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        let marker: RecoveryMarker = serde_json::from_str(&persisted).unwrap();
+        assert_eq!(marker.attempts, MAX_RECOVERY_ATTEMPTS);
+        assert_eq!(marker.first_attempt_epoch_secs, started);
+        assert!(!record_recovery_attempt_at(&path, started + 2 * interval));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), persisted);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
-        let exhausted = RecoveryMarker {
-            first_attempt_epoch_secs: now,
-            attempts: MAX_RECOVERY_ATTEMPTS,
-        };
-        assert!(next_recovery_marker(Some(exhausted), now).is_none());
+    #[test]
+    fn recovery_attempts_fuse_after_two_restarts() {
+        let now = 1_000;
+        let first = next_recovery_marker(None, now).unwrap();
+        assert_eq!(first.attempts, 1);
+        let second = next_recovery_marker(Some(first), now + 1).unwrap();
+        assert_eq!(second.attempts, MAX_RECOVERY_ATTEMPTS);
+        assert!(next_recovery_marker(Some(second), now + 2).is_none());
+    }
+
+    #[test]
+    fn confirmed_current_runtime_poll_clears_recovery_attempts() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        let now = 1_000;
+        assert!(record_recovery_attempt_at(&path, now));
+        assert!(record_recovery_attempt_at(&path, now + 1));
+        let restart_level = AtomicU8::new(0);
+        let runtime_current =
+            runtime_version_changed(Some("152.0.4191.19"), "152.0.4191.19") == Some(false);
+
+        clear_recovery_marker(&path, runtime_current, &restart_level);
+        assert!(!path.exists());
+        clear_recovery_marker(&path, runtime_current, &restart_level);
+        let recovered_at = now + VERSION_POLL_INTERVAL.as_secs();
+        assert!(record_recovery_attempt_at(&path, recovered_at));
+        let reset: RecoveryMarker =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(reset.attempts, 1);
+        assert_eq!(reset.first_attempt_epoch_secs, recovered_at);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn unconfirmed_runtime_poll_preserves_recovery_attempts() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        assert!(record_recovery_attempt_at(&path, 1_000));
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        let restart_level = AtomicU8::new(0);
+        for loaded in [None, Some("151.0.4191.19")] {
+            let runtime_current = runtime_version_changed(loaded, "152.0.4191.19") == Some(false);
+            clear_recovery_marker(&path, runtime_current, &restart_level);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), persisted);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn failed_version_comparison_preserves_recovery_attempts() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        assert!(record_recovery_attempt_at(&path, 1_000));
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        let restart_level = AtomicU8::new(0);
+        for (loaded, available) in [("invalid", "152.0.4191.19"), ("152.0.4191.19", "invalid")] {
+            let changed = runtime_version_changed(Some(loaded), available);
+            assert_eq!(changed, None);
+            clear_recovery_marker(&path, changed == Some(false), &restart_level);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), persisted);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn runtime_poll_preserves_attempts_when_recovery_is_pending() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        assert!(record_recovery_attempt_at(&path, 1_000));
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        for level in [1, 2, 3] {
+            clear_recovery_marker(&path, true, &AtomicU8::new(level));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), persisted);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn concurrent_runtime_poll_preserves_recovery_attempts() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        let restart_level = AtomicU8::new(0);
+        assert!(record_recovery_attempt_at(&path, 1_000));
+        let marker_lock = RECOVERY_MARKER_LOCK.lock();
+        std::thread::scope(|scope| {
+            let (started, waiting) = std::sync::mpsc::channel();
+            let poll_path = &path;
+            let poll_restart_level = &restart_level;
+            let poll = scope.spawn(move || {
+                started.send(()).unwrap();
+                clear_recovery_marker(poll_path, true, poll_restart_level);
+            });
+            waiting.recv().unwrap();
+            restart_level.store(1, Ordering::Release);
+            drop(marker_lock);
+            assert!(record_recovery_attempt_at(&path, 1_001));
+            poll.join().unwrap();
+        });
+        let marker: RecoveryMarker =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(marker.attempts, MAX_RECOVERY_ATTEMPTS);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
