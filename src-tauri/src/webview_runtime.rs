@@ -21,7 +21,7 @@ static LOADED_VERSION: LazyLock<parking_lot::RwLock<Option<String>>> =
     LazyLock::new(|| parking_lot::RwLock::new(None));
 static NATIVE_EVENTS_REGISTERED: AtomicBool = AtomicBool::new(false);
 static INTENTIONAL_EXIT: AtomicBool = AtomicBool::new(false);
-// 0 = none, 1 = restart when safe, 2 = restart immediately, 3 = recovery fuse open.
+// 0 = 未安排恢复，2 = 立即重启，3 = 恢复熔断。
 static RESTART_LEVEL: AtomicU8 = AtomicU8::new(0);
 static RECOVERY_MARKER_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 static MANAGED_WINDOWS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<WindowReadiness>>>> =
@@ -110,7 +110,6 @@ impl WindowCreationGuard {
                 schedule_restart(
                     &watchdog.app,
                     &format!("window_ready_timeout:{}", watchdog.label),
-                    true,
                 );
             });
         }
@@ -177,7 +176,7 @@ fn cancel_window_readiness(label: &str, readiness: &Arc<WindowReadiness>) {
     }
 }
 
-pub(crate) fn initialize(app: &tauri::AppHandle, main_window: &tauri::WebviewWindow) {
+pub(crate) fn initialize(_app: &tauri::AppHandle, main_window: &tauri::WebviewWindow) {
     if let Ok(version) = tauri::webview_version() {
         let version = version.to_string();
         *LOADED_VERSION.write() = Some(version.clone());
@@ -185,40 +184,48 @@ pub(crate) fn initialize(app: &tauri::AppHandle, main_window: &tauri::WebviewWin
     }
 
     register_native_events(main_window);
-    start_version_poll(app.clone());
+    start_version_poll();
 }
 
-pub(crate) fn ensure_runtime_current(app: &tauri::AppHandle) -> Result<(), String> {
-    check_runtime_current(app).map(|_| ())
+pub(crate) fn ensure_runtime_current(_app: &tauri::AppHandle) -> Result<(), String> {
+    ensure_recovery_idle(&RESTART_LEVEL)
 }
 
-fn check_runtime_current(app: &tauri::AppHandle) -> Result<bool, String> {
-    match RESTART_LEVEL.load(Ordering::Acquire) {
-        1 | 2 => {
-            return Err("WebView2 正在恢复，ElegantClipboard 即将重启".to_string());
-        }
-        3 => {
-            return Err("WebView2 自动恢复已停止，请手动重启 ElegantClipboard".to_string());
-        }
-        _ => {}
+fn ensure_recovery_idle(restart_level: &AtomicU8) -> Result<(), String> {
+    match restart_level.load(Ordering::Acquire) {
+        1 | 2 => Err("WebView2 正在恢复，ElegantClipboard 即将重启".to_string()),
+        3 => Err("WebView2 自动恢复已停止，请手动重启 ElegantClipboard".to_string()),
+        _ => Ok(()),
     }
-    let available = tauri::webview_version()
-        .map_err(|error| format!("查询 WebView2 版本失败: {error}"))?
-        .to_string();
-    let loaded = LOADED_VERSION.read().clone();
+}
 
-    let changed = runtime_version_changed(loaded.as_deref(), &available);
+fn check_runtime_current() -> Result<bool, String> {
+    ensure_recovery_idle(&RESTART_LEVEL)?;
+    let available = tauri::webview_version()
+        .map(|version| version.to_string())
+        .map_err(|error| format!("查询 WebView2 版本失败: {error}"));
+    let loaded = LOADED_VERSION.read().clone();
+    Ok(check_runtime_versions(loaded.as_deref(), available))
+}
+
+fn check_runtime_versions(loaded: Option<&str>, available: Result<String, String>) -> bool {
+    let available = match available {
+        Ok(available) => available,
+        Err(error) => {
+            tracing::warn!(%error, "Failed to query available WebView2 runtime version");
+            return false;
+        }
+    };
+    let changed = runtime_version_changed(loaded, &available);
     if changed == Some(true) {
-        tracing::warn!(
+        tracing::info!(
             loaded_version = ?loaded,
             available_version = %available,
-            "A different WebView2 runtime version is available; dynamic window creation is suspended"
+            "A different WebView2 runtime version is available; keeping the current environment until application restart"
         );
-        schedule_restart(app, "runtime_version_changed", false);
-        return Err("WebView2 运行时已更新，ElegantClipboard 正在重启".to_string());
     }
-
-    Ok(changed == Some(false))
+    // 版本差异是更新过渡状态，不能据此判定当前环境失效。
+    changed.is_some()
 }
 
 #[cfg(target_os = "windows")]
@@ -308,11 +315,7 @@ pub(crate) fn window_operation_error(
     let detail = error.to_string();
     if is_webview_connection_failure(&detail) {
         tracing::error!(label, operation, %detail, "WebView window operation lost its runtime connection");
-        schedule_restart(
-            app,
-            &format!("window_operation_failed:{label}:{operation}"),
-            true,
-        );
+        schedule_restart(app, &format!("window_operation_failed:{label}:{operation}"));
     }
     format!("{operation}: {detail}")
 }
@@ -328,32 +331,30 @@ pub(crate) fn mark_intentional_exit() {
     INTENTIONAL_EXIT.store(true, Ordering::Release);
 }
 
-fn start_version_poll(app: tauri::AppHandle) {
+fn start_version_poll() {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(VERSION_POLL_INTERVAL);
             if INTENTIONAL_EXIT.load(Ordering::Acquire) {
                 return;
             }
-            let runtime_current = match check_runtime_current(&app) {
-                Ok(current) => current,
+            let version_checked = match check_runtime_current() {
+                Ok(checked) => checked,
                 Err(_) => return,
             };
-            clear_recovery_marker(&recovery_marker_path(), runtime_current, &RESTART_LEVEL);
+            clear_recovery_marker(&recovery_marker_path(), version_checked, &RESTART_LEVEL);
         }
     });
 }
 
-fn schedule_restart(app: &tauri::AppHandle, reason: &str, immediate: bool) {
+fn schedule_restart(app: &tauri::AppHandle, reason: &str) {
     if INTENTIONAL_EXIT.load(Ordering::Acquire) {
         return;
     }
 
-    let requested_level = if immediate { 2 } else { 1 };
-    let previous = RESTART_LEVEL.fetch_max(requested_level, Ordering::AcqRel);
+    let previous = RESTART_LEVEL.fetch_max(2, Ordering::AcqRel);
     tracing::warn!(
         reason,
-        immediate,
         previous_level = previous,
         "WebView recovery restart requested"
     );
@@ -361,20 +362,11 @@ fn schedule_restart(app: &tauri::AppHandle, reason: &str, immediate: bool) {
         return;
     }
 
-    notify_restart(app, immediate);
+    notify_restart(app);
     let app = app.clone();
     let reason = reason.to_string();
     std::thread::spawn(move || {
-        if !immediate {
-            loop {
-                if RESTART_LEVEL.load(Ordering::Acquire) >= 2 || safe_to_restart(&app) {
-                    break;
-                }
-                std::thread::sleep(Duration::from_secs(2));
-            }
-        } else {
-            std::thread::sleep(Duration::from_millis(250));
-        }
+        std::thread::sleep(Duration::from_millis(250));
 
         if !record_recovery_attempt() {
             RESTART_LEVEL.store(3, Ordering::Release);
@@ -389,29 +381,14 @@ fn schedule_restart(app: &tauri::AppHandle, reason: &str, immediate: bool) {
     });
 }
 
-fn safe_to_restart(app: &tauri::AppHandle) -> bool {
-    app.webview_windows().iter().all(|(label, window)| {
-        !requires_user_attention(label) || !window.is_visible().unwrap_or(false)
-    })
-}
-
-fn requires_user_attention(label: &str) -> bool {
-    label == "settings" || label == "translate-result" || label.starts_with("text-editor-")
-}
-
-fn notify_restart(app: &tauri::AppHandle, immediate: bool) {
+fn notify_restart(app: &tauri::AppHandle) {
     use tauri_plugin_notification::NotificationExt;
 
-    let body = if immediate {
-        "WebView2 连接已失效，程序将自动重启恢复"
-    } else {
-        "WebView2 已更新；关闭设置、编辑器或翻译窗口后将自动重启"
-    };
     let _ = app
         .notification()
         .builder()
         .title("ElegantClipboard 正在恢复")
-        .body(body)
+        .body("WebView2 连接已失效，程序将自动重启恢复")
         .show();
 }
 
@@ -459,9 +436,9 @@ fn record_recovery_attempt_at(path: &std::path::Path, now: u64) -> bool {
     true
 }
 
-fn clear_recovery_marker(path: &std::path::Path, runtime_current: bool, restart_level: &AtomicU8) {
+fn clear_recovery_marker(path: &std::path::Path, version_checked: bool, restart_level: &AtomicU8) {
     let _marker_lock = RECOVERY_MARKER_LOCK.lock();
-    if !runtime_current || restart_level.load(Ordering::Acquire) != 0 {
+    if !version_checked || restart_level.load(Ordering::Acquire) != 0 {
         return;
     }
     if let Err(error) = std::fs::remove_file(path)
@@ -537,14 +514,23 @@ fn register_native_events(main_window: &tauri::WebviewWindow) {
 fn register_native_events(_main_window: &tauri::WebviewWindow) {}
 
 #[cfg(target_os = "windows")]
+fn new_browser_version_available_handler()
+-> webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2NewBrowserVersionAvailableEventHandler{
+    webview2_com::NewBrowserVersionAvailableEventHandler::create(Box::new(|_, _| {
+        tracing::info!(
+            "A new WebView2 runtime version is available; keeping the current environment until application restart"
+        );
+        Ok(())
+    }))
+}
+
+#[cfg(target_os = "windows")]
 fn register_environment_handlers(
     app: &tauri::AppHandle,
     environment: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment,
 ) {
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment5;
-    use webview2_com::{
-        BrowserProcessExitedEventHandler, NewBrowserVersionAvailableEventHandler, take_pwstr,
-    };
+    use webview2_com::{BrowserProcessExitedEventHandler, take_pwstr};
     use windows_core::{Interface, PWSTR};
 
     let mut raw_version = PWSTR::null();
@@ -554,11 +540,7 @@ fn register_environment_handlers(
         tracing::info!(loaded_version = %version, "Registered WebView2 environment");
     }
 
-    let update_app = app.clone();
-    let update_handler = NewBrowserVersionAvailableEventHandler::create(Box::new(move |_, _| {
-        schedule_restart(&update_app, "new_browser_version_available", false);
-        Ok(())
-    }));
+    let update_handler = new_browser_version_available_handler();
     let mut update_token = 0;
     if let Err(error) =
         unsafe { environment.add_NewBrowserVersionAvailable(&update_handler, &mut update_token) }
@@ -585,7 +567,7 @@ fn register_environment_handlers(
                     }
 
                     if is_failed_browser_process_exit_kind(kind.0) {
-                        schedule_restart(&exit_app, "browser_process_exited_failed", true);
+                        schedule_restart(&exit_app, "browser_process_exited_failed");
                     } else {
                         tracing::debug!(
                             exit_kind = kind.0,
@@ -649,14 +631,12 @@ fn register_process_failed_handler_inner(
             schedule_restart(
                 &failure_app,
                 &format!("process_failed:{}:{}", failure_label, kind.0),
-                true,
             );
         } else if is_renderer_unresponsive(kind.0) {
             if record_renderer_unresponsive(&failure_label) {
                 schedule_restart(
                     &failure_app,
                     &format!("renderer_unresponsive:{}", failure_label),
-                    true,
                 );
             } else {
                 tracing::warn!(label = %failure_label, "Reloading unresponsive WebView2 renderer");
@@ -665,7 +645,6 @@ fn register_process_failed_handler_inner(
                     schedule_restart(
                         &failure_app,
                         &format!("renderer_reload_failed:{}", failure_label),
-                        true,
                     );
                 }
             }
@@ -696,8 +675,77 @@ fn is_renderer_unresponsive(kind: i32) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "windows")]
     #[test]
-    fn runtime_version_change_requires_restart() {
+    fn runtime_update_event_does_not_schedule_recovery() {
+        let handler = new_browser_version_available_handler();
+        for _ in 0..3 {
+            unsafe {
+                handler
+                    .Invoke(
+                        None::<&webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment>,
+                        None::<&windows_core::IUnknown>,
+                    )
+                    .unwrap();
+            }
+            assert_eq!(RESTART_LEVEL.load(Ordering::Acquire), 0);
+            assert!(!INTENTIONAL_EXIT.load(Ordering::Acquire));
+        }
+    }
+
+    #[test]
+    fn runtime_update_does_not_require_recovery() {
+        for (loaded, available) in [
+            ("151.0.4129.107", "152.0.4191.53"),
+            ("152.0.4191.53", "151.0.4129.107"),
+            ("152.0.4191.9", "152.0.4191.19"),
+        ] {
+            assert!(check_runtime_versions(
+                Some(loaded),
+                Ok(available.to_string())
+            ));
+            assert!(ensure_recovery_idle(&AtomicU8::new(0)).is_ok());
+        }
+    }
+
+    #[test]
+    fn unavailable_version_query_does_not_block_window_creation() {
+        assert!(!check_runtime_versions(
+            Some("151.0.4129.107"),
+            Err("version query failed".to_string())
+        ));
+        assert!(ensure_recovery_idle(&AtomicU8::new(0)).is_ok());
+    }
+
+    #[test]
+    fn runtime_update_poll_clears_previous_recovery_attempts() {
+        let directory =
+            std::env::temp_dir().join(format!("ec_webview_recovery_{}", uuid::Uuid::new_v4()));
+        let path = directory.join("webview-recovery.json");
+        assert!(record_recovery_attempt_at(&path, 1_000));
+        assert!(record_recovery_attempt_at(&path, 1_001));
+        let checked =
+            check_runtime_versions(Some("151.0.4129.107"), Ok("152.0.4191.53".to_string()));
+        clear_recovery_marker(&path, checked, &AtomicU8::new(0));
+        assert!(!path.exists());
+        for _ in 0..3 {
+            assert!(check_runtime_versions(
+                Some("151.0.4129.107"),
+                Ok("152.0.4191.53".to_string())
+            ));
+            assert!(!path.exists());
+        }
+        let recovered_at = 1_000 + VERSION_POLL_INTERVAL.as_secs();
+        assert!(record_recovery_attempt_at(&path, recovered_at));
+        let marker: RecoveryMarker =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(marker.attempts, 1);
+        assert_eq!(marker.first_attempt_epoch_secs, recovered_at);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn runtime_version_comparison_detects_numeric_changes() {
         assert_eq!(runtime_version_changed(None, "152.0.4191.19"), None);
         assert_eq!(
             runtime_version_changed(Some("152.0.4191.19"), "152.0.4191.19"),
@@ -775,7 +823,7 @@ mod tests {
         assert!(record_recovery_attempt_at(&path, now + 1));
         let restart_level = AtomicU8::new(0);
         let runtime_current =
-            runtime_version_changed(Some("152.0.4191.19"), "152.0.4191.19") == Some(false);
+            check_runtime_versions(Some("152.0.4191.19"), Ok("152.0.4191.19".to_string()));
 
         clear_recovery_marker(&path, runtime_current, &restart_level);
         assert!(!path.exists());
@@ -797,9 +845,16 @@ mod tests {
         assert!(record_recovery_attempt_at(&path, 1_000));
         let persisted = std::fs::read_to_string(&path).unwrap();
         let restart_level = AtomicU8::new(0);
-        for loaded in [None, Some("151.0.4191.19")] {
-            let runtime_current = runtime_version_changed(loaded, "152.0.4191.19") == Some(false);
-            clear_recovery_marker(&path, runtime_current, &restart_level);
+        for (loaded, available) in [
+            (None, Ok("152.0.4191.19".to_string())),
+            (
+                Some("151.0.4129.107"),
+                Err("version query failed".to_string()),
+            ),
+        ] {
+            let version_checked = check_runtime_versions(loaded, available);
+            assert!(!version_checked);
+            clear_recovery_marker(&path, version_checked, &restart_level);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), persisted);
         }
         std::fs::remove_dir_all(directory).unwrap();
@@ -817,10 +872,20 @@ mod tests {
         for (loaded, available) in [("invalid", "152.0.4191.19"), ("152.0.4191.19", "invalid")] {
             let changed = runtime_version_changed(Some(loaded), available);
             assert_eq!(changed, None);
-            clear_recovery_marker(&path, changed == Some(false), &restart_level);
+            let version_checked = check_runtime_versions(Some(loaded), Ok(available.to_string()));
+            assert!(!version_checked);
+            clear_recovery_marker(&path, version_checked, &restart_level);
             assert_eq!(std::fs::read_to_string(&path).unwrap(), persisted);
         }
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn pending_recovery_still_blocks_window_creation() {
+        assert!(ensure_recovery_idle(&AtomicU8::new(0)).is_ok());
+        for level in [1, 2, 3] {
+            assert!(ensure_recovery_idle(&AtomicU8::new(level)).is_err());
+        }
     }
 
     #[test]
