@@ -29,7 +29,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 文档与实现来源
 
-本文件描述当前 Tauri 分支，核对日期：2026-10-03。功能说明见 `FEATURES.md` / `FEATURES_EN.md`，历史发布记录见 `docs/Changlog.md`。依赖版本以 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock` 为准；不要把旧版本更新记录当成当前架构。
+本文件描述当前 Tauri 分支，核对日期：2026-10-09。功能说明见 `FEATURES.md` / `FEATURES_EN.md`，历史发布记录见 `docs/Changlog.md`。依赖版本以 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock` 为准；不要把旧版本更新记录当成当前架构。
 
 ## 开发命令
 
@@ -160,6 +160,13 @@ t("groups.all", { count: 3 });
 - 图片和文本预览窗口加载 `public/` 中对应静态 HTML。
 
 悬浮预览命令在 `commands/preview.rs`，不是旧文档中的 `lib.rs:show_image_preview`。前端使用 lease 避免过期请求覆盖新预览；主窗口隐藏时关闭预览。图片预览支持左右定位和缩放，`previewZoomStep` 默认 15；悬浮延时 `hoverPreviewDelay` 当前默认 128ms。其它默认值以 `src/stores/ui-settings.ts` 为准。
+
+WebView2 运行时策略见 `webview_runtime.rs`：
+
+- Windows 使用官方 `CompareBrowserVersions` 比较版本，忽略 beta / dev / canary 渠道后缀。已加载与可用版本不同，或收到 `NewBrowserVersionAvailable` 事件时，只记录日志；现有环境继续运行，不能把正常更新当成故障。
+- 动态窗口创建前的 `ensure_runtime_current` 只检查是否正在恢复或已熔断，不因版本差异、版本未知或可用版本查询失败而拒绝创建窗口。
+- 进程崩溃、连接断开、窗口就绪超时等真实故障仍触发自动恢复。次数保存在数据目录 `webview-recovery.json`，跨启动累计，最多允许两次自动恢复，第三次请求熔断；计数不按十分钟过期。跨启动限制依赖计数文件成功读写，持久化失败会记录诊断日志。
+- 每十分钟查询并比较运行时版本；检查成功且未安排恢复时清理旧计数，版本相同或不同均可清理。版本未知、查询失败、比较失败或恢复中保留计数；记录和清理共用 `RECOVERY_MARKER_LOCK`，清理持锁后重新检查恢复状态。
 
 ## 管理员启动与自启动
 

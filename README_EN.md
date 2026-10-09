@@ -138,6 +138,8 @@ Download the latest version from [Releases](https://github.com/Y-ASLant/ElegantC
 
 The Release workflow builds x64 and arm64 separately; choose the asset matching your device. The UI requires Microsoft Edge WebView2 Runtime. The installer includes its bootstrapper; portable users need the runtime already installed.
 
+After a WebView2 update, an existing environment can continue using its loaded version. Version differences, channel suffixes, and update events alone do not restart the app or block window creation. Automatic recovery remains limited to actual failures such as process crashes, disconnections, and window readiness timeouts.
+
 ### winget
 
 ```powershell
@@ -227,21 +229,33 @@ Notes:
 
 #### Version Management
 
+The next release is **v1.2.10**. The repository keeps `0.0.0` as the development version; the Release workflow injects the official version from its tag. To validate a local installer displaying `1.2.10`, first run:
+
 ```powershell
-# Update version in three places (package.json, tauri.conf.json, Cargo.toml)
-.\scripts\bump-version.ps1 1.2.9
+# Change the app version in package.json, tauri.conf.json, and Cargo.toml
+.\scripts\bump-version.ps1 1.2.10
 ```
 
-Alternatively, leave local versions unchanged: once the intended release changes are committed, push a tag. The Release workflow synchronizes versions in its build workspace:
+The script changes only these three files. If committing a manual version bump, also synchronize the top-level and root-package versions in `package-lock.json` and the `elegant-clipboard` version in `src-tauri/Cargo.lock`; leave dependency versions unchanged.
 
-```bash
-git tag v1.2.9
-git push origin v1.2.9
+Once the intended release changes are committed, push a tag to trigger x64 / arm64 builds:
+
+```powershell
+git tag v1.2.10
+git push origin v1.2.10
 ```
 
-Before releasing, run `make check`, `make test`, and `make build`, then verify copy/paste, both paste-key modes, missing-resource rechecks, Save As cancellation, and upgrading from the previous version on a native Windows desktop. To validate a local installer displaying `1.2.9`, run the version script above before building; do not upload development-placeholder builds as official assets.
+Before releasing, run `make check`, `make test`, and `make build`, then verify copy/paste, both paste-key modes, missing-resource rechecks, Save As cancellation, and upgrading from v1.2.9 on a native Windows desktop. To run Makefile commands with PowerShell 7, specify the shell, for example `make SHELL=pwsh check`. Do not upload development-placeholder builds as official assets.
 
-The workflow creates a **draft release** and does not automatically import the changelog. Once x64 / arm64 installer and portable assets are complete, add this version's [release notes](docs/Changlog.md#v129) to the draft, verify versions and assets, finish acceptance checks, and then publish. Replace the changelog's pending status with the actual publication date. GPUI 2.0 is not the installer or automatic-update target for this 1.2.9 release.
+This release also needs WebView2 update validation:
+
+- With beta / dev / canary runtimes, and when the loaded and available versions differ, verify that settings, translation, image/text preview, and editor windows still open.
+- Keep the app running for more than ten minutes after a runtime update and verify that version differences or update events alone cause no restart, recovery notification, or fuse activation.
+- In an isolated test session, verify that actual process failures or disconnections still request recovery, with at most two automatic attempts for consecutive failures; a successful version check after normal operation can clear old recovery counts.
+
+These are acceptance requirements before publishing. Unit tests and browser E2E cannot replace native Windows desktop validation.
+
+The workflow creates a **draft release** and does not automatically import the changelog. Once all four x64 / arm64 installer and portable assets are complete, add this version's [release notes](docs/Changlog.md#v1210) to the draft, verify versions and assets, finish acceptance checks, and then publish. Replace the changelog's pending status with the actual publication date and set its comparison link to `v1.2.9...v1.2.10`. The Scoop manifest is updated after publication using actual asset hashes. GPUI 2.0 remains a separate branch; v1.2.10 continues to use Tauri + React 1.x.
 
 ## Data Storage
 

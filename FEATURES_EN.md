@@ -1,6 +1,6 @@
 # Features
 
-Main features of the current `main` branch (Tauri + React, preparing v1.2.9). Defaults refer to fresh settings; saved preferences may differ. See the [release changelog](docs/Changlog.md#v129) for this version's changes; the separate GPUI 2.0 implementation is not included.
+Main features of the current `main` branch (Tauri + React, preparing v1.2.10). Defaults refer to fresh settings; saved preferences may differ. See the [release changelog](docs/Changlog.md#v1210) for this version's changes; the separate GPUI 2.0 implementation is not included.
 For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may differ from the latest version).
 
 ## Terminology
@@ -158,3 +158,4 @@ For UI screenshots, see [README_EN.md](README_EN.md) (captured on v0.5.0 and may
 - **Startup notification** - Optional startup notification with the active show/hide shortcut
 - **On-demand elevation** - An elevated process can create a scheduled task for later launches; if unavailable, UAC is used. A prompt-free first launch is not guaranteed
 - **Portable mode** - Standalone x64 / arm64 executables; portable mode is detected by the absence of `uninstall.exe` beside the exe. Writable directories and WebView2 Runtime are required
+- **WebView2 runtime recovery** - Normal runtime updates, version differences, and channel suffixes alone do not trigger restarts or block settings, translation, preview, or editor windows. Actual failures such as process crashes, disconnections, and window readiness timeouts still use limited automatic recovery
