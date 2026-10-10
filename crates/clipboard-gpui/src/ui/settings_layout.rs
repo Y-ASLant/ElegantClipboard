@@ -166,12 +166,52 @@ fn paste_audio_content(
     view.settings_audio_content(SoundChannel::Paste, cx)
 }
 
+fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
+    TitleBar::new().bg(cx.theme().background).child(
+        div()
+            .text_sm()
+            .font_semibold()
+            .child(tr(language, "设置", "Settings")),
+    )
+}
+
+fn settings_feedback(message: &str, is_error: bool) -> Option<Alert> {
+    if message.is_empty() {
+        return None;
+    }
+    let alert = if is_error {
+        Alert::error("settings-feedback", message.to_owned())
+    } else {
+        Alert::success("settings-feedback", message.to_owned())
+    };
+    Some(alert.small().w_full().min_w_0().whitespace_normal())
+}
+
 impl Render for SettingsWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(owner) = self.owner.upgrade() else {
-            return div()
-                .size_full()
-                .child("The main window is no longer available");
+            return window_shell(cx)
+                .font_family("Microsoft YaHei UI")
+                .child(settings_title_bar(self.language, cx))
+                .child(
+                    div().p_3().child(
+                        Alert::error(
+                            "settings-owner-unavailable",
+                            tr(
+                                self.language,
+                                "主窗口已关闭，无法继续更改设置。请关闭此窗口并重新启动应用。",
+                                "The main window is no longer available. Close this window and restart the app to change settings.",
+                            ),
+                        )
+                        .small()
+                        .min_w_0()
+                        .whitespace_normal(),
+                    ),
+                );
+        };
+        let feedback = {
+            let owner = owner.read(cx);
+            settings_feedback(&owner.message, owner.is_error)
         };
         let (language, preview_lines, display_pending) = {
             let owner = owner.read(cx);
@@ -247,14 +287,7 @@ impl Render for SettingsWindowView {
 
         window_shell(cx)
             .font_family("Microsoft YaHei UI")
-            .child(
-                TitleBar::new().bg(cx.theme().background).child(
-                    div()
-                        .text_sm()
-                        .font_semibold()
-                        .child(tr(language, "设置", "Settings")),
-                ),
-            )
+            .child(settings_title_bar(language, cx))
             .child(
                 div().flex_1().min_h_0().child(
                     Settings::new(if language == LanguagePreference::Chinese {
@@ -272,5 +305,23 @@ impl Render for SettingsWindowView {
                     .pages(pages),
                 ),
             )
+            .when_some(feedback, |shell, feedback| {
+                // Keep results visible on every page without consuming the settings viewport.
+                // GPUI's normal whitespace also wraps long paths without word boundaries.
+                shell.child(
+                    div()
+                        .id("settings-feedback-scroll")
+                        .relative()
+                        .w_full()
+                        .min_w_0()
+                        .max_h(px(120.))
+                        .flex_shrink_0()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.feedback_scroll)
+                        .p_2()
+                        .child(feedback)
+                        .vertical_scrollbar(&self.feedback_scroll),
+                )
+            })
     }
 }

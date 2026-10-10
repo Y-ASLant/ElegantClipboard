@@ -1223,6 +1223,10 @@ impl SettingsPage {
 struct SettingsWindowView {
     owner: WeakEntity<ClipboardView>,
     _owner_subscription: Subscription,
+    _owner_release_subscription: Subscription,
+    language: LanguagePreference,
+    feedback_message: String,
+    feedback_scroll: ScrollHandle,
     page: SettingsPage,
     shortcut_input: Option<Entity<InputState>>,
     shortcut_editing: Option<(bool, u8)>,
@@ -1595,7 +1599,21 @@ impl SettingsWindowView {
         let entity = owner
             .upgrade()
             .expect("settings window requires its owner view");
-        let subscription = cx.observe(&entity, |_, _, cx| cx.notify());
+        let language = entity.read(cx).language;
+        let feedback_message = entity.read(cx).message.clone();
+        let subscription = cx.observe(&entity, |this, owner, cx| {
+            let owner = owner.read(cx);
+            this.language = owner.language;
+            if this.feedback_message != owner.message {
+                this.feedback_message.clone_from(&owner.message);
+                this.feedback_scroll.set_offset(point(px(0.), px(0.)));
+            }
+            cx.notify();
+        });
+        let release_subscription = cx.observe_release(&entity, |this, owner, cx| {
+            this.language = owner.language;
+            cx.notify();
+        });
         let app_filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("notepad.exe or *browser*"));
         let app_filter_input_subscription =
@@ -1674,6 +1692,10 @@ impl SettingsWindowView {
         Self {
             owner,
             _owner_subscription: subscription,
+            _owner_release_subscription: release_subscription,
+            language,
+            feedback_message,
+            feedback_scroll: ScrollHandle::default(),
             page,
             shortcut_input: None,
             shortcut_editing: None,
@@ -2703,7 +2725,6 @@ impl ClipboardView {
                 match opened {
                     Ok((handle, _)) => {
                         owner.settings_window = Some(handle);
-                        owner.is_error = false;
                     }
                     Err(error) => {
                         owner.message = format!(

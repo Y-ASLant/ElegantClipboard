@@ -9,7 +9,8 @@ fn main() -> anyhow::Result<()> {
     use clipboard_core::PreviewContent;
     use clipboard_platform::{Command, Event, Service};
     use clipboard_rs::{
-        Clipboard, ClipboardContext, ContentFormat, RustImageData, common::RustImage,
+        Clipboard, ClipboardContent, ClipboardContext, ContentFormat, RustImageData,
+        common::RustImage,
     };
     use std::{
         thread,
@@ -225,6 +226,69 @@ fn main() -> anyhow::Result<()> {
     assert!(!clipboard.has(ContentFormat::Html));
     assert!(!clipboard.has(ContentFormat::Rtf));
     println!("rich plain-text copy ok");
+
+    let observed_html = "<b>observed rich snapshot</b>";
+    let observed_rtf = b"{\\rtf1 observed rich snapshot}\0";
+    clipboard
+        .set(vec![
+            ClipboardContent::Html(observed_html.into()),
+            ClipboardContent::Other("Rich Text Format".into(), observed_rtf.to_vec()),
+            ClipboardContent::Text("observed rich snapshot".into()),
+        ])
+        .map_err(|error| anyhow!("写入监听富文本样本失败：{error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        match events.try_recv() {
+            Ok(Event::Snapshot { items, .. })
+                if items.iter().any(|item| {
+                    item.content_type == "html"
+                        && item.preview.as_deref() == Some("observed rich snapshot")
+                }) =>
+            {
+                break;
+            }
+            Ok(Event::BackgroundError(message) | Event::Error(message)) => bail!("{message}"),
+            _ => {}
+        }
+        if Instant::now() >= deadline {
+            bail!("等待多格式监听采集超时");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let history = clipboard_core::History::open(directory.path().join("clipboard.db"))?;
+    let rows = history.list("observed rich snapshot", 100, false)?;
+    let observed = history.item(rows.first().context("缺少监听富文本记录")?.id)?;
+    let clipboard_html = clipboard.get_html().map_err(|error| anyhow!("{error}"))?;
+    assert!(clipboard_html.contains(observed_html));
+    assert_eq!(
+        observed.html_content.as_deref(),
+        Some(clipboard_html.as_str())
+    );
+    assert_eq!(
+        observed.text_content.as_deref(),
+        Some("observed rich snapshot")
+    );
+    assert_eq!(
+        clipboard_core::rich::decode_rtf_for_clipboard(observed.rtf_content.as_deref().unwrap()),
+        Some(observed_rtf.to_vec())
+    );
+    drop(history);
+    clipboard
+        .set(vec![ClipboardContent::Other(
+            "Rich Text Format".into(),
+            b"\\*\\datastore\0".to_vec(),
+        )])
+        .map_err(|error| anyhow!("写入异常 RTF 样本失败：{error}"))?;
+    let malformed_id = snapshot("rtf")?;
+    service.send(Command::Copy(malformed_id))?;
+    status(false)?;
+    assert_eq!(
+        clipboard
+            .get_buffer("Rich Text Format")
+            .map_err(|error| anyhow!("{error}"))?,
+        b"\\*\\datastore\0"
+    );
+    println!("observed rich snapshot and malformed RTF roundtrip ok");
 
     let image_path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/test.png");

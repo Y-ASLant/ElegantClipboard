@@ -33,7 +33,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, SyncSender},
+        mpsc,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -433,10 +433,7 @@ struct CaptureState {
     paused: bool,
     ignored_sequence: u32,
     last_sequence: u32,
-    pending_image_bytes: usize,
 }
-
-const MAX_PENDING_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 
 fn lock_capture_state(
     state: &Mutex<CaptureState>,
@@ -447,155 +444,26 @@ fn lock_capture_state(
 struct WatchHandler {
     clipboard: ClipboardContext,
     state: Arc<Mutex<CaptureState>>,
-    commands: SyncSender<Command>,
+    commands: Arc<CommandQueue>,
     events: async_channel::Sender<Event>,
+    feedback: Arc<CaptureFeedback>,
 }
 
 impl ClipboardHandler for WatchHandler {
     fn on_clipboard_change(&mut self) {
-        let result = self.read_change();
-        if let Err(error) = result {
-            let _ = self
-                .events
-                .try_send(Event::BackgroundError(error.to_string()));
+        if let Err(error) = self.read_change() {
+            self.feedback.error(error.to_string());
         }
+        self.feedback.flush(&self.events);
     }
 }
 
-impl WatchHandler {
-    fn read_change(&mut self) -> Result<()> {
-        // Serialize our writes with capture so their sequence is suppressed before
-        // a delayed WM_CLIPBOARDUPDATE callback can observe the new text.
-        let mut state = lock_capture_state(&self.state)?;
-        let sequence = unsafe { GetClipboardSequenceNumber() };
-        if state.paused || sequence == state.ignored_sequence || sequence == state.last_sequence {
-            return Ok(());
-        }
-        let source = source_app::clipboard_source();
-        if self.clipboard.has(ContentFormat::Files) {
-            let paths = self
-                .clipboard
-                .get_files()
-                .map_err(|error| anyhow!("读取剪贴板文件失败：{error}"))?;
-            if paths.is_empty()
-                || paths.len() > MAX_FILE_PATHS
-                || paths.iter().map(String::len).sum::<usize>() > MAX_PATH_LIST_BYTES
-            {
-                state.last_sequence = sequence;
-                bail!("文件路径列表为空或超过限制，本次复制未保存");
-            }
-            self.commands
-                .try_send(Command::ObservedCapture {
-                    content: CapturedClipboard::Files(paths),
-                    source,
-                })
-                .map_err(|_| anyhow!("采集队列已满或已停止，本次文件未保存"))?;
-            state.last_sequence = sequence;
-            return Ok(());
-        }
-        let html = self
-            .clipboard
-            .has(ContentFormat::Html)
-            .then(|| self.clipboard.get_html().ok())
-            .flatten()
-            .filter(|value| !value.is_empty());
-        let rtf = self
-            .clipboard
-            .has(ContentFormat::Rtf)
-            .then(|| self.clipboard.get_buffer("Rich Text Format").ok())
-            .flatten()
-            .filter(|value| !value.is_empty());
-        let text = self
-            .clipboard
-            .has(ContentFormat::Text)
-            .then(|| self.clipboard.get_text().ok())
-            .flatten()
-            .filter(|value| !value.is_empty());
-        if html.is_some() || rtf.is_some() {
-            let bytes = html.as_ref().map_or(0, String::len)
-                + rtf.as_ref().map_or(0, Vec::len)
-                + text.as_ref().map_or(0, String::len);
-            if bytes <= MAX_TEXT_BYTES {
-                self.commands
-                    .try_send(Command::ObservedCapture {
-                        content: CapturedClipboard::Rich { html, rtf, text },
-                        source,
-                    })
-                    .map_err(|_| anyhow!("采集队列已满或已停止，本次富文本未保存"))?;
-                state.last_sequence = sequence;
-                return Ok(());
-            }
-            if text.is_none() {
-                state.last_sequence = sequence;
-                bail!("富文本超过 1 MiB 且没有纯文本，未保存");
-            }
-            let _ = self
-                .events
-                .try_send(Event::Status("富文本超过 1 MiB，按纯文本保存".into()));
-        }
-        if let Some(text) = text {
-            if text.len() > MAX_TEXT_BYTES {
-                state.last_sequence = sequence;
-                bail!("文本超过 1 MiB，未保存");
-            }
-            self.commands
-                .try_send(Command::ObservedCapture {
-                    content: CapturedClipboard::Text(text),
-                    source,
-                })
-                .map_err(|_| anyhow!("采集队列已满或已停止，本次复制未保存"))?;
-            state.last_sequence = sequence;
-            return Ok(());
-        }
-        if self.clipboard.has(ContentFormat::Image) {
-            let image = self
-                .clipboard
-                .get_image()
-                .map_err(|error| anyhow!("读取剪贴板图片失败：{error}"))?;
-            let (width, height) = image.get_size();
-            if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS
-            {
-                state.last_sequence = sequence;
-                bail!("图片尺寸无效或超过 2500 万像素");
-            }
-            let png = image
-                .to_png()
-                .map_err(|error| anyhow!("编码剪贴板图片失败：{error}"))?;
-            let bytes = png.get_bytes();
-            if bytes.len() > MAX_IMAGE_BYTES {
-                state.last_sequence = sequence;
-                bail!("图片超过 50 MiB，未保存");
-            }
-            if state.pending_image_bytes.saturating_add(bytes.len()) > MAX_PENDING_IMAGE_BYTES {
-                state.last_sequence = sequence;
-                bail!("图片采集队列已满，本次复制未保存");
-            }
-            state.pending_image_bytes += bytes.len();
-            if self
-                .commands
-                .try_send(Command::ObservedCapture {
-                    content: CapturedClipboard::Image {
-                        png: bytes.to_vec(),
-                        width,
-                        height,
-                    },
-                    source,
-                })
-                .is_err()
-            {
-                state.pending_image_bytes -= bytes.len();
-                bail!("采集队列已满或已停止，本次图片未保存");
-            }
-            state.last_sequence = sequence;
-            return Ok(());
-        }
-        state.last_sequence = sequence;
-        Ok(())
-    }
-}
+mod capture;
+mod queue;
+use queue::{CaptureFeedback, CommandQueue};
 
 pub struct Service {
-    commands: SyncSender<Command>,
+    commands: Arc<CommandQueue>,
     stop: Arc<AtomicBool>,
     shutdown: Option<WatcherShutdown>,
     watcher: Option<JoinHandle<()>>,
@@ -728,7 +596,9 @@ impl Service {
         };
         let writer =
             ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
-        let (commands, incoming) = mpsc::sync_channel(64);
+        let commands = Arc::new(CommandQueue::default());
+        let incoming = commands.clone();
+        let capture_feedback = Arc::new(CaptureFeedback::default());
         let (events, outgoing) = async_channel::bounded(64);
         let state = Arc::new(Mutex::new(CaptureState {
             paused: initial_paused,
@@ -770,6 +640,7 @@ impl Service {
         };
         let worker_state = state.clone();
         let worker_events = events.clone();
+        let worker_feedback = capture_feedback.clone();
         let images_dir = service.data_dir.join("images");
         let icons_dir = service.data_dir.join("icons");
         let staged_dir = service.data_dir.join("staged");
@@ -793,23 +664,38 @@ impl Service {
                     group_id: None,
                     limit: PAGE_SIZE,
                     generation: 0,
+                    snapshot_pending: false,
                     events: worker_events,
                 };
                 if let Err(error) = worker.send_groups().and_then(|_| worker.snapshot()) {
                     let _ = worker.events.send_blocking(Event::Error(error.to_string()));
                 }
-                while !stop.load(Ordering::Acquire) {
+                loop {
+                    if !stop.load(Ordering::Acquire) {
+                        worker_feedback.flush(&worker.events);
+                        if let Err(error) = worker.flush_capture_snapshot() {
+                            worker_feedback.error(error.to_string());
+                        }
+                    }
                     match incoming.recv_timeout(Duration::from_millis(250)) {
-                        Ok(command) => {
-                            let failure_kind = command.failure_kind();
+                        Ok((command, _permit)) => {
                             let observed_capture =
                                 matches!(command, Command::ObservedCapture { .. });
+                            if stop.load(Ordering::Acquire)
+                                && !matches!(
+                                    command,
+                                    Command::ObservedCapture { .. }
+                                        | Command::SetMonitorTypes(_)
+                                        | Command::SetAppFilter(_)
+                                )
+                            {
+                                continue;
+                            }
+                            let failure_kind = command.failure_kind();
                             if let Err(error) = worker.handle(command) {
                                 match failure_kind {
                                     None if observed_capture => {
-                                        let _ = worker
-                                            .events
-                                            .try_send(Event::BackgroundError(error.to_string()));
+                                        worker_feedback.error(error.to_string());
                                     }
                                     None => {
                                         let _ = worker.events.send_blocking(
@@ -841,6 +727,7 @@ impl Service {
                 state,
                 commands,
                 events: events.clone(),
+                feedback: capture_feedback.clone(),
             });
             service.shutdown = Some(watcher.get_shutdown_channel());
             let stop = service.stop.clone();
@@ -851,9 +738,8 @@ impl Service {
                     .spawn(move || {
                         watcher.start_watch();
                         if !stop.load(Ordering::Acquire) {
-                            let _ = watcher_events.try_send(Event::BackgroundError(
-                                "剪贴板监听已停止，请重启应用".into(),
-                            ));
+                            capture_feedback.error("剪贴板监听已停止，请重启应用".into());
+                            capture_feedback.flush(&watcher_events);
                         }
                     })?,
             );
@@ -870,16 +756,15 @@ impl Service {
     }
 
     pub fn send(&self, command: Command) -> Result<()> {
-        self.commands
-            .try_send(command)
-            .map_err(|_| anyhow!("后台任务繁忙或已停止，请稍后重试"))
+        self.commands.try_send(command)
     }
 }
 
 impl Drop for Service {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        // Closing first releases both the worker and the instance signal under UI backpressure.
+        self.commands.close();
+        // Release blocked replies before draining accepted captures and joining producers.
         self.events.close();
         self.instance_signal = None;
         if let Some(shutdown) = self.shutdown.take() {
@@ -1246,6 +1131,7 @@ struct Worker {
     group_id: Option<i64>,
     limit: i64,
     generation: u64,
+    snapshot_pending: bool,
     events: async_channel::Sender<Event>,
 }
 
@@ -1273,8 +1159,28 @@ impl Worker {
         self.send_event(event(result))
     }
 
-    fn snapshot(&self) -> Result<()> {
-        self.send_event(Event::Snapshot {
+    fn snapshot(&mut self) -> Result<()> {
+        let event = self.snapshot_event()?;
+        self.snapshot_pending = false;
+        self.send_event(event)
+    }
+
+    fn flush_capture_snapshot(&mut self) -> Result<()> {
+        if !self.snapshot_pending || self.events.is_full() || self.events.is_closed() {
+            return Ok(());
+        }
+        let event = self.snapshot_event()?;
+        match self.events.try_send(event) {
+            Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {
+                self.snapshot_pending = false;
+            }
+            Err(async_channel::TrySendError::Full(_)) => {}
+        }
+        Ok(())
+    }
+
+    fn snapshot_event(&self) -> Result<Event> {
+        Ok(Event::Snapshot {
             items: self
                 .history
                 .list_filtered_in_group(
@@ -1331,6 +1237,8 @@ impl Worker {
             }
             Command::ObservedCapture { content, source } => {
                 self.handle_observed_capture(content, source)?;
+                self.snapshot_pending = true;
+                return self.flush_capture_snapshot();
             }
             Command::MergeCopy(ids) => return self.handle_merge(ids, false),
             Command::MergeForPaste(ids) => return self.handle_merge(ids, true),
@@ -1642,18 +1550,9 @@ impl Worker {
         group_id == self.group_id && generation == self.generation
     }
 
-    fn release_pending_image_bytes(&self, bytes: usize) -> Result<()> {
-        let mut state = lock_capture_state(&self.state)?;
-        state.pending_image_bytes = state.pending_image_bytes.saturating_sub(bytes);
-        Ok(())
-    }
-
     fn capture_image(&self, png: &[u8], width: u32, height: u32) -> Result<i64> {
-        let result = self
-            .history
-            .capture_image(png, width, height, &self.images_dir);
-        self.release_pending_image_bytes(png.len())?;
-        result
+        self.history
+            .capture_image(png, width, height, &self.images_dir)
     }
 
     fn handle_observed_capture(
@@ -1661,10 +1560,6 @@ impl Worker {
         content: CapturedClipboard,
         source: Option<source_app::SourceApp>,
     ) -> Result<()> {
-        let image_bytes = match &content {
-            CapturedClipboard::Image { png, .. } => png.len(),
-            _ => 0,
-        };
         let excluded = self.app_filter.excludes(
             source.as_ref().map(|app| app.name.as_str()),
             source.as_ref().and_then(|app| app.executable.as_deref()),
@@ -1673,9 +1568,6 @@ impl Worker {
             .then(|| filter_observed_capture(content, self.monitor_types))
             .flatten();
         let Some(content) = filtered else {
-            if image_bytes != 0 {
-                self.release_pending_image_bytes(image_bytes)?;
-            }
             return Ok(());
         };
         let id = match content {

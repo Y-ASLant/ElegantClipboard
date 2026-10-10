@@ -159,6 +159,72 @@ mod tests {
     }
 
     #[test]
+    fn rtf_hash_ignores_word_datastore_and_preserves_original_payload() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let first_rtf =
+            br"{\rtf1{\*\datastore{first \} metadata}}\rsid123\insrsid456\mdispDef1 text}";
+        let second_rtf = br"{\rtf1{\*\datastore{second {nested}}}\rsid789\insrsid012text}";
+        let first = history.capture_rich(None, Some(first_rtf), None, &images)?;
+        let second = history.capture_rich(None, Some(second_rtf), None, &images)?;
+        assert_eq!(first, second);
+        assert_eq!(history.count("", false)?, 1);
+        let item = history.item(first)?;
+        assert_eq!(
+            item.content_hash,
+            crate::clipboard::hash_with_prefix(b"rtf:", br"{\rtf1{text}")
+        );
+        let mut original = first_rtf.to_vec();
+        original.push(0);
+        assert_eq!(
+            decode_rtf_for_clipboard(item.rtf_content.as_deref().unwrap()),
+            Some(original)
+        );
+        assert_ne!(
+            history.capture_rich(None, Some(br"{\rtf1different}"), None, &images)?,
+            first
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rtf_capture_preserves_malformed_datastore_and_non_ascii_payloads() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let inputs: &[&[u8]] = &[
+            br"\*\datastore",
+            br"\*\datastore}",
+            br"{\*\datastore{payload}",
+            br"{\*\datastore payload\}",
+            br"\{\*\datastore\}",
+            "{\\rtf1 中文😀\\rsid123}".as_bytes(),
+            b"{\\rtf1 \\rsid123 \xff}",
+        ];
+        for &rtf in inputs {
+            let id = history.capture_rich(None, Some(rtf), None, &images)?;
+            let item = history.item(id)?;
+            assert_eq!(
+                item.content_hash,
+                crate::clipboard::hash_with_prefix(b"rtf:", rtf)
+            );
+            let mut terminated = rtf.to_vec();
+            terminated.push(0);
+            assert_eq!(
+                history.capture_rich(None, Some(&terminated), None, &images)?,
+                id
+            );
+            assert_eq!(
+                decode_rtf_for_clipboard(item.rtf_content.as_deref().unwrap()),
+                Some(terminated)
+            );
+        }
+        assert_eq!(history.count("", false)?, inputs.len() as i64);
+        Ok(())
+    }
+
+    #[test]
     fn oversized_rich_content_is_rejected() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;

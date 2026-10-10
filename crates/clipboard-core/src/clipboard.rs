@@ -166,30 +166,38 @@ pub(crate) fn is_url(text: &str) -> bool {
 /// - `\rsid`, `\insrsid` control words with trailing decimal digits
 /// - `\mdispDef1` control word (no numeric arg)
 pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(rtf_bytes) else {
+    if std::str::from_utf8(rtf_bytes).is_err() {
         return rtf_bytes.to_vec();
-    };
+    }
 
-    let mut out = String::with_capacity(text.len());
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
+    let mut out = Vec::with_capacity(rtf_bytes.len());
+    let len = rtf_bytes.len();
     let mut i = 0;
 
     while i < len {
-        // Match {\*\datastore{...}} — the RTF destination control word form.
-        // Start from the opening brace before \* and find the matching close.
-        if text[i..].starts_with("\\*\\datastore") {
-            // Find the opening brace that starts this group
-            let open = text[..i].rfind('{').unwrap_or(i);
-            let mut depth = 0u32;
-            let mut j = open;
+        // Escaped backslashes and braces are literal text, not RTF syntax.
+        if rtf_bytes[i] == b'\\' && matches!(rtf_bytes.get(i + 1), Some(b'\\' | b'{' | b'}')) {
+            out.extend_from_slice(&rtf_bytes[i..i + 2]);
+            i += 2;
+            continue;
+        }
+
+        let remaining = &rtf_bytes[i..];
+        // Only skip a complete datastore group.
+        if remaining.starts_with(br"{\*\datastore")
+            && !remaining
+                .get(br"{\*\datastore".len())
+                .is_some_and(u8::is_ascii_alphabetic)
+        {
+            let mut depth = 1usize;
+            let mut j = i + 1;
             while j < len {
-                match chars[j] {
-                    '{' => depth += 1,
-                    '}' => {
+                match rtf_bytes[j] {
+                    b'\\' => j += 1, // Skip escaped braces and backslashes.
+                    b'{' => depth += 1,
+                    b'}' => {
                         depth -= 1;
                         if depth == 0 {
-                            i = j + 1;
                             break;
                         }
                     }
@@ -198,21 +206,30 @@ pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
                 j += 1;
             }
             if depth == 0 {
+                // Keep the historical opening-brace placeholder for stored hash compatibility.
+                out.push(b'{');
+                i = j + 1;
                 continue;
             }
+            // Preserve an unterminated group without repeatedly rescanning it.
+            out.extend_from_slice(remaining);
+            break;
         }
 
         // Match \rsidXXXXX / \insrsidXXXXX — strip control word + trailing digits.
         // Only strip when digits actually follow, so \rsidtbl, \rsidroot etc. are untouched.
-        let remaining = &text[i..];
-        let cmd_len = if remaining.starts_with("\\insrsid") {
-            Some("\\insrsid".len())
-        } else if remaining.starts_with("\\rsid") {
-            Some("\\rsid".len())
-        } else if remaining.starts_with("\\mdispDef1") {
+        let cmd_len = if remaining.starts_with(br"\insrsid") {
+            Some(br"\insrsid".len())
+        } else if remaining.starts_with(br"\rsid") {
+            Some(br"\rsid".len())
+        } else if remaining.starts_with(br"\mdispDef1") {
             // \mdispDef1 has no numeric arg — always strip
-            let j = i + "\\mdispDef1".len();
-            i = j + if j < len && chars[j] == ' ' { 1 } else { 0 };
+            let j = i + br"\mdispDef1".len();
+            i = j + if j < len && rtf_bytes[j] == b' ' {
+                1
+            } else {
+                0
+            };
             continue;
         } else {
             None
@@ -221,14 +238,14 @@ pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
         if let Some(cmd_len) = cmd_len {
             let after_cmd = i + cmd_len;
             // Skip optional space between control word and digits
-            let digit_start = if after_cmd < len && chars[after_cmd] == ' ' {
+            let digit_start = if after_cmd < len && rtf_bytes[after_cmd] == b' ' {
                 after_cmd + 1
             } else {
                 after_cmd
             };
             // Scan trailing digits (Word RSID is decimal, not hex)
             let mut j = digit_start;
-            while j < len && chars[j].is_ascii_digit() {
+            while j < len && rtf_bytes[j].is_ascii_digit() {
                 j += 1;
             }
             if j > digit_start {
@@ -239,11 +256,11 @@ pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
             // No digits found — don't strip (e.g. \rsidtbl, \rsidroot)
         }
 
-        out.push(chars[i]);
+        out.push(rtf_bytes[i]);
         i += 1;
     }
 
-    out.into_bytes()
+    out
 }
 
 pub(crate) fn compute_semantic_hash(
@@ -403,14 +420,88 @@ mod tests {
     }
 
     #[test]
-    fn rtf_strips_datastore_block() {
+    fn rtf_strips_datastore_block_preserving_historical_hash_bytes() {
         // Standard RTF form: {\*\datastore {...}}
         let rtf = br"{\rtf1\ansi hello {\*\datastore {some xml {nested}}}\par}";
-        let cleaned = normalize_rtf_for_hash(rtf);
-        let s = String::from_utf8(cleaned).unwrap();
-        assert!(!s.contains("datastore"));
-        assert!(s.contains("hello"));
-        assert!(s.contains("\\par"));
+        assert_eq!(normalize_rtf_for_hash(rtf), br"{\rtf1\ansi hello {\par}");
+    }
+
+    #[test]
+    fn rtf_preserves_malformed_datastore_groups() {
+        for rtf in [
+            "",
+            "\\",
+            r"\*\datastore",
+            r"\*\datastore}",
+            r"\*\datastore{payload}",
+            r"{visible \*\datastore{payload}}",
+            r"}\*\datastore",
+            r"{\*\datastore",
+            r"{\*\datastore{payload}",
+            r"{\*\datastore{\*\datastore{payload}",
+            r"{\*\datastore payload\}",
+            r"{\*\datastore payload\",
+            r"{\*\datastoreExtra{visible}}",
+            r"\{\*\datastore{visible}}",
+        ] {
+            assert_eq!(normalize_rtf_for_hash(rtf.as_bytes()), rtf.as_bytes());
+        }
+    }
+
+    #[test]
+    fn rtf_datastore_respects_escaped_braces_and_backslashes() {
+        for rtf in [
+            r"before{\*\datastore left\{nested{payload}}after",
+            r"before{\*\datastore right\}nested{payload}}after",
+            r"before{\*\datastore slash\\}after",
+            r"before{\*\datastore slash\\{nested}}after",
+            r"before{\*\datastore slash\\\}nested{payload}}after",
+        ] {
+            assert_eq!(normalize_rtf_for_hash(rtf.as_bytes()), b"before{after");
+        }
+        assert_eq!(
+            normalize_rtf_for_hash(br"before{\*\datastore{one}}{\*\datastore{two}}after"),
+            b"before{{after"
+        );
+        assert_eq!(
+            normalize_rtf_for_hash(br"\\{\*\datastore{payload}}after"),
+            br"\\{after"
+        );
+        assert_eq!(normalize_rtf_for_hash(br"{\*\datastore}"), b"{");
+    }
+
+    #[test]
+    fn rtf_preserves_escaped_control_words() {
+        let rtf = br"{\rtf1 \\rsid123 \\insrsid456 \\mdispDef1 \{\*\datastore\}}";
+        assert_eq!(normalize_rtf_for_hash(rtf), rtf);
+    }
+
+    #[test]
+    fn rtf_normalization_preserves_utf8_text() {
+        let rtf =
+            "{\\rtf1 中文😀{\\*\\datastore{元数据\\}值}}\\rsid123 字\\insrsid456\\mdispDef1 尾}";
+        assert_eq!(
+            normalize_rtf_for_hash(rtf.as_bytes()),
+            "{\\rtf1 中文😀{ 字尾}".as_bytes()
+        );
+        for rtf in ["中文😀", r"中文\*\datastore", r"{\*\datastore{未闭合😀}"] {
+            assert_eq!(normalize_rtf_for_hash(rtf.as_bytes()), rtf.as_bytes());
+        }
+    }
+
+    #[test]
+    fn rtf_truncated_controls_and_groups_terminate() {
+        let rtf = r"{\rtf1 中文😀{\*\datastore{nested \{literal\} \\}}\rsid123\insrsid456\mdispDef1 text}";
+        for end in 0..=rtf.len() {
+            let prefix = &rtf.as_bytes()[..end];
+            let normalized = normalize_rtf_for_hash(prefix);
+            assert!(normalized.len() <= prefix.len());
+            if std::str::from_utf8(prefix).is_err() {
+                assert_eq!(normalized, prefix);
+            } else {
+                assert!(std::str::from_utf8(&normalized).is_ok());
+            }
+        }
     }
 
     #[test]
