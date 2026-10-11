@@ -1,5 +1,10 @@
-use super::*;
-use std::{collections::VecDeque, sync::Condvar, time::Instant};
+use super::{CapturedClipboard, Command, Event};
+use anyhow::{Result, bail};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Condvar, Mutex, mpsc},
+    time::{Duration, Instant},
+};
 
 const MAX_PENDING_COMMANDS: usize = 64;
 const MAX_PENDING_CAPTURES: usize = 1024;
@@ -199,6 +204,7 @@ impl CaptureFeedback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clipboard_core::preferences::ThemePreference;
 
     fn capture(text: &str) -> Command {
         Command::ObservedCapture {

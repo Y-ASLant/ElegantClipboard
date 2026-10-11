@@ -39,6 +39,10 @@ scripts/               Packaging and verification helpers
 docs/                  Architecture decisions, feature status, and QA evidence
 ```
 
+Dependencies flow from `clipboard-gpui` to `clipboard-platform` to `clipboard-core`; the UI may also use core directly. Core must not depend on GPUI or Windows APIs. The tray belongs to `clipboard-gpui`, while platform handles OS integration.
+
+Every Rust source, example, and test file is limited to **500 physical lines**, including blank lines and comments. Split by responsibility into private submodules and keep tests alongside their owning module; do not bypass the limit with numbered fragments or `include!`. Both `just check` and GPUI CI run `scripts/check-source-size.ps1`. See the [engineering documentation](docs/README.md) for module responsibilities.
+
 ## Run from source
 
 Requirements:

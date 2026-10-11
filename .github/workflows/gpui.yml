@@ -16,6 +16,8 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: swatinem/rust-cache@v2.9.2
+      - name: Source module size
+        run: ./scripts/check-source-size.ps1
       - name: Format
         run: cargo fmt --all -- --check
       - name: Check

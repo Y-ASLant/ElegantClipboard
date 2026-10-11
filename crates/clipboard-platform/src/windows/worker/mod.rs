@@ -1,0 +1,96 @@
+use super::{Command, Event, capture::CaptureState};
+use anyhow::{Result, anyhow};
+use clipboard_core::{
+    ContentCategory, History,
+    preferences::{AppFilterPreference, MonitorTypesPreference, Preferences},
+};
+use clipboard_rs::ClipboardContext;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
+
+mod capture;
+mod clipboard;
+mod commands;
+mod history;
+mod settings;
+
+#[cfg(test)]
+pub(super) use capture::filter_observed_capture;
+
+pub(super) struct Worker {
+    pub(super) history: History,
+    pub(super) preferences: Preferences,
+    pub(super) clipboard: ClipboardContext,
+    pub(super) images_dir: PathBuf,
+    pub(super) staged_dir: PathBuf,
+    pub(super) icons_dir: PathBuf,
+    pub(super) data_dir: PathBuf,
+    pub(super) state: Arc<Mutex<CaptureState>>,
+    pub(super) monitor_types: MonitorTypesPreference,
+    pub(super) app_filter: AppFilterPreference,
+    pub(super) search: String,
+    pub(super) favorite_only: bool,
+    pub(super) category: ContentCategory,
+    pub(super) group_id: Option<i64>,
+    pub(super) limit: i64,
+    pub(super) generation: u64,
+    pub(super) snapshot_pending: bool,
+    pub(super) events: async_channel::Sender<Event>,
+}
+
+impl Worker {
+    /// Blocking event delivery; the only failure mode is a closed UI receiver.
+    fn send_event(&self, event: Event) -> Result<()> {
+        self.events
+            .send_blocking(event)
+            .map_err(|_| anyhow!("窗口已关闭"))
+    }
+
+    pub(super) fn send_groups(&self) -> Result<()> {
+        self.send_event(Event::Groups(self.history.groups()?))
+    }
+
+    pub(super) fn snapshot(&mut self) -> Result<()> {
+        let event = self.snapshot_event()?;
+        self.snapshot_pending = false;
+        self.send_event(event)
+    }
+
+    pub(super) fn flush_capture_snapshot(&mut self) -> Result<()> {
+        if !self.snapshot_pending || self.events.is_full() || self.events.is_closed() {
+            return Ok(());
+        }
+        let event = self.snapshot_event()?;
+        match self.events.try_send(event) {
+            Ok(()) | Err(async_channel::TrySendError::Closed(_)) => {
+                self.snapshot_pending = false;
+            }
+            Err(async_channel::TrySendError::Full(_)) => {}
+        }
+        Ok(())
+    }
+
+    fn snapshot_event(&self) -> Result<Event> {
+        Ok(Event::Snapshot {
+            items: self
+                .history
+                .list_filtered_in_group(
+                    &self.search,
+                    self.limit,
+                    self.favorite_only,
+                    self.group_id,
+                    self.category,
+                )
+                .map_err(|error| anyhow!("读取历史记录失败：{error}"))?,
+            total: self.history.count_filtered_in_group(
+                &self.search,
+                self.favorite_only,
+                self.group_id,
+                self.category,
+            )?,
+            generation: self.generation,
+        })
+    }
+}

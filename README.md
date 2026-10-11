@@ -39,6 +39,10 @@ scripts/               打包与验证辅助脚本
 docs/                  架构决策、功能状态和验收证据
 ```
 
+依赖方向固定为 `clipboard-gpui -> clipboard-platform -> clipboard-core`，界面层也可直接使用核心层；核心层不依赖 GPUI 或 Windows API。托盘属于 `clipboard-gpui`，平台层提供操作系统集成。
+
+Rust 源码、示例和测试文件均不得超过 **500 物理行**（包含空行和注释）。按职责拆分私有子模块，测试放在对应模块的测试文件中；不要用编号分片或 `include!` 绕过限制。`just check` 和 GPUI CI 均执行 `scripts/check-source-size.ps1`。模块职责见[工程文档](docs/README.md)。
+
 ## 从源码运行
 
 要求：

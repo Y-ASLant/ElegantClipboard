@@ -7,6 +7,9 @@
 ### 重构
 
 - 使用 Rust、GPUI 和 gpui-kit 构建 Windows 原生应用，移除旧版前端运行时及构建链。代码划分为 `clipboard-core`（数据与业务逻辑）、`clipboard-platform`（Windows 集成）和 `clipboard-gpui`（界面）。
+- 按职责拆分界面、Windows 服务、数据库和偏好设置大文件：界面入口 `ui.rs` 从约 8,800 行缩至 446 行，Windows 模块入口缩至 17 行；生产代码、示例和测试共 123 个 Rust 文件，最大 480 行。新增 500 物理行上限检查并接入 `just check` 和 GPUI CI，模块说明见[工程文档](README.md)。
+- 将原 Windows 单文件测试迁入按领域划分的 `windows/tests/` 并删除搬空的 `windows/tests.rs`；移除拆分后冗余导入、分区注释及菜单返回的无用中间绑定。保持现有公开调用路径、数据格式、旧版导入及官方 GPUI Kit 控件，不新增运行时依赖。
+- 本轮重构验证：123 个 Rust 文件全部符合 500 行限制；fmt、all-targets check、Clippy `-D warnings`、249 项测试（另 2 项忽略）及 Release 构建通过。原生主窗口与设置数据页冒烟正常退出，隔离窗口站剪贴板往返通过；未修改交互桌面的剪贴板。
 - 默认数据目录改为 Windows 用户 LocalAppData 下的 `ElegantClipboard-GPUI` 应用目录；不会自动读取或覆盖旧版数据库。可按 [Windows GPUI 状态](WINDOWS_MVP.md)中的说明，向空 GPUI 数据目录显式导入旧数据库或旧版 ZIP 备份。
 - 主窗口、设置窗口与悬停预览复用 GPUI 窗口骨架；内部页面继承窗口主题，删除重复样式声明。合并记录流程移除不可达的空结果分支，保留既有返回类型与导入兼容性。
 - 性能审查：搜索条件改为单次转义并共享 SQL 参数；URL 主机校验移除临时分段数组；富文本复制复用一次 RTF 解码结果；文件卡片每帧只解析一次路径 JSON，图片悬浮预览复用路径，后台文件检查结果直接移动所有权。保留格式支持、搜索匹配和剪贴板写回行为。

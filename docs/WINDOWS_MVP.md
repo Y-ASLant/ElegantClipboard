@@ -14,6 +14,8 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 
 数据库与去重源码已经物理迁入 `clipboard-core`；核心不依赖桌面 UI 框架或 Windows API。
 
+源码模块与维护边界见[工程文档](README.md)。所有 Rust 源码、示例和测试文件上限为 500 物理行，`scripts/check-source-size.ps1` 在 `just check` 与 GPUI CI 中强制检查；拆分按职责而不是编号或文本包含进行。
+
 默认目录由 `ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")` 生成，位于 Windows 用户 LocalAppData。不自动读取旧版安装目录中的数据库；可通过显式导入命令复制旧库到空 GPUI 数据目录。自动测试使用临时目录、合成文本和仓库内 PNG 样本。
 
 限制：单条文本最多 1 MiB，富文本的 HTML、RTF 原始字节与纯文本合计最多 1 MiB；图片最多 2500 万像素、编码 PNG 最多 50 MiB；文件路径列表最多 256 项或 1 MiB，仅保存原路径，不备份文件内容。普通未固定历史按原仓储规则保留一万条；空白文本不保存。重复的完全相同文本移动到顶部，文字和换行原样保存。队列满时报告采集失败，不把不同复制事件主动合并成最后一条。
@@ -26,8 +28,8 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 
 | 直接依赖 | 当前使用版本 |
 |---|---|
-| gpui-kit | 0.7.0 |
-| tray-icon | 0.25.1 |
+| gpui-kit | 0.7.1 |
+| tray-icon | 0.26.0 |
 | raw-window-handle | 0.6.2 |
 | rusqlite | 0.40.2 |
 | clipboard-rs | 0.3.5（注册表版，启用 `image` 功能） |
@@ -46,7 +48,7 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 | image（来源图标 PNG 编码） | 0.25.10 |
 | tempfile（测试及来源图标原子缓存） | 3.27.0 |
 
-工具链要求 Rust 1.98+；本机使用 1.98.1。Cargo.lock 固定实际解析结果。依赖升级流程：查询最新稳定版本 → 更新 workspace requirements → `cargo update` → fmt/clippy/test/build → 原生交互验收。`zip` 最新发布项 9.0.0-pre3 为预发布版，因此保留稳定版 8.6.0。间接依赖 `generic-array` 暂留 0.14.7：上游 `crypto-common 0.1.7` 固定要求 `=0.14.7`，不能强制升级至 0.14.9。
+工具链要求 Rust 1.98+；本轮模块重构验证使用 Rust 1.99.0。Cargo.lock 固定实际解析结果。依赖升级流程：查询最新稳定版本 → 更新 workspace requirements → `cargo update` → fmt/clippy/test/build → 原生交互验收。`zip` 使用锁定的稳定版 8.6.0。本轮仅做模块重构，不升级依赖。
 
 **上游例外**：稳定版 gpui-kit 0.7.0 的 Windows 依赖路径 `gpui-kit → gpui-base/gpui-component → ropey` 仍使用 ropey 2.0.0-beta.1；`gpui-pre-*` 随 Kit 升为 0.3.7。详见 [技术决策](decisions/0001-windows-gpui.md)，不宣称整个依赖树均为稳定版。
 
@@ -128,23 +130,29 @@ cargo run -p elegant-clipboard-gpui --locked -- --import-db "C:\旧版目录\cli
 在仓库根目录运行：
 
 ```powershell
-cargo test --workspace --locked
-cargo clippy --workspace --all-targets --locked -- -D warnings
+.\scripts\check-source-size.ps1
 cargo fmt --all -- --check
-cargo build -p elegant-clipboard-gpui --locked
+cargo check --workspace --all-targets --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build -p elegant-clipboard-gpui --release --locked
 cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 .\scripts\package-gpui-windows.ps1
 ```
 
 打包脚本仅接受 Windows x64 MSVC 构建，使用锁定依赖生成 `target/packages/elegant-clipboard-gpui-v<版本>-windows-x64.zip` 与 `.zip.sha256`。压缩包含 exe、许可证和运行说明，程序默认在 LocalAppData 保存数据；这是未经签名的独立压缩包，不是安装器或自动更新制品。
 
-当前 242 项测试通过（核心 155、Windows 后端 56、应用 31），另有 2 项依赖系统程序图标的测试默认跳过。测试覆盖历史查询、分类与分组操作、排序和事务回滚、批量删除与合并复制、文本及媒体读写、设置与备份恢复、实例唤出，以及托盘操作项的固定入口、语言和置顶勾选状态。fmt、Clippy（warnings 视为错误）、Windows debug/release 构建通过。隔离数据目录下以 `--no-monitor` 启动的主窗口已在中文和英文 420×520 尺寸检查搜索与批量图标、分类和分组 Select 无重叠；实际操作验证了分组创建、切换、上移和批量模式，托盘右键菜单展示打开、清理历史、置顶、设置、暂停和退出。此轮窗口验收未接触真实剪贴板。
+2026-10-11 模块重构后，249 项测试通过（核心 149、Windows 后端 69、应用 31），另有 2 项依赖系统程序图标的测试默认跳过。源码行数检查、fmt、workspace all-targets check、Clippy（warnings 视为错误）与 Release 构建通过，最终输出无错误或警告。非交互窗口站中的真实剪贴板冒烟通过文本、富文本、纯文本转换、图片、文件、路径、合并复制和采集错误隔离场景。
+
+同轮 Release `--smoke-test --data-dir <独立目录>` 已实际创建主窗口（576×768）和设置数据页（1296×728），窗口截图确认搜索、分类/分组、设置导航、每日历史图表和数据占用正常显示；进程自动退出码为 0，stderr 为空。运行前后交互桌面剪贴板序列号均为 5162。此次窗口验证使用空隔离数据库，未重新覆盖有记录时的全部拖拽、预览和编辑交互。
+
+此前隔离桌面验收覆盖中文和英文 420×520 主窗口、分组创建/切换/上移、批量模式和托盘操作；这些历史记录不表示本次重构重新执行了全部交互场景，具体范围以对应 `evidence/` 记录为准。
 
 Windows 常驻资源可用 `scripts/measure-gpui-idle.ps1 -ProcessId <GPUI 进程 ID> -OutputPath <CSV 路径>` 采样，默认持续 8 小时、每分钟记录私有内存、工作集、句柄、线程和累计 CPU 时间。脚本只观察进程，不启动或结束应用；执行前应使用独立数据目录并关闭采集与全局快捷键。采样通过不等于完成休眠唤醒和跨应用粘贴验收。
 
 原生窗口已通过启动/退出、中文路径、重复启动唤回，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查；10,000 条合成文本的启动与末尾搜索也已验收。HTML/RTF、图片、文件卡片和对应预览均在隔离目录中截图核验；文件详情另覆盖有效文件、文件夹、受管备份副本、失效路径与最小窗口滚动布局。普通窗口缩放、最大化不覆盖、重启恢复和损坏尺寸回退已在真实窗口验收。富文本卡片之间的真实鼠标拖动也已核对 SQLite 顺序。搜索框、分组创建和正文编辑已在活动 Windows 桌面通过拼音组合输入及候选确认验收。其他窗口交互使用隔离目录并禁用实际采集；图片另存为已打开原生保存对话框并取消，数据占用统计、数据库空间回收、全局清空历史和最小窗口布局也已核对；另在非交互式窗口站中完成文本、HTML/RTF、图片和文件路径的真实系统剪贴板采集与写回，交互桌面的剪贴板序列号未变。Windows x64 独立压缩包已完成 SHA-256 核对和解压运行冒烟。仍未覆盖常见应用之间的真实复制粘贴、其他输入法及输入场景、长时间运行、安装升级或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)、[规模验证](evidence/windows-scale-2026-09-19.md)、[中文输入法验收](evidence/windows-ime-2026-09-19.md)、[隔离剪贴板记录](evidence/windows-private-clipboard-2026-09-19.md)、[文件详情记录](evidence/windows-file-details-2026-09-19.md)、[另存为记录](evidence/windows-save-as-2026-09-19.md)、[数据占用记录](evidence/windows-data-size-2026-09-19.md)、[数据库整理记录](evidence/windows-database-maintenance-2026-09-19.md)、[全局清空记录](evidence/windows-clear-all-history-2026-09-19.md)、[窗口尺寸记录](evidence/windows-window-size-2026-09-19.md)和[独立包验收](evidence/windows-package-2026-09-19.md)。
 
-Windows CI 包含 fmt、Clippy、locked 测试和应用构建，尚未在远端运行。CI 使用已核验的 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
+Windows CI 包含源码行数限制、fmt、all-targets check、Clippy、locked 测试和应用 Release 构建，本轮只在本机执行，未在远端运行。CI 使用 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
 
 收藏增量验证见 [2026-09-19 验证记录](evidence/windows-favorites-2026-09-19.md)。
 

@@ -1,4 +1,50 @@
-use super::*;
+use super::{
+    CapturedClipboard, Command, Event,
+    queue::{CaptureFeedback, CommandQueue},
+};
+use crate::source_app;
+use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+use anyhow::{Result, anyhow, bail};
+use clipboard_core::{
+    MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES,
+};
+use clipboard_rs::{
+    Clipboard, ClipboardContext, ClipboardHandler, ContentFormat, common::RustImage,
+};
+use std::{
+    sync::{Arc, Mutex},
+    thread,
+};
+
+#[derive(Default)]
+pub(super) struct CaptureState {
+    pub(super) paused: bool,
+    pub(super) ignored_sequence: u32,
+    pub(super) last_sequence: u32,
+}
+
+pub(super) fn lock_capture_state(
+    state: &Mutex<CaptureState>,
+) -> Result<std::sync::MutexGuard<'_, CaptureState>> {
+    state.lock().map_err(|_| anyhow!("剪贴板状态异常"))
+}
+
+pub(super) struct WatchHandler {
+    pub(super) clipboard: ClipboardContext,
+    pub(super) state: Arc<Mutex<CaptureState>>,
+    pub(super) commands: Arc<CommandQueue>,
+    pub(super) events: async_channel::Sender<Event>,
+    pub(super) feedback: Arc<CaptureFeedback>,
+}
+
+impl ClipboardHandler for WatchHandler {
+    fn on_clipboard_change(&mut self) {
+        if let Err(error) = self.read_change() {
+            self.feedback.error(error.to_string());
+        }
+        self.feedback.flush(&self.events);
+    }
+}
 
 struct ClipboardSnapshot {
     content: Option<CapturedClipboard>,
@@ -29,7 +75,7 @@ fn read_stable_capture(
 }
 
 impl WatchHandler {
-    pub(super) fn read_change(&mut self) -> Result<()> {
+    fn read_change(&mut self) -> Result<()> {
         // Keep our own writes serialized with the entire snapshot, including retries.
         let mut state = lock_capture_state(&self.state)?;
         let Some((sequence, snapshot)) = read_stable_capture(

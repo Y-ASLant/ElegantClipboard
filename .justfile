@@ -23,8 +23,9 @@ package:
 run:
     cargo run -p elegant-clipboard-gpui --locked
 
-# 运行 rustfmt、cargo check 与 Clippy
+# 检查模块行数、rustfmt、cargo check 与 Clippy
 check:
+    powershell.exe -NoProfile -File scripts/check-source-size.ps1
     cargo fmt --all -- --check
     cargo check --workspace --all-targets --locked
     cargo clippy --workspace --all-targets --locked -- -D warnings
