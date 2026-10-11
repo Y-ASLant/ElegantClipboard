@@ -49,23 +49,25 @@ impl ClipboardView {
                 self.preview_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 window.focus(&self.list_focus, cx);
-                self.message = if changed {
-                    tr(
-                        self.language,
-                        "内容已保存为纯文本",
-                        "Content saved as plain text",
-                    )
-                } else {
-                    tr(self.language, "内容未修改", "Content was not changed")
-                }
-                .into();
+                self.set_feedback_message(
+                    if changed {
+                        tr(
+                            self.language,
+                            "内容已保存为纯文本",
+                            "Content saved as plain text",
+                        )
+                    } else {
+                        tr(self.language, "内容未修改", "Content was not changed")
+                    }
+                    .into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "保存编辑失败", "Failed to save changes")
-                );
+                ));
                 self.is_error = true;
             }
         }

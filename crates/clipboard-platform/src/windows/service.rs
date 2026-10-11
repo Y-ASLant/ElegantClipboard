@@ -36,7 +36,7 @@ pub struct Service {
     shutdown: Option<WatcherShutdown>,
     watcher: Option<JoinHandle<()>>,
     worker: Option<JoinHandle<()>>,
-    instance_signal: Option<InstanceSignal>,
+    pub(super) instance_signal: Option<InstanceSignal>,
     pub(super) events: async_channel::Sender<Event>,
     _instance_lock: File,
     pub data_dir: PathBuf,

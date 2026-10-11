@@ -30,7 +30,7 @@ impl ClipboardView {
             return;
         }
         if let Err(error) = validate_paste_shortcuts(&self.paste_shortcuts, choice) {
-            self.message = error.to_string();
+            self.set_feedback_message(error.to_string());
             self.is_error = true;
             cx.notify();
             return;
@@ -45,10 +45,10 @@ impl ClipboardView {
             Ok(hotkey) => self.hotkey = hotkey,
             Err(error) => {
                 let restore_error = self.restore_hotkey();
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "快捷键切换失败", "Failed to change shortcut")
-                );
+                ));
                 if let Some(restore_error) = restore_error {
                     self.message.push_str(&format!("；{restore_error}"));
                 }
@@ -88,7 +88,7 @@ impl ClipboardView {
                         paste_registration_summary(self.language, &warnings);
                 }
                 Err(error) => {
-                    self.message = error.to_string();
+                    self.set_feedback_message(error.to_string());
                     self.is_error = true;
                     cx.notify();
                     return;
@@ -146,7 +146,7 @@ impl ClipboardView {
         match next {
             Ok(next) => self.save_paste_shortcuts(next, cx),
             Err(error) => {
-                self.message = error.to_string();
+                self.set_feedback_message(error.to_string());
                 self.is_error = true;
                 self.paste_shortcut_status = Some((self.message.clone(), true));
                 cx.notify();
@@ -167,7 +167,7 @@ impl ClipboardView {
         }
         self.paste_shortcut_status = None;
         if let Err(error) = validate_paste_shortcuts(&next, self.hotkey_choice) {
-            self.message = error.to_string();
+            self.set_feedback_message(error.to_string());
             self.is_error = true;
             self.paste_shortcut_status = Some((self.message.clone(), true));
             cx.notify();
@@ -187,15 +187,17 @@ impl ClipboardView {
                     if changed_slot_failed {
                         drop(hotkeys);
                         let restore_error = self.restore_paste_hotkeys();
-                        self.message = warnings
-                            .iter()
-                            .filter(|warning| {
-                                next.slot(warning.favorite, warning.slot)
-                                    != self.paste_shortcuts.slot(warning.favorite, warning.slot)
-                            })
-                            .map(ToString::to_string)
-                            .collect::<Vec<_>>()
-                            .join("; ");
+                        self.set_feedback_message(
+                            warnings
+                                .iter()
+                                .filter(|warning| {
+                                    next.slot(warning.favorite, warning.slot)
+                                        != self.paste_shortcuts.slot(warning.favorite, warning.slot)
+                                })
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join("; "),
+                        );
                         if let Some(error) = restore_error {
                             self.message.push_str(&format!("; {error}"));
                         }
@@ -210,7 +212,7 @@ impl ClipboardView {
                 }
                 Err(error) => {
                     let restore_error = self.restore_paste_hotkeys();
-                    self.message = error.to_string();
+                    self.set_feedback_message(error.to_string());
                     if let Some(error) = restore_error {
                         self.message.push_str(&format!("; {error}"));
                     }

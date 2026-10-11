@@ -10,9 +10,9 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.message = localize_service_message(self.language, message);
+        self.set_feedback_message(localize_service_message(self.language, message));
         self.is_error = false;
-        if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
+        if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
         if let Some((pending_id, target)) = self.paste_pending.take() {
@@ -34,9 +34,11 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         self.batch_pending = false;
-        self.batch_confirm_open = false;
+        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+            self.close_history_confirmation(window, cx);
+        }
         self.reset_selection();
-        if sound::enabled(self.audio, Sound::Copy, SoundTiming::AfterSuccess) {
+        if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
         let target = self.batch_paste_pending.take();
@@ -44,19 +46,19 @@ impl ClipboardView {
             if let Some(target) = target {
                 self.return_to_paste_target(target, clipboard_sequence, None, window, cx);
             } else {
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Merged and copied {item_count} items; paste manually")
                 } else {
                     format!("已合并 {item_count} 条记录并复制，请手动粘贴")
-                };
+                });
                 self.is_error = true;
             }
         } else {
-            self.message = if self.language == LanguagePreference::English {
+            self.set_feedback_message(if self.language == LanguagePreference::English {
                 format!("Merged and copied {item_count} items")
             } else {
                 format!("已合并 {item_count} 条记录并复制")
-            };
+            });
             self.is_error = false;
         }
         true
@@ -64,36 +66,40 @@ impl ClipboardView {
     pub(super) fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
         let Some(target) = self.paste_target else {
-            self.message = tr(
+            self.set_feedback_message(tr(
                 self.language,
                 "请从目标应用按全局快捷键唤出，再使用粘贴",
                 "Open the clipboard with the global shortcut from the target app before pasting.",
             )
-            .into();
+            .into());
             self.is_error = true;
             cx.notify();
             return;
         };
         if self._tray.is_none() || !paste::is_external_target(window, target) {
             self.paste_target = None;
-            self.message = tr(
-                self.language,
-                "原窗口不可用，仍可使用复制后手动粘贴",
-                "The previous window is unavailable; copy and paste manually instead.",
-            )
-            .into();
+            self.set_feedback_message(
+                tr(
+                    self.language,
+                    "原窗口不可用，仍可使用复制后手动粘贴",
+                    "The previous window is unavailable; copy and paste manually instead.",
+                )
+                .into(),
+            );
             self.is_error = true;
             cx.notify();
             return;
         }
         if self.paste_pending.is_none() && self.send(Command::CopyForPaste(id), cx) {
             self.paste_pending = Some((id, target));
-            self.message = tr(
-                self.language,
-                "正在复制并返回原窗口…",
-                "Copying and returning to the previous window…",
-            )
-            .into();
+            self.set_feedback_message(
+                tr(
+                    self.language,
+                    "正在复制并返回原窗口…",
+                    "Copying and returning to the previous window…",
+                )
+                .into(),
+            );
             self.is_error = false;
             cx.notify();
         }
@@ -160,7 +166,7 @@ impl ClipboardView {
             && let Some(target) = target
         {
             self.paste_pending = Some((id, target));
-            self.message = tr(self.language, paste_message.0, paste_message.1).into();
+            self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
             self.is_error = false;
             cx.notify();
         }
@@ -175,19 +181,20 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if !paste::is_external_target(window, target) {
-            self.message = tr(
-                self.language,
-                "目标窗口已变化，内容已复制，请手动粘贴",
-                "The target window changed. The content was copied; paste it manually.",
-            )
-            .into();
+            self.set_feedback_message(
+                tr(
+                    self.language,
+                    "目标窗口已变化，内容已复制，请手动粘贴",
+                    "The target window changed. The content was copied; paste it manually.",
+                )
+                .into(),
+            );
             self.is_error = true;
             return;
         }
         let hide_window = self.paste_close_window.value && tray::is_window_shown(window);
         if hide_window {
-            self.prepare_to_hide(window, cx);
-            tray::set_window_visible(window, false);
+            self.hide_window(window, cx);
         }
         let main_window = window.window_handle();
         cx.spawn_in(window, async move |view, cx| {
@@ -195,20 +202,23 @@ impl ClipboardView {
                 .timer(Duration::from_millis(60))
                 .await;
             let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                if sound::enabled(this.audio, Sound::Paste, SoundTiming::Immediate) {
+                if sound::enabled(this.audio.value, Sound::Paste, SoundTiming::Immediate) {
                     sound::play(Sound::Paste);
                 }
-                match paste::send_to_target(target, clipboard_sequence, this.paste_key) {
+                match paste::send_to_target(target, clipboard_sequence, this.paste_key.value) {
                     Ok(()) => {
-                        if sound::enabled(this.audio, Sound::Paste, SoundTiming::AfterSuccess) {
+                        if sound::enabled(this.audio.value, Sound::Paste, SoundTiming::AfterSuccess)
+                        {
                             sound::play(Sound::Paste);
                         }
-                        this.message = tr(
-                            this.language,
-                            "已发送粘贴快捷键，请检查目标应用",
-                            "Paste shortcut sent; check the target app.",
-                        )
-                        .into();
+                        this.set_feedback_message(
+                            tr(
+                                this.language,
+                                "已发送粘贴快捷键，请检查目标应用",
+                                "Paste shortcut sent; check the target app.",
+                            )
+                            .into(),
+                        );
                         this.is_error = false;
                         if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top.value) {
                             this.send(Command::BumpToTop(id), cx);
@@ -218,7 +228,7 @@ impl ClipboardView {
                         if hide_window {
                             this.show_window(window, cx);
                         }
-                        this.message = error.to_string();
+                        this.set_feedback_message(error.to_string());
                         this.is_error = true;
                     }
                 }

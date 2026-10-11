@@ -1,5 +1,4 @@
 use super::*;
-use gpui_kit::component::notification::Notification;
 impl SettingsPage {
     pub(super) const ALL: [Self; 8] = [
         Self::General,
@@ -106,14 +105,14 @@ impl ClipboardView {
                         owner.settings_window = Some(handle);
                     }
                     Err(error) => {
-                        owner.message = format!(
+                        owner.set_feedback_message(format!(
                             "{}: {error:?}",
                             tr(
                                 owner.language,
                                 "无法打开设置窗口",
                                 "Unable to open settings"
                             )
-                        );
+                        ));
                         owner.is_error = true;
                     }
                 }
@@ -134,23 +133,9 @@ impl SettingsWindowView {
             .upgrade()
             .expect("settings window requires its owner view");
         let language = entity.read(cx).language;
-        let feedback_message = entity.read(cx).message.clone();
-        let feedback_is_error = entity.read(cx).is_error;
-        let subscription = cx.observe_in(&entity, window, |this, owner, window, cx| {
+        let subscription = cx.observe_in(&entity, window, |this, owner, _, cx| {
             let owner = owner.read(cx);
             this.language = owner.language;
-            if this.feedback_message != owner.message || this.feedback_is_error != owner.is_error {
-                this.feedback_message.clone_from(&owner.message);
-                this.feedback_is_error = owner.is_error;
-                if !owner.message.is_empty() {
-                    let notification = if owner.is_error {
-                        Notification::error(owner.message.clone())
-                    } else {
-                        Notification::success(owner.message.clone())
-                    };
-                    window.push_notification(notification.id::<SettingsWindowView>(), cx);
-                }
-            }
             cx.notify();
         });
         let release_subscription = cx.observe_release(&entity, |this, owner, cx| {
@@ -237,8 +222,6 @@ impl SettingsWindowView {
             _owner_subscription: subscription,
             _owner_release_subscription: release_subscription,
             language,
-            feedback_message,
-            feedback_is_error,
             page,
             shortcut_input: None,
             shortcut_editing: None,
@@ -286,22 +269,24 @@ impl SettingsWindowView {
             return;
         };
         let accepted = owner.update(cx, |owner, cx| {
-            let Some(next) = owner.app_filter.clone().with_rule(&rule) else {
-                owner.message = tr(
-                    owner.language,
-                    "规则无效或已达到上限",
-                    "Invalid rule or rule limit reached",
-                )
-                .into();
+            let Some(next) = owner.app_filter.value.clone().with_rule(&rule) else {
+                owner.set_feedback_message(
+                    tr(
+                        owner.language,
+                        "规则无效或已达到上限",
+                        "Invalid rule or rule limit reached",
+                    )
+                    .into(),
+                );
                 owner.is_error = true;
                 cx.notify();
                 return false;
             };
-            if next == owner.app_filter {
+            if next == owner.app_filter.value {
                 return true;
             }
             owner.save_app_filter(next, cx);
-            owner.app_filter_pending
+            owner.app_filter.pending
         });
         if accepted {
             self.app_filter_error = false;

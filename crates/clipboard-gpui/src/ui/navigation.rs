@@ -94,11 +94,9 @@ impl ClipboardView {
         }
         self.cancel_pending_row_click();
         self.close_hover_preview(cx);
-        self.clear_confirm_open = false;
+        self.close_history_confirmation(window, cx);
         self.group_move_id = None;
-        self.group_delete_id = None;
         self.reset_selection();
-        self.sync_confirmation_dialog(window, cx);
         self.search_task = None;
         if let Some(category) = category {
             self.history.set_category(category);

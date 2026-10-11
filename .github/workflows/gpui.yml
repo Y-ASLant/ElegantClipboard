@@ -26,5 +26,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked
+      - name: Isolated Windows clipboard roundtrip
+        timeout-minutes: 5
+        run: cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
       - name: Build Windows application
         run: cargo build -p elegant-clipboard-gpui --release --locked

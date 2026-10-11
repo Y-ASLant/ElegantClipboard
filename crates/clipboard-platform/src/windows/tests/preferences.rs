@@ -16,9 +16,9 @@ fn capture_error_does_not_replace_an_unrelated_settings_acknowledgement() -> Res
 
     service.send(Command::Capture("x".repeat(MAX_TEXT_BYTES + 1)))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
-    assert!(matches!(events.recv_blocking()?, Event::BackgroundError(_)));
+    assert!(matches!(next_event(&events), Event::BackgroundError(_)));
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::ThemeSaved(Ok(ThemePreference::Dark))
     ));
     Ok(())
@@ -193,7 +193,6 @@ fn window_behavior_settings_are_acknowledged_and_loaded_on_restart() -> Result<(
     service.send(Command::SetPasteKey(PasteKeyPreference::ShiftInsert))?;
     service.send(Command::SetPasteMoveToTop(false))?;
     service.send(Command::SetQuickPasteEnabled(true))?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let mut size_acknowledged = false;
     let mut reset_acknowledged = false;
     let mut focus_acknowledged = false;
@@ -203,62 +202,63 @@ fn window_behavior_settings_are_acknowledged_and_loaded_on_restart() -> Result<(
     let mut paste_key_acknowledged = false;
     let mut move_acknowledged = false;
     let mut quick_acknowledged = false;
-    while !size_acknowledged
-        || !reset_acknowledged
-        || !focus_acknowledged
-        || !clear_acknowledged
-        || !skip_clear_acknowledged
-        || !paste_acknowledged
-        || !paste_key_acknowledged
-        || !move_acknowledged
-        || !quick_acknowledged
-    {
-        match events.try_recv() {
-            Ok(Event::PersistWindowSizeSaved(result)) => {
-                assert!(!result.unwrap());
-                size_acknowledged = true;
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "window behavior save timed out",
+        |event| {
+            match event {
+                Event::PersistWindowSizeSaved(result) => {
+                    assert!(!result.unwrap());
+                    size_acknowledged = true;
+                }
+                Event::AutoResetStateSaved(result) => {
+                    assert!(result.unwrap());
+                    reset_acknowledged = true;
+                }
+                Event::SearchAutoFocusSaved(result) => {
+                    assert!(result.unwrap());
+                    focus_acknowledged = true;
+                }
+                Event::SearchAutoClearSaved(result) => {
+                    assert!(!result.unwrap());
+                    clear_acknowledged = true;
+                }
+                Event::SkipClearConfirmSaved(result) => {
+                    assert!(result.unwrap());
+                    skip_clear_acknowledged = true;
+                }
+                Event::PasteCloseWindowSaved(result) => {
+                    assert!(!result.unwrap());
+                    paste_acknowledged = true;
+                }
+                Event::PasteKeySaved(result) => {
+                    assert_eq!(result.unwrap(), PasteKeyPreference::ShiftInsert);
+                    paste_key_acknowledged = true;
+                }
+                Event::PasteMoveToTopSaved(result) => {
+                    assert!(!result.unwrap());
+                    move_acknowledged = true;
+                }
+                Event::QuickPasteEnabledSaved(result) => {
+                    assert!(result.unwrap());
+                    quick_acknowledged = true;
+                }
+                Event::Error(message) => panic!("{message}"),
+                _ => {}
             }
-            Ok(Event::AutoResetStateSaved(result)) => {
-                assert!(result.unwrap());
-                reset_acknowledged = true;
-            }
-            Ok(Event::SearchAutoFocusSaved(result)) => {
-                assert!(result.unwrap());
-                focus_acknowledged = true;
-            }
-            Ok(Event::SearchAutoClearSaved(result)) => {
-                assert!(!result.unwrap());
-                clear_acknowledged = true;
-            }
-            Ok(Event::SkipClearConfirmSaved(result)) => {
-                assert!(result.unwrap());
-                skip_clear_acknowledged = true;
-            }
-            Ok(Event::PasteCloseWindowSaved(result)) => {
-                assert!(!result.unwrap());
-                paste_acknowledged = true;
-            }
-            Ok(Event::PasteKeySaved(result)) => {
-                assert_eq!(result.unwrap(), PasteKeyPreference::ShiftInsert);
-                paste_key_acknowledged = true;
-            }
-            Ok(Event::PasteMoveToTopSaved(result)) => {
-                assert!(!result.unwrap());
-                move_acknowledged = true;
-            }
-            Ok(Event::QuickPasteEnabledSaved(result)) => {
-                assert!(result.unwrap());
-                quick_acknowledged = true;
-            }
-            Ok(Event::Error(message)) => panic!("{message}"),
-            _ => {}
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "window behavior save timed out"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+            (size_acknowledged
+                && reset_acknowledged
+                && focus_acknowledged
+                && clear_acknowledged
+                && skip_clear_acknowledged
+                && paste_acknowledged
+                && paste_key_acknowledged
+                && move_acknowledged
+                && quick_acknowledged)
+                .then_some(())
+        },
+    );
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
     assert!(!reopened.initial_persist_window_size);
@@ -281,24 +281,30 @@ fn paste_shortcuts_save_atomically_and_reject_window_hotkey_conflicts() -> Resul
     let mut shortcuts = service.initial_paste_shortcuts.clone();
     shortcuts.set_slot(true, 10, "Ctrl+Shift+Z".into())?;
     service.send(Command::SetPasteShortcuts(Box::new(shortcuts.clone())))?;
-    let result = loop {
-        match events.recv_blocking()? {
-            Event::PasteShortcutsSaved(result) => break result,
-            Event::Error(message) => anyhow::bail!("{message}"),
-            _ => {}
-        }
-    };
+    let result = wait_for(
+        &events,
+        Duration::from_secs(5),
+        "paste shortcuts save timed out",
+        |event| match event {
+            Event::PasteShortcutsSaved(result) => Some(result),
+            Event::Error(message) => panic!("{message}"),
+            _ => None,
+        },
+    );
     assert_eq!(*result.unwrap(), shortcuts);
     let mut invalid = shortcuts.clone();
     invalid.set_slot(true, 10, "Ctrl+Shift+V".into())?;
     service.send(Command::SetPasteShortcuts(Box::new(invalid)))?;
-    let result = loop {
-        match events.recv_blocking()? {
-            Event::PasteShortcutsSaved(result) => break result,
-            Event::Error(message) => anyhow::bail!("{message}"),
-            _ => {}
-        }
-    };
+    let result = wait_for(
+        &events,
+        Duration::from_secs(5),
+        "paste shortcuts rejection timed out",
+        |event| match event {
+            Event::PasteShortcutsSaved(result) => Some(result),
+            Event::Error(message) => panic!("{message}"),
+            _ => None,
+        },
+    );
     assert!(result.is_err());
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
@@ -361,7 +367,7 @@ fn audio_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
         paste_timing: SoundTiming::AfterSuccess,
     };
     service.send(Command::SetAudio(audio))?;
-    assert!(matches!(events.recv_blocking()?, Event::AudioSaved(Ok(saved)) if saved == audio));
+    assert!(matches!(next_event(&events), Event::AudioSaved(Ok(saved)) if saved == audio));
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
     assert_eq!(reopened.initial_audio, audio);

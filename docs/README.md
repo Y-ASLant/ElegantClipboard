@@ -37,8 +37,11 @@
 | `database/repository.rs`、`repository/` | 记录模型与查询条件；查询、写入、保留策略分别实现 |
 | `database/groups.rs`、`settings.rs` | 分组和设置仓储 |
 | `preferences.rs`、`preferences/types.rs` | 设置键与持久化；设置值类型、默认值和校验 |
+| `backup_common.rs::check_central_directory_names` | 新旧 ZIP 共用原始目录项去重与数量校验，避免依赖合并同名条目后漏检 |
 | `backup.rs`、`backup_common.rs`、`import.rs`、`legacy_backup.rs` | GPUI 备份、共享归档校验及旧数据兼容导入 |
 | 各模块的 `tests.rs` / `tests/` | 就近维护的隔离业务测试；仓储测试按记录、查询、保留、分组及设置分类 |
+
+数据库打开时只转换旧的 UNIQUE 内容哈希索引，已完成迁移的非唯一索引不再重建。查询继续使用现有条件构造器，以 SQLite `Value` 和迭代绑定参数；媒体路径重映射借用原字段，未修改的字段保持原值。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。
 
 ### Windows 平台层
 
@@ -49,6 +52,7 @@
 | `capture.rs`、`queue.rs` | 剪贴板监听、有界队列及反馈背压 |
 | `data.rs`、`file_actions.rs` | 数据目录、实例锁、导入恢复与占用统计；文件定位和另存为 |
 | `worker/` | 命令分发、采集保存、剪贴板写回、历史操作、偏好设置和快照 |
+| `tests/mod.rs` | 有超时、区分通道关闭的事件等待；严格下一事件与按条件匹配分别保留顺序语义 |
 | `tests/` | 采集、剪贴板、数据、事件投递、分组、历史、生命周期、偏好和预览测试 |
 
 ### GPUI 界面层
@@ -68,3 +72,6 @@
 | `onboarding`、`content`、`presentation` | 首次引导、内容展示助手、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。
+
+确认操作仅由 `HistoryConfirmation` 表示当前类型与分组作用域，保存中的状态仍按操作分别保留。普通偏好使用 `PendingPref<T>`，仅在保存成功后替换生效值；快捷键注册回滚、语言和显示布局等副作用仍由专用处理器负责。窗口隐藏复用清理与隐藏动作，各入口的保护条件不合并。
+

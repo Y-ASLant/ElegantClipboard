@@ -6,7 +6,6 @@ impl ClipboardView {
         self.batch_mode = false;
         self.selected_ids.clear();
         self.selection_anchor = None;
-        self.batch_confirm_open = false;
     }
     pub(super) fn exit_batch_mode(&mut self, cx: &mut Context<Self>) {
         if self.batch_pending {
@@ -15,7 +14,13 @@ impl ClipboardView {
         self.reset_selection();
         cx.notify();
     }
-    pub(super) fn toggle_selection(&mut self, id: i64, extend_range: bool, cx: &mut Context<Self>) {
+    pub(super) fn toggle_selection(
+        &mut self,
+        id: i64,
+        extend_range: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_pending_row_click();
         if self.batch_pending || self.history.loading {
             return;
@@ -36,7 +41,9 @@ impl ClipboardView {
             self.selected_ids.remove(&id);
         }
         self.selection_anchor = Some(id);
-        self.batch_confirm_open = false;
+        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+            self.close_history_confirmation(window, cx);
+        }
         cx.notify();
     }
 
@@ -121,7 +128,7 @@ impl ClipboardView {
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);
         if self.batch_mode {
-            self.toggle_selection(id, extend_range, cx);
+            self.toggle_selection(id, extend_range, window, cx);
             return;
         }
         let can_paste = self.paste_target.is_some_and(|target| {
@@ -135,18 +142,20 @@ impl ClipboardView {
         }
         cx.notify();
     }
-    pub(super) fn select_all_loaded(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn select_all_loaded(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.batch_pending || self.history.loading || self.history.items.is_empty() {
             return;
         }
         self.batch_mode = true;
         self.selected_ids
             .extend(self.history.items.iter().map(|item| item.id));
-        self.batch_confirm_open = false;
+        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+            self.close_history_confirmation(window, cx);
+        }
         cx.notify();
     }
 
-    pub(super) fn merge_selected(&mut self, window: &Window, cx: &mut Context<Self>) {
+    pub(super) fn merge_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.batch_pending || self.selected_ids.len() < 2 || self.paste_pending.is_some() {
             return;
         }
@@ -173,28 +182,35 @@ impl ClipboardView {
         if self.send(command, cx) {
             self.batch_pending = true;
             self.batch_paste_pending = target;
-            self.batch_confirm_open = false;
-            self.message = if target.is_some() {
-                tr(
-                    self.language,
-                    "正在合并并返回原窗口…",
-                    "Merging and returning to the previous window…",
-                )
-            } else {
-                tr(
-                    self.language,
-                    "正在合并所选记录…",
-                    "Merging selected items…",
-                )
+            if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+                self.close_history_confirmation(window, cx);
             }
-            .into();
+            self.set_feedback_message(
+                if target.is_some() {
+                    tr(
+                        self.language,
+                        "正在合并并返回原窗口…",
+                        "Merging and returning to the previous window…",
+                    )
+                } else {
+                    tr(
+                        self.language,
+                        "正在合并所选记录…",
+                        "Merging selected items…",
+                    )
+                }
+                .into(),
+            );
             self.is_error = false;
             cx.notify();
         }
     }
 
     pub(super) fn delete_selected(&mut self, cx: &mut Context<Self>) {
-        if !self.batch_confirm_open || self.batch_pending || self.selected_ids.is_empty() {
+        if !self.confirmation_active(HistoryConfirmation::DeleteSelected)
+            || self.batch_pending
+            || self.selected_ids.is_empty()
+        {
             return;
         }
         let mut ids: Vec<_> = self.selected_ids.iter().copied().collect();

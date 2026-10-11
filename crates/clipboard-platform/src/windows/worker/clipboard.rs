@@ -28,9 +28,9 @@ impl Worker {
 
     pub(super) fn handle_copy(&mut self, id: i64, for_paste: bool, mode: CopyMode) -> Result<()> {
         let item = self.history.item(id)?;
-        let plain_text = (mode == CopyMode::PlainText)
-            .then(|| plain_text_for_copy(&item).map(str::to_owned))
-            .transpose()?;
+        if mode == CopyMode::PlainText {
+            plain_text_for_copy(&item)?;
+        }
         let path_text = (mode == CopyMode::Paths)
             .then(|| item_paths_for_action(&item, &self.staged_dir).map(|paths| paths.join("\n")))
             .transpose()?;
@@ -94,9 +94,7 @@ impl Worker {
                 .is_some_and(|value| !value.is_empty())
                 || rtf.is_some();
         } else {
-            let text = plain_text
-                .or(item.text_content)
-                .context("记录没有可复制的文本")?;
+            let text = item.text_content.context("记录没有可复制的文本")?;
             self.clipboard
                 .set_text(text)
                 .map_err(|error| anyhow!("复制失败：{error}"))?;

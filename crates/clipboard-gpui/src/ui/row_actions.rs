@@ -199,9 +199,9 @@ impl ClipboardView {
                     })
                     .selected(marked)
                     .disabled(self.batch_pending || self.history.loading)
-                    .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         cx.stop_propagation();
-                        this.toggle_selection(id, event.modifiers().shift, cx);
+                        this.toggle_selection(id, event.modifiers().shift, window, cx);
                     })),
             )
             .child(

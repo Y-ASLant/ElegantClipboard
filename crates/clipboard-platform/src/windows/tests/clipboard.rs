@@ -109,21 +109,21 @@ fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
     service.send(Command::CopyPathForPaste(424243))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::CommandFailed {
             kind: FailureKind::Paste(424242),
             ..
         }
     ));
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::CommandFailed {
             kind: FailureKind::Paste(424243),
             ..
         }
     ));
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::ThemeSaved(Ok(ThemePreference::Dark))
     ));
     Ok(())
@@ -137,14 +137,14 @@ fn failed_merge_identifies_only_the_batch_request() -> Result<()> {
     service.send(Command::MergeForPaste(vec![424242, 424243]))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::CommandFailed {
             kind: FailureKind::Merge,
             ..
         }
     ));
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::ThemeSaved(Ok(ThemePreference::Dark))
     ));
     Ok(())

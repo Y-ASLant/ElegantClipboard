@@ -1,27 +1,61 @@
 use super::*;
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::status_bar::StatusBar;
 
 impl ClipboardView {
+    pub(super) fn set_feedback_message(&mut self, message: String) {
+        self.message = message;
+        self.feedback_pending = true;
+    }
+
+    pub(super) fn schedule_feedback(main_window: AnyWindowHandle, cx: &mut Context<Self>) {
+        let owner = cx.weak_entity();
+        // Settings reads the same view, so its implicit window association is not stable.
+        // Defer until the observer releases the view before updating the explicit main window.
+        cx.defer(move |cx| {
+            let _ = main_window.update(cx, |_, window, cx| {
+                owner.update(cx, |this, cx| this.show_feedback(window, cx))
+            });
+        });
+    }
+
+    fn show_feedback(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.feedback_pending) || self.message.is_empty() {
+            return;
+        }
+        let notification = || {
+            if self.is_error {
+                Notification::error(self.message.clone())
+            } else {
+                Notification::success(self.message.clone())
+            }
+        };
+        // A single destination prevents settings operations from notifying both windows.
+        if let Some(handle) = self.settings_window
+            && !window.is_window_active()
+            && handle
+                .update(cx, |_, window, cx| {
+                    window.push_notification(notification().id::<ClipboardView>(), cx);
+                })
+                .is_ok()
+        {
+            return;
+        }
+        window.push_notification(notification().id::<ClipboardView>(), cx);
+    }
+
     fn render_status(&self, cx: &Context<Self>) -> AnyElement {
-        if self.message.is_empty() && !self.reorder_pending {
+        if !self.reorder_pending {
             return div().into_any_element();
         }
         StatusBar::new()
             .flex_shrink_0()
             .px(px(PAGE_PADDING))
-            .left(
-                div()
-                    .text_color(if self.is_error {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(if self.reorder_pending {
-                        tr(self.language, "正在保存顺序…", "Saving order…").to_owned()
-                    } else {
-                        self.message.clone()
-                    }),
-            )
+            .left(div().text_color(cx.theme().muted_foreground).child(tr(
+                self.language,
+                "正在保存顺序…",
+                "Saving order…",
+            )))
             .into_any_element()
     }
 }

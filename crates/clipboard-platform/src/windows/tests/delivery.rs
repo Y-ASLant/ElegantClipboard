@@ -26,24 +26,22 @@ fn command_failures_wait_for_room_in_a_full_event_queue() -> Result<()> {
     for _ in 0..64 {
         assert!(matches!(events.try_recv()?, Event::Status(_)));
     }
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let mut failures = Vec::new();
     let mut capture_error = false;
-    let mut theme_saved = false;
-    while !theme_saved {
-        match events.try_recv() {
-            Ok(Event::CommandFailed { kind, .. }) => failures.push(kind),
-            Ok(Event::BackgroundError(_)) => capture_error = true,
-            Ok(Event::ThemeSaved(Ok(ThemePreference::Dark))) => theme_saved = true,
-            Ok(_) | Err(async_channel::TryRecvError::Empty) => {}
-            Err(error) => return Err(error.into()),
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "worker did not report all command results"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "worker did not report all command results",
+        |event| {
+            match event {
+                Event::CommandFailed { kind, .. } => failures.push(kind),
+                Event::BackgroundError(_) => capture_error = true,
+                Event::ThemeSaved(Ok(ThemePreference::Dark)) => return Some(()),
+                _ => {}
+            }
+            None
+        },
+    );
     assert_eq!(
         failures,
         [FailureKind::Paste(424242), FailureKind::Paste(424243)]

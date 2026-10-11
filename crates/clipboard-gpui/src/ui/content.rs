@@ -250,7 +250,9 @@ impl ClipboardView {
                                         || self.history.loading
                                         || self.selected_ids.len() == self.history.items.len(),
                                 )
-                                .on_click(cx.listener(|this, _, _, cx| this.select_all_loaded(cx))),
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.select_all_loaded(window, cx)
+                                })),
                         )
                         .child(
                             Button::new("batch-exit")
@@ -285,9 +287,6 @@ impl ClipboardView {
                                 .label(tr(self.language, "删除选中", "Delete selected"))
                                 .disabled(self.batch_pending || self.selected_ids.is_empty())
                                 .on_click(cx.listener(|this, _, window, cx| {
-                                    this.batch_confirm_open = true;
-                                    this.clear_confirm_open = false;
-                                    this.group_delete_id = None;
                                     this.open_history_confirmation(
                                         HistoryConfirmation::DeleteSelected,
                                         window,

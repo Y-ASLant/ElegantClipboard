@@ -36,6 +36,16 @@ fn next_snapshot(events: &async_channel::Receiver<Event>, generation: u64) -> Ve
     )
 }
 
+/// Returns the very next event without skipping unexpected replies.
+fn next_event(events: &async_channel::Receiver<Event>) -> Event {
+    wait_for(
+        events,
+        Duration::from_secs(5),
+        "worker did not send the next event",
+        Some,
+    )
+}
+
 /// Polls the event stream until `match_event` returns `Some`, discarding
 /// unrelated events. Panics with `timeout_message` when nothing matches.
 fn wait_for<T>(
@@ -46,10 +56,16 @@ fn wait_for<T>(
 ) -> T {
     let deadline = std::time::Instant::now() + timeout;
     loop {
-        if let Ok(event) = events.try_recv()
-            && let Some(value) = match_event(event)
-        {
-            return value;
+        match events.try_recv() {
+            Ok(event) => {
+                if let Some(value) = match_event(event) {
+                    return value;
+                }
+            }
+            Err(async_channel::TryRecvError::Closed) => {
+                panic!("event stream closed: {timeout_message}");
+            }
+            Err(async_channel::TryRecvError::Empty) => {}
         }
         assert!(std::time::Instant::now() < deadline, "{timeout_message}");
         thread::sleep(Duration::from_millis(10));

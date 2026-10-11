@@ -152,13 +152,21 @@ cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 
 默认 Release EXE 当时被占用，覆盖链接失败（Windows `os error 5`）；未终止现有进程。改用 `cargo build -p elegant-clipboard-gpui --release --locked --target-dir target/feedback-verified` 构建成功，无错误或警告。最终产物 `target/feedback-verified/release/elegant-clipboard-gpui.exe` 使用恢复后的标准 3 秒冒烟启动，退出码 0、stderr 为空。
 
+后续全项目简化验证：124 个 Rust 文件均不超过 500 行；fmt、workspace all-targets check、Clippy `-D warnings`、248 项测试（核心 148、Windows 后端 69、应用 31，另 2 项忽略）和默认路径 Release 构建全部通过。修复前，重复打开当前数据库使 `schema_version` 从 20 增至 24；旧 ZIP 的有效正对照通过后，同名 `clipboard.db` 仍被接受。两项回归修复后通过，并覆盖旧 UNIQUE／缺失索引、重复媒体目录项和失败后目标目录不安装数据。
+
+本轮临时核心 smoke 实跑字面搜索与分组查询、图片／图标备份恢复、旧 ZIP 导入及数据库重开，内容和媒体字节保持一致。独立窗口站剪贴板 smoke 再次全部通过；Release 标准 `--smoke-test` 正常退出。临时核心示例在验证后移除。
+
+使用三条合成记录、独立数据目录和 `--no-monitor` 运行 Release 原生界面，截图核对主窗口创建分组的 Notification 出现后自动消失，底部不再保留操作消息。设置保存通知仅出现在设置窗口；保持设置窗口打开并在主窗口删除分组，通知仅出现在主窗口。显式主窗口句柄投递避免设置渲染改变 GPUI 隐式窗口关联；相同文案的后续操作仍重新通知。
+
+在隔离数据库中临时注入设置写入失败，确认旧勾选值保持、错误通知显示、后台数据占用刷新不覆盖错误；解除故障后可重试并持久化新值。原生交互另覆盖分组删除与批量删除取消、清理确认取消及提交（两条普通记录删除、收藏保留）、确认批量删除最后一条收藏、窗口关闭／Esc 隐藏与托盘唤回、开启隐藏重置后恢复默认组和空搜索。交互桌面剪贴板序列号在整段原生验证前后均为 5363；未启用采集、开机启动或真实粘贴。未重新验收全部拖拽、快捷键冲突、跨应用粘贴和长期运行场景。
+
 此前隔离桌面验收覆盖中文和英文 420×520 主窗口、分组创建/切换/上移、批量模式和托盘操作；这些历史记录不表示本次重构重新执行了全部交互场景，具体范围以对应 `evidence/` 记录为准。
 
 Windows 常驻资源可用 `scripts/measure-gpui-idle.ps1 -ProcessId <GPUI 进程 ID> -OutputPath <CSV 路径>` 采样，默认持续 8 小时、每分钟记录私有内存、工作集、句柄、线程和累计 CPU 时间。脚本只观察进程，不启动或结束应用；执行前应使用独立数据目录并关闭采集与全局快捷键。采样通过不等于完成休眠唤醒和跨应用粘贴验收。
 
 原生窗口已通过启动/退出、中文路径、重复启动唤回，以及 120 条合成数据下的加载更多、字面搜索、空结果、置顶和删除检查；10,000 条合成文本的启动与末尾搜索也已验收。HTML/RTF、图片、文件卡片和对应预览均在隔离目录中截图核验；文件详情另覆盖有效文件、文件夹、受管备份副本、失效路径与最小窗口滚动布局。普通窗口缩放、最大化不覆盖、重启恢复和损坏尺寸回退已在真实窗口验收。富文本卡片之间的真实鼠标拖动也已核对 SQLite 顺序。搜索框、分组创建和正文编辑已在活动 Windows 桌面通过拼音组合输入及候选确认验收。其他窗口交互使用隔离目录并禁用实际采集；图片另存为已打开原生保存对话框并取消，数据占用统计、数据库空间回收、全局清空历史和最小窗口布局也已核对；另在非交互式窗口站中完成文本、HTML/RTF、图片和文件路径的真实系统剪贴板采集与写回，交互桌面的剪贴板序列号未变。Windows x64 独立压缩包已完成 SHA-256 核对和解压运行冒烟。仍未覆盖常见应用之间的真实复制粘贴、其他输入法及输入场景、长时间运行、安装升级或跨平台运行。完整过程见 [验证记录](evidence/windows-ui-2026-09-18.md)、[规模验证](evidence/windows-scale-2026-09-19.md)、[中文输入法验收](evidence/windows-ime-2026-09-19.md)、[隔离剪贴板记录](evidence/windows-private-clipboard-2026-09-19.md)、[文件详情记录](evidence/windows-file-details-2026-09-19.md)、[另存为记录](evidence/windows-save-as-2026-09-19.md)、[数据占用记录](evidence/windows-data-size-2026-09-19.md)、[数据库整理记录](evidence/windows-database-maintenance-2026-09-19.md)、[全局清空记录](evidence/windows-clear-all-history-2026-09-19.md)、[窗口尺寸记录](evidence/windows-window-size-2026-09-19.md)和[独立包验收](evidence/windows-package-2026-09-19.md)。
 
-Windows CI 包含源码行数限制、fmt、all-targets check、Clippy、locked 测试和应用 Release 构建，本轮只在本机执行，未在远端运行。CI 使用 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。
+Windows CI 包含源码行数限制、fmt、all-targets check、Clippy、locked 测试、独立窗口站剪贴板往返 smoke 和应用 Release 构建。剪贴板 smoke 在写入前拒绝交互窗口站 `WinSta0`，使用临时数据库；CI 步骤设置 5 分钟超时。CI 使用 [checkout v7.0.1](https://github.com/actions/checkout/releases/tag/v7.0.1) 与 [rust-cache v2.9.2](https://github.com/Swatinem/rust-cache/releases/tag/v2.9.2)。本轮命令在本机执行，未验证远端 Actions 运行结果。
 
 收藏增量验证见 [2026-09-19 验证记录](evidence/windows-favorites-2026-09-19.md)。
 

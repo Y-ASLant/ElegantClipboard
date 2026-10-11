@@ -53,14 +53,12 @@ impl ClipboardView {
                 }
             }
             GroupChoice::Delete => {
-                self.group_delete_id = self.history.group_id();
                 self.reset_selection();
-                self.clear_confirm_open = false;
                 self.group_editor_open = false;
                 self.group_rename_id = None;
                 self.group_move_id = None;
                 window.focus(&self.list_focus, cx);
-                if let Some(id) = self.group_delete_id {
+                if let Some(id) = self.history.group_id() {
                     self.open_history_confirmation(
                         HistoryConfirmation::DeleteGroup(id),
                         window,
@@ -109,10 +107,8 @@ impl ClipboardView {
         self.close_hover_preview(cx);
         self.search_task = None;
         self.group_move_id = None;
-        self.group_delete_id = None;
-        self.clear_confirm_open = false;
+        self.close_history_confirmation(window, cx);
         self.reset_selection();
-        self.sync_confirmation_dialog(window, cx);
         self.history.set_group(group_id);
         cx.defer_in(window, |this, window, cx| {
             this.refresh_group_select(window, cx)
@@ -270,12 +266,12 @@ impl ClipboardView {
         if self.group_delete_pending {
             return;
         }
-        let Some(id) = self
-            .group_delete_id
-            .filter(|id| self.history.group_id() == Some(*id))
-        else {
+        let Some(HistoryConfirmation::DeleteGroup(id)) = self.confirmation else {
             return;
         };
+        if !self.confirmation_active(HistoryConfirmation::DeleteGroup(id)) {
+            return;
+        }
         if self.send(
             Command::DeleteGroup {
                 id,

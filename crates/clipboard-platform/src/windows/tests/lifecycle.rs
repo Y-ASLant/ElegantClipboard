@@ -10,7 +10,7 @@ fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
     next_snapshot(&events, 0);
     service.send(Command::CompleteOnboarding)?;
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::OnboardingCompleted(Ok(()))
     ));
     drop(service);
@@ -45,19 +45,19 @@ fn invalid_history_row_reports_startup_error() -> Result<()> {
     drop(db);
 
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        match events.try_recv() {
-            Ok(Event::Error(message)) => {
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "启动错误未上报",
+        |event| match event {
+            Event::Error(message) => {
                 assert!(message.contains("读取历史记录失败"), "{message}");
-                break;
+                Some(())
             }
-            Ok(Event::Snapshot { .. }) => bail!("损坏记录被错误地显示为正常快照"),
-            _ => {}
-        }
-        assert!(std::time::Instant::now() < deadline, "启动错误未上报");
-        thread::sleep(Duration::from_millis(10));
-    }
+            Event::Snapshot { .. } => panic!("损坏记录被错误地显示为正常快照"),
+            _ => None,
+        },
+    );
     service.send(Command::Query {
         search: String::new(),
         favorite_only: false,
@@ -66,25 +66,22 @@ fn invalid_history_row_reports_startup_error() -> Result<()> {
         limit: PAGE_SIZE,
         generation: 7,
     })?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        match events.try_recv() {
-            Ok(Event::CommandFailed {
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "查询错误未携带请求代次",
+        |event| match event {
+            Event::CommandFailed {
                 kind: FailureKind::Query(7),
                 message,
-            }) => {
+            } => {
                 assert!(message.contains("读取历史记录失败"), "{message}");
-                break;
+                Some(())
             }
-            Ok(Event::Snapshot { .. }) => bail!("损坏记录被错误地显示为正常快照"),
-            _ => {}
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "查询错误未携带请求代次"
-        );
-        thread::sleep(Duration::from_millis(10));
-    }
+            Event::Snapshot { .. } => panic!("损坏记录被错误地显示为正常快照"),
+            _ => None,
+        },
+    );
     Ok(())
 }
 
@@ -102,17 +99,23 @@ fn instance_lock_and_shutdown_work_even_with_a_full_event_queue() -> Result<()> 
                 .is_ok()
         );
     }
-    service.send(Command::Query {
-        search: String::new(),
-        favorite_only: false,
-        category: ContentCategory::All,
-        group_id: None,
-        limit: PAGE_SIZE,
-        generation: 1,
-    })?;
+    service.send(Command::Capture("shutdown barrier".into()))?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while history.count("shutdown barrier", false)? != 1 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "worker did not reach its blocked snapshot"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
     assert!(show_existing_instance(Some(directory.path().to_owned()))?);
-    // Keep the receiver stalled while both producers reach the full channel.
-    thread::sleep(Duration::from_millis(50));
+    service
+        .instance_signal
+        .as_ref()
+        .unwrap()
+        .wake_received
+        .recv_timeout(Duration::from_secs(5))?;
     drop(service);
     let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
     drop(service);
@@ -152,8 +155,12 @@ fn second_launch_wakes_after_a_full_event_queue_drains() -> Result<()> {
         );
     }
     assert!(show_existing_instance(Some(directory.path().to_owned()))?);
-    // Give the instance listener time to encounter the full queue before draining it.
-    thread::sleep(Duration::from_millis(50));
+    service
+        .instance_signal
+        .as_ref()
+        .unwrap()
+        .wake_received
+        .recv_timeout(Duration::from_secs(5))?;
     for _ in 0..64 {
         assert!(matches!(events.try_recv()?, Event::Status(_)));
     }

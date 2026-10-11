@@ -9,8 +9,8 @@ impl SettingsWindowView {
         };
         let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
-        let app_filter = owner_state.app_filter.clone();
-        let app_filter_pending = owner_state.app_filter_pending;
+        let app_filter = owner_state.app_filter.value.clone();
+        let app_filter_pending = owner_state.app_filter.pending;
         let running_apps = owner_state.running_apps.clone();
         let running_apps_pending = owner_state.running_apps_pending;
         let filter_enable_owner = self.owner.clone();
@@ -28,7 +28,7 @@ impl SettingsWindowView {
                     .disabled(app_filter_pending)
                     .on_change(move |checked, _, cx| {
                         let _ = filter_enable_owner.update(cx, |owner, cx| {
-                            let mut next = owner.app_filter.clone();
+                            let mut next = owner.app_filter.value.clone();
                             next.enabled = *checked;
                             owner.save_app_filter(next, cx);
                         });
@@ -44,9 +44,9 @@ impl SettingsWindowView {
                 ],
                 app_filter.mode,
                 app_filter_pending,
-                |owner| owner.app_filter.mode,
+                |owner| owner.app_filter.value.mode,
                 |owner, mode, cx| {
-                    let mut next = owner.app_filter.clone();
+                    let mut next = owner.app_filter.value.clone();
                     next.mode = mode;
                     owner.save_app_filter(next, cx);
                 },
@@ -108,7 +108,7 @@ impl SettingsWindowView {
                             .disabled(app_filter_pending)
                             .on_click(move |_, _, cx| {
                                 let _ = owner.update(cx, |owner, cx| {
-                                    let next = owner.app_filter.clone().without_rule(&remove_rule);
+                                    let next = owner.app_filter.value.clone().without_rule(&remove_rule);
                                     owner.save_app_filter(next, cx);
                                 });
                             }),
@@ -178,7 +178,7 @@ impl SettingsWindowView {
                                                             .disabled(app_filter_pending || already_added)
                                                             .on_click(move |_, _, cx| {
                                                                 let _ = owner.update(cx, |owner, cx| {
-                                                                    if let Some(next) = owner.app_filter.clone().with_rule(&process) {
+                                                                    if let Some(next) = owner.app_filter.value.clone().with_rule(&process) {
                                                                         owner.save_app_filter(next, cx);
                                                                     }
                                                                 });

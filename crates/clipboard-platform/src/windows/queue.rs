@@ -12,7 +12,7 @@ const MAX_PENDING_CAPTURE_BYTES: usize = 100 * 1024 * 1024;
 
 #[derive(Default)]
 struct QueueState {
-    commands: VecDeque<Command>,
+    commands: VecDeque<(Command, Option<usize>)>,
     pending_commands: usize,
     pending_captures: usize,
     capture_bytes: usize,
@@ -105,7 +105,7 @@ impl CommandQueue {
             }
             state.pending_commands += 1;
         }
-        state.commands.push_back(command);
+        state.commands.push_back((command, bytes));
         self.ready.notify_one();
         Ok(())
     }
@@ -117,10 +117,10 @@ impl CommandQueue {
         let deadline = Instant::now() + timeout;
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         loop {
-            if let Some(command) = state.commands.pop_front() {
+            if let Some((command, bytes)) = state.commands.pop_front() {
                 let permit = CommandPermit {
                     queue: self.clone(),
-                    capture_bytes: capture_bytes(&command),
+                    capture_bytes: bytes,
                 };
                 return Ok((command, permit));
             }

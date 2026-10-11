@@ -53,34 +53,37 @@ fn hover_preview_has_its_own_response_and_reads_full_text() -> Result<()> {
     let id = next_snapshot(&events, 0)[0].id;
     service.send(Command::HoverPreview { id, generation: 7 })?;
     service.send(Command::Preview { id, generation: 3 })?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let mut hover_seen = false;
     let mut preview_seen = false;
-    while !hover_seen || !preview_seen {
-        match events.try_recv() {
-            Ok(Event::HoverPreview {
-                id: actual,
-                generation,
-                result,
-            }) => {
-                assert_eq!((actual, generation), (id, 7));
-                assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
-                hover_seen = true;
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "preview timed out",
+        |event| {
+            match event {
+                Event::HoverPreview {
+                    id: actual,
+                    generation,
+                    result,
+                } => {
+                    assert_eq!((actual, generation), (id, 7));
+                    assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
+                    hover_seen = true;
+                }
+                Event::Preview {
+                    id: actual,
+                    generation,
+                    result,
+                } => {
+                    assert_eq!((actual, generation), (id, 3));
+                    assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
+                    preview_seen = true;
+                }
+                Event::Error(message) => panic!("{message}"),
+                _ => {}
             }
-            Ok(Event::Preview {
-                id: actual,
-                generation,
-                result,
-            }) => {
-                assert_eq!((actual, generation), (id, 3));
-                assert_eq!(result.unwrap(), PreviewContent::Text(text.clone()));
-                preview_seen = true;
-            }
-            Ok(Event::Error(message)) => panic!("{message}"),
-            _ => {}
-        }
-        assert!(std::time::Instant::now() < deadline, "preview timed out");
-        thread::sleep(Duration::from_millis(10));
-    }
+            (hover_seen && preview_seen).then_some(())
+        },
+    );
     Ok(())
 }

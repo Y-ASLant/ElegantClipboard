@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn media_reference_queries_fail_if_a_path_cannot_be_read() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("media reference")).unwrap();
     db.write_connection()
@@ -20,7 +20,7 @@ fn media_reference_queries_fail_if_a_path_cannot_be_read() {
 
 #[test]
 fn clear_history_preserves_pinned_and_favorites() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id1 = repo.insert(make_text_item("normal")).unwrap();
     let id2 = repo.insert(make_text_item("pinned")).unwrap();
@@ -37,7 +37,7 @@ fn clear_history_preserves_pinned_and_favorites() {
 
 #[test]
 fn clear_all() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("all1")).unwrap();
     let id2 = repo.insert(make_text_item("all2")).unwrap();
@@ -48,7 +48,7 @@ fn clear_all() {
 
 #[test]
 fn enforce_max_count() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     for i in 0..5 {
         repo.insert(make_text_item(&format!("enforce_{i}")))
@@ -61,7 +61,7 @@ fn enforce_max_count() {
 
 #[test]
 fn enforce_max_count_no_op_when_under_limit() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("under_limit")).unwrap();
     let (deleted, _, _) = repo.enforce_max_count(10, None).unwrap();
@@ -70,7 +70,7 @@ fn enforce_max_count_no_op_when_under_limit() {
 
 #[test]
 fn enforce_max_count_reports_only_media_from_evicted_rows() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let text = repo.insert(make_text_item("old text")).unwrap();
     let image = repo.insert(make_text_item("old image")).unwrap();

@@ -38,26 +38,26 @@ impl ClipboardView {
                     Ok(Ok(None)) => this.export_pending = false,
                     Ok(Err(error)) => {
                         this.export_pending = false;
-                        this.message = format!(
+                        this.set_feedback_message(format!(
                             "{}: {error}",
                             tr(
                                 this.language,
                                 "无法选择备份路径",
                                 "Unable to select a backup path"
                             )
-                        );
+                        ));
                         this.is_error = true;
                     }
                     Err(error) => {
                         this.export_pending = false;
-                        this.message = format!(
+                        this.set_feedback_message(format!(
                             "{}: {error}",
                             tr(
                                 this.language,
                                 "备份路径选择中断",
                                 "Backup path selection was interrupted"
                             )
-                        );
+                        ));
                         this.is_error = true;
                     }
                 }
@@ -94,26 +94,26 @@ impl ClipboardView {
                     Ok(Ok(None)) => this.save_as_pending = None,
                     Ok(Err(error)) => {
                         this.save_as_pending = None;
-                        this.message = format!(
+                        this.set_feedback_message(format!(
                             "{}: {error}",
                             tr(
                                 this.language,
                                 "无法选择另存为路径",
                                 "Unable to select a destination"
                             )
-                        );
+                        ));
                         this.is_error = true;
                     }
                     Err(error) => {
                         this.save_as_pending = None;
-                        this.message = format!(
+                        this.set_feedback_message(format!(
                             "{}: {error}",
                             tr(
                                 this.language,
                                 "另存为路径选择中断",
                                 "Destination selection was interrupted"
                             )
-                        );
+                        ));
                         this.is_error = true;
                     }
                 }
@@ -133,18 +133,18 @@ impl ClipboardView {
         self.save_as_pending = None;
         match result {
             Ok(destination) => {
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Saved to {}", destination.display())
                 } else {
                     format!("已另存到 {}", destination.display())
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "另存为失败", "Save as failed")
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -157,14 +157,14 @@ impl ClipboardView {
                 self.data_size = Some(size);
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "统计数据占用失败",
                         "Failed to calculate storage usage"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -179,14 +179,14 @@ impl ClipboardView {
             Ok(counts) => self.daily_counts = Some(counts),
             Err(error) => {
                 self.daily_counts = None;
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "统计每日历史失败",
                         "Failed to count daily history"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -200,7 +200,7 @@ impl ClipboardView {
                 let included =
                     report.included_images + report.included_icons + report.included_staged;
                 let missing = report.missing_images + report.missing_icons + report.missing_staged;
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!(
                         "Backed up {} items and {} attachments to {}{}",
                         report.total_items,
@@ -224,14 +224,14 @@ impl ClipboardView {
                             format!("；{missing} 个源附件未包含在备份中")
                         }
                     )
-                };
+                });
                 self.is_error = missing != 0;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "导出备份失败", "Failed to export backup")
-                );
+                ));
                 self.is_error = true;
             }
         }

@@ -97,8 +97,8 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &PageDown, _, cx| {
                 this.select(this.page_step(), cx);
             }))
-            .on_action(cx.listener(|this, _: &SelectAllLoaded, _, cx| {
-                this.select_all_loaded(cx);
+            .on_action(cx.listener(|this, _: &SelectAllLoaded, window, cx| {
+                this.select_all_loaded(window, cx);
             }))
             .on_action(cx.listener(|this, _: &ActivateSelected, window, cx| {
                 if !this.batch_mode

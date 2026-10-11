@@ -47,6 +47,8 @@ pub struct InstanceSignal {
     handle: HANDLE,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
+    #[cfg(test)]
+    pub(crate) wake_received: std::sync::mpsc::Receiver<()>,
 }
 
 impl InstanceSignal {
@@ -57,6 +59,8 @@ impl InstanceSignal {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let raw_handle = handle.0 as usize;
+        #[cfg(test)]
+        let (wake_started, wake_received) = std::sync::mpsc::channel();
         let worker = match thread::Builder::new()
             .name("instance-signal".into())
             .spawn(move || {
@@ -65,6 +69,8 @@ impl InstanceSignal {
                     if worker_stop.load(Ordering::Acquire) {
                         break;
                     }
+                    #[cfg(test)]
+                    let _ = wake_started.send(());
                     if events.send_blocking(Event::ShowWindow).is_err() {
                         break;
                     }
@@ -80,6 +86,8 @@ impl InstanceSignal {
             handle,
             stop,
             worker: Some(worker),
+            #[cfg(test)]
+            wake_received,
         })
     }
 }

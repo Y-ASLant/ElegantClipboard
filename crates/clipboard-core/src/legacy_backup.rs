@@ -1,8 +1,9 @@
 //! Import the ZIP layout written by the Tauri application into an unused GPUI directory.
 
 use crate::backup_common::{
-    MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES, ensure_destination_unused,
-    install_staged_tree, remap_media_rows, remap_staged_payload, verify_staged_database,
+    MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES,
+    check_central_directory_names, ensure_destination_unused, install_staged_tree,
+    remap_media_rows, remap_staged_payload, verify_staged_database,
 };
 use crate::import::{ImportReport, import_legacy_database};
 use anyhow::{Context, Result, bail};
@@ -45,11 +46,15 @@ impl Assets {
 pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<LegacyBackupReport> {
     let data_dir = fs::canonicalize(data_dir).context("无法解析目标数据目录")?;
     ensure_destination_unused(&data_dir, "导入")?;
-    let mut archive = ZipArchive::new(File::open(archive_path).context("无法打开旧版备份")?)
-        .context("所选文件不是有效的 ZIP 备份")?;
-    if archive.len() > MAX_ENTRIES {
-        bail!("备份中的文件数量超过限制");
-    }
+    let source = File::open(archive_path).context("无法打开旧版备份")?;
+    let mut raw_source = source.try_clone()?;
+    let mut archive = ZipArchive::new(source).context("所选文件不是有效的 ZIP 备份")?;
+    check_central_directory_names(
+        &mut raw_source,
+        archive.central_directory_start(),
+        archive.len(),
+        MAX_ENTRIES,
+    )?;
     let stage = tempfile::Builder::new()
         .prefix(".clipboard-legacy-restore-")
         .tempdir_in(&data_dir)?;
@@ -123,18 +128,15 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
     let mut unbundled_images = 0;
     {
         let tx = connection.transaction()?;
-        remap_media_rows(&tx, |_id, image, icon, payload| {
-            let mapped_image = image
-                .as_deref()
-                .and_then(|raw| rebase_path(raw, "images", &assets.images, &data_dir));
+        remap_media_rows(&tx, |image, icon, payload| {
+            let mapped_image =
+                image.and_then(|raw| rebase_path(raw, "images", &assets.images, &data_dir));
             if image.is_some() && mapped_image.is_none() {
                 unbundled_images += 1;
             }
-            let mapped_icon = icon
-                .as_deref()
-                .and_then(|raw| rebase_path(raw, "icons", &assets.icons, &data_dir));
+            let mapped_icon =
+                icon.and_then(|raw| rebase_path(raw, "icons", &assets.icons, &data_dir));
             let mapped_payload = payload
-                .as_deref()
                 .map(|raw| {
                     remap_staged_payload(raw, |path| {
                         Ok(rebase_path(path, "staged", &assets.staged, &data_dir))
@@ -206,12 +208,20 @@ fn rebase_path(
 }
 
 #[cfg(test)]
+#[path = "backup/legacy_media_tests.rs"]
+mod media_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{History, PreviewContent};
     use rusqlite::{backup::Backup, params};
     use serde_json::Value;
-    use std::{io::Write, path::PathBuf, time::Duration};
+    use std::{
+        io::{Read, Write},
+        path::PathBuf,
+        time::Duration,
+    };
     use zip::{ZipWriter, write::SimpleFileOptions};
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\nsynthetic";
@@ -323,6 +333,92 @@ mod tests {
             0
         );
         assert!(import_legacy_backup(&archive_path, &target).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn old_zip_rejects_duplicate_database_and_media_without_installing() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("source.db");
+        let history = History::open(source.clone())?;
+        let id = history.capture("preserved legacy text")?.unwrap();
+        crate::import::checkpoint_staged_database(&history.db.write_connection().lock())?;
+        drop(history);
+        let database = fs::read(source)?;
+
+        let valid = directory.path().join("valid.zip");
+        let mut zip = ZipWriter::new(File::create(&valid)?);
+        zip.start_file("clipboard.db", SimpleFileOptions::default())?;
+        zip.write_all(&database)?;
+        for name in ["images/photo.png", "icons/app.ico", "staged/draft.txt"] {
+            zip.start_file(name, SimpleFileOptions::default())?;
+            zip.write_all(PNG)?;
+        }
+        zip.finish()?;
+        let control = directory.path().join("control");
+        fs::create_dir_all(&control)?;
+        let report = import_legacy_backup(&valid, &control).context("valid ZIP control failed")?;
+        assert_eq!(report.items.total_items, 1);
+        assert_eq!(
+            History::open(control.join("clipboard.db"))?.text(id)?,
+            "preserved legacy text"
+        );
+
+        for (index, duplicate) in [
+            "clipboard.db",
+            "images/photo.png",
+            "icons/app.ico",
+            "staged/draft.txt",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let archive_path = directory.path().join(format!("duplicate-{index}.zip"));
+            let mut zip = ZipWriter::new(File::create(&archive_path)?);
+            zip.start_file("clipboard.db", SimpleFileOptions::default())?;
+            zip.write_all(&database)?;
+            for name in ["images/photo.png", "icons/app.ico", "staged/draft.txt"] {
+                zip.start_file(name, SimpleFileOptions::default())?;
+                zip.write_all(PNG)?;
+            }
+            // Rename a same-length placeholder in both ZIP headers: ZipWriter
+            // itself rejects duplicate names before writing the archive.
+            let placeholder = "Q".repeat(duplicate.len());
+            zip.start_file(&placeholder, SimpleFileOptions::default())?;
+            zip.write_all(if duplicate == "clipboard.db" {
+                &database
+            } else {
+                PNG
+            })?;
+            zip.finish()?;
+            let mut bytes = fs::read(&archive_path)?;
+            let offsets: Vec<_> = bytes
+                .windows(placeholder.len())
+                .enumerate()
+                .filter_map(|(offset, chunk)| (chunk == placeholder.as_bytes()).then_some(offset))
+                .collect();
+            assert_eq!(offsets.len(), 2);
+            for offset in offsets {
+                bytes[offset..offset + duplicate.len()].copy_from_slice(duplicate.as_bytes());
+            }
+            fs::write(&archive_path, bytes)?;
+            let mut parsed = ZipArchive::new(File::open(&archive_path)?)?;
+            let mut contents = Vec::new();
+            parsed.by_name(duplicate)?.read_to_end(&mut contents)?;
+            assert_eq!(
+                contents.as_slice(),
+                if duplicate == "clipboard.db" {
+                    database.as_slice()
+                } else {
+                    PNG
+                }
+            );
+            let target = directory.path().join(format!("restored-{index}"));
+            fs::create_dir_all(&target)?;
+            let result = import_legacy_backup(&archive_path, &target);
+            assert!(result.is_err(), "accepted duplicate {duplicate}");
+            assert_eq!(fs::read_dir(&target)?.count(), 0);
+        }
         Ok(())
     }
 

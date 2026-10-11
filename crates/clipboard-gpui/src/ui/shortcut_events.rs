@@ -6,7 +6,7 @@ impl ClipboardView {
         match result {
             Ok(choice) => {
                 self.hotkey_choice = choice;
-                self.message = if choice == HotkeyPreference::Disabled {
+                self.set_feedback_message(if choice == HotkeyPreference::Disabled {
                     tr(
                         self.language,
                         "全局快捷键已关闭，可从托盘唤出窗口",
@@ -17,16 +17,16 @@ impl ClipboardView {
                     format!("Shortcut saved: {}", hotkey_label(self.language, choice))
                 } else {
                     format!("已保存唤出快捷键：{}", choice.label())
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
                 self.hotkey = None;
                 let restore_error = self.restore_hotkey();
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "快捷键保存失败", "Failed to save shortcut")
-                );
+                ));
                 if let Some(restore_error) = restore_error {
                     self.message.push_str(&format!("; {restore_error}"));
                 }
@@ -41,15 +41,17 @@ impl ClipboardView {
             Ok(enabled) => {
                 self.quick_paste_enabled = enabled;
                 if let Some(warning) = self.quick_paste_registration_warning.take() {
-                    self.message = warning;
+                    self.set_feedback_message(warning);
                     self.is_error = true;
                 } else {
-                    self.message = tr(
-                        self.language,
-                        "快速粘贴快捷键设置已保存",
-                        "Quick paste shortcuts setting saved",
-                    )
-                    .into();
+                    self.set_feedback_message(
+                        tr(
+                            self.language,
+                            "快速粘贴快捷键设置已保存",
+                            "Quick paste shortcuts setting saved",
+                        )
+                        .into(),
+                    );
                     self.is_error = false;
                 }
             }
@@ -66,14 +68,14 @@ impl ClipboardView {
                 } else if !self.quick_paste_enabled {
                     self.paste_hotkeys = None;
                 }
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "保存快速粘贴快捷键设置失败",
                         "Failed to save quick paste shortcuts setting",
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -91,15 +93,17 @@ impl ClipboardView {
             Ok(shortcuts) => {
                 self.paste_shortcuts = *shortcuts;
                 if let Some(warning) = self.quick_paste_registration_warning.take() {
-                    self.message = warning;
+                    self.set_feedback_message(warning);
                     self.is_error = true;
                 } else {
-                    self.message = tr(
-                        self.language,
-                        "快速粘贴槽位快捷键已保存",
-                        "Quick paste slot shortcut saved",
-                    )
-                    .into();
+                    self.set_feedback_message(
+                        tr(
+                            self.language,
+                            "快速粘贴槽位快捷键已保存",
+                            "Quick paste slot shortcut saved",
+                        )
+                        .into(),
+                    );
                     self.is_error = false;
                 }
                 self.paste_shortcut_status = Some((self.message.clone(), self.is_error));
@@ -109,7 +113,7 @@ impl ClipboardView {
                 self.paste_hotkeys = None;
                 self.quick_paste_registration_warning = None;
                 let restore_error = self.restore_paste_hotkeys();
-                self.message = error;
+                self.set_feedback_message(error);
                 if let Some(error) = restore_error {
                     self.message.push_str(&format!("; {error}"));
                 }
@@ -142,16 +146,18 @@ impl ClipboardView {
                 }
             }
             Ok(_) => {
-                self.message = tr(
-                    self.language,
-                    "目标窗口已变化，快速粘贴已取消",
-                    "Target window changed; quick paste was canceled",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "目标窗口已变化，快速粘贴已取消",
+                        "Target window changed; quick paste was canceled",
+                    )
+                    .into(),
+                );
                 self.is_error = true;
             }
             Err(error) => {
-                self.message = error;
+                self.set_feedback_message(error);
                 self.is_error = true;
             }
         }

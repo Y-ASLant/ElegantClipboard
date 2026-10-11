@@ -1,4 +1,5 @@
 use super::{ClipboardRepository, ConditionBuilder};
+use rusqlite::params_from_iter;
 use tracing::debug;
 
 impl ClipboardRepository {
@@ -134,7 +135,6 @@ impl ClipboardRepository {
             "SELECT id FROM clipboard_items{} ORDER BY created_at ASC, id ASC LIMIT ?",
             candidates.where_clause()
         );
-        let params = candidates.param_refs();
         let mut image_paths = Vec::new();
         let mut file_payloads = Vec::new();
         {
@@ -142,7 +142,7 @@ impl ClipboardRepository {
                 "SELECT image_path, file_payload FROM clipboard_items WHERE id IN ({selector})"
             );
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params.as_slice(), |row| {
+            let rows = stmt.query_map(params_from_iter(&candidates.params), |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
                     row.get::<_, Option<String>>(1)?,
@@ -156,7 +156,7 @@ impl ClipboardRepository {
         }
         let deleted = conn.execute(
             &format!("DELETE FROM clipboard_items WHERE id IN ({selector})"),
-            params.as_slice(),
+            params_from_iter(&candidates.params),
         )? as i64;
 
         debug!(

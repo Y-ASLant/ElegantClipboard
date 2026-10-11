@@ -64,8 +64,8 @@ impl SettingsWindowView {
         };
         let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
-        let audio = owner_state.audio;
-        let pending = owner_state.audio_pending;
+        let audio = owner_state.audio.value;
+        let pending = owner_state.audio.pending;
         let (switch_id, timing_id, preview_id) = channel.ids();
         let enabled = channel.enabled(audio);
         let timing = channel.timing(audio);
@@ -87,9 +87,9 @@ impl SettingsWindowView {
                 ],
                 timing,
                 pending || !enabled,
-                move |owner: &ClipboardView| channel.timing(owner.audio),
+                move |owner: &ClipboardView| channel.timing(owner.audio.value),
                 move |owner, timing, cx| {
-                    let mut next = owner.audio;
+                    let mut next = owner.audio.value;
                     channel.set_timing(&mut next, timing);
                     owner.save_audio(next, cx);
                 },
@@ -103,12 +103,14 @@ impl SettingsWindowView {
                         let played = sound::play(channel.sound());
                         if !played {
                             let _ = preview_owner.update(cx, |owner, cx| {
-                                owner.message = tr(
-                                    owner.language,
-                                    "音频设备不可用，无法试听",
-                                    "Audio device unavailable; preview could not play",
-                                )
-                                .into();
+                                owner.set_feedback_message(
+                                    tr(
+                                        owner.language,
+                                        "音频设备不可用，无法试听",
+                                        "Audio device unavailable; preview could not play",
+                                    )
+                                    .into(),
+                                );
                                 owner.is_error = true;
                                 cx.notify();
                             });
@@ -122,7 +124,7 @@ impl SettingsWindowView {
                     .disabled(pending)
                     .on_change(move |checked, _, cx| {
                         let _ = toggle_owner.update(cx, |owner, cx| {
-                            let mut next = owner.audio;
+                            let mut next = owner.audio.value;
                             channel.set_enabled(&mut next, *checked);
                             owner.save_audio(next, cx);
                         });

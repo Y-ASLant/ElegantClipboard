@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn group_create_and_list() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = GroupRepository::new(&db);
     let group = repo.create("Test Group", Some("#ff0000")).unwrap();
     assert_eq!(group.name, "Test Group");
@@ -16,7 +16,7 @@ fn group_create_and_list() {
 
 #[test]
 fn group_rename() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = GroupRepository::new(&db);
     let group = repo.create("Old Name", None).unwrap();
     repo.rename(group.id, "New Name").unwrap();
@@ -26,7 +26,7 @@ fn group_rename() {
 
 #[test]
 fn group_delete() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = GroupRepository::new(&db);
     let group = repo.create("To Delete", None).unwrap();
     repo.delete(group.id).unwrap();
@@ -35,7 +35,7 @@ fn group_delete() {
 
 #[test]
 fn group_delete_cascades_items() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
     let group = group_repo.create("Cascade Group", None).unwrap();
 
@@ -50,7 +50,7 @@ fn group_delete_cascades_items() {
 
 #[test]
 fn group_move_item() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
     let group = group_repo.create("Move Target", None).unwrap();
 
@@ -69,7 +69,7 @@ fn group_move_item() {
 
 #[test]
 fn group_item_count() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
     let group = group_repo.create("Counting", None).unwrap();
 

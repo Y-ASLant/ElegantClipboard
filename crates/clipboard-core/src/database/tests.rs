@@ -1,26 +1,14 @@
 use super::*;
 
-fn temp_db() -> Database {
-    let dir = std::env::temp_dir().join(format!("ec_test_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!("test_{}.db", uuid_simple()));
-    Database::new(path).unwrap()
-}
-
-fn uuid_simple() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::SystemTime;
-    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("{nanos}_{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
+fn temp_db() -> (tempfile::TempDir, Database) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::new(dir.path().join("test.db")).unwrap();
+    (dir, db)
 }
 
 #[test]
 fn read_write_separation() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     {
         let w = db.write_connection();
         let w = w.lock();
@@ -44,7 +32,7 @@ fn read_write_separation() {
 
 #[test]
 fn clone_shares_connections() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let db2 = db.clone();
     {
         let w = db.write_connection();
@@ -210,9 +198,8 @@ fn migration_10_adds_url_content_type_from_legacy_schema() {
 
 #[test]
 fn migration_6_accepts_legacy_url_content_type_without_group_id() {
-    let dir = std::env::temp_dir().join(format!("ec_mig6_{}", uuid_simple()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.db");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.db");
 
     {
         let conn = Connection::open(&path).unwrap();
@@ -280,4 +267,76 @@ fn migration_6_accepts_legacy_url_content_type_without_group_id() {
         )
         .unwrap();
     assert_eq!(video_count, 1);
+}
+
+#[test]
+fn content_hash_index_migration_is_stable_after_reopening() {
+    for state in ["current", "unique", "missing"] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("indexes.db");
+        let db = Database::new(path.clone()).unwrap();
+        {
+            let conn = db.write_connection();
+            let conn = conn.lock();
+            if state != "current" {
+                conn.execute_batch(
+                    "DROP INDEX idx_clipboard_hash_default;
+                     DROP INDEX idx_clipboard_hash_group;",
+                )
+                .unwrap();
+            }
+            if state == "unique" {
+                conn.execute_batch(
+                    "CREATE UNIQUE INDEX idx_clipboard_hash_default
+                       ON clipboard_items(content_hash) WHERE group_id IS NULL;
+                     CREATE UNIQUE INDEX idx_clipboard_hash_group
+                       ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;",
+                )
+                .unwrap();
+            }
+        }
+        drop(db);
+
+        let db = Database::new(path.clone()).unwrap();
+        let schema_version: i64 = {
+            let conn = db.write_connection();
+            let conn = conn.lock();
+            let indexes: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_index_list('clipboard_items')
+                     WHERE name IN ('idx_clipboard_hash_default', 'idx_clipboard_hash_group')
+                       AND \"unique\" = 0",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(indexes, 2, "{state}");
+            conn.execute_batch(
+                "INSERT INTO groups (id, name) VALUES (1, 'group');
+                 INSERT INTO clipboard_items (content_type, content_hash, semantic_hash, group_id)
+                 VALUES ('text', 'same', 'same', NULL), ('text', 'same', 'same', NULL),
+                        ('text', 'same', 'same', 1), ('text', 'same', 'same', 1);",
+            )
+            .unwrap();
+            conn.query_row("PRAGMA schema_version", [], |row| row.get(0))
+                .unwrap()
+        };
+        drop(db);
+
+        let reopened = Database::new(path).unwrap();
+        let conn = reopened.read_connection();
+        let conn = conn.lock();
+        let reopened_version: i64 = conn
+            .query_row("PRAGMA schema_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(reopened_version, schema_version, "{state}");
+        let duplicates: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE content_hash = 'same'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(duplicates, 4, "{state}");
+    }
 }

@@ -36,12 +36,12 @@ impl ClipboardView {
                         cx.notify();
                     });
                 }));
-                self.message = tr(self.language, "顺序已保存", "Order saved").into();
+                self.set_feedback_message(tr(self.language, "顺序已保存", "Order saved").into());
                 self.is_error = false;
             }
             Ok(()) => {}
             Err(error) => {
-                self.message = error;
+                self.set_feedback_message(error);
                 self.is_error = true;
             }
         }
@@ -64,12 +64,14 @@ impl ClipboardView {
         self.history_drag_direction = 0;
         let target = self.drop_target.take();
         if !self.valid_drag(drag) {
-            self.message = tr(
-                self.language,
-                "列表已变化，请重新拖动",
-                "The list changed; drag again.",
-            )
-            .into();
+            self.set_feedback_message(
+                tr(
+                    self.language,
+                    "列表已变化，请重新拖动",
+                    "The list changed; drag again.",
+                )
+                .into(),
+            );
             self.is_error = true;
         } else if let Some(target) = target.filter(|target| target.allowed && target.id != drag.id)
             && self.send(

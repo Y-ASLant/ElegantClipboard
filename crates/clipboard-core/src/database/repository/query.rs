@@ -1,5 +1,5 @@
 use super::{ClipboardItem, ClipboardRepository, ConditionBuilder, QueryOptions};
-use rusqlite::{OptionalExtension, Row, params};
+use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 
 impl ClipboardRepository {
     pub fn get_by_id(&self, id: i64) -> Result<Option<ClipboardItem>, rusqlite::Error> {
@@ -71,7 +71,7 @@ impl ClipboardRepository {
             "SELECT {columns} FROM clipboard_items{} ORDER BY {order} LIMIT 1 OFFSET ?",
             builder.where_clause()
         );
-        conn.query_row(&sql, builder.param_refs().as_slice(), map)
+        conn.query_row(&sql, params_from_iter(&builder.params), map)
             .optional()
     }
 
@@ -117,9 +117,8 @@ impl ClipboardRepository {
             builder = builder.param(limit).param(options.offset.unwrap_or(0));
         }
 
-        let params_refs = builder.param_refs();
         let mut stmt = conn.prepare(&sql)?;
-        stmt.query_map(params_refs.as_slice(), Self::row_to_item)?
+        stmt.query_map(params_from_iter(&builder.params), Self::row_to_item)?
             .collect()
     }
 

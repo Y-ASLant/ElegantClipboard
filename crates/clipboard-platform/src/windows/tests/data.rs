@@ -47,7 +47,7 @@ fn database_maintenance_preserves_history_and_returns_updated_size() -> Result<(
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
     service.send(Command::OptimizeDatabase)?;
-    match events.recv_blocking()? {
+    match next_event(&events) {
         Event::DatabaseOptimized(size) => {
             assert!(size.database_bytes > 0);
             assert_eq!(size.total_bytes, size.database_bytes);

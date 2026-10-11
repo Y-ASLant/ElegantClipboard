@@ -65,7 +65,7 @@ impl Worker {
             .preferences
             .set_app_filter(&preference)
             .map(|_| {
-                self.app_filter = *preference.clone();
+                self.app_filter = (*preference).clone();
                 preference
             })
             .map_err(|error| error.to_string());

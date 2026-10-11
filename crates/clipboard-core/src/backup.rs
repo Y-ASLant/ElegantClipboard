@@ -1,7 +1,8 @@
 use crate::History;
 use crate::backup_common::{
-    MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES, ensure_destination_unused,
-    install_staged_tree, remap_media_rows, remap_staged_payload, verify_staged_database,
+    MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES,
+    check_central_directory_names, ensure_destination_unused, install_staged_tree,
+    remap_media_rows, remap_staged_payload, verify_staged_database,
 };
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, backup::Backup, params};
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -336,19 +337,16 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     let mut restored_db = Connection::open(&staged_db)?;
     let tx = restored_db.transaction()?;
     tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
-    remap_media_rows(&tx, |_id, image, icon, payload| {
+    remap_media_rows(&tx, |image, icon, payload| {
         let mapped_image = image
-            .as_deref()
             .map(|raw| rebase_archive_path(raw, "images", &extracted, data_dir))
             .transpose()?
             .flatten();
         let mapped_icon = icon
-            .as_deref()
             .map(|raw| rebase_archive_path(raw, "icons", &extracted, data_dir))
             .transpose()?
             .flatten();
         let mapped_payload = payload
-            .as_deref()
             .map(|raw| {
                 remap_staged_payload(raw, |path| {
                     rebase_archive_path(path, "staged", &extracted, data_dir)
@@ -417,44 +415,6 @@ fn preflight_archive(
     }
     if !names.contains("manifest.json") || !names.contains("clipboard.db") {
         bail!("备份缺少格式说明或数据库");
-    }
-    Ok(())
-}
-
-// zip 8.x keeps central-directory entries in an IndexMap and silently replaces
-// earlier entries with the same raw name. Inspect the directory before trusting
-// ZipArchive::len() or by_name() for restore decisions.
-fn check_central_directory_names(
-    file: &mut File,
-    start: u64,
-    parsed_count: usize,
-    max_entries: usize,
-) -> Result<()> {
-    file.seek(SeekFrom::Start(start))?;
-    let mut names = HashSet::new();
-    loop {
-        let mut signature = [0u8; 4];
-        file.read_exact(&mut signature)?;
-        if signature != *b"PK\x01\x02" {
-            break;
-        }
-        let mut header = [0u8; 42];
-        file.read_exact(&mut header)?;
-        let name_len = u16::from_le_bytes([header[24], header[25]]) as usize;
-        let extra_len = u16::from_le_bytes([header[26], header[27]]) as i64;
-        let comment_len = u16::from_le_bytes([header[28], header[29]]) as i64;
-        let mut name = vec![0; name_len];
-        file.read_exact(&mut name)?;
-        if !names.insert(name) {
-            bail!("备份包含重复条目");
-        }
-        if names.len() > max_entries {
-            bail!("备份中的文件数量超过限制");
-        }
-        file.seek(SeekFrom::Current(extra_len + comment_len))?;
-    }
-    if names.len() != parsed_count {
-        bail!("备份目录条目数量不一致");
     }
     Ok(())
 }

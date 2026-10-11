@@ -41,7 +41,12 @@ impl ClipboardView {
             if matches!(event, InputEvent::Change) {
                 this.cancel_pending_row_click();
                 this.close_hover_preview(cx);
-                this.clear_confirm_open = false;
+                if matches!(
+                    this.confirmation,
+                    Some(HistoryConfirmation::ClearHistory(_))
+                ) {
+                    this.close_history_confirmation(window, cx);
+                }
                 this.reset_selection();
                 this.sync_confirmation_dialog(window, cx);
                 this.history.begin_search();
@@ -143,12 +148,14 @@ impl ClipboardView {
                     }
                     this.paste_target = paste::is_external_target(window, target).then_some(target);
                     if this.paste_target.is_some() {
-                        this.message = tr(
-                            this.language,
-                            "已从原窗口唤出，可选择记录并粘贴",
-                            "Opened from the previous window; select an item to paste.",
-                        )
-                        .into();
+                        this.set_feedback_message(
+                            tr(
+                                this.language,
+                                "已从原窗口唤出，可选择记录并粘贴",
+                                "Opened from the previous window; select an item to paste.",
+                            )
+                            .into(),
+                        );
                         this.is_error = false;
                     }
                     this.show_window(window, cx);
@@ -279,12 +286,12 @@ impl ClipboardView {
             let had_pending = this.paste_pending.take().is_some();
             let had_batch_pending = this.batch_paste_pending.take().is_some();
             if had_target || had_pending || had_batch_pending {
-                this.message = tr(
+                this.set_feedback_message(tr(
                     this.language,
                     "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出",
                     "The history window lost focus. Open it again from the target app to paste automatically.",
                 )
-                .into();
+                .into());
                 this.is_error = false;
                 cx.notify();
             }
@@ -293,6 +300,12 @@ impl ClipboardView {
         let bounds = cx.observe_window_bounds(window, |this, window, cx| {
             this.window_bounds_changed(window, cx);
         });
+        let feedback = cx.observe_self(move |this, cx| {
+            if this.feedback_pending {
+                Self::schedule_feedback(main_window, cx);
+            }
+        });
+        Self::schedule_feedback(main_window, cx);
         let list_focus = cx.focus_handle();
         if startup.show_onboarding && !onboarding_completed {
             window.focus(&list_focus, cx);
@@ -330,16 +343,13 @@ impl ClipboardView {
             group_save_pending: false,
             group_edit_error: None,
             group_reorder_pending: false,
-            group_delete_id: None,
             group_delete_pending: false,
-            clear_confirm_open: false,
             clear_pending: false,
             clear_all_error: None,
             clear_all_pending: false,
             batch_mode: false,
             selected_ids: HashSet::new(),
             selection_anchor: None,
-            batch_confirm_open: false,
             batch_pending: false,
             batch_paste_pending: None,
             confirmation: None,
@@ -390,15 +400,19 @@ impl ClipboardView {
             paste_shortcuts_pending: None,
             paste_shortcut_status: None,
             quick_paste_pending: None,
-            autostart: autostart.unwrap_or(false),
-            autostart_pending: false,
+            autostart: PendingPref {
+                value: autostart.unwrap_or(false),
+                pending: false,
+            },
             data_size: None,
             daily_counts: None,
             data_size_pending: false,
             database_maintenance_pending: false,
             export_pending: false,
-            window_position,
-            window_position_pending: false,
+            window_position: PendingPref {
+                value: window_position,
+                pending: false,
+            },
             persist_window_size,
             persist_window_size_pending: false,
             auto_reset_state: PendingPref {
@@ -421,20 +435,28 @@ impl ClipboardView {
                 value: paste_close_window,
                 pending: false,
             },
-            paste_key,
-            paste_key_pending: false,
+            paste_key: PendingPref {
+                value: paste_key,
+                pending: false,
+            },
             paste_move_to_top: PendingPref {
                 value: paste_move_to_top,
                 pending: false,
             },
             display,
             display_pending: false,
-            audio,
-            audio_pending: false,
-            monitor_types,
-            monitor_types_pending: false,
-            app_filter,
-            app_filter_pending: false,
+            audio: PendingPref {
+                value: audio,
+                pending: false,
+            },
+            monitor_types: PendingPref {
+                value: monitor_types,
+                pending: false,
+            },
+            app_filter: PendingPref {
+                value: app_filter,
+                pending: false,
+            },
             running_apps: Vec::new(),
             running_apps_pending: false,
             last_window_size: initial_window_size,
@@ -455,12 +477,14 @@ impl ClipboardView {
                 startup_errors.join("；")
             },
             is_error: !startup_errors.is_empty(),
+            feedback_pending: !startup_errors.is_empty(),
             _subscriptions: vec![
                 subscription,
                 group_subscription,
                 appearance,
                 activation,
                 bounds,
+                feedback,
             ],
             _events: event_task,
             search_task: None,

@@ -28,14 +28,16 @@ impl ClipboardView {
         self.group_reorder_pending = false;
         match result {
             Ok(()) => {
-                self.message = tr(self.language, "分组顺序已保存", "Group order saved").into();
+                self.set_feedback_message(
+                    tr(self.language, "分组顺序已保存", "Group order saved").into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "分组排序失败", "Failed to reorder groups")
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -58,18 +60,18 @@ impl ClipboardView {
                 self.group_name_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 self.select_group(Some(group.id), window, cx);
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Group created: {}", group.name)
                 } else {
                     format!("已创建分组：{}", group.name)
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "创建分组失败", "Failed to create group")
-                );
+                ));
                 self.is_error = true;
                 self.group_edit_error = Some(self.message.clone());
                 window.refresh();
@@ -94,18 +96,18 @@ impl ClipboardView {
                 self.group_name_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
                 window.focus(&self.list_focus, cx);
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Group renamed to: {}", group.name)
                 } else {
                     format!("分组已重命名为：{}", group.name)
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "重命名分组失败", "Failed to rename group")
-                );
+                ));
                 self.is_error = true;
                 self.group_edit_error = Some(self.message.clone());
                 window.refresh();
@@ -121,45 +123,57 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         self.group_delete_pending = false;
-        self.group_delete_id = None;
+        if matches!(self.confirmation, Some(HistoryConfirmation::DeleteGroup(_))) {
+            self.close_history_confirmation(window, cx);
+        }
         match result {
             Ok(count) => {
                 window.focus(&self.list_focus, cx);
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Group deleted; {count} items moved to the default group")
                 } else {
                     format!("已删除分组，{count} 条记录移至默认分组")
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "删除分组失败", "Failed to delete group")
-                );
+                ));
                 self.is_error = true;
             }
         }
         true
     }
 
-    pub(super) fn apply_history_cleared(&mut self, result: Result<i64, String>) -> bool {
+    pub(super) fn apply_history_cleared(
+        &mut self,
+        result: Result<i64, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.clear_pending = false;
-        self.clear_confirm_open = false;
+        if matches!(
+            self.confirmation,
+            Some(HistoryConfirmation::ClearHistory(_))
+        ) {
+            self.close_history_confirmation(window, cx);
+        }
         match result {
             Ok(count) => {
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Cleared {count} unpinned, non-favorite items")
                 } else {
                     format!("已清理 {count} 条未置顶且未收藏的记录")
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "清理历史失败", "Failed to clear history")
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -182,11 +196,11 @@ impl ClipboardView {
                 self.preview_editing = false;
                 self.preview_edit_requested = false;
                 self.preview_save_pending = false;
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Deleted all {count} items; settings and groups were kept")
                 } else {
                     format!("已删除全部 {count} 条历史，设置和分组已保留")
-                };
+                });
                 self.is_error = false;
                 self.clear_all_error = None;
                 if let Some(handle) = self.settings_window {
@@ -201,14 +215,14 @@ impl ClipboardView {
                 window.focus(&self.list_focus, cx);
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "删除全部历史失败",
                         "Failed to delete all history"
                     )
-                );
+                ));
                 self.is_error = true;
                 self.clear_all_error = Some(self.message.clone());
                 cx.refresh_windows();
@@ -217,28 +231,35 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn apply_batch_deleted(&mut self, result: Result<i64, String>) -> bool {
+    pub(super) fn apply_batch_deleted(
+        &mut self,
+        result: Result<i64, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.batch_pending = false;
-        self.batch_confirm_open = false;
+        if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+            self.close_history_confirmation(window, cx);
+        }
         match result {
             Ok(count) => {
                 self.reset_selection();
-                self.message = if self.language == LanguagePreference::English {
+                self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Deleted {count} selected items")
                 } else {
                     format!("已删除 {count} 条选中记录")
-                };
+                });
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "批量删除失败",
                         "Failed to delete selected items"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -250,19 +271,21 @@ impl ClipboardView {
         match result {
             Ok(()) => {
                 self.group_move_id = None;
-                self.message = tr(
-                    self.language,
-                    "已移动到目标分组",
-                    "Moved to the selected group",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "已移动到目标分组",
+                        "Moved to the selected group",
+                    )
+                    .into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "移动分组失败", "Failed to move item")
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -298,9 +321,6 @@ impl ClipboardView {
             .is_some_and(|id| !loaded_ids.contains(&id))
         {
             self.selection_anchor = None;
-        }
-        if self.selected_ids.is_empty() && !self.batch_pending {
-            self.batch_confirm_open = false;
         }
         if !self.group_move_pending
             && self

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn list_default_ordering() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("older")).unwrap();
     repo.insert(make_text_item("newer")).unwrap();
@@ -14,7 +14,7 @@ fn list_default_ordering() {
 
 #[test]
 fn list_reports_invalid_row_instead_of_silently_skipping_it() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let valid_id = repo.insert(make_text_item("valid")).unwrap();
     let invalid_id = repo.insert(make_text_item("invalid")).unwrap();
@@ -41,7 +41,7 @@ fn list_reports_invalid_row_instead_of_silently_skipping_it() {
 
 #[test]
 fn list_with_search() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("hello world")).unwrap();
     repo.insert(make_text_item("goodbye world")).unwrap();
@@ -104,7 +104,7 @@ fn search_reuses_escaped_pattern_with_filters_and_pagination() {
 
 #[test]
 fn list_with_content_type_filter() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("text item")).unwrap();
 
@@ -128,7 +128,7 @@ fn list_with_content_type_filter() {
 
 #[test]
 fn list_with_limit_and_offset() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     for i in 0..5 {
         repo.insert(make_text_item(&format!("item_{i}"))).unwrap();
@@ -146,7 +146,7 @@ fn list_with_limit_and_offset() {
 
 #[test]
 fn count_items() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     for i in 0..3 {
         repo.insert(make_text_item(&format!("count_{i}"))).unwrap();
@@ -157,7 +157,7 @@ fn count_items() {
 
 #[test]
 fn count_with_filter() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     repo.insert(make_text_item("fav count")).unwrap();
     let id2 = repo.insert(make_text_item("fav count 2")).unwrap();
@@ -174,7 +174,7 @@ fn count_with_filter() {
 
 #[test]
 fn daily_counts_groups_all_items_from_inclusive_start_date() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let group = GroupRepository::new(&db)
         .create("Daily counts group", None)

@@ -10,7 +10,7 @@ fn text_edit_refreshes_snapshot_and_reports_stale_content() -> Result<()> {
     let hash = history.item(id)?.content_hash;
     drop(history);
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+    assert!(matches!(next_event(&events), Event::Groups(_)));
     next_snapshot(&events, 0);
     service.send(Command::EditText {
         id,
@@ -23,7 +23,7 @@ fn text_edit_refreshes_snapshot_and_reports_stale_content() -> Result<()> {
         Some("after edit")
     );
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::TextEdited { id: edited, generation: 7, result: Ok(true) } if edited == id
     ));
     service.send(Command::EditText {
@@ -33,7 +33,7 @@ fn text_edit_refreshes_snapshot_and_reports_stale_content() -> Result<()> {
         generation: 8,
     })?;
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::TextEdited { result: Err(_), .. }
     ));
     assert_eq!(History::open(path)?.text(id)?, "after edit");
@@ -131,7 +131,7 @@ fn reorder_acknowledges_success_and_rejects_stale_view() -> Result<()> {
         vec![(first, true), (second, true)]
     );
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::Reordered { result: Ok(()), .. }
     ));
     drop(service);
@@ -192,7 +192,7 @@ fn quick_paste_resolves_recent_and_favorite_slots_with_group_isolation() -> Resu
             slot: actual_slot,
             favorite: actual_favorite,
             result,
-        } = events.recv_blocking()?
+        } = next_event(&events)
         else {
             bail!("没有返回快速粘贴槽位结果");
         };
@@ -304,20 +304,14 @@ fn clear_history_preserves_favorites_and_rejects_stale_group_view() -> Result<()
         group_id: Some(group.id),
         generation: 0,
     })?;
-    assert!(matches!(
-        events.recv_blocking()?,
-        Event::HistoryCleared(Err(_))
-    ));
+    assert!(matches!(next_event(&events), Event::HistoryCleared(Err(_))));
     service.send(Command::ClearHistory {
         group_id: Some(group.id),
         generation: 1,
     })?;
-    assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+    assert!(matches!(next_event(&events), Event::Groups(_)));
     assert_eq!(next_snapshot(&events, 1).len(), 1);
-    assert!(matches!(
-        events.recv_blocking()?,
-        Event::HistoryCleared(Ok(1))
-    ));
+    assert!(matches!(next_event(&events), Event::HistoryCleared(Ok(1))));
     let history = History::open(directory.path().join("clipboard.db"))?;
     assert!(history.item(removed).is_err());
     assert!(history.item(favorite)?.is_favorite);
@@ -342,7 +336,7 @@ fn clear_all_history_removes_protected_items_across_groups() -> Result<()> {
     service.send(Command::ClearAllHistory)?;
     assert!(next_snapshot(&events, 0).is_empty());
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::AllHistoryCleared(Ok(2))
     ));
     drop(service);
@@ -383,22 +377,16 @@ fn batch_delete_rejects_stale_or_cross_group_selection() -> Result<()> {
             group_id: Some(group.id),
             generation,
         })?;
-        assert!(matches!(
-            events.recv_blocking()?,
-            Event::BatchDeleted(Err(_))
-        ));
+        assert!(matches!(next_event(&events), Event::BatchDeleted(Err(_))));
     }
     service.send(Command::DeleteBatch {
         ids: vec![first, second],
         group_id: Some(group.id),
         generation: 1,
     })?;
-    assert!(matches!(events.recv_blocking()?, Event::Groups(_)));
+    assert!(matches!(next_event(&events), Event::Groups(_)));
     assert!(next_snapshot(&events, 1).is_empty());
-    assert!(matches!(
-        events.recv_blocking()?,
-        Event::BatchDeleted(Ok(2))
-    ));
+    assert!(matches!(next_event(&events), Event::BatchDeleted(Ok(2))));
     let history = History::open(directory.path().join("clipboard.db"))?;
     assert!(history.item(first).is_err());
     assert!(history.item(second).is_err());

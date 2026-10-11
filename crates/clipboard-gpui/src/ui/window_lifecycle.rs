@@ -69,9 +69,7 @@ impl ClipboardView {
         {
             return;
         }
-        self.prepare_to_hide(window, cx);
-        tray::set_window_visible(window, false);
-        cx.notify();
+        self.hide_window(window, cx);
     }
 
     pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -79,11 +77,11 @@ impl ClipboardView {
         if was_minimized {
             tray::set_window_visible(window, true);
         }
-        if let Err(error) = position::position_window(window, self.window_position) {
-            self.message = format!(
+        if let Err(error) = position::position_window(window, self.window_position.value) {
+            self.set_feedback_message(format!(
                 "{}: {error}",
                 tr(self.language, "无法定位窗口", "Failed to position window")
-            );
+            ));
             self.is_error = true;
         }
         if !was_minimized {
@@ -120,6 +118,10 @@ impl ClipboardView {
             self.cancel_confirmation(kind, cx);
             window.close_dialog(cx);
         }
+        self.hide_window(window, cx);
+    }
+
+    pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prepare_to_hide(window, cx);
         tray::set_window_visible(window, false);
         cx.notify();
@@ -147,12 +149,8 @@ impl ClipboardView {
     }
     /// 当前打开的覆盖层，按 Esc 关闭优先级排列（同时至多一层）。
     pub(super) fn active_overlay(&self) -> Option<Overlay> {
-        if self.group_delete_id.is_some() {
-            Some(Overlay::GroupDelete)
-        } else if self.clear_confirm_open {
-            Some(Overlay::ClearConfirm)
-        } else if self.batch_confirm_open {
-            Some(Overlay::BatchConfirm)
+        if let Some(kind) = self.confirmation {
+            Some(Overlay::Confirmation(kind))
         } else if self.group_move_id.is_some() {
             Some(Overlay::GroupMove)
         } else if self.group_editor_open {
@@ -179,25 +177,9 @@ impl ClipboardView {
             return;
         }
         match self.active_overlay() {
-            Some(Overlay::GroupDelete) => {
-                if !self.group_delete_pending {
-                    self.group_delete_id = None;
-                    self.sync_confirmation_dialog(window, cx);
-                    cx.notify();
-                }
-            }
-            Some(Overlay::ClearConfirm) => {
-                if !self.clear_pending {
-                    self.clear_confirm_open = false;
-                    self.sync_confirmation_dialog(window, cx);
-                    cx.notify();
-                }
-            }
-            Some(Overlay::BatchConfirm) => {
-                if !self.batch_pending {
-                    self.batch_confirm_open = false;
-                    self.sync_confirmation_dialog(window, cx);
-                    cx.notify();
+            Some(Overlay::Confirmation(kind)) => {
+                if self.cancel_confirmation(kind, cx) {
+                    window.close_dialog(cx);
                 }
             }
             Some(Overlay::GroupMove) => {
@@ -223,9 +205,7 @@ impl ClipboardView {
                 }
                 self.paste_target = None;
                 if self._tray.is_some() {
-                    self.prepare_to_hide(window, cx);
-                    tray::set_window_visible(window, false);
-                    cx.notify();
+                    self.hide_window(window, cx);
                 } else {
                     self.exiting.set(true);
                     window.remove_window();

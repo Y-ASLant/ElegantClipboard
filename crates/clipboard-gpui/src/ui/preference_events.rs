@@ -1,5 +1,13 @@
 use super::*;
 
+impl<T> PendingPref<T> {
+    fn acknowledge(&mut self, result: Result<T, String>) -> Result<(), String> {
+        self.pending = false;
+        self.value = result?;
+        Ok(())
+    }
+}
+
 impl ClipboardView {
     pub(super) fn save_display(&mut self, display: DisplayPreference, cx: &mut Context<Self>) {
         if !self.display_pending
@@ -12,8 +20,11 @@ impl ClipboardView {
     }
 
     pub(super) fn save_audio(&mut self, audio: AudioPreference, cx: &mut Context<Self>) {
-        if !self.audio_pending && audio != self.audio && self.send(Command::SetAudio(audio), cx) {
-            self.audio_pending = true;
+        if !self.audio.pending
+            && audio != self.audio.value
+            && self.send(Command::SetAudio(audio), cx)
+        {
+            self.audio.pending = true;
             cx.notify();
         }
     }
@@ -23,12 +34,12 @@ impl ClipboardView {
         monitor_types: MonitorTypesPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.monitor_types_pending
+        if !self.monitor_types.pending
             && monitor_types.valid()
-            && monitor_types != self.monitor_types
+            && monitor_types != self.monitor_types.value
             && self.send(Command::SetMonitorTypes(monitor_types), cx)
         {
-            self.monitor_types_pending = true;
+            self.monitor_types.pending = true;
             cx.notify();
         }
     }
@@ -38,12 +49,12 @@ impl ClipboardView {
         preference: AppFilterPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.app_filter_pending
+        if !self.app_filter.pending
             && preference.valid()
-            && preference != self.app_filter
+            && preference != self.app_filter.value
             && self.send(Command::SetAppFilter(Box::new(preference)), cx)
         {
-            self.app_filter_pending = true;
+            self.app_filter.pending = true;
             cx.notify();
         }
     }
@@ -54,28 +65,26 @@ impl ClipboardView {
             cx.notify();
         }
     }
-    /// 统一处理“设置已保存”确认：清除 pending 标记、回写新值并按结果
-    /// 设置状态栏消息。仅适用于形状完全一致的单值偏好确认。
-    pub(super) fn acknowledge_save<T: Copy>(
+    /// 普通偏好仅在保存成功后替换生效值；失败也必须释放 pending。
+    pub(super) fn acknowledge_save<T>(
         &mut self,
         result: Result<T, String>,
-        set_pending: impl FnOnce(&mut Self, bool),
-        set_value: impl FnOnce(&mut Self, T),
+        preference: impl FnOnce(&mut Self) -> &mut PendingPref<T>,
         saved_message: (&'static str, &'static str),
         failure_message: (&'static str, &'static str),
     ) {
-        set_pending(self, false);
-        match result {
-            Ok(value) => {
-                set_value(self, value);
-                self.message = tr(self.language, saved_message.0, saved_message.1).into();
+        match preference(self).acknowledge(result) {
+            Ok(()) => {
+                self.set_feedback_message(
+                    tr(self.language, saved_message.0, saved_message.1).into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, failure_message.0, failure_message.1)
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -92,19 +101,21 @@ impl ClipboardView {
                 self.close_hover_preview(cx);
                 self.theme = theme;
                 apply_theme(theme, window, cx);
-                self.message = tr(
-                    self.language,
-                    "外观设置已保存",
-                    "Appearance preference saved",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "外观设置已保存",
+                        "Appearance preference saved",
+                    )
+                    .into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "外观保存失败", "Failed to save appearance")
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -150,28 +161,29 @@ impl ClipboardView {
                             self._tray = Some(tray);
                             self.tray_enabled.set(true);
                         }
-                        self.message =
-                            tr(language, "语言设置已保存", "Language preference saved").into();
+                        self.set_feedback_message(
+                            tr(language, "语言设置已保存", "Language preference saved").into(),
+                        );
                         self.is_error = false;
                     }
                     Err(error) => {
-                        self.message = format!(
+                        self.set_feedback_message(format!(
                             "{}: {error}",
                             tr(
                                 language,
                                 "语言已保存，但托盘菜单更新失败",
                                 "Language saved, but the tray menu could not be updated"
                             )
-                        );
+                        ));
                         self.is_error = true;
                     }
                 }
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "语言保存失败", "Failed to save language")
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -184,14 +196,14 @@ impl ClipboardView {
         match result {
             Ok(size) => self.last_window_size = Some(size),
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "保存窗口大小失败",
                         "Failed to save window size"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -212,23 +224,25 @@ impl ClipboardView {
                 if enabled {
                     self.window_bounds_changed(window, cx);
                 }
-                self.message = tr(
-                    self.language,
-                    "窗口大小设置已保存",
-                    "Window size setting saved",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "窗口大小设置已保存",
+                        "Window size setting saved",
+                    )
+                    .into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "保存窗口大小设置失败",
                         "Failed to save window size setting"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -257,18 +271,20 @@ impl ClipboardView {
                 {
                     self.select_category(Some(ContentCategory::All), window, cx);
                 }
-                self.message = tr(self.language, "显示设置已保存", "Display settings saved").into();
+                self.set_feedback_message(
+                    tr(self.language, "显示设置已保存", "Display settings saved").into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "保存显示设置失败",
                         "Failed to save display settings"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -278,8 +294,7 @@ impl ClipboardView {
     pub(super) fn apply_audio_saved(&mut self, result: Result<AudioPreference, String>) -> bool {
         self.acknowledge_save(
             result,
-            |this, pending| this.audio_pending = pending,
-            |this, audio| this.audio = audio,
+            |this| &mut this.audio,
             ("音效设置已保存", "Audio settings saved"),
             ("保存音效设置失败", "Failed to save audio settings"),
         );
@@ -292,8 +307,7 @@ impl ClipboardView {
     ) -> bool {
         self.acknowledge_save(
             result,
-            |this, pending| this.monitor_types_pending = pending,
-            |this, preference| this.monitor_types = preference,
+            |this| &mut this.monitor_types,
             ("监听类型已保存", "Capture types saved"),
             ("保存监听类型失败", "Failed to save capture types"),
         );
@@ -304,25 +318,12 @@ impl ClipboardView {
         &mut self,
         result: Result<Box<AppFilterPreference>, String>,
     ) -> bool {
-        self.app_filter_pending = false;
-        match result {
-            Ok(preference) => {
-                self.app_filter = *preference;
-                self.message = tr(self.language, "应用过滤设置已保存", "App filter saved").into();
-                self.is_error = false;
-            }
-            Err(error) => {
-                self.message = format!(
-                    "{}: {error}",
-                    tr(
-                        self.language,
-                        "保存应用过滤失败",
-                        "Failed to save app filter"
-                    )
-                );
-                self.is_error = true;
-            }
-        }
+        self.acknowledge_save(
+            result.map(|preference| *preference),
+            |this| &mut this.app_filter,
+            ("应用过滤设置已保存", "App filter saved"),
+            ("保存应用过滤失败", "Failed to save app filter"),
+        );
         true
     }
 
@@ -336,12 +337,14 @@ impl ClipboardView {
         match result {
             Ok(()) => {
                 self.onboarding_completed = true;
-                self.message = tr(
-                    self.language,
-                    "欢迎使用 ElegantClipboard",
-                    "Welcome to ElegantClipboard",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "欢迎使用 ElegantClipboard",
+                        "Welcome to ElegantClipboard",
+                    )
+                    .into(),
+                );
                 self.is_error = false;
                 if self.search_auto_focus.value {
                     self.search.update(cx, |input, cx| input.focus(window, cx));
@@ -350,14 +353,14 @@ impl ClipboardView {
                 }
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "保存引导状态失败",
                         "Failed to save onboarding state"
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }
@@ -370,8 +373,7 @@ impl ClipboardView {
     ) -> bool {
         self.acknowledge_save(
             result,
-            |this, pending| this.window_position_pending = pending,
-            |this, position| this.window_position = position,
+            |this| &mut this.window_position,
             ("窗口唤出位置已保存", "Window position mode saved"),
             ("保存窗口位置失败", "Failed to save window position"),
         );
@@ -379,30 +381,39 @@ impl ClipboardView {
     }
 
     pub(super) fn apply_autostart_saved(&mut self, result: Result<bool, String>) -> bool {
-        self.autostart_pending = false;
-        match result {
-            Ok(enabled) => {
-                self.autostart = enabled;
-                self.message = if enabled {
-                    tr(self.language, "已开启开机启动", "Startup enabled")
-                } else {
-                    tr(self.language, "已关闭开机启动", "Startup disabled")
-                }
-                .into();
-                self.is_error = false;
-            }
-            Err(error) => {
-                self.message = format!(
-                    "{}: {error}",
-                    tr(
-                        self.language,
-                        "开机启动设置失败",
-                        "Failed to update startup"
-                    )
-                );
-                self.is_error = true;
-            }
-        }
+        let saved_message = if matches!(result, Ok(true)) {
+            ("已开启开机启动", "Startup enabled")
+        } else {
+            ("已关闭开机启动", "Startup disabled")
+        };
+        self.acknowledge_save(
+            result,
+            |this| &mut this.autostart,
+            saved_message,
+            ("开机启动设置失败", "Failed to update startup"),
+        );
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PendingPref;
+
+    #[test]
+    fn failed_preference_save_keeps_effective_value_and_allows_retry() {
+        let mut preference = PendingPref {
+            value: String::from("saved"),
+            pending: true,
+        };
+        let error = String::from("storage unavailable");
+        assert_eq!(preference.acknowledge(Err(error.clone())), Err(error));
+        assert_eq!(preference.value, "saved");
+        assert!(!preference.pending);
+
+        preference.pending = true;
+        assert_eq!(preference.acknowledge(Ok(String::from("retried"))), Ok(()));
+        assert_eq!(preference.value, "retried");
+        assert!(!preference.pending);
     }
 }

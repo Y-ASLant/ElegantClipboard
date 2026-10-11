@@ -330,24 +330,24 @@ fn file_paths_are_saved_and_missing_sources_do_not_touch_clipboard() -> Result<(
     std::fs::remove_file(path)?;
     service.send(Command::Copy(id))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        match events.try_recv() {
-            Ok(Event::CommandFailed {
+    wait_for(
+        &events,
+        Duration::from_secs(5),
+        "copy error timed out",
+        |event| match event {
+            Event::CommandFailed {
                 kind: FailureKind::Other,
                 message,
-            }) => {
+            } => {
                 assert!(message.contains("已不存在"));
-                break;
+                Some(())
             }
-            Ok(Event::Error(message) | Event::BackgroundError(message)) => bail!("{message}"),
-            _ => {}
-        }
-        assert!(std::time::Instant::now() < deadline, "copy error timed out");
-        thread::sleep(Duration::from_millis(10));
-    }
+            Event::Error(message) | Event::BackgroundError(message) => panic!("{message}"),
+            _ => None,
+        },
+    );
     assert!(matches!(
-        events.recv_blocking()?,
+        next_event(&events),
         Event::ThemeSaved(Ok(ThemePreference::Dark))
     ));
     Ok(())

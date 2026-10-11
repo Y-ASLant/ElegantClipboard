@@ -14,12 +14,12 @@ impl ClipboardView {
                 | Command::MergeForPaste(_)
         );
         if let Err(error) = self.service.send(command) {
-            self.message = error.to_string();
+            self.set_feedback_message(error.to_string());
             self.is_error = true;
             cx.notify();
             return false;
         }
-        if copy_requested && sound::enabled(self.audio, Sound::Copy, SoundTiming::Immediate) {
+        if copy_requested && sound::enabled(self.audio.value, Sound::Copy, SoundTiming::Immediate) {
             sound::play(Sound::Copy);
         }
         true
@@ -41,9 +41,9 @@ impl ClipboardView {
             Event::GroupCreated(result) => self.apply_group_created(result, window, cx),
             Event::GroupRenamed(result) => self.apply_group_renamed(result, window, cx),
             Event::GroupDeleted(result) => self.apply_group_deleted(result, window, cx),
-            Event::HistoryCleared(result) => self.apply_history_cleared(result),
+            Event::HistoryCleared(result) => self.apply_history_cleared(result, window, cx),
             Event::AllHistoryCleared(result) => self.apply_all_history_cleared(result, window, cx),
-            Event::BatchDeleted(result) => self.apply_batch_deleted(result),
+            Event::BatchDeleted(result) => self.apply_batch_deleted(result, window, cx),
             Event::ItemMoved { result, .. } => self.apply_item_moved(result),
             Event::Snapshot {
                 items,
@@ -73,7 +73,7 @@ impl ClipboardView {
                 result,
             } => self.apply_reordered(from, generation, result, cx),
             Event::Status(message) => {
-                self.message = localize_service_message(self.language, message);
+                self.set_feedback_message(localize_service_message(self.language, message));
                 self.is_error = false;
                 true
             }
@@ -98,8 +98,7 @@ impl ClipboardView {
             Event::AutoResetStateSaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.auto_reset_state.pending = pending,
-                    |this, value| this.auto_reset_state.value = value,
+                    |this| &mut this.auto_reset_state,
                     ("隐藏时重置设置已保存", "Reset-on-hide setting saved"),
                     ("保存隐藏设置失败", "Failed to save hide setting"),
                 );
@@ -108,8 +107,7 @@ impl ClipboardView {
             Event::SearchAutoFocusSaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.search_auto_focus.pending = pending,
-                    |this, value| this.search_auto_focus.value = value,
+                    |this| &mut this.search_auto_focus,
                     ("搜索焦点设置已保存", "Search focus setting saved"),
                     ("保存搜索焦点失败", "Failed to save search focus"),
                 );
@@ -118,8 +116,7 @@ impl ClipboardView {
             Event::SearchAutoClearSaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.search_auto_clear.pending = pending,
-                    |this, value| this.search_auto_clear.value = value,
+                    |this| &mut this.search_auto_clear,
                     ("搜索清空设置已保存", "Search clearing setting saved"),
                     ("保存搜索清空失败", "Failed to save search clearing"),
                 );
@@ -128,8 +125,7 @@ impl ClipboardView {
             Event::SkipClearConfirmSaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.skip_clear_confirm.pending = pending,
-                    |this, value| this.skip_clear_confirm.value = value,
+                    |this| &mut this.skip_clear_confirm,
                     ("清理确认设置已保存", "Clear confirmation setting saved"),
                     (
                         "保存清理确认设置失败",
@@ -141,8 +137,7 @@ impl ClipboardView {
             Event::PasteCloseWindowSaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.paste_close_window.pending = pending,
-                    |this, value| this.paste_close_window.value = value,
+                    |this| &mut this.paste_close_window,
                     (
                         "粘贴后关闭窗口设置已保存",
                         "Close-after-paste setting saved",
@@ -157,8 +152,7 @@ impl ClipboardView {
             Event::PasteKeySaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.paste_key_pending = pending,
-                    |this, value| this.paste_key = value,
+                    |this| &mut this.paste_key,
                     ("粘贴按键设置已保存", "Paste key setting saved"),
                     ("保存粘贴按键失败", "Failed to save paste key"),
                 );
@@ -167,8 +161,7 @@ impl ClipboardView {
             Event::PasteMoveToTopSaved(result) => {
                 self.acknowledge_save(
                     result,
-                    |this, pending| this.paste_move_to_top.pending = pending,
-                    |this, value| this.paste_move_to_top.value = value,
+                    |this| &mut this.paste_move_to_top,
                     (
                         "粘贴后移到首位设置已保存",
                         "Move-to-top-after-paste setting saved",
@@ -206,12 +199,14 @@ impl ClipboardView {
             Event::DatabaseOptimized(size) => {
                 self.database_maintenance_pending = false;
                 self.data_size = Some(size);
-                self.message = tr(
-                    self.language,
-                    "数据库已整理，数据占用已更新",
-                    "Database optimized and storage usage updated",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "数据库已整理，数据占用已更新",
+                        "Database optimized and storage usage updated",
+                    )
+                    .into(),
+                );
                 self.is_error = false;
                 true
             }
@@ -219,16 +214,18 @@ impl ClipboardView {
                 self.paused = paused;
                 self.pause_pending = false;
                 self.is_error = false;
-                self.message = if paused {
-                    tr(
-                        self.language,
-                        "已暂停记录，已有历史仍可使用",
-                        "Recording paused; existing history is still available",
-                    )
-                } else {
-                    tr(self.language, "已恢复记录", "Recording resumed")
-                }
-                .into();
+                self.set_feedback_message(
+                    if paused {
+                        tr(
+                            self.language,
+                            "已暂停记录，已有历史仍可使用",
+                            "Recording paused; existing history is still available",
+                        )
+                    } else {
+                        tr(self.language, "已恢复记录", "Recording resumed")
+                    }
+                    .into(),
+                );
                 let _ = self.refresh_tray_menu();
                 true
             }
@@ -237,13 +234,13 @@ impl ClipboardView {
                 self.apply_command_failed(kind, message, window, cx)
             }
             Event::Error(message) => {
-                self.message = message;
+                self.set_feedback_message(message);
                 self.is_error = true;
                 self.history.loading = false;
                 true
             }
             Event::BackgroundError(message) => {
-                self.message = message;
+                self.set_feedback_message(message);
                 self.is_error = true;
                 true
             }
@@ -294,7 +291,9 @@ impl ClipboardView {
             }
             FailureKind::GroupDelete => {
                 self.group_delete_pending = false;
-                self.group_delete_id = None;
+                if matches!(self.confirmation, Some(HistoryConfirmation::DeleteGroup(_))) {
+                    self.close_history_confirmation(window, cx);
+                }
             }
             FailureKind::GroupMove => self.group_move_pending = false,
             FailureKind::ClearHistory => {
@@ -308,7 +307,9 @@ impl ClipboardView {
             }
             FailureKind::BatchDelete => {
                 self.batch_pending = false;
-                self.batch_confirm_open = false;
+                if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
+                    self.close_history_confirmation(window, cx);
+                }
             }
             FailureKind::EditText { .. } => self.preview_save_pending = false,
             FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
@@ -321,7 +322,7 @@ impl ClipboardView {
             FailureKind::Pause => self.pause_pending = false,
             FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
         }
-        self.message = message;
+        self.set_feedback_message(message);
         self.is_error = true;
         true
     }

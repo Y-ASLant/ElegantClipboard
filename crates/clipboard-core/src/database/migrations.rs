@@ -244,10 +244,21 @@ impl Database {
         }
 
         // 迁移 8: 允许重复 content_hash（always_new 策略），保留索引但移除唯一约束
+        for index in ["idx_clipboard_hash_default", "idx_clipboard_hash_group"] {
+            let is_unique: bool = conn.query_row(
+                "SELECT EXISTS(
+                    SELECT 1 FROM pragma_index_list('clipboard_items')
+                    WHERE name = ?1 AND \"unique\" = 1
+                )",
+                [index],
+                |row| row.get(0),
+            )?;
+            if is_unique {
+                conn.execute_batch(&format!("DROP INDEX {index};"))?;
+            }
+        }
         conn.execute_batch(
-            "DROP INDEX IF EXISTS idx_clipboard_hash_default;
-             DROP INDEX IF EXISTS idx_clipboard_hash_group;
-             CREATE INDEX IF NOT EXISTS idx_clipboard_hash_default
+            "CREATE INDEX IF NOT EXISTS idx_clipboard_hash_default
                ON clipboard_items(content_hash) WHERE group_id IS NULL;
              CREATE INDEX IF NOT EXISTS idx_clipboard_hash_group
                ON clipboard_items(group_id, content_hash) WHERE group_id IS NOT NULL;",

@@ -1,6 +1,6 @@
 use super::{ContentType, Database};
 use parking_lot::Mutex;
-use rusqlite::Connection;
+use rusqlite::{Connection, params_from_iter, types::Value};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -92,13 +92,10 @@ pub struct ClipboardRepository {
     read_conn: Arc<Mutex<Connection>>,
 }
 
-/// Dynamic SQL condition builder to reduce boilerplate in repository query methods.
-///
-/// Replaces repetitive patterns of condition assembly, parameter boxing, and
-/// reference conversion with a fluent builder API.
+/// Dynamic SQL conditions and owned SQLite parameters.
 struct ConditionBuilder {
     conditions: Vec<String>,
-    params: Vec<Box<dyn rusqlite::ToSql>>,
+    params: Vec<Value>,
 }
 
 impl ConditionBuilder {
@@ -153,7 +150,7 @@ impl ConditionBuilder {
         let (cond, param) = ClipboardRepository::group_condition(group_id);
         self.conditions.push(cond.to_string());
         if let Some(gid) = param {
-            self.params.push(Box::new(gid));
+            self.params.push(gid.into());
         }
         self
     }
@@ -175,15 +172,15 @@ impl ConditionBuilder {
     }
 
     /// Add a condition with an associated parameter.
-    fn condition_with_param(mut self, cond: &str, value: impl rusqlite::ToSql + 'static) -> Self {
+    fn condition_with_param(mut self, cond: &str, value: impl Into<Value>) -> Self {
         self.conditions.push(cond.to_string());
-        self.params.push(Box::new(value));
+        self.params.push(value.into());
         self
     }
 
     /// Push a trailing parameter (e.g., for LIMIT clauses outside WHERE).
-    fn param(mut self, value: impl rusqlite::ToSql + 'static) -> Self {
-        self.params.push(Box::new(value));
+    fn param(mut self, value: impl Into<Value>) -> Self {
+        self.params.push(value.into());
         self
     }
 
@@ -196,14 +193,6 @@ impl ConditionBuilder {
         }
     }
 
-    /// Get parameter references for query execution.
-    fn param_refs(&self) -> Vec<&dyn rusqlite::ToSql> {
-        self.params
-            .iter()
-            .map(std::convert::AsRef::as_ref)
-            .collect()
-    }
-
     /// SELECT single-column string results.
     fn select_strings(
         &self,
@@ -211,17 +200,17 @@ impl ConditionBuilder {
         prefix: &str,
     ) -> Result<Vec<String>, rusqlite::Error> {
         let sql = format!("{}{}", prefix, self.where_clause());
-        let refs = self.param_refs();
         let mut stmt = conn.prepare(&sql)?;
-        stmt.query_map(refs.as_slice(), |row| row.get::<_, String>(0))?
-            .collect()
+        stmt.query_map(params_from_iter(&self.params), |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect()
     }
 
     /// DELETE FROM clipboard_items and return affected row count.
     fn delete_items(&self, conn: &Connection) -> Result<i64, rusqlite::Error> {
         let sql = format!("DELETE FROM clipboard_items{}", self.where_clause());
-        let refs = self.param_refs();
-        Ok(conn.execute(&sql, refs.as_slice())? as i64)
+        Ok(conn.execute(&sql, params_from_iter(&self.params))? as i64)
     }
 
     /// COUNT(*) on clipboard_items.
@@ -230,8 +219,7 @@ impl ConditionBuilder {
             "SELECT COUNT(*) FROM clipboard_items{}",
             self.where_clause()
         );
-        let refs = self.param_refs();
-        conn.query_row(&sql, refs.as_slice(), |row| row.get(0))
+        conn.query_row(&sql, params_from_iter(&self.params), |row| row.get(0))
     }
 }
 
@@ -255,7 +243,7 @@ impl ClipboardRepository {
     fn append_content_type_condition(
         content_type: Option<&str>,
         conditions: &mut Vec<String>,
-        params_vec: &mut Vec<Box<dyn rusqlite::ToSql>>,
+        params_vec: &mut Vec<Value>,
     ) {
         let Some(raw) = content_type else {
             return;
@@ -270,12 +258,12 @@ impl ClipboardRepository {
         }
         if types.len() == 1 {
             conditions.push("content_type = ?".to_string());
-            params_vec.push(Box::new(types[0].to_string()));
+            params_vec.push(types[0].to_string().into());
         } else {
             let placeholders: Vec<&str> = types.iter().map(|_| "?").collect();
             conditions.push(format!("content_type IN ({})", placeholders.join(",")));
             for t in &types {
-                params_vec.push(Box::new((*t).to_string()));
+                params_vec.push((*t).to_string().into());
             }
         }
     }

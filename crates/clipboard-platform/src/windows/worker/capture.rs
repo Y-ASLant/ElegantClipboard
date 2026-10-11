@@ -5,11 +5,6 @@ use anyhow::Result;
 use clipboard_core::{is_url_text, preferences::MonitorTypesPreference};
 
 impl Worker {
-    pub(super) fn capture_image(&self, png: &[u8], width: u32, height: u32) -> Result<i64> {
-        self.history
-            .capture_image(png, width, height, &self.images_dir)
-    }
-
     pub(super) fn handle_observed_capture(
         &mut self,
         content: CapturedClipboard,
@@ -25,23 +20,25 @@ impl Worker {
         let Some(content) = filtered else {
             return Ok(());
         };
-        let id = match content {
-            CapturedClipboard::Text(text) => {
-                self.history.capture_with_media(&text, &self.images_dir)?
-            }
-            CapturedClipboard::Rich { html, rtf, text } => Some(self.history.capture_rich(
-                html.as_deref(),
-                rtf.as_deref(),
-                text.as_deref(),
-                &self.images_dir,
-            )?),
-            CapturedClipboard::Files(paths) => {
-                Some(self.history.capture_files(&paths, &self.images_dir)?)
-            }
-            CapturedClipboard::Image { png, width, height } => {
-                Some(self.capture_image(&png, width, height)?)
-            }
-        };
+        let id =
+            match content {
+                CapturedClipboard::Text(text) => {
+                    self.history.capture_with_media(&text, &self.images_dir)?
+                }
+                CapturedClipboard::Rich { html, rtf, text } => Some(self.history.capture_rich(
+                    html.as_deref(),
+                    rtf.as_deref(),
+                    text.as_deref(),
+                    &self.images_dir,
+                )?),
+                CapturedClipboard::Files(paths) => {
+                    Some(self.history.capture_files(&paths, &self.images_dir)?)
+                }
+                CapturedClipboard::Image { png, width, height } => Some(
+                    self.history
+                        .capture_image(&png, width, height, &self.images_dir)?,
+                ),
+            };
         if let (Some(id), Some(source)) = (id, source) {
             let icon = source.executable.as_deref().and_then(|executable| {
                 source_app::extract_and_cache_icon(executable, &self.icons_dir)

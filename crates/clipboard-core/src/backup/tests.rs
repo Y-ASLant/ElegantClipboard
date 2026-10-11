@@ -277,6 +277,37 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
 }
 
 #[test]
+fn missing_bundled_image_is_rejected_without_installation() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let history = History::open(dir.path().join("source.db"))?;
+    history.capture_image(
+        b"\x89PNG\r\n\x1a\nsynthetic",
+        3,
+        2,
+        &dir.path().join("images"),
+    )?;
+    let valid = dir.path().join("valid.zip");
+    history.export_backup(&valid)?;
+    let incomplete = dir.path().join("incomplete.zip");
+    let mut input = ZipArchive::new(File::open(valid)?)?;
+    let mut output = ZipWriter::new(File::create(&incomplete)?);
+    for index in 0..input.len() {
+        let mut entry = input.by_index(index)?;
+        if entry.name().starts_with("images/") {
+            continue;
+        }
+        output.start_file(entry.name(), SimpleFileOptions::default())?;
+        io::copy(&mut entry, &mut output)?;
+    }
+    output.finish()?;
+    let target = dir.path().join("restored");
+    fs::create_dir_all(&target)?;
+    assert!(restore_backup(&incomplete, &target).is_err());
+    assert_eq!(fs::read_dir(&target)?.count(), 0);
+    Ok(())
+}
+
+#[test]
 fn invalid_backup_cannot_create_destination_database() -> Result<()> {
     let dir = tempfile::tempdir()?;
     let invalid = dir.path().join("invalid.zip");

@@ -60,8 +60,8 @@ impl SettingsWindowView {
             let state = owner_entity.read(cx);
             (
                 state.language,
-                state.window_position,
-                state.window_position_pending,
+                state.window_position.value,
+                state.window_position.pending,
             )
         };
 
@@ -80,10 +80,10 @@ impl SettingsWindowView {
             ],
             window_position,
             window_position_pending,
-            |owner| owner.window_position,
+            |owner| owner.window_position.value,
             |owner, preference, cx| {
                 if owner.send(Command::SetWindowPosition(preference), cx) {
-                    owner.window_position_pending = true;
+                    owner.window_position.pending = true;
                     cx.notify();
                 }
             },
@@ -221,7 +221,11 @@ impl SettingsWindowView {
         };
         let (language, autostart, autostart_pending) = {
             let state = owner_entity.read(cx);
-            (state.language, state.autostart, state.autostart_pending)
+            (
+                state.language,
+                state.autostart.value,
+                state.autostart.pending,
+            )
         };
         let startup_owner = self.owner.clone();
         div()
@@ -233,7 +237,7 @@ impl SettingsWindowView {
                     .on_change(move |checked, _, cx| {
                         let _ = startup_owner.update(cx, |owner, cx| {
                             if owner.send(Command::SetAutostart(*checked), cx) {
-                                owner.autostart_pending = true;
+                                owner.autostart.pending = true;
                                 cx.notify();
                             }
                         });
@@ -263,8 +267,8 @@ impl SettingsWindowView {
                 state.language,
                 state.quick_paste_enabled,
                 state.quick_paste_pending_setting,
-                state.paste_key,
-                state.paste_key_pending,
+                state.paste_key.value,
+                state.paste_key.pending,
                 state.paste_shortcuts.clone(),
                 state.paste_shortcuts_pending.is_some(),
                 state.paste_shortcuts_pending.is_some()
@@ -343,10 +347,10 @@ impl SettingsWindowView {
                             .on_click(move |index: &usize, _, cx| {
                                 if let Some(&(_, key)) = click_choices.get(*index) {
                                     let _ = owner.update(cx, |owner, cx| {
-                                        if owner.paste_key != key
+                                        if owner.paste_key.value != key
                                             && owner.send(Command::SetPasteKey(key), cx)
                                         {
-                                            owner.paste_key_pending = true;
+                                            owner.paste_key.pending = true;
                                             cx.notify();
                                         }
                                     });

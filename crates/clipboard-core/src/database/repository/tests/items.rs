@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn insert_and_get_by_id() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("hello")).unwrap();
     let item = repo.get_by_id(id).unwrap().unwrap();
@@ -12,14 +12,14 @@ fn insert_and_get_by_id() {
 
 #[test]
 fn get_nonexistent_returns_none() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     assert!(repo.get_by_id(999).unwrap().is_none());
 }
 
 #[test]
 fn insert_increments_sort_order() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id1 = repo.insert(make_text_item("first")).unwrap();
     let id2 = repo.insert(make_text_item("second")).unwrap();
@@ -30,7 +30,7 @@ fn insert_increments_sort_order() {
 
 #[test]
 fn touch_by_hash_updates_sort_order() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let item = make_text_item("touchable");
     let hash = item.content_hash.clone();
@@ -48,14 +48,14 @@ fn touch_by_hash_updates_sort_order() {
 
 #[test]
 fn touch_nonexistent_returns_none() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     assert!(repo.touch_by_hash("no_such_hash", None).unwrap().is_none());
 }
 
 #[test]
 fn delete_item() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("to_delete")).unwrap();
     assert!(repo.get_by_id(id).unwrap().is_some());
@@ -65,7 +65,7 @@ fn delete_item() {
 
 #[test]
 fn toggle_pin() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("pin_test")).unwrap();
     assert!(!repo.get_by_id(id).unwrap().unwrap().is_pinned);
@@ -78,7 +78,7 @@ fn toggle_pin() {
 
 #[test]
 fn toggle_favorite() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("fav_test")).unwrap();
     let fav = repo.toggle_favorite(id).unwrap();
@@ -96,7 +96,7 @@ fn toggle_favorite() {
 
 #[test]
 fn bump_to_top() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id1 = repo.insert(make_text_item("bump1")).unwrap();
     let id2 = repo.insert(make_text_item("bump2")).unwrap();
@@ -109,7 +109,7 @@ fn bump_to_top() {
 
 #[test]
 fn bump_to_top_skips_pinned() {
-    let db = temp_db();
+    let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let id = repo.insert(make_text_item("pinned_bump")).unwrap();
     repo.toggle_pin(id).unwrap();

@@ -41,7 +41,8 @@ impl Worker {
                 self.history.capture_files(&paths, &self.images_dir)?;
             }
             Command::CaptureImage { png, width, height } => {
-                self.capture_image(&png, width, height)?;
+                self.history
+                    .capture_image(&png, width, height, &self.images_dir)?;
             }
             Command::ObservedCapture { content, source } => {
                 self.handle_observed_capture(content, source)?;
@@ -140,8 +141,6 @@ impl Worker {
             }
             Command::BumpToTop(id) => {
                 self.history.bump_to_top(id)?;
-                self.snapshot()?;
-                return Ok(());
             }
             Command::ResolveQuickPaste {
                 slot,

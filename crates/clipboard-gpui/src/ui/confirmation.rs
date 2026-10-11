@@ -1,8 +1,21 @@
 use super::*;
 
+impl HistoryConfirmation {
+    fn matches_scope(self, group_id: Option<i64>, has_selection: bool) -> bool {
+        match self {
+            Self::DeleteGroup(id) => group_id == Some(id),
+            Self::ClearHistory(confirmed_group) => group_id == confirmed_group,
+            Self::DeleteSelected => has_selection,
+        }
+    }
+}
+
 impl ClipboardView {
     pub(super) fn clear_history(&mut self, cx: &mut Context<Self>) {
-        if (!self.clear_confirm_open && !self.skip_clear_confirm.value) || self.clear_pending {
+        if (!self.confirmation_active(HistoryConfirmation::ClearHistory(self.history.group_id()))
+            && !self.skip_clear_confirm.value)
+            || self.clear_pending
+        {
             return;
         }
         if self.send(
@@ -30,15 +43,8 @@ impl ClipboardView {
         cx.notify();
     }
     pub(super) fn confirmation_active(&self, kind: HistoryConfirmation) -> bool {
-        match kind {
-            HistoryConfirmation::DeleteGroup(id) => {
-                self.group_delete_id == Some(id) && self.history.group_id() == Some(id)
-            }
-            HistoryConfirmation::ClearHistory(group_id) => {
-                self.clear_confirm_open && self.history.group_id() == group_id
-            }
-            HistoryConfirmation::DeleteSelected => self.batch_confirm_open,
-        }
+        self.confirmation == Some(kind)
+            && kind.matches_scope(self.history.group_id(), !self.selected_ids.is_empty())
     }
 
     pub(super) fn confirmation_pending(&self, kind: HistoryConfirmation) -> bool {
@@ -57,12 +63,8 @@ impl ClipboardView {
         if self.confirmation != Some(kind) || self.confirmation_pending(kind) {
             return false;
         }
-        match kind {
-            HistoryConfirmation::DeleteGroup(_) => self.group_delete_id = None,
-            HistoryConfirmation::ClearHistory(_) => self.clear_confirm_open = false,
-            HistoryConfirmation::DeleteSelected => self.batch_confirm_open = false,
-        }
         self.confirmation = None;
+        self.confirmation_error = None;
         cx.notify();
         true
     }
@@ -93,13 +95,23 @@ impl ClipboardView {
         window.refresh();
     }
 
+    pub(super) fn close_history_confirmation(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.confirmation.take().is_some() {
+            self.confirmation_error = None;
+            window.close_dialog(cx);
+        }
+    }
+
     pub(super) fn sync_confirmation_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(kind) = self.confirmation
             && !self.confirmation_active(kind)
             && !self.confirmation_pending(kind)
         {
-            self.confirmation = None;
-            window.close_dialog(cx);
+            self.close_history_confirmation(window, cx);
         }
     }
 
@@ -112,9 +124,7 @@ impl ClipboardView {
         if self.confirmation == Some(kind) {
             return;
         }
-        if self.confirmation.is_some() {
-            window.close_dialog(cx);
-        }
+        self.close_history_confirmation(window, cx);
         self.confirmation = Some(kind);
         self.confirmation_error = None;
         let owner = cx.entity().downgrade();
@@ -252,18 +262,15 @@ impl ClipboardView {
             return;
         }
         self.reset_selection();
-        self.group_delete_id = None;
         self.group_editor_open = false;
         self.group_rename_id = None;
         self.group_move_id = None;
         self.preview.close();
         window.focus(&self.list_focus, cx);
         if self.skip_clear_confirm.value {
-            self.clear_confirm_open = false;
-            self.sync_confirmation_dialog(window, cx);
+            self.close_history_confirmation(window, cx);
             self.clear_history(cx);
         } else {
-            self.clear_confirm_open = true;
             self.open_history_confirmation(
                 HistoryConfirmation::ClearHistory(self.history.group_id()),
                 window,
@@ -271,5 +278,27 @@ impl ClipboardView {
             );
         }
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HistoryConfirmation;
+
+    #[test]
+    fn confirmation_cannot_apply_to_another_group_or_an_empty_selection() {
+        for confirmation in [
+            HistoryConfirmation::DeleteGroup(7),
+            HistoryConfirmation::ClearHistory(Some(7)),
+        ] {
+            assert!(confirmation.matches_scope(Some(7), false));
+            assert!(!confirmation.matches_scope(Some(8), true));
+            assert!(!confirmation.matches_scope(None, true));
+        }
+        let clear_default = HistoryConfirmation::ClearHistory(None);
+        assert!(clear_default.matches_scope(None, false));
+        assert!(!clear_default.matches_scope(Some(7), false));
+        assert!(HistoryConfirmation::DeleteSelected.matches_scope(Some(7), true));
+        assert!(!HistoryConfirmation::DeleteSelected.matches_scope(Some(7), false));
     }
 }

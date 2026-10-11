@@ -9,8 +9,8 @@ impl SettingsWindowView {
         };
         let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
-        let monitor_types = owner_state.monitor_types;
-        let monitor_types_pending = owner_state.monitor_types_pending;
+        let monitor_types = owner_state.monitor_types.value;
+        let monitor_types_pending = owner_state.monitor_types.pending;
 
         type MonitorChoice<'a> = (
             &'a str,
@@ -71,7 +71,7 @@ impl SettingsWindowView {
                             .disabled(monitor_types_pending || !next.valid())
                             .on_change(move |checked, _, cx| {
                                 let _ = owner.update(cx, |owner, cx| {
-                                    let mut next = owner.monitor_types;
+                                    let mut next = owner.monitor_types.value;
                                     set_checked(&mut next, *checked);
                                     owner.save_monitor_types(next, cx);
                                 });

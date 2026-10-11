@@ -28,23 +28,25 @@ impl ClipboardView {
             Ok(preference) => {
                 self.hover_preference = preference;
                 self.close_hover_preview(cx);
-                self.message = tr(
-                    self.language,
-                    "悬停预览设置已保存",
-                    "Hover preview preferences saved",
-                )
-                .into();
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "悬停预览设置已保存",
+                        "Hover preview preferences saved",
+                    )
+                    .into(),
+                );
                 self.is_error = false;
             }
             Err(error) => {
-                self.message = format!(
+                self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(
                         self.language,
                         "悬停预览设置保存失败",
                         "Failed to save hover preview preferences",
                     )
-                );
+                ));
                 self.is_error = true;
             }
         }

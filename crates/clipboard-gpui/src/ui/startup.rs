@@ -115,20 +115,15 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         if exiting.get() || !tray_enabled.get() {
                             return true;
                         }
-                        let can_hide = close_view.update(cx, |this, cx| {
+                        close_view.update(cx, |this, cx| {
                             if this.batch_pending
                                 || this.paste_pending.is_some()
                                 || this.batch_paste_pending.is_some()
                             {
-                                return false;
+                                return;
                             }
-                            this.prepare_to_hide(window, cx);
-                            true
+                            this.hide_window(window, cx);
                         });
-                        if !can_hide {
-                            return false;
-                        }
-                        tray::set_window_visible(window, false);
                         false
                     });
                     view

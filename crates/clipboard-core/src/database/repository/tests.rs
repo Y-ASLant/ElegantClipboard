@@ -8,20 +8,10 @@ mod query;
 mod retention;
 mod settings;
 
-fn temp_db() -> Database {
-    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let dir = std::env::temp_dir().join(format!("ec_repo_test_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = dir.join(format!(
-        "test_{}_{}.db",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos(),
-        n
-    ));
-    Database::new(path).unwrap()
+fn temp_db() -> (tempfile::TempDir, Database) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::new(dir.path().join("test.db")).unwrap();
+    (dir, db)
 }
 
 fn make_text_item(text: &str) -> NewClipboardItem {
