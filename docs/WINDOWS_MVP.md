@@ -146,6 +146,12 @@ cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 
 同轮 Release `--smoke-test --data-dir <独立目录>` 已实际创建主窗口（576×768）和设置数据页（1296×728），窗口截图确认搜索、分类/分组、设置导航、每日历史图表和数据占用正常显示；进程自动退出码为 0，stderr 为空。运行前后交互桌面剪贴板序列号均为 5162。此次窗口验证使用空隔离数据库，未重新覆盖有记录时的全部拖拽、预览和编辑交互。
 
+随后修复设置页常驻提示：移除全宽底部 `Alert` 和专属滚动状态，改用 Root 承载的官方 `Notification`；数据占用查询成功只更新统计。实际点击“文本”采集类型后，右上角显示“监听类型已保存”，6 秒后截图确认已消失，初次打开截图没有成功提示或底部消息条。该计时验收临时将冒烟进程寿命延长至 12 秒，完成后已恢复原来的 3 秒并删除临时脚本；运行前后交互桌面剪贴板序列号均为 5170。
+
+同轮清理 7 项只覆盖实现细节或重复路径的测试后，242 项通过（核心 144、Windows 后端 69、应用 29），另 2 项忽略；源码行数、fmt、all-targets check、Clippy `-D warnings` 通过。测试准入、删除标准及 UI 反馈组件选型已写入 `CLAUDE.md`。
+
+默认 Release EXE 当时被占用，覆盖链接失败（Windows `os error 5`）；未终止现有进程。改用 `cargo build -p elegant-clipboard-gpui --release --locked --target-dir target/feedback-verified` 构建成功，无错误或警告。最终产物 `target/feedback-verified/release/elegant-clipboard-gpui.exe` 使用恢复后的标准 3 秒冒烟启动，退出码 0、stderr 为空。
+
 此前隔离桌面验收覆盖中文和英文 420×520 主窗口、分组创建/切换/上移、批量模式和托盘操作；这些历史记录不表示本次重构重新执行了全部交互场景，具体范围以对应 `evidence/` 记录为准。
 
 Windows 常驻资源可用 `scripts/measure-gpui-idle.ps1 -ProcessId <GPUI 进程 ID> -OutputPath <CSV 路径>` 采样，默认持续 8 小时、每分钟记录私有内存、工作集、句柄、线程和累计 CPU 时间。脚本只观察进程，不启动或结束应用；执行前应使用独立数据目录并关闭采集与全局快捷键。采样通过不等于完成休眠唤醒和跨应用粘贴验收。

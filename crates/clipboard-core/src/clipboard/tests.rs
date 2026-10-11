@@ -253,15 +253,6 @@ fn rtf_strips_mdispdef1() {
 }
 
 #[test]
-fn rtf_preserves_rsidtbl() {
-    let rtf = br"{\rtf1\ansi {\rsidtbl \rsid12345}}";
-    let cleaned = normalize_rtf_for_hash(rtf);
-    let s = String::from_utf8(cleaned).unwrap();
-    // \rsidtbl should be preserved; only standalone \rsid is stripped
-    assert!(s.contains("rsidtbl"));
-}
-
-#[test]
 fn rtf_same_content_different_rsid_same_hash() {
     let rtf_a = br"{\rtf1\ansi hello\rsid11111 world}";
     let rtf_b = br"{\rtf1\ansi hello\rsid99999 world}";

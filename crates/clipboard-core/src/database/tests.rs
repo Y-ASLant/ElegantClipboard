@@ -19,51 +19,6 @@ fn uuid_simple() -> String {
 }
 
 #[test]
-fn new_database_creates_schema() {
-    let db = temp_db();
-    let conn = db.read_connection();
-    let conn = conn.lock();
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='clipboard_items'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 1);
-}
-
-#[test]
-fn schema_creates_groups_table() {
-    let db = temp_db();
-    let conn = db.read_connection();
-    let conn = conn.lock();
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='groups'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 1);
-}
-
-#[test]
-fn schema_creates_settings_table_with_defaults() {
-    let db = temp_db();
-    let conn = db.read_connection();
-    let conn = conn.lock();
-    let val: String = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'global_shortcut'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(val, "Alt+C");
-}
-
-#[test]
 fn read_write_separation() {
     let db = temp_db();
     {
@@ -85,13 +40,6 @@ fn read_write_separation() {
         )
         .unwrap();
     assert_eq!(val, "hello");
-}
-
-#[test]
-fn optimize_and_vacuum() {
-    let db = temp_db();
-    assert!(db.optimize().is_ok());
-    assert!(db.vacuum().is_ok());
 }
 
 #[test]

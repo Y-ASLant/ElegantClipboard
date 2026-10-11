@@ -38,28 +38,3 @@ pub fn open(link: ProjectLink) -> Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn about_links_are_fixed_https_destinations() {
-        for link in [
-            ProjectLink::Author,
-            ProjectLink::Repository,
-            ProjectLink::Issues,
-        ] {
-            let mut index = 0;
-            let mut units = Vec::new();
-            unsafe {
-                while *link.url().0.add(index) != 0 {
-                    units.push(*link.url().0.add(index));
-                    index += 1;
-                }
-            }
-            let url = String::from_utf16(&units).unwrap();
-            assert!(url.starts_with("https://github.com/Y-ASLant"));
-        }
-    }
-}

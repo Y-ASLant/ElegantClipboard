@@ -385,7 +385,7 @@ struct SettingsWindowView {
     _owner_release_subscription: Subscription,
     language: LanguagePreference,
     feedback_message: String,
-    feedback_scroll: ScrollHandle,
+    feedback_is_error: bool,
     page: SettingsPage,
     shortcut_input: Option<Entity<InputState>>,
     shortcut_editing: Option<(bool, u8)>,

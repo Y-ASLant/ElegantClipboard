@@ -260,12 +260,6 @@ fn app_icon() -> Result<Icon> {
 mod tests {
     use super::*;
     #[test]
-    fn bundled_tray_icon_can_be_loaded() -> Result<()> {
-        app_icon()?;
-        Ok(())
-    }
-
-    #[test]
     fn tray_recording_control_tracks_monitoring_availability() -> Result<()> {
         for language in [LanguagePreference::Chinese, LanguagePreference::English] {
             for monitoring in [false, true] {

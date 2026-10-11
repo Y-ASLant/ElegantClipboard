@@ -175,18 +175,6 @@ fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
     )
 }
 
-fn settings_feedback(message: &str, is_error: bool) -> Option<Alert> {
-    if message.is_empty() {
-        return None;
-    }
-    let alert = if is_error {
-        Alert::error("settings-feedback", message.to_owned())
-    } else {
-        Alert::success("settings-feedback", message.to_owned())
-    };
-    Some(alert.small().w_full().min_w_0().whitespace_normal())
-}
-
 impl Render for SettingsWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(owner) = self.owner.upgrade() else {
@@ -208,10 +196,6 @@ impl Render for SettingsWindowView {
                         .whitespace_normal(),
                     ),
                 );
-        };
-        let feedback = {
-            let owner = owner.read(cx);
-            settings_feedback(&owner.message, owner.is_error)
         };
         let (language, preview_lines, display_pending) = {
             let owner = owner.read(cx);
@@ -305,23 +289,5 @@ impl Render for SettingsWindowView {
                     .pages(pages),
                 ),
             )
-            .when_some(feedback, |shell, feedback| {
-                // Keep results visible on every page without consuming the settings viewport.
-                // GPUI's normal whitespace also wraps long paths without word boundaries.
-                shell.child(
-                    div()
-                        .id("settings-feedback-scroll")
-                        .relative()
-                        .w_full()
-                        .min_w_0()
-                        .max_h(px(120.))
-                        .flex_shrink_0()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.feedback_scroll)
-                        .p_2()
-                        .child(feedback)
-                        .vertical_scrollbar(&self.feedback_scroll),
-                )
-            })
     }
 }

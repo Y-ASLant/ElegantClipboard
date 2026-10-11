@@ -1,4 +1,5 @@
 use super::*;
+use gpui_kit::component::notification::Notification;
 impl SettingsPage {
     pub(super) const ALL: [Self; 8] = [
         Self::General,
@@ -134,12 +135,21 @@ impl SettingsWindowView {
             .expect("settings window requires its owner view");
         let language = entity.read(cx).language;
         let feedback_message = entity.read(cx).message.clone();
-        let subscription = cx.observe(&entity, |this, owner, cx| {
+        let feedback_is_error = entity.read(cx).is_error;
+        let subscription = cx.observe_in(&entity, window, |this, owner, window, cx| {
             let owner = owner.read(cx);
             this.language = owner.language;
-            if this.feedback_message != owner.message {
+            if this.feedback_message != owner.message || this.feedback_is_error != owner.is_error {
                 this.feedback_message.clone_from(&owner.message);
-                this.feedback_scroll.set_offset(point(px(0.), px(0.)));
+                this.feedback_is_error = owner.is_error;
+                if !owner.message.is_empty() {
+                    let notification = if owner.is_error {
+                        Notification::error(owner.message.clone())
+                    } else {
+                        Notification::success(owner.message.clone())
+                    };
+                    window.push_notification(notification.id::<SettingsWindowView>(), cx);
+                }
             }
             cx.notify();
         });
@@ -228,7 +238,7 @@ impl SettingsWindowView {
             _owner_release_subscription: release_subscription,
             language,
             feedback_message,
-            feedback_scroll: ScrollHandle::default(),
+            feedback_is_error,
             page,
             shortcut_input: None,
             shortcut_editing: None,

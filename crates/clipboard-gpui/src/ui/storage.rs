@@ -155,8 +155,6 @@ impl ClipboardView {
         match result {
             Ok(size) => {
                 self.data_size = Some(size);
-                self.message = tr(self.language, "数据占用已更新", "Storage usage updated").into();
-                self.is_error = false;
             }
             Err(error) => {
                 self.message = format!(
