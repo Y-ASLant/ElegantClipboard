@@ -8,6 +8,8 @@
 
 2026-09-28 更新：应用升级至 [gpui-kit 0.7.0](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.0)，使用配套 `gpui-pre-* 0.3.7`；窗口通过 Kit `open_window` 创建，由上游 Base Root 自动管理浮层。历史版本号与原始决策记录保留。
 
+2026-10-12 更新：应用升级至 [gpui-kit 0.7.3](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，配套 `gpui-pre-* 0.3.9`，保持默认 GPUI 后端和既有窗口入口，不启用可选 `gpui-fast`；本次原生冒烟发现的一次间歇性借用冲突及后续验证结果见 [Windows GPUI 状态](../WINDOWS_MVP.md#依赖策略)。
+
 ## 栈与依赖
 
 - 首批使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。
