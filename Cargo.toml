@@ -9,6 +9,7 @@ rust-version = "1.98"
 license = "MIT"
 
 # Direct dependencies checked against crates.io on 2026-10-06.
+# gpui-kit checked against crates.io on 2026-10-12.
 # Commit Cargo.lock; review `cargo update` at the start of each development batch.
 [workspace.dependencies]
 anyhow = "1.0.104"

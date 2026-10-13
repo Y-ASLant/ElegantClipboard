@@ -8,6 +8,8 @@
 
 2026-09-28 更新：应用升级至 [gpui-kit 0.7.0](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.0)，使用配套 `gpui-pre-* 0.3.7`；窗口通过 Kit `open_window` 创建，由上游 Base Root 自动管理浮层。历史版本号与原始决策记录保留。
 
+2026-10-12 更新：应用升级至 [gpui-kit 0.7.3](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，配套 `gpui-pre-* 0.3.9`，保持既有窗口入口；本次原生冒烟发现的一次间歇性借用冲突及后续验证结果见 [Windows GPUI 状态](../WINDOWS_MVP.md#依赖策略)。2026-10-13 启用可选后端 `gpui-fast`：窗口材质需要直接设置 DWM 背板属性与窗口样式，并依赖该后端的无边框窗口类与 `WM_NCCALCSIZE`/`WM_NCHITTEST` 通路。
+
 ## 栈与依赖
 
 - 首批使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。

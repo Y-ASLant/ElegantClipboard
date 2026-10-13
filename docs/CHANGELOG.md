@@ -6,6 +6,8 @@
 
 ### 重构
 
+- 将 gpui-kit 从 `0.7.1` 升级至[最新稳定版 `0.7.3`](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，同步锁定 `gpui-base`、`gpui-component`、`gpui-kit-assets 0.7.3` 与 `gpui-pre-* 0.3.9`。检查、248 项测试（另 2 项忽略）和 Release 构建通过；原生冒烟首次出现一次借用冲突 panic，随后三次正常退出，详见[验证记录](WINDOWS_MVP.md#依赖策略)。
+- 改用 gpui-kit 的可选后端 `gpui-fast`（`gpui-kit = { version = "0.7.3", features = ["gpui-fast"] }`）。窗口材质直接操作 DWM 与窗口样式，需要该后端暴露的原生窗口句柄、无边框窗口类与 `WM_NCCALCSIZE`/`WM_NCHITTEST` 通路；同时 `image` 补充 `jpeg` feature，使图片文件的悬停预览能读取文件头尺寸（`Cargo.lock` 无新增 crate，jpeg 解码器原本已在依赖图中）。
 - 使用 Rust、GPUI 和 gpui-kit 构建 Windows 原生应用，移除旧版前端运行时及构建链。代码划分为 `clipboard-core`（数据与业务逻辑）、`clipboard-platform`（Windows 集成）和 `clipboard-gpui`（界面）。
 - 按职责拆分界面、Windows 服务、数据库和偏好设置大文件：界面入口 `ui.rs` 从约 8,800 行缩至 446 行，Windows 模块入口缩至 17 行；生产代码、示例和测试共 123 个 Rust 文件，最大 480 行。新增 500 物理行上限检查并接入 `just check` 和 GPUI CI，模块说明见[工程文档](README.md)。
 - 将原 Windows 单文件测试迁入按领域划分的 `windows/tests/` 并删除搬空的 `windows/tests.rs`；移除拆分后冗余导入、分区注释及菜单返回的无用中间绑定。保持现有公开调用路径、数据格式、旧版导入及官方 GPUI Kit 控件，不新增运行时依赖。
