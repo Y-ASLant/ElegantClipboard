@@ -31,6 +31,28 @@ fn supported_image_file(path: &str) -> bool {
         .iter()
         .any(|supported| extension.eq_ignore_ascii_case(supported))
 }
+
+/// `files` 记录是否恰好是一张受支持的图片文件。
+///
+/// 复制截图工具（PixPin 等）产出的 JPG 会以「文件」形式进入历史，用户在悬停设置里
+/// 看到的却是「图片」开关，所以这类记录要按图片对待。
+pub(super) fn single_image_file_paths(raw: Option<&str>) -> bool {
+    let Some(paths) = raw.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok()) else {
+        return false;
+    };
+    matches!(paths.as_slice(), [path] if supported_image_file(path))
+}
+
+/// 读本地图片文件的尺寸。只解析文件头，不解码像素，开销极小。
+///
+/// 网络路径（`\\`）直接放弃：文件头读取会阻塞调用线程，而这个调用来自 UI 线程。
+pub(super) fn image_file_dimensions(path: &Path) -> Option<(i64, i64)> {
+    if path.to_string_lossy().starts_with(r"\\") {
+        return None;
+    }
+    let (width, height) = image::image_dimensions(path).ok()?;
+    Some((i64::from(width), i64::from(height)))
+}
 fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
     let mut info = FileCardInfo {
         availability: FileCardAvailability::Available,
@@ -168,6 +190,7 @@ impl ClipboardView {
                         }
                     }
                     if changed {
+                        this.sync_image_assets(cx);
                         cx.notify();
                     }
                 });

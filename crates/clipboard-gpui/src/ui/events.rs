@@ -89,6 +89,7 @@ impl ClipboardView {
                 item_count,
             } => self.apply_merged(for_paste, clipboard_sequence, item_count, window, cx),
             Event::ThemeSaved(result) => self.apply_theme_saved(result, window, cx),
+            Event::WindowEffectSaved(result) => self.apply_window_effect_saved(result, window, cx),
             Event::LanguageSaved(result) => self.apply_language_saved(result, window, cx),
             Event::HotkeySaved(result) => self.apply_hotkey_saved(result),
             Event::WindowSizeSaved(result) => self.apply_window_size_saved(result),

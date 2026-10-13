@@ -12,6 +12,8 @@ impl SettingsWindowView {
         let language_pending = owner_state.language_pending;
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
+        let window_effect = owner_state.window_effect;
+        let window_effect_pending = owner_state.window_effect_pending;
         div()
             .w_full()
             .flex()
@@ -75,6 +77,82 @@ impl SettingsWindowView {
                             }
                         },
                     ))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w(px(280.))
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(tr(language, "窗口效果", "Window effect"))
+                    .child(div().flex_1().min_w_0().child(choice_tabs(
+                        "settings-window-effect",
+                        &self.owner,
+                        [
+                            WindowEffect::None,
+                            WindowEffect::Acrylic,
+                            WindowEffect::Mica,
+                            WindowEffect::MicaAlt,
+                        ],
+                        [
+                            tr(language, "关闭", "Off"),
+                            tr(language, "亚克力", "Acrylic"),
+                            tr(language, "云母", "Mica"),
+                            tr(language, "云母 Alt", "Mica Alt"),
+                        ],
+                        window_effect.effect,
+                        window_effect_pending,
+                        |owner| owner.window_effect.effect,
+                        |owner, effect, cx| {
+                            owner.save_window_effect(
+                                WindowEffectPreference {
+                                    effect,
+                                    ..owner.window_effect
+                                },
+                                cx,
+                            );
+                        },
+                    ))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w(px(280.))
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(tr(language, "磨砂浓度", "Frost opacity"))
+                    .child(div().flex_1().min_w_0().child(choice_tabs(
+                        "settings-window-effect-opacity",
+                        &self.owner,
+                        [40_u8, 55_u8, 72_u8, 85_u8],
+                        ["40%", "55%", "72%", "85%"],
+                        window_effect.opacity,
+                        window_effect_pending || window_effect.effect == WindowEffect::None,
+                        |owner| owner.window_effect.opacity,
+                        |owner, opacity, cx| {
+                            owner.save_window_effect(
+                                WindowEffectPreference {
+                                    opacity,
+                                    ..owner.window_effect
+                                },
+                                cx,
+                            );
+                        },
+                    ))),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(
+                        language,
+                        "亚克力与云母会调用 Windows 合成背板；浓度越高越接近纯色，越低越通透。仅在 Windows 10 1809 及以上版本有效。",
+                        "Acrylic and Mica use the Windows composition backdrop. Higher opacity hides more of it; lower lets more through. Requires Windows 10 1809 or later.",
+                    )),
             )
             .into_any_element()
     }

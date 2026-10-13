@@ -12,6 +12,7 @@ mod history_events;
 mod history_list;
 mod hover_lifecycle;
 mod hover_window;
+mod image_assets;
 mod navigation;
 mod onboarding;
 mod paste_actions;
@@ -44,14 +45,18 @@ mod window_render;
 
 pub use startup::run;
 
-use file_cards::single_file_image_path;
+use file_cards::{image_file_dimensions, single_file_image_path, single_image_file_paths};
 use navigation::{history_drop_row, history_row_height, history_top_row};
-use presentation::{apply_theme, format_bytes, localize_service_message, tr, window_shell};
+use presentation::{
+    apply_theme, format_bytes, init_window_effect, localize_service_message, panel_background, tr,
+    window_shell,
+};
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_from_keystroke, shortcut_kbd,
 };
 use window_lifecycle::update_clipboard_window;
 
+use crate::acrylic;
 use crate::links::{self, ProjectLink};
 use crate::paste;
 use crate::position;
@@ -74,8 +79,8 @@ use clipboard_core::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
         HotkeyPreference, HoverPreviewPosition, HoverPreviewPreference, LanguagePreference,
         MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, SoundTiming,
-        SourceAppDisplay, ThemePreference, TimeFormat, WindowPositionPreference,
-        WindowSizePreference,
+        SourceAppDisplay, ThemePreference, TimeFormat, WindowEffect, WindowEffectPreference,
+        WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -277,6 +282,9 @@ struct ClipboardView {
     preview_save_pending: bool,
     image_zoom_percent: u16,
     image_scroll: ScrollHandle,
+    /// 已请求过解码的图片路径；用于在图片离开列表或窗口隐藏后释放 GPUI 的解码缓存。
+    rendered_images: HashSet<PathBuf>,
+    image_release_task: Option<Task<()>>,
     hover_preview: PreviewState,
     hover_popup: Option<AnyWindowHandle>,
     hover_popup_opening: Option<(i64, u64)>,
@@ -284,6 +292,8 @@ struct ClipboardView {
     hover_popup_active: bool,
     hover_task: Option<Task<()>>,
     hover_close_task: Option<Task<()>>,
+    /// 悬停预览「无操作自动关闭」的计时任务；每次鼠标活动都会重置它。
+    hover_autoclose_task: Option<Task<()>>,
     hover_preference: HoverPreviewPreference,
     hover_preference_pending: bool,
     pending_row_click: Option<(i64, u64)>,
@@ -302,6 +312,8 @@ struct ClipboardView {
     settings_window_opening: bool,
     theme: ThemePreference,
     theme_pending: bool,
+    window_effect: WindowEffectPreference,
+    window_effect_pending: bool,
     language: LanguagePreference,
     language_pending: bool,
     hotkey_choice: HotkeyPreference,
@@ -402,8 +414,16 @@ struct HoverPreviewWindowView {
     generation: u64,
     language: LanguagePreference,
     content: Result<PreviewContent, String>,
-    text_input: Entity<TextareaState>,
-    zoom_percent: u16,
+    /// 纯文本预览正文（文本/富文本内容，或文件路径列表）。
+    ///
+    /// 刻意**不用** `Textarea`：悬停预览是「看一眼就走」的表面，用可聚焦的文本框会
+    /// 一点击就抢焦点、变出可编辑的样子，还会带上竖直/水平滚动条（就是被当成
+    /// 「右下多两条灰边」的东西）。要选中/编辑请用主预览（空格或「查看详情」）。
+    text: SharedString,
+    /// 图片缩放倍率，1.0 = 100%。
+    zoom: f32,
+    /// 拖拽平移的起点与该次拖拽开始时的滚动偏移。
+    pan_from: Option<(Point<Pixels>, Point<Pixels>)>,
     image_scroll: ScrollHandle,
     zoom_step: u8,
 }

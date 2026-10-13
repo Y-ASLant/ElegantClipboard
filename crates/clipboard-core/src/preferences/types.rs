@@ -377,6 +377,48 @@ pub enum ThemePreference {
     Dark,
 }
 
+/// 主窗口与设置窗口的系统级材质：None 为纯色，其余为 Windows 合成背板。
+///
+/// 与 `WindowBackgroundAppearance` 的差别在于 Acrylic 走
+/// `DWMSBT_TRANSIENTWINDOW`，GPUI 未暴露该取值，由界面层另行设置。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowEffect {
+    #[default]
+    None,
+    Acrylic,
+    Mica,
+    MicaAlt,
+}
+
+/// 见 `WindowEffect`。`opacity` 是覆盖在背板之上的纯色遮罩浓度，
+/// 0 全透、100 最实；它只影响观感，不影响背板本身是否生效。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WindowEffectPreference {
+    pub effect: WindowEffect,
+    pub opacity: u8,
+}
+
+impl Default for WindowEffectPreference {
+    fn default() -> Self {
+        Self {
+            effect: WindowEffect::None,
+            opacity: DEFAULT_WINDOW_EFFECT_OPACITY,
+        }
+    }
+}
+
+pub const MIN_WINDOW_EFFECT_OPACITY: u8 = 0;
+pub const MAX_WINDOW_EFFECT_OPACITY: u8 = 100;
+pub const DEFAULT_WINDOW_EFFECT_OPACITY: u8 = 72;
+
+impl WindowEffectPreference {
+    pub fn valid(&self) -> bool {
+        (MIN_WINDOW_EFFECT_OPACITY..=MAX_WINDOW_EFFECT_OPACITY).contains(&self.opacity)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LanguagePreference {
     #[default]

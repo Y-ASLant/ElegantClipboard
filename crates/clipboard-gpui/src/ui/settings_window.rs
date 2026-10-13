@@ -68,6 +68,7 @@ impl ClipboardView {
             };
             let (theme, language) =
                 owner_entity.update(cx, |owner, _| (owner.theme, owner.language));
+            let window_effect = owner_entity.read(cx).window_effect;
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
@@ -88,6 +89,7 @@ impl ClipboardView {
             let close_owner = owner.clone();
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 apply_theme(theme, window, cx);
+                init_window_effect(window_effect, window, cx);
                 window.set_window_title(tr(language, "设置", "Settings"));
                 window.on_window_should_close(cx, move |_, cx| {
                     let _ = close_owner.update(cx, |owner, cx| {

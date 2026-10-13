@@ -7,7 +7,8 @@ use clipboard_core::{
     preferences::{
         AppFilterPreference, AudioPreference, DisplayPreference, HotkeyPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, ThemePreference, WindowPositionPreference, WindowSizePreference,
+        PasteShortcutConfig, ThemePreference, WindowEffectPreference, WindowPositionPreference,
+        WindowSizePreference,
     },
 };
 use std::path::PathBuf;
@@ -102,6 +103,7 @@ pub enum Command {
     SetAudio(AudioPreference),
     SetMonitorTypes(MonitorTypesPreference),
     SetAppFilter(Box<AppFilterPreference>),
+    SetWindowEffect(WindowEffectPreference),
     ListRunningApps,
     CompleteOnboarding,
     BumpToTop(i64),
@@ -240,6 +242,7 @@ impl Command {
             | Self::SetAudio(_)
             | Self::SetMonitorTypes(_)
             | Self::SetAppFilter(_)
+            | Self::SetWindowEffect(_)
             | Self::ListRunningApps
             | Self::CompleteOnboarding
             | Self::BumpToTop(_)
@@ -335,6 +338,7 @@ pub enum Event {
     AudioSaved(Result<AudioPreference, String>),
     MonitorTypesSaved(Result<MonitorTypesPreference, String>),
     AppFilterSaved(Result<Box<AppFilterPreference>, String>),
+    WindowEffectSaved(Result<WindowEffectPreference, String>),
     RunningApps(Vec<source_app::RunningApp>),
     OnboardingCompleted(Result<(), String>),
     AutostartSaved(Result<bool, String>),

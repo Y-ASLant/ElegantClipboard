@@ -21,14 +21,43 @@ pub(super) fn apply_theme(preference: ThemePreference, window: &mut Window, cx: 
         ThemePreference::Light => Theme::change(ThemeMode::Light, Some(window), cx),
         ThemePreference::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
     }
+    // 必须单独一次 `Theme::update`：`Theme::change` 会重载主题配置覆写 token 的
+    // alpha，在同一个闭包里改会被冲掉。
+    acrylic::retint_theme(cx);
 }
+
+/// 开窗时套用窗口效果：先 `record` 让外壳底色算对，再由 `apply` 改 DWM 与窗口样式。
+/// 必须在窗口首次绘制之前调用，否则第一帧仍是不透明背景。
+pub(super) fn init_window_effect(
+    preference: WindowEffectPreference,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    acrylic::record(preference, cx);
+    acrylic::apply(preference, window);
+}
+
+/// 所有窗口共用的最外层容器：效果开启时背景为半透明色，
+/// 让 DWM 系统背板透出来，效果关闭时与主题底色完全一致。
+///
+/// 注意：这里**不要**加外扩底色之类的小动作。窗口边缘那条灰带（含 1px 亮线）不是
+/// 我们这层造成的，而是 gpui-component 的 `window_border()` 画的——它的边框和
+/// box shadow 见 `window_border.rs`，根因写在 2026-10-12 日志里。
 pub(super) fn window_shell(cx: &App) -> Div {
+    let background = acrylic::shell_background(cx.theme().background, acrylic::active(cx));
     div()
         .size_full()
         .flex()
         .flex_col()
-        .bg(cx.theme().background)
+        .bg(background)
         .text_color(cx.theme().foreground)
+}
+
+/// 内容面板底色。与 [`window_shell`] 同一套浓度分配：效果开启时随浓度半透明，
+/// 关闭时即主题底色。凡是要铺 `theme().background` 的应用自有面板都应走这里，
+/// 不能直接 `bg(theme().background)`——那会在玻璃上留一块死白/死黑。
+pub(super) fn panel_background(cx: &App) -> Hsla {
+    acrylic::surface_background(cx)
 }
 pub(super) fn tr(
     language: LanguagePreference,
