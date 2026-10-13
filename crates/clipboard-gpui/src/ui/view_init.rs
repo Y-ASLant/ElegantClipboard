@@ -253,6 +253,7 @@ impl ClipboardView {
             ));
         }
         let theme = service.initial_theme;
+        let window_effect = service.initial_window_effect;
         let paused = service.initial_paused;
         let initial_window_size = service.initial_window_size;
         let persist_window_size = service.initial_persist_window_size;
@@ -273,6 +274,7 @@ impl ClipboardView {
         {
             startup_errors.push(error.to_string());
         }
+        init_window_effect(window_effect, window, cx);
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {
@@ -280,23 +282,10 @@ impl ClipboardView {
             }
         });
         let activation = cx.observe_window_activation(window, |this, window, cx| {
-        if !window.is_window_active() {
-            this.cancel_pending_row_click();
-            let had_target = this.paste_target.take().is_some();
-            let had_pending = this.paste_pending.take().is_some();
-            let had_batch_pending = this.batch_paste_pending.take().is_some();
-            if had_target || had_pending || had_batch_pending {
-                this.set_feedback_message(tr(
-                    this.language,
-                    "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出",
-                    "The history window lost focus. Open it again from the target app to paste automatically.",
-                )
-                .into());
-                this.is_error = false;
-                cx.notify();
+            if !window.is_window_active() {
+                this.handle_window_deactivated(cx);
             }
-        }
-    });
+        });
         let bounds = cx.observe_window_bounds(window, |this, window, cx| {
             this.window_bounds_changed(window, cx);
         });
@@ -364,6 +353,8 @@ impl ClipboardView {
             preview_save_pending: false,
             image_zoom_percent: 100,
             image_scroll: ScrollHandle::default(),
+            rendered_images: HashSet::new(),
+            image_release_task: None,
             hover_preview: PreviewState::default(),
             hover_popup: None,
             hover_popup_opening: None,
@@ -371,6 +362,7 @@ impl ClipboardView {
             hover_popup_active: false,
             hover_task: None,
             hover_close_task: None,
+            hover_autoclose_task: None,
             hover_preference,
             hover_preference_pending: false,
             pending_row_click: None,
@@ -389,6 +381,8 @@ impl ClipboardView {
             settings_window_opening: false,
             theme,
             theme_pending: false,
+            window_effect,
+            window_effect_pending: false,
             language,
             language_pending: false,
             hotkey_choice,

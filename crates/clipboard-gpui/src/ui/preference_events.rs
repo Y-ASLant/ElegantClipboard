@@ -59,6 +59,21 @@ impl ClipboardView {
         }
     }
 
+    pub(super) fn save_window_effect(
+        &mut self,
+        preference: WindowEffectPreference,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.window_effect_pending
+            && preference.valid()
+            && preference != self.window_effect
+            && self.send(Command::SetWindowEffect(preference), cx)
+        {
+            self.window_effect_pending = true;
+            cx.notify();
+        }
+    }
+
     pub(super) fn load_running_apps(&mut self, cx: &mut Context<Self>) {
         if !self.running_apps_pending && self.send(Command::ListRunningApps, cx) {
             self.running_apps_pending = true;
@@ -327,6 +342,55 @@ impl ClipboardView {
         true
     }
 
+    pub(super) fn apply_window_effect_saved(
+        &mut self,
+        result: Result<WindowEffectPreference, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.window_effect_pending = false;
+        match result {
+            Ok(preference) => {
+                if preference != self.window_effect {
+                    self.window_effect = preference;
+                    acrylic::record(preference, cx);
+                    // 先改主题 token 再改窗口：token 决定侧边栏/卡片/Tab 的 alpha，
+                    // 两者都做完才有一次完整的重绘。
+                    //
+                    // 这里走 `apply_theme` 而不是直接 `retint_theme`：`retint_theme` 是在
+                    // token 现有 alpha 上做乘法，必须先让 `Theme::change` 把 token 重载回
+                    // 主题原始值，否则反复切换浓度会越切越淡。
+                    apply_theme(self.theme, window, cx);
+                    acrylic::apply(preference, window);
+                    refresh_window_effects(preference, cx);
+                    self.close_hover_preview(cx);
+                }
+                self.set_feedback_message(
+                    tr(
+                        self.language,
+                        "窗口效果设置已保存",
+                        "Window effect settings saved",
+                    )
+                    .into(),
+                );
+                self.is_error = false;
+                cx.notify();
+            }
+            Err(error) => {
+                self.set_feedback_message(format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "窗口效果保存失败",
+                        "Failed to save window effect"
+                    )
+                ));
+                self.is_error = true;
+            }
+        }
+        true
+    }
+
     pub(super) fn apply_onboarding_completed(
         &mut self,
         result: Result<(), String>,
@@ -393,6 +457,19 @@ impl ClipboardView {
             ("开机启动设置失败", "Failed to update startup"),
         );
         true
+    }
+}
+
+/// 把新效果推开到所有已打开的窗口：设置窗口与悬停预览都要立刻换肤，不能等下次打开。
+///
+/// 主窗口会在这里被**再套用一次**（调用方已经直接处理过）——`acrylic::apply` 是幂等的，
+/// 重复调用只是多刷一次非客户区，没有副作用。
+fn refresh_window_effects(preference: WindowEffectPreference, cx: &mut Context<ClipboardView>) {
+    for handle in cx.windows() {
+        let _ = handle.update(cx, |_, window, _| {
+            acrylic::apply(preference, window);
+            window.refresh();
+        });
     }
 }
 

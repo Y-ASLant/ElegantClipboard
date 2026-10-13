@@ -26,7 +26,9 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 
 2026-09-28 将 gpui-kit 更新至 `0.7.0`，配套 `gpui-base`/`gpui-component` 为 `0.7.0`、`gpui-pre-*` 为 `0.3.7`。三个应用窗口使用 Kit `open_window` 建立 Base-owned Root，由 Kit 自动承载 Dialog 等浮层；不再手工渲染 Dialog 层。仅更新 Kit 及其必需的配套锁定依赖。
 
-2026-10-12 根据 [crates.io 索引](https://index.crates.io/gp/ui/gpui-kit)及[官方发布说明](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，将 gpui-kit 从 `0.7.1` 更新至最新稳定版 `0.7.3`。使用 `cargo update -p gpui-kit --precise 0.7.3` 定向更新锁文件，配套 `gpui-base`、`gpui-component`、`gpui-kit-assets` 为 `0.7.3`，`gpui-pre-*` 为 `0.3.9`；其余直接依赖及默认功能开关保持不变，不启用可选 `gpui-fast`。
+2026-10-12 根据 [crates.io 索引](https://index.crates.io/gp/ui/gpui-kit)及[官方发布说明](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，将 gpui-kit 从 `0.7.1` 更新至最新稳定版 `0.7.3`。使用 `cargo update -p gpui-kit --precise 0.7.3` 定向更新锁文件，配套 `gpui-base`、`gpui-component`、`gpui-kit-assets` 为 `0.7.3`，`gpui-pre-*` 为 `0.3.9`；其余直接依赖保持不变。
+
+2026-10-13 在 `0.7.3` 基础上启用可选后端 `gpui-fast`，供窗口材质与悬停预览使用：材质直接操作 DWM 背板属性与窗口样式，需要该后端暴露的原生窗口句柄与无边框窗口类；`image` 同时补充 `jpeg` feature 以读取图片文件头尺寸，`Cargo.lock` 未新增 crate（jpeg 解码器原本已在依赖图中）。
 
 本次验证：124 个 Rust 文件通过行数检查，fmt、all-targets check、Clippy `-D warnings`、248 项测试（另 2 项忽略）及 Release 构建通过。使用独立数据目录、禁用采集运行原生冒烟，首次在上游 `gpui-pre-0.3.9/src/app/async_context.rs:178` 出现 `RefCell already borrowed` panic；随后三次正常退出且 stderr 为空，尚未复现该间歇性问题，不视为已修复。PrintWindow 截图确认主窗口搜索、分类、分组及设置数据页正常渲染；证据位于 `target/qa/gpui-kit-073-32f9e8675eee405f9ff2315684b4bc8d/`，首次错误位于 `target/qa/gpui-kit-073-54e5785a5008436c8b7b5426b27c29ce/stderr.log`。未覆盖有历史记录的全部交互。
 
@@ -49,7 +51,7 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 | serde_json | 1.0.151 |
 | tracing | 0.1.44 |
 | chrono（卡片绝对/相对时间） | 0.4.45 |
-| image（来源图标 PNG 编码） | 0.25.10 |
+| image（来源图标 PNG 编码、图片文件头尺寸） | 0.25.10（启用 `png`、`jpeg`） |
 | tempfile（测试及来源图标原子缓存） | 3.27.0 |
 
 工具链要求 Rust 1.98+；此前模块重构验证使用 Rust 1.99.0。Cargo.lock 固定实际解析结果。依赖升级流程：查询最新稳定版本 → 更新 workspace requirements → 定向 `cargo update -p` → fmt/clippy/test/build → 原生交互验收。`zip` 使用锁定的稳定版 8.6.0。

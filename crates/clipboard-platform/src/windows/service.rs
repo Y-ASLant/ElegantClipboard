@@ -13,8 +13,8 @@ use clipboard_core::{
     preferences::{
         AppFilterPreference, AudioPreference, DisplayPreference, HotkeyPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, Preferences, ThemePreference, WindowPositionPreference,
-        WindowSizePreference,
+        PasteShortcutConfig, Preferences, ThemePreference, WindowEffectPreference,
+        WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_rs::{ClipboardContext, ClipboardWatcher, ClipboardWatcherContext, WatcherShutdown};
@@ -61,6 +61,7 @@ pub struct Service {
     pub initial_audio: AudioPreference,
     pub initial_monitor_types: MonitorTypesPreference,
     pub initial_app_filter: AppFilterPreference,
+    pub initial_window_effect: WindowEffectPreference,
     pub initial_onboarding_completed: bool,
 }
 
@@ -97,6 +98,7 @@ impl Service {
         let initial_audio = preferences.audio()?;
         let initial_monitor_types = preferences.monitor_types()?;
         let initial_app_filter = preferences.app_filter()?;
+        let initial_window_effect = preferences.window_effect()?;
         let initial_onboarding_completed = if preferences.onboarding_completed()? {
             true
         } else if history.count("", false)? > 0
@@ -149,6 +151,7 @@ impl Service {
             initial_audio,
             initial_monitor_types,
             initial_app_filter: initial_app_filter.clone(),
+            initial_window_effect,
             initial_onboarding_completed,
             data_dir,
         };

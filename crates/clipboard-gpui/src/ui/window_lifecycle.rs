@@ -14,6 +14,22 @@ pub(super) fn update_clipboard_window<R>(
     })
 }
 
+/// 当前前台窗口是否属于本进程。
+///
+/// 用于区分「用户切去了别的应用」和「用户点了我们自己的浮窗」——后者前台窗口仍是
+/// 本进程的，不该被当成离开应用。
+fn foreground_window_is_ours() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return false;
+    }
+    let mut process_id = 0u32;
+    unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
+    process_id == std::process::id()
+}
+
 impl ClipboardView {
     pub(super) fn refresh_tray_menu(&self) -> anyhow::Result<()> {
         if let Some(tray) = &self._tray {
@@ -73,6 +89,8 @@ impl ClipboardView {
     }
 
     pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 窗口又要显示了：取消隐藏时的延迟释放，避免缩略图白解码一遍。
+        self.image_release_task = None;
         let was_minimized = tray::is_window_minimized(window);
         if was_minimized {
             tray::set_window_visible(window, true);
@@ -121,9 +139,43 @@ impl ClipboardView {
         self.hide_window(window, cx);
     }
 
+    /// 窗口失去激活时：如果用户是切去**别的应用**，就把悬停预览收掉，并丢弃待粘贴目标。
+    ///
+    /// 关键是把两种「主窗口失活」区分开：
+    /// - 用户点到别的应用 → 我们确实不再被使用，预览该消失、自动粘贴也不可能完成；
+    /// - 用户点的是**我们自己的浮窗**（比如按预览里的缩放按钮）→ 前台窗口仍然属于本进程，
+    ///   只是在操作预览，什么都不该关。
+    ///
+    /// 判据用「前台窗口属于哪个进程」，**不要**用「浮窗此刻是不是激活窗口」——
+    /// 失活回调触发的那一刻浮窗往往还没被系统标记为激活，会把点浮窗误判成切走，
+    /// 结果预览被一点就没（之前就是这么错的）。
+    pub(super) fn handle_window_deactivated(&mut self, cx: &mut Context<Self>) {
+        if foreground_window_is_ours() {
+            return;
+        }
+        self.close_hover_preview(cx);
+        self.cancel_pending_row_click();
+        let had_target = self.paste_target.take().is_some();
+        let had_pending = self.paste_pending.take().is_some();
+        let had_batch_pending = self.batch_paste_pending.take().is_some();
+        if had_target || had_pending || had_batch_pending {
+            self.set_feedback_message(
+                tr(
+                    self.language,
+                    "已离开历史窗口；如需自动粘贴，请从目标应用重新唤出",
+                    "The history window lost focus. Open it again from the target app to paste automatically.",
+                )
+                .into(),
+            );
+            self.is_error = false;
+            cx.notify();
+        }
+    }
+
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prepare_to_hide(window, cx);
         tray::set_window_visible(window, false);
+        self.schedule_image_release(cx);
         cx.notify();
     }
 

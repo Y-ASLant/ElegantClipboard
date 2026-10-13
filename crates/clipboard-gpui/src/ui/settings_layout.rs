@@ -167,7 +167,7 @@ fn paste_audio_content(
 }
 
 fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
-    TitleBar::new().bg(cx.theme().background).child(
+    TitleBar::new().bg(panel_background(cx)).child(
         div()
             .text_sm()
             .font_semibold()

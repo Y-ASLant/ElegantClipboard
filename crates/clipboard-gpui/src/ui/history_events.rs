@@ -315,6 +315,7 @@ impl ClipboardView {
             self.close_hover_preview(cx);
         }
         self.refresh_file_card_info(cx);
+        self.sync_image_assets(cx);
         self.selected_ids.retain(|id| loaded_ids.contains(id));
         if self
             .selection_anchor

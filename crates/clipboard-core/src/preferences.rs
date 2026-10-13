@@ -27,13 +27,14 @@ const MONITOR_TYPES_KEY: &str = "gpui_monitor_types";
 const APP_FILTER_KEY: &str = "gpui_app_filter";
 const ONBOARDING_COMPLETED_KEY: &str = "gpui_onboarding_completed";
 const AUDIO_KEY: &str = "gpui_audio";
+const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
 pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
      ('gpui_theme_mode', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size',
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
       'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
       'gpui_display', 'gpui_monitor_types', 'gpui_app_filter',
-      'gpui_onboarding_completed', 'gpui_audio',
+      'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect',
       '_migration_url_content_type', '_migration_backfill_semantic_hash')";
 
 pub struct Preferences {
@@ -349,6 +350,15 @@ impl Preferences {
         self.write_json(AUDIO_KEY, &preference)
     }
 
+    pub fn window_effect(&self) -> Result<WindowEffectPreference> {
+        self.read_json(WINDOW_EFFECT_KEY, WindowEffectPreference::valid)
+    }
+
+    pub fn set_window_effect(&self, preference: WindowEffectPreference) -> Result<()> {
+        anyhow::ensure!(preference.valid(), "窗口效果设置超出允许范围");
+        self.write_json(WINDOW_EFFECT_KEY, &preference)
+    }
+
     pub fn monitor_types(&self) -> Result<MonitorTypesPreference> {
         self.read_json(MONITOR_TYPES_KEY, |preference: &MonitorTypesPreference| {
             preference.valid()
@@ -384,3 +394,5 @@ impl Preferences {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_content;

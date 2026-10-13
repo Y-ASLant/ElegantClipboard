@@ -58,7 +58,7 @@ impl Render for HistoryDrag {
                 .rounded_md()
                 .border_1()
                 .border_color(cx.theme().primary)
-                .bg(cx.theme().background)
+                .bg(panel_background(cx))
                 .text_color(cx.theme().foreground)
                 .shadow_md()
                 .flex()

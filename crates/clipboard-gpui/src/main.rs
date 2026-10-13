@@ -1,6 +1,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 #[cfg(windows)]
+mod acrylic;
+#[cfg(windows)]
 mod links;
 mod options;
 #[cfg(windows)]

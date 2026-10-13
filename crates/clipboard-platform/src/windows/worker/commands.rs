@@ -293,6 +293,13 @@ impl Worker {
                 return self.handle_set_monitor_types(preference);
             }
             Command::SetAppFilter(preference) => return self.handle_set_app_filter(preference),
+            Command::SetWindowEffect(preference) => {
+                return self.save_setting(
+                    preference,
+                    Preferences::set_window_effect,
+                    Event::WindowEffectSaved,
+                );
+            }
             Command::ListRunningApps => {
                 let apps = source_app::running_apps(&self.icons_dir);
                 self.send_event(Event::RunningApps(apps))?;

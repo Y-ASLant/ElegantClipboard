@@ -154,7 +154,7 @@ impl ClipboardView {
                     .rounded_md()
                     .border_1()
                     .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
+                    .bg(panel_background(cx))
                     .p_4()
                     .flex()
                     .flex_col()
