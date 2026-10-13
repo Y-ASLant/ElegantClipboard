@@ -48,8 +48,7 @@ pub use startup::run;
 use file_cards::{image_file_dimensions, single_file_image_path, single_image_file_paths};
 use navigation::{history_drop_row, history_row_height, history_top_row};
 use presentation::{
-    apply_theme, format_bytes, init_window_effect, localize_service_message, panel_background, tr,
-    window_shell,
+    apply_theme, format_bytes, init_window_effect, localize_service_message, tr, window_shell,
 };
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_from_keystroke, shortcut_kbd,

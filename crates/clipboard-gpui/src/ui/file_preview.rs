@@ -61,7 +61,7 @@ impl ClipboardView {
                     } else {
                         cx.theme().border
                     })
-                    .bg(panel_background(cx))
+                    .bg(cx.theme().background)
                     .p_3()
                     .flex()
                     .flex_col()

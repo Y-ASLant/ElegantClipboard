@@ -158,7 +158,7 @@ impl ClipboardView {
             .items_center()
             .gap_1()
             .rounded_sm()
-            .bg(panel_background(cx))
+            .bg(cx.theme().background)
             .invisible()
             .group_hover("", |bar| bar.visible())
             .when(selected, |bar| bar.visible())

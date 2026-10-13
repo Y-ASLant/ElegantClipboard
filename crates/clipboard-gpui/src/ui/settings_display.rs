@@ -82,12 +82,12 @@ impl SettingsWindowView {
                 div()
                     .flex()
                     .flex_1()
-                    .min_w(px(280.))
+                    .min_w(px(320.))
                     .flex_wrap()
                     .items_center()
                     .gap_2()
                     .child(tr(language, "窗口效果", "Window effect"))
-                    .child(div().flex_1().min_w_0().child(choice_tabs(
+                    .child(div().flex_1().min_w(px(320.)).child(choice_tabs(
                         "settings-window-effect",
                         &self.owner,
                         [
@@ -124,7 +124,7 @@ impl SettingsWindowView {
                     .flex_wrap()
                     .items_center()
                     .gap_2()
-                    .child(tr(language, "磨砂浓度", "Frost opacity"))
+                    .child(tr(language, "背景遮罩强度", "Background tint"))
                     .child(div().flex_1().min_w_0().child(choice_tabs(
                         "settings-window-effect-opacity",
                         &self.owner,
@@ -146,12 +146,15 @@ impl SettingsWindowView {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w_0()
+                    .whitespace_normal()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(
                         language,
-                        "亚克力与云母会调用 Windows 合成背板；浓度越高越接近纯色，越低越通透。仅在 Windows 10 1809 及以上版本有效。",
-                        "Acrylic and Mica use the Windows composition backdrop. Higher opacity hides more of it; lower lets more through. Requires Windows 10 1809 or later.",
+                        "仅调整窗口背景的遮罩，不改变控件透明度或系统模糊半径。数值越高越接近主题纯色，越低越通透。",
+                        "Only changes the window background tint, not control opacity or system blur. Higher values look more solid; lower values reveal more of the backdrop.",
                     )),
             )
             .into_any_element()

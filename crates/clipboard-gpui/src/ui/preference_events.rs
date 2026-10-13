@@ -354,13 +354,6 @@ impl ClipboardView {
                 if preference != self.window_effect {
                     self.window_effect = preference;
                     acrylic::record(preference, cx);
-                    // 先改主题 token 再改窗口：token 决定侧边栏/卡片/Tab 的 alpha，
-                    // 两者都做完才有一次完整的重绘。
-                    //
-                    // 这里走 `apply_theme` 而不是直接 `retint_theme`：`retint_theme` 是在
-                    // token 现有 alpha 上做乘法，必须先让 `Theme::change` 把 token 重载回
-                    // 主题原始值，否则反复切换浓度会越切越淡。
-                    apply_theme(self.theme, window, cx);
                     acrylic::apply(preference, window);
                     refresh_window_effects(preference, cx);
                     self.close_hover_preview(cx);

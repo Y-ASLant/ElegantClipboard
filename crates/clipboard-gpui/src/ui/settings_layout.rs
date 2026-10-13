@@ -167,12 +167,17 @@ fn paste_audio_content(
 }
 
 fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
-    TitleBar::new().bg(panel_background(cx)).child(
-        div()
-            .text_sm()
-            .font_semibold()
-            .child(tr(language, "设置", "Settings")),
-    )
+    TitleBar::new()
+        .bg(cx.theme().background)
+        .when(acrylic::active(cx).effect != WindowEffect::None, |bar| {
+            bar.bg(transparent_black())
+        })
+        .child(
+            div()
+                .text_sm()
+                .font_semibold()
+                .child(tr(language, "设置", "Settings")),
+        )
 }
 
 impl Render for SettingsWindowView {
@@ -285,6 +290,15 @@ impl Render for SettingsWindowView {
                     })
                     .sidebar_width(px(224.))
                     .sidebar_size_range(px(212.)..px(280.))
+                    .when(
+                        acrylic::active(cx).effect != WindowEffect::None,
+                        |settings| {
+                            // Only the sidebar container exposes the shell; its controls keep
+                            // their theme surfaces, so there is no second tint layer.
+                            settings
+                                .sidebar_style(&StyleRefinement::default().bg(transparent_black()))
+                        },
+                    )
                     .with_group_variant(GroupBoxVariant::Outline)
                     .pages(pages),
                 ),

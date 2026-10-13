@@ -11,8 +11,8 @@
 //!    交换链清成透明色。
 //! 4. **根 div 不能有不透明背景**。见 [`AcrylicRootPlugin`]——这是最隐蔽的一条。
 //!
-//! 除此之外，窗口内的每个表面（侧边栏、卡片、Tab）自己也是不透明的，必须一并降 alpha，
-//! 否则玻璃只存在于窗口底色、内容区仍是死板一块。见 [`retint_theme`]。
+//! 材质只作用于窗口外壳，不修改组件主题。控件与浮层保留原有底色，
+//! 避免半透明表面透出自身阴影；装饰性容器可局部透明以露出同一层外壳。
 //!
 //! 生效值通过 Global 广播：三处窗口（主窗口、设置窗口、悬停预览）在创建时套用，
 //! 偏好保存成功后由全局刷新推送给所有已打开窗口。
@@ -35,7 +35,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::BOOL;
 
 use gpui_kit::base::{Root, RootPlugin};
-use gpui_kit::component::theme::{ActiveTheme, Theme, ThemeToken};
 use gpui_kit::{
     App, Context, Div, Global, Hsla, IntoElement, Render, Stateful, StyleRefinement, Window,
     WindowBackgroundAppearance, div, prelude::*, transparent_black,
@@ -44,11 +43,6 @@ use gpui_kit::{
 mod frameless;
 
 use frameless::set_frameless;
-
-/// 窗口底色占「磨砂浓度」的份额。剩下的留给窗口内表面，两者相加即用户感知的总浓度。
-const WINDOW_TINT_SHARE: f32 = 0.55;
-/// 窗口内表面（侧边栏、卡片、Tab 等）的份额。
-const SURFACE_TINT_SHARE: f32 = 0.45;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct WindowEffectSetting(pub(crate) WindowEffectPreference);
@@ -174,89 +168,15 @@ fn backdrop(effect: WindowEffect) -> DWM_SYSTEMBACKDROP_TYPE {
     }
 }
 
-/// 把 `concentration` 归一化到 0..1，效果关闭时为 1（即完全实色，与未启用时一致）。
-fn concentration(preference: WindowEffectPreference) -> f32 {
-    if preference.effect == WindowEffect::None {
-        1.0
-    } else {
-        f32::from(preference.opacity) / 100.0
-    }
-}
-
-/// 窗口外壳底色：窗口玻璃层，只占浓度的一部分，余量留给窗口内表面叠加。
+/// 外壳只绘制一层主题染色；强度不分摊给控件，也不改变 DWM 的模糊半径。
 pub(crate) fn shell_background(base: Hsla, preference: WindowEffectPreference) -> Hsla {
     if preference.effect == WindowEffect::None {
         return base;
     }
     Hsla {
-        a: concentration(preference) * WINDOW_TINT_SHARE,
+        a: f32::from(preference.opacity) / 100.0,
         ..base
     }
-}
-
-/// 窗口内表面底色：侧边栏、卡片、Tab、面板都走这里，叠加在窗口玻璃之上。
-pub(crate) fn surface_background(cx: &App) -> Hsla {
-    let preference = active(cx);
-    if preference.effect == WindowEffect::None {
-        return cx.theme().background;
-    }
-    Hsla {
-        a: concentration(preference) * SURFACE_TINT_SHARE,
-        ..cx.theme().background
-    }
-}
-
-/// 把窗口内表面 token 的 alpha 同步到当前浓度。
-///
-/// 这些表面由 gpui-component 自己绘制（侧边栏、TabBar、分组框、输入框、列表…），
-/// 应用无法逐个改，只能从主题 token 一次改齐。`Theme::update` 内部会 `reconcile`
-/// 并把改动回写到 `colors.background`，因此 `theme().background` 的使用方
-/// （如历史卡片）会同步变半透明。`Theme::update` 结尾 `refresh_windows`，所以
-/// 所有已打开窗口立即重绘。
-///
-/// **在 token 自己的 alpha 上做乘法，而不是直接替换成 `alpha`**：主题里本来就有
-/// 半透明的 token（例如暗色主题的 `list.head.background` 是 `#17171766`），
-/// 替换会把它们抬成实色，关闭窗口效果时也能看出差别。相乘则天然满足
-/// 「效果关闭（`alpha == 1`）时与原主题完全一致」。
-///
-/// 由于是乘法，调用前必须保证 token 处于**主题原始值**。调用点只有
-/// [`crate::ui::presentation::apply_theme`]，它每次都在 `Theme::change` 重载主题之后
-/// 才调这里；反复调用不会累积变淡。
-pub(crate) fn retint_theme(cx: &mut App) {
-    let alpha = {
-        let preference = active(cx);
-        if preference.effect == WindowEffect::None {
-            1.0
-        } else {
-            concentration(preference) * SURFACE_TINT_SHARE
-        }
-    };
-    Theme::update(cx, |theme| {
-        let tokens = &mut theme.tokens;
-        for token in [
-            &mut tokens.background,
-            &mut tokens.sidebar,
-            &mut tokens.tab_bar,
-            &mut tokens.tab_active,
-            &mut tokens.group_box,
-            &mut tokens.accordion,
-            &mut tokens.list,
-            &mut tokens.list_head,
-            &mut tokens.list_hover,
-            &mut tokens.popover,
-            &mut tokens.input,
-            &mut tokens.table,
-            &mut tokens.table_head,
-            &mut tokens.status_bar,
-            &mut tokens.title_bar,
-        ] {
-            let color = Hsla {
-                a: token.color.a * alpha,
-                ..token.color
-            };
-            *token = ThemeToken::new(color, color.into());
-        }
-    });
 }
 
 /// 开启效果时去掉 caption 让 DWM 把背板铺进客户区；关闭时还原成启用前的样式。
