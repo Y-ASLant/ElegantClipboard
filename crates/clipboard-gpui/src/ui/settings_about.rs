@@ -111,8 +111,8 @@ const FEATURE_GROUPS: &[FeatureGroup] = &[
                 "General settings can skip the confirmation when clearing the current group's history from the tray menu, though confirmation remains the default",
             ),
             (
-                "主窗口、设置窗口与悬停预览浮窗支持 Windows 系统材质：可选关闭、亚克力、云母或云母 Alt，背景遮罩强度可选 40%/55%/72%/85%。材质仅作用于窗口外壳，控件、卡片与通知保留原有主题表面；开启后使用无边框 + DWM 系统背板，窗口边缘仍可缩放",
-                "Windows system materials for the main window, settings window, and hover preview popup: off, Acrylic, Mica, or Mica Alt, with a 40%/55%/72%/85% background tint. Materials affect only the window shell; controls, cards, and notifications retain their theme surfaces. Enabled effects use a borderless DWM backdrop with resizable edges",
+                "主窗口、设置窗口与悬停预览浮窗按系统能力提供关闭、亚克力、云母或云母 Alt；不支持的已保存选项保留，并明确显示降级说明。背景遮罩强度可选 40%/55%/72%/85%，仅重绘背景，不重复设置原生材质。材质只作用于窗口外壳，控件、卡片与通知保留原有主题表面；开启后保持无边框与边缘缩放",
+                "System-capable window effects for the main window, settings window, and hover preview: off, Acrylic, Mica, or Mica Alt. Unsupported saved choices are retained with an explicit fallback notice. The 40%/55%/72%/85% background tint only repaints the background without reapplying native materials. Controls, cards, and notifications retain their theme surfaces; enabled effects keep a borderless frame with resizable edges",
             ),
         ],
     },

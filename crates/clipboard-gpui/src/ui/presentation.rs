@@ -31,7 +31,7 @@ pub(super) fn init_window_effect(
     cx: &mut App,
 ) {
     acrylic::record(preference, cx);
-    acrylic::apply(preference, window);
+    acrylic::apply(preference.effect, window);
 }
 
 /// 所有窗口共用的外壳：仅此处绘制材质染色，内容表面保留原有主题。

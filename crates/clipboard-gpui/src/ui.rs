@@ -34,6 +34,7 @@ mod settings_hover;
 mod settings_layout;
 mod settings_shortcuts;
 mod settings_window;
+mod settings_window_effect;
 mod shortcut_events;
 mod shortcut_labels;
 mod shortcuts;

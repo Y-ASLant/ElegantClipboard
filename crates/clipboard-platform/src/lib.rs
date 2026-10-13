@@ -8,6 +8,7 @@ mod instance;
 pub mod outside_click;
 #[cfg(windows)]
 pub mod source_app;
+pub mod window_effect;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

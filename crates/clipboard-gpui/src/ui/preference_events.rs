@@ -352,11 +352,17 @@ impl ClipboardView {
         match result {
             Ok(preference) => {
                 if preference != self.window_effect {
+                    let capabilities =
+                        clipboard_platform::window_effect::WindowEffectCapabilities::current();
+                    let material_changed = capabilities.resolve(preference.effect)
+                        != capabilities.resolve(self.window_effect.effect);
                     self.window_effect = preference;
                     acrylic::record(preference, cx);
-                    acrylic::apply(preference, window);
-                    refresh_window_effects(preference, cx);
-                    self.close_hover_preview(cx);
+                    if material_changed {
+                        self.close_hover_preview(cx);
+                        apply_window_effect_to_open_windows(preference.effect, window, cx);
+                    }
+                    cx.refresh_windows();
                 }
                 self.set_feedback_message(
                     tr(
@@ -453,16 +459,19 @@ impl ClipboardView {
     }
 }
 
-/// 把新效果推开到所有已打开的窗口：设置窗口与悬停预览都要立刻换肤，不能等下次打开。
-///
-/// 主窗口会在这里被**再套用一次**（调用方已经直接处理过）——`acrylic::apply` 是幂等的，
-/// 重复调用只是多刷一次非客户区，没有副作用。
-fn refresh_window_effects(preference: WindowEffectPreference, cx: &mut Context<ClipboardView>) {
+/// Only an effective material change reconfigures native windows; tint changes just repaint.
+fn apply_window_effect_to_open_windows(
+    effect: WindowEffect,
+    window: &mut Window,
+    cx: &mut Context<ClipboardView>,
+) {
+    acrylic::apply(effect, window);
+    let current = window.window_handle().window_id();
     for handle in cx.windows() {
-        let _ = handle.update(cx, |_, window, _| {
-            acrylic::apply(preference, window);
-            window.refresh();
-        });
+        if handle.window_id() == current {
+            continue;
+        }
+        let _ = handle.update(cx, |_, window, _| acrylic::apply(effect, window));
     }
 }
 

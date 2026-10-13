@@ -18,6 +18,7 @@
 //! 偏好保存成功后由全局刷新推送给所有已打开窗口。
 
 use clipboard_core::preferences::{WindowEffect, WindowEffectPreference};
+use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
@@ -49,9 +50,15 @@ pub(crate) struct WindowEffectSetting(pub(crate) WindowEffectPreference);
 
 impl Global for WindowEffectSetting {}
 
-/// 记录当前生效的窗口效果；三个窗口的渲染都会读取它。
+/// 只广播本机实际生效的效果；请求值继续保存在视图和 SQLite 中。
 pub(crate) fn record(preference: WindowEffectPreference, cx: &mut App) {
-    cx.set_global(WindowEffectSetting(preference));
+    let effect = WindowEffectCapabilities::current()
+        .resolve(preference.effect)
+        .effect();
+    cx.set_global(WindowEffectSetting(WindowEffectPreference {
+        effect,
+        ..preference
+    }));
 }
 
 pub(crate) fn active(cx: &App) -> WindowEffectPreference {
@@ -94,15 +101,19 @@ pub(crate) fn register_root_plugin(cx: &mut App) {
     Root::register_plugin::<AcrylicRootPlugin>(cx, |_, _| AcrylicRootPlugin);
 }
 
-/// 套用窗口效果：清屏行为、窗口样式、DWM 背板属性、无边框四件事一起做。
-pub(crate) fn apply(preference: WindowEffectPreference, window: &mut Window) {
-    window.set_background_appearance(appearance(preference.effect));
+/// 首次开窗或有效材质变化时调用；遮罩强度不参与原生窗口配置。
+pub(crate) fn apply(effect: WindowEffect, window: &mut Window) {
+    let capabilities = WindowEffectCapabilities::current();
+    let backend = capabilities.resolve(effect);
+    window.set_background_appearance(appearance(backend));
     let Some(hwnd) = window_handle(window) else {
         return;
     };
-    let enabled = preference.effect != WindowEffect::None;
+    let enabled = backend != WindowEffectBackend::Opaque;
     set_window_style(hwnd, enabled);
-    set_dwm_attributes(hwnd, preference.effect);
+    if capabilities.supports_system_backdrop() {
+        set_dwm_attributes(hwnd, backend.effect());
+    }
     // 无边框要放在最后：它靠 SWP_FRAMECHANGED 让新客户区生效，
     // 且依赖前面已经装好的窗口样式。
     set_frameless(enabled, hwnd);
@@ -150,12 +161,14 @@ fn notify_client_size(hwnd: HWND) {
     }
 }
 
-fn appearance(effect: WindowEffect) -> WindowBackgroundAppearance {
-    match effect {
-        WindowEffect::None => WindowBackgroundAppearance::Opaque,
-        WindowEffect::Acrylic => WindowBackgroundAppearance::Blurred,
-        WindowEffect::Mica => WindowBackgroundAppearance::MicaBackdrop,
-        WindowEffect::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
+fn appearance(backend: WindowEffectBackend) -> WindowBackgroundAppearance {
+    match backend {
+        WindowEffectBackend::Opaque => WindowBackgroundAppearance::Opaque,
+        WindowEffectBackend::LegacyAcrylic => WindowBackgroundAppearance::Blurred,
+        // Clear any WCA accent before installing the native DWM Acrylic backdrop.
+        WindowEffectBackend::Acrylic => WindowBackgroundAppearance::Transparent,
+        WindowEffectBackend::Mica => WindowBackgroundAppearance::MicaBackdrop,
+        WindowEffectBackend::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
     }
 }
 

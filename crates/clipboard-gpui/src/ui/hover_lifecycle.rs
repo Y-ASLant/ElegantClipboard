@@ -307,7 +307,7 @@ impl ClipboardView {
                     // 右/下露出一条没被绘制的区域（背板透出来就是灰色带），要拖一下窗口才恢复。
                     // 这一次套用会把尺寸重新投递到消息队列，等本次更新结束后派发，回调才能生效。
                     let _ = handle.update(cx, |_, window, _| {
-                        acrylic::apply(window_effect, window);
+                        acrylic::apply(window_effect.effect, window);
                         window.refresh();
                     });
                     if this.hover_preview.id == Some(id)

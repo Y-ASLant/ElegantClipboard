@@ -45,6 +45,8 @@
 
 ### Windows 平台层
 
+`crates/clipboard-platform/src/window_effect.rs` 独立负责 Windows 版本探测、材质能力与降级策略，不修改已保存的偏好。界面层的 `ui/settings_window_effect.rs` 显示可用选项和保存值的降级说明；`acrylic.rs` 只在初始化或有效材质变化时配置原生窗口，遮罩强度变化只更新背景并重绘。
+
 | 路径（相对 `crates/clipboard-platform/src/windows`） | 职责 |
 |---|---|
 | `mod.rs`、`protocol.rs` | 对外入口；命令、事件、采集载荷与失败分类 |
