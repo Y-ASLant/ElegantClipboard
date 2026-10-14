@@ -147,17 +147,6 @@ impl ClipboardView {
                         return;
                     }
                     this.paste_target = paste::is_external_target(window, target).then_some(target);
-                    if this.paste_target.is_some() {
-                        this.set_feedback_message(
-                            tr(
-                                this.language,
-                                "已从原窗口唤出，可选择记录并粘贴",
-                                "Opened from the previous window; select an item to paste.",
-                            )
-                            .into(),
-                        );
-                        this.is_error = false;
-                    }
                     this.show_window(window, cx);
                     cx.notify();
                 })
