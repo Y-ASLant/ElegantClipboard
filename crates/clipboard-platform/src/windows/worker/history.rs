@@ -19,13 +19,20 @@ impl Worker {
         } else {
             Err(anyhow!("列表已切换，请重新选择要删除的记录"))
         };
-        if result.is_ok() {
-            self.send_groups()?;
-            self.snapshot()?;
-        }
+        let refresh = if result.is_ok() {
+            self.send_groups()
+                .and_then(|_| self.snapshot())
+                .context("所选记录已删除，但列表或分组计数刷新失败，请重启应用后查看")
+        } else {
+            Ok(())
+        };
         self.send_event(Event::BatchDeleted(
             result.map_err(|error| error.to_string()),
-        ))
+        ))?;
+        if let Err(error) = refresh {
+            self.send_event(Event::BackgroundError(error.to_string()))?;
+        }
+        Ok(())
     }
 
     pub(super) fn handle_clear_history(
@@ -39,29 +46,38 @@ impl Worker {
         } else {
             Err(anyhow!("列表已切换，请重新选择要清理的分组"))
         };
-        if result.is_ok() {
-            self.send_groups()?;
-            self.snapshot()?;
-        }
+        let refresh = if result.is_ok() {
+            self.send_groups()
+                .and_then(|_| self.snapshot())
+                .context("历史记录已清理，但列表或分组计数刷新失败，请重启应用后查看")
+        } else {
+            Ok(())
+        };
         self.send_event(Event::HistoryCleared(
             result.map_err(|error| error.to_string()),
-        ))
+        ))?;
+        if let Err(error) = refresh {
+            self.send_event(Event::BackgroundError(error.to_string()))?;
+        }
+        Ok(())
     }
 
     pub(super) fn handle_clear_all(&mut self) -> Result<()> {
-        let result = self
-            .history
-            .clear_all_with_media(&self.images_dir)
-            .and_then(|count| {
-                self.send_groups()
-                    .context("全部历史已删除，但分组计数刷新失败，请重启应用后查看")?;
-                self.snapshot()
-                    .context("全部历史已删除，但列表刷新失败，请重启应用后查看")?;
-                Ok(count)
-            });
+        let result = self.history.clear_all_with_media(&self.images_dir);
+        let refresh = if result.is_ok() {
+            self.send_groups()
+                .and_then(|_| self.snapshot())
+                .context("全部历史已删除，但列表或分组计数刷新失败，请重启应用后查看")
+        } else {
+            Ok(())
+        };
         self.send_event(Event::AllHistoryCleared(
             result.map_err(|error| error.to_string()),
-        ))
+        ))?;
+        if let Err(error) = refresh {
+            self.send_event(Event::BackgroundError(error.to_string()))?;
+        }
+        Ok(())
     }
 
     pub(super) fn handle_reorder(

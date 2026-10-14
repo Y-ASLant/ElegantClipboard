@@ -41,6 +41,7 @@ impl ClipboardView {
             Event::GroupCreated(result) => self.apply_group_created(result, window, cx),
             Event::GroupRenamed(result) => self.apply_group_renamed(result, window, cx),
             Event::GroupDeleted(result) => self.apply_group_deleted(result, window, cx),
+            Event::ItemDeleted(outcome) => self.apply_item_deleted(outcome),
             Event::HistoryCleared(result) => self.apply_history_cleared(result, window, cx),
             Event::AllHistoryCleared(result) => self.apply_all_history_cleared(result, window, cx),
             Event::BatchDeleted(result) => self.apply_batch_deleted(result, window, cx),

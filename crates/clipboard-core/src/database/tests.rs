@@ -1,3 +1,5 @@
+mod migration_recovery;
+
 use super::*;
 
 fn temp_db() -> (tempfile::TempDir, Database) {

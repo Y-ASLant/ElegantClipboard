@@ -147,9 +147,32 @@ impl ClipboardView {
         true
     }
 
+    pub(super) fn apply_item_deleted(&mut self, outcome: clipboard_core::DeletionOutcome) -> bool {
+        if outcome.cleanup_warning.is_some() {
+            self.set_feedback_message(tr(self.language, "记录已删除", "Item deleted").into());
+            self.apply_cleanup_warning(outcome.cleanup_warning);
+        }
+        true
+    }
+
+    fn apply_cleanup_warning(&mut self, warning: Option<String>) {
+        self.is_error = warning.is_some();
+        if let Some(warning) = warning {
+            self.set_feedback_message(format!(
+                "{}；{}: {warning}",
+                self.message,
+                tr(
+                    self.language,
+                    "部分附件未能回收",
+                    "Some attachments could not be removed",
+                )
+            ));
+        }
+    }
+
     pub(super) fn apply_history_cleared(
         &mut self,
-        result: Result<i64, String>,
+        result: Result<clipboard_core::DeletionOutcome, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -161,13 +184,14 @@ impl ClipboardView {
             self.close_history_confirmation(window, cx);
         }
         match result {
-            Ok(count) => {
+            Ok(outcome) => {
+                let count = outcome.deleted;
                 self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Cleared {count} unpinned, non-favorite items")
                 } else {
                     format!("已清理 {count} 条未置顶且未收藏的记录")
                 });
-                self.is_error = false;
+                self.apply_cleanup_warning(outcome.cleanup_warning);
             }
             Err(error) => {
                 self.set_feedback_message(format!(
@@ -182,13 +206,14 @@ impl ClipboardView {
 
     pub(super) fn apply_all_history_cleared(
         &mut self,
-        result: Result<i64, String>,
+        result: Result<clipboard_core::DeletionOutcome, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         self.clear_all_pending = false;
         match result {
-            Ok(count) => {
+            Ok(outcome) => {
+                let count = outcome.deleted;
                 self.reset_selection();
                 self.group_move_id = None;
                 self.preview.close();
@@ -201,7 +226,7 @@ impl ClipboardView {
                 } else {
                     format!("已删除全部 {count} 条历史，设置和分组已保留")
                 });
-                self.is_error = false;
+                self.apply_cleanup_warning(outcome.cleanup_warning);
                 self.clear_all_error = None;
                 if let Some(handle) = self.settings_window {
                     cx.spawn(async move |_, cx| {
@@ -233,7 +258,7 @@ impl ClipboardView {
 
     pub(super) fn apply_batch_deleted(
         &mut self,
-        result: Result<i64, String>,
+        result: Result<clipboard_core::DeletionOutcome, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -242,14 +267,15 @@ impl ClipboardView {
             self.close_history_confirmation(window, cx);
         }
         match result {
-            Ok(count) => {
+            Ok(outcome) => {
+                let count = outcome.deleted;
                 self.reset_selection();
                 self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Deleted {count} selected items")
                 } else {
                     format!("已删除 {count} 条选中记录")
                 });
-                self.is_error = false;
+                self.apply_cleanup_warning(outcome.cleanup_warning);
             }
             Err(error) => {
                 self.set_feedback_message(format!(

@@ -1,7 +1,7 @@
 use crate::source_app;
 use anyhow::Result;
 use clipboard_core::{
-    ContentCategory, PreviewContent,
+    ContentCategory, DeletionOutcome, PreviewContent,
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
@@ -309,9 +309,10 @@ pub enum Event {
         id: i64,
         result: Result<PathBuf, String>,
     },
-    HistoryCleared(Result<i64, String>),
-    AllHistoryCleared(Result<i64, String>),
-    BatchDeleted(Result<i64, String>),
+    ItemDeleted(DeletionOutcome),
+    HistoryCleared(Result<DeletionOutcome, String>),
+    AllHistoryCleared(Result<DeletionOutcome, String>),
+    BatchDeleted(Result<DeletionOutcome, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
     LanguageSaved(Result<LanguagePreference, String>),

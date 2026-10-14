@@ -1,8 +1,9 @@
+use crate::image::{canonical_media_path, remove_media_file};
 use crate::{
     FilePreviewEntry, History,
     database::{ClipboardItem, ContentType, NewClipboardItem},
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -136,40 +137,62 @@ impl History {
             .collect())
     }
 
-    pub(crate) fn cleanup_staged(&self, candidates: Vec<String>, images_dir: &Path) {
+    pub(crate) fn cleanup_staged(&self, candidates: Vec<String>, images_dir: &Path) -> Result<()> {
         if candidates.is_empty() {
-            return;
+            return Ok(());
         }
-        let Some(staged_dir) = images_dir.parent().map(|parent| parent.join("staged")) else {
-            return;
+        let staged_dir = images_dir
+            .parent()
+            .context("无法确定暂存目录")?
+            .join("staged");
+        let Some(root) = canonical_media_path(&staged_dir)? else {
+            return Ok(());
         };
-        let Ok(root) = fs::canonicalize(&staged_dir) else {
-            return;
-        };
-        let Ok(current_payloads) = self.repo.get_all_file_payloads() else {
-            return;
-        };
-        let used: HashSet<PathBuf> = current_payloads
-            .iter()
-            .flat_map(|payload| staged_paths(payload))
-            .filter_map(|path| fs::canonicalize(path).ok())
-            .collect();
-        for path in candidates.iter().flat_map(|payload| staged_paths(payload)) {
-            let raw = Path::new(&path);
-            let Ok(canonical) = fs::canonicalize(raw) else {
-                continue;
-            };
-            if raw
-                .parent()
-                .and_then(|parent| fs::canonicalize(parent).ok())
-                .as_deref()
-                == Some(root.as_path())
-                && canonical.parent() == Some(root.as_path())
-                && !used.contains(&canonical)
-            {
-                let _ = fs::remove_file(raw);
+        let current_payloads = self
+            .repo
+            .get_all_file_payloads()
+            .context("无法读取暂存附件引用，未回收暂存附件")?;
+        let mut used = HashSet::<PathBuf>::new();
+        for payload in current_payloads {
+            for path in staged_paths(&payload)? {
+                if let Some(path) = canonical_media_path(Path::new(&path))? {
+                    used.insert(path);
+                }
             }
         }
+        let mut errors = Vec::new();
+        for payload in candidates {
+            let paths = match staged_paths(&payload) {
+                Ok(paths) => paths,
+                Err(error) => {
+                    errors.push(format!("{error:#}"));
+                    continue;
+                }
+            };
+            for path in paths {
+                let result = (|| -> Result<()> {
+                    let raw = Path::new(&path);
+                    let parent = raw.parent().context("暂存附件路径没有父目录")?;
+                    if canonical_media_path(parent)?.as_deref() != Some(root.as_path()) {
+                        return Ok(());
+                    }
+                    let Some(canonical) = canonical_media_path(raw)? else {
+                        return Ok(());
+                    };
+                    if canonical.parent() == Some(root.as_path()) && !used.contains(&canonical) {
+                        remove_media_file(raw)?;
+                    }
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    errors.push(format!("{error:#}"));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            bail!("{}", errors.join("; "));
+        }
+        Ok(())
     }
 }
 
@@ -219,18 +242,24 @@ fn resolved_file_paths(
         .collect()
 }
 
-fn staged_paths(raw: &str) -> Vec<String> {
-    serde_json::from_str::<serde_json::Value>(raw)
-        .ok()
-        .and_then(|value| {
-            value.get("staged")?.as_array().map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|entry| entry.get("staged")?.as_str().map(str::to_owned))
-                    .collect()
-            })
+fn staged_paths(raw: &str) -> Result<Vec<String>> {
+    let value: serde_json::Value = serde_json::from_str(raw).context("暂存附件载荷无效")?;
+    let Some(staged) = value.get("staged") else {
+        return Ok(Vec::new());
+    };
+    staged
+        .as_array()
+        .context("暂存附件列表无效")?
+        .iter()
+        .map(|entry| {
+            entry
+                .get("staged")
+                .and_then(serde_json::Value::as_str)
+                .filter(|path| !path.is_empty())
+                .map(str::to_owned)
+                .context("暂存附件路径无效")
         })
-        .unwrap_or_default()
+        .collect()
 }
 
 #[cfg(test)]
@@ -373,10 +402,10 @@ mod tests {
             ids.push(id);
         }
         history.toggle_pin(ids[0])?;
-        assert_eq!(history.clear_history_with_media(None, &images)?, 1);
+        assert_eq!(history.clear_history_with_media(None, &images)?.deleted, 1);
         assert!(staged.exists());
         history.toggle_pin(ids[0])?;
-        assert_eq!(history.clear_history_with_media(None, &images)?, 1);
+        assert_eq!(history.clear_history_with_media(None, &images)?.deleted, 1);
         assert!(!staged.exists());
         Ok(())
     }

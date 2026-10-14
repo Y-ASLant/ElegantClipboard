@@ -311,7 +311,9 @@ fn clear_history_preserves_favorites_and_rejects_stale_group_view() -> Result<()
     })?;
     assert!(matches!(next_event(&events), Event::Groups(_)));
     assert_eq!(next_snapshot(&events, 1).len(), 1);
-    assert!(matches!(next_event(&events), Event::HistoryCleared(Ok(1))));
+    assert!(
+        matches!(next_event(&events), Event::HistoryCleared(Ok(outcome)) if outcome.deleted == 1 && outcome.cleanup_warning.is_none())
+    );
     let history = History::open(directory.path().join("clipboard.db"))?;
     assert!(history.item(removed).is_err());
     assert!(history.item(favorite)?.is_favorite);
@@ -337,7 +339,7 @@ fn clear_all_history_removes_protected_items_across_groups() -> Result<()> {
     assert!(next_snapshot(&events, 0).is_empty());
     assert!(matches!(
         next_event(&events),
-        Event::AllHistoryCleared(Ok(2))
+        Event::AllHistoryCleared(Ok(outcome)) if outcome.deleted == 2 && outcome.cleanup_warning.is_none()
     ));
     drop(service);
 
@@ -345,6 +347,69 @@ fn clear_all_history_removes_protected_items_across_groups() -> Result<()> {
     assert_eq!(history.count("", false)?, 0);
     assert_eq!(history.count_in_group("", false, Some(group.id))?, 0);
     assert!(history.groups()?.iter().any(|item| item.id == group.id));
+    Ok(())
+}
+
+#[test]
+fn media_cleanup_failure_still_refreshes_deleted_history_and_reports_commit() -> Result<()> {
+    for (operation, fail_refresh) in
+        (0..4).flat_map(|operation| [(operation, false), (operation, true)])
+    {
+        let directory = tempfile::tempdir()?;
+        let database = directory.path().join("clipboard.db");
+        let history = History::open(database.clone())?;
+        let images = directory.path().join("images");
+        let id = history.capture_image(b"\x89PNG\r\n\x1a\nsynthetic", 1, 1, &images)?;
+        let image = std::path::PathBuf::from(history.item(id)?.image_path.unwrap());
+        std::fs::remove_file(&image)?;
+        std::fs::create_dir(&image)?;
+        drop(history);
+        let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+        next_snapshot(&events, 0);
+        if fail_refresh {
+            let db = Database::new(database.clone())?;
+            db.write_connection().lock().execute_batch(
+                "CREATE TRIGGER break_refresh AFTER DELETE ON clipboard_items BEGIN
+                 INSERT INTO clipboard_items (content_type, content_hash, semantic_hash, preview)
+                 VALUES ('text', 'refresh-fault', 'refresh-fault', X'01'); END;",
+            )?;
+        }
+        service.send(match operation {
+            0 => Command::Delete(id),
+            1 => Command::DeleteBatch {
+                ids: vec![id],
+                group_id: None,
+                generation: 0,
+            },
+            2 => Command::ClearHistory {
+                group_id: None,
+                generation: 0,
+            },
+            _ => Command::ClearAllHistory,
+        })?;
+        if fail_refresh {
+            if operation != 0 {
+                assert!(matches!(next_event(&events), Event::Groups(_)));
+            }
+        } else {
+            assert!(next_snapshot(&events, 0).is_empty());
+        }
+        let outcome = match next_event(&events) {
+            Event::ItemDeleted(outcome) if operation == 0 => outcome,
+            Event::BatchDeleted(Ok(outcome)) if operation == 1 => outcome,
+            Event::HistoryCleared(Ok(outcome)) if operation == 2 => outcome,
+            Event::AllHistoryCleared(Ok(outcome)) if operation == 3 => outcome,
+            _ => panic!("expected committed deletion outcome"),
+        };
+        assert_eq!(outcome.deleted, 1);
+        assert!(outcome.cleanup_warning.is_some());
+        if fail_refresh {
+            assert!(matches!(next_event(&events), Event::BackgroundError(_)));
+        }
+        assert!(image.is_dir());
+        drop(service);
+        assert!(History::open(database)?.item(id).is_err());
+    }
     Ok(())
 }
 
@@ -386,7 +451,9 @@ fn batch_delete_rejects_stale_or_cross_group_selection() -> Result<()> {
     })?;
     assert!(matches!(next_event(&events), Event::Groups(_)));
     assert!(next_snapshot(&events, 1).is_empty());
-    assert!(matches!(next_event(&events), Event::BatchDeleted(Ok(2))));
+    assert!(
+        matches!(next_event(&events), Event::BatchDeleted(Ok(outcome)) if outcome.deleted == 2 && outcome.cleanup_warning.is_none())
+    );
     let history = History::open(directory.path().join("clipboard.db"))?;
     assert!(history.item(first).is_err());
     assert!(history.item(second).is_err());

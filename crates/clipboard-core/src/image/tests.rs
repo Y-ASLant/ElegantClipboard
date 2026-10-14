@@ -91,7 +91,9 @@ fn clear_history_is_group_scoped_and_preserves_protected_items() -> Result<()> {
     let default_text = history.capture("keep default")?.unwrap();
 
     assert_eq!(
-        history.clear_history_with_media(Some(group.id), &images)?,
+        history
+            .clear_history_with_media(Some(group.id), &images)?
+            .deleted,
         2
     );
     assert!(history.item(group_image).is_err());
@@ -100,7 +102,7 @@ fn clear_history_is_group_scoped_and_preserves_protected_items() -> Result<()> {
     assert!(history.item(favorite)?.is_favorite);
     assert!(history.item(pinned)?.is_pinned);
     assert_eq!(history.text(default_text)?, "keep default");
-    assert_eq!(history.clear_history_with_media(None, &images)?, 1);
+    assert_eq!(history.clear_history_with_media(None, &images)?.deleted, 1);
     assert!(history.item(default_text).is_err());
     assert_eq!(history.groups()?[0].item_count, 2);
     Ok(())
@@ -137,7 +139,7 @@ fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings()
     crate::preferences::Preferences::new(&database)
         .set_theme(crate::preferences::ThemePreference::Dark)?;
 
-    assert_eq!(history.clear_all_with_media(&images)?, 4);
+    assert_eq!(history.clear_all_with_media(&images)?.deleted, 4);
 
     assert_eq!(history.count("", false)?, 0);
     assert_eq!(history.count_in_group("", false, Some(group.id))?, 0);
@@ -232,7 +234,9 @@ fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
         .execute_batch("DROP TRIGGER reject_batch")?;
 
     assert_eq!(
-        history.delete_batch_with_media(&[image, file], Some(group.id), &images)?,
+        history
+            .delete_batch_with_media(&[image, file], Some(group.id), &images)?
+            .deleted,
         2
     );
     assert!(history.item(image).is_err());
@@ -240,6 +244,99 @@ fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
     assert!(!image_path.exists());
     assert!(!staged.exists());
     assert_eq!(history.text(other)?, "keep in default");
+    Ok(())
+}
+
+#[test]
+fn committed_deletions_report_cleanup_failures_and_continue_other_media() -> Result<()> {
+    for operation in 0..4 {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let id = history.capture_image(PNG, 3, 2, &images)?;
+        let image = PathBuf::from(history.item(id)?.image_path.unwrap());
+        std::fs::remove_file(&image)?;
+        std::fs::create_dir(&image)?;
+        let staged = directory.path().join("staged");
+        std::fs::create_dir(&staged)?;
+        let blocked = staged.join("blocked");
+        std::fs::create_dir(&blocked)?;
+        let removable = staged.join("removable.txt");
+        std::fs::write(&removable, b"remove")?;
+        let payload = serde_json::json!({"staged": [
+            {"staged": blocked}, {"staged": removable}
+        ]});
+        history.db.write_connection().lock().execute(
+            "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
+            params![payload.to_string(), id],
+        )?;
+        let outcome = match operation {
+            0 => history.delete_with_media(id, &images)?,
+            1 => history.delete_batch_with_media(&[id], None, &images)?,
+            2 => history.clear_history_with_media(None, &images)?,
+            _ => history.clear_all_with_media(&images)?,
+        };
+        assert_eq!(outcome.deleted, 1);
+        let warning = outcome.cleanup_warning.context("missing cleanup warning")?;
+        assert!(warning.contains(&image.display().to_string()));
+        assert!(warning.contains(&blocked.display().to_string()));
+        assert!(history.item(id).is_err());
+        assert!(image.is_dir());
+        assert!(blocked.is_dir());
+        assert!(!removable.exists());
+    }
+    Ok(())
+}
+
+#[test]
+fn missing_media_is_already_cleaned_and_shared_payload_errors_prevent_deletion() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let images = directory.path().join("images");
+    let id = history.capture_image(PNG, 3, 2, &images)?;
+    std::fs::remove_file(history.item(id)?.image_path.unwrap())?;
+    assert!(
+        history
+            .delete_with_media(id, &images)?
+            .cleanup_warning
+            .is_none()
+    );
+    let staged = directory.path().join("staged");
+    std::fs::create_dir(&staged)?;
+    let shared = staged.join("shared.txt");
+    std::fs::write(&shared, b"shared")?;
+    let preserved = history.capture("preserved")?.unwrap();
+    history.db.write_connection().lock().execute(
+        "UPDATE clipboard_items SET file_payload = '{broken' WHERE id = ?1",
+        [preserved],
+    )?;
+    let payload = serde_json::json!({"staged": [{"staged": shared}]});
+    assert!(
+        history
+            .cleanup_staged(vec![payload.to_string()], &images)
+            .is_err()
+    );
+    assert!(shared.is_file());
+    Ok(())
+}
+
+#[test]
+fn edited_text_stays_saved_when_old_image_cleanup_fails() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let images = directory.path().join("images");
+    let blocked = images.join("blocked.png");
+    std::fs::create_dir_all(&blocked)?;
+    let id = history.capture("before")?.unwrap();
+    history.db.write_connection().lock().execute(
+        "UPDATE clipboard_items SET image_path = ?1 WHERE id = ?2",
+        params![blocked.to_string_lossy(), id],
+    )?;
+    let hash = history.item(id)?.content_hash;
+    assert!(history.edit_text(id, &hash, "after", &images)?);
+    assert_eq!(history.text(id)?, "after");
+    assert!(history.item(id)?.image_path.is_none());
+    assert!(blocked.is_dir());
     Ok(())
 }
 

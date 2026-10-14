@@ -122,7 +122,15 @@ impl Worker {
                 })?;
                 return Ok(());
             }
-            Command::Delete(id) => self.history.delete_with_media(id, &self.images_dir)?,
+            Command::Delete(id) => {
+                let outcome = self.history.delete_with_media(id, &self.images_dir)?;
+                let refresh = self.snapshot().context("记录已删除，但列表刷新失败");
+                self.send_event(Event::ItemDeleted(outcome))?;
+                if let Err(error) = refresh {
+                    self.send_event(Event::BackgroundError(error.to_string()))?;
+                }
+                return Ok(());
+            }
             Command::DeleteBatch {
                 ids,
                 group_id,

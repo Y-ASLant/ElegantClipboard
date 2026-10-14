@@ -63,7 +63,7 @@ impl History {
         tx.commit()?;
         drop(connection);
         if let Some(image_path) = item.image_path {
-            self.cleanup_images(vec![image_path], images_dir);
+            let _ = self.cleanup_media(vec![image_path], Vec::new(), images_dir);
         }
         Ok(true)
     }

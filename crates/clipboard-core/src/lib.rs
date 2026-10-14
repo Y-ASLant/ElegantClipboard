@@ -14,7 +14,7 @@ pub mod preferences;
 mod reorder;
 pub mod rich;
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
-pub use image::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
+pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 pub use merge::MergedContent;
 
 use anyhow::{Context, Result, bail};
@@ -255,8 +255,7 @@ impl History {
         let (_, deleted_images, deleted_payloads) =
             self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
         if let Some(images_dir) = images_dir {
-            self.cleanup_images(deleted_images, images_dir);
-            self.cleanup_staged(deleted_payloads, images_dir);
+            let _ = self.cleanup_media(deleted_images, deleted_payloads, images_dir);
         }
         Ok(())
     }

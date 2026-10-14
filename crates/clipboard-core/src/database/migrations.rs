@@ -25,10 +25,12 @@ impl Database {
 
         if !has_sort_order {
             info!("Migrating database: adding sort_order column");
-            conn.execute_batch(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(
                 "ALTER TABLE clipboard_items ADD COLUMN sort_order INTEGER DEFAULT 0;
                  UPDATE clipboard_items SET sort_order = id;",
             )?;
+            tx.commit()?;
             info!("Migration complete: sort_order column added");
         }
 
@@ -59,44 +61,35 @@ impl Database {
 
         if !has_char_count {
             info!("Migrating database: adding char_count column");
-            conn.execute_batch(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(
                 "ALTER TABLE clipboard_items ADD COLUMN char_count INTEGER;
                  UPDATE clipboard_items SET char_count = LENGTH(text_content) WHERE text_content IS NOT NULL;"
             )?;
+            tx.commit()?;
             info!("Migration complete: char_count column added");
         }
 
-        // 迁移 4: image_width/image_height
-        let has_image_width: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'image_width'",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(false);
-
-        if !has_image_width {
-            info!("Migrating database: adding image_width and image_height columns");
-            conn.execute_batch(
-                "ALTER TABLE clipboard_items ADD COLUMN image_width INTEGER;
-                 ALTER TABLE clipboard_items ADD COLUMN image_height INTEGER;",
+        // 迁移 4–5: 逐列补齐，也恢复旧版本中断后只存在一列的数据库。
+        let tx = conn.unchecked_transaction()?;
+        for (column, sql_type) in [
+            ("image_width", "INTEGER"),
+            ("image_height", "INTEGER"),
+            ("source_app_name", "TEXT"),
+            ("source_app_icon", "TEXT"),
+        ] {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('clipboard_items') WHERE name = ?1)",
+                [column],
+                |row| row.get(0),
             )?;
-            info!("Migration complete: image_width and image_height columns added");
+            if !exists {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE clipboard_items ADD COLUMN {column} {sql_type};"
+                ))?;
+            }
         }
-
-        // 迁移 5: source_app_name/source_app_icon
-        let has_source_app: bool = conn.query_row(
-            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'source_app_name'",
-            [],
-            |row| row.get(0),
-        ).unwrap_or(false);
-
-        if !has_source_app {
-            info!("Migrating database: adding source_app_name and source_app_icon columns");
-            conn.execute_batch(
-                "ALTER TABLE clipboard_items ADD COLUMN source_app_name TEXT;
-                 ALTER TABLE clipboard_items ADD COLUMN source_app_icon TEXT;",
-            )?;
-            info!("Migration complete: source_app columns added");
-        }
+        tx.commit()?;
 
         // 迁移 6: 添加 group_id 并将 content_hash 唯一性改为分组内唯一（重建表）
         let has_group_id: bool = conn.query_row(
@@ -232,7 +225,8 @@ impl Database {
 
         if !has_favorite_order {
             info!("Migrating database: adding favorite_order column");
-            conn.execute_batch(
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(
                 "ALTER TABLE clipboard_items ADD COLUMN favorite_order INTEGER DEFAULT 0;
                  UPDATE clipboard_items
                  SET favorite_order = sort_order
@@ -240,6 +234,7 @@ impl Database {
                  CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order
                    ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;",
             )?;
+            tx.commit()?;
             info!("Migration complete: favorite_order column added");
         }
 
