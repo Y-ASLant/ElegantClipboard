@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
 use clipboard_core::preferences::PasteKeyPreference;
 use gpui_kit::Window;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::{
     Foundation::HWND,
     System::DataExchange::GetClipboardSequenceNumber,
@@ -21,10 +20,7 @@ pub fn is_external_target(window: &Window, target: (isize, u32)) -> bool {
     if !is_same_window(target) || target.1 == std::process::id() {
         return false;
     }
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return false;
-    };
-    matches!(handle.as_raw(), RawWindowHandle::Win32(own) if own.hwnd.get() != target.0)
+    crate::tray::window_hwnd(window).is_some_and(|own| own.0 as isize != target.0)
 }
 
 pub fn send_to_target(

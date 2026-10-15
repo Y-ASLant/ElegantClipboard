@@ -19,7 +19,6 @@
 
 use clipboard_core::preferences::{WindowEffect, WindowEffectPreference};
 use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE, DWMSBT_MAINWINDOW, DWMSBT_NONE,
@@ -106,7 +105,7 @@ pub(crate) fn apply(effect: WindowEffect, window: &mut Window) {
     let capabilities = WindowEffectCapabilities::current();
     let backend = capabilities.resolve(effect);
     window.set_background_appearance(appearance(backend));
-    let Some(hwnd) = window_handle(window) else {
+    let Some(hwnd) = crate::tray::window_hwnd(window) else {
         return;
     };
     let enabled = backend != WindowEffectBackend::Opaque;
@@ -281,17 +280,6 @@ fn set_dwm_attributes(hwnd: HWND, effect: WindowEffect) {
             &border_thickness,
         );
         let _ = set_attribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner);
-    }
-}
-
-fn window_handle(window: &Window) -> Option<HWND> {
-    // `Window::window_handle` 是 GPUI 自己的同名方法，必须限定 trait 才能拿到原生句柄。
-    let handle = HasWindowHandle::window_handle(window).ok()?;
-    match handle.as_raw() {
-        RawWindowHandle::Win32(handle) => {
-            Some(HWND(isize::from(handle.hwnd) as *mut core::ffi::c_void))
-        }
-        _ => None,
     }
 }
 

@@ -146,7 +146,7 @@ impl HoverPreviewWindowView {
             Ok(PreviewContent::Text(text) | PreviewContent::RichText(text)) => text.clone().into(),
             Ok(PreviewContent::Files(entries)) => entries
                 .iter()
-                .map(|entry| entry.original_path.clone())
+                .map(|entry| entry.original_path.as_str())
                 .collect::<Vec<_>>()
                 .join("\n")
                 .into(),

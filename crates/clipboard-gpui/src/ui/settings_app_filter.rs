@@ -11,7 +11,11 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let app_filter = owner_state.app_filter.value.clone();
         let app_filter_pending = owner_state.app_filter.pending;
-        let running_apps = owner_state.running_apps.clone();
+        let running_apps = if self.app_picker_open {
+            owner_state.running_apps.clone()
+        } else {
+            Vec::new()
+        };
         let running_apps_pending = owner_state.running_apps_pending;
         let filter_enable_owner = self.owner.clone();
 

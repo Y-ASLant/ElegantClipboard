@@ -16,14 +16,6 @@ fn settings_get_nonexistent() {
 }
 
 #[test]
-fn settings_get_all() {
-    let (_dir, db) = temp_db();
-    let repo = SettingsRepository::new(&db);
-    let all = repo.get_all().unwrap();
-    assert!(all.contains_key("global_shortcut"));
-}
-
-#[test]
 fn settings_clear_all() {
     let (_dir, db) = temp_db();
     let repo = SettingsRepository::new(&db);

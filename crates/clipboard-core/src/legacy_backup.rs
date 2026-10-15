@@ -321,7 +321,7 @@ mod tests {
         assert!(staged.starts_with(fs::canonicalize(target.join("staged"))?));
         assert_eq!(fs::read(staged)?, b"draft bytes");
         assert_eq!(restored.files(file)?, vec![original_file]);
-        let copied = restored.files_for_copy(file, &target.join("staged"))?;
+        let copied = History::file_paths_for_copy(&restored.item(file)?, &target.join("staged"))?;
         assert_eq!(copied.len(), 1);
         assert_eq!(fs::read(&copied[0])?, b"draft bytes");
         assert_eq!(

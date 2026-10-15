@@ -262,19 +262,12 @@ fn get_by_position() {
         for (favorite_only, expected) in [(false, expected_recent), (true, expected_favorites)] {
             for index in 0..=expected.len() {
                 let expected_id = expected.get(index).copied();
-                let item = if favorite_only {
-                    repo.get_favorite_by_position(index, group_id)
-                } else {
-                    repo.get_by_position(index, group_id)
-                }
-                .unwrap();
                 let id = if favorite_only {
                     repo.get_favorite_id_by_position(index, group_id)
                 } else {
                     repo.get_id_by_position(index, group_id)
                 }
                 .unwrap();
-                assert_eq!(item.map(|item| item.id), expected_id);
                 assert_eq!(id, expected_id);
             }
         }
@@ -294,6 +287,4 @@ fn get_by_position() {
         Some(pinned)
     );
     assert!(repo.get_by_id(pinned).is_err());
-    assert!(repo.get_by_position(0, None).is_err());
-    assert!(repo.get_favorite_by_position(0, None).is_err());
 }

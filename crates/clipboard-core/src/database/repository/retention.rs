@@ -70,42 +70,6 @@ impl ClipboardRepository {
         Ok(deleted as i64)
     }
 
-    /// 删除 N 天前的非置顶/非收藏条目（按分组），返回 (删除数, 图片路径, file_payload)
-    pub fn delete_older_than(
-        &self,
-        days: i64,
-        group_id: Option<i64>,
-    ) -> Result<(i64, Vec<String>, Vec<String>), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        let age_cond = "created_at < datetime('now', 'localtime', '-' || ? || ' days')";
-
-        let image_paths = ConditionBuilder::new()
-            .clearable()
-            .group(group_id)
-            .condition("image_path IS NOT NULL")
-            .condition_with_param(age_cond, days)
-            .select_strings(&conn, "SELECT image_path FROM clipboard_items")?;
-
-        let file_payloads = ConditionBuilder::new()
-            .clearable()
-            .group(group_id)
-            .condition("file_payload IS NOT NULL")
-            .condition_with_param(age_cond, days)
-            .select_strings(&conn, "SELECT file_payload FROM clipboard_items")?;
-
-        let deleted = ConditionBuilder::new()
-            .clearable()
-            .group(group_id)
-            .condition_with_param(age_cond, days)
-            .delete_items(&conn)?;
-
-        debug!(
-            "Auto-cleanup: deleted {} items older than {} days (group: {:?})",
-            deleted, days, group_id
-        );
-        Ok((deleted, image_paths, file_payloads))
-    }
-
     /// 执行最大数量限制（按分组），返回 (删除数, 图片路径, file_payload)
     pub fn enforce_max_count(
         &self,

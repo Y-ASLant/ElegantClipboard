@@ -68,10 +68,6 @@ impl History {
         parse_file_paths(item.file_paths.as_deref())
     }
 
-    pub fn files_for_copy(&self, id: i64, staged_dir: &Path) -> Result<Vec<String>> {
-        Self::file_paths_for_copy(&self.item(id)?, staged_dir)
-    }
-
     /// Prefer original files; use a recovered staged copy only when it is
     /// still contained in this GPUI data directory's staged folder.
     pub fn file_paths_for_copy(item: &ClipboardItem, staged_dir: &Path) -> Result<Vec<String>> {
@@ -347,7 +343,7 @@ mod tests {
                 "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
                 rusqlite::params![payload.to_string(), id],
             )?;
-            let resolved = history.files_for_copy(id, &staged_dir)?;
+            let resolved = History::file_paths_for_copy(&history.item(id)?, &staged_dir)?;
             assert_eq!(
                 resolved,
                 vec![if candidate == &staged {

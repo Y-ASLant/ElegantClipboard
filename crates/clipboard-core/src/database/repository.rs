@@ -38,9 +38,6 @@ pub struct ClipboardItem {
     pub source_app_icon: Option<String>,
     /// 所属分组（NULL = 默认分组，Some(id) = 自定义分组）
     pub group_id: Option<i64>,
-    /// 文件是否有效（查询时计算，不存储）
-    #[serde(default, skip_deserializing)]
-    pub files_valid: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default)]

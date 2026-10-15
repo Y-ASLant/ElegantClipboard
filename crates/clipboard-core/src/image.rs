@@ -89,8 +89,9 @@ impl History {
     pub fn delete_with_media(&self, id: i64, images_dir: &Path) -> Result<DeletionOutcome> {
         let item = self.repo.get_by_id(id)?;
         let deleted = i64::from(item.is_some());
-        let image_path = item.as_ref().and_then(|item| item.image_path.clone());
-        let file_payload = item.and_then(|item| item.file_payload);
+        let (image_path, file_payload) = item
+            .map(|item| (item.image_path, item.file_payload))
+            .unwrap_or_default();
         self.repo.delete(id)?;
         Ok(DeletionOutcome {
             deleted,

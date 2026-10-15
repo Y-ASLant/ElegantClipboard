@@ -12,31 +12,13 @@ impl ClipboardRepository {
         .optional()
     }
 
-    /// 按默认排序位置获取完整条目（含文本内容）。
-    pub fn get_by_position(
-        &self,
-        index: usize,
-        group_id: Option<i64>,
-    ) -> Result<Option<ClipboardItem>, rusqlite::Error> {
-        self.query_by_position(index, group_id, false, "*", Self::row_to_item)
-    }
-
-    /// 按收藏列表位置获取完整条目。
-    pub fn get_favorite_by_position(
-        &self,
-        index: usize,
-        group_id: Option<i64>,
-    ) -> Result<Option<ClipboardItem>, rusqlite::Error> {
-        self.query_by_position(index, group_id, true, "*", Self::row_to_item)
-    }
-
     /// Resolve a quick-paste slot without loading the item's contents.
     pub fn get_id_by_position(
         &self,
         index: usize,
         group_id: Option<i64>,
     ) -> Result<Option<i64>, rusqlite::Error> {
-        self.query_by_position(index, group_id, false, "id", |row| row.get(0))
+        self.query_id_by_position(index, group_id, false)
     }
 
     pub fn get_favorite_id_by_position(
@@ -44,17 +26,15 @@ impl ClipboardRepository {
         index: usize,
         group_id: Option<i64>,
     ) -> Result<Option<i64>, rusqlite::Error> {
-        self.query_by_position(index, group_id, true, "id", |row| row.get(0))
+        self.query_id_by_position(index, group_id, true)
     }
 
-    fn query_by_position<T>(
+    fn query_id_by_position(
         &self,
         index: usize,
         group_id: Option<i64>,
         favorite_only: bool,
-        columns: &str,
-        map: impl FnOnce(&Row<'_>) -> Result<T, rusqlite::Error>,
-    ) -> Result<Option<T>, rusqlite::Error> {
+    ) -> Result<Option<i64>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let builder = ConditionBuilder::filtered(&QueryOptions {
             favorite_only,
@@ -62,17 +42,21 @@ impl ClipboardRepository {
             ..Default::default()
         })
         .param(index as i64);
-        let order = if favorite_only {
-            "is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC"
-        } else {
-            "is_pinned DESC, sort_order DESC, created_at DESC"
-        };
         let sql = format!(
-            "SELECT {columns} FROM clipboard_items{} ORDER BY {order} LIMIT 1 OFFSET ?",
-            builder.where_clause()
+            "SELECT id FROM clipboard_items{}{} LIMIT 1 OFFSET ?",
+            builder.where_clause(),
+            Self::order_clause(favorite_only)
         );
-        conn.query_row(&sql, params_from_iter(&builder.params), map)
+        conn.query_row(&sql, params_from_iter(&builder.params), |row| row.get(0))
             .optional()
+    }
+
+    fn order_clause(favorite_only: bool) -> &'static str {
+        if favorite_only {
+            " ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC"
+        } else {
+            " ORDER BY is_pinned DESC, sort_order DESC, created_at DESC"
+        }
     }
 
     /// 列表查询列（排除大文本字段以减少 IPC 传输）
@@ -103,14 +87,7 @@ impl ClipboardRepository {
             builder.where_clause()
         );
 
-        if options.favorite_only {
-            sql.push_str(
-                " ORDER BY is_pinned DESC, favorite_order DESC, sort_order DESC, created_at DESC",
-            );
-        } else {
-            // 排序：置顶优先 → sort_order 降序 → 时间降序
-            sql.push_str(" ORDER BY is_pinned DESC, sort_order DESC, created_at DESC");
-        }
+        sql.push_str(Self::order_clause(options.favorite_only));
 
         if let Some(limit) = options.limit {
             sql.push_str(" LIMIT ? OFFSET ?");
@@ -169,7 +146,6 @@ impl ClipboardRepository {
             source_app_name: row.get("source_app_name")?,
             source_app_icon: row.get("source_app_icon")?,
             group_id: row.get("group_id")?,
-            files_valid: None, // 查询时计算
         })
     }
 }

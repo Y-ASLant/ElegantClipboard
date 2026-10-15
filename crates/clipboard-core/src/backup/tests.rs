@@ -172,7 +172,7 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     let icon = PathBuf::from(restored.item(id)?.source_app_icon.unwrap());
     assert!(icon.starts_with(target.join("icons")));
     assert_eq!(fs::read(icon)?, b"icon bytes");
-    let copied = restored.files_for_copy(file, &target.join("staged"))?;
+    let copied = History::file_paths_for_copy(&restored.item(file)?, &target.join("staged"))?;
     assert_eq!(copied.len(), 1);
     assert_eq!(fs::read(&copied[0])?, b"draft bytes");
     assert_eq!(
