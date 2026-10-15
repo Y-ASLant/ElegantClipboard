@@ -71,6 +71,8 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if !tray::is_window_shown(window)
+            || self.external_drag.is_some()
+            || cx.has_active_drag()
             || self._tray.is_none()
             || self.settings_window.is_some()
             || self.settings_window_opening
@@ -223,6 +225,7 @@ impl ClipboardView {
         self.close_hover_preview(cx);
         if cx.has_active_drag() {
             cx.stop_active_drag(window);
+            self.finish_external_drag(cx);
             self.drop_target = None;
             self.history_drag_direction = 0;
             cx.notify();

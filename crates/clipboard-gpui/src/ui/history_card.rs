@@ -16,7 +16,6 @@ impl ClipboardView {
         } else {
             file_info.and_then(|info| info.image_path.clone())
         };
-        let show_file_icon = is_files && thumbnail_path.is_none();
         let file_warning = file_info.and_then(|info| match info.availability {
             FileCardAvailability::Available => None,
             FileCardAvailability::Missing => {
@@ -36,7 +35,6 @@ impl ClipboardView {
             IconName::File
         };
         let image_too_large = file_info.is_some_and(|info| info.image_too_large);
-        let image_unavailable = tr(self.language, "无法显示", "Cannot display");
         let kind = match item.content_type.as_str() {
             "image" => tr(self.language, "图片", "Image"),
             "files" => tr(self.language, "文件", "Files"),
@@ -45,7 +43,6 @@ impl ClipboardView {
             "url" => tr(self.language, "网址", "URL"),
             _ => tr(self.language, "文本", "Text"),
         };
-        let pinned = item.is_pinned;
         let summary = self.row_summary(
             item,
             kind,
@@ -54,15 +51,6 @@ impl ClipboardView {
             image_too_large,
             file_info.and_then(|info| info.total_size),
         );
-        let source_icon = item
-            .source_app_icon
-            .as_deref()
-            .filter(|path| !path.is_empty());
-        let (show_source_name, show_source_icon) = if self.display.show_source_app {
-            source_app_parts(self.display.source_app_display, source_icon.is_some())
-        } else {
-            (false, false)
-        };
         let selected = !self.batch_mode && self.history.selected == Some(id);
         let marked = self.selected_ids.contains(&id);
         let (preview_text, highlights) = if is_image {
@@ -116,33 +104,37 @@ impl ClipboardView {
                 .collect::<Vec<_>>();
             (preview_text, highlights)
         };
+        let card = drag_visual::HistoryCardSnapshot {
+            item: item.clone(),
+            display: self.display,
+            language: self.language,
+            summary,
+            preview_text,
+            highlights,
+            thumbnail_path,
+            file_warning: file_warning.is_some(),
+            file_icon,
+            selected: selected || marked,
+            batch_mode: self.batch_mode,
+        };
+        let measured_size = Rc::new(Cell::new(size(px(0.), px(0.))));
         let drag = HistoryDrag {
             id,
-            pinned,
+            pinned: item.is_pinned,
             favorite_only: self.history.favorite_only(),
             group_id: self.history.group_id(),
             generation: self.history.generation,
-            kind,
-            preview: item.preview.clone().unwrap_or_else(|| kind.to_owned()),
-            language: self.language,
+            card: card.clone(),
+            size: measured_size.clone(),
+            native_preview: false,
         };
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
-        let show_drag_area_indicator = self.display.show_drag_area_indicator;
-        let active_drop = cx.has_active_drag().then_some(self.drop_target).flatten();
-        let live_drag_source = cx.has_active_drag() && self.history.selected == Some(id);
-        let color = if selected || marked {
-            cx.theme().accent
-        } else {
-            cx.theme().background
-        };
+        let live_drag_source = cx.has_active_drag() && self.drag_source_id() == Some(id);
         let card_spacing = visual::card_spacing(self.display.card_density);
-        let (thumbnail_width, thumbnail_height) = if is_image {
-            visual::thumbnail_size(self.display.card_density)
-        } else {
-            (48., 36.)
-        };
+        let entity = cx.entity();
         let row = div()
             .id(("history-row", id as usize))
+            .relative()
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _, _, _| this.cancel_pending_row_click()),
@@ -160,228 +152,44 @@ impl ClipboardView {
                 }
                 this.handle_row_click(id, event, window, cx);
             }))
+            .when(drag_enabled, |row| {
+                row.cursor_grab()
+                    .on_drag(drag, move |drag, offset, window, cx| {
+                        let mut preview = drag.clone();
+                        entity.update(cx, |this, cx| {
+                            this.cancel_pending_row_click();
+                            this.close_hover_preview(cx);
+                            this.history.selected = Some(drag.id);
+                            this.drop_target = None;
+                            this.drag_motion.hovered = None;
+                            this.start_history_drag_scroll(cx);
+                            preview.native_preview =
+                                this.begin_external_drag(drag, offset, window, cx);
+                            cx.notify();
+                        });
+                        cx.new(|_| preview)
+                    })
+            })
             .child(
-                div()
-                    .h_full()
-                    .group("")
-                    .when(self.batch_mode, |card| card.px_3())
-                    .when(!self.batch_mode, |card| card.pl(px(22.)).pr(px(22.)))
-                    .py(px(card_spacing))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(match active_drop.filter(|target| target.id == id) {
-                        Some(target) if target.allowed => cx.theme().primary,
-                        Some(_) => cx.theme().danger,
-                        None if selected || marked => cx.theme().primary,
-                        None => cx.theme().border,
-                    })
-                    .bg(color)
-                    .relative()
-                    .when(active_drop.is_some_and(|target| target.id == id), |card| {
-                        card.child(visual::reveal(
-                            div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .h(px(visual::DROP_MARKER_HEIGHT))
-                                .bg(if active_drop.is_some_and(|target| target.allowed) {
-                                    cx.theme().primary
-                                } else {
-                                    cx.theme().danger
-                                })
-                                .when(active_drop.is_some_and(|target| target.after), |line| {
-                                    line.bottom_0()
-                                })
-                                .when(active_drop.is_some_and(|target| !target.after), |line| {
-                                    line.top_0()
-                                }),
-                            (
-                                "drop-marker",
-                                id as usize * 2
-                                    + usize::from(active_drop.is_some_and(|target| target.after)),
-                            ),
-                            cx,
-                        ))
-                    })
-                    .flex()
-                    .flex_col()
-                    .gap(px(card_spacing))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_hidden()
-                            .rounded_sm()
-                            .when(is_image, |body| body.bg(cx.theme().muted))
-                            .px_2()
-                            .py(px(card_spacing))
-                            .flex()
-                            .when(is_image, |body| body.justify_center())
-                            .gap_3()
-                            .when(show_file_icon, |body| {
-                                body.child(
-                                    div()
-                                        .w(px(thumbnail_width))
-                                        .h(px(thumbnail_height))
-                                        .flex_none()
-                                        .rounded_sm()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .bg(if file_warning.is_some() {
-                                            cx.theme().danger.opacity(0.12)
-                                        } else {
-                                            cx.theme().primary.opacity(0.12)
-                                        })
-                                        .child(Icon::new(file_icon).large().text_color(
-                                            if file_warning.is_some() {
-                                                cx.theme().danger
-                                            } else {
-                                                cx.theme().primary
-                                            },
-                                        )),
-                                )
-                            })
-                            .when(is_image && thumbnail_path.is_none(), |body| {
-                                body.child(image_unavailable)
-                            })
-                            .when(thumbnail_path.is_some(), |body| {
-                                body.child(
-                                    div()
-                                        .w(px(thumbnail_width))
-                                        .h(px(thumbnail_height))
-                                        .flex_none()
-                                        .rounded_sm()
-                                        .overflow_hidden()
-                                        .when_some(thumbnail_path, |box_, path| {
-                                            box_.child(
-                                                img(path)
-                                                    .size_full()
-                                                    .object_fit(ObjectFit::Contain)
-                                                    .with_fallback(move || {
-                                                        div()
-                                                            .child(image_unavailable)
-                                                            .into_any_element()
-                                                    }),
-                                            )
-                                        }),
-                                )
-                            })
-                            .when(!is_image, |body| {
-                                body.child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .text_sm()
-                                        .text_color(if file_warning.is_some() {
-                                            cx.theme().danger
-                                        } else {
-                                            cx.theme().foreground
-                                        })
-                                        .line_height(px(20.))
-                                        .line_clamp(self.display.card_max_lines as usize)
-                                        .text_ellipsis()
-                                        .child(
-                                            StyledText::new(preview_text)
-                                                .with_highlights(highlights),
-                                        ),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .h(px(24.))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .text_xs()
-                            .text_color(if file_warning.is_some() {
-                                cx.theme().danger
-                            } else {
-                                cx.theme().muted_foreground
-                            })
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .child(summary),
-                            )
-                            .when(self.display.show_source_app, |footer| {
-                                footer.child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .max_w(px(118.))
-                                        .overflow_hidden()
-                                        .group_hover("", |source| source.invisible())
-                                        .when_some(
-                                            show_source_icon.then_some(source_icon).flatten(),
-                                            |source, path| {
-                                                source.child(
-                                                    img(PathBuf::from(path))
-                                                        .w(px(16.))
-                                                        .h(px(16.))
-                                                        .flex_none()
-                                                        .object_fit(ObjectFit::Contain)
-                                                        .with_fallback(|| div().into_any_element()),
-                                                )
-                                            },
-                                        )
-                                        .when(
-                                            show_source_name
-                                                && item
-                                                    .source_app_name
-                                                    .as_deref()
-                                                    .is_some_and(|name| !name.is_empty()),
-                                            |source| {
-                                                source.child(
-                                                    div()
-                                                        .min_w_0()
-                                                        .overflow_hidden()
-                                                        .text_ellipsis()
-                                                        .child(
-                                                            item.source_app_name
-                                                                .clone()
-                                                                .unwrap_or_default(),
-                                                        ),
-                                                )
-                                            },
-                                        ),
-                                )
-                            }),
-                    )
-                    .when(!self.batch_mode, |card| {
-                        card.child(self.render_row_action_bar(id, item, card_spacing, cx))
-                    })
-                    .when(!self.batch_mode, |card| {
-                        card.child(self.drag_handle(
-                            id,
-                            true,
-                            drag.clone(),
-                            drag_enabled,
-                            show_drag_area_indicator,
-                            cx,
-                        ))
-                        .child(self.drag_handle(
-                            id,
-                            false,
-                            drag.clone(),
-                            drag_enabled,
-                            show_drag_area_indicator,
-                            cx,
-                        ))
-                    }),
-            );
+                canvas(
+                    move |bounds, _, _| measured_size.set(bounds.size),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full(),
+            )
+            .child(card.surface(false, cx).when(!self.batch_mode, |card| {
+                card.child(self.render_row_action_bar(id, item, card_spacing, cx))
+                    .child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
+                    .child(self.drag_handle(id, false, self.display.show_drag_area_indicator, cx))
+            }));
         let row = self.history_row_menu(row, item, cx);
         let row = div()
-            .when(live_drag_source, |row| row.opacity(0.0))
+            .when(live_drag_source, |row| row.opacity(0.))
             .child(row);
-        if let Some(offset) = self
+        let positioned = if let Some(offset) = self
             .reorder_offsets
             .get(&id)
             .filter(|_| !cx.has_active_drag())
@@ -394,7 +202,9 @@ impl ClipboardView {
             )
         } else {
             let (from, to) = self.drag_motion.offsets(index, &self.row_offsets);
-            if from != 0. || to != 0. {
+            if live_drag_source {
+                row.relative().top(px(to)).into_any_element()
+            } else if from != 0. || to != 0. {
                 visual::drag_yield(
                     row,
                     from,
@@ -405,6 +215,13 @@ impl ClipboardView {
             } else {
                 row.into_any_element()
             }
-        }
+        };
+        // VirtualList assigns its row root a fixed origin via prepaint_at. Move a child
+        // within that root so relative offsets survive the list's positioning.
+        div()
+            .w_full()
+            .h(px(history_row_height(item, self.display)))
+            .child(positioned)
+            .into_any_element()
     }
 }

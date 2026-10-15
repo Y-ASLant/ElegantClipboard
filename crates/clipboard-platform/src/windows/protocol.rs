@@ -22,6 +22,10 @@ pub enum Command {
         limit: i64,
         generation: u64,
     },
+    PrepareExternalDrag {
+        id: i64,
+        token: u64,
+    },
     Copy(i64),
     CopyPlainText(i64),
     CopyPlainTextForPaste(i64),
@@ -186,7 +190,8 @@ pub enum FailureKind {
 impl Command {
     pub(super) fn failure_kind(&self) -> Option<FailureKind> {
         match self {
-            Self::Capture(_)
+            Self::PrepareExternalDrag { .. }
+            | Self::Capture(_)
             | Self::CaptureRich { .. }
             | Self::CaptureFiles(_)
             | Self::CaptureImage { .. }
@@ -255,6 +260,11 @@ impl Command {
 }
 
 pub enum Event {
+    ExternalDragPrepared {
+        id: i64,
+        token: u64,
+        result: Result<crate::external_drag::PreparedExternalDrag, String>,
+    },
     ShowWindow,
     Groups(Vec<Group>),
     GroupCreated(Result<Group, String>),

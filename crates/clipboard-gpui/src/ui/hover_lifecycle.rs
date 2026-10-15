@@ -102,6 +102,8 @@ impl ClipboardView {
     pub(super) fn set_hover_source(&mut self, id: i64, entered: bool, cx: &mut Context<Self>) {
         if entered {
             if self.batch_mode
+                || cx.has_active_drag()
+                || self.external_drag.is_some()
                 || self.history.loading
                 || self.preview.id.is_some()
                 || self.pending_row_click.is_some()

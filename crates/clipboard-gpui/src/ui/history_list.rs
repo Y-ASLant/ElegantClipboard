@@ -30,6 +30,9 @@ impl ClipboardView {
             }))
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
+                    if this.native_drag_active() {
+                        return;
+                    }
                     let y = event.event.position.y;
                     let inside = event.bounds.contains(&event.event.position);
                     let direction = if !inside {
@@ -41,22 +44,10 @@ impl ClipboardView {
                     } else {
                         0
                     };
-                    let target = if inside {
-                        history_drop_row(
-                            &this.row_offsets,
-                            this.scroll.offset().y,
-                            event.bounds.top(),
-                            y,
-                        )
-                        .and_then(|(index, after)| {
-                            let id = this.history.items.get(index)?.id;
-                            (id != event.drag(cx).id).then_some(DropTarget {
-                                id,
-                                after,
-                                allowed: this.valid_drag(event.drag(cx)),
-                            })
-                        })
+                    let target = if inside && this.valid_drag(event.drag(cx)) {
+                        this.history_drag_target(event.drag(cx), event.bounds.top(), y)
                     } else {
+                        this.drag_motion.hovered = None;
                         None
                     };
                     if this.history_drag_direction != direction || this.drop_target != target {

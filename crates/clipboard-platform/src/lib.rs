@@ -1,6 +1,8 @@
 #[cfg(windows)]
 pub mod autostart;
 #[cfg(windows)]
+pub mod external_drag;
+#[cfg(windows)]
 pub mod hotkey;
 #[cfg(windows)]
 mod instance;

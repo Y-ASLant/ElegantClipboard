@@ -29,7 +29,7 @@ impl ClipboardView {
                 }
                 self.feedback_task = Some(cx.spawn(async move |view, cx| {
                     cx.background_executor()
-                        .timer(visual::MOTION_DURATION)
+                        .timer(visual::DRAG_MOTION_DURATION)
                         .await;
                     let _ = view.update(cx, |this, cx| {
                         this.reorder_offsets.clear();
@@ -60,7 +60,36 @@ impl ClipboardView {
                 .any(|item| item.id == drag.id && item.is_pinned == drag.pinned)
     }
 
+    pub(super) fn history_drag_target(
+        &mut self,
+        drag: &HistoryDrag,
+        viewport_top: Pixels,
+        pointer_y: Pixels,
+    ) -> Option<DropTarget> {
+        let source = self
+            .history
+            .items
+            .iter()
+            .position(|item| item.id == drag.id)?;
+        let content_y = pointer_y - viewport_top - self.scroll.offset().y;
+        let slots = self
+            .history
+            .items
+            .iter()
+            .map(|item| (item.id, item.is_pinned));
+        self.drag_motion.hover_target(
+            source,
+            slots,
+            &self.row_offsets,
+            content_y,
+            self.drop_target,
+        )
+    }
+
     pub(super) fn drop_history_card(&mut self, drag: &HistoryDrag, cx: &mut Context<Self>) {
+        if self.native_drag_active() {
+            return;
+        }
         self.history_drag_direction = 0;
         let target = self.drop_target.take();
         if !self.valid_drag(drag) {
@@ -73,21 +102,38 @@ impl ClipboardView {
                 .into(),
             );
             self.is_error = true;
-        } else if let Some(target) = target.filter(|target| target.allowed && target.id != drag.id)
-            && self.send(
-                Command::Reorder {
-                    from: drag.id,
-                    to: target.id,
-                    after: target.after,
-                    favorite_only: drag.favorite_only,
-                    group_id: drag.group_id,
-                    generation: drag.generation,
-                },
-                cx,
-            )
-        {
+        } else if let Some(target) = target.filter(|target| {
+            target.allowed
+                && target.id != drag.id
+                && self
+                    .history
+                    .items
+                    .iter()
+                    .any(|item| item.id == target.id && item.is_pinned == drag.pinned)
+        }) && self.send(
+            Command::Reorder {
+                from: drag.id,
+                to: target.id,
+                after: target.after,
+                favorite_only: drag.favorite_only,
+                group_id: drag.group_id,
+                generation: drag.generation,
+            },
+            cx,
+        ) {
+            self.drag_motion.update(
+                Some((drag.id, target)),
+                &self.history.items,
+                &self.row_offsets,
+            );
             self.reorder_pending = true;
-            self.reorder_before = Some(self.history.items.iter().map(|item| item.id).collect());
+            self.drop_target = Some(target);
+            let mut preview_order: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
+            if let Some(placement) = self.drag_motion.to {
+                let moved = preview_order.remove(placement.source);
+                preview_order.insert(placement.insertion, moved);
+            }
+            self.reorder_before = Some(preview_order);
         }
         cx.notify();
     }
@@ -104,11 +150,13 @@ impl ClipboardView {
                 let Ok(active) = view.update(cx, |this, cx| {
                     if !cx.has_active_drag() {
                         this.history_drag_direction = 0;
-                        this.drop_target = None;
+                        if !this.reorder_pending {
+                            this.drop_target = None;
+                        }
                         cx.notify();
                         return false;
                     }
-                    if this.history_drag_direction == 0 {
+                    if this.native_drag_active() || this.history_drag_direction == 0 {
                         ticks = 0;
                         scroll_target = None;
                         return true;
@@ -138,15 +186,17 @@ impl ClipboardView {
                     .and_then(|index| this.history.items.get(index))
                     .and_then(|target| {
                         let source = this
-                            .history
-                            .selected
+                            .drag_source_id()
                             .and_then(|id| this.history.items.iter().find(|item| item.id == id))?;
-                        (source.id != target.id).then_some(DropTarget {
-                            id: target.id,
-                            after: this.history_drag_direction > 0,
-                            allowed: source.is_pinned == target.is_pinned,
-                        })
-                    });
+                        (source.id != target.id && source.is_pinned == target.is_pinned).then_some(
+                            DropTarget {
+                                id: target.id,
+                                after: this.history_drag_direction > 0,
+                                allowed: true,
+                            },
+                        )
+                    })
+                    .or(this.drop_target);
                     if next != current || this.drop_target != target {
                         this.drop_target = target;
                         cx.notify();

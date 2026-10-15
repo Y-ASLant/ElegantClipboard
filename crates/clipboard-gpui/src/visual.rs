@@ -37,7 +37,7 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
     }
 }
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
-pub const DROP_MARKER_HEIGHT: f32 = 2.;
+pub const DRAG_MOTION_DURATION: Duration = Duration::from_millis(260);
 pub const DRAG_EDGE_ZONE: f32 = 32.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);
 pub const HISTORY_DRAG_SCROLL_TICKS: usize = 2;
@@ -64,9 +64,11 @@ pub fn reflow(element: Div, offset: f32, id: impl Into<ElementId>, cx: &App) -> 
     }
     element
         .relative()
-        .with_animation(id, motion(), move |element, progress| {
-            element.top(px(offset * (1. - progress)))
-        })
+        .with_animation(
+            id,
+            Animation::new(DRAG_MOTION_DURATION).with_easing(ease_in_out),
+            move |element, progress| element.top(px(offset * (1. - progress))),
+        )
         .into_any_element()
 }
 
@@ -82,8 +84,10 @@ pub fn drag_yield(
         return element.top(px(to)).into_any_element();
     }
     element
-        .with_animation(id, motion(), move |element, progress| {
-            element.top(px(from + (to - from) * progress))
-        })
+        .with_animation(
+            id,
+            Animation::new(DRAG_MOTION_DURATION).with_easing(ease_in_out),
+            move |element, progress| element.top(px(from + (to - from) * progress)),
+        )
         .into_any_element()
 }

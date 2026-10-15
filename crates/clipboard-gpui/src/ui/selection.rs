@@ -60,6 +60,8 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if self.reorder_pending
+            || self.external_drag.is_some()
+            || cx.has_active_drag()
             || self.history.loading
             || self.batch_pending
             || self.paste_pending.is_some()
@@ -116,6 +118,8 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if self.reorder_pending
+            || self.external_drag.is_some()
+            || cx.has_active_drag()
             || self.history.loading
             || self.batch_pending
             || self.paste_pending.is_some()

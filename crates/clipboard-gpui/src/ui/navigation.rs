@@ -38,24 +38,6 @@ pub(super) fn history_top_row(offsets: &[Pixels], scroll_y: Pixels) -> (usize, P
     )
 }
 
-pub(super) fn history_drop_row(
-    offsets: &[Pixels],
-    scroll_y: Pixels,
-    viewport_top: Pixels,
-    pointer_y: Pixels,
-) -> Option<(usize, bool)> {
-    if offsets.len() < 2 {
-        return None;
-    }
-    let content_y = pointer_y - viewport_top - scroll_y;
-    if content_y < px(0.) || content_y >= *offsets.last()? {
-        return None;
-    }
-    let index = offsets.partition_point(|offset| *offset <= content_y) - 1;
-    let midpoint = offsets[index] + px(f32::from(offsets[index + 1] - offsets[index]) / 2.);
-    Some((index, content_y > midpoint))
-}
-
 impl ClipboardView {
     pub(super) fn query(&mut self, cx: &mut Context<Self>) {
         let generation = self.history.generation;
@@ -211,7 +193,7 @@ impl ClipboardView {
 }
 #[cfg(test)]
 mod history_virtual_list_tests {
-    use super::{DragPlacement, history_drop_row, history_top_row, px};
+    use super::{DragPlacement, history_top_row, px};
 
     #[test]
     fn mixed_height_rows_preserve_partial_position_across_resizing_and_pagination() {
@@ -240,27 +222,5 @@ mod history_virtual_list_tests {
         );
         assert!(DragPlacement::new(0, 1, false).is_none());
         assert!(DragPlacement::new(2, 1, true).is_none());
-    }
-
-    #[test]
-    fn drop_target_uses_virtual_slots_not_displaced_card_hitboxes() {
-        let offsets = [px(0.), px(96.), px(220.), px(308.), px(456.)];
-        let scroll = px(-80.);
-        let top = px(100.);
-        assert_eq!(
-            history_drop_row(&offsets, scroll, top, px(100.)),
-            Some((0, true))
-        );
-        assert_eq!(
-            history_drop_row(&offsets, scroll, top, px(120.)),
-            Some((1, false))
-        );
-        assert_eq!(
-            history_drop_row(&offsets, scroll, top, px(200.)),
-            Some((1, true))
-        );
-        assert_eq!(history_drop_row(&offsets, scroll, top, px(19.)), None);
-        assert_eq!(history_drop_row(&offsets, scroll, top, px(476.)), None);
-        assert_eq!(history_drop_row(&[px(0.)], scroll, top, px(100.)), None);
     }
 }

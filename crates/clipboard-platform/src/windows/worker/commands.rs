@@ -72,6 +72,16 @@ impl Worker {
                 self.send_event(Event::SavedAs { id, result })?;
                 return Ok(());
             }
+            Command::PrepareExternalDrag { id, token } => {
+                let result = self
+                    .history
+                    .item(id)
+                    .and_then(|item| {
+                        crate::external_drag::prepare_external_drag(&item, &self.staged_dir)
+                    })
+                    .map_err(|error| error.to_string());
+                return self.send_event(Event::ExternalDragPrepared { id, token, result });
+            }
             Command::Copy(id) => return self.handle_copy(id, false, CopyMode::Original),
             Command::CopyPlainText(id) => return self.handle_copy(id, false, CopyMode::PlainText),
             Command::CopyPlainTextForPaste(id) => {

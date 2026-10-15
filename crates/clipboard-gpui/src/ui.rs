@@ -3,6 +3,7 @@ mod content;
 mod drag;
 mod drag_visual;
 mod events;
+mod external_drag;
 mod file_cards;
 mod file_preview;
 mod group_select;
@@ -47,7 +48,7 @@ mod window_render;
 pub use startup::run;
 
 use file_cards::{image_file_dimensions, single_file_image_path, single_image_file_paths};
-use navigation::{history_drop_row, history_row_height, history_top_row};
+use navigation::{history_row_height, history_top_row};
 use presentation::{
     apply_theme, format_bytes, init_window_effect, localize_service_message, tr, window_shell,
 };
@@ -186,9 +187,9 @@ struct HistoryDrag {
     favorite_only: bool,
     group_id: Option<i64>,
     generation: u64,
-    kind: &'static str,
-    preview: String,
-    language: LanguagePreference,
+    card: drag_visual::HistoryCardSnapshot,
+    size: Rc<Cell<gpui_kit::Size<Pixels>>>,
+    native_preview: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -207,7 +208,9 @@ struct DragPlacement {
 #[derive(Default)]
 struct DragMotionState {
     request: Option<(i64, DropTarget)>,
-    from: Option<DragPlacement>,
+    hovered: Option<i64>,
+    started: Option<std::time::Instant>,
+    from_offsets: Vec<f32>,
     to: Option<DragPlacement>,
     revision: usize,
 }
@@ -358,6 +361,8 @@ struct ClipboardView {
     reorder_offsets: HashMap<i64, f32>,
     feedback_revision: usize,
     history_drag_direction: i8,
+    external_drag: Option<external_drag::CardDragSession>,
+    drag_token: u64,
     paused: bool,
     pause_pending: bool,
     message: String,

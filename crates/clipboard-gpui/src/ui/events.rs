@@ -68,6 +68,10 @@ impl ClipboardView {
                 result,
             } => self.apply_text_edited(id, generation, result, window, cx),
             Event::SavedAs { id, result } => self.apply_saved_as(id, result),
+            Event::ExternalDragPrepared { id, token, result } => {
+                self.apply_external_drag_prepared(id, token, result, cx);
+                true
+            }
             Event::Reordered {
                 from,
                 generation,

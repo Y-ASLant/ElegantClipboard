@@ -452,6 +452,8 @@ impl ClipboardView {
             reorder_offsets: HashMap::new(),
             feedback_revision: 0,
             history_drag_direction: 0,
+            external_drag: None,
+            drag_token: 0,
             paused,
             pause_pending: false,
             message: if startup_errors.is_empty() {

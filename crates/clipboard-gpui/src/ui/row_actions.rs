@@ -1,17 +1,14 @@
 use super::*;
 
 impl ClipboardView {
-    /// 卡片两侧的拖拽把手：除锚定边与元素 id 外逐行一致。
+    /// 两侧仅显示拖拽提示；整张卡片负责拖拽手势。
     pub(super) fn drag_handle(
         &self,
         id: i64,
         anchored_left: bool,
-        drag: HistoryDrag,
-        drag_enabled: bool,
         show_drag_area_indicator: bool,
         cx: &Context<Self>,
     ) -> impl IntoElement {
-        let entity = cx.entity();
         let mut handle = div()
             .id((
                 if anchored_left {
@@ -45,19 +42,6 @@ impl ClipboardView {
                 this.cancel_pending_row_click();
                 cx.stop_propagation();
             }))
-            .when(drag_enabled, |handle| {
-                handle.cursor_grab().on_drag(drag, move |drag, _, _, cx| {
-                    entity.update(cx, |this, cx| {
-                        this.cancel_pending_row_click();
-                        this.close_hover_preview(cx);
-                        this.history.selected = Some(drag.id);
-                        this.drop_target = None;
-                        this.start_history_drag_scroll(cx);
-                        cx.notify();
-                    });
-                    cx.new(|_| drag.clone())
-                })
-            })
     }
 
     /// 卡片摘要行文本：时间/类型、置顶标记、字符数、大小与失效提示。

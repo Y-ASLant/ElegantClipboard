@@ -70,13 +70,15 @@ impl Render for ClipboardView {
             });
         }
         let drag_request = if cx.has_active_drag() {
-            self.history
-                .selected
+            self.drag_source_id()
                 .zip(self.drop_target.filter(|target| target.allowed))
+        } else if self.reorder_pending {
+            self.drag_motion.request
         } else {
             None
         };
-        self.drag_motion.update(drag_request, &self.history.items);
+        self.drag_motion
+            .update(drag_request, &self.history.items, &self.row_offsets);
         window_shell(cx)
             .font_family("Microsoft YaHei UI")
             .child(
