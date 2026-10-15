@@ -69,9 +69,8 @@ impl Render for ClipboardView {
                 view.sync_confirmation_dialog(window, cx);
             });
         }
-        let drag_request = if cx.has_active_drag() {
-            self.drag_source_id()
-                .zip(self.drop_target.filter(|target| target.allowed))
+        let drag_request = if self.card_drag_active(cx) {
+            self.drag_source_id().zip(self.drop_target)
         } else if self.reorder_pending {
             self.drag_motion.request
         } else {

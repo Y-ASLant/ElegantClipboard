@@ -196,7 +196,6 @@ struct HistoryDrag {
 struct DropTarget {
     id: i64,
     after: bool,
-    allowed: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -210,9 +209,9 @@ struct DragMotionState {
     request: Option<(i64, DropTarget)>,
     hovered: Option<i64>,
     started: Option<std::time::Instant>,
-    from_offsets: Vec<f32>,
+    from_offsets: HashMap<usize, f32>,
     to: Option<DragPlacement>,
-    revision: usize,
+    progress: Rc<visual::DragProgress>,
 }
 
 enum HistoryMenuAction {
@@ -362,6 +361,11 @@ struct ClipboardView {
     feedback_revision: usize,
     history_drag_direction: i8,
     external_drag: Option<external_drag::CardDragSession>,
+    drag_preview_window: Option<WindowHandle<external_drag::DragPreview>>,
+    drag_preparation: Option<external_drag::DragPreparation>,
+    drag_snapshot: Option<(Vec<DbClipboardItem>, i64, u64)>,
+    drag_viewport: Rc<Cell<Option<Bounds<Pixels>>>>,
+    drag_release_pending: bool,
     drag_token: u64,
     paused: bool,
     pause_pending: bool,

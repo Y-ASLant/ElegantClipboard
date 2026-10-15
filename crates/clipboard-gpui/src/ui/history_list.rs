@@ -6,15 +6,32 @@ impl ClipboardView {
         empty_message: &'static str,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
+        let viewport = self.drag_viewport.clone();
         div()
             .id("history-content")
+            .relative()
+            .child(
+                canvas(
+                    move |bounds, _, _| viewport.set(Some(bounds)),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| {
+                    this.drag_release_pending = false;
+                }),
+            )
             .key_context("HistoryList")
             .track_focus(&self.list_focus)
             .flex_1()
             .min_h_0()
             .overflow_hidden()
             .on_click(cx.listener(|this, _, window, cx| {
-                if this._tray.is_some()
+                if !this.suppress_drag_click(cx)
+                    && this._tray.is_some()
                     && this.settings_window.is_none()
                     && !this.settings_window_opening
                 {
@@ -30,7 +47,7 @@ impl ClipboardView {
             }))
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
-                    if this.native_drag_active() {
+                    if this.external_drag.is_some() {
                         return;
                     }
                     let y = event.event.position.y;
@@ -58,7 +75,9 @@ impl ClipboardView {
                 }),
             )
             .on_drop(cx.listener(|this, drag: &HistoryDrag, _, cx| {
-                this.drop_history_card(drag, cx);
+                if this.external_drag.is_none() {
+                    this.drop_history_card(drag, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &Previous, window, cx| {

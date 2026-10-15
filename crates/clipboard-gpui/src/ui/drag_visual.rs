@@ -1,8 +1,13 @@
+mod motion;
+
 use super::*;
 
 #[derive(Clone)]
 pub(super) struct HistoryCardSnapshot {
-    pub(super) item: DbClipboardItem,
+    pub(super) is_image: bool,
+    pub(super) is_files: bool,
+    pub(super) source_app_name: Option<String>,
+    pub(super) source_app_icon: Option<String>,
     pub(super) display: DisplayPreference,
     pub(super) language: LanguagePreference,
     pub(super) summary: String,
@@ -17,8 +22,8 @@ pub(super) struct HistoryCardSnapshot {
 
 impl HistoryCardSnapshot {
     pub(super) fn surface(&self, preview: bool, cx: &App) -> Div {
-        let is_image = self.item.content_type == "image";
-        let show_file_icon = self.item.content_type == "files" && self.thumbnail_path.is_none();
+        let is_image = self.is_image;
+        let show_file_icon = self.is_files && self.thumbnail_path.is_none();
         let spacing = visual::card_spacing(self.display.card_density);
         let (thumbnail_width, thumbnail_height) = if is_image {
             visual::thumbnail_size(self.display.card_density)
@@ -27,7 +32,6 @@ impl HistoryCardSnapshot {
         };
         let image_unavailable = tr(self.language, "无法显示", "Cannot display");
         let source_icon = self
-            .item
             .source_app_icon
             .as_deref()
             .filter(|path| !path.is_empty());
@@ -185,131 +189,13 @@ impl HistoryCardSnapshot {
                                 .when(show_source_name, |source| {
                                     source.child(
                                         div().min_w_0().overflow_hidden().text_ellipsis().child(
-                                            self.item.source_app_name.clone().unwrap_or_default(),
+                                            self.source_app_name.clone().unwrap_or_default(),
                                         ),
                                     )
                                 }),
                         )
                     }),
             )
-    }
-}
-
-impl DragPlacement {
-    pub(super) fn new(source: usize, target: usize, after: bool) -> Option<Self> {
-        let insertion = target + usize::from(after);
-        let insertion = insertion - usize::from(source < insertion);
-        (source != insertion).then_some(Self { source, insertion })
-    }
-
-    pub(super) fn shift(self, index: usize, offsets: &[Pixels]) -> f32 {
-        let source_height = f32::from(offsets[self.source + 1] - offsets[self.source]);
-        if index == self.source {
-            if self.insertion > self.source {
-                f32::from(offsets[self.insertion + 1] - offsets[self.source + 1])
-            } else {
-                f32::from(offsets[self.insertion] - offsets[self.source])
-            }
-        } else if (self.source + 1..=self.insertion).contains(&index) {
-            -source_height
-        } else if (self.insertion..self.source).contains(&index) {
-            source_height
-        } else {
-            0.
-        }
-    }
-}
-
-impl DragMotionState {
-    pub(super) fn hover_target(
-        &mut self,
-        source: usize,
-        items: impl Iterator<Item = (i64, bool)> + Clone,
-        offsets: &[Pixels],
-        pointer_y: Pixels,
-        previous: Option<DropTarget>,
-    ) -> Option<DropTarget> {
-        let (_, pinned) = items.clone().nth(source)?;
-        let shift = |index| {
-            self.to
-                .map_or(0., |placement| placement.shift(index, offsets))
-        };
-        let source_top = offsets[source] + px(shift(source));
-        let hovered = items.enumerate().find_map(|(index, (id, is_pinned))| {
-            let top = offsets[index] + px(shift(index));
-            let bottom = offsets[index + 1] + px(shift(index));
-            (pointer_y >= top && pointer_y < bottom).then_some((index, id, is_pinned, top))
-        });
-        let Some((index, id, is_pinned, top)) = hovered else {
-            self.hovered = None;
-            return previous;
-        };
-        if index == source || is_pinned != pinned {
-            self.hovered = None;
-            return previous;
-        }
-        if self.hovered == Some(id) {
-            return previous;
-        }
-        self.hovered = Some(id);
-        Some(DropTarget {
-            id,
-            after: top > source_top,
-            allowed: true,
-        })
-    }
-
-    pub(super) fn update(
-        &mut self,
-        request: Option<(i64, DropTarget)>,
-        items: &[DbClipboardItem],
-        row_offsets: &[Pixels],
-    ) {
-        if self.request == request {
-            return;
-        }
-        let next = request.and_then(|(source, target)| {
-            let source = items.iter().position(|item| item.id == source)?;
-            let target_index = items.iter().position(|item| item.id == target.id)?;
-            DragPlacement::new(source, target_index, target.after)
-        });
-        self.transition(next, row_offsets, std::time::Instant::now());
-        self.request = request;
-    }
-
-    fn transition(
-        &mut self,
-        next: Option<DragPlacement>,
-        row_offsets: &[Pixels],
-        now: std::time::Instant,
-    ) {
-        let progress = self.started.map_or(1., |started| {
-            ease_in_out(
-                (now.saturating_duration_since(started).as_secs_f32()
-                    / visual::DRAG_MOTION_DURATION.as_secs_f32())
-                .min(1.),
-            )
-        });
-        self.from_offsets = (0..row_offsets.len().saturating_sub(1))
-            .map(|index| {
-                let (from, to) = self.offsets(index, row_offsets);
-                from + (to - from) * progress
-            })
-            .collect();
-        self.to = next;
-        self.started = Some(now);
-        self.revision = self.revision.wrapping_add(1);
-    }
-
-    pub(super) fn offsets(&self, index: usize, row_offsets: &[Pixels]) -> (f32, f32) {
-        (
-            self.from_offsets.get(index).copied().unwrap_or(0.),
-            self.to
-                .filter(|to| {
-                    to.source + 1 < row_offsets.len() && to.insertion + 1 < row_offsets.len()
-                })
-                .map_or(0., |to| to.shift(index, row_offsets)),
-        )
     }
 }
 
@@ -411,14 +297,122 @@ mod tests {
     }
 
     #[test]
+    fn hover_uses_painted_progress_and_ignores_the_invisible_source() {
+        let offsets = [px(0.), px(100.), px(200.), px(300.)];
+        let items = [(10, false), (20, false), (30, false)];
+        let mut motion = DragMotionState::default();
+        motion.transition(
+            DragPlacement::new(0, 2, true),
+            &offsets,
+            std::time::Instant::now(),
+        );
+        motion.progress.set(0.25);
+        // Row 30 is still at 175..275, while its final position is 100..200.
+        // The hidden source occupies 50..150 and must not block row 20.
+        assert_eq!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(225.), None)
+                .unwrap()
+                .id,
+            30
+        );
+        assert_eq!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(125.), None)
+                .unwrap()
+                .id,
+            20
+        );
+    }
+
+    #[test]
+    fn hover_boundaries_follow_the_last_painted_frame() {
+        let offsets = [px(0.), px(100.), px(200.), px(300.)];
+        let items = [(10, false), (20, false), (30, false)];
+        let mut motion = DragMotionState::default();
+        motion.transition(
+            DragPlacement::new(0, 2, true),
+            &offsets,
+            std::time::Instant::now(),
+        );
+        // A transition has been requested but no frame has moved the cards yet.
+        assert!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(99.), None)
+                .is_none()
+        );
+        assert_eq!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(100.), None)
+                .unwrap()
+                .id,
+            20
+        );
+        motion.hovered = None;
+        assert_eq!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(200.), None)
+                .unwrap()
+                .id,
+            30
+        );
+        // After a final frame (including reduced motion), use final half-open bounds.
+        motion.progress.set(1.);
+        motion.hovered = None;
+        assert_eq!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(0.), None)
+                .unwrap()
+                .id,
+            20
+        );
+        assert_eq!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(100.), None)
+                .unwrap()
+                .id,
+            30
+        );
+        assert!(
+            motion
+                .hover_target(0, items.into_iter(), &offsets, px(200.), None)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_stationary_pointer_does_not_reverse_the_same_moving_target() {
+        let offsets = [px(0.), px(96.), px(220.)];
+        let items = [(10, false), (20, false)];
+        let mut motion = DragMotionState::default();
+        let target = motion
+            .hover_target(0, items.into_iter(), &offsets, px(110.), None)
+            .unwrap();
+        motion.transition(
+            DragPlacement::new(0, 1, true),
+            &offsets,
+            std::time::Instant::now(),
+        );
+        for progress in [0., 0.25, 0.5, 0.75, 1.] {
+            motion.progress.set(progress);
+            let current = motion
+                .hover_target(0, items.into_iter(), &offsets, px(110.), Some(target))
+                .unwrap();
+            assert_eq!((current.id, current.after), (target.id, target.after));
+        }
+    }
+
+    #[test]
     fn reversing_a_drag_continues_from_the_visible_offset() {
         let offsets = [px(0.), px(96.), px(220.), px(308.)];
         let start = std::time::Instant::now();
         let mut motion = DragMotionState::default();
         motion.transition(DragPlacement::new(0, 2, true), &offsets, start);
+        motion.progress.set(0.5);
         motion.transition(None, &offsets, start + visual::DRAG_MOTION_DURATION / 2);
         assert_eq!(motion.offsets(1, &offsets), (-48., 0.));
         assert_eq!(motion.offsets(0, &offsets), (106., 0.));
+        motion.progress.set(0.5);
         motion.transition(
             DragPlacement::new(0, 1, true),
             &offsets,

@@ -1,7 +1,11 @@
 //! Shared spacing, control sizing and motion for the native UI.
 use clipboard_core::preferences::CardDensity;
 use gpui_kit::*;
-use std::time::Duration;
+use std::{
+    cell::Cell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 pub const PAGE_PADDING: f32 = 8.;
 pub const ROW_HEIGHT: f32 = 96.;
 pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
@@ -62,32 +66,161 @@ pub fn reflow(element: Div, offset: f32, id: impl Into<ElementId>, cx: &App) -> 
     if cx.reduce_motion() {
         return element.into_any_element();
     }
-    element
-        .relative()
+    RowTranslation::new(element)
         .with_animation(
             id,
             Animation::new(DRAG_MOTION_DURATION).with_easing(ease_in_out),
-            move |element, progress| element.top(px(offset * (1. - progress))),
+            move |mut element, progress| {
+                element.from = offset * (1. - progress);
+                element.to = element.from;
+                element
+            },
         )
         .into_any_element()
+}
+
+#[derive(Default)]
+pub struct DragProgress {
+    painted: Cell<f32>,
+    frame: Cell<Option<f32>>,
+}
+
+impl DragProgress {
+    pub fn get(&self) -> f32 {
+        self.painted.get()
+    }
+
+    pub fn reset(&self) {
+        self.painted.set(0.);
+        self.frame.set(None);
+    }
+
+    #[cfg(test)]
+    pub fn set(&self, progress: f32) {
+        self.painted.set(progress);
+    }
 }
 
 pub fn drag_yield(
     element: Div,
     from: f32,
     to: f32,
-    id: impl Into<ElementId>,
+    started: Option<Instant>,
+    progress: Rc<DragProgress>,
     cx: &App,
 ) -> AnyElement {
-    let element = element.relative();
-    if cx.reduce_motion() || from == to {
-        return element.top(px(to)).into_any_element();
+    let mut translated = RowTranslation::new(element);
+    translated.from = from;
+    translated.to = to;
+    translated.started = started;
+    translated.progress = Some(progress);
+    if cx.reduce_motion() {
+        translated.started = None;
     }
-    element
-        .with_animation(
-            id,
-            Animation::new(DRAG_MOTION_DURATION).with_easing(ease_in_out),
-            move |element, progress| element.top(px(from + (to - from) * progress)),
-        )
-        .into_any_element()
+    translated.into_any_element()
+}
+
+// The virtual list owns the row's layout origin. Translate only its child during
+// prepaint so drawing and hitboxes move together without changing Taffy geometry.
+struct RowTranslation {
+    child: AnyElement,
+    from: f32,
+    to: f32,
+    started: Option<Instant>,
+    progress: Option<Rc<DragProgress>>,
+}
+
+impl RowTranslation {
+    fn new(child: Div) -> Self {
+        Self {
+            child: child.into_any_element(),
+            from: 0.,
+            to: 0.,
+            started: None,
+            progress: None,
+        }
+    }
+}
+
+impl IntoElement for RowTranslation {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for RowTranslation {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let sample = || {
+            self.started.map_or(1., |started| {
+                ease_in_out(
+                    (started.elapsed().as_secs_f32() / DRAG_MOTION_DURATION.as_secs_f32()).min(1.),
+                )
+            })
+        };
+        let progress = if let Some(shared) = &self.progress {
+            if let Some(progress) = shared.frame.get() {
+                progress
+            } else {
+                let progress = sample();
+                shared.frame.set(Some(progress));
+                shared.painted.set(progress);
+                let shared = shared.clone();
+                window.on_next_frame(move |_, _| shared.frame.set(None));
+                progress
+            }
+        } else {
+            sample()
+        };
+        let offset = self.from + (self.to - self.from) * progress;
+        window.with_element_offset(point(px(0.), px(offset)), |window| {
+            self.child.prepaint(window, cx);
+        });
+        if progress < 1. && self.from != self.to {
+            window.request_animation_frame();
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
 }

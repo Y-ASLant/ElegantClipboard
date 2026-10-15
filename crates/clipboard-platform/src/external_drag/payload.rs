@@ -1,15 +1,41 @@
+use super::dib::DeferredDib;
 use anyhow::{Context, Result, bail};
-use clipboard_core::{History, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, database::ClipboardItem};
-use std::{io::Read, path::Path, sync::Arc};
+use clipboard_core::{History, MAX_IMAGE_BYTES, database::ClipboardItem};
+use std::{path::Path, sync::Arc};
 use windows::Win32::System::Ole::{CF_DIB, CF_HDROP, CF_UNICODETEXT};
 
-/// Owned bytes only: prepare on a worker, then transfer to the window thread.
+/// Transferable payload: cheap formats are ready; a bounded worker renders DIB.
 #[derive(Clone, Debug)]
 pub struct PreparedExternalDrag {
-    pub(super) formats: Arc<Vec<(u16, Vec<u8>)>>,
+    pub(super) formats: Arc<Vec<(u16, FormatData)>>,
 }
 
-/// Reads existing attachment files, but never reads the database or writes the clipboard.
+#[derive(Debug)]
+pub(super) enum FormatData {
+    Bytes(Vec<u8>),
+    Dib(Arc<DeferredDib>),
+}
+
+impl From<Vec<u8>> for FormatData {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::Bytes(bytes)
+    }
+}
+
+impl FormatData {
+    pub(super) fn with_bytes<T>(
+        &self,
+        consume: impl FnOnce(&[u8]) -> windows::core::Result<T>,
+    ) -> windows::core::Result<T> {
+        match self {
+            Self::Bytes(bytes) => consume(bytes),
+            Self::Dib(dib) => dib.with_bytes(consume),
+        }
+    }
+}
+
+/// Checks attachment paths, but never decodes images or writes the clipboard.
+/// The bounded DIB renderer runs separately; a DIB consumer may wait for its result.
 pub fn prepare_external_drag(
     item: &ClipboardItem,
     staged_dir: &Path,
@@ -18,33 +44,33 @@ pub fn prepare_external_drag(
     match item.content_type.as_str() {
         "files" => {
             let paths = History::file_paths_for_copy(item, staged_dir)?;
-            formats.push((CF_HDROP.0, file_drop(&paths)?));
+            formats.push((CF_HDROP.0, file_drop(&paths)?.into()));
         }
         "image" => {
             let path = item.image_path.as_deref().context("图片文件路径缺失")?;
-            formats.push((CF_HDROP.0, file_drop(&[path.to_owned()])?));
-            // BMP without its 14-byte file header is CF_DIB. The encoder supplies
-            // the bitmap header, palette and padded scanlines in Windows order.
-            let image = decode_image(path)?;
-            let mut bitmap = std::io::Cursor::new(Vec::new());
-            // A 24-bit BI_RGB DIB is accepted by older OLE consumers too.
-            image::DynamicImage::ImageRgb8(image.to_rgb8())
-                .write_to(&mut bitmap, image::ImageFormat::Bmp)?;
-            formats.push((CF_DIB.0, bitmap.into_inner().split_off(14)));
+            formats.push((CF_HDROP.0, file_drop(&[path.to_owned()])?.into()));
+            let metadata = std::fs::metadata(path)?;
+            if !metadata.is_file() || metadata.len() > MAX_IMAGE_BYTES as u64 {
+                bail!("拖放图片无效或超过 50 MiB");
+            }
+            formats.push((
+                CF_DIB.0,
+                FormatData::Dib(DeferredDib::prepare(path.to_owned())),
+            ));
         }
         "text" | "url" | "html" | "rtf" => {
             if let Some(text) = item.text_content.as_deref().filter(|text| !text.is_empty()) {
-                formats.push((CF_UNICODETEXT.0, unicode_text(text)?));
+                formats.push((CF_UNICODETEXT.0, unicode_text(text)?.into()));
             }
             if let Some(html) = item.html_content.as_deref().filter(|html| !html.is_empty()) {
-                formats.push((registered_format("HTML Format")?, html_format(html)?));
+                formats.push((registered_format("HTML Format")?, html_format(html)?.into()));
             }
             if let Some(rtf) = item
                 .rtf_content
                 .as_deref()
                 .and_then(clipboard_core::rich::decode_rtf_for_clipboard)
             {
-                formats.push((registered_format("Rich Text Format")?, rtf));
+                formats.push((registered_format("Rich Text Format")?, rtf.into()));
             }
         }
         kind => bail!("记录类型 {kind} 不支持拖放"),
@@ -55,30 +81,6 @@ pub fn prepare_external_drag(
     Ok(PreparedExternalDrag {
         formats: Arc::new(formats),
     })
-}
-
-fn decode_image(path: &str) -> Result<image::DynamicImage> {
-    let mut bytes = Vec::new();
-    std::fs::File::open(path)?
-        .take(MAX_IMAGE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_IMAGE_BYTES {
-        bail!("拖放图片超过 50 MiB");
-    }
-    let reader = || image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format();
-    let (width, height) = reader()?
-        .into_dimensions()
-        .context("无法读取拖放图片尺寸")?;
-    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
-        bail!("拖放图片尺寸无效或超过 2500 万像素");
-    }
-    let mut reader = reader()?;
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(width);
-    limits.max_image_height = Some(height);
-    limits.max_alloc = Some(MAX_IMAGE_PIXELS * 8);
-    reader.limits(limits);
-    reader.decode().context("无法读取拖放图片")
 }
 
 fn registered_format(name: &str) -> Result<u16> {

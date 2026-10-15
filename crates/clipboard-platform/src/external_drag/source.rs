@@ -1,8 +1,9 @@
 use super::{
-    DragPointerState, ExternalDragOptions, contains, move_drag_preview, poll_drag_pointer,
+    DragPointerState, ExternalDragOptions, ExternalDragOutcome, contains, move_drag_preview,
+    poll_drag_pointer,
 };
 use std::{
-    cell::{Cell, RefCell},
+    cell::Cell,
     panic::{AssertUnwindSafe, catch_unwind},
     rc::Rc,
 };
@@ -23,25 +24,25 @@ use windows::{
 pub(super) struct DragSource {
     pub rect: RECT,
     pub has_left: Cell<bool>,
-    pub returned: Rc<Cell<bool>>,
+    pub returned: Rc<Cell<Option<ExternalDragOutcome>>>,
     pub failed: Rc<Cell<bool>>,
+    pub last_preview_position: Cell<Option<(i32, i32)>>,
     pub options: ExternalDragOptions,
-    pub on_move: RefCell<Box<dyn FnMut(DragPointerState)>>,
 }
 
 impl DragSource {
     fn update_preview(&self, pointer: DragPointerState) -> bool {
-        // Never unwind through the COM ABI if a consumer callback panics.
+        // Keep native preview updates from unwinding through the COM ABI.
         let result = catch_unwind(AssertUnwindSafe(|| {
             if let Some(hwnd) = self.options.preview_window {
-                move_drag_preview(
-                    hwnd,
+                let position = (
                     pointer.x.saturating_sub(self.options.preview_offset.0),
                     pointer.y.saturating_sub(self.options.preview_offset.1),
-                )?;
-            }
-            if let Ok(mut callback) = self.on_move.try_borrow_mut() {
-                callback(pointer);
+                );
+                if self.last_preview_position.get() != Some(position) {
+                    move_drag_preview(hwnd, position.0, position.1)?;
+                    self.last_preview_position.set(Some(position));
+                }
             }
             anyhow::Ok(())
         }));
@@ -59,8 +60,12 @@ impl DragSource {
         let inside = contains(self.rect, pointer);
         // Re-entry wins over release: never drop into the source window even
         // when release and the final move arrive in the same OLE iteration.
-        if inside && self.has_left.get() {
-            self.returned.set(true);
+        if inside && (self.has_left.get() || !pointer.left_button_down) {
+            self.returned.set(Some(if pointer.left_button_down {
+                ExternalDragOutcome::ReturnedToSource
+            } else {
+                ExternalDragOutcome::ReleasedInSource
+            }));
             return DRAGDROP_S_CANCEL;
         }
         if !inside {

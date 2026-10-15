@@ -126,7 +126,8 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.paste_pending.is_some()
+        if self.card_drag_active(cx)
+            || self.paste_pending.is_some()
             || self.batch_paste_pending.is_some()
             || self.batch_pending
             || self.group_delete_pending
@@ -175,6 +176,9 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.card_drag_active(cx) {
+            return;
+        }
         self.prepare_to_hide(window, cx);
         tray::set_window_visible(window, false);
         self.schedule_image_release(cx);
@@ -223,7 +227,7 @@ impl ClipboardView {
         }
         self.cancel_pending_row_click();
         self.close_hover_preview(cx);
-        if cx.has_active_drag() {
+        if self.card_drag_active(cx) {
             cx.stop_active_drag(window);
             self.finish_external_drag(cx);
             self.drop_target = None;

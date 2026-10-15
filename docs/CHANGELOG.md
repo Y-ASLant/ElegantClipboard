@@ -6,6 +6,9 @@
 
 ### 重构
 
+- 修复拖动预览右侧／底部裁切：原生 resize 按实际非客户区差额补足外框，确保客户区容纳完整卡片；复用浮窗先移动到目标显示器，再按浮窗当前 DPI 确定尺寸，避免旧屏 DPI 与源屏 DPI 混用。
+- 修复拖动交接与跟随：应用会话统一内部／OLE 松手与取消，区分按住回源和回源释放；原生预览窗口复用并按帧跟随，同坐标不重复移动，旧会话不能隐藏新预览。让位改为 prepaint 位移并按实际绘制进度命中，后台历史刷新拖动期间合并延后；图片 DIB 移至单线程有界后台渲染，轻量格式先就绪，保留独立 HGLOBAL 和像素限额。真实外拖、回源与连续排序证据见[拖动验证记录](evidence/windows-card-external-drag-2026-10-15.md)。
+- 简化拖动与删除完成处理：卡片预览快照只保存显示字段，避免重复克隆完整搜索正文；图片 DIB 准备消费原图并复用编码缓冲区；移除无消费者的拖动回调和恒为真的目标状态，合并三种批量删除／清理的刷新与回执收尾。保持拖动效果、载荷格式及删除完成事件顺序。
 - 将 gpui-kit 从 `0.7.1` 升级至[最新稳定版 `0.7.3`](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，同步锁定 `gpui-base`、`gpui-component`、`gpui-kit-assets 0.7.3` 与 `gpui-pre-* 0.3.9`。检查、248 项测试（另 2 项忽略）和 Release 构建通过；原生冒烟首次出现一次借用冲突 panic，随后三次正常退出，详见[验证记录](WINDOWS_MVP.md#依赖策略)。
 - 改用 gpui-kit 的可选后端 `gpui-fast`（`gpui-kit = { version = "0.7.3", features = ["gpui-fast"] }`）。窗口材质直接操作 DWM 与窗口样式，需要该后端暴露的原生窗口句柄、无边框窗口类与 `WM_NCCALCSIZE`/`WM_NCHITTEST` 通路；同时 `image` 补充 `jpeg` feature，使图片文件的悬停预览能读取文件头尺寸（`Cargo.lock` 无新增 crate，jpeg 解码器原本已在依赖图中）。
 - 使用 Rust、GPUI 和 gpui-kit 构建 Windows 原生应用，移除旧版前端运行时及构建链。代码划分为 `clipboard-core`（数据与业务逻辑）、`clipboard-platform`（Windows 集成）和 `clipboard-gpui`（界面）。

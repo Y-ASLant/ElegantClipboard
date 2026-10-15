@@ -18,7 +18,7 @@ directories.workspace = true
 image.workspace = true
 tempfile.workspace = true
 windows-core = "0.62.2"
-windows = { workspace = true, features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Security", "Win32_System_DataExchange", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows = { workspace = true, features = ["Wdk_System_SystemServices", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_Security", "Win32_System_DataExchange", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_SystemServices", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows = { workspace = true, features = ["Win32_Graphics_Gdi", "Win32_System_StationsAndDesktops"] }

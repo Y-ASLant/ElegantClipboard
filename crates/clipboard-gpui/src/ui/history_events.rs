@@ -325,6 +325,10 @@ impl ClipboardView {
         generation: u64,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.external_drag.is_some() && generation == self.history.generation {
+            self.drag_snapshot = Some((items, total, generation));
+            return true;
+        }
         if !self.history.apply(items, total, generation) {
             return true;
         }

@@ -1,5 +1,6 @@
 use super::{Event, Worker};
 use anyhow::{Context, Result, anyhow};
+use clipboard_core::DeletionOutcome;
 
 impl Worker {
     /// 列表视图是否仍是命令发起时的视图（分组与代次一致）。
@@ -19,20 +20,11 @@ impl Worker {
         } else {
             Err(anyhow!("列表已切换，请重新选择要删除的记录"))
         };
-        let refresh = if result.is_ok() {
-            self.send_groups()
-                .and_then(|_| self.snapshot())
-                .context("所选记录已删除，但列表或分组计数刷新失败，请重启应用后查看")
-        } else {
-            Ok(())
-        };
-        self.send_event(Event::BatchDeleted(
-            result.map_err(|error| error.to_string()),
-        ))?;
-        if let Err(error) = refresh {
-            self.send_event(Event::BackgroundError(error.to_string()))?;
-        }
-        Ok(())
+        self.finish_deletion(
+            result,
+            Event::BatchDeleted,
+            "所选记录已删除，但列表或分组计数刷新失败，请重启应用后查看",
+        )
     }
 
     pub(super) fn handle_clear_history(
@@ -46,34 +38,36 @@ impl Worker {
         } else {
             Err(anyhow!("列表已切换，请重新选择要清理的分组"))
         };
-        let refresh = if result.is_ok() {
-            self.send_groups()
-                .and_then(|_| self.snapshot())
-                .context("历史记录已清理，但列表或分组计数刷新失败，请重启应用后查看")
-        } else {
-            Ok(())
-        };
-        self.send_event(Event::HistoryCleared(
-            result.map_err(|error| error.to_string()),
-        ))?;
-        if let Err(error) = refresh {
-            self.send_event(Event::BackgroundError(error.to_string()))?;
-        }
-        Ok(())
+        self.finish_deletion(
+            result,
+            Event::HistoryCleared,
+            "历史记录已清理，但列表或分组计数刷新失败，请重启应用后查看",
+        )
     }
 
     pub(super) fn handle_clear_all(&mut self) -> Result<()> {
         let result = self.history.clear_all_with_media(&self.images_dir);
+        self.finish_deletion(
+            result,
+            Event::AllHistoryCleared,
+            "全部历史已删除，但列表或分组计数刷新失败，请重启应用后查看",
+        )
+    }
+
+    fn finish_deletion(
+        &mut self,
+        result: Result<DeletionOutcome>,
+        completed: fn(Result<DeletionOutcome, String>) -> Event,
+        refresh_context: &'static str,
+    ) -> Result<()> {
         let refresh = if result.is_ok() {
             self.send_groups()
                 .and_then(|_| self.snapshot())
-                .context("全部历史已删除，但列表或分组计数刷新失败，请重启应用后查看")
+                .context(refresh_context)
         } else {
             Ok(())
         };
-        self.send_event(Event::AllHistoryCleared(
-            result.map_err(|error| error.to_string()),
-        ))?;
+        self.send_event(completed(result.map_err(|error| error.to_string())))?;
         if let Err(error) = refresh {
             self.send_event(Event::BackgroundError(error.to_string()))?;
         }

@@ -42,3 +42,14 @@ cargo build -p elegant-clipboard-gpui --release --locked
 Use `just check`, `just test`, and `just build` for the same normal workflow. Package only on Windows x64 with `just package`.
 
 Tests must use isolated temporary data and must not write to the user's real clipboard unless the test explicitly documents and contains that scope.
+
+<!-- rtk-instructions v2 -->
+# Command output
+
+Command output here is condensed to save tokens, keeping every signal and
+dropping costly noise. Treat it as the complete result: run commands
+normally, and batch related commands into one call to avoid extra turns.
+Truncated results state their recovery path in their own output. Re-run a
+command as `rtk bypass <cmd>` only when its result is unusable: empty when
+output was clearly expected, contradicting its exit code, or garbled.
+<!-- /rtk-instructions -->

@@ -60,13 +60,15 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if self.reorder_pending
-            || self.external_drag.is_some()
-            || cx.has_active_drag()
+            || self.card_drag_active(cx)
             || self.history.loading
             || self.batch_pending
             || self.paste_pending.is_some()
             || !self.history.items.iter().any(|item| item.id == id)
         {
+            return;
+        }
+        if !event.is_keyboard() && self.drag_release_pending {
             return;
         }
         let editable = self.history.items.iter().any(|item| {
@@ -118,8 +120,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if self.reorder_pending
-            || self.external_drag.is_some()
-            || cx.has_active_drag()
+            || self.card_drag_active(cx)
             || self.history.loading
             || self.batch_pending
             || self.paste_pending.is_some()

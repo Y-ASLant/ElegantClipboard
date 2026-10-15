@@ -102,7 +102,10 @@ fn com_requests_reject_unsupported_aspects_indices_media_and_formats() -> Result
 #[test]
 fn enumeration_clones_position_and_preserves_partial_fetch_and_skip_results() -> Result<()> {
     let object = data_object::data_object(PreparedExternalDrag {
-        formats: std::sync::Arc::new(vec![(CF_UNICODETEXT.0, vec![0, 0]), (CF_DIB.0, vec![1])]),
+        formats: std::sync::Arc::new(vec![
+            (CF_UNICODETEXT.0, vec![0, 0].into()),
+            (CF_DIB.0, vec![1].into()),
+        ]),
     });
     let enumeration = unsafe { object.EnumFormatEtc(DATADIR_GET.0 as u32) }?;
     let mut one = [FORMATETC::default()];
@@ -195,6 +198,11 @@ fn image_supplies_original_file_and_decodable_bitmap_without_clipboard_writes() 
     assert_eq!(decoded.dimensions(), (3, 2));
     assert_eq!(decoded.get_pixel(2, 1).0[..3], [20, 40, 60]);
     std::fs::remove_file(path)?;
+    // Successful deferred rendering is cached and each consumer still owns its medium.
+    let first = get(&object, CF_DIB.0);
+    let second = get(&object, CF_DIB.0);
+    assert_ne!(unsafe { first.0.u.hGlobal }, unsafe { second.0.u.hGlobal });
+    assert_eq!(first.bytes(), second.bytes());
     assert!(prepare_external_drag(&item, directory.path()).is_err());
     Ok(())
 }
@@ -209,14 +217,14 @@ fn escape_release_and_source_reentry_have_distinct_drag_transitions() {
             bottom: 100,
         },
         has_left: Cell::new(false),
-        returned: Rc::new(Cell::new(false)),
+        returned: Rc::new(Cell::new(None)),
         failed: Rc::new(Cell::new(false)),
+        last_preview_position: Cell::new(None),
         options: ExternalDragOptions {
             source_window: 0,
             preview_window: None,
             preview_offset: (0, 0),
         },
-        on_move: RefCell::new(Box::new(|_| {})),
     };
     let inside = DragPointerState {
         x: 20,
@@ -236,9 +244,9 @@ fn escape_release_and_source_reentry_have_distinct_drag_transitions() {
         ),
         DRAGDROP_S_DROP
     );
-    assert!(!source.returned.get());
+    assert_eq!(source.returned.get(), None);
     assert_eq!(source.continue_at(true, inside), DRAGDROP_S_CANCEL);
-    assert!(!source.returned.get());
+    assert_eq!(source.returned.get(), None);
     assert_eq!(
         source.continue_at(
             false,
@@ -249,7 +257,32 @@ fn escape_release_and_source_reentry_have_distinct_drag_transitions() {
         ),
         DRAGDROP_S_CANCEL
     );
-    assert!(source.returned.get());
+    assert_eq!(
+        source.returned.get(),
+        Some(ExternalDragOutcome::ReleasedInSource)
+    );
+    source.returned.set(None);
+    assert_eq!(source.continue_at(false, inside), DRAGDROP_S_CANCEL);
+    assert_eq!(
+        source.returned.get(),
+        Some(ExternalDragOutcome::ReturnedToSource)
+    );
+    source.returned.set(None);
+    source.has_left.set(false);
+    assert_eq!(
+        source.continue_at(
+            false,
+            DragPointerState {
+                left_button_down: false,
+                ..inside
+            }
+        ),
+        DRAGDROP_S_CANCEL
+    );
+    assert_eq!(
+        source.returned.get(),
+        Some(ExternalDragOutcome::ReleasedInSource)
+    );
 }
 
 #[test]
@@ -345,6 +378,51 @@ fn oversized_image_attachment_is_rejected_before_decode() -> Result<()> {
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
     assert!(prepare_external_drag(&item, directory.path()).is_err());
+    Ok(())
+}
+
+#[test]
+fn deferred_dib_failure_preserves_file_format_and_is_cached() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("invalid.png");
+    std::fs::write(&path, b"invalid image")?;
+    let mut item = text_item("image fixture")?;
+    item.content_type = "image".into();
+    item.image_path = Some(path.to_string_lossy().into_owned());
+    let object = data_object::data_object(prepare_external_drag(&item, directory.path())?);
+    let dib_format = data_object::format_etc(CF_DIB.0);
+    assert_eq!(unsafe { object.QueryGetData(&dib_format) }, S_OK);
+    let files = get(&object, CF_HDROP.0);
+    assert_eq!(
+        unsafe { DragQueryFileW(HDROP(files.0.u.hGlobal.0), u32::MAX, None) },
+        1
+    );
+    let error = unsafe { object.GetData(&dib_format) }.err().unwrap();
+    // Replacing a corrupt source must not restart rendering on every consumer request.
+    image::RgbImage::new(1, 1).save(&path)?;
+    let repeated = unsafe { object.GetData(&dib_format) }.err().unwrap();
+    assert_eq!(error.code(), repeated.code());
+    assert_eq!(error.message(), repeated.message());
+    Ok(())
+}
+
+#[test]
+fn deferred_dib_rejects_excessive_dimensions_before_pixel_allocation() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("oversized.bmp");
+    image::RgbImage::new(1, 1).save(&path)?;
+    let mut bytes = std::fs::read(&path)?;
+    bytes[18..22].copy_from_slice(&5001i32.to_le_bytes());
+    bytes[22..26].copy_from_slice(&5000i32.to_le_bytes());
+    std::fs::write(&path, bytes)?;
+    let mut item = text_item("image fixture")?;
+    item.content_type = "image".into();
+    item.image_path = Some(path.to_string_lossy().into_owned());
+    let object = data_object::data_object(prepare_external_drag(&item, directory.path())?);
+    let error = unsafe { object.GetData(&data_object::format_etc(CF_DIB.0)) }
+        .err()
+        .unwrap();
+    assert!(error.message().contains("2500"));
     Ok(())
 }
 

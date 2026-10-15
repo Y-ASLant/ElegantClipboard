@@ -105,7 +105,10 @@ impl ClipboardView {
             (preview_text, highlights)
         };
         let card = drag_visual::HistoryCardSnapshot {
-            item: item.clone(),
+            is_image,
+            is_files,
+            source_app_name: item.source_app_name.clone(),
+            source_app_icon: item.source_app_icon.clone(),
             display: self.display,
             language: self.language,
             summary,
@@ -117,19 +120,10 @@ impl ClipboardView {
             selected: selected || marked,
             batch_mode: self.batch_mode,
         };
+        let surface = card.surface(false, cx);
         let measured_size = Rc::new(Cell::new(size(px(0.), px(0.))));
-        let drag = HistoryDrag {
-            id,
-            pinned: item.is_pinned,
-            favorite_only: self.history.favorite_only(),
-            group_id: self.history.group_id(),
-            generation: self.history.generation,
-            card: card.clone(),
-            size: measured_size.clone(),
-            native_preview: false,
-        };
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
-        let live_drag_source = cx.has_active_drag() && self.drag_source_id() == Some(id);
+        let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
         let card_spacing = visual::card_spacing(self.display.card_density);
         let entity = cx.entity();
         let row = div()
@@ -147,13 +141,29 @@ impl ClipboardView {
             .py(px(card_spacing))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                if cx.has_active_drag() {
+                if this.card_drag_active(cx) {
                     return;
                 }
                 this.handle_row_click(id, event, window, cx);
             }))
             .when(drag_enabled, |row| {
+                let drag = HistoryDrag {
+                    id,
+                    pinned: item.is_pinned,
+                    favorite_only: self.history.favorite_only(),
+                    group_id: self.history.group_id(),
+                    generation: self.history.generation,
+                    card,
+                    size: measured_size.clone(),
+                    native_preview: false,
+                };
                 row.cursor_grab()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            this.prepare_card_drag(id, cx);
+                        }),
+                    )
                     .on_drag(drag, move |drag, offset, window, cx| {
                         let mut preview = drag.clone();
                         entity.update(cx, |this, cx| {
@@ -180,7 +190,7 @@ impl ClipboardView {
                 .left_0()
                 .size_full(),
             )
-            .child(card.surface(false, cx).when(!self.batch_mode, |card| {
+            .child(surface.when(!self.batch_mode, |card| {
                 card.child(self.render_row_action_bar(id, item, card_spacing, cx))
                     .child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
                     .child(self.drag_handle(id, false, self.display.show_drag_area_indicator, cx))
@@ -192,7 +202,7 @@ impl ClipboardView {
         let positioned = if let Some(offset) = self
             .reorder_offsets
             .get(&id)
-            .filter(|_| !cx.has_active_drag())
+            .filter(|_| !self.card_drag_active(cx))
         {
             visual::reflow(
                 row,
@@ -202,14 +212,13 @@ impl ClipboardView {
             )
         } else {
             let (from, to) = self.drag_motion.offsets(index, &self.row_offsets);
-            if live_drag_source {
-                row.relative().top(px(to)).into_any_element()
-            } else if from != 0. || to != 0. {
+            if from != 0. || to != 0. {
                 visual::drag_yield(
                     row,
                     from,
                     to,
-                    format!("drag-yield-{}-{id}", self.drag_motion.revision),
+                    self.drag_motion.started,
+                    self.drag_motion.progress.clone(),
                     cx,
                 )
             } else {

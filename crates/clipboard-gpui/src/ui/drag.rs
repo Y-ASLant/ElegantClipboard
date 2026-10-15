@@ -103,8 +103,7 @@ impl ClipboardView {
             );
             self.is_error = true;
         } else if let Some(target) = target.filter(|target| {
-            target.allowed
-                && target.id != drag.id
+            target.id != drag.id
                 && self
                     .history
                     .items
@@ -148,7 +147,7 @@ impl ClipboardView {
                     .timer(visual::DRAG_SCROLL_INTERVAL)
                     .await;
                 let Ok(active) = view.update(cx, |this, cx| {
-                    if !cx.has_active_drag() {
+                    if !this.card_drag_active(cx) {
                         this.history_drag_direction = 0;
                         if !this.reorder_pending {
                             this.drop_target = None;
@@ -192,7 +191,6 @@ impl ClipboardView {
                             DropTarget {
                                 id: target.id,
                                 after: this.history_drag_direction > 0,
-                                allowed: true,
                             },
                         )
                     })
