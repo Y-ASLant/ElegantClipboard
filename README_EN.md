@@ -23,7 +23,8 @@ ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, an
 - System-capable window effects for the main window, settings window, and hover preview: off, Acrylic, Mica, or Mica Alt. Unsupported saved choices are retained with an explicit fallback notice. The 40%/55%/72%/85% background tint only repaints the background without reapplying native materials. Controls, cards, and notifications retain their theme surfaces; enabled effects keep a borderless frame with resizable edges
 - Borderless main window: drag the small grip above search to move it (the top edge still resizes); search occupies its own row, with category tabs and the GPUI Kit group Select on the next row. Enter batch selection from a card or Ctrl+A and exit from the batch toolbar; Clear History, Pin Window, and Settings remain in the tray menu
 - Optional category filters and compact, standard, or spacious history cards. Two-line text previews are shorter than image cards by default; text or a centered thumbnail sits above time, size, and source app, while hovering reveals card actions
-- A return-to-top control in the fixed header for long history lists
+- A floating return-to-top button at the lower right of long lists; the item count stays in a fixed footer below the scrolling history
+- Static list images use background thumbnails sized for the card and DPI, with bounded concurrency and a viewport cache; full previews, copying and export retain the originals
 - Configurable card preview lines, absolute/relative time, character-count, size, and source-app display by name, icon, or both; source icons are cached as PNG
 - Data settings export GPUI backups and restore GPUI/legacy ZIPs or older databases into a separate empty folder, with a result report and an action to open the restored data
 - Combine group, category and keyword filters; record or type the main shortcut, with conflict rejection and rollback on save failure

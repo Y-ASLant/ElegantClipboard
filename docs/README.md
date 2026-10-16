@@ -70,10 +70,11 @@
 | `preview_actions`、`preview_render`、`file_preview`、`file_cards` | 完整预览、编辑和文件卡片信息 |
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
-| `shortcuts`、`shortcut_labels`、`paste_actions`、`storage` | 快捷键注册与显示、受控粘贴、数据操作 |
+| `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
+| `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
 | `onboarding`、`content`、`presentation` | 首次引导、内容展示助手、主题及本地化展示 |
 
-纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。
+纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于完整预览与复制。
 
 确认操作仅由 `HistoryConfirmation` 表示当前类型与分组作用域，保存中的状态仍按操作分别保留。普通偏好使用 `PendingPref<T>`，仅在保存成功后替换生效值；快捷键注册回滚、语言和显示布局等副作用仍由专用处理器负责。窗口隐藏复用清理与隐藏动作，各入口的保护条件不合并。
 

@@ -260,6 +260,12 @@ impl ClipboardView {
             }
         });
         Self::schedule_feedback(main_window, cx);
+        cx.on_release(|this, cx| {
+            for image in this.thumbnails.drain_images() {
+                cx.drop_image(image, None);
+            }
+        })
+        .detach();
         let list_focus = cx.focus_handle();
         if startup.show_onboarding && !onboarding_completed {
             window.focus(&list_focus, cx);
@@ -322,6 +328,9 @@ impl ClipboardView {
             image_visible_range: 0..0,
             image_sync_pending: false,
             image_release_task: None,
+            thumbnails: thumbnail_cache::ThumbnailCache::default(),
+            thumbnail_scale: window.scale_factor(),
+            _thumbnail_maintenance: Self::maintain_thumbnails(cx),
             hover_preview: PreviewState::default(),
             hover_popup: None,
             hover_popup_opening: None,

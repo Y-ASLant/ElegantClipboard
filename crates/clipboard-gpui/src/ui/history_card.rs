@@ -110,6 +110,10 @@ impl ClipboardView {
             summary,
             preview_text,
             highlights,
+            thumbnail: thumbnail_path.as_ref().and_then(|path| {
+                self.thumbnails
+                    .source(&self.thumbnail_key(item, path.clone()))
+            }),
             thumbnail_path,
             file_warning: file_warning.is_some(),
             file_icon,

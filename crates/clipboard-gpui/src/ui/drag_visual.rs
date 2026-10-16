@@ -14,6 +14,8 @@ pub(super) struct HistoryCardSnapshot {
     pub(super) preview_text: String,
     pub(super) highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
     pub(super) thumbnail_path: Option<PathBuf>,
+    // Cloning a drag snapshot also retains the decoded pixels after list eviction.
+    pub(super) thumbnail: Option<gpui_kit::ImageSource>,
     pub(super) file_warning: bool,
     pub(super) file_icon: IconName,
     pub(super) selected: bool,
@@ -102,6 +104,14 @@ impl HistoryCardSnapshot {
                         body.child(image_unavailable)
                     })
                     .when_some(self.thumbnail_path.clone(), |body, path| {
+                        let source = self.thumbnail.clone().unwrap_or_else(|| {
+                            if preview {
+                                // A drag started before decoding must not freeze a loading image.
+                                gpui_kit::ImageSource::from(path)
+                            } else {
+                                gpui_kit::ImageSource::Custom(std::sync::Arc::new(|_, _| None))
+                            }
+                        });
                         body.child(
                             div()
                                 .w(px(thumbnail_width))
@@ -110,8 +120,11 @@ impl HistoryCardSnapshot {
                                 .rounded_sm()
                                 .overflow_hidden()
                                 .child(
-                                    img(path)
+                                    img(source)
                                         .size_full()
+                                        // GPUI otherwise uses the source ratio for block layout,
+                                        // enlarging portrait bounds before Contain is applied.
+                                        .aspect_ratio(thumbnail_width / thumbnail_height)
                                         .object_fit(ObjectFit::Contain)
                                         .with_fallback(move || {
                                             div().child(image_unavailable).into_any_element()

@@ -215,7 +215,10 @@ impl ClipboardView {
             match paste::PendingPaste::begin(target, clipboard_sequence, self.paste_key.value) {
                 Ok(pending) => pending,
                 Err(error) => {
-                    self.set_feedback_message(error.to_string());
+                    self.set_feedback_message(localize_service_message(
+                        self.language,
+                        error.to_string(),
+                    ));
                     self.is_error = true;
                     return;
                 }

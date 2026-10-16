@@ -15,6 +15,14 @@ impl ClipboardView {
                 | Command::MergeCopy(_)
                 | Command::MergeForPaste(_)
         );
+        let copy_only = matches!(
+            &command,
+            Command::Copy(_)
+                | Command::CopyPlainText(_)
+                | Command::CopyPath(_)
+                | Command::CopyAsFile(_)
+                | Command::MergeCopy(_)
+        );
         if copy_requested || matches!(&command, Command::ResolveQuickPaste { .. }) {
             // Dropping the task cancels the old wait before this request can replace its data.
             self.paste_delivery_task = None;
@@ -24,6 +32,12 @@ impl ClipboardView {
             self.is_error = true;
             cx.notify();
             return false;
+        }
+        if copy_only {
+            // Late acknowledgements must not resurrect a paste superseded by a copy.
+            self.paste_pending = None;
+            self.batch_paste_pending = None;
+            self.quick_paste_pending = None;
         }
         if copy_requested && sound::enabled(self.audio.value, Sound::Copy, SoundTiming::Immediate) {
             sound::play(Sound::Copy);

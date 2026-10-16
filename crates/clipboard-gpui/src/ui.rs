@@ -45,6 +45,7 @@ mod shortcut_labels;
 mod shortcuts;
 mod startup;
 mod storage;
+mod thumbnail_cache;
 mod view_init;
 mod window_lifecycle;
 mod window_render;
@@ -293,6 +294,9 @@ struct ClipboardView {
     image_visible_range: std::ops::Range<usize>,
     image_sync_pending: bool,
     image_release_task: Option<Task<()>>,
+    thumbnails: thumbnail_cache::ThumbnailCache,
+    thumbnail_scale: f32,
+    _thumbnail_maintenance: Task<()>,
     hover_preview: PreviewState,
     hover_popup: Option<AnyWindowHandle>,
     hover_popup_opening: Option<(i64, u64)>,

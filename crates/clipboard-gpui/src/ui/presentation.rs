@@ -60,6 +60,18 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
         return message;
     }
     match message.as_str() {
+        "目标窗口已关闭，内容已复制，请手动粘贴" =>
+            "The target window has closed. The content was copied; paste it manually.".into(),
+        "前台窗口已变化，已取消自动粘贴，请检查后手动粘贴" =>
+            "The active window changed. Automatic paste was cancelled; check the target and paste manually.".into(),
+        "剪贴板内容已变化，已取消自动粘贴，请检查后手动粘贴" =>
+            "The clipboard changed. Automatic paste was cancelled; check its contents before pasting manually.".into(),
+        "无法聚焦原窗口，内容已复制，请手动粘贴" =>
+            "Unable to focus the previous window. The content was copied; paste it manually.".into(),
+        "目标窗口未接受粘贴快捷键，内容已复制，请手动粘贴" =>
+            "The paste shortcut could not be sent. The content was copied; paste it manually.".into(),
+        "等待修饰键释放超时，已取消自动粘贴；请松开按键后手动粘贴" =>
+            "Timed out waiting for modifier keys. Automatic paste was cancelled; release the keys and paste manually.".into(),
         "富文本超过 1 MiB，按纯文本保存" => {
             "Rich text exceeded 1 MiB and was saved as plain text".into()
         }

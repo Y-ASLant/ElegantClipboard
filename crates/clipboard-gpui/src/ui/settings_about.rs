@@ -1,8 +1,7 @@
 use super::*;
 use gpui_kit::component::alert::Alert;
 
-/// 「关于」页特性分组。`items` 与 README 的「当前功能」逐条对应，
-/// 保证应用内展示与项目说明不脱节；`en` 文案直接取自 README_EN.md。
+/// 「关于」页特性分组，与中英文 README 的当前功能保持一致。
 struct FeatureGroup {
     chinese: &'static str,
     english: &'static str,
@@ -23,8 +22,8 @@ const FEATURE_GROUPS: &[FeatureGroup] = &[
                 "Edit text, preview rich text/images/files, see image thumbnails and missing-source hints, plus copy, copy as plain text, and auto-paste",
             ),
             (
-                "历史列表较长时，固定信息栏提供返回顶部入口",
-                "A pinned footer bar offers a back-to-top entry for long history lists",
+                "历史列表右下角提供返回顶部按钮，记录数固定显示在列表下方",
+                "A floating button returns to the top; the item count stays below the scrolling list",
             ),
         ],
     },
@@ -69,8 +68,8 @@ const FEATURE_GROUPS: &[FeatureGroup] = &[
         english: "Shortcuts and paste",
         items: &[
             (
-                "全局快捷键显隐切换、系统托盘、开机启动、暂停采集和单实例唤回",
-                "Global shortcut to toggle visibility, system tray, autostart, pause capture, and single-instance wake-up",
+                "可输入或录制全局唤出快捷键，支持冲突拒绝及失败回滚；系统托盘、开机启动、暂停采集和单实例唤回",
+                "Type or record the global shortcut with conflict checks and rollback; system tray, autostart, pause capture, and single-instance wake-up",
             ),
             (
                 "快速粘贴快捷键默认关闭，可在设置的“快捷键”页按需启用或再次关闭；单个槽位支持录制或输入组合键，两组各 10 个槽位可批量停用或恢复默认。启用后预置 Alt+1～Alt+0 粘贴当前分组前十条记录，Ctrl+Alt+1～3 粘贴前三条收藏记录，数字键支持数字小键盘；自动粘贴按键可选 Ctrl+V 或 Shift+Insert",
@@ -119,10 +118,16 @@ const FEATURE_GROUPS: &[FeatureGroup] = &[
     FeatureGroup {
         chinese: "备份与数据",
         english: "Backup and data",
-        items: &[(
-            "GPUI ZIP 备份与恢复，并可导入旧数据库或旧版 ZIP 备份",
-            "GPUI ZIP backup and restore, plus importing legacy databases or older ZIP backups",
-        )],
+        items: &[
+            (
+                "在数据设置导出备份，或将旧数据库、旧版 ZIP 和 GPUI 备份恢复到独立空目录，显示恢复报告并打开恢复数据",
+                "Export backups or restore legacy databases, legacy ZIPs and GPUI backups into a separate empty folder, with a report and an action to open restored data",
+            ),
+            (
+                "按分组限制历史数量与天数，保护置顶和收藏，首次启用及收紧需确认；可选文件副本默认关闭，单文件 50 MiB、总预算 256 MiB",
+                "Per-group count and age limits protect pinned and favorite items and require confirmation when enabled or tightened; optional file copies are off by default, with 50 MiB per file and 256 MiB total",
+            ),
+        ],
     },
 ];
 
