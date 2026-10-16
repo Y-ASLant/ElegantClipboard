@@ -56,17 +56,19 @@ unsafe extern "system" fn frameless_subclass_proc(
                 if wparam.0 == 0 {
                     return DefSubclassProc(hwnd, msg, wparam, lparam);
                 }
-                let Some(params) = (lparam.0 as *mut NCCALCSIZE_PARAMS).as_mut() else {
+                let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
+                if params.is_null() {
                     return DefSubclassProc(hwnd, msg, wparam, lparam);
-                };
-                // 先走 GPUI 的处理（它会恢复 top，最大化时补 frame 厚度），
-                // 再按需把四边都还给窗口矩形。
-                let window_rect = params.rgrc[0];
+                }
+                // 下游过程也会修改此结构，不能跨回调保留排他引用。
+                // 先保存窗口矩形，再走 GPUI 的处理并按需恢复客户区。
+                let rect = std::ptr::addr_of_mut!((*params).rgrc[0]);
+                let window_rect = rect.read();
                 let handled = DefSubclassProc(hwnd, msg, wparam, lparam);
                 if !FRAMELESS.with(|flag| flag.get()) || IsZoomed(hwnd).as_bool() {
                     return handled;
                 }
-                params.rgrc[0] = window_rect;
+                rect.write(window_rect);
                 LRESULT(0)
             }
             WM_NCHITTEST => {
