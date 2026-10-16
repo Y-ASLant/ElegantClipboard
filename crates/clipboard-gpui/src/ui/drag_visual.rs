@@ -52,7 +52,7 @@ impl HistoryCardSnapshot {
                 cx.theme().border
             })
             .bg(if preview {
-                cx.theme().background.opacity(0.8)
+                cx.theme().background.opacity(1.0)
             } else if self.selected {
                 cx.theme().accent
             } else {

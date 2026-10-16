@@ -129,7 +129,7 @@ pub(crate) fn apply(effect: WindowEffect, window: &mut Window) {
 
 /// 让 GPUI 按**当前**客户区尺寸重新布局。
 ///
-/// GPUI 只在收到 `WM_SIZE` 时更新布局尺寸——`gpui-fast-windows` 的 `handle_size_msg`
+/// GPUI 只在收到 `WM_SIZE` 时更新布局尺寸——`gpui-pre-windows` 的 `handle_size_msg`
 /// 直接取 `lparam` 里的宽高，并不会自己去 `GetClientRect`。而套用窗口效果会改窗口样式
 /// 与 DWM 背板属性（去掉 `WS_BORDER`/`WS_DLGFRAME`、加系统背板与圆角），客户区随之变大；
 /// 不补这条消息，内容就停在旧尺寸，右/下露出一条**没被绘制**的区域——背板从那里透出来，
@@ -137,7 +137,7 @@ pub(crate) fn apply(effect: WindowEffect, window: &mut Window) {
 /// 因为拖动会真的产生 `WM_SIZE`。
 ///
 /// **必须用 `PostMessageW`，不能用 `SendMessageW`**：`SendMessageW` 是同步派发，而所有
-/// 调用点都在「正在更新某个窗口」的过程中（开窗 builder、偏好保存回调）。`gpui-fast`
+/// 调用点都在「正在更新某个窗口」的过程中（开窗 builder、偏好保存回调）。GPUI
 /// 处理 `WM_SIZE` 时是通过 `handle.update` 回调把新尺寸写回窗口的（`Window::bounds_changed`
 /// 里更新 `viewport_size`），而窗口此刻正被借用，那个回调只会静默失败（源码里是
 /// `.log_err()`），尺寸照旧不变。投递到消息队列则会等本次窗口更新结束后再派发，

@@ -270,7 +270,7 @@ impl ClipboardView {
                         focus: false,
                         show: true,
                         // 允许拖动：`WindowControlArea::Drag` 只在 `is_movable` 为真时才生效
-                        // （见 gpui-fast-windows 的 hit-test）。预览浮窗常常盖住任务栏或别的
+                        // （见 GPUI Windows 后端的 hit-test）。预览浮窗常常盖住任务栏或别的
                         // 可点区域，用户得能把它挪开。
                         is_movable: true,
                         is_resizable: false,
