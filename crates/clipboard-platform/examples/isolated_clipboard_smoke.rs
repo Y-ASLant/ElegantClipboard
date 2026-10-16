@@ -136,6 +136,58 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    // Privacy probes write only to the private window station created above.
+    let private_text = format!("private-history-{}", std::process::id());
+    for (format, payload) in [
+        ("ExcludeClipboardContentFromMonitorProcessing", vec![1]),
+        ("CanIncludeInClipboardHistory", 0u32.to_le_bytes().to_vec()),
+    ] {
+        clipboard
+            .set(vec![
+                ClipboardContent::Text(private_text.clone()),
+                ClipboardContent::Other(format.into(), payload),
+            ])
+            .map_err(|error| anyhow!("写入隔离隐私样本失败：{error}"))?;
+        // A following query is also a worker barrier; the watcher needs one interval.
+        thread::sleep(Duration::from_millis(200));
+        service.send(Command::Query {
+            search: private_text.clone(),
+            favorite_only: false,
+            category: clipboard_core::ContentCategory::All,
+            group_id: None,
+            limit: clipboard_core::PAGE_SIZE,
+            generation: 90,
+        })?;
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            if let Ok(Event::Snapshot {
+                items,
+                generation: 90,
+                ..
+            }) = events.try_recv()
+            {
+                assert!(
+                    items.is_empty(),
+                    "private clipboard content entered history"
+                );
+                break;
+            }
+            if Instant::now() >= deadline {
+                bail!("等待隐私标记验证超时");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    service.send(Command::Query {
+        search: String::new(),
+        favorite_only: false,
+        category: clipboard_core::ContentCategory::All,
+        group_id: None,
+        limit: clipboard_core::PAGE_SIZE,
+        generation: 91,
+    })?;
+    println!("clipboard privacy exclusions ok");
+
     let text = format!("isolated-text-{}", std::process::id());
     clipboard
         .set_text(text.clone())

@@ -1,5 +1,6 @@
 mod confirmation;
 mod content;
+mod data_import;
 mod drag;
 mod drag_visual;
 mod events;
@@ -23,6 +24,7 @@ mod preview_actions;
 mod preview_render;
 mod row_actions;
 mod row_menu;
+mod search_input;
 mod selection;
 mod settings_about;
 mod settings_app_filter;
@@ -30,9 +32,11 @@ mod settings_audio;
 mod settings_common;
 mod settings_data;
 mod settings_display;
+mod settings_file_staging;
 mod settings_general;
 mod settings_hover;
 mod settings_layout;
+mod settings_retention;
 mod settings_shortcuts;
 mod settings_window;
 mod settings_window_effect;
@@ -218,6 +222,7 @@ enum HistoryMenuAction {
     PastePlainText,
     Copy,
     CopyPath,
+    CopyAsFile,
     Preview,
     Edit,
     Reveal,
@@ -334,6 +339,8 @@ struct ClipboardView {
     data_size_pending: bool,
     database_maintenance_pending: bool,
     export_pending: bool,
+    data_import_pending: bool,
+    data_import_result: Option<data_import::ImportOutcome>,
     window_position: PendingPref<WindowPositionPreference>,
     persist_window_size: bool,
     persist_window_size_pending: bool,
@@ -347,6 +354,9 @@ struct ClipboardView {
     display: DisplayPreference,
     display_pending: bool,
     audio: PendingPref<AudioPreference>,
+    retention: PendingPref<clipboard_core::retention::RetentionPolicy>,
+    retention_saved: bool,
+    stage_files: PendingPref<bool>,
     monitor_types: PendingPref<MonitorTypesPreference>,
     app_filter: PendingPref<AppFilterPreference>,
     running_apps: Vec<RunningApp>,
@@ -354,6 +364,7 @@ struct ClipboardView {
     last_window_size: Option<WindowSizePreference>,
     paste_target: Option<(isize, u32)>,
     paste_pending: Option<(i64, (isize, u32))>,
+    paste_delivery_task: Option<Task<()>>,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,
     drag_motion: DragMotionState,
@@ -394,6 +405,12 @@ enum SettingsPage {
     About,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShortcutTarget {
+    Main,
+    Paste(bool, u8),
+}
+
 struct SettingsWindowView {
     owner: WeakEntity<ClipboardView>,
     _owner_subscription: Subscription,
@@ -401,7 +418,7 @@ struct SettingsWindowView {
     language: LanguagePreference,
     page: SettingsPage,
     shortcut_input: Option<Entity<InputState>>,
-    shortcut_editing: Option<(bool, u8)>,
+    shortcut_editing: Option<ShortcutTarget>,
     shortcut_capture_focus: FocusHandle,
     shortcut_recording: bool,
     shortcut_capture_error: Option<String>,
@@ -409,6 +426,9 @@ struct SettingsWindowView {
     favorite_shortcuts_expanded: bool,
     app_filter_input: Entity<InputState>,
     _app_filter_input_subscription: Subscription,
+    retention_days_input: Entity<InputState>,
+    retention_count_input: Entity<InputState>,
+    retention_error: Option<String>,
     preview_lines_input: Entity<InputState>,
     _preview_lines_input_subscription: Subscription,
     _preview_lines_step_subscription: Subscription,

@@ -176,13 +176,12 @@ impl PreviewState {
     }
 }
 
-/// 历史列表的互斥筛选维度：任意时刻只作用于一个维度。
+/// The mutually exclusive category tabs; the selected group is independent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HistoryFilter {
+enum HistoryFilter {
     All,
     Favorites,
     Category(ContentCategory),
-    Group(i64),
 }
 
 /// View state kept independent of GPUI so asynchronous ordering can be tested.
@@ -194,6 +193,7 @@ pub struct HistoryState {
     pub selected: Option<i64>,
     pub loading: bool,
     filter: HistoryFilter,
+    group_id: Option<i64>,
 }
 
 impl Default for HistoryState {
@@ -206,6 +206,7 @@ impl Default for HistoryState {
             selected: None,
             loading: true,
             filter: HistoryFilter::All,
+            group_id: None,
         }
     }
 }
@@ -223,19 +224,14 @@ impl HistoryState {
     }
 
     pub fn group_id(&self) -> Option<i64> {
-        match self.filter {
-            HistoryFilter::Group(id) => Some(id),
-            _ => None,
-        }
+        self.group_id
     }
 
     pub fn should_reset_category_filter(&self, show_category_filter: bool) -> bool {
-        !show_category_filter
-            && self.group_id().is_none()
-            && (self.favorite_only() || self.category() != ContentCategory::All)
+        !show_category_filter && (self.favorite_only() || self.category() != ContentCategory::All)
     }
 
-    pub fn set_filter(&mut self, filter: HistoryFilter) {
+    fn set_filter(&mut self, filter: HistoryFilter) {
         self.filter = filter;
         self.begin_search();
     }
@@ -253,7 +249,13 @@ impl HistoryState {
     }
 
     pub fn set_group(&mut self, group_id: Option<i64>) {
-        self.set_filter(group_id.map_or(HistoryFilter::All, HistoryFilter::Group));
+        self.group_id = group_id;
+        self.begin_search();
+    }
+
+    pub fn reset_filters(&mut self) {
+        self.group_id = None;
+        self.set_filter(HistoryFilter::All);
     }
 
     pub fn begin_search(&mut self) {

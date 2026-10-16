@@ -31,19 +31,33 @@ fn hotkey_preference_persists_independently_of_legacy_setting() -> Result<()> {
     let path = directory.path().join("clipboard.db");
     let db = Database::new(path.clone())?;
     let preferences = Preferences::new(&db);
-    assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
+    assert_eq!(preferences.hotkey()?, HotkeyPreference::default());
     SettingsRepository::new(&db).set("global_shortcut", "Alt+C")?;
-    assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
-    preferences.set_hotkey(HotkeyPreference::CtrlAltV)?;
+    assert_eq!(preferences.hotkey()?, HotkeyPreference::default());
+    preferences.set_hotkey(HotkeyPreference::Shortcut("Ctrl+Alt+F9".into()))?;
     drop(preferences);
     drop(db);
     let db = Database::new(path)?;
     let preferences = Preferences::new(&db);
-    assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlAltV);
+    assert_eq!(
+        preferences.hotkey()?,
+        HotkeyPreference::Shortcut("Ctrl+Alt+F9".into())
+    );
     preferences.set_hotkey(HotkeyPreference::Disabled)?;
     assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
-    SettingsRepository::new(&db).set(HOTKEY_KEY, "unknown")?;
-    assert_eq!(preferences.hotkey()?, HotkeyPreference::CtrlShiftV);
+    for (stored, expected) in [
+        ("ctrl_shift_v", HotkeyPreference::default()),
+        ("alt_c", HotkeyPreference::Shortcut("Alt+C".into())),
+        (
+            "ctrl_alt_v",
+            HotkeyPreference::Shortcut("Ctrl+Alt+V".into()),
+        ),
+        ("disabled", HotkeyPreference::Disabled),
+        ("unknown", HotkeyPreference::default()),
+    ] {
+        SettingsRepository::new(&db).set(HOTKEY_KEY, stored)?;
+        assert_eq!(preferences.hotkey()?, expected);
+    }
     Ok(())
 }
 

@@ -91,6 +91,7 @@ impl ClipboardView {
     }
 
     pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.paste_delivery_task = None;
         // 窗口又要显示了：取消隐藏时的延迟释放，避免缩略图白解码一遍。
         self.image_release_task = None;
         let was_minimized = tray::is_window_minimized(window);
@@ -194,7 +195,7 @@ impl ClipboardView {
             self.search_task = None;
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            self.history.set_group(None);
+            self.history.reset_filters();
             self.refresh_group_select(window, cx);
             self.scroll_to_top();
             if !self.preview_editing && !self.preview_save_pending {

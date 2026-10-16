@@ -71,6 +71,9 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
         "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
             "Plain text copied; switch to the target app and press Ctrl+V".into()
         }
+        "图片文件已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Image file copied; switch to the target app and press Ctrl+V".into()
+        }
         "图片已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
             "Image copied; switch to the target app and press Ctrl+V".into()
         }

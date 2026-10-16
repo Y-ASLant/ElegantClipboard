@@ -59,6 +59,9 @@ pub struct Service {
     pub initial_hover_preview: HoverPreviewPreference,
     pub initial_display: DisplayPreference,
     pub initial_audio: AudioPreference,
+    pub initial_retention: clipboard_core::retention::RetentionPolicy,
+    pub initial_retention_saved: bool,
+    pub initial_stage_files: bool,
     pub initial_monitor_types: MonitorTypesPreference,
     pub initial_app_filter: AppFilterPreference,
     pub initial_window_effect: WindowEffectPreference,
@@ -96,6 +99,9 @@ impl Service {
         let initial_hover_preview = preferences.hover_preview()?;
         let initial_display = preferences.display()?;
         let initial_audio = preferences.audio()?;
+        let initial_retention = preferences.retention()?;
+        let initial_retention_saved = preferences.retention_saved()?;
+        let initial_stage_files = preferences.stage_files()?;
         let initial_monitor_types = preferences.monitor_types()?;
         let initial_app_filter = preferences.app_filter()?;
         let initial_window_effect = preferences.window_effect()?;
@@ -149,6 +155,9 @@ impl Service {
             initial_hover_preview,
             initial_display,
             initial_audio,
+            initial_retention,
+            initial_retention_saved,
+            initial_stage_files,
             initial_monitor_types,
             initial_app_filter: initial_app_filter.clone(),
             initial_window_effect,
@@ -184,11 +193,21 @@ impl Service {
                     snapshot_pending: false,
                     events: worker_events,
                 };
+                if let Err(error) = worker.maintain_retention() {
+                    worker_feedback.error(format!("执行保留策略失败：{error}"));
+                }
+                let mut retention_checked = std::time::Instant::now();
                 if let Err(error) = worker.send_groups().and_then(|_| worker.snapshot()) {
                     let _ = worker.events.send_blocking(Event::Error(error.to_string()));
                 }
                 loop {
                     if !stop.load(Ordering::Acquire) {
+                        if retention_checked.elapsed() >= Duration::from_secs(300) {
+                            retention_checked = std::time::Instant::now();
+                            if let Err(error) = worker.maintain_retention() {
+                                worker_feedback.error(format!("执行保留策略失败：{error}"));
+                            }
+                        }
                         worker_feedback.flush(&worker.events);
                         if let Err(error) = worker.flush_capture_snapshot() {
                             worker_feedback.error(error.to_string());

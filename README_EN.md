@@ -22,10 +22,14 @@ ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, an
 - Simplified Chinese and English UI (Chinese by default), light/dark themes, always-on-top mode, hide on outside click, and opening-position, close-after-paste, and move-to-top settings
 - System-capable window effects for the main window, settings window, and hover preview: off, Acrylic, Mica, or Mica Alt. Unsupported saved choices are retained with an explicit fallback notice. The 40%/55%/72%/85% background tint only repaints the background without reapplying native materials. Controls, cards, and notifications retain their theme surfaces; enabled effects keep a borderless frame with resizable edges
 - Borderless main window: drag the small grip above search to move it (the top edge still resizes); search occupies its own row, with category tabs and the GPUI Kit group Select on the next row. Enter batch selection from a card or Ctrl+A and exit from the batch toolbar; Clear History, Pin Window, and Settings remain in the tray menu
-- Reorder tray actions by dragging or Up/Down controls and configure their visibility in Settings (Settings remains available); optional category filters and compact, standard, or spacious history cards. Two-line text previews are shorter than image cards by default; text or a centered thumbnail sits above time, size, and source app, while hovering reveals card actions
+- Optional category filters and compact, standard, or spacious history cards. Two-line text previews are shorter than image cards by default; text or a centered thumbnail sits above time, size, and source app, while hovering reveals card actions
 - A return-to-top control in the fixed header for long history lists
 - Configurable card preview lines, absolute/relative time, character-count, size, and source-app display by name, icon, or both; source icons are cached as PNG
-- GPUI ZIP backup and restore, plus import of an older database or legacy ZIP backup
+- Data settings export GPUI backups and restore GPUI/legacy ZIPs or older databases into a separate empty folder, with a result report and an action to open the restored data
+- Combine group, category and keyword filters; record or type the main shortcut, with conflict rejection and rollback on save failure
+- Per-group count and age limits protect pinned and favorite items; first activation and tighter policies require confirmation, without expanding cleanup automatically on upgrade
+- Optional regular-file copies are off by default (50 MiB per file, 256 MiB total); copy images as files and convert HTML when plain text is missing
+- Verify clipboard contents after writing, wait a bounded time for modifier release before pasting, validate the target, and honor producer opt-outs from local clipboard history
 
 See [Windows GPUI status](docs/WINDOWS_MVP.md) for implementation details and known limits.
 

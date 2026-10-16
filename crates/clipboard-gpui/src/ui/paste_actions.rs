@@ -139,6 +139,24 @@ impl ClipboardView {
         );
     }
 
+    pub(super) fn copy_or_paste_image_file(
+        &mut self,
+        id: i64,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.copy_or_paste_variant(
+            id,
+            (Command::CopyAsFile(id), Command::CopyAsFileForPaste(id)),
+            (
+                "正在复制图片文件并返回原窗口…",
+                "Copying the image file and returning to the previous window…",
+            ),
+            window,
+            cx,
+        );
+    }
+
     pub(super) fn copy_or_paste_variant(
         &mut self,
         id: i64,
@@ -180,6 +198,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.paste_delivery_task = None;
         if !paste::is_external_target(window, target) {
             self.set_feedback_message(
                 tr(
@@ -192,49 +211,67 @@ impl ClipboardView {
             self.is_error = true;
             return;
         }
+        let pending =
+            match paste::PendingPaste::begin(target, clipboard_sequence, self.paste_key.value) {
+                Ok(pending) => pending,
+                Err(error) => {
+                    self.set_feedback_message(error.to_string());
+                    self.is_error = true;
+                    return;
+                }
+            };
         let hide_window = self.paste_close_window.value && tray::is_window_shown(window);
         if hide_window {
             self.hide_window(window, cx);
         }
+        if sound::enabled(self.audio.value, Sound::Paste, SoundTiming::Immediate) {
+            sound::play(Sound::Paste);
+        }
         let main_window = window.window_handle();
-        cx.spawn_in(window, async move |view, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(60))
-                .await;
-            let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                if sound::enabled(this.audio.value, Sound::Paste, SoundTiming::Immediate) {
-                    sound::play(Sound::Paste);
+        self.paste_delivery_task = Some(cx.spawn_in(window, async move |view, cx| {
+            loop {
+                cx.background_executor().timer(paste::POLL_INTERVAL).await;
+                let finished =
+                    update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                        match pending.try_send() {
+                            Ok(false) => return false,
+                            Ok(true) => {
+                                if sound::enabled(
+                                    this.audio.value,
+                                    Sound::Paste,
+                                    SoundTiming::AfterSuccess,
+                                ) {
+                                    sound::play(Sound::Paste);
+                                }
+                                this.set_feedback_message(
+                                    tr(
+                                        this.language,
+                                        "已发送粘贴快捷键，请检查目标应用",
+                                        "Paste shortcut sent; check the target app.",
+                                    )
+                                    .into(),
+                                );
+                                this.is_error = false;
+                                if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top.value)
+                                {
+                                    this.send(Command::BumpToTop(id), cx);
+                                }
+                            }
+                            Err(error) => {
+                                if hide_window {
+                                    this.show_window(window, cx);
+                                }
+                                this.set_feedback_message(error.to_string());
+                                this.is_error = true;
+                            }
+                        }
+                        cx.notify();
+                        true
+                    });
+                if !matches!(finished, Ok(false)) {
+                    break;
                 }
-                match paste::send_to_target(target, clipboard_sequence, this.paste_key.value) {
-                    Ok(()) => {
-                        if sound::enabled(this.audio.value, Sound::Paste, SoundTiming::AfterSuccess)
-                        {
-                            sound::play(Sound::Paste);
-                        }
-                        this.set_feedback_message(
-                            tr(
-                                this.language,
-                                "已发送粘贴快捷键，请检查目标应用",
-                                "Paste shortcut sent; check the target app.",
-                            )
-                            .into(),
-                        );
-                        this.is_error = false;
-                        if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top.value) {
-                            this.send(Command::BumpToTop(id), cx);
-                        }
-                    }
-                    Err(error) => {
-                        if hide_window {
-                            this.show_window(window, cx);
-                        }
-                        this.set_feedback_message(error.to_string());
-                        this.is_error = true;
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+            }
+        }));
     }
 }

@@ -10,9 +10,15 @@ impl ClipboardView {
                 | Command::CopyForPaste(_)
                 | Command::CopyPath(_)
                 | Command::CopyPathForPaste(_)
+                | Command::CopyAsFile(_)
+                | Command::CopyAsFileForPaste(_)
                 | Command::MergeCopy(_)
                 | Command::MergeForPaste(_)
         );
+        if copy_requested || matches!(&command, Command::ResolveQuickPaste { .. }) {
+            // Dropping the task cancels the old wait before this request can replace its data.
+            self.paste_delivery_task = None;
+        }
         if let Err(error) = self.service.send(command) {
             self.set_feedback_message(error.to_string());
             self.is_error = true;
@@ -62,6 +68,7 @@ impl ClipboardView {
                 result,
             } => self.apply_hover_preview_result(id, generation, result, window, cx),
             Event::HoverPreviewSaved(result) => self.apply_hover_preview_saved(result, cx),
+            Event::RetentionSaved(result) => self.apply_retention_saved(result, cx),
             Event::TextEdited {
                 id,
                 generation,
@@ -188,6 +195,7 @@ impl ClipboardView {
             } => self.apply_quick_paste_resolved(slot, favorite, result, window, cx),
             Event::DisplaySaved(result) => self.apply_display_saved(result, window, cx),
             Event::AudioSaved(result) => self.apply_audio_saved(result),
+            Event::StageFilesSaved(result) => self.apply_stage_files_saved(result),
             Event::MonitorTypesSaved(result) => self.apply_monitor_types_saved(result),
             Event::AppFilterSaved(result) => self.apply_app_filter_saved(result),
             Event::RunningApps(apps) => {

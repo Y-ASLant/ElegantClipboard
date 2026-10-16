@@ -7,48 +7,60 @@ impl SettingsWindowView {
         let Some(owner_entity) = self.owner.upgrade() else {
             return div().into_any_element();
         };
-        let (language, hotkey_choice, hotkey_pending) = {
-            let state = owner_entity.read(cx);
-            (state.language, state.hotkey_choice, state.hotkey_pending)
-        };
-
-        let choices = [
-            HotkeyPreference::CtrlShiftV,
-            HotkeyPreference::AltC,
-            HotkeyPreference::CtrlAltV,
-            HotkeyPreference::Disabled,
-        ];
-        let selected_index = choices
-            .iter()
-            .position(|choice| *choice == hotkey_choice)
-            .expect("built-in hotkey choice");
-        let click_choices = choices;
+        let state = owner_entity.read(cx);
+        let language = state.language;
+        let pending = state.hotkey_pending
+            || state.paste_shortcuts_pending.is_some()
+            || state.quick_paste_pending_setting;
+        let disabled = state.hotkey_choice == HotkeyPreference::Disabled;
+        let label = hotkey_label(language, &state.hotkey_choice).to_owned();
         let owner = self.owner.clone();
-        TabBar::new("settings-window-hotkey-tabs")
+        div()
             .w_full()
-            .outline()
-            .selected_index(selected_index)
-            .on_click(move |index: &usize, _, cx| {
-                if let Some(&choice) = click_choices.get(*index) {
-                    let _ = owner.update(cx, |owner, cx| {
-                        if owner.hotkey_choice != choice {
-                            owner.select_hotkey(choice, cx);
-                        }
-                    });
-                }
-            })
-            .children(choices.map(|choice| {
-                let tab = Tab::new().flex_1().disabled(hotkey_pending);
-                if choice == HotkeyPreference::Disabled {
-                    tab.label(hotkey_label(language, choice))
-                } else {
-                    tab.aria_label(choice.label()).child(
-                        shortcut_kbd(choice.label())
-                            .expect("built-in hotkey")
-                            .appearance(false),
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(if disabled {
+                        div().child(label).into_any_element()
+                    } else {
+                        shortcut_kbd(&label).map_or_else(
+                            || div().child(label).into_any_element(),
+                            |kbd| kbd.into_any_element(),
+                        )
+                    })
+                    .child(
+                        Button::new("main-shortcut-edit")
+                            .small()
+                            .outline()
+                            .label(tr(language, "修改", "Edit"))
+                            .disabled(pending)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.begin_shortcut_edit(ShortcutTarget::Main, window, cx);
+                            })),
                     )
-                }
-            }))
+                    .child(
+                        Button::new("main-shortcut-disable")
+                            .small()
+                            .ghost()
+                            .label(tr(language, "关闭", "Disable"))
+                            .disabled(pending || disabled)
+                            .on_click(move |_, _, cx| {
+                                let _ = owner.update(cx, |owner, cx| {
+                                    owner.select_hotkey(HotkeyPreference::Disabled, cx);
+                                });
+                            }),
+                    ),
+            )
+            .when(
+                self.shortcut_editing == Some(ShortcutTarget::Main),
+                |panel| panel.child(self.shortcut_editor(language, pending, cx)),
+            )
             .into_any_element()
     }
 
@@ -253,11 +265,9 @@ impl SettingsWindowView {
         let (
             language,
             quick_paste_enabled,
-            quick_paste_pending_setting,
             paste_key,
             paste_key_pending,
             paste_shortcuts,
-            paste_shortcuts_pending,
             shortcut_actions_pending,
             paste_shortcut_status,
             monitoring,
@@ -266,11 +276,9 @@ impl SettingsWindowView {
             (
                 state.language,
                 state.quick_paste_enabled,
-                state.quick_paste_pending_setting,
                 state.paste_key.value,
                 state.paste_key.pending,
                 state.paste_shortcuts.clone(),
-                state.paste_shortcuts_pending.is_some(),
                 state.paste_shortcuts_pending.is_some()
                     || state.quick_paste_pending_setting
                     || state.hotkey_pending,
@@ -311,7 +319,7 @@ impl SettingsWindowView {
                     .text_sm()
                     .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
                     .checked(quick_paste_enabled)
-                    .disabled(quick_paste_pending_setting || paste_shortcuts_pending || !monitoring)
+                    .disabled(shortcut_actions_pending || !monitoring)
                     .on_change(move |checked, _, cx| {
                         let _ = quick_paste_owner.update(cx, |owner, cx| {
                             owner.select_quick_paste_enabled(*checked, cx);

@@ -5,6 +5,22 @@ use anyhow::Result;
 use clipboard_core::{is_url_text, preferences::MonitorTypesPreference};
 
 impl Worker {
+    pub(super) fn capture_files(&self, paths: &[String]) -> Result<i64> {
+        if !self.preferences.stage_files()? {
+            return self.history.capture_files(paths, &self.images_dir);
+        }
+        let outcome = self
+            .history
+            .capture_files_with_staging(paths, &self.images_dir)?;
+        if !outcome.warnings.is_empty() {
+            self.send_event(super::Event::Status(format!(
+                "警告：文件路径已保存，但部分暂存操作未完成：{}",
+                outcome.warnings.join("；")
+            )))?;
+        }
+        Ok(outcome.id)
+    }
+
     pub(super) fn handle_observed_capture(
         &mut self,
         content: CapturedClipboard,
@@ -31,9 +47,7 @@ impl Worker {
                     text.as_deref(),
                     &self.images_dir,
                 )?),
-                CapturedClipboard::Files(paths) => {
-                    Some(self.history.capture_files(&paths, &self.images_dir)?)
-                }
+                CapturedClipboard::Files(paths) => Some(self.capture_files(&paths)?),
                 CapturedClipboard::Image { png, width, height } => Some(
                     self.history
                         .capture_image(&png, width, height, &self.images_dir)?,

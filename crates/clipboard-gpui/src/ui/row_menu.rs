@@ -40,6 +40,7 @@ impl ClipboardView {
                 self.send(Command::Copy(id), cx);
             }
             HistoryMenuAction::CopyPath => self.copy_or_paste_path(id, window, cx),
+            HistoryMenuAction::CopyAsFile => self.copy_or_paste_image_file(id, window, cx),
             HistoryMenuAction::Preview => self.open_preview(id, window, cx),
             HistoryMenuAction::Edit => self.open_preview_for_edit(id, window, cx),
             HistoryMenuAction::Reveal => {
@@ -133,7 +134,20 @@ impl ClipboardView {
                         entity.clone(),
                         id,
                         HistoryMenuAction::Copy,
-                    ));
+                    ))
+                    .when(is_image, |menu| {
+                        menu.item(history_menu_item(
+                            if can_paste {
+                                tr(language, "作为文件粘贴", "Paste as file")
+                            } else {
+                                tr(language, "作为文件复制", "Copy as file")
+                            },
+                            paste_pending,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::CopyAsFile,
+                        ))
+                    });
                 let menu = if is_image || is_files {
                     let menu = menu.item(history_menu_item(
                         if can_paste {

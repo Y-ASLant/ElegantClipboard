@@ -273,6 +273,71 @@ impl SettingsWindowView {
             .into_any_element()
     }
 
+    pub(super) fn settings_import_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        use data_import::ImportSource;
+        let Some(owner_entity) = self.owner.upgrade() else {
+            return div().into_any_element();
+        };
+        let owner = owner_entity.read(cx);
+        let language = owner.language;
+        let pending = owner.data_import_pending;
+        let outcome = owner.data_import_result.as_ref();
+        let open_owner = self.owner.clone();
+        let choices = [
+            (
+                "import-legacy-db",
+                tr(language, "导入旧版数据库", "Import legacy database"),
+                ImportSource::LegacyDatabase,
+            ),
+            (
+                "import-legacy-zip",
+                tr(language, "导入旧版 ZIP", "Import legacy ZIP"),
+                ImportSource::LegacyBackup,
+            ),
+            (
+                "restore-backup",
+                tr(language, "恢复 GPUI 备份", "Restore GPUI backup"),
+                ImportSource::Backup,
+            ),
+        ];
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div().text_sm().text_color(cx.theme().muted_foreground).child(tr(
+                    language,
+                    "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据；完成后可打开恢复的数据。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
+                    "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Open the restored data when ready. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
+                )),
+            )
+            .child(
+                div().flex().flex_wrap().gap_2().children(choices.into_iter().map(|(id, label, source)| {
+                    let owner = self.owner.clone();
+                    Button::new(id).outline().small().label(label).disabled(pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner.update(cx, |owner, cx| owner.start_data_import(source, cx));
+                        })
+                })),
+            )
+            .when(pending, |content| {
+                content.child(div().text_sm().child(tr(language, "正在选择路径或恢复数据…", "Selecting paths or restoring data…")))
+            })
+            .when_some(outcome, |content, outcome| {
+                content
+                    .child(div().text_sm().min_w_0().whitespace_normal().child(outcome.description(language)))
+                    .child(
+                        Button::new("open-restored-data").outline().small()
+                            .label(tr(language, "打开恢复的数据", "Open restored data"))
+                            .disabled(pending)
+                            .on_click(move |_, _, cx| {
+                                let _ = open_owner.update(cx, |owner, cx| owner.open_imported_data(cx));
+                            }),
+                    )
+            })
+            .into_any_element()
+    }
+
     pub(super) fn settings_privacy_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(owner_entity) = self.owner.upgrade() else {
             return div().into_any_element();

@@ -72,6 +72,22 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
+        chinese: "保留策略",
+        english: "Retention",
+        description_chinese: "按分组限制普通历史数量和天数；收藏与置顶保留",
+        description_english: "Limit ordinary history by group, count and age; keep favorites and pinned items",
+        content: SettingsWindowView::settings_retention_content,
+    },
+    Section {
+        page: SettingsPage::Data,
+        chinese: "文件副本",
+        english: "File copies",
+        description_chinese: "可选保存普通文件副本，原件失效时用于恢复",
+        description_english: "Optionally retain regular files for recovery when originals are missing",
+        content: SettingsWindowView::render_file_staging_settings,
+    },
+    Section {
+        page: SettingsPage::Data,
         chinese: "每日历史条数",
         english: "Daily history",
         description_chinese: "最近 7 天每天保存的剪贴板记录数（含今天）",
@@ -85,6 +101,14 @@ const SECTIONS: &[Section] = &[
         description_chinese: "数据库、受管图片和暂存文件",
         description_english: "Database, managed images and staged files",
         content: SettingsWindowView::settings_storage_content,
+    },
+    Section {
+        page: SettingsPage::Data,
+        chinese: "导入与恢复",
+        english: "Import & restore",
+        description_chinese: "将旧版数据库、旧版 ZIP 或 GPUI 备份恢复到独立空目录",
+        description_english: "Restore a legacy database, legacy ZIP or GPUI backup to a separate empty folder",
+        content: SettingsWindowView::settings_import_content,
     },
     Section {
         page: SettingsPage::Data,

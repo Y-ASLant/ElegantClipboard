@@ -37,8 +37,18 @@ impl History {
             bail!("没有可保存的富文本内容");
         }
         let text = text.filter(|value| !value.is_empty());
-        let total =
+        let mut total =
             html.map_or(0, str::len) + rtf.map_or(0, <[u8]>::len) + text.map_or(0, str::len);
+        if total > MAX_TEXT_BYTES {
+            bail!("富文本内容超过 1 MiB，未保存");
+        }
+        let fallback = if text.is_none() {
+            html.map(crate::html_text::html_to_text).transpose()?
+        } else {
+            None
+        };
+        let text = text.or_else(|| fallback.as_deref().filter(|value| !value.is_empty()));
+        total += fallback.as_ref().map_or(0, String::len);
         if total > MAX_TEXT_BYTES {
             bail!("富文本内容超过 1 MiB，未保存");
         }
@@ -122,6 +132,32 @@ mod tests {
             PreviewContent::RichText("中文😀".into())
         );
         assert_eq!(history.list("中文", PAGE_SIZE, false)?[0].id, id);
+        Ok(())
+    }
+
+    #[test]
+    fn html_fallback_is_searchable_and_source_text_including_whitespace_wins() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let html = "<p>First &amp; second</p><p>末行</p>";
+        let id = history.capture_rich(Some(html), None, None, &images)?;
+        let item = history.item(id)?;
+        let expected = "First & second\n末行";
+        assert_eq!(item.text_content.as_deref(), Some(expected));
+        assert_eq!(item.preview.as_deref(), Some(expected));
+        assert_eq!(item.char_count, Some(expected.chars().count() as i64));
+        assert_eq!(item.byte_size, (html.len() + expected.len()) as i64);
+        assert_eq!(history.list("末行", PAGE_SIZE, false)?[0].id, id);
+        for (html, source) in [("<p>different</p>", " source\n"), ("<p>ignored</p>", " \t")] {
+            let id = history.capture_rich(Some(html), None, Some(source), &images)?;
+            assert_eq!(history.item(id)?.text_content.as_deref(), Some(source));
+        }
+        let id = history.capture_rich(Some("<p>empty source</p>"), None, Some(""), &images)?;
+        assert_eq!(
+            history.item(id)?.text_content.as_deref(),
+            Some("empty source")
+        );
         Ok(())
     }
 

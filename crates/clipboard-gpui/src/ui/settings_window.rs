@@ -152,6 +152,11 @@ impl SettingsWindowView {
                     this.add_app_filter_rule(window, cx);
                 }
             });
+        let retention = entity.read(cx).retention.value;
+        let retention_days_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(retention.days.to_string()));
+        let retention_count_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(retention.max_count.to_string()));
         let preview_lines_last_value = entity.read(cx).display.card_max_lines;
         let preview_lines_input = cx.new(|cx| {
             InputState::new(window, cx).default_value(preview_lines_last_value.to_string())
@@ -234,6 +239,9 @@ impl SettingsWindowView {
             favorite_shortcuts_expanded: false,
             app_filter_input,
             _app_filter_input_subscription: app_filter_input_subscription,
+            retention_days_input,
+            retention_count_input,
+            retention_error: None,
             preview_lines_input,
             _preview_lines_input_subscription: preview_lines_input_subscription,
             _preview_lines_step_subscription: preview_lines_step_subscription,

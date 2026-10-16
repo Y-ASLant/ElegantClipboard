@@ -4,16 +4,20 @@ pub(crate) mod backup_common;
 pub(crate) mod clipboard;
 pub mod database;
 mod editing;
+mod file_staging;
 mod files;
 mod groups;
+pub mod html_text;
 mod image;
 pub mod import;
 pub mod legacy_backup;
 mod merge;
 pub mod preferences;
 mod reorder;
+pub mod retention;
 pub mod rich;
 pub mod search;
+pub use file_staging::{FileCaptureOutcome, MAX_STAGED_DIRECTORY_BYTES, MAX_STAGED_FILE_BYTES};
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
 pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 pub use merge::MergedContent;
@@ -250,15 +254,6 @@ impl History {
         })?;
         self.enforce_history_limit(images_dir)?;
         Ok(Some(id))
-    }
-
-    fn enforce_history_limit(&self, images_dir: Option<&Path>) -> Result<()> {
-        let (_, deleted_images, deleted_payloads) =
-            self.repo.enforce_max_count(HISTORY_LIMIT, None)?;
-        if let Some(images_dir) = images_dir {
-            let _ = self.cleanup_media(deleted_images, deleted_payloads, images_dir);
-        }
-        Ok(())
     }
 
     pub fn list(

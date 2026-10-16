@@ -97,10 +97,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.history.group_id() == group_id
-            && !self.history.favorite_only()
-            && self.history.category() == ContentCategory::All
-        {
+        if self.history.group_id() == group_id {
             return;
         }
         self.cancel_pending_row_click();

@@ -87,25 +87,51 @@ fn language_defaults_to_chinese_and_is_loaded_after_restart() -> Result<()> {
 fn hotkey_change_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_hotkey, HotkeyPreference::CtrlShiftV);
+    assert_eq!(service.initial_hotkey, HotkeyPreference::default());
     next_snapshot(&events, 0);
-    service.send(Command::SetHotkey(HotkeyPreference::AltC))?;
+    service.send(Command::SetHotkey(HotkeyPreference::Shortcut(
+        " alt + control + f9 ".into(),
+    )))?;
     wait_for(
         &events,
         Duration::from_secs(5),
         "hotkey save timed out",
         |event| match event {
             Event::HotkeySaved(result) => {
-                assert_eq!(result.unwrap(), HotkeyPreference::AltC);
+                assert_eq!(
+                    result.unwrap(),
+                    HotkeyPreference::Shortcut("Ctrl+Alt+F9".into())
+                );
                 Some(())
             }
             Event::Error(message) => panic!("{message}"),
             _ => None,
         },
     );
+    for rejected in ["Alt+Numpad1", "Ctrl+Ctrl+V", ""] {
+        service.send(Command::SetHotkey(HotkeyPreference::Shortcut(
+            rejected.into(),
+        )))?;
+        wait_for(
+            &events,
+            Duration::from_secs(5),
+            "hotkey rejection timed out",
+            |event| match event {
+                Event::HotkeySaved(result) => {
+                    assert!(result.is_err(), "{rejected}");
+                    Some(())
+                }
+                Event::Error(message) => panic!("{message}"),
+                _ => None,
+            },
+        );
+    }
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_hotkey, HotkeyPreference::AltC);
+    assert_eq!(
+        reopened.initial_hotkey,
+        HotkeyPreference::Shortcut("Ctrl+Alt+F9".into())
+    );
     Ok(())
 }
 

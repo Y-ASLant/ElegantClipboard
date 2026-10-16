@@ -102,6 +102,13 @@ impl WatchHandler {
 }
 
 fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSnapshot> {
+    if super::privacy::excludes_history(clipboard)? {
+        return Ok(ClipboardSnapshot {
+            content: None,
+            source: None,
+            warning: None,
+        });
+    }
     let source = source_app::clipboard_source();
     let (content, warning) = read_content(clipboard)?;
     Ok(ClipboardSnapshot {

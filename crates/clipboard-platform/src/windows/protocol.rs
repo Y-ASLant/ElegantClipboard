@@ -10,6 +10,7 @@ use clipboard_core::{
         PasteShortcutConfig, ThemePreference, WindowEffectPreference, WindowPositionPreference,
         WindowSizePreference,
     },
+    retention::RetentionPolicy,
 };
 use std::path::PathBuf;
 
@@ -32,6 +33,8 @@ pub enum Command {
     CopyForPaste(i64),
     CopyPath(i64),
     CopyPathForPaste(i64),
+    CopyAsFile(i64),
+    CopyAsFileForPaste(i64),
     RevealInExplorer(i64),
     SaveAs {
         id: i64,
@@ -105,6 +108,11 @@ pub enum Command {
     SetHoverPreview(HoverPreviewPreference),
     SetDisplay(DisplayPreference),
     SetAudio(AudioPreference),
+    SetRetention {
+        policy: RetentionPolicy,
+        confirmed: bool,
+    },
+    SetStageFiles(bool),
     SetMonitorTypes(MonitorTypesPreference),
     SetAppFilter(Box<AppFilterPreference>),
     SetWindowEffect(WindowEffectPreference),
@@ -199,7 +207,8 @@ impl Command {
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
             Self::CopyForPaste(id)
             | Self::CopyPlainTextForPaste(id)
-            | Self::CopyPathForPaste(id) => Some(FailureKind::Paste(*id)),
+            | Self::CopyPathForPaste(id)
+            | Self::CopyAsFileForPaste(id) => Some(FailureKind::Paste(*id)),
             Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
             Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
@@ -220,6 +229,7 @@ impl Command {
             Self::Copy(_)
             | Self::CopyPlainText(_)
             | Self::CopyPath(_)
+            | Self::CopyAsFile(_)
             | Self::RevealInExplorer(_)
             | Self::Preview { .. }
             | Self::HoverPreview { .. }
@@ -245,6 +255,8 @@ impl Command {
             | Self::SetHoverPreview(_)
             | Self::SetDisplay(_)
             | Self::SetAudio(_)
+            | Self::SetRetention { .. }
+            | Self::SetStageFiles(_)
             | Self::SetMonitorTypes(_)
             | Self::SetAppFilter(_)
             | Self::SetWindowEffect(_)
@@ -350,6 +362,8 @@ pub enum Event {
     HoverPreviewSaved(Result<HoverPreviewPreference, String>),
     DisplaySaved(Result<DisplayPreference, String>),
     AudioSaved(Result<AudioPreference, String>),
+    RetentionSaved(Result<(RetentionPolicy, DeletionOutcome), String>),
+    StageFilesSaved(Result<bool, String>),
     MonitorTypesSaved(Result<MonitorTypesPreference, String>),
     AppFilterSaved(Result<Box<AppFilterPreference>, String>),
     WindowEffectSaved(Result<WindowEffectPreference, String>),

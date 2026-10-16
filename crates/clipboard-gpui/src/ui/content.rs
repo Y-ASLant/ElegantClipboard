@@ -104,19 +104,12 @@ impl ClipboardView {
                             .items_center()
                             .gap_2()
                             .when(self.display.show_category_filter, |row| {
-                                let selected_index = self
-                                    .history
-                                    .group_id()
-                                    .is_none()
-                                    .then(|| self.category_tab_index());
                                 row.child(
                                     div().flex_1().min_w_0().child(
                                         TabBar::new("history-category-tabs")
                                             .w_full()
                                             .segmented()
-                                            .when_some(selected_index, |tabs, index| {
-                                                tabs.selected_index(index)
-                                            })
+                                            .selected_index(self.category_tab_index())
                                             .on_click(cx.listener(
                                                 |this, index: &usize, window, cx| {
                                                     if let Some(&category) =

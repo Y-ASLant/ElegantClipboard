@@ -426,21 +426,22 @@ pub enum LanguagePreference {
     English,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HotkeyPreference {
-    #[default]
-    CtrlShiftV,
-    AltC,
-    CtrlAltV,
+    Shortcut(String),
     Disabled,
 }
 
+impl Default for HotkeyPreference {
+    fn default() -> Self {
+        Self::Shortcut("Ctrl+Shift+V".into())
+    }
+}
+
 impl HotkeyPreference {
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &str {
         match self {
-            Self::CtrlShiftV => "Ctrl+Shift+V",
-            Self::AltC => "Alt+C",
-            Self::CtrlAltV => "Ctrl+Alt+V",
+            Self::Shortcut(shortcut) => shortcut,
             Self::Disabled => "关闭",
         }
     }

@@ -4,25 +4,30 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 impl SettingsWindowView {
     pub(super) fn begin_shortcut_edit(
         &mut self,
-        favorite: bool,
-        slot: u8,
+        target: ShortcutTarget,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(owner) = self.owner.upgrade() else {
             return;
         };
-        let shortcut = owner
-            .read(cx)
-            .paste_shortcuts
-            .slot(favorite, slot)
-            .unwrap_or_default()
-            .to_owned();
+        let state = owner.read(cx);
+        let shortcut = match target {
+            ShortcutTarget::Main => match &state.hotkey_choice {
+                HotkeyPreference::Shortcut(value) => value.clone(),
+                HotkeyPreference::Disabled => String::new(),
+            },
+            ShortcutTarget::Paste(favorite, slot) => state
+                .paste_shortcuts
+                .slot(favorite, slot)
+                .unwrap_or_default()
+                .to_owned(),
+        };
         let shortcut_input = self.shortcut_input.get_or_insert_with(|| {
             cx.new(|cx| InputState::new(window, cx).placeholder("Ctrl+Alt+1"))
         });
         shortcut_input.update(cx, |input, cx| input.set_value(shortcut, window, cx));
-        self.shortcut_editing = Some((favorite, slot));
+        self.shortcut_editing = Some(target);
         self.shortcut_recording = false;
         self.shortcut_capture_error = None;
         shortcut_input.update(cx, |input, cx| input.focus(window, cx));
@@ -30,7 +35,7 @@ impl SettingsWindowView {
     }
 
     pub(super) fn save_shortcut_edit(&mut self, cx: &mut Context<Self>) {
-        let Some((favorite, slot)) = self.shortcut_editing else {
+        let Some(target) = self.shortcut_editing else {
             return;
         };
         let Some(owner) = self.owner.upgrade() else {
@@ -40,10 +45,26 @@ impl SettingsWindowView {
             return;
         };
         let shortcut = shortcut_input.read(cx).value().to_string();
-        let accepted = owner.update(cx, |owner, cx| {
-            owner.save_paste_shortcut(favorite, slot, &shortcut, cx);
-            owner.paste_shortcuts_pending.is_some()
-        });
+        let accepted = match target {
+            ShortcutTarget::Main => {
+                let normalized = clipboard_platform::hotkey::normalize_main_shortcut(&shortcut);
+                match normalized {
+                    Ok(value) => owner.update(cx, |owner, cx| {
+                        owner.select_hotkey(HotkeyPreference::Shortcut(value), cx);
+                        owner.hotkey_pending
+                    }),
+                    Err(error) => {
+                        self.shortcut_capture_error = Some(error.to_string());
+                        cx.notify();
+                        false
+                    }
+                }
+            }
+            ShortcutTarget::Paste(favorite, slot) => owner.update(cx, |owner, cx| {
+                owner.save_paste_shortcut(favorite, slot, &shortcut, cx);
+                owner.paste_shortcuts_pending.is_some()
+            }),
+        };
         if accepted {
             self.shortcut_editing = None;
             self.shortcut_recording = false;
@@ -81,7 +102,11 @@ impl SettingsWindowView {
         }
         let shift_down = event.keystroke.modifiers.shift
             || unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) } < 0;
-        match shortcut_from_keystroke(&event.keystroke, shift_down) {
+        match shortcut_from_keystroke(
+            &event.keystroke,
+            shift_down,
+            self.shortcut_editing == Some(ShortcutTarget::Main),
+        ) {
             Ok(shortcut) => {
                 if let Some(input) = &self.shortcut_input {
                     input.update(cx, |input, cx| input.set_value(shortcut, window, cx));
@@ -96,8 +121,6 @@ impl SettingsWindowView {
 
     pub(super) fn shortcut_editor(
         &self,
-        favorite: bool,
-        slot: u8,
         language: LanguagePreference,
         pending: bool,
         cx: &mut Context<Self>,
@@ -117,18 +140,10 @@ impl SettingsWindowView {
                     .flex_wrap()
                     .items_center()
                     .gap_1()
-                    .child(format!(
-                        "{} {slot}: {}",
-                        tr(
-                            language,
-                            if favorite { "收藏" } else { "普通" },
-                            if favorite { "Favorite" } else { "Recent" }
-                        ),
-                        tr(
-                            language,
-                            "输入组合键，例如",
-                            "Enter a shortcut, for example"
-                        )
+                    .child(tr(
+                        language,
+                        "输入组合键，例如",
+                        "Enter a shortcut, for example",
                     ))
                     .child(shortcut_kbd("Ctrl+Alt+Z").expect("shortcut example")),
             )
@@ -275,7 +290,11 @@ impl SettingsWindowView {
                                     .label(tr(language, "修改", "Edit"))
                                     .disabled(pending)
                                     .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.begin_shortcut_edit(favorite, slot, window, cx);
+                                        this.begin_shortcut_edit(
+                                            ShortcutTarget::Paste(favorite, slot),
+                                            window,
+                                            cx,
+                                        );
                                     })),
                             )
                             .child(
@@ -303,9 +322,10 @@ impl SettingsWindowView {
                                     }),
                             ),
                     )
-                    .when(self.shortcut_editing == Some((favorite, slot)), |row| {
-                        row.child(self.shortcut_editor(favorite, slot, language, pending, cx))
-                    })
+                    .when(
+                        self.shortcut_editing == Some(ShortcutTarget::Paste(favorite, slot)),
+                        |row| row.child(self.shortcut_editor(language, pending, cx)),
+                    )
             }))
     }
 

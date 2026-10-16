@@ -75,35 +75,20 @@ fn append_unique_files(
     }
 }
 
-fn merge_text(item: &crate::database::ClipboardItem) -> Option<String> {
-    item.text_content
-        .clone()
-        .filter(|text| !text.is_empty())
-        .or_else(|| {
-            item.html_content
-                .as_deref()
-                .map(strip_html_tags)
-                .filter(|text| !text.is_empty())
-        })
-        .or_else(|| {
-            item.preview
-                .clone()
-                .filter(|preview| !preview.is_empty() && !preview.starts_with('['))
-        })
-}
-
-fn strip_html_tags(html: &str) -> String {
-    let mut text = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for character in html.chars() {
-        match character {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => text.push(character),
-            _ => {}
+fn merge_text(item: &crate::database::ClipboardItem) -> Result<String> {
+    if let Some(text) = item.text_content.as_ref().filter(|text| !text.is_empty()) {
+        return Ok(text.clone());
+    }
+    if let Some(html) = item.html_content.as_deref() {
+        let text = crate::html_text::html_to_text(html)?;
+        if !text.is_empty() {
+            return Ok(text);
         }
     }
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    item.preview
+        .clone()
+        .filter(|preview| !preview.is_empty() && !preview.starts_with('['))
+        .context("记录没有可合并的文本表示")
 }
 
 #[cfg(test)]
@@ -181,6 +166,12 @@ mod tests {
         let images = directory.path().join("images");
         let text = history.capture("plain")?.unwrap();
         let html = history.capture_rich(Some("<p>Hello <b>world</b></p>"), None, None, &images)?;
+        let mut legacy = history.item(html)?;
+        legacy.text_content = None;
+        legacy.html_content = Some("<p>A &amp; B</p><p>C</p><style>hidden</style>".into());
+        assert_eq!(merge_text(&legacy)?, "A & B\nC");
+        legacy.html_content = Some("\0".repeat(crate::MAX_TEXT_BYTES / 3 + 1));
+        assert!(merge_text(&legacy).is_err());
         assert_eq!(
             history
                 .merge_content(&[html, text], &directory.path().join("staged"))?

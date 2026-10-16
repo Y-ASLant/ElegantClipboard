@@ -19,13 +19,24 @@ fn plain_text_paste_failure_is_routed_to_its_pending_item() {
 }
 
 #[test]
-fn plain_text_copy_uses_only_stored_text_and_rejects_missing_representation() -> Result<()> {
+fn plain_text_copy_preserves_source_and_converts_legacy_html() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;
     let images = directory.path().join("images");
     let rich = history.capture_rich(Some("<b>格式</b>"), None, Some("格式"), &images)?;
     assert_eq!(plain_text_for_copy(&history.item(rich)?)?, "格式");
-    let no_text = history.capture_rich(Some("<i>only html</i>"), None, None, &images)?;
+    let mut legacy = history.item(rich)?;
+    legacy.text_content = None;
+    legacy.html_content = Some("<p>旧 &amp; 内容</p><p>下一行</p><script>hidden</script>".into());
+    assert_eq!(plain_text_for_copy(&legacy)?, "旧 & 内容\n下一行");
+    legacy.text_content = Some(" \t".into());
+    assert_eq!(plain_text_for_copy(&legacy)?, " \t");
+    legacy.text_content = None;
+    legacy.html_content = Some("<script>hidden</script>".into());
+    assert!(plain_text_for_copy(&legacy).is_err());
+    legacy.html_content = Some("\0".repeat(clipboard_core::MAX_TEXT_BYTES / 3 + 1));
+    assert!(plain_text_for_copy(&legacy).is_err());
+    let no_text = history.capture_rich(None, Some(b"{\\rtf1 missing}"), None, &images)?;
     assert!(plain_text_for_copy(&history.item(no_text)?).is_err());
     let file = history.capture_files(&["C:\\example.txt".into()], &images)?;
     assert!(plain_text_for_copy(&history.item(file)?).is_err());
@@ -58,6 +69,22 @@ fn file_path_actions_use_resolved_existing_sources() -> Result<()> {
     assert!(item_paths_for_action(&history.item(id)?, &directory.path().join("staged")).is_err());
     let text = history.capture("not a file")?.unwrap();
     assert!(item_paths_for_action(&history.item(text)?, &directory.path().join("staged")).is_err());
+    Ok(())
+}
+
+#[test]
+fn image_file_copy_uses_managed_png_and_rejects_missing_source() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let images = directory.path().join("images");
+    let staged = directory.path().join("staged");
+    let id = history.capture_image(b"\x89PNG\r\n\x1a\nsynthetic", 1, 1, &images)?;
+    let item = history.item(id)?;
+    let path = item.image_path.as_deref().unwrap();
+    assert_eq!(item_paths_for_action(&item, &staged)?, vec![path]);
+    assert!(!staged.exists());
+    std::fs::remove_file(path)?;
+    assert!(item_paths_for_action(&item, &staged).is_err());
     Ok(())
 }
 
@@ -107,6 +134,7 @@ fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
     next_snapshot(&events, 0);
     service.send(Command::CopyForPaste(424242))?;
     service.send(Command::CopyPathForPaste(424243))?;
+    service.send(Command::CopyAsFileForPaste(424244))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(
         next_event(&events),
@@ -119,6 +147,13 @@ fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
         next_event(&events),
         Event::CommandFailed {
             kind: FailureKind::Paste(424243),
+            ..
+        }
+    ));
+    assert!(matches!(
+        next_event(&events),
+        Event::CommandFailed {
+            kind: FailureKind::Paste(424244),
             ..
         }
     ));

@@ -5,10 +5,12 @@ use serde::{Serialize, de::DeserializeOwned};
 mod types;
 pub use types::*;
 
+pub(crate) const RETENTION_KEY: &str = "gpui_retention";
 const THEME_KEY: &str = "gpui_theme_mode";
 const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
+const STAGE_FILES_KEY: &str = "gpui_stage_files";
 const WINDOW_SIZE_KEY: &str = "gpui_window_size";
 const PERSIST_WINDOW_SIZE_KEY: &str = "gpui_persist_window_size";
 const AUTO_RESET_STATE_KEY: &str = "gpui_auto_reset_state";
@@ -33,8 +35,8 @@ pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
       'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
-      'gpui_display', 'gpui_monitor_types', 'gpui_app_filter',
-      'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect',
+      'gpui_display', 'gpui_monitor_types', 'gpui_app_filter', 'gpui_stage_files',
+      'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect', 'gpui_retention',
       '_migration_url_content_type', '_migration_backfill_semantic_hash')";
 
 pub struct Preferences {
@@ -45,6 +47,17 @@ impl Preferences {
     pub fn new(db: &Database) -> Self {
         Self {
             repository: SettingsRepository::new(db),
+        }
+    }
+
+    pub fn retention_saved(&self) -> Result<bool> {
+        Ok(self.repository.get(RETENTION_KEY)?.is_some())
+    }
+
+    pub fn retention(&self) -> Result<crate::retention::RetentionPolicy> {
+        match self.repository.get(RETENTION_KEY)? {
+            Some(value) => Ok(serde_json::from_str(&value)?),
+            None => Ok(crate::retention::RetentionPolicy::default()),
         }
     }
 
@@ -86,23 +99,35 @@ impl Preferences {
 
     pub fn hotkey(&self) -> Result<HotkeyPreference> {
         Ok(match self.repository.get(HOTKEY_KEY)?.as_deref() {
-            Some("alt_c") => HotkeyPreference::AltC,
-            Some("ctrl_alt_v") => HotkeyPreference::CtrlAltV,
+            Some("alt_c") => HotkeyPreference::Shortcut("Alt+C".into()),
+            Some("ctrl_alt_v") => HotkeyPreference::Shortcut("Ctrl+Alt+V".into()),
             Some("disabled") => HotkeyPreference::Disabled,
-            _ => HotkeyPreference::CtrlShiftV,
+            Some(value) if value.contains('+') => HotkeyPreference::Shortcut(value.to_owned()),
+            _ => HotkeyPreference::default(),
         })
     }
 
     pub fn set_hotkey(&self, hotkey: HotkeyPreference) -> Result<()> {
         Ok(self.repository.set(
             HOTKEY_KEY,
-            match hotkey {
-                HotkeyPreference::CtrlShiftV => "ctrl_shift_v",
-                HotkeyPreference::AltC => "alt_c",
-                HotkeyPreference::CtrlAltV => "ctrl_alt_v",
+            match &hotkey {
+                HotkeyPreference::Shortcut(shortcut) => shortcut,
                 HotkeyPreference::Disabled => "disabled",
             },
         )?)
+    }
+
+    pub fn stage_files(&self) -> Result<bool> {
+        Ok(matches!(
+            self.repository.get(STAGE_FILES_KEY)?.as_deref(),
+            Some("true")
+        ))
+    }
+
+    pub fn set_stage_files(&self, enabled: bool) -> Result<()> {
+        self.repository
+            .set(STAGE_FILES_KEY, if enabled { "true" } else { "false" })?;
+        Ok(())
     }
 
     pub fn capture_paused(&self) -> Result<bool> {

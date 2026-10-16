@@ -64,13 +64,10 @@ impl ClipboardView {
         if self.group_delete_pending || self.clear_pending || self.group_reorder_pending {
             return;
         }
-        let selected = self.history.group_id().is_none()
-            && match category {
-                None => self.history.favorite_only(),
-                Some(category) => {
-                    !self.history.favorite_only() && self.history.category() == category
-                }
-            };
+        let selected = match category {
+            None => self.history.favorite_only(),
+            Some(category) => !self.history.favorite_only() && self.history.category() == category,
+        };
         if selected {
             return;
         }

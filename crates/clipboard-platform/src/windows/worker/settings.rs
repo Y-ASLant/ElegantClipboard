@@ -20,13 +20,19 @@ impl Worker {
     }
 
     pub(super) fn handle_set_hotkey(&mut self, hotkey: HotkeyPreference) -> Result<()> {
-        let result = self
-            .preferences
-            .paste_shortcuts()
-            .and_then(|shortcuts| crate::hotkey::validate_paste_shortcuts(&shortcuts, hotkey))
-            .and_then(|_| self.preferences.set_hotkey(hotkey))
-            .map(|_| hotkey)
-            .map_err(|error| error.to_string());
+        let result = (|| {
+            let hotkey = match hotkey {
+                HotkeyPreference::Shortcut(value) => {
+                    let normalized = crate::hotkey::normalize_main_shortcut(&value)?;
+                    HotkeyPreference::Shortcut(normalized)
+                }
+                HotkeyPreference::Disabled => HotkeyPreference::Disabled,
+            };
+            crate::hotkey::validate_paste_shortcuts(&self.preferences.paste_shortcuts()?, &hotkey)?;
+            self.preferences.set_hotkey(hotkey.clone())?;
+            Ok::<_, anyhow::Error>(hotkey)
+        })()
+        .map_err(|error| error.to_string());
         self.send_event(Event::HotkeySaved(result))
     }
 
@@ -35,7 +41,7 @@ impl Worker {
         shortcuts: Box<PasteShortcutConfig>,
     ) -> Result<()> {
         let result =
-            crate::hotkey::validate_paste_shortcuts(&shortcuts, self.preferences.hotkey()?)
+            crate::hotkey::validate_paste_shortcuts(&shortcuts, &self.preferences.hotkey()?)
                 .and_then(|_| self.preferences.set_paste_shortcuts(&shortcuts))
                 .map(|_| shortcuts)
                 .map_err(|error| error.to_string());

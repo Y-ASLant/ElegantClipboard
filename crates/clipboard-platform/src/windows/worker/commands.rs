@@ -38,7 +38,7 @@ impl Worker {
                 )?;
             }
             Command::CaptureFiles(paths) => {
-                self.history.capture_files(&paths, &self.images_dir)?;
+                self.capture_files(&paths)?;
             }
             Command::CaptureImage { png, width, height } => {
                 self.history
@@ -90,6 +90,8 @@ impl Worker {
             Command::CopyForPaste(id) => return self.handle_copy(id, true, CopyMode::Original),
             Command::CopyPath(id) => return self.handle_copy(id, false, CopyMode::Paths),
             Command::CopyPathForPaste(id) => return self.handle_copy(id, true, CopyMode::Paths),
+            Command::CopyAsFile(id) => return self.handle_copy(id, false, CopyMode::Files),
+            Command::CopyAsFileForPaste(id) => return self.handle_copy(id, true, CopyMode::Files),
             Command::Preview { id, generation } => {
                 self.send_event(Event::Preview {
                     id,
@@ -304,8 +306,19 @@ impl Worker {
                     Event::DisplaySaved,
                 );
             }
+            Command::SetRetention { policy, confirmed } => {
+                return self.handle_set_retention(policy, confirmed);
+            }
             Command::SetAudio(preference) => {
                 return self.save_setting(preference, Preferences::set_audio, Event::AudioSaved);
+            }
+            Command::SetStageFiles(enabled) => {
+                let result = self
+                    .preferences
+                    .set_stage_files(enabled)
+                    .map(|()| enabled)
+                    .map_err(|error| error.to_string());
+                return self.send_event(Event::StageFilesSaved(result));
             }
             Command::SetMonitorTypes(preference) => {
                 return self.handle_set_monitor_types(preference);

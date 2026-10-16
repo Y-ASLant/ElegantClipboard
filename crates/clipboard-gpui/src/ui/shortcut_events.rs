@@ -5,7 +5,7 @@ impl ClipboardView {
         self.hotkey_pending = false;
         match result {
             Ok(choice) => {
-                self.hotkey_choice = choice;
+                self.hotkey_choice = choice.clone();
                 self.set_feedback_message(if choice == HotkeyPreference::Disabled {
                     tr(
                         self.language,
@@ -14,7 +14,7 @@ impl ClipboardView {
                     )
                     .into()
                 } else if self.language == LanguagePreference::English {
-                    format!("Shortcut saved: {}", hotkey_label(self.language, choice))
+                    format!("Shortcut saved: {}", hotkey_label(self.language, &choice))
                 } else {
                     format!("已保存唤出快捷键：{}", choice.label())
                 });
@@ -61,7 +61,7 @@ impl ClipboardView {
                     if let Ok((hotkeys, _)) = PasteHotkeys::start(
                         self.paste_hotkey_sender.clone(),
                         &self.paste_shortcuts,
-                        self.hotkey_choice,
+                        &self.hotkey_choice,
                     ) {
                         self.paste_hotkeys = Some(hotkeys);
                     }

@@ -11,8 +11,8 @@ use windows::Win32::{
     System::Threading::GetCurrentThreadId,
     UI::{
         Input::KeyboardAndMouse::{
-            HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, RegisterHotKey,
-            UnregisterHotKey,
+            HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT, MOD_WIN,
+            RegisterHotKey, UnregisterHotKey,
         },
         WindowsAndMessaging::{
             GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, MSG, PM_NOREMOVE,
@@ -23,12 +23,13 @@ use windows::Win32::{
 
 const HOTKEY_ID: i32 = 1;
 
-fn main_hotkey_binding(choice: HotkeyPreference) -> Option<(HOT_KEY_MODIFIERS, u32)> {
+fn main_hotkey_binding(choice: &HotkeyPreference) -> Result<Option<(HOT_KEY_MODIFIERS, u32)>> {
     match choice {
-        HotkeyPreference::CtrlShiftV => Some((MOD_CONTROL | MOD_SHIFT, u32::from(b'V'))),
-        HotkeyPreference::AltC => Some((MOD_ALT, u32::from(b'C'))),
-        HotkeyPreference::CtrlAltV => Some((MOD_CONTROL | MOD_ALT, u32::from(b'V'))),
-        HotkeyPreference::Disabled => None,
+        HotkeyPreference::Shortcut(value) => {
+            let parsed = parse_shortcut(value, true)?;
+            Ok(Some((parsed.modifiers, parsed.key)))
+        }
+        HotkeyPreference::Disabled => Ok(None),
     }
 }
 
@@ -54,9 +55,9 @@ pub struct Hotkey {
 }
 
 impl Hotkey {
-    pub fn start(choice: HotkeyPreference, events: Sender<(isize, u32)>) -> Result<Self> {
+    pub fn start(choice: &HotkeyPreference, events: Sender<(isize, u32)>) -> Result<Self> {
         let (modifiers, key) =
-            main_hotkey_binding(choice).ok_or_else(|| anyhow!("快捷键已关闭"))?;
+            main_hotkey_binding(choice)?.ok_or_else(|| anyhow!("快捷键已关闭"))?;
         let (ready, receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("history-hotkey".into())
@@ -134,6 +135,14 @@ struct ParsedPasteShortcut {
 }
 
 fn parse_paste_shortcut(value: &str) -> Result<ParsedPasteShortcut> {
+    parse_shortcut(value, false)
+}
+
+pub fn normalize_main_shortcut(value: &str) -> Result<String> {
+    Ok(parse_shortcut(value, true)?.canonical)
+}
+
+fn parse_shortcut(value: &str, main: bool) -> Result<ParsedPasteShortcut> {
     let parts: Vec<_> = value.split('+').map(str::trim).collect();
     if parts.len() < 2 || parts.iter().any(|part| part.is_empty()) {
         return Err(anyhow!("快捷键需要修饰键和主键"));
@@ -141,11 +150,13 @@ fn parse_paste_shortcut(value: &str) -> Result<ParsedPasteShortcut> {
     let mut control = false;
     let mut alt = false;
     let mut shift = false;
+    let mut win = false;
     for modifier in &parts[..parts.len() - 1] {
         let used = match modifier.to_ascii_uppercase().as_str() {
             "CTRL" | "CONTROL" => &mut control,
             "ALT" => &mut alt,
             "SHIFT" => &mut shift,
+            "WIN" | "WINDOWS" | "SUPER" if main => &mut win,
             _ => return Err(anyhow!("不支持的快捷键修饰键：{modifier}")),
         };
         if *used {
@@ -153,8 +164,12 @@ fn parse_paste_shortcut(value: &str) -> Result<ParsedPasteShortcut> {
         }
         *used = true;
     }
-    if !control && !alt {
-        return Err(anyhow!("快速粘贴快捷键至少需要 Ctrl 或 Alt"));
+    if !control && !alt && !win {
+        return Err(anyhow!(if main {
+            "快捷键至少需要 Ctrl、Alt 或 Win"
+        } else {
+            "快速粘贴快捷键至少需要 Ctrl 或 Alt"
+        }));
     }
     let key_name = parts[parts.len() - 1].to_ascii_uppercase();
     let (key, numpad_key, key_label) =
@@ -211,6 +226,10 @@ fn parse_paste_shortcut(value: &str) -> Result<ParsedPasteShortcut> {
         modifiers |= MOD_SHIFT;
         canonical.push("Shift");
     }
+    if win {
+        modifiers |= MOD_WIN;
+        canonical.push("Win");
+    }
     canonical.push(&key_label);
     Ok(ParsedPasteShortcut {
         canonical: canonical.join("+"),
@@ -229,9 +248,9 @@ pub fn normalize_paste_shortcut(value: &str) -> Result<String> {
 
 pub fn validate_paste_shortcuts(
     shortcuts: &PasteShortcutConfig,
-    main_hotkey: HotkeyPreference,
+    main_hotkey: &HotkeyPreference,
 ) -> Result<()> {
-    let main = main_hotkey_binding(main_hotkey).map(|(modifiers, key)| (modifiers.0, key));
+    let main = main_hotkey_binding(main_hotkey)?.map(|(modifiers, key)| (modifiers.0, key));
     let mut used = HashSet::new();
     for favorite in [false, true] {
         for slot in 1..=10u8 {
@@ -242,7 +261,11 @@ pub fn validate_paste_shortcuts(
             let parsed =
                 parse_paste_shortcut(value).with_context(|| format!("槽位 {slot} 的快捷键无效"))?;
             let primary = (parsed.modifiers.0, parsed.key);
-            if Some(primary) == main {
+            if Some(primary) == main
+                || parsed
+                    .numpad_key
+                    .is_some_and(|key| Some((parsed.modifiers.0, key)) == main)
+            {
                 return Err(anyhow!("{} 与窗口唤出快捷键冲突", parsed.canonical));
             }
             if !used.insert(primary) {
@@ -266,7 +289,7 @@ impl PasteHotkeys {
     pub fn start(
         events: Sender<PasteHotkeyEvent>,
         shortcuts: &PasteShortcutConfig,
-        main_hotkey: HotkeyPreference,
+        main_hotkey: &HotkeyPreference,
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main_hotkey)?;
         let shortcuts = shortcuts.clone();
@@ -370,8 +393,40 @@ fn paste_slot_for_id(id: i32) -> Option<(u8, bool)> {
 
 #[cfg(test)]
 mod paste_tests {
-    use super::{normalize_paste_shortcut, paste_slot_for_id, validate_paste_shortcuts};
+    use super::{
+        normalize_main_shortcut, normalize_paste_shortcut, paste_slot_for_id,
+        validate_paste_shortcuts,
+    };
     use clipboard_core::preferences::{HotkeyPreference, PasteShortcutConfig};
+
+    #[test]
+    fn main_shortcuts_validate_modifiers_keys_and_numpad_alias_conflicts() {
+        assert_eq!(
+            normalize_main_shortcut(" windows + control + f9 ").unwrap(),
+            "Ctrl+Win+F9"
+        );
+        for invalid in [
+            "",
+            "Ctrl+",
+            "Ctrl+Ctrl+V",
+            "Shift+A",
+            "Win+F25",
+            "Alt+Numpad10",
+        ] {
+            assert!(normalize_main_shortcut(invalid).is_err(), "{invalid}");
+        }
+        let config = PasteShortcutConfig::default();
+        for shortcut in ["Alt+1", "Alt+Numpad1"] {
+            assert!(
+                validate_paste_shortcuts(&config, &HotkeyPreference::Shortcut(shortcut.into()))
+                    .is_err()
+            );
+        }
+        assert!(
+            validate_paste_shortcuts(&config, &HotkeyPreference::Shortcut("Ctrl+Win+F9".into()))
+                .is_ok()
+        );
+    }
 
     #[test]
     fn paste_ids_map_number_row_and_numpad_to_same_slots() {
@@ -397,10 +452,10 @@ mod paste_tests {
         assert!(normalize_paste_shortcut("Shift+1").is_err());
         assert!(normalize_paste_shortcut("Win+1").is_err());
         let mut config = PasteShortcutConfig::default();
-        assert!(validate_paste_shortcuts(&config, HotkeyPreference::CtrlShiftV).is_ok());
+        assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_ok());
         config.set_slot(true, 4, "Alt+Numpad1".into()).unwrap();
-        assert!(validate_paste_shortcuts(&config, HotkeyPreference::CtrlShiftV).is_err());
+        assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_err());
         config.set_slot(true, 4, "Ctrl+Shift+V".into()).unwrap();
-        assert!(validate_paste_shortcuts(&config, HotkeyPreference::CtrlShiftV).is_err());
+        assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_err());
     }
 }

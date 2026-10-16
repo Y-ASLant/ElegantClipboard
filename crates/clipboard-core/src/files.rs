@@ -23,39 +23,42 @@ pub(crate) fn parse_file_paths(raw: Option<&str>) -> Result<Vec<String>> {
     Ok(paths)
 }
 
+pub(crate) fn file_capture_item(paths: &[String]) -> Result<NewClipboardItem> {
+    if paths.is_empty() || paths.len() > MAX_FILE_PATHS || paths.iter().any(|path| path.is_empty())
+    {
+        bail!("文件路径列表为空或超过 256 项");
+    }
+    let serialized = serde_json::to_vec(paths)?;
+    if serialized.len() > MAX_PATH_LIST_BYTES {
+        bail!("文件路径列表超过 1 MiB");
+    }
+    let hash = crate::clipboard::hash_with_prefix(b"files:", &serialized);
+    let preview = if paths.len() == 1 {
+        Path::new(&paths[0])
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| paths[0].clone())
+    } else {
+        format!("{} 个文件或文件夹", paths.len())
+    };
+    Ok(NewClipboardItem {
+        content_type: ContentType::Files,
+        file_paths: Some(paths.to_vec()),
+        content_hash: hash.clone(),
+        semantic_hash: hash,
+        preview: Some(preview.chars().take(240).collect()),
+        byte_size: serialized.len() as i64,
+        ..Default::default()
+    })
+}
+
 impl History {
     pub fn capture_files(&self, paths: &[String], images_dir: &Path) -> Result<i64> {
-        if paths.is_empty()
-            || paths.len() > MAX_FILE_PATHS
-            || paths.iter().any(|path| path.is_empty())
-        {
-            bail!("文件路径列表为空或超过 256 项");
-        }
-        let serialized = serde_json::to_vec(paths)?;
-        if serialized.len() > MAX_PATH_LIST_BYTES {
-            bail!("文件路径列表超过 1 MiB");
-        }
-        let hash = crate::clipboard::hash_with_prefix(b"files:", &serialized);
-        if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
+        let item = file_capture_item(paths)?;
+        if let Some(id) = self.repo.touch_by_hash(&item.content_hash, None)? {
             return Ok(id);
         }
-        let preview = if paths.len() == 1 {
-            Path::new(&paths[0])
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| paths[0].clone())
-        } else {
-            format!("{} 个文件或文件夹", paths.len())
-        };
-        let id = self.repo.insert(NewClipboardItem {
-            content_type: ContentType::Files,
-            file_paths: Some(paths.to_vec()),
-            content_hash: hash.clone(),
-            semantic_hash: hash,
-            preview: Some(preview.chars().take(240).collect()),
-            byte_size: serialized.len() as i64,
-            ..Default::default()
-        })?;
+        let id = self.repo.insert(item)?;
         self.enforce_history_limit(Some(images_dir))?;
         Ok(id)
     }

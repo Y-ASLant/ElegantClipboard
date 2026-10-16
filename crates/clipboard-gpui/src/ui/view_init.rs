@@ -38,34 +38,7 @@ impl ClipboardView {
             },
         );
         let subscription = cx.subscribe_in(&search, window, |this, _, event, window, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.cancel_pending_row_click();
-                this.close_hover_preview(cx);
-                if matches!(
-                    this.confirmation,
-                    Some(HistoryConfirmation::ClearHistory(_))
-                ) {
-                    this.close_history_confirmation(window, cx);
-                }
-                this.reset_selection();
-                this.sync_confirmation_dialog(window, cx);
-                this.history.begin_search();
-                this.scroll_to_top();
-                this.search_task = Some(cx.spawn(async move |view, cx| {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(150))
-                        .await;
-                    let _ = view.update(cx, |this, cx| this.query(cx));
-                }));
-                cx.notify();
-            } else if matches!(event, InputEvent::Focus) {
-                this.cancel_pending_row_click();
-            } else if matches!(event, InputEvent::PressEnter { .. })
-                && !this.batch_mode
-                && let Some(id) = this.history.selected
-            {
-                this.send(Command::Copy(id), cx);
-            }
+            this.handle_search_input(event, window, cx);
         });
         let main_window = window.window_handle();
         let event_task = cx.spawn_in(window, async move |view, cx| {
@@ -133,11 +106,11 @@ impl ClipboardView {
         // The hotkey thread uses try_send; a full channel must not discard the
         // second press while the first press is still waking the window.
         let (hotkey_sender, hotkey_receiver) = async_channel::unbounded();
-        let hotkey_choice = service.initial_hotkey;
+        let hotkey_choice = service.initial_hotkey.clone();
         let hotkey = if hotkey_choice == HotkeyPreference::Disabled {
             Ok(None)
         } else {
-            Hotkey::start(hotkey_choice, hotkey_sender.clone()).map(Some)
+            Hotkey::start(&hotkey_choice, hotkey_sender.clone()).map(Some)
         };
         let hotkey_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(target) = hotkey_receiver.recv().await {
@@ -161,8 +134,12 @@ impl ClipboardView {
         let paste_shortcuts = service.initial_paste_shortcuts.clone();
         let (paste_hotkey_sender, paste_hotkey_receiver) = async_channel::bounded(16);
         let paste_hotkeys = if startup.monitoring && quick_paste_enabled {
-            PasteHotkeys::start(paste_hotkey_sender.clone(), &paste_shortcuts, hotkey_choice)
-                .map(Some)
+            PasteHotkeys::start(
+                paste_hotkey_sender.clone(),
+                &paste_shortcuts,
+                &hotkey_choice,
+            )
+            .map(Some)
         } else {
             Ok(None)
         };
@@ -208,29 +185,25 @@ impl ClipboardView {
             .err()
             .map(ToString::to_string);
         let autostart = clipboard_platform::autostart::enabled(&service.data_dir);
-        let mut startup_errors = Vec::new();
-        if let Some(error) = tray_error {
-            startup_errors.push(format!(
-                "{}: {error}",
-                tr(
-                    language,
-                    "托盘不可用，关闭窗口将退出",
-                    "The tray is unavailable; closing the window will exit"
+        let mut startup_errors: Vec<_> = [
+            tray_error.map(|error| {
+                format!(
+                    "{}: {error}",
+                    tr(
+                        language,
+                        "托盘不可用，关闭窗口将退出",
+                        "The tray is unavailable; closing the window will exit"
+                    )
                 )
-            ));
-        }
-        if let Some(error) = hotkey_error {
-            startup_errors.push(error);
-        }
-        if let Some(error) = paste_hotkey_error {
-            startup_errors.push(error);
-        }
-        if let Some(warning) = paste_registration_summary(language, &paste_hotkey_warnings) {
-            startup_errors.push(warning);
-        }
-        if let Some(error) = outside_click_error {
-            startup_errors.push(error);
-        }
+            }),
+            hotkey_error,
+            paste_hotkey_error,
+            paste_registration_summary(language, &paste_hotkey_warnings),
+            outside_click_error,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         if let Err(error) = &autostart {
             startup_errors.push(format!(
                 "{}: {error}",
@@ -255,6 +228,9 @@ impl ClipboardView {
         let paste_move_to_top = service.initial_paste_move_to_top;
         let display = service.initial_display;
         let audio = service.initial_audio;
+        let retention = service.initial_retention;
+        let retention_saved = service.initial_retention_saved;
+        let stage_files = service.initial_stage_files;
         let monitor_types = service.initial_monitor_types;
         let app_filter = service.initial_app_filter.clone();
         let onboarding_completed = service.initial_onboarding_completed;
@@ -394,6 +370,8 @@ impl ClipboardView {
             data_size_pending: false,
             database_maintenance_pending: false,
             export_pending: false,
+            data_import_pending: false,
+            data_import_result: None,
             window_position: PendingPref {
                 value: window_position,
                 pending: false,
@@ -430,8 +408,17 @@ impl ClipboardView {
             },
             display,
             display_pending: false,
+            retention_saved,
+            retention: PendingPref {
+                value: retention,
+                pending: false,
+            },
             audio: PendingPref {
                 value: audio,
+                pending: false,
+            },
+            stage_files: PendingPref {
+                value: stage_files,
                 pending: false,
             },
             monitor_types: PendingPref {
@@ -447,6 +434,7 @@ impl ClipboardView {
             last_window_size: initial_window_size,
             paste_target: None,
             paste_pending: None,
+            paste_delivery_task: None,
             reorder_pending: false,
             drop_target: None,
             drag_motion: DragMotionState::default(),

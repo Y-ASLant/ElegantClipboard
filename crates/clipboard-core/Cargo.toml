@@ -9,6 +9,7 @@ license.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 blake3.workspace = true
+html5ever.workspace = true
 parking_lot.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

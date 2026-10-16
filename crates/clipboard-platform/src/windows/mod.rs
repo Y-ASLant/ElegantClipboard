@@ -1,6 +1,7 @@
 mod capture;
 mod data;
 mod file_actions;
+mod privacy;
 mod protocol;
 mod queue;
 mod service;

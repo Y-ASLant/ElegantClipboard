@@ -149,8 +149,14 @@ fn filter_change_resets_paging_and_rejects_previous_results() {
     assert_eq!(state.category(), ContentCategory::All);
     assert!(state.favorite_only());
     state.set_group(Some(7));
+    assert!(state.favorite_only());
+    assert_eq!(state.category(), ContentCategory::All);
+    let old = state.generation;
+    state.reset_filters();
+    assert_eq!(state.group_id(), None);
     assert!(!state.favorite_only());
     assert_eq!(state.category(), ContentCategory::All);
+    assert!(!state.apply(vec![], 100, old));
 }
 
 #[test]
@@ -182,6 +188,7 @@ fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow
         assert!(state.should_reset_category_filter(false));
         state.set_category(ContentCategory::All);
         assert_eq!(state.category(), ContentCategory::All);
+        assert_eq!(state.group_id(), Some(group.id));
         assert!(!state.should_reset_category_filter(false));
     }
 
@@ -191,7 +198,99 @@ fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow
     assert!(state.should_reset_category_filter(false));
     state.set_category(ContentCategory::All);
     assert!(!state.favorite_only());
+    assert_eq!(state.group_id(), Some(group.id));
     assert!(!state.should_reset_category_filter(false));
+    Ok(())
+}
+
+#[test]
+fn group_tabs_and_search_compose_without_leaking_rows_or_selection() -> anyhow::Result<()> {
+    use clipboard_core::database::{ClipboardRepository, ContentType, Database, NewClipboardItem};
+
+    let dir = tempfile::tempdir()?;
+    let db = Database::new(dir.path().join("history.db"))?;
+    let history = History::new(&db);
+    let first = history.create_group("First")?.id;
+    let second = history.create_group("Second")?.id;
+    let mut ids = Vec::new();
+    for (index, (group, kind, favorite, text)) in [
+        (None, ContentType::Text, true, "needle default"),
+        (Some(first), ContentType::Text, true, "needle first"),
+        (Some(first), ContentType::Files, true, "needle files"),
+        (Some(first), ContentType::Text, false, "unmatched"),
+        (Some(second), ContentType::Text, true, "needle second"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = ClipboardRepository::new(&db).insert(NewClipboardItem {
+            content_type: kind,
+            text_content: Some(text.into()),
+            content_hash: format!("filter-{index}"),
+            semantic_hash: format!("filter-{index}"),
+            ..Default::default()
+        })?;
+        if group.is_some() {
+            history.move_to_group(id, None, group)?;
+        }
+        if favorite {
+            history.toggle_favorite(id)?;
+        }
+        ids.push(id);
+    }
+    let query = |state: &mut HistoryState, search: &str, expected: &[i64]| -> anyhow::Result<()> {
+        let rows = history.list_filtered_in_group(
+            search,
+            state.limit,
+            state.favorite_only(),
+            state.group_id(),
+            state.category(),
+        )?;
+        let count = history.count_filtered_in_group(
+            search,
+            state.favorite_only(),
+            state.group_id(),
+            state.category(),
+        )?;
+        let mut actual: Vec<_> = rows.iter().map(|item| item.id).collect();
+        actual.sort_unstable();
+        assert_eq!(actual, expected);
+        assert_eq!(count, expected.len() as i64);
+        assert!(state.apply(rows, count, state.generation));
+        assert!(state.selected.is_none_or(|id| expected.contains(&id)));
+        Ok(())
+    };
+    let mut state = HistoryState::default();
+    query(&mut state, "needle", &ids[..1])?;
+    state.set_category(ContentCategory::Text);
+    state.set_group(Some(first));
+    query(&mut state, "needle", &ids[1..2])?;
+    let stale_rows = state.items.clone();
+    let stale_generation = state.generation;
+    state.limit = PAGE_SIZE * 3;
+    state.set_group(Some(second));
+    assert_eq!(state.limit, PAGE_SIZE);
+    assert_eq!(state.selected, None);
+    assert!(state.items.is_empty());
+    assert!(!state.apply(stale_rows, 1, stale_generation));
+    assert!(!state.fail_query(stale_generation));
+    query(&mut state, "needle", &ids[4..5])?;
+    state.set_category(ContentCategory::Other);
+    state.set_group(Some(first));
+    query(&mut state, "needle", &ids[2..3])?;
+    state.set_favorite_filter(true);
+    query(&mut state, "needle", &ids[1..3])?;
+    state.set_group(None);
+    query(&mut state, "needle", &ids[..1])?;
+    state.set_group(Some(first));
+    state.begin_search();
+    query(&mut state, "files", &ids[2..3])?;
+    state.begin_search();
+    query(&mut state, "unmatched", &[])?;
+    state.set_category(ContentCategory::Text);
+    query(&mut state, "unmatched", &ids[3..4])?;
+    state.reset_filters();
+    query(&mut state, "", &ids[..1])?;
     Ok(())
 }
 

@@ -17,8 +17,8 @@ pub(super) fn paste_registration_summary(
     })
 }
 
-pub(super) fn hotkey_label(language: LanguagePreference, choice: HotkeyPreference) -> &'static str {
-    if choice == HotkeyPreference::Disabled {
+pub(super) fn hotkey_label(language: LanguagePreference, choice: &HotkeyPreference) -> &str {
+    if *choice == HotkeyPreference::Disabled {
         tr(language, "关闭", "Disabled")
     } else {
         choice.label()
@@ -39,6 +39,8 @@ pub(super) fn shortcut_kbd(shortcut: &str) -> Option<Kbd> {
             modifiers.alt = true;
         } else if part.eq_ignore_ascii_case("shift") {
             modifiers.shift = true;
+        } else if part.eq_ignore_ascii_case("win") {
+            modifiers.platform = true;
         } else {
             return None;
         }
@@ -53,13 +55,11 @@ pub(super) fn shortcut_kbd(shortcut: &str) -> Option<Kbd> {
 pub(super) fn shortcut_from_keystroke(
     keystroke: &Keystroke,
     shift_down: bool,
+    main: bool,
 ) -> Result<String, String> {
     let modifiers = keystroke.modifiers;
-    if modifiers.platform || modifiers.function {
-        return Err("快速粘贴不支持 Win 或 Fn 修饰键".into());
-    }
-    if !modifiers.control && !modifiers.alt {
-        return Err("快速粘贴快捷键至少需要 Ctrl 或 Alt".into());
+    if modifiers.function || (!main && modifiers.platform) {
+        return Err("不支持此修饰键".into());
     }
     let key = if shift_down {
         match keystroke.key.as_str() {
@@ -88,8 +88,16 @@ pub(super) fn shortcut_from_keystroke(
     if shift_down {
         parts.push("Shift");
     }
+    if modifiers.platform {
+        parts.push("Win");
+    }
     parts.push(key);
-    normalize_paste_shortcut(&parts.join("+")).map_err(|error| error.to_string())
+    if main {
+        clipboard_platform::hotkey::normalize_main_shortcut(&parts.join("+"))
+    } else {
+        normalize_paste_shortcut(&parts.join("+"))
+    }
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -109,7 +117,7 @@ mod shortcut_capture_tests {
             ..Default::default()
         };
         assert_eq!(
-            shortcut_from_keystroke(&stroke, false).unwrap(),
+            shortcut_from_keystroke(&stroke, false, false).unwrap(),
             "Ctrl+Alt+Z"
         );
         let shifted_digit = Keystroke {
@@ -121,15 +129,27 @@ mod shortcut_capture_tests {
             ..Default::default()
         };
         assert_eq!(
-            shortcut_from_keystroke(&shifted_digit, true).unwrap(),
+            shortcut_from_keystroke(&shifted_digit, true, false).unwrap(),
             "Alt+Shift+1"
         );
-        assert!(shortcut_from_keystroke(&stroke, true).is_ok());
+        let windows = Keystroke {
+            modifiers: Modifiers {
+                platform: true,
+                ..Default::default()
+            },
+            key: "f9".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            shortcut_from_keystroke(&windows, false, true).unwrap(),
+            "Win+F9"
+        );
+        assert!(shortcut_from_keystroke(&windows, false, false).is_err());
         let bare = Keystroke {
             key: "z".into(),
             ..Default::default()
         };
-        assert!(shortcut_from_keystroke(&bare, false).is_err());
+        assert!(shortcut_from_keystroke(&bare, false, false).is_err());
     }
 }
 #[cfg(test)]

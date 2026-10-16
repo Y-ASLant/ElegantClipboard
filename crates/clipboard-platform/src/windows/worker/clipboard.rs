@@ -27,16 +27,36 @@ impl Worker {
     }
 
     pub(super) fn handle_copy(&mut self, id: i64, for_paste: bool, mode: CopyMode) -> Result<()> {
-        let item = self.history.item(id)?;
-        if mode == CopyMode::PlainText {
-            plain_text_for_copy(&item)?;
+        let mut item = self.history.item(id)?;
+        let plain_text = (mode == CopyMode::PlainText)
+            .then(|| plain_text_for_copy(&item).map(|text| text.into_owned()))
+            .transpose()?;
+        if mode == CopyMode::Original
+            && item.content_type == "html"
+            && item.text_content.as_deref().is_none_or(str::is_empty)
+        {
+            item.text_content = item
+                .html_content
+                .as_deref()
+                .map(clipboard_core::html_text::html_to_text)
+                .transpose()?
+                .filter(|text| !text.is_empty());
         }
         let path_text = (mode == CopyMode::Paths)
             .then(|| item_paths_for_action(&item, &self.staged_dir).map(|paths| paths.join("\n")))
             .transpose()?;
         let is_rich =
             mode == CopyMode::Original && matches!(item.content_type.as_str(), "html" | "rtf");
-        let files = if mode == CopyMode::Original && item.content_type == "files" {
+        let files = if mode == CopyMode::Files {
+            if item.content_type != "image" {
+                bail!("该记录不是图片，无法作为文件复制");
+            }
+            let paths = item_paths_for_action(&item, &self.staged_dir)?;
+            if !Path::new(&paths[0]).is_file() {
+                bail!("图片文件已丢失，无法复制");
+            }
+            Some(paths)
+        } else if mode == CopyMode::Original && item.content_type == "files" {
             let paths = History::file_paths_for_copy(&item, &self.staged_dir)?;
             if paths.iter().any(|path| !Path::new(path).exists()) {
                 bail!("源文件或文件夹已不存在，无法复制");
@@ -60,24 +80,40 @@ impl Worker {
             image
                 .to_bitmap()
                 .map_err(|error| anyhow!("图片位图编码失败：{error}"))?;
-            Some(image)
+            let pixels = image
+                .to_rgba8()
+                .map_err(|error| anyhow!("读取图片像素失败：{error}"))?;
+            Some((image, pixels))
         } else {
             None
         };
         let mut state = lock_capture_state(&self.state)?;
         let mut rich_preserved = false;
-        if let Some(path_text) = path_text {
-            self.clipboard
-                .set_text(path_text)
-                .map_err(|error| anyhow!("复制路径失败：{error}"))?;
-        } else if let Some(files) = files {
-            self.clipboard
-                .set_files(files)
-                .map_err(|error| anyhow!("复制文件失败：{error}"))?;
-        } else if let Some(image) = image {
-            self.clipboard
-                .set_image(image)
-                .map_err(|error| anyhow!("复制图片失败：{error}"))?;
+        // A setter can fail after clearing or writing one image format. Record
+        // its sequence before propagating errors to suppress partial self-capture.
+        let clipboard_sequence = if let Some(files) = files {
+            let result = self.clipboard.set_files(files.clone());
+            state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+            result.map_err(|error| anyhow!("复制文件失败：{error}"))?;
+            verified_copy_sequence(
+                || unsafe { GetClipboardSequenceNumber() },
+                || self.clipboard.get_files().ok().as_ref() == Some(&files),
+            )?
+        } else if let Some((image, pixels)) = image {
+            let result = self.clipboard.set_image(image);
+            state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+            result.map_err(|error| anyhow!("复制图片失败：{error}"))?;
+            verified_copy_sequence(
+                || unsafe { GetClipboardSequenceNumber() },
+                || {
+                    self.clipboard
+                        .get_image()
+                        .and_then(|actual| actual.to_rgba8())
+                        .ok()
+                        .as_ref()
+                        == Some(&pixels)
+                },
+            )?
         } else if is_rich {
             // Record partial self-writes as ignored before an error is
             // returned, so the listener cannot add them to history.
@@ -93,19 +129,21 @@ impl Worker {
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
                 || rtf.is_some();
-        } else {
-            let text = item.text_content.context("记录没有可复制的文本")?;
-            self.clipboard
-                .set_text(text)
-                .map_err(|error| anyhow!("复制失败：{error}"))?;
-        }
-        let clipboard_sequence = if is_rich {
             state.ignored_sequence
         } else {
-            let sequence = unsafe { GetClipboardSequenceNumber() };
-            state.ignored_sequence = sequence;
-            sequence
+            let text = plain_text
+                .or(path_text)
+                .or(item.text_content)
+                .context("记录没有可复制的文本")?;
+            let result = self.clipboard.set_text(text.clone());
+            state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+            result.map_err(|error| anyhow!("复制文本失败：{error}"))?;
+            verified_copy_sequence(
+                || unsafe { GetClipboardSequenceNumber() },
+                || self.clipboard.get_text().ok().as_ref() == Some(&text),
+            )?
         };
+        state.ignored_sequence = clipboard_sequence;
         if unsafe { GetClipboardSequenceNumber() } != clipboard_sequence {
             bail!("复制过程中剪贴板已被其他应用修改，请重试");
         }
@@ -115,6 +153,7 @@ impl Worker {
             for_paste,
             clipboard_sequence,
             message: match item.content_type.as_str() {
+                _ if mode == CopyMode::Files => "图片文件已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 _ if mode == CopyMode::Paths => "路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 _ if mode == CopyMode::PlainText => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
@@ -132,6 +171,32 @@ pub(super) enum CopyMode {
     Original,
     PlainText,
     Paths,
+    Files,
+}
+
+// clipboard-rs opens/closes the clipboard inside each setter and getter. Do not
+// wrap those calls in another clipboard guard: closing a nested guard releases
+// the OS clipboard lock. Verify the content across a stable sequence instead.
+fn verified_copy_sequence(
+    mut sequence: impl FnMut() -> u32,
+    mut matches: impl FnMut() -> bool,
+) -> Result<u32> {
+    for _ in 0..4 {
+        let before = sequence();
+        if before == 0 {
+            bail!("无法确认复制内容的剪贴板序列号，请重试");
+        }
+        let content_matches = matches();
+        let after = sequence();
+        if before == after {
+            if !content_matches {
+                bail!("复制内容写回后校验失败，请重试");
+            }
+            return Ok(after);
+        }
+        thread::yield_now();
+    }
+    bail!("复制内容写回后剪贴板持续变化，请重试")
 }
 
 fn write_rich_clipboard(
@@ -286,4 +351,48 @@ fn write_merged_clipboard(
         thread::yield_now();
     }
     bail!("合并内容写回后剪贴板持续变化，请重试")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verified_copy_sequence;
+    use std::cell::Cell;
+
+    #[test]
+    fn copy_confirmation_requires_matching_content_and_a_nonzero_sequence() {
+        // An external writer can replace our content before the first sequence
+        // read. A stable sequence alone must not report that copy as successful.
+        assert!(verified_copy_sequence(|| 42, || false).is_err());
+        assert!(verified_copy_sequence(|| 0, || true).is_err());
+        assert_eq!(verified_copy_sequence(|| 42, || true).unwrap(), 42);
+    }
+
+    #[test]
+    fn copy_confirmation_rechecks_content_when_the_sequence_changes_during_read() {
+        let sequence = Cell::new(42);
+        let matches = Cell::new(true);
+        let result = verified_copy_sequence(
+            || sequence.get(),
+            || {
+                let matched = matches.replace(false);
+                // The first read saw our contents, but another writer replaced
+                // them before the trailing sequence read. Retry must reject it.
+                sequence.set(43);
+                matched
+            },
+        );
+        assert!(result.is_err());
+
+        let sequence = Cell::new(42);
+        assert!(
+            verified_copy_sequence(
+                || sequence.get(),
+                || {
+                    sequence.set(sequence.get() + 1);
+                    true
+                },
+            )
+            .is_err()
+        );
+    }
 }

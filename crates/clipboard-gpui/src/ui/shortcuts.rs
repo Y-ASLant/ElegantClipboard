@@ -5,7 +5,7 @@ impl ClipboardView {
         if self.hotkey_choice == HotkeyPreference::Disabled {
             return None;
         }
-        match Hotkey::start(self.hotkey_choice, self.hotkey_sender.clone()) {
+        match Hotkey::start(&self.hotkey_choice, self.hotkey_sender.clone()) {
             Ok(hotkey) => {
                 self.hotkey = Some(hotkey);
                 None
@@ -23,13 +23,14 @@ impl ClipboardView {
 
     pub(super) fn select_hotkey(&mut self, choice: HotkeyPreference, cx: &mut Context<Self>) {
         if self.hotkey_pending
+            || self.quick_paste_pending_setting
             || self.paste_shortcuts_pending.is_some()
             || (choice == self.hotkey_choice
                 && (choice == HotkeyPreference::Disabled || self.hotkey.is_some()))
         {
             return;
         }
-        if let Err(error) = validate_paste_shortcuts(&self.paste_shortcuts, choice) {
+        if let Err(error) = validate_paste_shortcuts(&self.paste_shortcuts, &choice) {
             self.set_feedback_message(error.to_string());
             self.is_error = true;
             cx.notify();
@@ -39,7 +40,7 @@ impl ClipboardView {
         let registration = if choice == HotkeyPreference::Disabled {
             Ok(None)
         } else {
-            Hotkey::start(choice, self.hotkey_sender.clone()).map(Some)
+            Hotkey::start(&choice, self.hotkey_sender.clone()).map(Some)
         };
         match registration {
             Ok(hotkey) => self.hotkey = hotkey,
@@ -70,6 +71,7 @@ impl ClipboardView {
 
     pub(super) fn select_quick_paste_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !self.monitoring
+            || self.hotkey_pending
             || self.quick_paste_pending_setting
             || self.paste_shortcuts_pending.is_some()
             || enabled == self.quick_paste_enabled
@@ -80,7 +82,7 @@ impl ClipboardView {
             match PasteHotkeys::start(
                 self.paste_hotkey_sender.clone(),
                 &self.paste_shortcuts,
-                self.hotkey_choice,
+                &self.hotkey_choice,
             ) {
                 Ok((hotkeys, warnings)) => {
                     self.paste_hotkeys = Some(hotkeys);
@@ -106,7 +108,7 @@ impl ClipboardView {
         } else if let Ok((hotkeys, _)) = PasteHotkeys::start(
             self.paste_hotkey_sender.clone(),
             &self.paste_shortcuts,
-            self.hotkey_choice,
+            &self.hotkey_choice,
         ) {
             self.paste_hotkeys = Some(hotkeys);
         }
@@ -120,7 +122,7 @@ impl ClipboardView {
         match PasteHotkeys::start(
             self.paste_hotkey_sender.clone(),
             &self.paste_shortcuts,
-            self.hotkey_choice,
+            &self.hotkey_choice,
         ) {
             Ok((hotkeys, warnings)) => {
                 self.paste_hotkeys = Some(hotkeys);
@@ -166,7 +168,7 @@ impl ClipboardView {
             return;
         }
         self.paste_shortcut_status = None;
-        if let Err(error) = validate_paste_shortcuts(&next, self.hotkey_choice) {
+        if let Err(error) = validate_paste_shortcuts(&next, &self.hotkey_choice) {
             self.set_feedback_message(error.to_string());
             self.is_error = true;
             self.paste_shortcut_status = Some((self.message.clone(), true));
@@ -178,7 +180,8 @@ impl ClipboardView {
         }
         self.paste_hotkeys = None;
         if self.monitoring && self.quick_paste_enabled {
-            match PasteHotkeys::start(self.paste_hotkey_sender.clone(), &next, self.hotkey_choice) {
+            match PasteHotkeys::start(self.paste_hotkey_sender.clone(), &next, &self.hotkey_choice)
+            {
                 Ok((hotkeys, warnings)) => {
                     let changed_slot_failed = warnings.iter().any(|warning| {
                         next.slot(warning.favorite, warning.slot)
