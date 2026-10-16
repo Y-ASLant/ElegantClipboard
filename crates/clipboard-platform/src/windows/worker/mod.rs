@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use clipboard_core::{
     ContentCategory, History,
     preferences::{AppFilterPreference, MonitorTypesPreference, Preferences},
+    search::search_excerpt,
 };
 use clipboard_rs::ClipboardContext;
 use std::{
@@ -73,17 +74,30 @@ impl Worker {
     }
 
     fn snapshot_event(&self) -> Result<Event> {
-        Ok(Event::Snapshot {
-            items: self
-                .history
-                .list_filtered_in_group(
+        let mut items = self
+            .history
+            .list_filtered_in_group(
+                &self.search,
+                self.limit,
+                self.favorite_only,
+                self.group_id,
+                self.category,
+            )
+            .map_err(|error| anyhow!("读取历史记录失败：{error}"))?;
+        for item in &mut items {
+            if let Some(full) = item.text_content.take()
+                && item.content_type != "image"
+                && let Some(excerpt) = search_excerpt(
+                    &full,
+                    item.preview.as_deref().unwrap_or_default(),
                     &self.search,
-                    self.limit,
-                    self.favorite_only,
-                    self.group_id,
-                    self.category,
                 )
-                .map_err(|error| anyhow!("读取历史记录失败：{error}"))?,
+            {
+                item.preview = Some(excerpt);
+            }
+        }
+        Ok(Event::Snapshot {
+            items,
             total: self.history.count_filtered_in_group(
                 &self.search,
                 self.favorite_only,

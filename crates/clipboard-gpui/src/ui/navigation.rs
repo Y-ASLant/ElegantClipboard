@@ -134,10 +134,15 @@ impl ClipboardView {
         self.drag_motion = DragMotionState::default();
     }
 
-    pub(super) fn select(&mut self, direction: isize, cx: &mut Context<Self>) {
+    pub(super) fn select(
+        &mut self,
+        direction: isize,
+        strategy: ScrollStrategy,
+        cx: &mut Context<Self>,
+    ) {
         self.cancel_pending_row_click();
         if let Some(index) = self.history.select_relative(direction) {
-            self.scroll.scroll_to_item(index, ScrollStrategy::Top);
+            self.scroll.scroll_to_item(index, strategy);
         }
         cx.notify();
     }
@@ -153,7 +158,7 @@ impl ClipboardView {
             self.search
                 .update(cx, |search, cx| search.focus(window, cx));
         } else {
-            self.select(-1, cx);
+            self.select(-1, ScrollStrategy::Nearest, cx);
         }
     }
 

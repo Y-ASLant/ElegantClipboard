@@ -68,8 +68,7 @@ use crate::{
     options::Options,
     state::{
         HistoryState, PreviewState, drag_edge_target_index, format_card_time,
-        next_drag_scroll_index, reorder_pixel_offsets, search_excerpt, search_highlight_ranges,
-        selection_range_ids, source_app_parts,
+        next_drag_scroll_index, reorder_pixel_offsets, selection_range_ids, source_app_parts,
     },
 };
 use clipboard_core::{
@@ -284,8 +283,10 @@ struct ClipboardView {
     preview_save_pending: bool,
     image_zoom_percent: u16,
     image_scroll: ScrollHandle,
-    /// 已请求过解码的图片路径；用于在图片离开列表或窗口隐藏后释放 GPUI 的解码缓存。
+    /// 可见区及预取区的图片路径，另保留拖动和预览使用的资源。
     rendered_images: HashSet<PathBuf>,
+    image_visible_range: std::ops::Range<usize>,
+    image_sync_pending: bool,
     image_release_task: Option<Task<()>>,
     hover_preview: PreviewState,
     hover_popup: Option<AnyWindowHandle>,
@@ -364,6 +365,7 @@ struct ClipboardView {
     drag_preview_window: Option<WindowHandle<external_drag::DragPreview>>,
     drag_preparation: Option<external_drag::DragPreparation>,
     drag_snapshot: Option<(Vec<DbClipboardItem>, i64, u64)>,
+    drag_deleted_ids: HashSet<i64>,
     drag_viewport: Rc<Cell<Option<Bounds<Pixels>>>>,
     drag_release_pending: bool,
     drag_token: u64,

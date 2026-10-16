@@ -78,44 +78,6 @@ fn card_time_matches_absolute_and_relative_display_choices() {
 }
 
 #[test]
-fn search_highlights_keep_utf8_boundaries_and_match_literal_case() {
-    let text = "中aBc🙂中文 ABC";
-    let ranges = search_highlight_ranges(text, "AbC");
-    assert_eq!(
-        ranges
-            .iter()
-            .map(|range| &text[range.clone()])
-            .collect::<Vec<_>>(),
-        ["aBc", "ABC"]
-    );
-    let ranges = search_highlight_ranges(text, "中");
-    assert_eq!(
-        ranges
-            .iter()
-            .map(|range| &text[range.clone()])
-            .collect::<Vec<_>>(),
-        ["中", "中"]
-    );
-    let ranges = search_highlight_ranges("a.c a-c", "a.c");
-    assert_eq!(ranges.len(), 1);
-    assert_eq!(ranges[0], 0..3);
-    assert!(search_highlight_ranges(text, "  ").is_empty());
-    assert!(search_highlight_ranges(text, "missing").is_empty());
-}
-
-#[test]
-fn search_excerpt_exposes_a_match_beyond_the_saved_preview() {
-    let full = format!("{}目标{}", "前".repeat(80), "后".repeat(120));
-    let excerpt = search_excerpt(&full, "前前前", "目标").unwrap();
-    assert!(excerpt.starts_with('…'));
-    assert!(excerpt.ends_with('…'));
-    assert!(excerpt.contains("目标"));
-    assert!(!search_highlight_ranges(&excerpt, "目标").is_empty());
-    assert!(search_excerpt(&full, "已显示目标", "目标").is_none());
-    assert!(search_excerpt(&full, "前前前", "不存在").is_none());
-}
-
-#[test]
 fn selection_range_uses_loaded_display_order_in_both_directions() {
     let ids = [14, 9, 7, 2];
     assert_eq!(selection_range_ids(&ids, 9, 2), Some(&ids[1..=3]));

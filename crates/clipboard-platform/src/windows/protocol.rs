@@ -319,7 +319,10 @@ pub enum Event {
         id: i64,
         result: Result<PathBuf, String>,
     },
-    ItemDeleted(DeletionOutcome),
+    ItemDeleted {
+        id: i64,
+        outcome: DeletionOutcome,
+    },
     HistoryCleared(Result<DeletionOutcome, String>),
     AllHistoryCleared(Result<DeletionOutcome, String>),
     BatchDeleted(Result<DeletionOutcome, String>),

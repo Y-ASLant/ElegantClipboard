@@ -37,6 +37,15 @@ impl ClipboardView {
             .or(self.history.selected)
     }
 
+    pub(super) fn drag_image_path(&self) -> Option<PathBuf> {
+        self.external_drag
+            .as_ref()?
+            .drag
+            .card
+            .thumbnail_path
+            .clone()
+    }
+
     pub(super) fn native_drag_active(&self) -> bool {
         self.external_drag
             .as_ref()
@@ -327,6 +336,7 @@ impl ClipboardView {
         {
             self.apply_snapshot(items, total, generation, cx);
         }
+        self.finish_drag_deletions(cx);
         cx.notify();
     }
 }

@@ -13,6 +13,7 @@ mod merge;
 pub mod preferences;
 mod reorder;
 pub mod rich;
+pub mod search;
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
 pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 pub use merge::MergedContent;

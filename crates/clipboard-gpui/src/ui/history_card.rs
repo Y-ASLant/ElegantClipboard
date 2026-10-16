@@ -1,4 +1,5 @@
 use super::*;
+use clipboard_core::search::search_highlight_ranges;
 
 impl ClipboardView {
     pub(super) fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -82,12 +83,7 @@ impl ClipboardView {
                     }
                     names
                 });
-            let preview_text = file_names.unwrap_or_else(|| {
-                item.text_content
-                    .as_deref()
-                    .and_then(|full| search_excerpt(full, saved_preview, &search))
-                    .unwrap_or_else(|| saved_preview.to_owned())
-            });
+            let preview_text = file_names.unwrap_or_else(|| saved_preview.to_owned());
             let highlights = search_highlight_ranges(&preview_text, &search)
                 .into_iter()
                 .map(|range| {

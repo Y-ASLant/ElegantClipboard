@@ -4,7 +4,7 @@ use clipboard_core::{
     database::ClipboardItem,
     preferences::{LanguagePreference, SourceAppDisplay, TimeFormat},
 };
-use std::{collections::HashMap, ops::Range};
+use std::collections::HashMap;
 
 /// Return whether to show the name and icon; icon-only falls back to the name.
 pub fn source_app_parts(mode: SourceAppDisplay, has_icon: bool) -> (bool, bool) {
@@ -76,72 +76,6 @@ pub fn format_card_time(
     } else {
         date.format("%m-%d %H:%M").to_string()
     }
-}
-
-/// Non-overlapping UTF-8 ranges for a literal term. A limit lets callers find
-/// the first match in a long body without collecting every occurrence.
-fn matching_ranges(text: &str, search: &str, limit: usize) -> Vec<Range<usize>> {
-    if search.trim().is_empty() || limit == 0 {
-        return Vec::new();
-    }
-    let needle: Vec<char> = search.chars().collect();
-    let mut ranges = Vec::new();
-    let mut chars = text.char_indices().peekable();
-    while let Some((start, first)) = chars.next() {
-        let mut candidate = chars.clone();
-        let mut end = start + first.len_utf8();
-        let matched = first.to_lowercase().eq(needle[0].to_lowercase())
-            && needle.iter().skip(1).all(|expected| {
-                if let Some((byte, actual)) = candidate.next()
-                    && actual.to_lowercase().eq(expected.to_lowercase())
-                {
-                    end = byte + actual.len_utf8();
-                    true
-                } else {
-                    false
-                }
-            });
-        if matched {
-            ranges.push(start..end);
-            if ranges.len() == limit {
-                break;
-            }
-            chars = candidate;
-        }
-    }
-    ranges
-}
-
-/// Search matches in a card preview, with byte ranges safe for StyledText.
-pub fn search_highlight_ranges(text: &str, search: &str) -> Vec<Range<usize>> {
-    matching_ranges(text, search, usize::MAX)
-}
-
-/// Show the first matching part of a full text record when its saved preview
-/// does not contain the term. Keep the match near the start of a two-line card.
-pub fn search_excerpt(full: &str, preview: &str, search: &str) -> Option<String> {
-    if !matching_ranges(preview, search, 1).is_empty() {
-        return None;
-    }
-    let matched = matching_ranges(full, search, 1).pop()?;
-    let start = full[..matched.start]
-        .char_indices()
-        .rev()
-        .nth(19)
-        .map_or(0, |(byte, _)| byte);
-    let end = full[matched.end..]
-        .char_indices()
-        .nth(80)
-        .map_or(full.len(), |(byte, _)| matched.end + byte);
-    let mut excerpt = String::new();
-    if start > 0 {
-        excerpt.push('…');
-    }
-    excerpt.push_str(&full[start..end]);
-    if end < full.len() {
-        excerpt.push('…');
-    }
-    Some(excerpt)
 }
 
 /// IDs between two loaded rows, inclusive, in their current display order.
@@ -344,6 +278,17 @@ impl HistoryState {
         true
     }
 
+    /// Reconcile a committed deletion without completing an in-flight query.
+    pub fn apply_deleted(&mut self, id: i64) -> bool {
+        if !remove_deleted_item(&mut self.items, &mut self.total, id) {
+            return false;
+        }
+        if self.selected == Some(id) {
+            self.selected = self.items.first().map(|item| item.id);
+        }
+        true
+    }
+
     pub fn fail_query(&mut self, generation: u64) -> bool {
         if generation != self.generation {
             return false;
@@ -376,5 +321,18 @@ impl HistoryState {
     }
 }
 
+/// Remove only a loaded ID: an absent ID may belong to another filter or an
+/// already refreshed snapshot, whose total must not be decremented again.
+pub fn remove_deleted_item(items: &mut Vec<ClipboardItem>, total: &mut i64, id: i64) -> bool {
+    let Some(index) = items.iter().position(|item| item.id == id) else {
+        return false;
+    };
+    items.remove(index);
+    *total = total.saturating_sub(1).max(0);
+    true
+}
+
+#[cfg(test)]
+mod deletion_tests;
 #[cfg(test)]
 mod tests;

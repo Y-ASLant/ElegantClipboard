@@ -147,7 +147,21 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn apply_item_deleted(&mut self, outcome: clipboard_core::DeletionOutcome) -> bool {
+    pub(super) fn apply_item_deleted(
+        &mut self,
+        id: i64,
+        outcome: clipboard_core::DeletionOutcome,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some((items, total, _)) = self.drag_snapshot.as_mut() {
+            crate::state::remove_deleted_item(items, total, id);
+        }
+        if self.external_drag.is_some() {
+            // Preserve frozen rows until the drag session releases its source.
+            self.drag_deleted_ids.insert(id);
+        } else if self.history.apply_deleted(id) {
+            self.reconcile_history_rows(cx);
+        }
         if outcome.cleanup_warning.is_some() {
             self.set_feedback_message(tr(self.language, "记录已删除", "Item deleted").into());
             self.apply_cleanup_warning(outcome.cleanup_warning);
@@ -320,11 +334,14 @@ impl ClipboardView {
 
     pub(super) fn apply_snapshot(
         &mut self,
-        items: Vec<DbClipboardItem>,
-        total: i64,
+        mut items: Vec<DbClipboardItem>,
+        mut total: i64,
         generation: u64,
         cx: &mut Context<Self>,
     ) -> bool {
+        for &id in &self.drag_deleted_ids {
+            crate::state::remove_deleted_item(&mut items, &mut total, id);
+        }
         if self.external_drag.is_some() && generation == self.history.generation {
             self.drag_snapshot = Some((items, total, generation));
             return true;
@@ -332,6 +349,21 @@ impl ClipboardView {
         if !self.history.apply(items, total, generation) {
             return true;
         }
+        self.reconcile_history_rows(cx);
+        true
+    }
+
+    pub(super) fn finish_drag_deletions(&mut self, cx: &mut Context<Self>) {
+        let mut changed = false;
+        for id in self.drag_deleted_ids.drain() {
+            changed |= self.history.apply_deleted(id);
+        }
+        if changed {
+            self.reconcile_history_rows(cx);
+        }
+    }
+
+    fn reconcile_history_rows(&mut self, cx: &mut Context<Self>) {
         let loaded_ids: HashSet<_> = self.history.items.iter().map(|item| item.id).collect();
         let (top_index, partial) = history_top_row(&self.row_offsets, self.scroll.offset().y);
         self.rebuild_row_layout();
@@ -360,6 +392,5 @@ impl ClipboardView {
         {
             self.group_move_id = None;
         }
-        true
     }
 }

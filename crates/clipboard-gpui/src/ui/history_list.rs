@@ -79,7 +79,9 @@ impl ClipboardView {
                     this.drop_history_card(drag, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &Next, _, cx| this.select(1, cx)))
+            .on_action(cx.listener(|this, _: &Next, _, cx| {
+                this.select(1, ScrollStrategy::Nearest, cx);
+            }))
             .on_action(cx.listener(|this, _: &Previous, window, cx| {
                 this.select_previous_or_focus_search(window, cx);
             }))
@@ -102,10 +104,10 @@ impl ClipboardView {
                 this.select_index(usize::MAX, ScrollStrategy::Bottom, cx);
             }))
             .on_action(cx.listener(|this, _: &PageUp, _, cx| {
-                this.select(-this.page_step(), cx);
+                this.select(-this.page_step(), ScrollStrategy::Top, cx);
             }))
             .on_action(cx.listener(|this, _: &PageDown, _, cx| {
-                this.select(this.page_step(), cx);
+                this.select(this.page_step(), ScrollStrategy::Top, cx);
             }))
             .on_action(cx.listener(|this, _: &SelectAllLoaded, window, cx| {
                 this.select_all_loaded(window, cx);
@@ -160,7 +162,8 @@ impl ClipboardView {
                                 cx.entity().clone(),
                                 "history-virtual-list",
                                 self.row_sizes.clone(),
-                                |this, visible, _, cx| {
+                                |this, visible, window, cx| {
+                                    this.update_image_visible_range(visible.clone(), window, cx);
                                     visible.map(|index| this.render_row(index, cx)).collect()
                                 },
                             )

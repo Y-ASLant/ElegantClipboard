@@ -15,6 +15,7 @@ mod history;
 mod lifecycle;
 mod preferences;
 mod preview;
+mod search;
 
 fn next_snapshot(events: &async_channel::Receiver<Event>, generation: u64) -> Vec<ClipboardItem> {
     wait_for(
