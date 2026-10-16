@@ -285,15 +285,17 @@ impl ClipboardView {
         {
             return;
         }
-        if self.send(
+        let request_id = self.quick_paste_pending.begin(event.target);
+        if !self.send(
             Command::ResolveQuickPaste {
+                request_id,
                 slot: event.slot,
                 favorite: event.favorite,
                 group_id: self.history.group_id(),
             },
             cx,
         ) {
-            self.quick_paste_pending = Some((event.slot, event.favorite, event.target));
+            self.quick_paste_pending.take();
         }
     }
 }

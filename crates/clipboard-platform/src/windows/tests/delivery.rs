@@ -18,8 +18,8 @@ fn command_failures_wait_for_room_in_a_full_event_queue() -> Result<()> {
                 .is_ok()
         );
     }
-    service.send(Command::CopyForPaste(424242))?;
-    service.send(Command::CopyPathForPaste(424243))?;
+    service.send(Command::CopyForPaste(424242, 1))?;
+    service.send(Command::CopyPathForPaste(424243, 2))?;
     service.send(Command::Capture("x".repeat(MAX_TEXT_BYTES + 1)))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
 
@@ -42,10 +42,7 @@ fn command_failures_wait_for_room_in_a_full_event_queue() -> Result<()> {
             None
         },
     );
-    assert_eq!(
-        failures,
-        [FailureKind::Paste(424242), FailureKind::Paste(424243)]
-    );
+    assert_eq!(failures, [FailureKind::Paste(1), FailureKind::Paste(2)]);
     assert!(capture_error, "explicit capture failure was dropped");
     Ok(())
 }

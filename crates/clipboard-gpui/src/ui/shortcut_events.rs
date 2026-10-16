@@ -126,23 +126,19 @@ impl ClipboardView {
 
     pub(super) fn apply_quick_paste_resolved(
         &mut self,
-        slot: u8,
-        favorite: bool,
+        request_id: u64,
         result: Result<i64, String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((pending_slot, pending_favorite, target)) = self.quick_paste_pending.take() else {
+        let Some(target) = self.quick_paste_pending.complete(request_id) else {
             return false;
         };
-        if slot != pending_slot || favorite != pending_favorite {
-            self.quick_paste_pending = Some((pending_slot, pending_favorite, target));
-            return false;
-        }
         match result {
             Ok(id) if paste::is_external_target(window, target) => {
-                if self.send(Command::CopyForPaste(id), cx) {
-                    self.paste_pending = Some((id, target));
+                let request_id = self.paste_pending.begin(target);
+                if !self.send(Command::CopyForPaste(id, request_id), cx) {
+                    self.paste_pending.take();
                 }
             }
             Ok(_) => {

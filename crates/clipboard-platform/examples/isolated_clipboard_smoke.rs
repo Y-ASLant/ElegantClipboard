@@ -93,11 +93,11 @@ fn main() -> anyhow::Result<()> {
         loop {
             match events.try_recv() {
                 Ok(Event::Copied {
-                    for_paste,
+                    request_id,
                     clipboard_sequence,
                     ..
                 }) => {
-                    assert_eq!(for_paste, expected_paste);
+                    assert_eq!(request_id.is_some(), expected_paste);
                     return Ok(clipboard_sequence);
                 }
                 Ok(Event::CommandFailed { message, .. }) => bail!("复制命令失败：{message}"),
@@ -193,7 +193,7 @@ fn main() -> anyhow::Result<()> {
         .set_text(text.clone())
         .map_err(|error| anyhow!("写入测试文本失败：{error}"))?;
     let text_id = snapshot("text")?;
-    service.send(Command::CopyForPaste(text_id))?;
+    service.send(Command::CopyForPaste(text_id, 1))?;
     let copied_sequence = status(true)?;
     assert_ne!(copied_sequence, 0);
     assert_eq!(unsafe { GetClipboardSequenceNumber() }, copied_sequence);

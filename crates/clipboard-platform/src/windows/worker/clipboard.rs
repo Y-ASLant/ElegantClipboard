@@ -26,7 +26,12 @@ impl Worker {
         })
     }
 
-    pub(super) fn handle_copy(&mut self, id: i64, for_paste: bool, mode: CopyMode) -> Result<()> {
+    pub(super) fn handle_copy(
+        &mut self,
+        id: i64,
+        request_id: Option<u64>,
+        mode: CopyMode,
+    ) -> Result<()> {
         let mut item = self.history.item(id)?;
         let plain_text = (mode == CopyMode::PlainText)
             .then(|| plain_text_for_copy(&item).map(|text| text.into_owned()))
@@ -150,7 +155,7 @@ impl Worker {
         drop(state);
         self.send_event(Event::Copied {
             id,
-            for_paste,
+            request_id,
             clipboard_sequence,
             message: match item.content_type.as_str() {
                 _ if mode == CopyMode::Files => "图片文件已复制，可切换到目标应用按 Ctrl+V 粘贴",

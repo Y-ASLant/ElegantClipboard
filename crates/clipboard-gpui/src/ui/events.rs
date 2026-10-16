@@ -6,12 +6,12 @@ impl ClipboardView {
             &command,
             Command::Copy(_)
                 | Command::CopyPlainText(_)
-                | Command::CopyPlainTextForPaste(_)
-                | Command::CopyForPaste(_)
+                | Command::CopyPlainTextForPaste(..)
+                | Command::CopyForPaste(..)
                 | Command::CopyPath(_)
-                | Command::CopyPathForPaste(_)
+                | Command::CopyPathForPaste(..)
                 | Command::CopyAsFile(_)
-                | Command::CopyAsFileForPaste(_)
+                | Command::CopyAsFileForPaste(..)
                 | Command::MergeCopy(_)
                 | Command::MergeForPaste(_)
         );
@@ -35,9 +35,9 @@ impl ClipboardView {
         }
         if copy_only {
             // Late acknowledgements must not resurrect a paste superseded by a copy.
-            self.paste_pending = None;
+            self.paste_pending.take();
             self.batch_paste_pending = None;
-            self.quick_paste_pending = None;
+            self.quick_paste_pending.take();
         }
         if copy_requested && sound::enabled(self.audio.value, Sound::Copy, SoundTiming::Immediate) {
             sound::play(Sound::Copy);
@@ -105,10 +105,10 @@ impl ClipboardView {
             }
             Event::Copied {
                 id,
-                for_paste,
+                request_id,
                 clipboard_sequence,
                 message,
-            } => self.apply_copied(id, for_paste, clipboard_sequence, message, window, cx),
+            } => self.apply_copied(id, request_id, clipboard_sequence, message, window, cx),
             Event::Merged {
                 for_paste,
                 clipboard_sequence,
@@ -202,11 +202,9 @@ impl ClipboardView {
             }
             Event::QuickPasteEnabledSaved(result) => self.apply_quick_paste_enabled_saved(result),
             Event::PasteShortcutsSaved(result) => self.apply_paste_shortcuts_saved(result),
-            Event::QuickPasteResolved {
-                slot,
-                favorite,
-                result,
-            } => self.apply_quick_paste_resolved(slot, favorite, result, window, cx),
+            Event::QuickPasteResolved { request_id, result } => {
+                self.apply_quick_paste_resolved(request_id, result, window, cx)
+            }
             Event::DisplaySaved(result) => self.apply_display_saved(result, window, cx),
             Event::AudioSaved(result) => self.apply_audio_saved(result),
             Event::StageFilesSaved(result) => self.apply_stage_files_saved(result),
@@ -301,12 +299,15 @@ impl ClipboardView {
         }
         match kind {
             FailureKind::Query(_) => {}
-            FailureKind::Paste(id)
-                if self
-                    .paste_pending
-                    .is_some_and(|(pending_id, _)| pending_id == id) =>
-            {
-                self.paste_pending = None;
+            FailureKind::Paste(request_id) => {
+                if self.paste_pending.complete(request_id).is_none() {
+                    return false;
+                }
+            }
+            FailureKind::QuickPaste(request_id) => {
+                if self.quick_paste_pending.complete(request_id).is_none() {
+                    return false;
+                }
             }
             FailureKind::Merge => {
                 self.batch_pending = false;
@@ -348,7 +349,7 @@ impl ClipboardView {
                 self.database_maintenance_pending = false;
             }
             FailureKind::Pause => self.pause_pending = false,
-            FailureKind::Other | FailureKind::Paste(_) | FailureKind::SaveAs(_) => {}
+            FailureKind::Other | FailureKind::SaveAs(_) => {}
         }
         self.set_feedback_message(message);
         self.is_error = true;

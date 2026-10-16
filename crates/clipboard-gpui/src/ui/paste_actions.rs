@@ -4,23 +4,27 @@ impl ClipboardView {
     pub(super) fn apply_copied(
         &mut self,
         id: i64,
-        for_paste: bool,
+        request_id: Option<u64>,
         clipboard_sequence: u32,
         message: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let target = if let Some(request_id) = request_id {
+            let Some(target) = self.paste_pending.complete(request_id) else {
+                return false;
+            };
+            Some(target)
+        } else {
+            None
+        };
         self.set_feedback_message(localize_service_message(self.language, message));
         self.is_error = false;
         if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
-        if let Some((pending_id, target)) = self.paste_pending.take() {
-            if pending_id == id && for_paste {
-                self.return_to_paste_target(target, clipboard_sequence, Some(id), window, cx);
-            } else {
-                self.paste_pending = Some((pending_id, target));
-            }
+        if let Some(target) = target {
+            self.return_to_paste_target(target, clipboard_sequence, Some(id), window, cx);
         }
         true
     }
@@ -90,8 +94,11 @@ impl ClipboardView {
             cx.notify();
             return;
         }
-        if self.paste_pending.is_none() && self.send(Command::CopyForPaste(id), cx) {
-            self.paste_pending = Some((id, target));
+        if self.paste_pending.is_some() {
+            return;
+        }
+        let request_id = self.paste_pending.begin(target);
+        if self.send(Command::CopyForPaste(id, request_id), cx) {
             self.set_feedback_message(
                 tr(
                     self.language,
@@ -102,6 +109,8 @@ impl ClipboardView {
             );
             self.is_error = false;
             cx.notify();
+        } else {
+            self.paste_pending.take();
         }
     }
 
@@ -113,10 +122,7 @@ impl ClipboardView {
     ) {
         self.copy_or_paste_variant(
             id,
-            (
-                Command::CopyPlainText(id),
-                Command::CopyPlainTextForPaste(id),
-            ),
+            (Command::CopyPlainText(id), Command::CopyPlainTextForPaste),
             (
                 "正在复制纯文本并返回原窗口…",
                 "Copying plain text and returning to the previous window…",
@@ -129,7 +135,7 @@ impl ClipboardView {
     pub(super) fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
         self.copy_or_paste_variant(
             id,
-            (Command::CopyPath(id), Command::CopyPathForPaste(id)),
+            (Command::CopyPath(id), Command::CopyPathForPaste),
             (
                 "正在复制路径并返回原窗口…",
                 "Copying paths and returning to the previous window…",
@@ -147,7 +153,7 @@ impl ClipboardView {
     ) {
         self.copy_or_paste_variant(
             id,
-            (Command::CopyAsFile(id), Command::CopyAsFileForPaste(id)),
+            (Command::CopyAsFile(id), Command::CopyAsFileForPaste),
             (
                 "正在复制图片文件并返回原窗口…",
                 "Copying the image file and returning to the previous window…",
@@ -160,7 +166,7 @@ impl ClipboardView {
     pub(super) fn copy_or_paste_variant(
         &mut self,
         id: i64,
-        commands: (Command, Command),
+        commands: (Command, fn(i64, u64) -> Command),
         paste_message: (&'static str, &'static str),
         window: &Window,
         cx: &mut Context<Self>,
@@ -175,15 +181,15 @@ impl ClipboardView {
         if self.paste_target.is_some() && target.is_none() {
             self.paste_target = None;
         }
-        let command = if target.is_some() {
-            commands.1
+        let command = if let Some(target) = target {
+            let request_id = self.paste_pending.begin(target);
+            commands.1(id, request_id)
         } else {
             commands.0
         };
-        if self.send(command, cx)
-            && let Some(target) = target
-        {
-            self.paste_pending = Some((id, target));
+        if !self.send(command, cx) {
+            self.paste_pending.take();
+        } else if target.is_some() {
             self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
             self.is_error = false;
             cx.notify();
@@ -264,7 +270,10 @@ impl ClipboardView {
                                 if hide_window {
                                     this.show_window(window, cx);
                                 }
-                                this.set_feedback_message(error.to_string());
+                                this.set_feedback_message(localize_service_message(
+                                    this.language,
+                                    error.to_string(),
+                                ));
                                 this.is_error = true;
                             }
                         }

@@ -18,6 +18,7 @@ mod image_assets;
 mod navigation;
 mod onboarding;
 mod paste_actions;
+mod paste_requests;
 mod preference_events;
 mod presentation;
 mod preview_actions;
@@ -336,7 +337,7 @@ struct ClipboardView {
     paste_shortcuts: PasteShortcutConfig,
     paste_shortcuts_pending: Option<PasteShortcutConfig>,
     paste_shortcut_status: Option<(String, bool)>,
-    quick_paste_pending: Option<(u8, bool, (isize, u32))>,
+    quick_paste_pending: paste_requests::PendingRequest<(isize, u32)>,
     autostart: PendingPref<bool>,
     data_size: Option<DataSizeInfo>,
     daily_counts: Option<Vec<(String, i64)>>,
@@ -367,7 +368,7 @@ struct ClipboardView {
     running_apps_pending: bool,
     last_window_size: Option<WindowSizePreference>,
     paste_target: Option<(isize, u32)>,
-    paste_pending: Option<(i64, (isize, u32))>,
+    paste_pending: paste_requests::PendingRequest<(isize, u32)>,
     paste_delivery_task: Option<Task<()>>,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,

@@ -82,16 +82,22 @@ impl Worker {
                     .map_err(|error| error.to_string());
                 return self.send_event(Event::ExternalDragPrepared { id, token, result });
             }
-            Command::Copy(id) => return self.handle_copy(id, false, CopyMode::Original),
-            Command::CopyPlainText(id) => return self.handle_copy(id, false, CopyMode::PlainText),
-            Command::CopyPlainTextForPaste(id) => {
-                return self.handle_copy(id, true, CopyMode::PlainText);
+            Command::Copy(id) => return self.handle_copy(id, None, CopyMode::Original),
+            Command::CopyPlainText(id) => return self.handle_copy(id, None, CopyMode::PlainText),
+            Command::CopyPlainTextForPaste(id, request_id) => {
+                return self.handle_copy(id, Some(request_id), CopyMode::PlainText);
             }
-            Command::CopyForPaste(id) => return self.handle_copy(id, true, CopyMode::Original),
-            Command::CopyPath(id) => return self.handle_copy(id, false, CopyMode::Paths),
-            Command::CopyPathForPaste(id) => return self.handle_copy(id, true, CopyMode::Paths),
-            Command::CopyAsFile(id) => return self.handle_copy(id, false, CopyMode::Files),
-            Command::CopyAsFileForPaste(id) => return self.handle_copy(id, true, CopyMode::Files),
+            Command::CopyForPaste(id, request_id) => {
+                return self.handle_copy(id, Some(request_id), CopyMode::Original);
+            }
+            Command::CopyPath(id) => return self.handle_copy(id, None, CopyMode::Paths),
+            Command::CopyPathForPaste(id, request_id) => {
+                return self.handle_copy(id, Some(request_id), CopyMode::Paths);
+            }
+            Command::CopyAsFile(id) => return self.handle_copy(id, None, CopyMode::Files),
+            Command::CopyAsFileForPaste(id, request_id) => {
+                return self.handle_copy(id, Some(request_id), CopyMode::Files);
+            }
             Command::Preview { id, generation } => {
                 self.send_event(Event::Preview {
                     id,
@@ -163,6 +169,7 @@ impl Worker {
                 self.history.bump_to_top(id)?;
             }
             Command::ResolveQuickPaste {
+                request_id,
                 slot,
                 favorite,
                 group_id,
@@ -172,11 +179,7 @@ impl Worker {
                     .quick_paste_item_id(slot, favorite, group_id)
                     .map_err(|error| error.to_string())
                     .and_then(|item| item.ok_or_else(|| format!("槽位 {slot} 没有可用的历史记录")));
-                self.send_event(Event::QuickPasteResolved {
-                    slot,
-                    favorite,
-                    result,
-                })?;
+                self.send_event(Event::QuickPasteResolved { request_id, result })?;
                 return Ok(());
             }
             Command::Reorder {

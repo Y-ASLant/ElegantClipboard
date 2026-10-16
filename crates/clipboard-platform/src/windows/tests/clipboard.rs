@@ -7,18 +7,6 @@ use clipboard_core::preferences::ThemePreference;
 use std::path::Path;
 
 #[test]
-fn plain_text_paste_failure_is_routed_to_its_pending_item() {
-    assert_eq!(
-        Command::CopyPlainTextForPaste(42).failure_kind(),
-        Some(FailureKind::Paste(42))
-    );
-    assert_eq!(
-        Command::CopyPlainText(42).failure_kind(),
-        Some(FailureKind::Other)
-    );
-}
-
-#[test]
 fn plain_text_copy_preserves_source_and_converts_legacy_html() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;
@@ -132,28 +120,36 @@ fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
-    service.send(Command::CopyForPaste(424242))?;
-    service.send(Command::CopyPathForPaste(424243))?;
-    service.send(Command::CopyAsFileForPaste(424244))?;
+    service.send(Command::CopyForPaste(424242, 1))?;
+    service.send(Command::CopyPathForPaste(424242, 2))?;
+    service.send(Command::CopyAsFileForPaste(424242, 3))?;
+    service.send(Command::CopyPlainTextForPaste(424242, 4))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(
         next_event(&events),
         Event::CommandFailed {
-            kind: FailureKind::Paste(424242),
+            kind: FailureKind::Paste(1),
             ..
         }
     ));
     assert!(matches!(
         next_event(&events),
         Event::CommandFailed {
-            kind: FailureKind::Paste(424243),
+            kind: FailureKind::Paste(2),
             ..
         }
     ));
     assert!(matches!(
         next_event(&events),
         Event::CommandFailed {
-            kind: FailureKind::Paste(424244),
+            kind: FailureKind::Paste(3),
+            ..
+        }
+    ));
+    assert!(matches!(
+        next_event(&events),
+        Event::CommandFailed {
+            kind: FailureKind::Paste(4),
             ..
         }
     ));

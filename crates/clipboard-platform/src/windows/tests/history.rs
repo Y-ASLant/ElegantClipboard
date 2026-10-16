@@ -176,27 +176,31 @@ fn quick_paste_resolves_recent_and_favorite_slots_with_group_isolation() -> Resu
 
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
-    for (slot, is_favorite, group_id, expected) in [
+    for (request_id, (slot, is_favorite, group_id, expected)) in [
         (1, false, None, Some(recent)),
         (1, true, None, Some(favorite)),
         (1, false, Some(group.id), Some(grouped)),
         (2, false, Some(group.id), None),
         (0, false, None, None),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let request_id = request_id as u64;
         service.send(Command::ResolveQuickPaste {
+            request_id,
             slot,
             favorite: is_favorite,
             group_id,
         })?;
         let Event::QuickPasteResolved {
-            slot: actual_slot,
-            favorite: actual_favorite,
+            request_id: actual_request_id,
             result,
         } = next_event(&events)
         else {
             bail!("没有返回快速粘贴槽位结果");
         };
-        assert_eq!((actual_slot, actual_favorite), (slot, is_favorite));
+        assert_eq!(actual_request_id, request_id);
         assert_eq!(result.ok(), expected);
     }
     Ok(())

@@ -369,7 +369,7 @@ impl ClipboardView {
             paste_shortcuts,
             paste_shortcuts_pending: None,
             paste_shortcut_status: None,
-            quick_paste_pending: None,
+            quick_paste_pending: Default::default(),
             autostart: PendingPref {
                 value: autostart.unwrap_or(false),
                 pending: false,
@@ -442,7 +442,7 @@ impl ClipboardView {
             running_apps_pending: false,
             last_window_size: initial_window_size,
             paste_target: None,
-            paste_pending: None,
+            paste_pending: Default::default(),
             paste_delivery_task: None,
             reorder_pending: false,
             drop_target: None,

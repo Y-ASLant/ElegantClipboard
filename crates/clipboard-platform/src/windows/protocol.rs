@@ -29,12 +29,12 @@ pub enum Command {
     },
     Copy(i64),
     CopyPlainText(i64),
-    CopyPlainTextForPaste(i64),
-    CopyForPaste(i64),
+    CopyPlainTextForPaste(i64, u64),
+    CopyForPaste(i64, u64),
     CopyPath(i64),
-    CopyPathForPaste(i64),
+    CopyPathForPaste(i64, u64),
     CopyAsFile(i64),
-    CopyAsFileForPaste(i64),
+    CopyAsFileForPaste(i64, u64),
     RevealInExplorer(i64),
     SaveAs {
         id: i64,
@@ -120,6 +120,7 @@ pub enum Command {
     CompleteOnboarding,
     BumpToTop(i64),
     ResolveQuickPaste {
+        request_id: u64,
         slot: u8,
         favorite: bool,
         group_id: Option<i64>,
@@ -179,7 +180,8 @@ pub enum CapturedClipboard {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureKind {
     Query(u64),
-    Paste(i64),
+    Paste(u64),
+    QuickPaste(u64),
     Merge,
     GroupSave,
     GroupDelete,
@@ -205,10 +207,13 @@ impl Command {
             | Self::CaptureImage { .. }
             | Self::ObservedCapture { .. } => None,
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
-            Self::CopyForPaste(id)
-            | Self::CopyPlainTextForPaste(id)
-            | Self::CopyPathForPaste(id)
-            | Self::CopyAsFileForPaste(id) => Some(FailureKind::Paste(*id)),
+            Self::CopyForPaste(_, request_id)
+            | Self::CopyPlainTextForPaste(_, request_id)
+            | Self::CopyPathForPaste(_, request_id)
+            | Self::CopyAsFileForPaste(_, request_id) => Some(FailureKind::Paste(*request_id)),
+            Self::ResolveQuickPaste { request_id, .. } => {
+                Some(FailureKind::QuickPaste(*request_id))
+            }
             Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
             Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
@@ -263,7 +268,6 @@ impl Command {
             | Self::ListRunningApps
             | Self::CompleteOnboarding
             | Self::BumpToTop(_)
-            | Self::ResolveQuickPaste { .. }
             | Self::SetAutostart(_)
             | Self::OpenDataDirectory
             | Self::ExportBackup(_) => Some(FailureKind::Other),
@@ -298,7 +302,7 @@ pub enum Event {
     Status(String),
     Copied {
         id: i64,
-        for_paste: bool,
+        request_id: Option<u64>,
         clipboard_sequence: u32,
         message: String,
     },
@@ -354,8 +358,7 @@ pub enum Event {
     QuickPasteEnabledSaved(Result<bool, String>),
     PasteShortcutsSaved(Result<Box<PasteShortcutConfig>, String>),
     QuickPasteResolved {
-        slot: u8,
-        favorite: bool,
+        request_id: u64,
         result: Result<i64, String>,
     },
     WindowPositionSaved(Result<WindowPositionPreference, String>),
