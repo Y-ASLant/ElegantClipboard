@@ -294,29 +294,6 @@ impl ClipboardView {
                     cx,
                 ))
             })
-            .child(
-                div()
-                    .px(px(PAGE_PADDING))
-                    .pb_2()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        div()
-                            .flex_1()
-                            .h(px(24.))
-                            .flex()
-                            .items_center()
-                            .window_control_area(WindowControlArea::Drag)
-                            .child(if self.language == LanguagePreference::English {
-                                format!("{} items", self.history.total)
-                            } else {
-                                format!("{} 条记录", self.history.total)
-                            }),
-                    ),
-            )
             .child(self.render_history_list(empty_message, cx))
             .when(
                 (self.history.items.len() as i64) < self.history.total
@@ -340,6 +317,22 @@ impl ClipboardView {
                         ),
                     )
                 },
+            )
+            .child(
+                div()
+                    .px(px(PAGE_PADDING))
+                    .h(px(24.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .window_control_area(WindowControlArea::Drag)
+                    .child(if self.language == LanguagePreference::English {
+                        format!("{} items", self.history.total)
+                    } else {
+                        format!("{} 条记录", self.history.total)
+                    }),
             )
             .into_any_element()
     }
