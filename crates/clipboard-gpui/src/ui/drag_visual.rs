@@ -1,5 +1,6 @@
 mod motion;
 
+use super::presentation::UI_FONT_FAMILY;
 use super::*;
 
 #[derive(Clone)]
@@ -219,7 +220,7 @@ impl HistoryDrag {
 
     pub(super) fn render_card(&self, cx: &App) -> AnyElement {
         div()
-            .font_family("Microsoft YaHei UI")
+            .font_family(UI_FONT_FAMILY)
             .w(self.size().width)
             .h(self.size().height)
             .px(px(PAGE_PADDING))

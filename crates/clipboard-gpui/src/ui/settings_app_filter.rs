@@ -1,13 +1,12 @@
-use super::settings_common::choice_tabs;
+use super::settings_common::{choice_tabs, owner_state};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
 
 impl SettingsWindowView {
     pub(super) fn settings_app_filter_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
         let app_filter = owner_state.app_filter.value.clone();
         let app_filter_pending = owner_state.app_filter.pending;

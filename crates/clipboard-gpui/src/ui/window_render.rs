@@ -79,7 +79,6 @@ impl Render for ClipboardView {
         self.drag_motion
             .update(drag_request, &self.history.items, &self.row_offsets);
         window_shell(cx)
-            .font_family("Microsoft YaHei UI")
             .child(
                 div()
                     .id("window-drag-handle")

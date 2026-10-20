@@ -1,3 +1,4 @@
+use super::file_cards::{copy_or_paste_label, save_as_suggested_name};
 use super::*;
 
 impl ClipboardView {
@@ -9,13 +10,12 @@ impl ClipboardView {
         let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
         let image_unavailable = tr(self.language, "图片无法显示", "Image unavailable");
         let save_as_name = match &self.preview.result {
-            Some(Ok(PreviewContent::Image(path))) => path.file_name(),
+            Some(Ok(PreviewContent::Image(path))) => save_as_suggested_name(path),
             Some(Ok(PreviewContent::Files(entries))) => entries
                 .first()
-                .and_then(|entry| std::path::Path::new(&entry.original_path).file_name()),
+                .and_then(|entry| save_as_suggested_name(&entry.original_path)),
             _ => None,
-        }
-        .map(|name| name.to_string_lossy().into_owned());
+        };
         let save_as_label = match &self.preview.result {
             Some(Ok(PreviewContent::Files(paths))) if paths.len() > 1 => {
                 tr(self.language, "另存第一项", "Save first item as")
@@ -300,14 +300,16 @@ impl ClipboardView {
                         )
                     })
                     .when(!self.preview_editing && rich, |bar| {
+                        let plain_label = copy_or_paste_label(
+                            self.language,
+                            self.paste_target.is_some(),
+                            "纯文本",
+                            "plain text",
+                        );
                         bar.child(
                             Button::new("preview-copy-plain")
                                 .outline()
-                                .label(if self.paste_target.is_some() {
-                                    tr(self.language, "粘贴纯文本", "Paste plain text")
-                                } else {
-                                    tr(self.language, "复制纯文本", "Copy plain text")
-                                })
+                                .label(plain_label)
                                 .disabled(!ready || self.paste_pending.is_some())
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.copy_or_paste_plain_text(id, window, cx);
@@ -342,11 +344,12 @@ impl ClipboardView {
                         .child(
                             Button::new("preview-copy-path")
                                 .outline()
-                                .label(if self.paste_target.is_some() && self._tray.is_some() {
-                                    tr(self.language, "粘贴路径", "Paste paths")
-                                } else {
-                                    tr(self.language, "复制路径", "Copy paths")
-                                })
+                                .label(copy_or_paste_label(
+                                    self.language,
+                                    self.paste_target.is_some() && self._tray.is_some(),
+                                    "路径",
+                                    "paths",
+                                ))
                                 .disabled(!ready || self.paste_pending.is_some())
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     this.copy_or_paste_path(id, window, cx);

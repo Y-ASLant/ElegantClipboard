@@ -227,9 +227,8 @@ impl Render for HoverPreviewWindowView {
         let zoom_percent = (self.zoom * 100.).round() as i32;
         window_shell(cx)
             .id("hover-preview-window")
-            // 以前由 gpui-base 的 Root 统一设字体；现在这个窗口不走 Root（见
-            // `hover_lifecycle.rs` 里绕开 window_border 的说明），这里显式对齐主窗口。
-            .font_family("Microsoft YaHei UI")
+            // 该窗口不走 gpui-base 的 Root（见 `hover_lifecycle.rs` 里绕开
+            // window_border 的说明），界面字体由共用外壳 window_shell 统一设置。
             .p_3()
             .gap_2()
             .border_1()

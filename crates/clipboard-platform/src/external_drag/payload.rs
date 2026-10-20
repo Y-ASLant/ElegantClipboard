@@ -93,11 +93,7 @@ fn unicode_text(text: &str) -> Result<Vec<u8>> {
     if text.contains('\0') {
         bail!("拖放文本包含无效的空字符");
     }
-    Ok(text
-        .encode_utf16()
-        .chain([0])
-        .flat_map(u16::to_le_bytes)
-        .collect())
+    Ok(crate::instance::to_wide_bytes(text))
 }
 
 fn file_drop(paths: &[String]) -> Result<Vec<u8>> {

@@ -1,13 +1,13 @@
+use super::settings_common::owner_state;
 use super::*;
 use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::{alert::Alert, checkbox::Checkbox, dialog::DialogFooter};
 
 impl SettingsWindowView {
     pub(super) fn settings_monitor_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
         let monitor_types = owner_state.monitor_types.value;
         let monitor_types_pending = owner_state.monitor_types.pending;
@@ -82,10 +82,9 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_daily_counts_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner = owner_entity.read(cx);
         let Some(counts) = &owner.daily_counts else {
             return div()
                 .text_sm()
@@ -144,10 +143,9 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_storage_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
         let data_size = owner_state.data_size;
         let data_size_pending = owner_state.data_size_pending;
@@ -275,10 +273,9 @@ impl SettingsWindowView {
 
     pub(super) fn settings_import_content(&self, cx: &mut Context<Self>) -> AnyElement {
         use data_import::ImportSource;
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner = owner_entity.read(cx);
         let language = owner.language;
         let pending = owner.data_import_pending;
         let outcome = owner.data_import_result.as_ref();
@@ -339,10 +336,9 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_privacy_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
         let clear_all_pending = owner_state.clear_all_pending;
         let privacy_owner = self.owner.clone();

@@ -1,5 +1,6 @@
 //! Current-user Windows startup entry for one GPUI data directory.
 
+use crate::instance::{to_wide, to_wide_bytes};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 use windows::{
@@ -34,11 +35,8 @@ fn check(status: WIN32_ERROR, operation: &str) -> Result<()> {
 fn name(data_dir: &Path) -> Result<Vec<u16>> {
     let canonical = data_dir.canonicalize().context("无法解析数据目录")?;
     let normalized = canonical.to_string_lossy().to_lowercase();
-    let hash = blake3::hash(normalized.as_bytes()).to_hex();
-    Ok(format!("ElegantClipboard-GPUI-{}", &hash[..16])
-        .encode_utf16()
-        .chain(Some(0))
-        .collect())
+    let hash = clipboard_core::backup::hash_token(normalized.as_bytes());
+    Ok(to_wide(&format!("ElegantClipboard-GPUI-{}", &hash[..16])))
 }
 
 fn command(exe: &Path, data_dir: &Path) -> String {
@@ -129,11 +127,7 @@ pub fn set_enabled(data_dir: &Path, enabled: bool) -> Result<()> {
     let value_name = name(data_dir)?;
     if enabled {
         let command = command(&std::env::current_exe()?, &data_dir.canonicalize()?);
-        let bytes: Vec<u8> = command
-            .encode_utf16()
-            .chain(Some(0))
-            .flat_map(u16::to_le_bytes)
-            .collect();
+        let bytes = to_wide_bytes(&command);
         check(
             unsafe {
                 RegSetValueExW(

@@ -1,3 +1,4 @@
+use super::settings_common::owner_language;
 use super::*;
 use gpui_kit::component::alert::Alert;
 
@@ -133,10 +134,9 @@ const FEATURE_GROUPS: &[FeatureGroup] = &[
 
 impl SettingsWindowView {
     pub(super) fn settings_about_details_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(language) = owner_language(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let language = owner_entity.read(cx).language;
 
         div()
             .flex()
@@ -201,10 +201,9 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_about_intro_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(language) = owner_language(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let language = owner_entity.read(cx).language;
 
         div()
             .flex()

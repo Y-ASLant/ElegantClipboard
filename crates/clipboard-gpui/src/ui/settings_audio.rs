@@ -1,4 +1,4 @@
-use super::settings_common::choice_tabs;
+use super::settings_common::{choice_tabs, owner_state};
 use super::*;
 use gpui_kit::component::switch::Switch;
 impl SoundChannel {
@@ -59,10 +59,9 @@ impl SettingsWindowView {
         channel: SoundChannel,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
         let audio = owner_state.audio.value;
         let pending = owner_state.audio.pending;

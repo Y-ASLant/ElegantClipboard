@@ -272,14 +272,8 @@ impl ClipboardView {
         self.display_pending = false;
         match result {
             Ok(display) => {
-                let (top_index, partial) =
-                    history_top_row(&self.row_offsets, self.scroll.offset().y);
                 self.display = display;
-                self.rebuild_row_layout();
-                self.scroll.set_offset(point(
-                    px(0.),
-                    -(self.row_offsets[top_index.min(self.history.items.len())] + partial),
-                ));
+                self.rebuild_rows_keeping_scroll();
                 if self
                     .history
                     .should_reset_category_filter(display.show_category_filter)

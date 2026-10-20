@@ -1,7 +1,8 @@
+use super::file_cards::{copy_or_paste_label, save_as_suggested_name};
 use super::*;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 pub(super) fn history_menu_item(
-    label: &'static str,
+    label: impl Into<SharedString>,
     disabled: bool,
     view: Entity<ClipboardView>,
     id: i64,
@@ -85,21 +86,13 @@ impl ClipboardView {
         let group_move_disabled = self.group_move_pending
             || (self.groups.is_empty() && self.history.group_id().is_none());
         let save_as_name = if is_image {
-            item.image_path.as_deref().and_then(|path| {
-                std::path::Path::new(path)
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
+            item.image_path.as_deref().and_then(save_as_suggested_name)
         } else if is_files {
             item.file_paths
                 .as_deref()
                 .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
                 .and_then(|paths| paths.into_iter().next())
-                .and_then(|path| {
-                    std::path::Path::new(&path)
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                })
+                .and_then(save_as_suggested_name)
         } else {
             None
         };
@@ -117,11 +110,7 @@ impl ClipboardView {
                     ))
                     .when(text_like, |menu| {
                         menu.item(history_menu_item(
-                            if can_paste {
-                                tr(language, "粘贴纯文本", "Paste plain text")
-                            } else {
-                                tr(language, "复制纯文本", "Copy plain text")
-                            },
+                            copy_or_paste_label(language, can_paste, "纯文本", "plain text"),
                             paste_pending,
                             entity.clone(),
                             id,
@@ -150,11 +139,7 @@ impl ClipboardView {
                     });
                 let menu = if is_image || is_files {
                     let menu = menu.item(history_menu_item(
-                        if can_paste {
-                            tr(language, "粘贴路径", "Paste paths")
-                        } else {
-                            tr(language, "复制路径", "Copy paths")
-                        },
+                        copy_or_paste_label(language, can_paste, "路径", "paths"),
                         paste_pending,
                         entity.clone(),
                         id,

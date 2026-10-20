@@ -1,13 +1,12 @@
-use super::settings_common::{choice_tabs, command_checkbox};
+use super::settings_common::{choice_tabs, command_checkbox, owner_state};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox, switch::Switch};
 
 impl SettingsWindowView {
     pub(super) fn settings_shortcut_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let state = owner_entity.read(cx);
         let language = state.language;
         let pending = state.hotkey_pending
             || state.paste_shortcuts_pending.is_some()
@@ -65,17 +64,12 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_positioning_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let (language, window_position, window_position_pending) = {
-            let state = owner_entity.read(cx);
-            (
-                state.language,
-                state.window_position.value,
-                state.window_position.pending,
-            )
-        };
+        let language = state.language;
+        let window_position = state.window_position.value;
+        let window_position_pending = state.window_position.pending;
 
         choice_tabs(
             "settings-window-position-tabs",
@@ -104,10 +98,9 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_behavior_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let owner_state = owner_entity.read(cx);
         let language = owner_state.language;
         // (id, 中文标签, 英文标签, 命令, (选中值, pending) 读取器, 发送成功后的回调)
         type BehaviorToggle = (
@@ -228,17 +221,12 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_startup_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner_entity) = self.owner.upgrade() else {
+        let Some(state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let (language, autostart, autostart_pending) = {
-            let state = owner_entity.read(cx);
-            (
-                state.language,
-                state.autostart.value,
-                state.autostart.pending,
-            )
-        };
+        let language = state.language;
+        let autostart = state.autostart.value;
+        let autostart_pending = state.autostart.pending;
         let startup_owner = self.owner.clone();
         div()
             .child(
@@ -259,33 +247,19 @@ impl SettingsWindowView {
     }
 
     pub(super) fn settings_quick_paste_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(owner) = self.owner.upgrade() else {
+        let Some(state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        let (
-            language,
-            quick_paste_enabled,
-            paste_key,
-            paste_key_pending,
-            paste_shortcuts,
-            shortcut_actions_pending,
-            paste_shortcut_status,
-            monitoring,
-        ) = {
-            let state = owner.read(cx);
-            (
-                state.language,
-                state.quick_paste_enabled,
-                state.paste_key.value,
-                state.paste_key.pending,
-                state.paste_shortcuts.clone(),
-                state.paste_shortcuts_pending.is_some()
-                    || state.quick_paste_pending_setting
-                    || state.hotkey_pending,
-                state.paste_shortcut_status.clone(),
-                state.monitoring,
-            )
-        };
+        let language = state.language;
+        let quick_paste_enabled = state.quick_paste_enabled;
+        let paste_key = state.paste_key.value;
+        let paste_key_pending = state.paste_key.pending;
+        let paste_shortcuts = state.paste_shortcuts.clone();
+        let shortcut_actions_pending = state.paste_shortcuts_pending.is_some()
+            || state.quick_paste_pending_setting
+            || state.hotkey_pending;
+        let paste_shortcut_status = state.paste_shortcut_status.clone();
+        let monitoring = state.monitoring;
         let quick_paste_owner = self.owner.clone();
         let recent_shortcut_rows = self.recent_shortcuts_expanded.then(|| {
             self.paste_slot_rows(

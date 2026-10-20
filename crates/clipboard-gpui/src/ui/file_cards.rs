@@ -53,6 +53,32 @@ pub(super) fn image_file_dimensions(path: &Path) -> Option<(i64, i64)> {
     let (width, height) = image::image_dimensions(path).ok()?;
     Some((i64::from(width), i64::from(height)))
 }
+
+/// 「复制/粘贴」操作的条件文案：可粘贴时为「粘贴+名词」，否则为「复制+名词」。
+pub(crate) fn copy_or_paste_label(
+    language: LanguagePreference,
+    can_paste: bool,
+    zh_noun: &str,
+    en_noun: &str,
+) -> String {
+    let verb = tr(
+        language,
+        if can_paste { "粘贴" } else { "复制" },
+        if can_paste { "Paste" } else { "Copy" },
+    );
+    if language == LanguagePreference::English {
+        format!("{verb} {en_noun}")
+    } else {
+        format!("{verb}{zh_noun}")
+    }
+}
+
+/// 「另存为」的默认文件名：取路径的最后一段文件名；路径无文件名时返回 `None`。
+pub(crate) fn save_as_suggested_name(path: impl AsRef<Path>) -> Option<String> {
+    Path::new(path.as_ref())
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+}
 fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
     let mut info = FileCardInfo {
         availability: FileCardAvailability::Available,

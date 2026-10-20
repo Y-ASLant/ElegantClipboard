@@ -1,6 +1,23 @@
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
 
+/// 设置各 section 共用的开场：升级 owner 弱引用并读取主窗口状态。
+/// 返回 `None` 表示主窗口实体已释放，调用方应给出各自的占位元素。
+pub(super) fn owner_state<'a>(
+    owner: &WeakEntity<ClipboardView>,
+    cx: &'a App,
+) -> Option<&'a ClipboardView> {
+    Some(owner.upgrade()?.read(cx))
+}
+
+/// 同上，但只需要界面语言时的简写。
+pub(super) fn owner_language(
+    owner: &WeakEntity<ClipboardView>,
+    cx: &App,
+) -> Option<LanguagePreference> {
+    owner_state(owner, cx).map(|state| state.language)
+}
+
 /// 枚举选择 TabBar 的统一构建。`choices` 与 `labels` 等长且顺序一致；
 /// 点击时重新读取 `current_of`，值确实变化后才调用 `apply` 保存。
 #[allow(clippy::too_many_arguments)]

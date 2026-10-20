@@ -1,3 +1,4 @@
+use super::file_cards::copy_or_paste_label;
 use super::*;
 
 impl ClipboardView {
@@ -280,24 +281,20 @@ impl ClipboardView {
                     })),
             )
             .when(item.content_type == "files", |bar| {
+                let path_label = copy_or_paste_label(
+                    self.language,
+                    self.paste_target.is_some() && self._tray.is_some(),
+                    "路径",
+                    "paths",
+                );
                 bar.child(
                     Button::new(("copy-path", id as usize))
                         .ghost()
                         .xsmall()
                         .h(px(24.))
                         .icon(IconName::Copy)
-                        .tooltip(if self.paste_target.is_some() && self._tray.is_some() {
-                            tr(self.language, "粘贴路径", "Paste paths")
-                        } else {
-                            tr(self.language, "复制路径", "Copy paths")
-                        })
-                        .accessibility_label(
-                            if self.paste_target.is_some() && self._tray.is_some() {
-                                tr(self.language, "粘贴路径", "Paste paths")
-                            } else {
-                                tr(self.language, "复制路径", "Copy paths")
-                            },
-                        )
+                        .tooltip(path_label.clone())
+                        .accessibility_label(path_label)
                         .disabled(self.paste_pending.is_some())
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
@@ -326,22 +323,20 @@ impl ClipboardView {
             .when(
                 matches!(item.content_type.as_str(), "html" | "rtf"),
                 |bar| {
+                    let plain_label = copy_or_paste_label(
+                        self.language,
+                        self.paste_target.is_some(),
+                        "纯文本",
+                        "plain text",
+                    );
                     bar.child(
                         Button::new(("copy-plain", id as usize))
                             .outline()
                             .xsmall()
                             .h(px(24.))
                             .icon(IconName::FileText)
-                            .tooltip(if self.paste_target.is_some() {
-                                tr(self.language, "粘贴纯文本", "Paste plain text")
-                            } else {
-                                tr(self.language, "复制纯文本", "Copy plain text")
-                            })
-                            .accessibility_label(if self.paste_target.is_some() {
-                                tr(self.language, "粘贴纯文本", "Paste plain text")
-                            } else {
-                                tr(self.language, "复制纯文本", "Copy plain text")
-                            })
+                            .tooltip(plain_label.clone())
+                            .accessibility_label(plain_label)
                             .disabled(self.paste_pending.is_some())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();

@@ -208,7 +208,6 @@ impl Render for SettingsWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let Some(owner) = self.owner.upgrade() else {
             return window_shell(cx)
-                .font_family("Microsoft YaHei UI")
                 .child(settings_title_bar(self.language, cx))
                 .child(
                     div().p_3().child(
@@ -299,7 +298,6 @@ impl Render for SettingsWindowView {
         });
 
         window_shell(cx)
-            .font_family("Microsoft YaHei UI")
             .child(settings_title_bar(language, cx))
             .child(
                 div().flex_1().min_h_0().child(

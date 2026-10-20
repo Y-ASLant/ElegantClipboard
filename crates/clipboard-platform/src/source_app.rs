@@ -116,8 +116,8 @@ fn process_name_for_window(window: HWND) -> Option<SourceApp> {
 }
 
 pub fn extract_and_cache_icon(executable: &str, icons_dir: &Path) -> Option<String> {
-    let key = blake3::hash(executable.to_lowercase().as_bytes());
-    let path = icons_dir.join(format!("{}.png", &key.to_hex()[..12]));
+    let hash = clipboard_core::backup::hash_token(executable.to_lowercase().as_bytes());
+    let path = icons_dir.join(format!("{}.png", &hash[..12]));
     if path.is_file() {
         return Some(path.to_string_lossy().into_owned());
     }
@@ -151,7 +151,7 @@ fn extract_icon_png(executable: &str) -> Option<Vec<u8>> {
         },
     };
 
-    let wide: Vec<u16> = executable.encode_utf16().chain(Some(0)).collect();
+    let wide = crate::instance::to_wide(executable);
     let mut icon = HICON::default();
     let count = unsafe {
         ExtractIconExW(

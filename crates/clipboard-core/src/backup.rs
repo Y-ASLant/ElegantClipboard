@@ -55,6 +55,11 @@ pub struct RestoreReport {
 
 type AssetMap = HashMap<String, (String, PathBuf)>;
 
+/// blake3 摘要的 hex 文本，用于把备份内的原始路径派生成安全的媒体文件名。
+pub fn hash_token(bytes: &[u8]) -> String {
+    blake3::hash(bytes).to_hex().to_string()
+}
+
 fn register_asset(
     raw_path: &str,
     assets: &mut AssetMap,
@@ -72,11 +77,7 @@ fn register_asset(
         .and_then(|part| part.to_str())
         .filter(|part| part.len() <= 8 && part.bytes().all(|byte| byte.is_ascii_alphanumeric()))
         .unwrap_or(fallback_extension);
-    let name = format!(
-        "{}.{}",
-        blake3::hash(raw_path.as_bytes()).to_hex(),
-        extension
-    );
+    let name = format!("{}.{}", hash_token(raw_path.as_bytes()), extension);
     assets.insert(raw_path.to_owned(), (name.clone(), path));
     Some(name)
 }

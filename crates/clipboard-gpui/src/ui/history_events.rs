@@ -50,39 +50,23 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.group_save_pending = false;
-        match result {
-            Ok(group) => {
-                self.group_editor_open = false;
-                self.group_rename_id = None;
-                self.group_edit_error = None;
-                window.close_dialog(cx);
-                self.group_name_input
-                    .update(cx, |input, cx| input.set_value("", window, cx));
-                self.select_group(Some(group.id), window, cx);
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Group created: {}", group.name)
-                } else {
-                    format!("已创建分组：{}", group.name)
-                });
-                self.is_error = false;
-            }
-            Err(error) => {
-                self.set_feedback_message(format!(
-                    "{}: {error}",
-                    tr(self.language, "创建分组失败", "Failed to create group")
-                ));
-                self.is_error = true;
-                self.group_edit_error = Some(self.message.clone());
-                window.refresh();
-            }
-        }
-        true
+        self.apply_group_saved(result, false, window, cx)
     }
 
     pub(super) fn apply_group_renamed(
         &mut self,
         result: Result<Group, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.apply_group_saved(result, true, window, cx)
+    }
+
+    /// 创建与重命名共用同一套对话框收尾流程，仅焦点处理和提示文案不同。
+    fn apply_group_saved(
+        &mut self,
+        result: Result<Group, String>,
+        renamed: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -95,18 +79,33 @@ impl ClipboardView {
                 window.close_dialog(cx);
                 self.group_name_input
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                window.focus(&self.list_focus, cx);
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Group renamed to: {}", group.name)
+                if renamed {
+                    window.focus(&self.list_focus, cx);
                 } else {
+                    self.select_group(Some(group.id), window, cx);
+                }
+                self.set_feedback_message(if self.language == LanguagePreference::English {
+                    if renamed {
+                        format!("Group renamed to: {}", group.name)
+                    } else {
+                        format!("Group created: {}", group.name)
+                    }
+                } else if renamed {
                     format!("分组已重命名为：{}", group.name)
+                } else {
+                    format!("已创建分组：{}", group.name)
                 });
                 self.is_error = false;
             }
             Err(error) => {
+                let failure = if renamed {
+                    ("重命名分组失败", "Failed to rename group")
+                } else {
+                    ("创建分组失败", "Failed to create group")
+                };
                 self.set_feedback_message(format!(
                     "{}: {error}",
-                    tr(self.language, "重命名分组失败", "Failed to rename group")
+                    tr(self.language, failure.0, failure.1)
                 ));
                 self.is_error = true;
                 self.group_edit_error = Some(self.message.clone());
@@ -363,12 +362,17 @@ impl ClipboardView {
         }
     }
 
-    fn reconcile_history_rows(&mut self, cx: &mut Context<Self>) {
-        let loaded_ids: HashSet<_> = self.history.items.iter().map(|item| item.id).collect();
+    /// 重建行布局后把滚动恢复到原先可见的那一行，避免重建导致视口跳动。
+    pub(super) fn rebuild_rows_keeping_scroll(&mut self) {
         let (top_index, partial) = history_top_row(&self.row_offsets, self.scroll.offset().y);
         self.rebuild_row_layout();
         let new_top = self.row_offsets[top_index.min(self.history.items.len())];
         self.scroll.set_offset(point(px(0.), -(new_top + partial)));
+    }
+
+    fn reconcile_history_rows(&mut self, cx: &mut Context<Self>) {
+        let loaded_ids: HashSet<_> = self.history.items.iter().map(|item| item.id).collect();
+        self.rebuild_rows_keeping_scroll();
         if self
             .hover_preview
             .id

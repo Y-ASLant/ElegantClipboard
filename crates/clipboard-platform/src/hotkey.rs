@@ -40,56 +40,96 @@ fn foreground_target() -> (isize, u32) {
     (foreground.0 as isize, process_id)
 }
 
-fn stop_hotkey_thread(thread_id: u32, worker: &mut Option<JoinHandle<()>>) {
-    unsafe {
-        let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+/// 主热键与快速粘贴槽位线程共用的消息循环脚手架：线程命名、消息队列
+/// 预注入、线程号握手与退出收尾都集中在这里，调用方只保留各自的注册与
+/// 分发逻辑。
+struct MessageThread {
+    thread_id: u32,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl MessageThread {
+    /// 在专用线程上运行 `run` 并阻塞等待握手回报，`run` 闭包负责先通过
+    /// `ready` 通道发送 `(线程号, 结果)` 再进入消息处理。
+    fn spawn<R: Send + 'static>(
+        name: &'static str,
+        handshake_context: &'static str,
+        run: impl FnOnce(u32, &mut MSG, mpsc::SyncSender<(u32, R)>) + Send + 'static,
+    ) -> Result<(Self, R)> {
+        let (ready, receiver) = mpsc::sync_channel(1);
+        let worker = thread::Builder::new().name(name.into()).spawn(move || {
+            let mut message = MSG::default();
+            unsafe {
+                let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+            }
+            let thread_id = unsafe { GetCurrentThreadId() };
+            run(thread_id, &mut message, ready);
+        })?;
+        let (thread_id, payload) = receiver.recv().context(handshake_context)?;
+        Ok((
+            Self {
+                thread_id,
+                worker: Some(worker),
+            },
+            payload,
+        ))
     }
-    if let Some(worker) = worker.take() {
-        let _ = worker.join();
+
+    /// 注册全部失败、线程已自行退出时仅回收线程，不投递退出消息。
+    fn join_worker(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+
+    fn stop(&mut self) {
+        unsafe {
+            let _ = PostThreadMessageW(self.thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+        }
+        self.join_worker();
+    }
+}
+
+/// 以 `dispatch` 分发每条消息，泵消息队列直到 GetMessageW 返回非正值。
+fn pump_messages(message: &mut MSG, mut dispatch: impl FnMut(&MSG)) {
+    while unsafe { GetMessageW(message, None, 0, 0) }.0 > 0 {
+        dispatch(message);
     }
 }
 
 pub struct Hotkey {
-    thread_id: u32,
-    worker: Option<JoinHandle<()>>,
+    thread: MessageThread,
 }
 
 impl Hotkey {
     pub fn start(choice: &HotkeyPreference, events: Sender<(isize, u32)>) -> Result<Self> {
         let (modifiers, key) =
             main_hotkey_binding(choice)?.ok_or_else(|| anyhow!("快捷键已关闭"))?;
-        let (ready, receiver) = mpsc::sync_channel(1);
-        let worker = thread::Builder::new()
-            .name("history-hotkey".into())
-            .spawn(move || {
-                let mut message = MSG::default();
-                unsafe {
-                    let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
-                }
-                let thread_id = unsafe { GetCurrentThreadId() };
+        let (mut thread, registration) = MessageThread::spawn(
+            "history-hotkey",
+            "快捷键线程未响应",
+            move |thread_id, message, ready| {
                 let registration =
                     unsafe { RegisterHotKey(None, HOTKEY_ID, modifiers | MOD_NOREPEAT, key) };
                 let registered = registration.is_ok();
-                let _ = ready.send(registration.map(|_| thread_id));
+                let _ = ready.send((thread_id, registration));
                 if !registered {
                     return;
                 }
-                while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
+                pump_messages(message, |message| {
                     if message.message == WM_HOTKEY && message.wParam.0 == HOTKEY_ID as usize {
                         let _ = events.try_send(foreground_target());
                     }
-                }
+                });
                 unsafe {
                     let _ = UnregisterHotKey(None, HOTKEY_ID);
                 }
-            })?;
-        match receiver.recv().context("快捷键线程未响应")? {
-            Ok(thread_id) => Ok(Self {
-                thread_id,
-                worker: Some(worker),
-            }),
+            },
+        )?;
+        match registration {
+            Ok(()) => Ok(Self { thread }),
             Err(error) => {
-                let _ = worker.join();
+                thread.join_worker();
                 Err(anyhow!("{} 注册失败：{error}", choice.label()))
             }
         }
@@ -98,7 +138,7 @@ impl Hotkey {
 
 impl Drop for Hotkey {
     fn drop(&mut self) {
-        stop_hotkey_thread(self.thread_id, &mut self.worker);
+        self.thread.stop();
     }
 }
 
@@ -110,8 +150,7 @@ pub struct PasteHotkeyEvent {
 }
 
 pub struct PasteHotkeys {
-    thread_id: u32,
-    worker: Option<JoinHandle<()>>,
+    thread: MessageThread,
 }
 
 #[derive(Clone, Debug)]
@@ -293,15 +332,10 @@ impl PasteHotkeys {
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main_hotkey)?;
         let shortcuts = shortcuts.clone();
-        let (ready, receiver) = mpsc::sync_channel(1);
-        let worker = thread::Builder::new()
-            .name("paste-hotkeys".into())
-            .spawn(move || {
-                let mut message = MSG::default();
-                unsafe {
-                    let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
-                }
-                let thread_id = unsafe { GetCurrentThreadId() };
+        let (mut thread, (failures, registered_any)) = MessageThread::spawn(
+            "paste-hotkeys",
+            "快速粘贴快捷键线程未响应",
+            move |thread_id, message, ready| {
                 let mut registered = Vec::new();
                 let mut failures = Vec::new();
                 for favorite in [false, true] {
@@ -334,9 +368,9 @@ impl PasteHotkeys {
                     }
                 }
                 let registered_any = !registered.is_empty();
-                let _ = ready.send((thread_id, failures, registered_any));
+                let _ = ready.send((thread_id, (failures, registered_any)));
                 if registered_any {
-                    while unsafe { GetMessageW(&mut message, None, 0, 0) }.0 > 0 {
+                    pump_messages(message, |message| {
                         if message.message == WM_HOTKEY
                             && let Some((slot, favorite)) =
                                 paste_slot_for_id(message.wParam.0 as i32)
@@ -347,37 +381,30 @@ impl PasteHotkeys {
                                 target: foreground_target(),
                             });
                         }
-                    }
+                    });
                 }
                 for id in registered {
                     unsafe {
                         let _ = UnregisterHotKey(None, id);
                     }
                 }
-            })?;
-        let (thread_id, failures, registered_any) =
-            receiver.recv().context("快速粘贴快捷键线程未响应")?;
+            },
+        )?;
         if !registered_any && !failures.is_empty() {
-            let _ = worker.join();
+            thread.join_worker();
             return Err(anyhow!(
                 "全部 {} 个快速粘贴组合键无法注册（如 {}）；请在设置 → 快捷键中更换组合键或关闭快速粘贴",
                 failures.len(),
                 failures[0],
             ));
         }
-        Ok((
-            Self {
-                thread_id,
-                worker: Some(worker),
-            },
-            failures,
-        ))
+        Ok((Self { thread }, failures))
     }
 }
 
 impl Drop for PasteHotkeys {
     fn drop(&mut self) {
-        stop_hotkey_thread(self.thread_id, &mut self.worker);
+        self.thread.stop();
     }
 }
 

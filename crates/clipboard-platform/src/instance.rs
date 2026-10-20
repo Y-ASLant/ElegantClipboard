@@ -19,13 +19,23 @@ use windows::{
     core::PCWSTR,
 };
 
+/// 以 NUL 结尾的 UTF-16 编码，供 Win32 宽字符 API 直接使用。
+pub(crate) fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// [`to_wide`] 结果的小端字节流，供按字节传递的 API（注册表、剪贴板）使用。
+pub(crate) fn to_wide_bytes(s: &str) -> Vec<u8> {
+    to_wide(s)
+        .iter()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect()
+}
+
 fn event_name(data_dir: &Path) -> Result<Vec<u16>> {
     let path = std::fs::canonicalize(data_dir).context("无法确定数据目录绝对路径")?;
-    let hash = blake3::hash(path.to_string_lossy().to_lowercase().as_bytes());
-    Ok(format!("Local\\ElegantClipboard-GPUI-{hash}")
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect())
+    let hash = clipboard_core::backup::hash_token(path.to_string_lossy().to_lowercase().as_bytes());
+    Ok(to_wide(&format!("Local\\ElegantClipboard-GPUI-{hash}")))
 }
 
 pub fn show_existing(data_dir: &Path) -> Result<bool> {

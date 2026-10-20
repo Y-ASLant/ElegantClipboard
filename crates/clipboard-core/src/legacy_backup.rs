@@ -1,5 +1,6 @@
 //! Import the ZIP layout written by the Tauri application into an unused GPUI directory.
 
+use crate::backup::hash_token;
 use crate::backup_common::{
     MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES,
     check_central_directory_names, ensure_destination_unused, install_staged_tree,
@@ -101,7 +102,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
                         && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
                 })
                 .unwrap_or("bin");
-            let safe_name = format!("{}.{}", blake3::hash(name.as_bytes()).to_hex(), extension);
+            let safe_name = format!("{}.{}", hash_token(name.as_bytes()), extension);
             if assets
                 .map_mut(category)
                 .insert(filename.to_owned(), safe_name.clone())

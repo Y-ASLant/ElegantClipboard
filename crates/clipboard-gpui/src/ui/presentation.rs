@@ -34,7 +34,10 @@ pub(super) fn init_window_effect(
     acrylic::apply(preference.effect, window);
 }
 
-/// 所有窗口共用的外壳：仅此处绘制材质染色，内容表面保留原有主题。
+/// 所有窗口统一使用的界面字体。
+pub(super) const UI_FONT_FAMILY: &str = "Microsoft YaHei UI";
+
+/// 所有窗口共用的外壳：仅此处绘制材质染色并统一界面字体，内容表面保留原有主题。
 pub(super) fn window_shell(cx: &App) -> Div {
     let background = acrylic::shell_background(cx.theme().background, acrylic::active(cx));
     div()
@@ -43,6 +46,7 @@ pub(super) fn window_shell(cx: &App) -> Div {
         .flex_col()
         .bg(background)
         .text_color(cx.theme().foreground)
+        .font_family(UI_FONT_FAMILY)
 }
 
 pub(super) fn tr(

@@ -142,17 +142,10 @@ pub(crate) fn is_url(text: &str) -> bool {
         return false;
     }
 
-    if starts_with_ignore_ascii_case(trimmed, "http://") {
-        return trimmed.get(7..).is_some_and(is_url_remainder);
-    }
-    if starts_with_ignore_ascii_case(trimmed, "https://") {
-        return trimmed.get(8..).is_some_and(is_url_remainder);
-    }
-    if starts_with_ignore_ascii_case(trimmed, "ftp://") {
-        return trimmed.get(6..).is_some_and(is_url_remainder);
-    }
-    if starts_with_ignore_ascii_case(trimmed, "www.") {
-        return trimmed.get(4..).is_some_and(is_url_remainder);
+    for prefix in ["http://", "https://", "ftp://", "www."] {
+        if starts_with_ignore_ascii_case(trimmed, prefix) {
+            return trimmed.get(prefix.len()..).is_some_and(is_url_remainder);
+        }
     }
 
     false
