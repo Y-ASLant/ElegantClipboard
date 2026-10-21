@@ -66,7 +66,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let name = entry.name().to_owned();
+        let name = entry.name()?.into_owned();
         if name == "manifest.json" {
             bail!("这是 GPUI 格式备份，请使用 --import-backup");
         }

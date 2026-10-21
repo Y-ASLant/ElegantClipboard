@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use html5ever::tokenizer::{
     BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind,
 };
+use std::cell::{Cell, RefCell};
 
 /// Extract visible text without wrapping or truncating the body. Source plain text
 /// should take precedence over this fallback, including whitespace-only text.
@@ -11,50 +12,51 @@ pub fn html_to_text(html: &str) -> Result<String> {
     if html.len() > MAX_TEXT_BYTES {
         bail!("HTML 内容超过 1 MiB，无法转换为纯文本");
     }
-    let mut input = BufferQueue::default();
+    let input = BufferQueue::default();
     input.push_back(html.into());
-    let mut tokenizer = Tokenizer::new(TextSink::default(), Default::default());
-    let _ = tokenizer.feed(&mut input);
+    let tokenizer = Tokenizer::new(TextSink::default(), Default::default());
+    let _ = tokenizer.feed(&input);
     tokenizer.end();
-    if tokenizer.sink.overflow {
+    if tokenizer.sink.overflow.get() {
         bail!("HTML 转换后的纯文本超过 1 MiB，未复制");
     }
-    Ok(tokenizer.sink.text)
+    Ok(tokenizer.sink.text.into_inner())
 }
 
 #[derive(Default)]
 struct TextSink {
-    text: String,
-    pending: Option<char>,
-    hidden: Option<String>,
-    preformatted: usize,
-    overflow: bool,
+    text: RefCell<String>,
+    pending: Cell<Option<char>>,
+    hidden: RefCell<Option<String>>,
+    preformatted: Cell<usize>,
+    overflow: Cell<bool>,
 }
 
 impl TextSink {
-    fn push(&mut self, character: char) {
-        if self.overflow {
+    fn push(&self, character: char) {
+        if self.overflow.get() {
             return;
         }
-        if self.text.len() + character.len_utf8() > MAX_TEXT_BYTES {
-            self.overflow = true;
+        let mut text = self.text.borrow_mut();
+        if text.len() + character.len_utf8() > MAX_TEXT_BYTES {
+            self.overflow.set(true);
         } else {
-            self.text.push(character);
+            text.push(character);
         }
     }
 
-    fn boundary(&mut self, separator: char) {
-        if self.text.is_empty() {
+    fn boundary(&self, separator: char) {
+        if self.text.borrow().is_empty() {
             return;
         }
-        if separator == '\n' || self.pending != Some('\n') {
-            self.pending = Some(separator);
+        if separator == '\n' || self.pending.get() != Some('\n') {
+            self.pending.set(Some(separator));
         }
     }
 
-    fn character(&mut self, character: char) {
-        if self.preformatted == 0 && matches!(character, ' ' | '\t' | '\n' | '\r' | '\x0c') {
-            if self.pending.is_none() {
+    fn character(&self, character: char) {
+        if self.preformatted.get() == 0 && matches!(character, ' ' | '\t' | '\n' | '\r' | '\x0c') {
+            if self.pending.get().is_none() {
                 self.boundary(' ');
             }
             return;
@@ -69,19 +71,19 @@ impl TextSink {
 impl TokenSink for TextSink {
     type Handle = ();
 
-    fn process_token(&mut self, token: Token, _: u64) -> TokenSinkResult<()> {
+    fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
         match token {
             Token::TagToken(tag) => {
                 let name = tag.name.as_ref();
                 let start = tag.kind == TagKind::StartTag;
-                if let Some(hidden) = &self.hidden {
-                    if !start && name == hidden {
-                        self.hidden = None;
+                if self.hidden.borrow().is_some() {
+                    if !start && self.hidden.borrow().as_deref() == Some(name) {
+                        *self.hidden.borrow_mut() = None;
                     }
                     return TokenSinkResult::Continue;
                 }
                 if start && matches!(name, "script" | "style" | "title") {
-                    self.hidden = Some(name.to_owned());
+                    *self.hidden.borrow_mut() = Some(name.to_owned());
                     return TokenSinkResult::RawData(match name {
                         "script" => RawKind::ScriptData,
                         "title" => RawKind::Rcdata,
@@ -89,11 +91,11 @@ impl TokenSink for TextSink {
                     });
                 }
                 if matches!(name, "pre" | "textarea") {
-                    self.preformatted = if start {
-                        self.preformatted + 1
+                    self.preformatted.set(if start {
+                        self.preformatted.get() + 1
                     } else {
-                        self.preformatted.saturating_sub(1)
-                    };
+                        self.preformatted.get().saturating_sub(1)
+                    });
                 }
                 if matches!(
                     name,
@@ -139,12 +141,14 @@ impl TokenSink for TextSink {
                     return TokenSinkResult::RawData(RawKind::Rcdata);
                 }
             }
-            Token::CharacterTokens(text) if self.hidden.is_none() => {
+            Token::CharacterTokens(text) if self.hidden.borrow().is_none() => {
                 for character in text.chars() {
                     self.character(character);
                 }
             }
-            Token::NullCharacterToken if self.hidden.is_none() => self.character('\u{fffd}'),
+            Token::NullCharacterToken if self.hidden.borrow().is_none() => {
+                self.character('\u{fffd}')
+            }
             _ => {}
         }
         TokenSinkResult::Continue

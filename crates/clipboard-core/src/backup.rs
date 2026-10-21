@@ -299,7 +299,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     let mut extracted: HashMap<String, HashSet<String>> = HashMap::new();
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let name = entry.name().to_string();
+        let name = entry.name()?.into_owned();
         if name == "clipboard.db" || name == "manifest.json" {
             continue;
         }
@@ -402,11 +402,11 @@ fn preflight_archive(
     let mut total_bytes = 0u64;
     for index in 0..archive.len() {
         let entry = archive.by_index(index)?;
-        let name = entry.name();
-        if !names.insert(name.to_owned()) {
+        let name = entry.name()?.into_owned();
+        if !names.insert(name.clone()) {
             bail!("备份包含重复条目：{name}");
         }
-        if matches!(name, "manifest.json" | "clipboard.db") && entry.is_dir() {
+        if matches!(name.as_str(), "manifest.json" | "clipboard.db") && entry.is_dir() {
             bail!("备份条目类型无效：{name}");
         }
         total_bytes = total_bytes

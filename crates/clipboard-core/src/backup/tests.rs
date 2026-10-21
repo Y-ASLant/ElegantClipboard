@@ -293,10 +293,10 @@ fn missing_bundled_image_is_rejected_without_installation() -> Result<()> {
     let mut output = ZipWriter::new(File::create(&incomplete)?);
     for index in 0..input.len() {
         let mut entry = input.by_index(index)?;
-        if entry.name().starts_with("images/") {
+        if entry.name()?.starts_with("images/") {
             continue;
         }
-        output.start_file(entry.name(), SimpleFileOptions::default())?;
+        output.start_file(entry.name()?, SimpleFileOptions::default())?;
         io::copy(&mut entry, &mut output)?;
     }
     output.finish()?;
@@ -331,7 +331,7 @@ fn archive_path_traversal_is_rejected_before_installation() -> Result<()> {
     let mut output = ZipWriter::new(File::create(&malicious)?);
     for index in 0..input.len() {
         let mut entry = input.by_index(index)?;
-        output.start_file(entry.name(), SimpleFileOptions::default())?;
+        output.start_file(entry.name()?, SimpleFileOptions::default())?;
         io::copy(&mut entry, &mut output)?;
     }
     output.start_file("images/../outside.txt", SimpleFileOptions::default())?;
@@ -362,7 +362,7 @@ fn duplicate_entries_are_rejected_without_creating_restore_files() -> Result<()>
         let mut output = ZipWriter::new(File::create(&archive_path)?);
         for index in 0..input.len() {
             let mut entry = input.by_index(index)?;
-            output.start_file(entry.name(), SimpleFileOptions::default())?;
+            output.start_file(entry.name()?, SimpleFileOptions::default())?;
             io::copy(&mut entry, &mut output)?;
         }
         if duplicate.starts_with("images/") {
