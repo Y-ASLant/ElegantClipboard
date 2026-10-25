@@ -77,10 +77,14 @@ fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("ordinary text".into()),
         source: None,
+        extra: Vec::new(),
+        deferred: false,
     })?;
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("https://example.com".into()),
         source: None,
+        extra: Vec::new(),
+        deferred: false,
     })?;
     service.send(Command::Query {
         search: String::new(),
@@ -117,10 +121,14 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("blocked note".into()),
         source: Some(notepad.clone()),
+        extra: Vec::new(),
+        deferred: false,
     })?;
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("unknown source".into()),
         source: None,
+        extra: Vec::new(),
+        deferred: false,
     })?;
     service.send(Command::Query {
         search: String::new(),
@@ -142,6 +150,8 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("allowed note".into()),
         source: Some(notepad),
+        extra: Vec::new(),
+        deferred: false,
     })?;
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("blocked browser".into()),
@@ -149,6 +159,8 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
             name: "Browser".into(),
             executable: Some("C:\\Apps\\browser.exe".into()),
         }),
+        extra: Vec::new(),
+        deferred: false,
     })?;
     service.send(Command::Query {
         search: String::new(),
@@ -188,6 +200,8 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
             name: "Editor".into(),
             executable: None,
         }),
+        extra: Vec::new(),
+        deferred: false,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Editor"));
@@ -198,6 +212,8 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
             name: "Browser".into(),
             executable: None,
         }),
+        extra: Vec::new(),
+        deferred: false,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Browser"));
@@ -230,6 +246,8 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
                 name: source.into(),
                 executable: None,
             }),
+            extra: Vec::new(),
+            deferred: false,
         })?;
         let items = next_snapshot(&events, 0);
         assert_eq!(items[0].source_app_name.as_deref(), Some(source));
@@ -252,6 +270,8 @@ fn observed_capture_persists_a_cached_source_icon() -> Result<()> {
             name: "Notepad".into(),
             executable: Some(executable.to_string_lossy().into_owned()),
         }),
+        extra: Vec::new(),
+        deferred: false,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Notepad"));
@@ -387,7 +407,10 @@ fn rich_capture_keeps_html_and_binary_rtf_for_preview() -> Result<()> {
         "preview timed out",
         |event| match event {
             Event::Preview { result, .. } => {
-                assert_eq!(result.unwrap(), PreviewContent::RichText("中文😀".into()));
+                assert_eq!(
+                    result.unwrap(),
+                    PreviewContent::Html("<b>中文😀</b>".into())
+                );
                 Some(())
             }
             Event::Error(message) => panic!("{message}"),

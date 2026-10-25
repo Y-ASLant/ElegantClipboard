@@ -177,7 +177,7 @@ pub(crate) fn install_staged_tree(
     db_context: &'static str,
 ) -> Result<()> {
     let mut installed = Vec::new();
-    for category in ["images", "icons", "staged"] {
+    for category in ["images", "icons", "staged", "blobs"] {
         let source = stage_path.join(category);
         if source.exists() {
             let final_path = data_dir.join(category);

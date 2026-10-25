@@ -17,3 +17,4 @@ serde_json.workspace = true
 tempfile.workspace = true
 tracing.workspace = true
 zip.workspace = true
+zstd.workspace = true

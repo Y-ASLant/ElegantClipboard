@@ -151,7 +151,7 @@ impl HoverPreviewWindowView {
                 .join("\n")
                 .into(),
             Err(error) => error.clone().into(),
-            Ok(PreviewContent::Image(_)) => SharedString::default(),
+            Ok(PreviewContent::Html(_) | PreviewContent::Image(_)) => SharedString::default(),
         };
         Self {
             owner,
@@ -172,6 +172,7 @@ impl Render for HoverPreviewWindowView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let title = match &self.content {
             Ok(PreviewContent::Text(_)) => tr(self.language, "文本预览", "Text preview"),
+            Ok(PreviewContent::Html(_)) => tr(self.language, "HTML 预览", "HTML preview"),
             Ok(PreviewContent::RichText(_)) => tr(self.language, "富文本预览", "Rich-text preview"),
             Ok(PreviewContent::Image(_)) => tr(self.language, "图片预览", "Image preview"),
             Ok(PreviewContent::Files(_)) => tr(self.language, "文件预览", "File preview"),
@@ -186,6 +187,16 @@ impl Render for HoverPreviewWindowView {
         let body: AnyElement =
             match &self.content {
                 Ok(PreviewContent::Image(path)) => self.image_viewport(path.clone(), cx),
+                Ok(PreviewContent::Html(source)) => div()
+                    .id("hover-html-body")
+                    .size_full()
+                    .overflow_scroll()
+                    .child(
+                        TextView::html("hover-html", source.clone())
+                            .selectable(true)
+                            .scrollable(true),
+                    )
+                    .into_any_element(),
                 Ok(PreviewContent::Files(entries)) if file_image_path.is_some() => {
                     let unavailable = tr(self.language, "图片无法显示", "Image unavailable");
                     div()

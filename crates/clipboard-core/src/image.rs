@@ -89,15 +89,18 @@ impl History {
     pub fn delete_with_media(&self, id: i64, images_dir: &Path) -> Result<DeletionOutcome> {
         let item = self.repo.get_by_id(id)?;
         let deleted = i64::from(item.is_some());
-        let (image_path, file_payload) = item
-            .map(|item| (item.image_path, item.file_payload))
+        let (image_path, file_payload, content_hash) = item
+            .map(|item| (item.image_path, item.file_payload, item.content_hash))
             .unwrap_or_default();
+        let blobs = self.detach_native_formats(&[id])?;
+        self.delete_aliases(&[content_hash])?;
         self.repo.delete(id)?;
         Ok(DeletionOutcome {
             deleted,
             cleanup_warning: self.cleanup_media(
                 image_path.into_iter().collect(),
                 file_payload.into_iter().collect(),
+                blobs,
                 images_dir,
             ),
         })
@@ -121,15 +124,19 @@ impl History {
         let tx = connection.transaction()?;
         let mut images = Vec::new();
         let mut payloads = Vec::new();
+        let mut hashes = Vec::new();
+        type MediaRow = (Option<i64>, Option<String>, Option<String>, String);
         {
             let mut query = tx.prepare(
-                "SELECT group_id, image_path, file_payload FROM clipboard_items WHERE id = ?1",
+                "SELECT group_id, image_path, file_payload, content_hash FROM clipboard_items WHERE id = ?1",
             )?;
             for id in ids {
-                let row: Option<(Option<i64>, Option<String>, Option<String>)> = query
-                    .query_row([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                let row: Option<MediaRow> = query
+                    .query_row([id], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                    })
                     .optional()?;
-                let Some((actual_group, image, payload)) = row else {
+                let Some((actual_group, image, payload, hash)) = row else {
                     bail!("所选记录已不存在，请刷新列表");
                 };
                 if actual_group != group_id {
@@ -137,8 +144,11 @@ impl History {
                 }
                 images.extend(image);
                 payloads.extend(payload);
+                hashes.push(hash);
             }
         }
+        let blobs = crate::native_format::detach_rows_in_transaction(&tx, ids)?;
+        crate::native_format::delete_aliases_in_transaction(&tx, &hashes)?;
         {
             let mut delete = tx.prepare("DELETE FROM clipboard_items WHERE id = ?1")?;
             for id in ids {
@@ -151,7 +161,7 @@ impl History {
         drop(connection);
         Ok(DeletionOutcome {
             deleted: ids.len() as i64,
-            cleanup_warning: self.cleanup_media(images, payloads, images_dir),
+            cleanup_warning: self.cleanup_media(images, payloads, blobs, images_dir),
         })
     }
 
@@ -164,10 +174,13 @@ impl History {
     ) -> Result<DeletionOutcome> {
         let candidates = self.repo.get_clearable_image_paths(group_id, None)?;
         let staged = self.repo.get_clearable_file_payloads(group_id, None)?;
+        let (blobs, hashes) = self.clear_native_by_clearable_condition(group_id)?;
+        // 清空历史已提交数据库行（clear_history 内删除），别名清理随后进行。
+        self.delete_aliases(&hashes)?;
         let deleted = self.repo.clear_history(group_id, None)?;
         Ok(DeletionOutcome {
             deleted,
-            cleanup_warning: self.cleanup_media(candidates, staged, images_dir),
+            cleanup_warning: self.cleanup_media(candidates, staged, blobs, images_dir),
         })
     }
 
@@ -176,10 +189,12 @@ impl History {
     pub fn clear_all_with_media(&self, images_dir: &Path) -> Result<DeletionOutcome> {
         let images = self.repo.get_all_image_paths()?;
         let payloads = self.repo.get_all_file_payloads()?;
+        let blobs = self.detach_all_native_formats()?;
+        self.delete_all_aliases()?;
         let deleted = self.repo.clear_all()?;
         Ok(DeletionOutcome {
             deleted,
-            cleanup_warning: self.cleanup_media(images, payloads, images_dir),
+            cleanup_warning: self.cleanup_media(images, payloads, blobs, images_dir),
         })
     }
 
@@ -187,11 +202,13 @@ impl History {
         &self,
         images: Vec<String>,
         payloads: Vec<String>,
+        blobs: Vec<String>,
         images_dir: &Path,
     ) -> Option<String> {
         let errors: Vec<String> = [
             self.cleanup_images(images, images_dir),
             self.cleanup_staged(payloads, images_dir),
+            self.cleanup_blobs(blobs),
         ]
         .into_iter()
         .filter_map(|result| result.err().map(|error| format!("{error:#}")))
@@ -203,6 +220,25 @@ impl History {
             tracing::warn!(%warning, "Media cleanup incomplete after database change");
             Some(warning)
         }
+    }
+
+    /// 删除提交后回收无引用的 blob 文件：重查全库引用集，仅删本存储内未引用项。
+    pub(crate) fn cleanup_blobs(&self, candidates: Vec<String>) -> Result<()> {
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let used = self.referenced_blob_hashes()?;
+        let unreferenced: Vec<String> = candidates
+            .into_iter()
+            .filter(|hash| !used.contains(hash))
+            .collect();
+        if unreferenced.is_empty() {
+            return Ok(());
+        }
+        let root = self.blob_root()?;
+        let removed = crate::blob_store::BlobStore::new(root).collect_garbage(&used)?;
+        tracing::debug!(count = removed.len(), "Collected unreferenced blobs");
+        Ok(())
     }
 
     pub(crate) fn cleanup_images(&self, candidates: Vec<String>, images_dir: &Path) -> Result<()> {

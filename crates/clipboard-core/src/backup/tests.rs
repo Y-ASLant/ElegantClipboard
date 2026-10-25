@@ -1,6 +1,7 @@
 use super::*;
 use crate::{
     History, PreviewContent,
+    backup_common::{MAX_ARCHIVE_BYTES, MAX_ENTRIES},
     preferences::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
@@ -8,6 +9,10 @@ use crate::{
         TimeFormat, WindowPositionPreference, WindowSizePreference,
     },
 };
+use std::fs;
+use zip::ZipArchive;
+
+use super::restore::preflight_archive;
 
 #[test]
 fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {

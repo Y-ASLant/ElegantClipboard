@@ -47,6 +47,32 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
 );
 
+-- Extra native clipboard formats captured beyond the five high-level kinds.
+-- Small payloads stay inline; larger ones point at blobs/<hash> on disk.
+-- Rows are deleted explicitly alongside their item (see image.rs GC paths).
+CREATE TABLE IF NOT EXISTS native_formats (
+    item_id INTEGER NOT NULL REFERENCES clipboard_items(id) ON DELETE CASCADE,
+    format_name TEXT NOT NULL,
+    data BLOB,
+    blob_hash TEXT,
+    byte_size INTEGER NOT NULL,
+    PRIMARY KEY (item_id, format_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_native_formats_blob
+    ON native_formats(blob_hash) WHERE blob_hash IS NOT NULL;
+
+-- Alternative content hashes that deduplicate to one canonical item after
+-- same-text format merges (see same_text.rs).
+CREATE TABLE IF NOT EXISTS content_hash_aliases (
+    alias_hash TEXT PRIMARY KEY,
+    canonical_hash TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_aliases_canonical
+    ON content_hash_aliases(canonical_hash);
+
 -- Update timestamp trigger
 CREATE TRIGGER IF NOT EXISTS clipboard_items_update_timestamp 
 AFTER UPDATE ON clipboard_items
@@ -106,6 +132,18 @@ impl ContentType {
             ContentType::Rtf => "rtf",
             ContentType::Files => "files",
             ContentType::Url => "url",
+        }
+    }
+
+    /// 解析存储中的类型串；未知值回退为纯文本（与旧库兼容行为一致）。
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "image" => ContentType::Image,
+            "html" => ContentType::Html,
+            "rtf" => ContentType::Rtf,
+            "files" => ContentType::Files,
+            "url" => ContentType::Url,
+            _ => ContentType::Text,
         }
     }
 }

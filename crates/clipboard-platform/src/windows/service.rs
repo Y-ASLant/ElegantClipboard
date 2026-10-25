@@ -6,6 +6,7 @@ use super::{
     worker::Worker,
 };
 use crate::instance::InstanceSignal;
+use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Result, anyhow};
 use clipboard_core::{
     ContentCategory, History, PAGE_SIZE,
@@ -62,6 +63,7 @@ pub struct Service {
     pub initial_retention: clipboard_core::retention::RetentionPolicy,
     pub initial_retention_saved: bool,
     pub initial_stage_files: bool,
+    pub initial_transient_filter: bool,
     pub initial_monitor_types: MonitorTypesPreference,
     pub initial_app_filter: AppFilterPreference,
     pub initial_window_effect: WindowEffectPreference,
@@ -102,6 +104,7 @@ impl Service {
         let initial_retention = preferences.retention()?;
         let initial_retention_saved = preferences.retention_saved()?;
         let initial_stage_files = preferences.stage_files()?;
+        let initial_transient_filter = preferences.transient_filter()?;
         let initial_monitor_types = preferences.monitor_types()?;
         let initial_app_filter = preferences.app_filter()?;
         let initial_window_effect = preferences.window_effect()?;
@@ -158,6 +161,7 @@ impl Service {
             initial_retention,
             initial_retention_saved,
             initial_stage_files,
+            initial_transient_filter,
             initial_monitor_types,
             initial_app_filter: initial_app_filter.clone(),
             initial_window_effect,
@@ -184,6 +188,9 @@ impl Service {
                     state: worker_state,
                     monitor_types: initial_monitor_types,
                     app_filter: initial_app_filter,
+                    transient: super::worker::transient::TransientWindow::new(
+                        initial_transient_filter,
+                    ),
                     search: String::new(),
                     favorite_only: false,
                     category: ContentCategory::All,
@@ -195,6 +202,10 @@ impl Service {
                 };
                 if let Err(error) = worker.maintain_retention() {
                     worker_feedback.error(format!("执行保留策略失败：{error}"));
+                }
+                // 启动清扫：上次运行遗留的 blob pending 临时文件与图片临时文件。
+                if let Err(error) = worker.sweep_temp_media() {
+                    worker_feedback.error(format!("清理临时文件失败：{error}"));
                 }
                 let mut retention_checked = std::time::Instant::now();
                 if let Err(error) = worker.send_groups().and_then(|_| worker.snapshot()) {
@@ -213,7 +224,17 @@ impl Service {
                             worker_feedback.error(error.to_string());
                         }
                     }
-                    match incoming.recv_timeout(Duration::from_millis(250)) {
+                    let timeout = worker
+                        .transient
+                        .next_deadline()
+                        .map(|deadline| {
+                            let now = std::time::Instant::now();
+                            deadline
+                                .saturating_duration_since(now)
+                                .min(Duration::from_millis(250))
+                        })
+                        .unwrap_or(Duration::from_millis(250));
+                    match incoming.recv_timeout(timeout) {
                         Ok((command, _permit)) => {
                             let observed_capture =
                                 matches!(command, Command::ObservedCapture { .. });
@@ -225,6 +246,34 @@ impl Service {
                                         | Command::SetAppFilter(_)
                                 )
                             {
+                                continue;
+                            }
+                            // 真实 watcher 的采集先进 300ms 瞬时确认窗口。
+                            if let Command::ObservedCapture {
+                                content,
+                                source,
+                                extra,
+                                deferred: true,
+                            } = command
+                            {
+                                for flushed in
+                                    worker.transient.push(super::worker::transient::new_pending(
+                                        last_seen_sequence(&worker.state),
+                                        content,
+                                        extra,
+                                        source,
+                                        std::time::Instant::now(),
+                                    ))
+                                {
+                                    if let Err(error) = worker.handle_observed_capture(
+                                        flushed.content,
+                                        flushed.extra,
+                                        flushed.source,
+                                        false,
+                                    ) {
+                                        worker_feedback.error(error.to_string());
+                                    }
+                                }
                                 continue;
                             }
                             let failure_kind = command.failure_kind();
@@ -247,10 +296,16 @@ impl Service {
                                 }
                             }
                         }
-                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {}
                         Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     }
+                    // 瞬时窗口到期确认：在 CaptureState 临界区内重读当前剪贴板。
+                    if !worker.transient.is_empty() {
+                        deliver_transient_due(&mut worker, &worker_feedback);
+                    }
                 }
+                // 退出时丢弃未确认的瞬时条目（<300ms 窗口内，重启后无损失）。
+                worker.transient.drain();
             },
         )?);
         if monitor {
@@ -293,6 +348,53 @@ impl Service {
 
     pub fn send(&self, command: Command) -> Result<()> {
         self.commands.try_send(command)
+    }
+}
+
+/// watcher 入队时的序列号；瞬时窗口用它比对确认时的当前序列号。
+fn last_seen_sequence(state: &Mutex<CaptureState>) -> u32 {
+    state.lock().map(|state| state.last_sequence).unwrap_or(0)
+}
+
+/// 逐条确认到期的瞬时条目：在 CaptureState 临界区内重读当前剪贴板，
+/// 与 watcher 的稳定读互斥（模式同 handle_copy 的写回锁）。
+fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
+    let mut deliver = Vec::new();
+    {
+        let Ok(state) = crate::windows::capture::lock_capture_state(&worker.state) else {
+            return;
+        };
+        let ignored_sequence = state.ignored_sequence;
+        let mut reread = || {
+            let sequence = unsafe { GetClipboardSequenceNumber() };
+            let content = super::worker::clipboard_read_current(&worker.clipboard)?;
+            Ok((sequence, content))
+        };
+        for (entry, outcome) in
+            worker
+                .transient
+                .poll_due(std::time::Instant::now(), ignored_sequence, &mut reread)
+        {
+            if matches!(outcome, super::worker::transient::PollOutcome::Deliver(())) {
+                deliver.push(entry);
+            }
+        }
+        drop(state);
+    }
+    for entry in deliver {
+        if let Err(error) =
+            worker.handle_observed_capture(entry.content, entry.extra, entry.source, false)
+        {
+            feedback.error(error.to_string());
+        } else {
+            worker.snapshot_pending = true;
+        }
+    }
+    // 确认入库后与直通路径一致地推送列表快照。
+    if worker.snapshot_pending
+        && let Err(error) = worker.flush_capture_snapshot()
+    {
+        feedback.error(error.to_string());
     }
 }
 

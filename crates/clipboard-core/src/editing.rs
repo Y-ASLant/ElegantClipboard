@@ -60,10 +60,16 @@ impl History {
         if affected != 1 {
             bail!("记录内容已变化，请重新打开后编辑");
         }
+        // 编辑后旧富文本格式失效：丢弃全部额外格式，并把指向旧哈希的别名改指新哈希。
+        let blobs = crate::native_format::detach_rows_in_transaction(&tx, &[id])?;
+        tx.execute(
+            "UPDATE content_hash_aliases SET canonical_hash = ?1 WHERE canonical_hash = ?2",
+            params![hash, expected_hash],
+        )?;
         tx.commit()?;
         drop(connection);
         if let Some(image_path) = item.image_path {
-            let _ = self.cleanup_media(vec![image_path], Vec::new(), images_dir);
+            let _ = self.cleanup_media(vec![image_path], Vec::new(), blobs, images_dir);
         }
         Ok(true)
     }

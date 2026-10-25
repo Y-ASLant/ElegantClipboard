@@ -23,6 +23,7 @@ mod preference_events;
 mod presentation;
 mod preview_actions;
 mod preview_render;
+mod preview_toolbar;
 mod row_actions;
 mod row_menu;
 mod search_input;
@@ -48,6 +49,7 @@ mod startup;
 mod storage;
 mod thumbnail_cache;
 mod view_init;
+mod window_effect_apply;
 mod window_lifecycle;
 mod window_render;
 
@@ -101,6 +103,7 @@ use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::scroll::{ScrollableElement, ScrollbarAxis};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::text::TextView;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{
@@ -362,6 +365,7 @@ struct ClipboardView {
     retention: PendingPref<clipboard_core::retention::RetentionPolicy>,
     retention_saved: bool,
     stage_files: PendingPref<bool>,
+    transient_filter: PendingPref<bool>,
     monitor_types: PendingPref<MonitorTypesPreference>,
     app_filter: PendingPref<AppFilterPreference>,
     running_apps: Vec<RunningApp>,

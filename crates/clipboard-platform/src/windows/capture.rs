@@ -1,16 +1,11 @@
 use super::{
-    CapturedClipboard, Command, Event,
+    Command, Event,
     queue::{CaptureFeedback, CommandQueue},
+    read_formats::ClipboardSnapshot,
 };
-use crate::source_app;
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Result, anyhow, bail};
-use clipboard_core::{
-    MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES,
-};
-use clipboard_rs::{
-    Clipboard, ClipboardContext, ClipboardHandler, ContentFormat, common::RustImage,
-};
+use clipboard_rs::{ClipboardContext, ClipboardHandler};
 use std::{
     sync::{Arc, Mutex},
     thread,
@@ -46,12 +41,6 @@ impl ClipboardHandler for WatchHandler {
     }
 }
 
-struct ClipboardSnapshot {
-    content: Option<CapturedClipboard>,
-    source: Option<source_app::SourceApp>,
-    warning: Option<&'static str>,
-}
-
 fn read_stable_capture(
     state: &CaptureState,
     mut sequence: impl FnMut() -> u32,
@@ -81,7 +70,7 @@ impl WatchHandler {
         let Some((sequence, snapshot)) = read_stable_capture(
             &state,
             || unsafe { GetClipboardSequenceNumber() },
-            || read_clipboard(&self.clipboard),
+            || super::read_formats::read_clipboard(&self.clipboard),
         )?
         else {
             return Ok(());
@@ -90,6 +79,8 @@ impl WatchHandler {
             self.commands.try_send(Command::ObservedCapture {
                 content,
                 source: snapshot.source,
+                extra: snapshot.extra,
+                deferred: true,
             })?;
         }
         state.last_sequence = sequence;
@@ -101,101 +92,10 @@ impl WatchHandler {
     }
 }
 
-fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSnapshot> {
-    if super::privacy::excludes_history(clipboard)? {
-        return Ok(ClipboardSnapshot {
-            content: None,
-            source: None,
-            warning: None,
-        });
-    }
-    let source = source_app::clipboard_source();
-    let (content, warning) = read_content(clipboard)?;
-    Ok(ClipboardSnapshot {
-        content,
-        source,
-        warning,
-    })
-}
-
-fn read_content(
-    clipboard: &ClipboardContext,
-) -> Result<(Option<CapturedClipboard>, Option<&'static str>)> {
-    if clipboard.has(ContentFormat::Files) {
-        let paths = clipboard
-            .get_files()
-            .map_err(|error| anyhow!("读取剪贴板文件失败：{error}"))?;
-        if paths.is_empty()
-            || paths.len() > MAX_FILE_PATHS
-            || paths.iter().map(String::len).sum::<usize>() > MAX_PATH_LIST_BYTES
-        {
-            bail!("文件路径列表为空或超过限制，本次复制未保存");
-        }
-        return Ok((Some(CapturedClipboard::Files(paths)), None));
-    }
-    let html = clipboard
-        .has(ContentFormat::Html)
-        .then(|| clipboard.get_html().ok())
-        .flatten()
-        .filter(|value| !value.is_empty());
-    let rtf = clipboard
-        .has(ContentFormat::Rtf)
-        .then(|| clipboard.get_buffer("Rich Text Format").ok())
-        .flatten()
-        .filter(|value| !value.is_empty());
-    let text = clipboard
-        .has(ContentFormat::Text)
-        .then(|| clipboard.get_text().ok())
-        .flatten()
-        .filter(|value| !value.is_empty());
-    let mut warning = None;
-    if html.is_some() || rtf.is_some() {
-        let bytes = html.as_ref().map_or(0, String::len)
-            + rtf.as_ref().map_or(0, Vec::len)
-            + text.as_ref().map_or(0, String::len);
-        if bytes <= MAX_TEXT_BYTES {
-            return Ok((Some(CapturedClipboard::Rich { html, rtf, text }), None));
-        }
-        if text.is_none() {
-            bail!("富文本超过 1 MiB 且没有纯文本，未保存");
-        }
-        warning = Some("富文本超过 1 MiB，按纯文本保存");
-    }
-    if let Some(text) = text {
-        if text.len() > MAX_TEXT_BYTES {
-            bail!("文本超过 1 MiB，未保存");
-        }
-        return Ok((Some(CapturedClipboard::Text(text)), warning));
-    }
-    if clipboard.has(ContentFormat::Image) {
-        let image = clipboard
-            .get_image()
-            .map_err(|error| anyhow!("读取剪贴板图片失败：{error}"))?;
-        let (width, height) = image.get_size();
-        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
-            bail!("图片尺寸无效或超过 2500 万像素");
-        }
-        let png = image
-            .to_png()
-            .map_err(|error| anyhow!("编码剪贴板图片失败：{error}"))?;
-        if png.get_bytes().len() > MAX_IMAGE_BYTES {
-            bail!("图片超过 50 MiB，未保存");
-        }
-        return Ok((
-            Some(CapturedClipboard::Image {
-                png: png.get_bytes().to_vec(),
-                width,
-                height,
-            }),
-            None,
-        ));
-    }
-    Ok((None, None))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{source_app, windows::CapturedClipboard};
 
     fn rich_snapshot(label: &str) -> ClipboardSnapshot {
         ClipboardSnapshot {
@@ -209,6 +109,7 @@ mod tests {
                 executable: None,
             }),
             warning: None,
+            extra: Vec::new(),
         }
     }
 

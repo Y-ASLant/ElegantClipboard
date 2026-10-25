@@ -231,6 +231,7 @@ impl ClipboardView {
         let retention = service.initial_retention;
         let retention_saved = service.initial_retention_saved;
         let stage_files = service.initial_stage_files;
+        let transient_filter = service.initial_transient_filter;
         let monitor_types = service.initial_monitor_types;
         let app_filter = service.initial_app_filter.clone();
         let onboarding_completed = service.initial_onboarding_completed;
@@ -428,6 +429,10 @@ impl ClipboardView {
             },
             stage_files: PendingPref {
                 value: stage_files,
+                pending: false,
+            },
+            transient_filter: PendingPref {
+                value: transient_filter,
                 pending: false,
             },
             monitor_types: PendingPref {

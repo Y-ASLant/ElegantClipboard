@@ -72,6 +72,14 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
+        chinese: "瞬时内容过滤",
+        english: "Transient filtering",
+        description_chinese: "过滤 300ms 内被撤销或覆盖的瞬时复制",
+        description_english: "Filter copies undone or replaced within 300ms",
+        content: SettingsWindowView::settings_transient_filter_content,
+    },
+    Section {
+        page: SettingsPage::Data,
         chinese: "保留策略",
         english: "Retention",
         description_chinese: "按分组限制普通历史数量和天数；收藏与置顶保留",

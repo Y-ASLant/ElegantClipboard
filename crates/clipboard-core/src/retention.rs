@@ -102,15 +102,16 @@ impl History {
         let mut images = Vec::new();
         let mut payloads = Vec::new();
         let mut ids = Vec::new();
+        let mut hashes = Vec::new();
         if policy.days > 0 || policy.max_count > 0 {
             let mut query = tx.prepare(
                 "WITH ranked AS (
-                    SELECT id, image_path, file_payload, created_at,
+                    SELECT id, image_path, file_payload, content_hash, created_at,
                            ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC, id DESC) AS position
                     FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0
                         AND (?3 = 0 OR group_id IS NULL)
                  )
-                 SELECT id, image_path, file_payload FROM ranked
+                 SELECT id, image_path, file_payload, content_hash FROM ranked
                  WHERE (?1 > 0 AND julianday(created_at) < julianday('now', 'localtime') - ?1)
                     OR (?2 > 0 AND position > ?2)",
             )?;
@@ -121,16 +122,19 @@ impl History {
                         row.get::<_, i64>(0)?,
                         row.get::<_, Option<String>>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )?;
             for row in rows {
-                let (id, image, payload) = row?;
+                let (id, image, payload, hash) = row?;
                 ids.push(id);
                 images.extend(image);
                 payloads.extend(payload);
+                hashes.push(hash);
             }
         }
+        let blobs = crate::native_format::clear_native_by_ids(&tx, &ids, &hashes)?;
         {
             let mut delete = tx.prepare("DELETE FROM clipboard_items WHERE id = ?1")?;
             for id in &ids {
@@ -141,7 +145,8 @@ impl History {
         drop(connection);
         Ok(DeletionOutcome {
             deleted: ids.len() as i64,
-            cleanup_warning: images_dir.and_then(|root| self.cleanup_media(images, payloads, root)),
+            cleanup_warning: images_dir
+                .and_then(|root| self.cleanup_media(images, payloads, blobs, root)),
         })
     }
 }

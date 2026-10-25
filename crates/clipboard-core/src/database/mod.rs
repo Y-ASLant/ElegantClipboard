@@ -24,6 +24,7 @@ use tracing::info;
 pub struct Database {
     write_conn: Arc<Mutex<Connection>>,
     read_conn: Arc<Mutex<Connection>>,
+    db_path: PathBuf,
 }
 
 impl Database {
@@ -46,11 +47,17 @@ impl Database {
         let db = Self {
             write_conn: Arc::new(Mutex::new(write_conn)),
             read_conn: Arc::new(Mutex::new(read_conn)),
+            db_path,
         };
 
         db.init_schema()?;
 
         Ok(db)
+    }
+
+    /// 数据库文件路径；其父目录即数据目录。
+    pub fn path(&self) -> &std::path::Path {
+        &self.db_path
     }
 
     fn configure_connection(conn: &Connection, read_only: bool) -> Result<(), rusqlite::Error> {

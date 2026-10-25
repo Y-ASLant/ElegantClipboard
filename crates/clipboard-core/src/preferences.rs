@@ -11,6 +11,7 @@ const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
 const STAGE_FILES_KEY: &str = "gpui_stage_files";
+const TRANSIENT_FILTER_KEY: &str = "gpui_transient_filter";
 const WINDOW_SIZE_KEY: &str = "gpui_window_size";
 const PERSIST_WINDOW_SIZE_KEY: &str = "gpui_persist_window_size";
 const AUTO_RESET_STATE_KEY: &str = "gpui_auto_reset_state";
@@ -35,7 +36,7 @@ pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
       'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
-      'gpui_display', 'gpui_monitor_types', 'gpui_app_filter', 'gpui_stage_files',
+      'gpui_display', 'gpui_monitor_types', 'gpui_app_filter', 'gpui_stage_files', 'gpui_transient_filter',
       'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect', 'gpui_retention',
       '_migration_url_content_type', '_migration_backfill_semantic_hash')";
 
@@ -127,6 +128,20 @@ impl Preferences {
     pub fn set_stage_files(&self, enabled: bool) -> Result<()> {
         self.repository
             .set(STAGE_FILES_KEY, if enabled { "true" } else { "false" })?;
+        Ok(())
+    }
+
+    /// 瞬时内容确认窗口开关；缺省开启（旧行为的增强，减少划词/碎片噪声）。
+    pub fn transient_filter(&self) -> Result<bool> {
+        Ok(!matches!(
+            self.repository.get(TRANSIENT_FILTER_KEY)?.as_deref(),
+            Some("false")
+        ))
+    }
+
+    pub fn set_transient_filter(&self, enabled: bool) -> Result<()> {
+        self.repository
+            .set(TRANSIENT_FILTER_KEY, if enabled { "true" } else { "false" })?;
         Ok(())
     }
 

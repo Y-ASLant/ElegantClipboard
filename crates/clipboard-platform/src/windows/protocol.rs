@@ -1,7 +1,7 @@
 use crate::source_app;
 use anyhow::Result;
 use clipboard_core::{
-    ContentCategory, DeletionOutcome, PreviewContent,
+    ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent,
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
@@ -159,9 +159,15 @@ pub enum Command {
     ObservedCapture {
         content: CapturedClipboard,
         source: Option<source_app::SourceApp>,
+        extra: Vec<NativeFormatCapture>,
+        /// true 仅来自真实 watcher：先进 300ms 瞬时确认窗口；
+        /// 测试与 smoke 注入 false 直接入库。
+        deferred: bool,
     },
+    SetTransientFilter(bool),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CapturedClipboard {
     Text(String),
     Rich {
@@ -176,7 +182,6 @@ pub enum CapturedClipboard {
         height: u32,
     },
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureKind {
     Query(u64),
@@ -264,6 +269,7 @@ impl Command {
             | Self::SetStageFiles(_)
             | Self::SetMonitorTypes(_)
             | Self::SetAppFilter(_)
+            | Self::SetTransientFilter(_)
             | Self::SetWindowEffect(_)
             | Self::ListRunningApps
             | Self::CompleteOnboarding
@@ -344,6 +350,7 @@ pub enum Event {
     BatchDeleted(Result<DeletionOutcome, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
+    TransientFilterSaved(Result<bool, String>),
     LanguageSaved(Result<LanguagePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
     WindowSizeSaved(Result<WindowSizePreference, String>),

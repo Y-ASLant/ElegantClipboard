@@ -20,6 +20,8 @@ Windows 优先，其他平台保留为后续目标。仓库使用单一根 Cargo
 
 限制：单条文本最多 1 MiB，富文本的 HTML、RTF 原始字节与纯文本合计最多 1 MiB；图片最多 2500 万像素、编码 PNG 最多 50 MiB；文件路径列表最多 256 项或 1 MiB，默认仅保存原路径；可在数据设置启用普通文件副本，单文件最多 50 MiB、暂存目录预算 256 MiB，不递归复制目录或链接，关闭后保留已有受引用副本。保留策略默认数量 10000、天数 0；显式保存后按各分组限制未置顶且非收藏记录，0 表示关闭相应限制，首次启用或收紧限制需要确认，旧配置不自动扩大清理范围。空白文本不保存。重复的完全相同文本移动到顶部，文字和换行原样保存。队列满时报告采集失败，不把不同复制事件主动合并成最后一条。
 
+2026-10-25 起的采集与存储扩展：监听线程在五类主格式之外用 `EnumClipboardFormats` 枚举全部原生格式（内置常量黑名单过滤 OLE/Shell/Chromium 内部格式、隐私标记与已由主采集表示的格式），逐条存入 `native_formats` 表（主键 item_id+format_name）；超过 64 KiB 的格式数据以内容寻址方式落盘 `blobs/<hash>`（zstd 压缩、pending→commit 两阶段），单格式 8 MiB、单次采集 32 MiB 上限，超限跳过并提示。复制历史记录时（Original 模式）额外格式随主格式写回剪贴板，富文本在单 guard 会话内 text→html→rtf→extras 顺序写入，纯文本路径以独立 NoClear 会话追加；图片 Original 复制改为单 guard 写 CF_HDROP（内容寻址 `image_tmp/<hash>.png`）+ CF_DIB（手工组 BITMAPINFOHEADER+自底向上 BGRA）+ PNG，可直接粘贴为图片文件，image_tmp 在 worker 启动时清扫（超过 24 小时或 64 个）。监听采集（deferred=true）先进 300ms 瞬时确认窗口：到期时序列号未变或被自身写回取代则入库，重读为空或内容不同则丢弃，重读失败顺延 250ms 最多 3 轮；测试与 smoke 注入 deferred=false 绕过窗口；开关 `gpui_transient_filter` 默认开启，在数据设置页切换。相同纯文本（text/url/html/rtf，默认分组）再次复制时合并进既有条目：补缺 html/rtf 列、仅 text 目标升级类型、byte_size 重算、置顶，并在 `content_hash_aliases` 记录别名；`touch_by_hash` 在默认分组作用域内解析别名。五个删除路径（单删/批删/清空当前组/清空全部/保留策略）在提交数据库行删除前收集 blob 引用与别名，提交后由 cleanup_media 回收无引用 blob 并用 purge_stale_aliases 兜底；GPUI 备份 v2 增加 blobs 资产类别与 missing_blobs 计数，恢复原样重放（文件名即内容哈希无需重映射）。HTML 条目的 `PreviewContent::Html`（优先 StartFragment 片段）在完整预览页与悬停浮窗用 gpui-kit `TextView::html` 渲染富排版（含本地图片；http(s) 远程图片不加载），列表卡片与搜索仍用纯文本，RTF 与缺 html_content 的旧数据回退纯文本，编辑路径不变。
+
 ## 依赖策略
 
 2026-09-27 已查询直接依赖的 crates.io 最新稳定版本，并将 gpui-kit 从 0.6.4 升至 0.6.6；其余直接依赖保持当前最新稳定版本。执行 `cargo update` 更新锁文件中的兼容间接依赖：

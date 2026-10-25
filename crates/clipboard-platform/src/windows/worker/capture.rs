@@ -2,7 +2,7 @@ use super::super::CapturedClipboard;
 use super::Worker;
 use crate::source_app;
 use anyhow::Result;
-use clipboard_core::{is_url_text, preferences::MonitorTypesPreference};
+use clipboard_core::{NativeFormatCapture, is_url_text, preferences::MonitorTypesPreference};
 
 impl Worker {
     pub(super) fn capture_files(&self, paths: &[String]) -> Result<i64> {
@@ -21,10 +21,12 @@ impl Worker {
         Ok(outcome.id)
     }
 
-    pub(super) fn handle_observed_capture(
+    pub(crate) fn handle_observed_capture(
         &mut self,
         content: CapturedClipboard,
+        extra: Vec<NativeFormatCapture>,
         source: Option<source_app::SourceApp>,
+        deferred: bool,
     ) -> Result<()> {
         let excluded = self.app_filter.excludes(
             source.as_ref().map(|app| app.name.as_str()),
@@ -60,6 +62,22 @@ impl Worker {
             self.history
                 .set_source_app(id, &source.name, icon.as_deref())?;
         }
+        if let Some(id) = id
+            && !extra.is_empty()
+        {
+            let skips = self.history.attach_native_formats(id, extra)?;
+            if !skips.is_empty() {
+                let names: Vec<String> = skips
+                    .iter()
+                    .map(|skip| format!("{}（{}）", skip.name, skip.reason))
+                    .collect();
+                self.send_event(super::Event::Status(format!(
+                    "部分原生格式未保存：{}",
+                    names.join("、")
+                )))?;
+            }
+        }
+        let _ = deferred;
         Ok(())
     }
 }

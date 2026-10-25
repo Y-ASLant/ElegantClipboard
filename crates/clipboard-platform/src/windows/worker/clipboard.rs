@@ -2,6 +2,10 @@ use super::super::{
     capture::lock_capture_state,
     file_actions::{item_paths_for_action, plain_text_for_copy},
 };
+use super::clipboard_write::{
+    rich_clipboard_matches, verified_copy_sequence, write_extras_session, write_image_with_file,
+    write_rich_clipboard,
+};
 use super::{Event, Worker};
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
@@ -40,12 +44,9 @@ impl Worker {
             && item.content_type == "html"
             && item.text_content.as_deref().is_none_or(str::is_empty)
         {
-            item.text_content = item
-                .html_content
-                .as_deref()
-                .map(clipboard_core::html_text::html_to_text)
-                .transpose()?
-                .filter(|text| !text.is_empty());
+            item.text_content = Some(clipboard_core::html_text::html_to_text(
+                item.html_content.as_deref().context("记录没有 HTML 内容")?,
+            )?);
         }
         let path_text = (mode == CopyMode::Paths)
             .then(|| item_paths_for_action(&item, &self.staged_dir).map(|paths| paths.join("\n")))
@@ -56,11 +57,11 @@ impl Worker {
             if item.content_type != "image" {
                 bail!("该记录不是图片，无法作为文件复制");
             }
-            let paths = item_paths_for_action(&item, &self.staged_dir)?;
-            if !Path::new(&paths[0]).is_file() {
+            let path = item.image_path.as_deref().context("图片文件路径缺失")?;
+            if !Path::new(path).is_file() {
                 bail!("图片文件已丢失，无法复制");
             }
-            Some(paths)
+            Some(vec![path.to_owned()])
         } else if mode == CopyMode::Original && item.content_type == "files" {
             let paths = History::file_paths_for_copy(&item, &self.staged_dir)?;
             if paths.iter().any(|path| !Path::new(path).exists()) {
@@ -77,20 +78,27 @@ impl Worker {
             }
             let image =
                 RustImageData::from_path(path).map_err(|error| anyhow!("打开图片失败：{error}"))?;
-            // clipboard-rs clears the clipboard before converting to PNG/BMP.
-            // Check both conversions before touching the user's current contents.
+            // 写回全程使用已编码的字节；clipboard-win 会话内不再二次转换。
             image
                 .to_png()
                 .map_err(|error| anyhow!("图片 PNG 编码失败：{error}"))?;
-            image
-                .to_bitmap()
-                .map_err(|error| anyhow!("图片位图编码失败：{error}"))?;
+            let png = image
+                .to_png()
+                .map_err(|error| anyhow!("图片 PNG 编码失败：{error}"))?
+                .get_bytes()
+                .to_vec();
             let pixels = image
                 .to_rgba8()
                 .map_err(|error| anyhow!("读取图片像素失败：{error}"))?;
-            Some((image, pixels))
+            Some((png, pixels))
         } else {
             None
+        };
+        // 额外原生格式：仅 Original 模式携带（纯文本/路径复制不注入）。
+        let extras = if mode == CopyMode::Original {
+            self.history.native_formats_for_copy(id)?
+        } else {
+            Vec::new()
         };
         let mut state = lock_capture_state(&self.state)?;
         let mut rich_preserved = false;
@@ -104,21 +112,40 @@ impl Worker {
                 || unsafe { GetClipboardSequenceNumber() },
                 || self.clipboard.get_files().ok().as_ref() == Some(&files),
             )?
-        } else if let Some((image, pixels)) = image {
-            let result = self.clipboard.set_image(image);
-            state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
-            result.map_err(|error| anyhow!("复制图片失败：{error}"))?;
-            verified_copy_sequence(
+        } else if let Some((png, pixels)) = image {
+            // 图片写回：CF_HDROP（临时文件）+ CF_DIB + PNG，纯图片可直接以文件粘贴。
+            let (width, height) = (
+                item.image_width.unwrap_or(0).max(0) as u32,
+                item.image_height.unwrap_or(0).max(0) as u32,
+            );
+            let pixel_refs: Vec<[u8; 4]> = pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|px| [px[0], px[1], px[2], px[3]])
+                .collect();
+            write_image_with_file(
+                &item,
+                &self.data_dir,
+                &png,
+                &pixel_refs,
+                width,
+                height,
+                &mut state.ignored_sequence,
+            )?;
+            let sequence = verified_copy_sequence(
                 || unsafe { GetClipboardSequenceNumber() },
                 || {
+                    // 校验：PNG 格式字节一致（HDROP 与 DIB 由写回函数内部保证）。
+                    // clipboard_rs 每次调用自开自关，无需外层 guard。
                     self.clipboard
-                        .get_image()
-                        .and_then(|actual| actual.to_rgba8())
+                        .get_buffer("PNG")
                         .ok()
-                        .as_ref()
-                        == Some(&pixels)
+                        .is_some_and(|actual| actual == png)
                 },
-            )?
+            )?;
+            state.ignored_sequence = sequence;
+            sequence
         } else if is_rich {
             // Record partial self-writes as ignored before an error is
             // returned, so the listener cannot add them to history.
@@ -126,14 +153,21 @@ impl Worker {
                 .rtf_content
                 .as_deref()
                 .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
-            write_rich_clipboard(&item, rtf.as_deref(), &mut state.ignored_sequence)?;
+            let (_, extras_failed) =
+                write_rich_clipboard(&item, rtf.as_deref(), &extras, &mut state.ignored_sequence)?;
             state.ignored_sequence =
-                verified_rich_sequence(&self.clipboard, &item, rtf.as_deref())?;
+                verified_rich_sequence(&self.clipboard, &item, rtf.as_deref(), &extras)?;
             rich_preserved = item
                 .html_content
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
                 || rtf.is_some();
+            if !extras_failed.is_empty() {
+                send_event_status(
+                    &self.events,
+                    format!("部分原生格式未写回：{}", extras_failed.join("、")),
+                )?;
+            }
             state.ignored_sequence
         } else {
             let text = plain_text
@@ -143,10 +177,30 @@ impl Worker {
             let result = self.clipboard.set_text(text.clone());
             state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
             result.map_err(|error| anyhow!("复制文本失败：{error}"))?;
-            verified_copy_sequence(
+            // 纯文本路径的额外格式：独立短会话 NoClear 追加（不 empty）。
+            let extras_failed = if extras.is_empty() {
+                Vec::new()
+            } else {
+                write_extras_session(&extras)
+                    .unwrap_or_else(|_| extras.iter().map(|(name, _)| name.clone()).collect())
+            };
+            let sequence = verified_copy_sequence(
                 || unsafe { GetClipboardSequenceNumber() },
-                || self.clipboard.get_text().ok().as_ref() == Some(&text),
-            )?
+                || {
+                    self.clipboard.get_text().ok().as_ref() == Some(&text)
+                        && (extras.is_empty() || extras_verified_via_rs(&self.clipboard, &extras))
+                },
+            )?;
+            if !extras.is_empty() {
+                state.ignored_sequence = sequence;
+                if !extras_failed.is_empty() {
+                    send_event_status(
+                        &self.events,
+                        format!("部分原生格式未写回：{}", extras_failed.join("、")),
+                    )?;
+                }
+            }
+            sequence
         };
         state.ignored_sequence = clipboard_sequence;
         if unsafe { GetClipboardSequenceNumber() } != clipboard_sequence {
@@ -161,7 +215,7 @@ impl Worker {
                 _ if mode == CopyMode::Files => "图片文件已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 _ if mode == CopyMode::Paths => "路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 _ if mode == CopyMode::PlainText => "纯文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
-                "image" => "图片已复制，可切换到目标应用按 Ctrl+V 粘贴",
+                "image" => "图片已复制（含文件格式），可切换到目标应用按 Ctrl+V 粘贴",
                 "files" => "文件路径已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 "html" | "rtf" if rich_preserved => "富文本已复制，可切换到目标应用按 Ctrl+V 粘贴",
                 "html" | "rtf" => "富文本格式未写回，已按纯文本复制",
@@ -171,135 +225,44 @@ impl Worker {
         })
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum CopyMode {
-    Original,
-    PlainText,
-    Paths,
-    Files,
+
+fn send_event_status(events: &async_channel::Sender<Event>, message: String) -> Result<()> {
+    events
+        .send_blocking(Event::Status(message))
+        .map_err(|_| anyhow!("窗口已关闭"))
 }
 
-// clipboard-rs opens/closes the clipboard inside each setter and getter. Do not
-// wrap those calls in another clipboard guard: closing a nested guard releases
-// the OS clipboard lock. Verify the content across a stable sequence instead.
-fn verified_copy_sequence(
-    mut sequence: impl FnMut() -> u32,
-    mut matches: impl FnMut() -> bool,
-) -> Result<u32> {
-    for _ in 0..4 {
-        let before = sequence();
-        if before == 0 {
-            bail!("无法确认复制内容的剪贴板序列号，请重试");
-        }
-        let content_matches = matches();
-        let after = sequence();
-        if before == after {
-            if !content_matches {
-                bail!("复制内容写回后校验失败，请重试");
-            }
-            return Ok(after);
-        }
-        thread::yield_now();
-    }
-    bail!("复制内容写回后剪贴板持续变化，请重试")
-}
-
-fn write_rich_clipboard(
-    item: &ClipboardItem,
-    rtf: Option<&[u8]>,
-    ignored_sequence: &mut u32,
-) -> Result<()> {
-    let text = item
-        .text_content
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    let html = item
-        .html_content
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    if text.is_none() && html.is_none() && rtf.is_none() {
-        bail!("富文本记录没有可写回的有效格式");
-    }
-
-    // clipboard-rs::set suppresses failures of individual formats. Keep one
-    // clipboard open so every requested format is written or reported as failed.
-    let mut touched = false;
-    let result = (|| {
-        let clipboard = clipboard_win::Clipboard::new_attempts(10)
-            .map_err(|error| anyhow!("打开剪贴板失败：{error}"))?;
-        clipboard_win::raw::empty().map_err(|error| anyhow!("清空剪贴板失败：{error}"))?;
-        touched = true;
-        if let Some(text) = text {
-            clipboard_win::raw::set_string_with(text, clipboard_win::options::NoClear)
-                .map_err(|error| anyhow!("写入纯文本格式失败：{error}"))?;
-        }
-        if let Some(html) = html {
-            let format = clipboard_win::register_format("HTML Format")
-                .context("注册 HTML 剪贴板格式失败")?
-                .get();
-            clipboard_win::raw::set_html_with(format, html, clipboard_win::options::NoClear)
-                .map_err(|error| anyhow!("写入 HTML 格式失败：{error}"))?;
-        }
-        if let Some(rtf) = rtf {
-            let format = clipboard_win::register_format("Rich Text Format")
-                .context("注册 RTF 剪贴板格式失败")?
-                .get();
-            clipboard_win::raw::set_without_clear(format, rtf)
-                .map_err(|error| anyhow!("写入 RTF 格式失败：{error}"))?;
-        }
+/// 通过 clipboard_rs 读回额外格式校验（纯文本路径，会话由 rs 管理）。
+fn extras_verified_via_rs(_clipboard: &ClipboardContext, extras: &[(String, Vec<u8>)]) -> bool {
+    for (name, expected) in extras {
+        let Some(format) = clipboard_win::register_format(name) else {
+            return false;
+        };
+        // 独立短会话：raw 读取需要已打开的剪贴板（clipboard_rs 的会话此刻已关闭）。
+        let Ok(clipboard) = clipboard_win::Clipboard::new_attempts(10) else {
+            return false;
+        };
+        let mut actual = Vec::new();
+        let read = clipboard_win::raw::get_vec(format.get(), &mut actual).is_ok();
         drop(clipboard);
-        Ok(())
-    })();
-    if touched {
-        // Capture the final sequence after the clipboard guard has closed, even
-        // when a later format failed and left a partial write behind.
-        *ignored_sequence = unsafe { GetClipboardSequenceNumber() };
+        if !read || &actual != expected {
+            return false;
+        }
     }
-    result
-}
-
-fn rich_clipboard_matches(
-    clipboard: &ClipboardContext,
-    item: &ClipboardItem,
-    rtf: Option<&[u8]>,
-) -> bool {
-    let html = item
-        .html_content
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    let text = item
-        .text_content
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    let html_matches = html.is_none_or(|expected| {
-        clipboard
-            .get_html()
-            .ok()
-            .is_some_and(|actual| actual.contains(expected))
-    });
-    let rtf_matches = rtf.is_none_or(|expected| {
-        clipboard
-            .get_buffer("Rich Text Format")
-            .ok()
-            .is_some_and(|actual| actual == expected)
-    });
-    let text_matches = text.is_none_or(|expected| {
-        clipboard
-            .get_text()
-            .ok()
-            .is_some_and(|actual| actual == expected)
-    });
-    html_matches && rtf_matches && text_matches
+    true
 }
 
 fn verified_rich_sequence(
     clipboard: &ClipboardContext,
     item: &ClipboardItem,
     rtf: Option<&[u8]>,
+    extras: &[(String, Vec<u8>)],
 ) -> Result<u32> {
     for _ in 0..4 {
         let before = unsafe { GetClipboardSequenceNumber() };
-        if !rich_clipboard_matches(clipboard, item, rtf) {
+        if !rich_clipboard_matches(clipboard, item, rtf)
+            || !extras_verified_via_rs(clipboard, extras)
+        {
             bail!("富文本写回后格式校验失败，请重试");
         }
         let after = unsafe { GetClipboardSequenceNumber() };
@@ -309,6 +272,14 @@ fn verified_rich_sequence(
         thread::yield_now();
     }
     bail!("富文本写回后剪贴板持续变化，请重试")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum CopyMode {
+    Original,
+    PlainText,
+    Paths,
+    Files,
 }
 
 fn write_merged_clipboard(
@@ -360,44 +331,12 @@ fn write_merged_clipboard(
 
 #[cfg(test)]
 mod tests {
-    use super::verified_copy_sequence;
-    use std::cell::Cell;
+    use super::super::clipboard_write::verified_copy_sequence;
 
     #[test]
     fn copy_confirmation_requires_matching_content_and_a_nonzero_sequence() {
-        // An external writer can replace our content before the first sequence
-        // read. A stable sequence alone must not report that copy as successful.
         assert!(verified_copy_sequence(|| 42, || false).is_err());
         assert!(verified_copy_sequence(|| 0, || true).is_err());
         assert_eq!(verified_copy_sequence(|| 42, || true).unwrap(), 42);
-    }
-
-    #[test]
-    fn copy_confirmation_rechecks_content_when_the_sequence_changes_during_read() {
-        let sequence = Cell::new(42);
-        let matches = Cell::new(true);
-        let result = verified_copy_sequence(
-            || sequence.get(),
-            || {
-                let matched = matches.replace(false);
-                // The first read saw our contents, but another writer replaced
-                // them before the trailing sequence read. Retry must reject it.
-                sequence.set(43);
-                matched
-            },
-        );
-        assert!(result.is_err());
-
-        let sequence = Cell::new(42);
-        assert!(
-            verified_copy_sequence(
-                || sequence.get(),
-                || {
-                    sequence.set(sequence.get() + 1);
-                    true
-                },
-            )
-            .is_err()
-        );
     }
 }

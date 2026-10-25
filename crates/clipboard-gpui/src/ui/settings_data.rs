@@ -1,9 +1,40 @@
+use super::settings_common::command_checkbox;
 use super::settings_common::owner_state;
 use super::*;
 use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::{alert::Alert, checkbox::Checkbox, dialog::DialogFooter};
 
 impl SettingsWindowView {
+    pub(super) fn settings_transient_filter_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
+            return div().into_any_element();
+        };
+        let language = owner_state.language;
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(command_checkbox(
+                "transient-filter",
+                tr(
+                    language,
+                    "过滤瞬时复制内容（推荐开启）",
+                    "Filter transient copies (recommended)",
+                ),
+                owner_state.transient_filter.value,
+                owner_state.transient_filter.pending,
+                &self.owner,
+                Command::SetTransientFilter,
+                |owner| owner.transient_filter.pending = true,
+            ))
+            .child(div().text_xs().child(tr(
+                language,
+                "复制后 300ms 内被撤销或覆盖的内容（划词工具临时复制、表格单元格碎片）不再进入历史。复制后立即从本应用粘贴不受影响。",
+                "Content undone or replaced within 300ms of copying (selection-tool flashes, spreadsheet fragments) no longer enters history. Pasting from this app right after copying is unaffected.",
+            )))
+            .into_any_element()
+    }
+
     pub(super) fn settings_monitor_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();

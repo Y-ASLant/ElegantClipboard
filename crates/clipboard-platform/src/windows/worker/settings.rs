@@ -78,6 +78,18 @@ impl Worker {
         self.send_event(Event::AppFilterSaved(result))
     }
 
+    pub(super) fn handle_set_transient_filter(&mut self, enabled: bool) -> Result<()> {
+        let result = self
+            .preferences
+            .set_transient_filter(enabled)
+            .map(|_| {
+                self.transient.set_enabled(enabled);
+                enabled
+            })
+            .map_err(|error| error.to_string());
+        self.send_event(Event::TransientFilterSaved(result))
+    }
+
     pub(super) fn handle_pause(&mut self, paused: bool) -> Result<()> {
         self.preferences
             .set_capture_paused(paused)

@@ -4,6 +4,7 @@ mod file_actions;
 mod privacy;
 mod protocol;
 mod queue;
+mod read_formats;
 mod service;
 mod worker;
 

@@ -23,6 +23,12 @@ pub fn decode_rtf_for_clipboard(stored: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// 存储编码：去掉 NUL 终止符后 base64（同 capture_rich 的 rtf_content 规则）。
+pub(crate) fn encode_rtf_for_storage(raw: &[u8]) -> String {
+    let raw = raw.strip_suffix(&[0]).unwrap_or(raw);
+    format!("{RTF_B64_PREFIX}{}", STANDARD.encode(raw))
+}
+
 impl History {
     pub fn capture_rich(
         &self,
@@ -68,6 +74,23 @@ impl History {
         let hash = hasher.finalize().to_hex().to_string();
         if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
             return Ok(id);
+        }
+        // 同文合并：默认分组内已有相同纯文本的条目时并入而不新建。
+        if let Some(text) = text
+            && let Some(target) = self.find_same_text_item(text)?
+        {
+            let input = crate::same_text::MergeInput {
+                content_type: if html.is_some() {
+                    ContentType::Html
+                } else {
+                    ContentType::Rtf
+                },
+                html,
+                rtf,
+                text: Some(text),
+                hash: hash.clone(),
+            };
+            return self.merge_same_text(&target, &input, Some(images_dir));
         }
         let rtf_content = rtf.map(|raw| {
             let raw = raw.strip_suffix(&[0]).unwrap_or(raw);
@@ -129,7 +152,7 @@ mod tests {
         );
         assert_eq!(
             history.preview_content(id)?,
-            PreviewContent::RichText("中文😀".into())
+            PreviewContent::Html("<b>中文😀</b>".into())
         );
         assert_eq!(history.list("中文", PAGE_SIZE, false)?[0].id, id);
         Ok(())

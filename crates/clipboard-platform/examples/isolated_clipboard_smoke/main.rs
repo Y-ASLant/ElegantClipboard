@@ -227,7 +227,7 @@ fn main() -> anyhow::Result<()> {
             Ok(Event::Preview { result, .. }) => {
                 assert_eq!(
                     result.map_err(|error| anyhow!(error))?,
-                    PreviewContent::RichText("rich smoke".into())
+                    PreviewContent::Html("<b>rich smoke</b>".into())
                 );
                 break;
             }
@@ -424,7 +424,17 @@ fn main() -> anyhow::Result<()> {
     }
     println!("capture error isolation ok");
 
+    native_format_roundtrip(&service, &events, &clipboard, directory.path())?;
+    println!("native format fidelity roundtrip ok");
+    transient_filtering(&service, &events, &clipboard, directory.path())?;
+    println!("transient window filtering ok");
+
     drop(service);
     println!("isolated clipboard roundtrip passed");
     Ok(())
 }
+
+/// 原生格式保真与瞬时过滤场景（拆分自本文件，保持 500 行限制）。
+mod scenarios;
+
+use scenarios::{native_format_roundtrip, transient_filtering};

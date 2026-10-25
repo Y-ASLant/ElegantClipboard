@@ -1,6 +1,7 @@
 //! Shared clipboard-history use cases. No dependency on a desktop UI or platform API.
 pub mod backup;
 pub(crate) mod backup_common;
+mod blob_store;
 pub(crate) mod clipboard;
 pub mod database;
 mod editing;
@@ -12,15 +13,38 @@ mod image;
 pub mod import;
 pub mod legacy_backup;
 mod merge;
+pub(crate) mod native_format;
 pub mod preferences;
+pub(crate) mod preview;
 mod reorder;
 pub mod retention;
 pub mod rich;
+pub(crate) mod same_text;
 pub mod search;
 pub use file_staging::{FileCaptureOutcome, MAX_STAGED_DIRECTORY_BYTES, MAX_STAGED_FILE_BYTES};
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
 pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
 pub use merge::MergedContent;
+pub use native_format::NativeFormatCapture;
+pub use preview::{FilePreviewEntry, PreviewContent};
+
+/// 平台层采集与写回使用的原生格式限额。
+pub mod native_format_public {
+    pub use crate::native_format::{
+        MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES, NATIVE_INLINE_MAX_BYTES,
+        valid_format_name,
+    };
+}
+
+/// 平台层启动清扫使用的 blob 存储入口。
+pub mod blob_store_public {
+    pub use crate::blob_store::{BlobStore, sweep_pending_at};
+}
+
+/// 计算数据目录对应的 blob 存储根目录。
+pub fn blob_root_for(db_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    db_path.parent().map(|parent| parent.join("blobs"))
+}
 
 use anyhow::{Context, Result, bail};
 use database::{
@@ -58,25 +82,6 @@ impl ContentCategory {
 pub struct History {
     repo: ClipboardRepository,
     db: Database,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FilePreviewEntry {
-    pub original_path: String,
-    pub resolved_path: String,
-    pub exists: bool,
-    pub is_dir: bool,
-    pub size: Option<u64>,
-    pub recovered: bool,
-    pub metadata_error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreviewContent {
-    Text(String),
-    Image(PathBuf),
-    Files(Vec<FilePreviewEntry>),
-    RichText(String),
 }
 
 impl History {
@@ -242,6 +247,17 @@ impl History {
         if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
             return Ok(Some(id));
         }
+        // 同文合并：默认分组内已有相同纯文本的条目时并入而不新建。
+        if let Some(target) = self.find_same_text_item(text)? {
+            let input = same_text::MergeInput {
+                content_type,
+                html: None,
+                rtf: None,
+                text: Some(text),
+                hash,
+            };
+            return Ok(Some(self.merge_same_text(&target, &input, images_dir)?));
+        }
         let id = self.repo.insert(NewClipboardItem {
             content_type,
             text_content: Some(text.to_owned()),
@@ -352,49 +368,6 @@ impl History {
             bail!("数据库日志正在使用，无法完成空间回收");
         }
         Ok(())
-    }
-
-    pub fn preview_content(&self, id: i64) -> Result<PreviewContent> {
-        self.preview_content_inner(id, None)
-    }
-
-    pub fn preview_content_with_staged(
-        &self,
-        id: i64,
-        staged_dir: &Path,
-    ) -> Result<PreviewContent> {
-        self.preview_content_inner(id, Some(staged_dir))
-    }
-
-    fn preview_content_inner(&self, id: i64, staged_dir: Option<&Path>) -> Result<PreviewContent> {
-        let item = self.item(id)?;
-        if item.content_type == "files" {
-            return Ok(PreviewContent::Files(Self::file_preview_entries(
-                &item, staged_dir,
-            )?));
-        }
-        if matches!(item.content_type.as_str(), "html" | "rtf") {
-            return Ok(PreviewContent::RichText(
-                item.text_content
-                    .or(item.preview)
-                    .unwrap_or_else(|| "[富文本内容，无纯文本预览]".into()),
-            ));
-        }
-        if item.content_type == "image" {
-            let path = PathBuf::from(
-                item.image_path
-                    .ok_or_else(|| anyhow::anyhow!("图片路径缺失"))?,
-            );
-            if !path.is_file() {
-                bail!("图片文件已丢失，无法预览");
-            }
-            Ok(PreviewContent::Image(path))
-        } else {
-            Ok(PreviewContent::Text(
-                item.text_content
-                    .ok_or_else(|| anyhow::anyhow!("记录没有可预览的文本"))?,
-            ))
-        }
     }
 
     pub fn delete(&self, id: i64) -> Result<()> {

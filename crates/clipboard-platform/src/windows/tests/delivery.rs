@@ -57,6 +57,8 @@ fn enqueue_observed_text(service: &Service, text: String) -> Result<()> {
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text(text),
         source: None,
+        extra: Vec::new(),
+        deferred: false,
     })
 }
 

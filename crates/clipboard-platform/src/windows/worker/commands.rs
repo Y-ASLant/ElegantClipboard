@@ -44,8 +44,13 @@ impl Worker {
                 self.history
                     .capture_image(&png, width, height, &self.images_dir)?;
             }
-            Command::ObservedCapture { content, source } => {
-                self.handle_observed_capture(content, source)?;
+            Command::ObservedCapture {
+                content,
+                source,
+                extra,
+                deferred,
+            } => {
+                self.handle_observed_capture(content, extra, source, deferred)?;
                 self.snapshot_pending = true;
                 return self.flush_capture_snapshot();
             }
@@ -325,6 +330,9 @@ impl Worker {
             }
             Command::SetMonitorTypes(preference) => {
                 return self.handle_set_monitor_types(preference);
+            }
+            Command::SetTransientFilter(enabled) => {
+                return self.handle_set_transient_filter(enabled);
             }
             Command::SetAppFilter(preference) => return self.handle_set_app_filter(preference),
             Command::SetWindowEffect(preference) => {

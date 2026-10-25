@@ -31,6 +31,7 @@ serde_json = "1.0.151"
 tempfile = "3.27.0"
 tracing = "0.1.44"
 windows = "0.62.2"
+zstd = "0.14"
 zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [profile.dev]

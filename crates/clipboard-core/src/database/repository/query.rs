@@ -12,6 +12,23 @@ impl ClipboardRepository {
         .optional()
     }
 
+    /// 默认分组内文本内容精确相等的最新文本类条目（同文合并用）。
+    pub fn find_same_text_item(
+        &self,
+        text: &str,
+    ) -> Result<Option<ClipboardItem>, rusqlite::Error> {
+        let conn = self.read_conn.lock();
+        conn.query_row(
+            "SELECT * FROM clipboard_items
+             WHERE text_content = ?1 AND group_id IS NULL
+               AND content_type IN ('text','url','html','rtf')
+             ORDER BY sort_order DESC, created_at DESC, id DESC LIMIT 1",
+            params![text],
+            Self::row_to_item,
+        )
+        .optional()
+    }
+
     /// Resolve a quick-paste slot without loading the item's contents.
     pub fn get_id_by_position(
         &self,

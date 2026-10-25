@@ -1,5 +1,5 @@
 use super::{ClipboardRepository, NewClipboardItem};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use tracing::debug;
 
 impl ClipboardRepository {
@@ -80,31 +80,57 @@ impl ClipboardRepository {
             conn.query_row(&select_sql, params![hash], |row| row.get(0))
         };
 
-        match target_id {
-            Ok(id) => {
-                let max_sort_order: i64 = conn
+        let target_id = match target_id {
+            Ok(id) => id,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // 同文合并别名：默认分组作用域下把别名哈希解析为规范哈希重查一次。
+                if group_id.is_some() {
+                    return Ok(None);
+                }
+                let canonical: Option<String> = conn
                     .query_row(
-                        "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
-                        [],
+                        "SELECT canonical_hash FROM content_hash_aliases WHERE alias_hash = ?1",
+                        params![hash],
                         |row| row.get(0),
                     )
-                    .unwrap_or(0);
-                let new_sort = max_sort_order + 1;
-
-                conn.execute(
-                    "UPDATE clipboard_items \
-                     SET access_count = access_count + 1, \
-                         last_accessed_at = datetime('now', 'localtime'), \
-                         updated_at = datetime('now', 'localtime'), \
-                         sort_order = ?1 \
-                     WHERE id = ?2",
-                    params![new_sort, id],
-                )?;
-                Ok(Some(id))
+                    .optional()?;
+                let Some(canonical) = canonical else {
+                    return Ok(None);
+                };
+                match conn.query_row(
+                    "SELECT id FROM clipboard_items \
+                     WHERE content_hash = ?1 AND group_id IS NULL \
+                     ORDER BY sort_order DESC, created_at DESC, id DESC LIMIT 1",
+                    params![canonical],
+                    |row| row.get(0),
+                ) {
+                    Ok(id) => id,
+                    Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+                    Err(error) => return Err(error),
+                }
             }
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(e),
-        }
+            Err(error) => return Err(error),
+        };
+
+        let max_sort_order: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM clipboard_items",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        let new_sort = max_sort_order + 1;
+
+        conn.execute(
+            "UPDATE clipboard_items \
+             SET access_count = access_count + 1, \
+                 last_accessed_at = datetime('now', 'localtime'), \
+                 updated_at = datetime('now', 'localtime'), \
+                 sort_order = ?1 \
+             WHERE id = ?2",
+            params![new_sort, target_id],
+        )?;
+        Ok(Some(target_id))
     }
 
     pub fn set_source_app(

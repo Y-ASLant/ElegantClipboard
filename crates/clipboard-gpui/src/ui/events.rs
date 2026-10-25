@@ -208,6 +208,7 @@ impl ClipboardView {
             Event::DisplaySaved(result) => self.apply_display_saved(result, window, cx),
             Event::AudioSaved(result) => self.apply_audio_saved(result),
             Event::StageFilesSaved(result) => self.apply_stage_files_saved(result),
+            Event::TransientFilterSaved(result) => self.apply_transient_filter_saved(result),
             Event::MonitorTypesSaved(result) => self.apply_monitor_types_saved(result),
             Event::AppFilterSaved(result) => self.apply_app_filter_saved(result),
             Event::RunningApps(apps) => {

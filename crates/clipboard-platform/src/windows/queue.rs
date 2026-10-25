@@ -38,7 +38,13 @@ impl Default for CommandQueue {
 }
 
 fn capture_bytes(command: &Command) -> Option<usize> {
-    let Command::ObservedCapture { content, source } = command else {
+    let Command::ObservedCapture {
+        content,
+        source,
+        extra,
+        ..
+    } = command
+    else {
         return None;
     };
     let bytes = match content {
@@ -53,7 +59,10 @@ fn capture_bytes(command: &Command) -> Option<usize> {
                 + paths.iter().map(String::capacity).sum::<usize>()
         }
         CapturedClipboard::Image { png, .. } => png.capacity(),
-    };
+    } + extra
+        .iter()
+        .map(|capture| capture.name.capacity() + capture.data.capacity())
+        .sum::<usize>();
     Some(
         bytes
             + source.as_ref().map_or(0, |source| {
@@ -210,6 +219,8 @@ mod tests {
         Command::ObservedCapture {
             content: CapturedClipboard::Text(text.into()),
             source: None,
+            extra: Vec::new(),
+            deferred: false,
         }
     }
 

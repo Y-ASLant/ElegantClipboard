@@ -1,3 +1,4 @@
+use super::window_effect_apply::apply_window_effect_to_open_windows;
 use super::*;
 
 impl<T> PendingPref<T> {
@@ -451,21 +452,21 @@ impl ClipboardView {
         );
         true
     }
-}
 
-/// Only an effective material change reconfigures native windows; tint changes just repaint.
-fn apply_window_effect_to_open_windows(
-    effect: WindowEffect,
-    window: &mut Window,
-    cx: &mut Context<ClipboardView>,
-) {
-    acrylic::apply(effect, window);
-    let current = window.window_handle().window_id();
-    for handle in cx.windows() {
-        if handle.window_id() == current {
-            continue;
-        }
-        let _ = handle.update(cx, |_, window, _| acrylic::apply(effect, window));
+    pub(super) fn apply_transient_filter_saved(&mut self, result: Result<bool, String>) -> bool {
+        self.acknowledge_save(
+            result,
+            |this| &mut this.transient_filter,
+            (
+                "瞬时内容过滤设置已保存",
+                "Transient filtering setting saved",
+            ),
+            (
+                "保存瞬时内容过滤设置失败",
+                "Failed to save transient filtering setting",
+            ),
+        );
+        true
     }
 }
 
