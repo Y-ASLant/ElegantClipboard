@@ -92,9 +92,14 @@ impl History {
         let (image_path, file_payload, content_hash) = item
             .map(|item| (item.image_path, item.file_payload, item.content_hash))
             .unwrap_or_default();
-        let blobs = self.detach_native_formats(&[id])?;
-        self.delete_aliases(&[content_hash])?;
-        self.repo.delete(id)?;
+        let connection = self.db.write_connection();
+        let mut connection = connection.lock();
+        let tx = connection.transaction()?;
+        let blobs = crate::native_format::detach_rows_in_transaction(&tx, &[id])?;
+        crate::native_format::delete_aliases_in_transaction(&tx, &[content_hash])?;
+        tx.execute("DELETE FROM clipboard_items WHERE id = ?1", [id])?;
+        tx.commit()?;
+        drop(connection);
         Ok(DeletionOutcome {
             deleted,
             cleanup_warning: self.cleanup_media(
@@ -174,9 +179,8 @@ impl History {
     ) -> Result<DeletionOutcome> {
         let candidates = self.repo.get_clearable_image_paths(group_id, None)?;
         let staged = self.repo.get_clearable_file_payloads(group_id, None)?;
-        let (blobs, hashes) = self.clear_native_by_clearable_condition(group_id)?;
-        // 清空历史已提交数据库行（clear_history 内删除），别名清理随后进行。
-        self.delete_aliases(&hashes)?;
+        // clear_native_in_transaction 事务内已删除别名；此处只需 blob 引用。
+        let (blobs, _) = self.clear_native_by_clearable_condition(group_id)?;
         let deleted = self.repo.clear_history(group_id, None)?;
         Ok(DeletionOutcome {
             deleted,
@@ -228,11 +232,7 @@ impl History {
             return Ok(());
         }
         let used = self.referenced_blob_hashes()?;
-        let unreferenced: Vec<String> = candidates
-            .into_iter()
-            .filter(|hash| !used.contains(hash))
-            .collect();
-        if unreferenced.is_empty() {
+        if candidates.iter().all(|hash| used.contains(hash)) {
             return Ok(());
         }
         let root = self.blob_root()?;
@@ -294,22 +294,24 @@ pub(crate) fn remove_media_file(path: &Path) -> Result<()> {
     }
 }
 
-struct SavedImage {
-    path: PathBuf,
+pub struct SavedImage {
+    pub path: PathBuf,
     created: bool,
 }
 
-fn save_png(png: &[u8], hash: &str, images_dir: &Path) -> Result<SavedImage> {
-    std::fs::create_dir_all(images_dir).context("无法创建图片目录")?;
-    let images_dir = std::fs::canonicalize(images_dir)?;
-    let path = images_dir.join(format!("{hash}.png"));
+/// 内容寻址 PNG 原子落盘：目标已存在则复用，写失败不残留临时文件。
+/// 供图片采集（images_dir）与平台层图片回贴临时文件共用。
+pub fn save_png(png: &[u8], hash: &str, dir: &Path) -> Result<SavedImage> {
+    std::fs::create_dir_all(dir).context("无法创建图片目录")?;
+    let dir = std::fs::canonicalize(dir)?;
+    let path = dir.join(format!("{hash}.png"));
     if path.is_file() {
         return Ok(SavedImage {
             path,
             created: false,
         });
     }
-    let mut temporary = tempfile::NamedTempFile::new_in(&images_dir)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(&dir)?;
     temporary.write_all(png)?;
     temporary.flush()?;
     temporary.as_file().sync_all()?;

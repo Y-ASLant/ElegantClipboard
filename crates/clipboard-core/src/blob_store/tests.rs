@@ -37,13 +37,10 @@ fn commit_is_idempotent_when_target_exists() -> Result<()> {
 fn garbage_collection_keeps_referenced_and_removes_unreferenced() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let store = BlobStore::new(directory.path().join("blobs"));
-    let (kept, _) = store.write_pending(b"kept")?;
-    store.commit(&kept, &store.root().join(format!(".pending-{kept}.tmp")))?;
-    let (dropped, _) = store.write_pending(b"dropped")?;
-    store.commit(
-        &dropped,
-        &store.root().join(format!(".pending-{dropped}.tmp")),
-    )?;
+    let (kept, kept_pending) = store.write_pending(b"kept")?;
+    store.commit(&kept, &kept_pending)?;
+    let (dropped, dropped_pending) = store.write_pending(b"dropped")?;
+    store.commit(&dropped, &dropped_pending)?;
     let removed = store.collect_garbage(&HashSet::from([kept.clone()]))?;
     assert_eq!(removed, vec![dropped.clone()]);
     assert!(store.path(&kept).is_file());

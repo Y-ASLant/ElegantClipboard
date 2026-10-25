@@ -22,7 +22,7 @@ fn entry(sequence: u32, value: &str, now: Instant) -> PendingCapture {
 fn delivered(outcomes: &[(PendingCapture, PollOutcome)]) -> usize {
     outcomes
         .iter()
-        .filter(|(_, outcome)| matches!(outcome, PollOutcome::Deliver(())))
+        .filter(|(_, outcome)| matches!(outcome, PollOutcome::Deliver))
         .count()
 }
 
@@ -124,11 +124,11 @@ fn overflow_flushes_oldest_entry() {
 }
 
 #[test]
-fn drain_returns_all_pending() {
+fn drain_clears_all_pending() {
     let mut window = TransientWindow::new(true);
     let now = Instant::now();
     window.push(entry(1, "a", now));
     window.push(entry(2, "b", now));
-    assert_eq!(window.drain().len(), 2);
+    window.drain();
     assert!(window.is_empty());
 }

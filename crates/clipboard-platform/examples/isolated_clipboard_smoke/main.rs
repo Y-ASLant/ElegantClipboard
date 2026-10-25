@@ -426,7 +426,7 @@ fn main() -> anyhow::Result<()> {
 
     native_format_roundtrip(&service, &events, &clipboard, directory.path())?;
     println!("native format fidelity roundtrip ok");
-    transient_filtering(&service, &events, &clipboard, directory.path())?;
+    transient_filtering(&events, &clipboard, directory.path())?;
     println!("transient window filtering ok");
 
     drop(service);

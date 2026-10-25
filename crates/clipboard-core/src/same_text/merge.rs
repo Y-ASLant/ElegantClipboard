@@ -1,30 +1,56 @@
 use crate::History;
-use crate::database::ClipboardItem;
 use crate::same_text::MergeInput;
 use anyhow::Result;
+use rusqlite::OptionalExtension;
+
+/// 同文合并目标的窄列投影：合并只需这四个字段，避免载入富文本大列。
+pub(crate) struct SameTextTarget {
+    pub id: i64,
+    pub content_type: String,
+    pub content_hash: String,
+    pub preview: Option<String>,
+}
 
 impl History {
-    pub(crate) fn find_same_text_item(&self, text: &str) -> Result<Option<ClipboardItem>> {
-        Ok(self.repo.find_same_text_item(text)?)
+    pub(crate) fn find_same_text_item(&self, text: &str) -> Result<Option<SameTextTarget>> {
+        let connection = self.db.read_connection();
+        let connection = connection.lock();
+        let mut statement = connection.prepare(
+            "SELECT id, content_type, content_hash, preview FROM clipboard_items
+             WHERE text_content = ?1 AND group_id IS NULL
+               AND content_type IN ('text','url','html','rtf')
+             ORDER BY sort_order DESC, created_at DESC, id DESC LIMIT 1",
+        )?;
+        let target = statement
+            .query_row([text], |row| {
+                Ok(SameTextTarget {
+                    id: row.get(0)?,
+                    content_type: row.get(1)?,
+                    content_hash: row.get(2)?,
+                    preview: row.get(3)?,
+                })
+            })
+            .optional()?;
+        Ok(target)
     }
 
     pub(crate) fn merge_same_text(
         &self,
-        target: &ClipboardItem,
+        target: &SameTextTarget,
         input: &MergeInput<'_>,
         images_dir: Option<&std::path::Path>,
     ) -> Result<i64> {
         let rtf_encoded = input.rtf.map(crate::rich::encode_rtf_for_storage);
         let html = input.html.map(str::to_owned);
-        let text = input.text.map(str::to_owned);
-        let next_type = crate::same_text::upgraded_type(&target.content_type, input.content_type);
-        let byte_size = text.as_ref().map_or(0, |value| value.len())
+        let byte_size = input.text.len()
             + html.as_ref().map_or(0, |value| value.len())
             + rtf_encoded.as_ref().map_or(0, |value| value.len());
-        let preview = target.preview.clone().or_else(|| {
-            text.as_ref()
-                .map(|value| value.chars().take(240).collect::<String>())
-        });
+        let preview = Some(
+            target
+                .preview
+                .clone()
+                .unwrap_or_else(|| input.text.chars().take(240).collect()),
+        );
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
@@ -39,7 +65,7 @@ impl History {
             rusqlite::params![
                 html,
                 rtf_encoded,
-                next_type.as_str(),
+                crate::same_text::upgraded_type(&target.content_type, input.content_type).as_str(),
                 byte_size as i64,
                 preview,
                 target.id

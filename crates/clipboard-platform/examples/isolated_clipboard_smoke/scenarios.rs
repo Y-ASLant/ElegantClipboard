@@ -10,11 +10,9 @@ use std::{
 
 /// 等待一条 preview 文本匹配的 Snapshot 出现，返回其 id。
 pub(super) fn wait_snapshot_by_preview(
-    service: &Service,
     events: &async_channel::Receiver<Event>,
     preview: &str,
 ) -> anyhow::Result<i64> {
-    let _ = service;
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         match events.try_recv() {
@@ -52,7 +50,7 @@ pub(super) fn native_format_roundtrip(
             ClipboardContent::Other(native_name.into(), native_payload.clone()),
         ])
         .map_err(|error| anyhow!("写入原生格式样本失败：{error}"))?;
-    let native_id = wait_snapshot_by_preview(service, events, &native_text)?;
+    let native_id = wait_snapshot_by_preview(events, &native_text)?;
     {
         let history = clipboard_core::History::open(directory.join("clipboard.db"))?;
         let stored = history.native_formats_for_copy(native_id)?;
@@ -87,12 +85,10 @@ pub(super) fn native_format_roundtrip(
 
 /// 瞬时内容：150ms 内覆盖写 → 仅最终内容入库。
 pub(super) fn transient_filtering(
-    service: &Service,
     events: &async_channel::Receiver<Event>,
     clipboard: &ClipboardContext,
     directory: &std::path::Path,
 ) -> anyhow::Result<()> {
-    let _ = service;
     let prefix = format!("transient-{}-", std::process::id());
     clipboard
         .set_text(format!("{prefix}first"))
@@ -102,7 +98,7 @@ pub(super) fn transient_filtering(
     clipboard
         .set_text(final_text.clone())
         .map_err(|error| anyhow!("写入瞬时最终样本失败：{error}"))?;
-    wait_snapshot_by_preview(service, events, &final_text)?;
+    wait_snapshot_by_preview(events, &final_text)?;
     // 给被丢弃条目的确认窗口留出时间，再核对历史。
     thread::sleep(Duration::from_millis(600));
     let history = clipboard_core::History::open(directory.join("clipboard.db"))?;

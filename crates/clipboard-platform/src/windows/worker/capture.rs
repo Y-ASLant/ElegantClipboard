@@ -26,7 +26,6 @@ impl Worker {
         content: CapturedClipboard,
         extra: Vec<NativeFormatCapture>,
         source: Option<source_app::SourceApp>,
-        deferred: bool,
     ) -> Result<()> {
         let excluded = self.app_filter.excludes(
             source.as_ref().map(|app| app.name.as_str()),
@@ -77,7 +76,6 @@ impl Worker {
                 )))?;
             }
         }
-        let _ = deferred;
         Ok(())
     }
 }

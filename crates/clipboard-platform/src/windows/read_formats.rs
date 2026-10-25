@@ -2,9 +2,8 @@ use super::CapturedClipboard;
 use crate::source_app;
 use anyhow::Result;
 use clipboard_core::{
-    MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES,
-    NativeFormatCapture,
-    native_format_public::{MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES},
+    MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_NATIVE_FORMAT_BYTES,
+    MAX_NATIVE_FORMAT_TOTAL_BYTES, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES, NativeFormatCapture,
 };
 use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat, common::RustImage};
 
@@ -81,11 +80,10 @@ const BLACKLISTED_STANDARD_IDS: &[u32] = &[
 ];
 
 /// 在已打开的剪贴板会话内枚举并读取全部非黑名单格式。
-/// `consumed` 是主采集已表示的注册格式名（不重复保存）。
-pub(super) fn read_extra_formats(
-    _guard: &clipboard_win::Clipboard,
-    consumed: &[&str],
-) -> Vec<NativeFormatCapture> {
+/// 五类主格式已由 BLACKLISTED_STANDARD_IDS 与名称黑名单覆盖，无需额外的
+/// consumed 名单——传入的 guard 仅用于满足枚举的「剪贴板已打开」前置条件。
+pub(super) fn read_extra_formats(guard: &clipboard_win::Clipboard) -> Vec<NativeFormatCapture> {
+    let _ = guard;
     let mut captures = Vec::new();
     let mut total = 0usize;
     for format in clipboard_win::EnumFormats::new() {
@@ -95,14 +93,13 @@ pub(super) fn read_extra_formats(
         let Some(name) = format_name(format) else {
             continue;
         };
-        if is_blacklisted_name(&name) || consumed.iter().any(|item| *item == name) {
+        if is_blacklisted_name(&name) {
             continue;
         }
         let mut data = Vec::new();
-        let Ok(size) = clipboard_win::raw::get_vec(format, &mut data) else {
+        if clipboard_win::raw::get_vec(format, &mut data).is_err() {
             continue;
-        };
-        let _ = size;
+        }
         if data.is_empty()
             || data.len() > MAX_NATIVE_FORMAT_BYTES
             || total + data.len() > MAX_NATIVE_FORMAT_TOTAL_BYTES
@@ -144,9 +141,12 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
     }
     let source = source_app::clipboard_source();
     let (content, warning) = read_content(clipboard)?;
-    // 额外格式枚举需要独立短会话；主读取（clipboard_rs）已关闭其会话，
-    // 序列号稳定性由调用方的 read_stable_capture 保证。
-    let extra = read_extra_in_session(&consumed_names(content.as_ref()));
+    // 主内容为 None（剪贴板只有不支持的私有格式）时快照会被丢弃，无需枚举额外格式。
+    let extra = if content.is_some() {
+        read_extra_in_session()
+    } else {
+        Vec::new()
+    };
     Ok(ClipboardSnapshot {
         content,
         source,
@@ -155,20 +155,13 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
     })
 }
 
-fn consumed_names(content: Option<&CapturedClipboard>) -> Vec<&'static str> {
-    match content {
-        Some(CapturedClipboard::Files(_)) => vec![],
-        Some(CapturedClipboard::Rich { .. }) => vec![],
-        Some(CapturedClipboard::Image { .. }) => vec![],
-        _ => vec![],
-    }
-}
-
-fn read_extra_in_session(consumed: &[&str]) -> Vec<NativeFormatCapture> {
+/// 额外格式枚举需要独立短会话；主读取（clipboard_rs）已关闭其会话，
+/// 序列号稳定性由调用方的 read_stable_capture 保证。
+fn read_extra_in_session() -> Vec<NativeFormatCapture> {
     let Ok(guard) = clipboard_win::Clipboard::new_attempts(10) else {
         return Vec::new();
     };
-    let captures = read_extra_formats(&guard, consumed);
+    let captures = read_extra_formats(&guard);
     drop(guard);
     captures
 }

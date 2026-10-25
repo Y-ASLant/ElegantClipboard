@@ -46,23 +46,11 @@ pub(super) struct Worker {
     pub(super) events: async_channel::Sender<Event>,
 }
 
-/// 瞬时确认窗口的重读入口（service.rs 的 deliver_transient_due 调用）。
-pub(super) fn clipboard_read_current(
-    clipboard: &ClipboardContext,
-) -> anyhow::Result<Option<super::CapturedClipboard>> {
-    super::read_formats::read_current_content(clipboard)
-}
-
 impl Worker {
     /// 启动清扫：blob pending 残留与过期图片临时文件。
     pub(super) fn sweep_temp_media(&self) -> Result<()> {
-        crate::windows::worker::image_tmp::sweep_image_tmp(
-            &self.data_dir,
-            std::time::Instant::now(),
-        )?;
-        let blob_root = clipboard_core::blob_root_for(&self.data_dir.join("clipboard.db"))
-            .ok_or_else(|| anyhow!("无法确定 blob 存储目录"))?;
-        clipboard_core::blob_store_public::sweep_pending_at(&blob_root)
+        crate::windows::worker::image_tmp::sweep_image_tmp(&self.data_dir)?;
+        clipboard_core::sweep_pending_at(&self.history.blob_root()?)
     }
 
     /// Blocking event delivery; the only failure mode is a closed UI receiver.

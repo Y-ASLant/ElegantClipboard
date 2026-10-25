@@ -103,7 +103,6 @@ use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::scroll::{ScrollableElement, ScrollbarAxis};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::text::TextView;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
     component::{

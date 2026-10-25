@@ -1,32 +1,25 @@
-use super::file_cards::copy_or_paste_label;
+use super::file_cards::{copy_or_paste_label, save_as_suggested_name};
 use super::*;
 
-/// 按钮栏的上下文标志，由 render_preview 一次判定后传入。
-pub(super) struct ToolbarContext {
-    pub(super) id: i64,
-    pub(super) ready: bool,
-    pub(super) image: bool,
-    pub(super) files: bool,
-    pub(super) rich: bool,
-    pub(super) save_as_name: Option<String>,
-    pub(super) save_as_label: &'static str,
-}
-
 impl ClipboardView {
-    pub(super) fn render_preview_toolbar(
-        &self,
-        context: ToolbarContext,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        let ToolbarContext {
-            id,
-            ready,
-            image,
-            files,
-            rich,
-            save_as_name,
-            save_as_label,
-        } = context;
+    pub(super) fn render_preview_toolbar(&self, id: i64, cx: &mut Context<Self>) -> Div {
+        let ready = matches!(self.preview.result, Some(Ok(_)));
+        let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
+        let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
+        let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
+        let save_as_name = match &self.preview.result {
+            Some(Ok(PreviewContent::Image(path))) => save_as_suggested_name(path),
+            Some(Ok(PreviewContent::Files(entries))) => entries
+                .first()
+                .and_then(|entry| save_as_suggested_name(&entry.original_path)),
+            _ => None,
+        };
+        let save_as_label = match &self.preview.result {
+            Some(Ok(PreviewContent::Files(paths))) if paths.len() > 1 => {
+                tr(self.language, "另存第一项", "Save first item as")
+            }
+            _ => tr(self.language, "另存为", "Save as"),
+        };
         let html = matches!(self.preview.result, Some(Ok(PreviewContent::Html(_))));
         div()
             .flex()

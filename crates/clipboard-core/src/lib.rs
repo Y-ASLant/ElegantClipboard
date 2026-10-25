@@ -21,30 +21,15 @@ pub mod retention;
 pub mod rich;
 pub(crate) mod same_text;
 pub mod search;
+pub use blob_store::sweep_pending_at;
 pub use file_staging::{FileCaptureOutcome, MAX_STAGED_DIRECTORY_BYTES, MAX_STAGED_FILE_BYTES};
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
-pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
+pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, SavedImage, save_png};
 pub use merge::MergedContent;
-pub use native_format::NativeFormatCapture;
+pub use native_format::{
+    MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES, NativeFormatCapture,
+};
 pub use preview::{FilePreviewEntry, PreviewContent};
-
-/// 平台层采集与写回使用的原生格式限额。
-pub mod native_format_public {
-    pub use crate::native_format::{
-        MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES, NATIVE_INLINE_MAX_BYTES,
-        valid_format_name,
-    };
-}
-
-/// 平台层启动清扫使用的 blob 存储入口。
-pub mod blob_store_public {
-    pub use crate::blob_store::{BlobStore, sweep_pending_at};
-}
-
-/// 计算数据目录对应的 blob 存储根目录。
-pub fn blob_root_for(db_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    db_path.parent().map(|parent| parent.join("blobs"))
-}
 
 use anyhow::{Context, Result, bail};
 use database::{
@@ -253,7 +238,7 @@ impl History {
                 content_type,
                 html: None,
                 rtf: None,
-                text: Some(text),
+                text,
                 hash,
             };
             return Ok(Some(self.merge_same_text(&target, &input, images_dir)?));

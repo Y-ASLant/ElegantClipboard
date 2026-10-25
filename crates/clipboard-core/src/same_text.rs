@@ -6,11 +6,12 @@ mod tests;
 use crate::database::ContentType;
 
 /// 同文合并的输入：本次采集的期望类型、富文本表示与原始内容哈希。
+/// 合并只对有纯文本表示的采集发生，text 恒有值。
 pub(crate) struct MergeInput<'a> {
     pub content_type: ContentType,
     pub html: Option<&'a str>,
     pub rtf: Option<&'a [u8]>,
-    pub text: Option<&'a str>,
+    pub text: &'a str,
     pub hash: String,
 }
 

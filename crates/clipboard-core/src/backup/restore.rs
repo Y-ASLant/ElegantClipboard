@@ -1,4 +1,4 @@
-use super::{BLOBS_FORMAT_VERSION, FORMAT_VERSION, Manifest, RestoreReport};
+use super::{FORMAT_VERSION, Manifest, RestoreReport};
 use crate::backup_common::{
     MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES,
     check_central_directory_names, ensure_destination_unused, install_staged_tree,
@@ -69,7 +69,6 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
             bail!("备份包含未知文件：{name}");
         };
         if !matches!(category, "images" | "icons" | "staged" | "blobs")
-            || (manifest.version < BLOBS_FORMAT_VERSION && category == "blobs")
             || (manifest.version == 1 && category != "images")
         {
             bail!("备份包含未知文件：{name}");

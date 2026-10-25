@@ -39,8 +39,7 @@ pub(super) fn write_native_formats_locked(formats: &[(String, Vec<u8>)]) -> Vec<
             failed.push(name.clone());
             continue;
         };
-        if let Err(error) = clipboard_win::raw::set_without_clear(format.get(), data) {
-            let _ = error;
+        if clipboard_win::raw::set_without_clear(format.get(), data).is_err() {
             failed.push(name.clone());
         }
     }
@@ -48,13 +47,13 @@ pub(super) fn write_native_formats_locked(formats: &[(String, Vec<u8>)]) -> Vec<
 }
 
 /// 富文本写回：单 guard 会话内 text→html→rtf→extras 顺序写入。
-/// extras 失败不中断主格式；返回（最终序列号，extras 失败名列表）。
+/// extras 失败不中断主格式；返回 extras 失败名列表（序列号经 ignored_sequence 记录）。
 pub(super) fn write_rich_clipboard(
     item: &ClipboardItem,
     rtf: Option<&[u8]>,
     extras: &[(String, Vec<u8>)],
     ignored_sequence: &mut u32,
-) -> Result<(u32, Vec<String>)> {
+) -> Result<Vec<String>> {
     let text = item
         .text_content
         .as_deref()
@@ -103,9 +102,8 @@ pub(super) fn write_rich_clipboard(
         // when a later format failed and left a partial write behind.
         *ignored_sequence = unsafe { GetClipboardSequenceNumber() };
     }
-    let sequence = *ignored_sequence;
     result?;
-    Ok((sequence, extras_failed))
+    Ok(extras_failed)
 }
 
 /// 图片写回：内容寻址临时 PNG 前置 CF_HDROP，使纯图片可直接以文件粘贴。
@@ -115,7 +113,7 @@ pub(super) fn write_image_with_file(
     item: &ClipboardItem,
     data_dir: &Path,
     png: &[u8],
-    pixels: &[[u8; 4]],
+    pixels: &[u8],
     width: u32,
     height: u32,
     ignored_sequence: &mut u32,
@@ -155,8 +153,10 @@ pub(super) fn write_image_with_file(
 }
 
 /// CF_DIB 字节：40 字节 BITMAPINFOHEADER + 32 位像素（自底向上，BGRA）。
-pub(super) fn build_cf_dib(pixels: &[[u8; 4]], width: u32, height: u32) -> Vec<u8> {
-    let mut dib = Vec::with_capacity(40 + pixels.len() * 4);
+/// `pixels` 是扁平 RGBA 缓冲（每像素 4 字节，行优先），直接下标取用避免整帧拷贝。
+pub(super) fn build_cf_dib(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let pixel_count = pixels.len() / 4;
+    let mut dib = Vec::with_capacity(40 + pixel_count * 4);
     // BITMAPINFOHEADER
     dib.extend_from_slice(&40u32.to_le_bytes());
     dib.extend_from_slice(&(i32::try_from(width).unwrap_or(0)).to_le_bytes());
@@ -165,7 +165,7 @@ pub(super) fn build_cf_dib(pixels: &[[u8; 4]], width: u32, height: u32) -> Vec<u
     dib.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
     dib.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
     dib.extend_from_slice(&0u32.to_le_bytes()); // biCompression = BI_RGB
-    dib.extend_from_slice(&((pixels.len() * 4) as u32).to_le_bytes()); // biSizeImage
+    dib.extend_from_slice(&((pixel_count * 4) as u32).to_le_bytes()); // biSizeImage
     dib.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
     dib.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
     dib.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
@@ -174,8 +174,13 @@ pub(super) fn build_cf_dib(pixels: &[[u8; 4]], width: u32, height: u32) -> Vec<u
     let row_len = width as usize;
     for row in (0..height as usize).rev() {
         for column in 0..row_len {
-            let pixel = pixels[row * row_len + column];
-            dib.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+            let offset = (row * row_len + column) * 4;
+            dib.extend_from_slice(&[
+                pixels[offset + 2],
+                pixels[offset + 1],
+                pixels[offset],
+                pixels[offset + 3],
+            ]);
         }
     }
     dib
@@ -240,13 +245,16 @@ mod tests {
 
     #[test]
     fn cf_dib_layout_matches_header_and_bottom_up_bgra_pixels() {
-        // 2×2 像素：上行 [p0, p1]，下行 [p2, p3]。自底向上存储时下行在先。
-        let pixels = [
+        // 2×2 像素扁平 RGBA：上行 [p0, p1]，下行 [p2, p3]。自底向上存储时下行在先。
+        let pixels: Vec<u8> = [
             [0x11, 0x22, 0x33, 0xFF], // p0 上左
             [0x44, 0x55, 0x66, 0xFF], // p1 上右
             [0x77, 0x88, 0x99, 0xFF], // p2 下左
             [0xAA, 0xBB, 0xCC, 0xFF], // p3 下右
-        ];
+        ]
+        .iter()
+        .flat_map(|pixel| pixel.iter().copied())
+        .collect();
         let dib = build_cf_dib(&pixels, 2, 2);
         assert_eq!(dib.len(), 40 + 16);
         assert_eq!(&dib[..4], &40u32.to_le_bytes());

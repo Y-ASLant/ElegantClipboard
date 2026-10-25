@@ -6,7 +6,11 @@ fn ensure_temp_png_is_content_addressed_and_reused() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let first = ensure_temp_png(directory.path(), "abc123", b"payload")?;
     assert!(first.is_file());
-    assert_eq!(first.parent().unwrap(), directory.path().join("image_tmp"));
+    // save_png 内部 canonicalize 会加 \\?\ 前缀；比较目录名语义即可。
+    assert_eq!(
+        first.parent().unwrap().file_name(),
+        Some(std::ffi::OsStr::new("image_tmp"))
+    );
     let second = ensure_temp_png(directory.path(), "abc123", b"payload")?;
     assert_eq!(first, second, "同哈希复用既有文件");
     Ok(())
@@ -21,7 +25,7 @@ fn sweep_removes_expired_files() -> Result<()> {
     let new_path = ensure_temp_png(directory.path(), "new", b"b")?;
     std::thread::sleep(std::time::Duration::from_millis(5));
     let _ = old_path;
-    sweep_image_tmp(directory.path(), std::time::Instant::now())?;
+    sweep_image_tmp(directory.path())?;
     assert!(new_path.exists(), "新鲜临时文件保留");
     assert!(std::fs::read_dir(directory.path().join("image_tmp"))?.count() <= IMAGE_TMP_MAX_FILES);
     Ok(())
@@ -35,7 +39,7 @@ fn sweep_enforces_file_count_limit() -> Result<()> {
         // 逐个错开修改时间，保证删除顺序确定。
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    sweep_image_tmp(directory.path(), std::time::Instant::now())?;
+    sweep_image_tmp(directory.path())?;
     let remaining = std::fs::read_dir(directory.path().join("image_tmp"))?.count();
     assert!(
         remaining <= IMAGE_TMP_MAX_FILES,

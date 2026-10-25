@@ -36,7 +36,7 @@ pub(crate) struct TransientWindow {
 
 pub(crate) enum PollOutcome {
     /// 内容应入库（载荷在配对的 PendingCapture 中）。
-    Deliver(()),
+    Deliver,
     /// 内容被瞬时覆盖或还原，丢弃。
     Discard,
 }
@@ -77,6 +77,7 @@ impl TransientWindow {
     }
 
     /// 取出到期条目并判定。`reread` 在 CaptureState 临界区内重读当前剪贴板。
+    /// 同一批次内缓存首次重读结果：序列号未变时后续条目直接复用，避免重复全量读取。
     pub(crate) fn poll_due(
         &mut self,
         now: Instant,
@@ -84,34 +85,51 @@ impl TransientWindow {
         reread: &mut dyn FnMut() -> Result<(u32, Option<CapturedClipboard>), anyhow::Error>,
     ) -> Vec<(PendingCapture, PollOutcome)> {
         let mut results = Vec::new();
+        let mut cached: Option<Result<(u32, Option<CapturedClipboard>), ()>> = None;
         while self.pending.front().is_some_and(|front| front.due <= now) {
             let mut entry = self.pending.pop_front().expect("checked front above");
-            let outcome = match reread() {
-                Ok((current, content)) => {
-                    if current == entry.sequence
-                        || (ignored_sequence != 0 && current == ignored_sequence)
-                    {
-                        // 序列号未变（确认成功）或被自身回贴取代：照常入库。
-                        PollOutcome::Deliver(())
-                    } else {
-                        match content {
-                            // 内容为空/不同：被还原或取代，丢弃。
-                            None => PollOutcome::Discard,
-                            Some(current_content) if current_content == entry.content => {
-                                PollOutcome::Deliver(())
+            let outcome = {
+                let read = match &cached {
+                    Some(Ok(cached_read)) => Ok(cached_read.clone()),
+                    Some(Err(())) => Err(()),
+                    None => match reread() {
+                        Ok(read) => {
+                            cached = Some(Ok(read.clone()));
+                            Ok(read)
+                        }
+                        Err(_) => {
+                            cached = Some(Err(()));
+                            Err(())
+                        }
+                    },
+                };
+                match read {
+                    Ok((current, content)) => {
+                        if current == entry.sequence
+                            || (ignored_sequence != 0 && current == ignored_sequence)
+                        {
+                            // 序列号未变（确认成功）或被自身回贴取代：照常入库。
+                            PollOutcome::Deliver
+                        } else {
+                            match content {
+                                // 内容为空/不同：被还原或取代，丢弃。
+                                None => PollOutcome::Discard,
+                                Some(current_content) if current_content == entry.content => {
+                                    PollOutcome::Deliver
+                                }
+                                Some(_) => PollOutcome::Discard,
                             }
-                            Some(_) => PollOutcome::Discard,
                         }
                     }
-                }
-                Err(_) => {
-                    entry.attempts += 1;
-                    if entry.attempts >= MAX_ATTEMPTS {
-                        PollOutcome::Discard
-                    } else {
-                        entry.due = now + RETRY_DELAY;
-                        self.pending.push_back(entry);
-                        continue;
+                    Err(()) => {
+                        entry.attempts += 1;
+                        if entry.attempts >= MAX_ATTEMPTS {
+                            PollOutcome::Discard
+                        } else {
+                            entry.due = now + RETRY_DELAY;
+                            self.pending.push_back(entry);
+                            continue;
+                        }
                     }
                 }
             };
@@ -120,9 +138,9 @@ impl TransientWindow {
         results
     }
 
-    /// 退出时清空全部未确认条目并返回（调用方可选择丢弃）。
-    pub(crate) fn drain(&mut self) -> Vec<PendingCapture> {
-        self.pending.drain(..).collect()
+    /// 退出时清空全部未确认条目（<300ms 窗口内，重启后无损失）。
+    pub(crate) fn drain(&mut self) {
+        self.pending.clear();
     }
 }
 

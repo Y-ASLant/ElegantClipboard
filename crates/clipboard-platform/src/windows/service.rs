@@ -269,7 +269,6 @@ impl Service {
                                         flushed.content,
                                         flushed.extra,
                                         flushed.source,
-                                        false,
                                     ) {
                                         worker_feedback.error(error.to_string());
                                     }
@@ -367,7 +366,7 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
         let ignored_sequence = state.ignored_sequence;
         let mut reread = || {
             let sequence = unsafe { GetClipboardSequenceNumber() };
-            let content = super::worker::clipboard_read_current(&worker.clipboard)?;
+            let content = super::read_formats::read_current_content(&worker.clipboard)?;
             Ok((sequence, content))
         };
         for (entry, outcome) in
@@ -375,15 +374,14 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
                 .transient
                 .poll_due(std::time::Instant::now(), ignored_sequence, &mut reread)
         {
-            if matches!(outcome, super::worker::transient::PollOutcome::Deliver(())) {
+            if matches!(outcome, super::worker::transient::PollOutcome::Deliver) {
                 deliver.push(entry);
             }
         }
         drop(state);
     }
     for entry in deliver {
-        if let Err(error) =
-            worker.handle_observed_capture(entry.content, entry.extra, entry.source, false)
+        if let Err(error) = worker.handle_observed_capture(entry.content, entry.extra, entry.source)
         {
             feedback.error(error.to_string());
         } else {

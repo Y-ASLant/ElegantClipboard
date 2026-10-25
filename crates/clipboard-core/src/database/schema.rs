@@ -95,6 +95,9 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_access ON clipboard_items(access_count 
 CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_order ON clipboard_items(favorite_order DESC) WHERE is_favorite = 1;
 CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_items(sort_order DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
+-- 同文合并查找：默认分组内按纯文本内容精确匹配（部分索引限制在文本类与默认分组）。
+CREATE INDEX IF NOT EXISTS idx_clipboard_same_text
+    ON clipboard_items(text_content) WHERE group_id IS NULL;
 
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES

@@ -50,7 +50,9 @@ impl Worker {
                 extra,
                 deferred,
             } => {
-                self.handle_observed_capture(content, extra, source, deferred)?;
+                // deferred 仅由 service.rs 路由瞬时窗口；到达 worker 的命令一律直通。
+                let _ = deferred;
+                self.handle_observed_capture(content, extra, source)?;
                 self.snapshot_pending = true;
                 return self.flush_capture_snapshot();
             }

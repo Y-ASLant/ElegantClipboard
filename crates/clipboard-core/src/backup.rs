@@ -17,8 +17,6 @@ mod restore;
 pub use restore::restore_backup;
 
 const FORMAT_VERSION: u32 = 2;
-/// 引入 blobs 资产类别的最低格式版本。
-pub(super) const BLOBS_FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
@@ -180,14 +178,10 @@ impl History {
             }
         }
         // 额外格式 blob：文件名即内容哈希，恢复后无需重映射。
-        let blob_hashes: Vec<String> = {
-            let mut query = tx.prepare(
-                "SELECT DISTINCT blob_hash FROM native_formats WHERE blob_hash IS NOT NULL",
-            )?;
-            query
-                .query_map([], |row| row.get(0))?
-                .collect::<Result<_, _>>()?
-        };
+        let blob_hashes: Vec<String> = self
+            .referenced_blob_hashes()?
+            .into_iter()
+            .collect::<Vec<_>>();
         let blob_root = self.blob_root()?;
         let mut blobs = AssetMap::new();
         let mut missing_blobs = 0;

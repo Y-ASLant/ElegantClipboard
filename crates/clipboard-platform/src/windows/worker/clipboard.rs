@@ -79,9 +79,6 @@ impl Worker {
             let image =
                 RustImageData::from_path(path).map_err(|error| anyhow!("打开图片失败：{error}"))?;
             // 写回全程使用已编码的字节；clipboard-win 会话内不再二次转换。
-            image
-                .to_png()
-                .map_err(|error| anyhow!("图片 PNG 编码失败：{error}"))?;
             let png = image
                 .to_png()
                 .map_err(|error| anyhow!("图片 PNG 编码失败：{error}"))?
@@ -94,12 +91,7 @@ impl Worker {
         } else {
             None
         };
-        // 额外原生格式：仅 Original 模式携带（纯文本/路径复制不注入）。
-        let extras = if mode == CopyMode::Original {
-            self.history.native_formats_for_copy(id)?
-        } else {
-            Vec::new()
-        };
+        // 额外原生格式：仅在会写入的 rich/text 分支装载（files/image 不注入）。
         let mut state = lock_capture_state(&self.state)?;
         let mut rich_preserved = false;
         // A setter can fail after clearing or writing one image format. Record
@@ -118,22 +110,16 @@ impl Worker {
                 item.image_width.unwrap_or(0).max(0) as u32,
                 item.image_height.unwrap_or(0).max(0) as u32,
             );
-            let pixel_refs: Vec<[u8; 4]> = pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .map(|px| [px[0], px[1], px[2], px[3]])
-                .collect();
             write_image_with_file(
                 &item,
                 &self.data_dir,
                 &png,
-                &pixel_refs,
+                &pixels,
                 width,
                 height,
                 &mut state.ignored_sequence,
             )?;
-            let sequence = verified_copy_sequence(
+            verified_copy_sequence(
                 || unsafe { GetClipboardSequenceNumber() },
                 || {
                     // 校验：PNG 格式字节一致（HDROP 与 DIB 由写回函数内部保证）。
@@ -143,9 +129,7 @@ impl Worker {
                         .ok()
                         .is_some_and(|actual| actual == png)
                 },
-            )?;
-            state.ignored_sequence = sequence;
-            sequence
+            )?
         } else if is_rich {
             // Record partial self-writes as ignored before an error is
             // returned, so the listener cannot add them to history.
@@ -153,22 +137,22 @@ impl Worker {
                 .rtf_content
                 .as_deref()
                 .and_then(clipboard_core::rich::decode_rtf_for_clipboard);
-            let (_, extras_failed) =
+            let extras = self.history.native_formats_for_copy(id)?;
+            let extras_failed =
                 write_rich_clipboard(&item, rtf.as_deref(), &extras, &mut state.ignored_sequence)?;
-            state.ignored_sequence =
-                verified_rich_sequence(&self.clipboard, &item, rtf.as_deref(), &extras)?;
+            let sequence = verified_rich_sequence(&self.clipboard, &item, rtf.as_deref(), &extras)?;
             rich_preserved = item
                 .html_content
                 .as_deref()
                 .is_some_and(|value| !value.is_empty())
                 || rtf.is_some();
             if !extras_failed.is_empty() {
-                send_event_status(
-                    &self.events,
-                    format!("部分原生格式未写回：{}", extras_failed.join("、")),
-                )?;
+                self.send_event(Event::Status(format!(
+                    "部分原生格式未写回：{}",
+                    extras_failed.join("、")
+                )))?;
             }
-            state.ignored_sequence
+            sequence
         } else {
             let text = plain_text
                 .or(path_text)
@@ -178,6 +162,7 @@ impl Worker {
             state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
             result.map_err(|error| anyhow!("复制文本失败：{error}"))?;
             // 纯文本路径的额外格式：独立短会话 NoClear 追加（不 empty）。
+            let extras = self.history.native_formats_for_copy(id)?;
             let extras_failed = if extras.is_empty() {
                 Vec::new()
             } else {
@@ -188,20 +173,18 @@ impl Worker {
                 || unsafe { GetClipboardSequenceNumber() },
                 || {
                     self.clipboard.get_text().ok().as_ref() == Some(&text)
-                        && (extras.is_empty() || extras_verified_via_rs(&self.clipboard, &extras))
+                        && (extras.is_empty() || extras_verified_via_rs(&extras))
                 },
             )?;
-            if !extras.is_empty() {
-                state.ignored_sequence = sequence;
-                if !extras_failed.is_empty() {
-                    send_event_status(
-                        &self.events,
-                        format!("部分原生格式未写回：{}", extras_failed.join("、")),
-                    )?;
-                }
+            if !extras_failed.is_empty() {
+                self.send_event(Event::Status(format!(
+                    "部分原生格式未写回：{}",
+                    extras_failed.join("、")
+                )))?;
             }
             sequence
         };
+        // 成功路径统一在此写 ignored_sequence；失败路径由写回函数经 &mut 记录部分写。
         state.ignored_sequence = clipboard_sequence;
         if unsafe { GetClipboardSequenceNumber() } != clipboard_sequence {
             bail!("复制过程中剪贴板已被其他应用修改，请重试");
@@ -226,30 +209,24 @@ impl Worker {
     }
 }
 
-fn send_event_status(events: &async_channel::Sender<Event>, message: String) -> Result<()> {
-    events
-        .send_blocking(Event::Status(message))
-        .map_err(|_| anyhow!("窗口已关闭"))
-}
-
-/// 通过 clipboard_rs 读回额外格式校验（纯文本路径，会话由 rs 管理）。
-fn extras_verified_via_rs(_clipboard: &ClipboardContext, extras: &[(String, Vec<u8>)]) -> bool {
-    for (name, expected) in extras {
+/// 额外格式读回校验：单个短会话内逐条 raw 读取比对
+/// （clipboard_rs 的会话此刻已关闭，raw 读取需要已打开剪贴板）。
+fn extras_verified_via_rs(extras: &[(String, Vec<u8>)]) -> bool {
+    if extras.is_empty() {
+        return true;
+    }
+    let Ok(clipboard) = clipboard_win::Clipboard::new_attempts(10) else {
+        return false;
+    };
+    let verified = extras.iter().all(|(name, expected)| {
         let Some(format) = clipboard_win::register_format(name) else {
             return false;
         };
-        // 独立短会话：raw 读取需要已打开的剪贴板（clipboard_rs 的会话此刻已关闭）。
-        let Ok(clipboard) = clipboard_win::Clipboard::new_attempts(10) else {
-            return false;
-        };
         let mut actual = Vec::new();
-        let read = clipboard_win::raw::get_vec(format.get(), &mut actual).is_ok();
-        drop(clipboard);
-        if !read || &actual != expected {
-            return false;
-        }
-    }
-    true
+        clipboard_win::raw::get_vec(format.get(), &mut actual).is_ok_and(|_| actual == *expected)
+    });
+    drop(clipboard);
+    verified
 }
 
 fn verified_rich_sequence(
@@ -260,9 +237,7 @@ fn verified_rich_sequence(
 ) -> Result<u32> {
     for _ in 0..4 {
         let before = unsafe { GetClipboardSequenceNumber() };
-        if !rich_clipboard_matches(clipboard, item, rtf)
-            || !extras_verified_via_rs(clipboard, extras)
-        {
+        if !rich_clipboard_matches(clipboard, item, rtf) || !extras_verified_via_rs(extras) {
             bail!("富文本写回后格式校验失败，请重试");
         }
         let after = unsafe { GetClipboardSequenceNumber() };

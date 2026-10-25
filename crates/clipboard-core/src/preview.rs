@@ -28,14 +28,28 @@ pub enum PreviewContent {
     Html(String),
 }
 
+/// ASCII 大小写不敏感的子串查找（无分配；按字节扫描，命中点必在 needle 边界，
+/// 对 UTF-8 haystack 需额外验证命中处是字符边界才可信）。
+fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&offset| {
+        haystack.is_char_boundary(offset)
+            && haystack.is_char_boundary(offset + needle.len())
+            && haystack[offset..offset + needle.len()].eq_ignore_ascii_case(needle)
+    })
+}
+
 /// Windows 剪贴板 HTML Format 的片段标记（大小写不敏感处理）。
 pub fn html_preview_fragment(html: &str) -> String {
-    let lower = html.to_ascii_lowercase();
-    let Some(start) = lower.find("<!--startfragment-->") else {
+    const START: &str = "<!--startfragment-->";
+    const END: &str = "<!--endfragment-->";
+    let Some(start) = find_ignore_ascii_case(html, START) else {
         return html.to_owned();
     };
-    let content_start = start + "<!--startfragment-->".len();
-    let Some(end) = lower[content_start..].find("<!--endfragment-->") else {
+    let content_start = start + START.len();
+    let Some(end) = find_ignore_ascii_case(&html[content_start..], END) else {
         return html.to_owned();
     };
     let fragment = &html[content_start..content_start + end];
@@ -72,14 +86,12 @@ impl History {
         }
         if matches!(item.content_type.as_str(), "html" | "rtf") {
             if item.content_type == "html"
-                && item
+                && let Some(html) = item
                     .html_content
                     .as_deref()
-                    .is_some_and(|value| !value.is_empty())
+                    .filter(|value| !value.is_empty())
             {
-                return Ok(PreviewContent::Html(html_preview_fragment(
-                    item.html_content.as_deref().unwrap_or_default(),
-                )));
+                return Ok(PreviewContent::Html(html_preview_fragment(html)));
             }
             return Ok(PreviewContent::RichText(
                 item.text_content

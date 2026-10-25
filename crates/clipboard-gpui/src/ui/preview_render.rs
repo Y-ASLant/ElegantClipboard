@@ -1,6 +1,19 @@
-use super::file_cards::save_as_suggested_name;
 use super::*;
 use gpui_kit::component::text::TextView;
+
+/// HTML 富文本预览的滚动容器：完整预览页与悬停浮窗共用，仅元素 id 不同。
+pub(super) fn html_preview_body(id: &'static str, source: impl Into<SharedString>) -> AnyElement {
+    div()
+        .id(id)
+        .size_full()
+        .overflow_scroll()
+        .child(
+            TextView::html(id, source.into())
+                .selectable(true)
+                .scrollable(true),
+        )
+        .into_any_element()
+}
 
 impl ClipboardView {
     /// 编辑入口判定：Html 原文不支持编辑（保存即降级纯文本，对 HTML 无意义）。
@@ -13,25 +26,11 @@ impl ClipboardView {
 
     pub(super) fn render_preview(&self, cx: &mut Context<Self>) -> Div {
         let id = self.preview.id.expect("preview is open");
-        let ready = matches!(self.preview.result, Some(Ok(_)));
         let image = matches!(self.preview.result, Some(Ok(PreviewContent::Image(_))));
         let files = matches!(self.preview.result, Some(Ok(PreviewContent::Files(_))));
         let rich = matches!(self.preview.result, Some(Ok(PreviewContent::RichText(_))));
         let html = matches!(self.preview.result, Some(Ok(PreviewContent::Html(_))));
         let image_unavailable = tr(self.language, "图片无法显示", "Image unavailable");
-        let save_as_name = match &self.preview.result {
-            Some(Ok(PreviewContent::Image(path))) => save_as_suggested_name(path),
-            Some(Ok(PreviewContent::Files(entries))) => entries
-                .first()
-                .and_then(|entry| save_as_suggested_name(&entry.original_path)),
-            _ => None,
-        };
-        let save_as_label = match &self.preview.result {
-            Some(Ok(PreviewContent::Files(paths))) if paths.len() > 1 => {
-                tr(self.language, "另存第一项", "Save first item as")
-            }
-            _ => tr(self.language, "另存为", "Save as"),
-        };
         let message = if self.preview_editing && rich {
             tr(
                 self.language,
@@ -143,16 +142,9 @@ impl ClipboardView {
                     })
                     .into_any_element()
             }
-            Some(Ok(PreviewContent::Html(source))) => div()
-                .id("preview-html-body")
-                .size_full()
-                .overflow_scroll()
-                .child(
-                    TextView::html("preview-html", source.clone())
-                        .selectable(true)
-                        .scrollable(true),
-                )
-                .into_any_element(),
+            Some(Ok(PreviewContent::Html(source))) => {
+                html_preview_body("preview-html", source.clone())
+            }
             Some(Ok(PreviewContent::Files(entries))) => self.render_file_preview(entries, cx),
             Some(Ok(PreviewContent::Image(path))) => div()
                 .relative()
@@ -253,17 +245,6 @@ impl ClipboardView {
                     .child(message),
             )
             .child(div().flex_1().min_h_0().child(body))
-            .child(self.render_preview_toolbar(
-                preview_toolbar::ToolbarContext {
-                    id,
-                    ready,
-                    image,
-                    files,
-                    rich,
-                    save_as_name,
-                    save_as_label,
-                },
-                cx,
-            ))
+            .child(self.render_preview_toolbar(id, cx))
     }
 }

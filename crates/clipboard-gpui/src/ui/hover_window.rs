@@ -187,16 +187,9 @@ impl Render for HoverPreviewWindowView {
         let body: AnyElement =
             match &self.content {
                 Ok(PreviewContent::Image(path)) => self.image_viewport(path.clone(), cx),
-                Ok(PreviewContent::Html(source)) => div()
-                    .id("hover-html-body")
-                    .size_full()
-                    .overflow_scroll()
-                    .child(
-                        TextView::html("hover-html", source.clone())
-                            .selectable(true)
-                            .scrollable(true),
-                    )
-                    .into_any_element(),
+                Ok(PreviewContent::Html(source)) => {
+                    super::preview_render::html_preview_body("hover-html", source.clone())
+                }
                 Ok(PreviewContent::Files(entries)) if file_image_path.is_some() => {
                     let unavailable = tr(self.language, "图片无法显示", "Image unavailable");
                     div()

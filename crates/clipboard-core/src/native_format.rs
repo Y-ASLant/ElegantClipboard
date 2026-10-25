@@ -38,14 +38,6 @@ pub(crate) struct StagedBlob {
     pending: PathBuf,
 }
 
-impl std::fmt::Debug for StagedBlob {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StagedBlob")
-            .field("hash", &self.hash)
-            .finish()
-    }
-}
-
 impl Drop for StagedBlob {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.pending);
@@ -63,35 +55,48 @@ pub(crate) fn insert_rows_in_transaction(
     tx: &rusqlite::Transaction<'_>,
     item_id: i64,
     rows: &[(String, Vec<u8>)],
-    blob_root: &std::path::Path,
-) -> Result<Vec<StagedBlob>> {
+    staged: &[StagedBlob],
+) -> Result<()> {
+    let mut staged_iter = staged.iter();
+    let mut insert = tx.prepare(
+        "INSERT OR REPLACE INTO native_formats (item_id, format_name, data, blob_hash, byte_size)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for (name, data) in rows {
+        if data.len() > NATIVE_INLINE_MAX_BYTES {
+            // blob 已在事务外压缩落盘为 pending；这里只写行。
+            let blob = staged_iter
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("blob 暂存数量与超大格式数量不一致"))?;
+            insert.execute(params![
+                item_id,
+                name,
+                Option::<Vec<u8>>::None,
+                blob.hash(),
+                data.len() as i64
+            ])?;
+        } else {
+            insert.execute(params![
+                item_id,
+                name,
+                data,
+                Option::<String>::None,
+                data.len() as i64
+            ])?;
+        }
+    }
+    Ok(())
+}
+
+/// 事务外的 blob 暂存：zstd 压缩 + 临时文件 fsync 不占用写连接锁。
+/// Drop 保证失败路径不残留 pending 文件。
+fn stage_blobs(rows: &[(String, Vec<u8>)], blob_root: &std::path::Path) -> Result<Vec<StagedBlob>> {
+    let store = BlobStore::new(blob_root.to_path_buf());
     let mut staged = Vec::new();
-    {
-        let mut insert = tx.prepare(
-            "INSERT OR REPLACE INTO native_formats (item_id, format_name, data, blob_hash, byte_size)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-        )?;
-        for (name, data) in rows {
-            if data.len() > NATIVE_INLINE_MAX_BYTES {
-                let (hash, pending) =
-                    BlobStore::new(blob_root.to_path_buf()).write_pending(data)?;
-                insert.execute(params![
-                    item_id,
-                    name,
-                    Option::<Vec<u8>>::None,
-                    hash,
-                    data.len() as i64
-                ])?;
-                staged.push(StagedBlob { hash, pending });
-            } else {
-                insert.execute(params![
-                    item_id,
-                    name,
-                    data,
-                    Option::<String>::None,
-                    data.len() as i64
-                ])?;
-            }
+    for (_, data) in rows {
+        if data.len() > NATIVE_INLINE_MAX_BYTES {
+            let (hash, pending) = store.write_pending(data)?;
+            staged.push(StagedBlob { hash, pending });
         }
     }
     Ok(staged)
@@ -183,6 +188,8 @@ impl History {
             return Ok(skips);
         }
         let blob_root = self.blob_root()?;
+        // 压缩与 fsync 在事务外完成，写连接锁只覆盖行插入。
+        let staged = stage_blobs(&accepted, &blob_root)?;
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
@@ -196,8 +203,7 @@ impl History {
         if exists.is_none() {
             bail!("记录已不存在，无法保存原生格式");
         }
-        // pending 文件在事务内创建；StagedBlob 的 Drop 保证失败路径不残留。
-        let staged = insert_rows_in_transaction(&tx, item_id, &accepted, &blob_root)?;
+        insert_rows_in_transaction(&tx, item_id, &accepted, &staged)?;
         tx.commit()?;
         drop(connection);
         // 提交成功后正式落盘；此后 StagedBlob Drop 删 pending 是空操作。
@@ -239,7 +245,8 @@ impl History {
         Ok(formats)
     }
 
-    pub(crate) fn blob_root(&self) -> Result<PathBuf> {
+    /// 数据目录下的 blob 存储根目录（数据库文件父目录 + blobs）。
+    pub fn blob_root(&self) -> Result<PathBuf> {
         Ok(self
             .db
             .path()
@@ -248,44 +255,13 @@ impl History {
             .join("blobs"))
     }
 
-    /// 删除条目对应的全部额外格式行，返回被释放的 blob 哈希（供提交后 GC）。
-    pub(crate) fn detach_native_formats(&self, item_ids: &[i64]) -> Result<Vec<String>> {
-        let connection = self.db.write_connection();
-        let mut connection = connection.lock();
-        let tx = connection.transaction()?;
-        let hashes = detach_rows_in_transaction(&tx, item_ids)?;
-        tx.commit()?;
-        Ok(hashes)
-    }
-
     /// 清空全部额外格式行（clear-all 用），返回释放的 blob 哈希。
     pub(crate) fn detach_all_native_formats(&self) -> Result<Vec<String>> {
+        let hashes: Vec<String> = self.referenced_blob_hashes()?.into_iter().collect();
         let connection = self.db.write_connection();
         let connection = connection.lock();
-        let hashes: Vec<String> = {
-            let mut statement = connection.prepare(
-                "SELECT DISTINCT blob_hash FROM native_formats WHERE blob_hash IS NOT NULL",
-            )?;
-            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
-            rows.flatten().collect()
-        };
         connection.execute("DELETE FROM native_formats", [])?;
         Ok(hashes)
-    }
-
-    /// 删除指向给定 content_hash 的别名行。
-    pub(crate) fn delete_aliases(&self, content_hashes: &[String]) -> Result<()> {
-        if content_hashes.is_empty() {
-            return Ok(());
-        }
-        let connection = self.db.write_connection();
-        let connection = connection.lock();
-        let mut statement =
-            connection.prepare("DELETE FROM content_hash_aliases WHERE canonical_hash = ?1")?;
-        for hash in content_hashes {
-            statement.execute([hash])?;
-        }
-        Ok(())
     }
 
     pub(crate) fn delete_all_aliases(&self) -> Result<()> {
@@ -362,11 +338,15 @@ pub(crate) fn clear_native_in_transaction(
 }
 
 /// 保留策略路径：事务内按 id 列表收集并删除额外格式行与别名。
+/// 有实际删除时才跑一次别名兜底清理（采集热路径绝大多数轮次无删除）。
 pub(crate) fn clear_native_by_ids(
     tx: &rusqlite::Transaction<'_>,
     ids: &[i64],
     content_hashes: &[String],
 ) -> Result<Vec<String>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
     let blobs = detach_rows_in_transaction(tx, ids)?;
     delete_aliases_in_transaction(tx, content_hashes)?;
     purge_stale_aliases(tx)?;

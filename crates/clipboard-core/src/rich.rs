@@ -87,15 +87,12 @@ impl History {
                 },
                 html,
                 rtf,
-                text: Some(text),
+                text,
                 hash: hash.clone(),
             };
             return self.merge_same_text(&target, &input, Some(images_dir));
         }
-        let rtf_content = rtf.map(|raw| {
-            let raw = raw.strip_suffix(&[0]).unwrap_or(raw);
-            format!("{RTF_B64_PREFIX}{}", STANDARD.encode(raw))
-        });
+        let rtf_content = rtf.map(encode_rtf_for_storage);
         let id = self.repo.insert(NewClipboardItem {
             content_type: if html.is_some() {
                 ContentType::Html

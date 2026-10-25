@@ -26,10 +26,6 @@ impl BlobStore {
         Self { root }
     }
 
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
     pub fn path(&self, hash: &str) -> PathBuf {
         self.root.join(hash)
     }
