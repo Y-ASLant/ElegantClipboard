@@ -2,7 +2,7 @@
 
 [English](README_EN.md) | 中文
 
-ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的 Windows 原生剪贴板管理器。当前分支只有 GPUI 应用，不需要 Node.js、WebView 或 Tauri。
+ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的原生剪贴板管理器，Windows、macOS 和 Linux 共用界面与数据服务，系统集成分别实现。当前分支只有 GPUI 应用，不需要 Node.js、WebView 或 Tauri。平台能力和验证边界见下文。
 
 ## 当前功能
 
@@ -38,14 +38,27 @@ ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的 Windows 原生剪�
 - 复制后读回校验，回贴有界等待修饰键释放并核对目标；采集尊重应用声明的本地历史隐私标记
 - 已知限制：HTML 预览中引用 http(s) 的远程图片不加载（gpui 无内置网络图片管线，本地图片正常）；编辑 HTML 条目保存后仍降级为纯文本；图片回贴临时文件位于数据目录 image_tmp/（24 小时或超过 64 个时启动清扫）
 
-Windows 实现和已知边界详见 [Windows GPUI 状态](docs/WINDOWS_MVP.md)。
+Windows 实现和历史验收详见 [Windows GPUI 状态](docs/WINDOWS_MVP.md)。上述功能受以下平台能力限制。
+
+## 平台差异
+
+| 平台 | 系统集成与限制 |
+|---|---|
+| Windows | 保留现有剪贴板原生格式、热键、托盘、OLE 拖放、受控粘贴与 DWM 材质 |
+| macOS | Carbon 热键、菜单栏托盘、LaunchAgent 登录启动、AppKit 拖放；自动粘贴使用 `Cmd+V`，需在系统设置授予辅助功能权限，不支持 `Shift+Insert`。来源应用是前台应用的尽力归因，不能当作可靠的剪贴板所有者；材质支持模糊，不支持 Windows Mica |
+| Linux X11 | X11 热键、XTEST 粘贴、XInput2 外部点击、XDND 拖放及 XDG 自动启动；来源优先按 selection owner 的 XRes PID 识别，无法确定时保持未知；需要支持相应扩展的 X server |
+| Linux Wayland | 剪贴板需要 compositor 的 data-control 协议，不会静默退回不完整的 XWayland 采集；全局快捷键、自动粘贴、来源识别和精确窗口/悬停浮窗定位不可用。保留内部排序及文件/图片原生拖出，不支持文本/富文本拖出。重复复制完全相同内容不能通过轮询识别为新事件 |
+
+Linux 托盘需要 StatusNotifier/XEmbed 宿主，GNOME 通常需要 AppIndicator 扩展；无宿主时不会把窗口隐藏到不可访问的托盘。Linux 音效需要 `paplay`（`pulseaudio-utils`，可使用 PipeWire 的 PulseAudio 兼容服务），链接和文件定位需要 `xdg-open` / `dbus-send`。macOS 使用系统 `open` / `afplay`。
+
+新增 macOS/Linux 后端不等于已经通过实机验收：当前 Windows 原生窗口与隔离剪贴板往返已验证，其他平台的桌面交互、权限、打包产物仍需对应系统验收；CI 已配置原生系统检查，不应将配置存在视为 CI 已通过。
 
 ## 工程结构
 
 ```text
 crates/
   clipboard-core/      数据模型、SQLite、查询、备份与业务规则
-  clipboard-platform/  Windows 剪贴板、快捷键、托盘和系统集成
+  clipboard-platform/  共享剪贴板服务及 Windows/macOS/Linux 系统集成
   clipboard-gpui/      GPUI 应用入口、状态与界面
 scripts/               打包与验证辅助脚本
 docs/                  架构决策、功能状态和验收证据
@@ -59,10 +72,19 @@ Rust 源码、示例和测试文件均不得超过 **500 物理行**（包含空
 
 要求：
 
-- Windows 10/11 x64
-- Rust 1.98 或更高版本，MSVC 工具链
-- 打包时需要 PowerShell 7（`pwsh`）
+- Windows 10/11 x64 + MSVC；或 macOS + Xcode Command Line Tools；或 Linux + 下列系统依赖
+- Rust 1.98 或更高版本，使用当前系统的原生工具链
+- 结构检查及打包需要 PowerShell 7（`pwsh`）
 - [`just`](https://github.com/casey/just)（可选，用于下文的快捷命令）
+
+macOS 先安装开发工具：`xcode-select --install`。Ubuntu 24.04 开发依赖：
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential clang cmake pkg-config libssl-dev libgtk-3-dev libayatana-appindicator3-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-randr0-dev libasound2-dev libudev-dev mesa-vulkan-drivers xdg-utils dbus-x11 pulseaudio-utils
+```
+
+Linux 运行时需要可用的图形会话及 Vulkan 驱动；不要在无显示服务的 SSH 会话中直接启动 GUI。
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked
@@ -74,7 +96,7 @@ cargo run -p elegant-clipboard-gpui --locked
 just run
 ```
 
-默认数据位于当前用户 LocalAppData 下的 `ElegantClipboard-GPUI` 应用目录。测试或隔离运行可显式指定目录：
+默认数据使用当前系统的应用数据目录（Windows 为 LocalAppData，macOS 为 Application Support，Linux 为 XDG data home）。测试或隔离运行可显式指定目录：
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
@@ -88,7 +110,7 @@ just test
 just build
 ```
 
-对应的 Release 可执行文件为 `target\release\elegant-clipboard-gpui.exe`。
+Release 可执行文件为 Windows 的 `target/release/elegant-clipboard-gpui.exe`，或 macOS/Linux 的 `target/release/elegant-clipboard-gpui`。
 
 生成未经签名的 Windows x64 独立 ZIP：
 
@@ -96,7 +118,16 @@ just build
 just package
 ```
 
-产物与 SHA-256 文件写入 `target\packages\`。当前不提供安装器、自动更新或 ARM64 制品。
+在 macOS 或 Linux **本机**打包：
+
+```sh
+just package-unix
+# 或 pwsh -NoProfile -File scripts/package-gpui-unix.ps1
+```
+
+macOS 生成包含 `.app` 的 ZIP，并进行本地 ad-hoc 签名；这不等同 Developer ID 签名或 Apple 公证。Linux 生成原生二进制、许可证和说明的 `.tar.gz`，不会捆绑系统动态库，需保留上述运行依赖。文件名包含实际 Rust host target；脚本支持 macOS/Linux 的 x86_64 和 aarch64 原生工具链。
+
+产物与 SHA-256 文件写入 `target/packages/`。不提供安装器或自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
 
 ## 版本管理
 

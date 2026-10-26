@@ -34,8 +34,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::General,
         chinese: "开机启动",
         english: "Startup",
-        description_chinese: "登录 Windows 后自动启动",
-        description_english: "Launch automatically after signing in to Windows",
+        description_chinese: "登录系统后自动启动",
+        description_english: "Launch automatically after signing in",
         content: SettingsWindowView::settings_startup_content,
     },
     Section {
@@ -170,8 +170,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::About,
         chinese: "关于 ElegantClipboard",
         english: "About ElegantClipboard",
-        description_chinese: "Windows 剪贴板管理器",
-        description_english: "Clipboard manager for Windows",
+        description_chinese: "跨平台剪贴板管理器",
+        description_english: "Cross-platform clipboard manager",
         content: SettingsWindowView::settings_about_intro_content,
     },
     Section {

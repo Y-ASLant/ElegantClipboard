@@ -1,4 +1,4 @@
-//! Windows material support and conservative fallback policy, separate from saved preferences.
+//! Native material support and conservative fallback policy, separate from saved preferences.
 
 use clipboard_core::preferences::WindowEffect;
 use std::sync::OnceLock;
@@ -26,29 +26,39 @@ impl WindowEffectBackend {
 #[derive(Clone, Copy, Debug)]
 pub struct WindowEffectCapabilities {
     build: u32,
+    native_blur: bool,
 }
 
 impl WindowEffectCapabilities {
     /// Probe the actual OS version once, independently of application compatibility manifests.
     pub fn current() -> Self {
         static CURRENT: OnceLock<WindowEffectCapabilities> = OnceLock::new();
-        *CURRENT.get_or_init(|| Self::from_build(current_build()))
+        *CURRENT.get_or_init(|| Self {
+            native_blur: cfg!(target_os = "macos"),
+            ..Self::from_build(current_build())
+        })
     }
 
     fn from_build(build: u32) -> Self {
-        Self { build }
+        Self {
+            build,
+            native_blur: false,
+        }
     }
 
     pub fn supports(self, effect: WindowEffect) -> bool {
         match effect {
             WindowEffect::None => true,
-            WindowEffect::Acrylic => self.build >= 17_763,
+            WindowEffect::Acrylic => self.native_blur || self.build >= 17_763,
             WindowEffect::Mica | WindowEffect::MicaAlt => self.supports_system_backdrop(),
         }
     }
 
     /// Resolve a saved preference without rewriting it when this machine lacks support.
     pub fn resolve(self, effect: WindowEffect) -> WindowEffectBackend {
+        if self.native_blur && effect != WindowEffect::None {
+            return WindowEffectBackend::Acrylic;
+        }
         if effect == WindowEffect::None || self.build < 17_763 {
             return WindowEffectBackend::Opaque;
         }

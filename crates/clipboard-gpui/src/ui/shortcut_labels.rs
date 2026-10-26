@@ -39,7 +39,10 @@ pub(super) fn shortcut_kbd(shortcut: &str) -> Option<Kbd> {
             modifiers.alt = true;
         } else if part.eq_ignore_ascii_case("shift") {
             modifiers.shift = true;
-        } else if part.eq_ignore_ascii_case("win") {
+        } else if ["win", "cmd", "command", "super"]
+            .iter()
+            .any(|name| part.eq_ignore_ascii_case(name))
+        {
             modifiers.platform = true;
         } else {
             return None;
@@ -58,7 +61,7 @@ pub(super) fn shortcut_from_keystroke(
     main: bool,
 ) -> Result<String, String> {
     let modifiers = keystroke.modifiers;
-    if modifiers.function || (!main && modifiers.platform) {
+    if modifiers.function || (!main && modifiers.platform && !cfg!(target_os = "macos")) {
         return Err("不支持此修饰键".into());
     }
     let key = if shift_down {
@@ -89,7 +92,11 @@ pub(super) fn shortcut_from_keystroke(
         parts.push("Shift");
     }
     if modifiers.platform {
-        parts.push("Win");
+        parts.push(if cfg!(target_os = "macos") {
+            "Cmd"
+        } else {
+            "Win"
+        });
     }
     parts.push(key);
     if main {
@@ -142,9 +149,18 @@ mod shortcut_capture_tests {
         };
         assert_eq!(
             shortcut_from_keystroke(&windows, false, true).unwrap(),
-            "Win+F9"
+            if cfg!(target_os = "macos") {
+                "Cmd+F9"
+            } else if cfg!(target_os = "linux") {
+                "Super+F9"
+            } else {
+                "Win+F9"
+            }
         );
-        assert!(shortcut_from_keystroke(&windows, false, false).is_err());
+        assert_eq!(
+            shortcut_from_keystroke(&windows, false, false).is_ok(),
+            cfg!(target_os = "macos")
+        );
         let bare = Keystroke {
             key: "z".into(),
             ..Default::default()

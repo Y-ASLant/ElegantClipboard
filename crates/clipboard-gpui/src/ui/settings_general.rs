@@ -1,4 +1,4 @@
-use super::settings_common::{choice_tabs, command_checkbox, owner_state};
+use super::settings_common::{command_checkbox, owner_state};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox, switch::Switch};
 
@@ -10,7 +10,8 @@ impl SettingsWindowView {
         let language = state.language;
         let pending = state.hotkey_pending
             || state.paste_shortcuts_pending.is_some()
-            || state.quick_paste_pending_setting;
+            || state.quick_paste_pending_setting
+            || crate::capabilities::positioning_unavailable_reason().is_some();
         let disabled = state.hotkey_choice == HotkeyPreference::Disabled;
         let label = hotkey_label(language, &state.hotkey_choice).to_owned();
         let owner = self.owner.clone();
@@ -56,45 +57,17 @@ impl SettingsWindowView {
                             }),
                     ),
             )
+            .when_some(
+                crate::capabilities::positioning_unavailable_reason(),
+                |panel, reason| {
+                    panel.child(Alert::warning("global-shortcut-capability", reason).small())
+                },
+            )
             .when(
                 self.shortcut_editing == Some(ShortcutTarget::Main),
                 |panel| panel.child(self.shortcut_editor(language, pending, cx)),
             )
             .into_any_element()
-    }
-
-    pub(super) fn settings_positioning_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(state) = owner_state(&self.owner, cx) else {
-            return div().into_any_element();
-        };
-        let language = state.language;
-        let window_position = state.window_position.value;
-        let window_position_pending = state.window_position.pending;
-
-        choice_tabs(
-            "settings-window-position-tabs",
-            &self.owner,
-            [
-                WindowPositionPreference::FollowCursor,
-                WindowPositionPreference::ScreenCenter,
-                WindowPositionPreference::FixedPosition,
-            ],
-            [
-                tr(language, "跟随光标", "Follow cursor"),
-                tr(language, "当前屏幕居中", "Center on screen"),
-                tr(language, "保持位置", "Keep position"),
-            ],
-            window_position,
-            window_position_pending,
-            |owner| owner.window_position.value,
-            |owner, preference, cx| {
-                if owner.send(Command::SetWindowPosition(preference), cx) {
-                    owner.window_position.pending = true;
-                    cx.notify();
-                }
-            },
-        )
-        .into_any_element()
     }
 
     pub(super) fn settings_behavior_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -257,7 +230,8 @@ impl SettingsWindowView {
         let paste_shortcuts = state.paste_shortcuts.clone();
         let shortcut_actions_pending = state.paste_shortcuts_pending.is_some()
             || state.quick_paste_pending_setting
-            || state.hotkey_pending;
+            || state.hotkey_pending
+            || crate::capabilities::desktop_unavailable_reason().is_some();
         let paste_shortcut_status = state.paste_shortcut_status.clone();
         let monitoring = state.monitoring;
         let quick_paste_owner = self.owner.clone();
@@ -300,6 +274,14 @@ impl SettingsWindowView {
                         });
                     }),
             )
+            .when_some(crate::capabilities::desktop_unavailable_reason(), |panel, reason| {
+                panel.child(Alert::warning("paste-capability", reason).small())
+            })
+            .when(cfg!(target_os = "macos"), |panel| {
+                panel.child(Alert::info("mac-paste-key", tr(language,
+                    "macOS 自动粘贴使用 Command+V，不支持 Shift+Insert。请在系统设置中授予辅助功能权限。",
+                    "macOS uses Command+V; Shift+Insert is unavailable. Grant Accessibility permission in System Settings.")).small())
+            })
             .child(
                 div()
                     .w_full()
@@ -313,7 +295,7 @@ impl SettingsWindowView {
                     )))
                     .child({
                         let choices = [
-                            ("Ctrl+V", PasteKeyPreference::CtrlV),
+                            (crate::capabilities::paste_key_label(), PasteKeyPreference::CtrlV),
                             ("Shift+Insert", PasteKeyPreference::ShiftInsert),
                         ];
                         let selected_index = choices
@@ -328,6 +310,9 @@ impl SettingsWindowView {
                             .selected_index(selected_index)
                             .on_click(move |index: &usize, _, cx| {
                                 if let Some(&(_, key)) = click_choices.get(*index) {
+                                    if !crate::capabilities::paste_key_supported(key) {
+                                        return;
+                                    }
                                     let _ = owner.update(cx, |owner, cx| {
                                         if owner.paste_key.value != key
                                             && owner.send(Command::SetPasteKey(key), cx)
@@ -338,7 +323,7 @@ impl SettingsWindowView {
                                     });
                                 }
                             })
-                            .children(choices.map(|(label, _)| {
+                            .children(choices.map(|(label, key)| {
                                 Tab::new()
                                     .aria_label(label)
                                     .child(
@@ -347,7 +332,7 @@ impl SettingsWindowView {
                                             .appearance(false),
                                     )
                                     .flex_1()
-                                    .disabled(paste_key_pending)
+                                    .disabled(paste_key_pending || !crate::capabilities::paste_key_supported(key))
                             }))
                     }),
             )

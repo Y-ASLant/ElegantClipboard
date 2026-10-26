@@ -1,4 +1,4 @@
-use crate::windows::Event;
+use crate::Event;
 use anyhow::{Context, Result};
 use async_channel::Sender;
 use std::{

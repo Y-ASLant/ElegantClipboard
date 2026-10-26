@@ -12,7 +12,14 @@ use std::{
 };
 
 mod capture;
+#[cfg(windows)]
+#[path = "../../windows/worker/clipboard.rs"]
 mod clipboard;
+#[cfg(unix)]
+#[path = "../../unix/clipboard.rs"]
+mod clipboard;
+#[cfg(windows)]
+#[path = "../../windows/worker/clipboard_write.rs"]
 mod clipboard_write;
 mod commands;
 mod history;
@@ -21,7 +28,7 @@ mod retention;
 mod settings;
 pub(crate) mod transient;
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 pub(super) use capture::filter_observed_capture;
 
 pub(super) struct Worker {
@@ -49,7 +56,7 @@ pub(super) struct Worker {
 impl Worker {
     /// 启动清扫：blob pending 残留与过期图片临时文件。
     pub(super) fn sweep_temp_media(&self) -> Result<()> {
-        crate::windows::worker::image_tmp::sweep_image_tmp(&self.data_dir)?;
+        image_tmp::sweep_image_tmp(&self.data_dir)?;
         clipboard_core::sweep_pending_at(&self.history.blob_root()?)
     }
 

@@ -9,7 +9,7 @@ use clipboard_core::preferences::Preferences;
 use std::path::Path;
 
 impl Worker {
-    pub(in crate::windows) fn handle(&mut self, command: Command) -> Result<()> {
+    pub(in crate::service) fn handle(&mut self, command: Command) -> Result<()> {
         match command {
             Command::Query {
                 search,

@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if (-not $SourceRoot) {
-    $SourceRoot = Join-Path $PSScriptRoot '..\crates'
+    $SourceRoot = Join-Path (Join-Path $PSScriptRoot '..') 'crates'
 }
 $maximumLines = 500
 $files = @(Get-ChildItem -LiteralPath $SourceRoot -Recurse -File -Filter '*.rs')

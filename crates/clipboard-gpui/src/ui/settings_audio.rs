@@ -62,6 +62,11 @@ impl SettingsWindowView {
         let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
+        if let Some(reason) = crate::capabilities::audio_unavailable_reason() {
+            return Alert::warning("audio-capability", reason)
+                .small()
+                .into_any_element();
+        }
         let language = owner_state.language;
         let audio = owner_state.audio.value;
         let pending = owner_state.audio.pending;

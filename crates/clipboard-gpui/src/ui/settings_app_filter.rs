@@ -8,6 +8,11 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner_state.language;
+        if let Some(reason) = crate::capabilities::source_unavailable_reason() {
+            return Alert::warning("source-app-capability", reason)
+                .small()
+                .into_any_element();
+        }
         let app_filter = owner_state.app_filter.value.clone();
         let app_filter_pending = owner_state.app_filter.pending;
         let running_apps = if self.app_picker_open {

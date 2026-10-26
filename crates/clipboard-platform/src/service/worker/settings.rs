@@ -1,6 +1,6 @@
 use super::super::capture::lock_capture_state;
 use super::{Event, Worker};
-use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+use crate::sequence::current_sequence;
 use anyhow::{Context, Result};
 use clipboard_core::preferences::{
     AppFilterPreference, HotkeyPreference, MonitorTypesPreference, PasteShortcutConfig, Preferences,
@@ -96,7 +96,7 @@ impl Worker {
             .context("无法保存暂停状态")?;
         let mut state = lock_capture_state(&self.state)?;
         state.paused = paused;
-        state.last_sequence = unsafe { GetClipboardSequenceNumber() };
+        state.last_sequence = current_sequence(&self.clipboard)?;
         drop(state);
         self.send_event(Event::Paused(paused))
     }

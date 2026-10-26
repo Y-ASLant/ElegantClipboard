@@ -31,3 +31,47 @@ jobs:
         run: cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
       - name: Build Windows application
         run: cargo build -p elegant-clipboard-gpui --release --locked
+
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev libgtk-3-dev libayatana-appindicator3-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-randr0-dev libasound2-dev libudev-dev xvfb mesa-vulkan-drivers dbus-x11 xdg-utils pulseaudio-utils
+      - uses: swatinem/rust-cache@v2.9.2
+      - name: Source module size
+        shell: pwsh
+        run: ./scripts/check-source-size.ps1
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Check
+        run: cargo check --workspace --all-targets --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Linux tests in isolated X server
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a cargo test --workspace --locked
+      - name: macOS tests
+        if: runner.os == 'macOS'
+        run: cargo test --workspace --locked
+      - name: Native package
+        shell: pwsh
+        run: ./scripts/package-gpui-unix.ps1
+      - name: Linux native window smoke
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        run: dbus-run-session -- xvfb-run -a ./target/release/elegant-clipboard-gpui --smoke-test --data-dir "$RUNNER_TEMP/elegant-gpui-smoke"
+      - name: macOS native window smoke
+        if: runner.os == 'macOS'
+        timeout-minutes: 2
+        run: ./target/release/elegant-clipboard-gpui --smoke-test --data-dir "$RUNNER_TEMP/elegant-gpui-smoke"

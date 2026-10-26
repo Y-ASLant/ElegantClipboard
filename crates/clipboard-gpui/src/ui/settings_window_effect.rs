@@ -158,7 +158,7 @@ impl SettingsWindowView {
                             .child(tr(
                                 language,
                                 "当前系统不支持窗口材质，或无法确认系统版本；窗口效果已关闭，使用不透明背景。",
-                                "Window materials are unavailable or the Windows version could not be detected. Effects are off; the background is opaque.",
+                                "Native window materials are unavailable on this desktop. Effects are off; the background is opaque.",
                             )),
                     )
                 },
@@ -183,6 +183,9 @@ impl SettingsWindowView {
 fn effect_label(language: LanguagePreference, effect: WindowEffect) -> &'static str {
     match effect {
         WindowEffect::None => tr(language, "关闭", "Off"),
+        WindowEffect::Acrylic if cfg!(target_os = "macos") => {
+            tr(language, "系统毛玻璃", "Native blur")
+        }
         WindowEffect::Acrylic => tr(language, "亚克力", "Acrylic"),
         WindowEffect::Mica => tr(language, "云母", "Mica"),
         WindowEffect::MicaAlt => tr(language, "云母 Alt", "Mica Alt"),

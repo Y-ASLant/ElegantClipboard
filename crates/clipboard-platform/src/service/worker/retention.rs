@@ -21,7 +21,7 @@ impl Worker {
         Ok(())
     }
 
-    pub(in crate::windows) fn maintain_retention(&mut self) -> Result<()> {
+    pub(in crate::service) fn maintain_retention(&mut self) -> Result<()> {
         let outcome = self.history.apply_retention(&self.images_dir)?;
         if let Some(warning) = outcome.cleanup_warning {
             self.send_event(Event::BackgroundError(format!(

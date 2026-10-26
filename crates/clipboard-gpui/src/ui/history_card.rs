@@ -147,6 +147,8 @@ impl ClipboardView {
                 this.handle_row_click(id, event, window, cx);
             }))
             .when(drag_enabled, |row| {
+                #[cfg(target_os = "linux")]
+                let payload_owner = entity.clone();
                 let drag = HistoryDrag {
                     id,
                     pinned: item.is_pinned,
@@ -157,7 +159,8 @@ impl ClipboardView {
                     size: measured_size.clone(),
                     native_preview: false,
                 };
-                row.cursor_grab()
+                let row = row
+                    .cursor_grab()
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
@@ -178,7 +181,15 @@ impl ClipboardView {
                             cx.notify();
                         });
                         cx.new(|_| preview)
-                    })
+                    });
+                #[cfg(target_os = "linux")]
+                let row = row.external_drag_payload(move |drag: &HistoryDrag, window, cx| {
+                    if native_window::window_id(window).is_some() {
+                        return None;
+                    }
+                    payload_owner.read(cx).wayland_drag_payload(drag)
+                });
+                row
             })
             .child(
                 canvas(

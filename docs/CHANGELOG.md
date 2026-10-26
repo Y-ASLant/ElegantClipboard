@@ -6,8 +6,12 @@
 
 ### 重构
 
+- 将完整 Service、Command/Event、队列和 Worker 从 Windows 专属目录移至共享 `clipboard-platform/src/service/`，三个平台共用采集、查询、编辑、分组、偏好、备份及恢复业务。Windows 原生格式读写保持独立；Unix 使用真实 clipboard-rs 后端、本地 socket 单实例唤回和文件 URI 校验。
+- 新增 `clipboard-platform/src/macos/` 与 `linux/`：实现 Carbon/X11 热键、来源应用、登录启动、外部点击、原生拖放及受控粘贴。Linux 来源按 selection owner/XRes 归因，采集快照校验 XFixes generation；XDND 松开后锁定目标，热键匹配使用实际锁定键掩码。Wayland 使用 data-control，缺少协议时拒绝静默 XWayland 降级，并明确全局系统能力限制。
+- GPUI 界面、状态和托盘菜单由 Windows/macOS/Linux 共用，平台窗口适配分离；macOS 自动粘贴使用 Cmd+V 并检查辅助功能授权，Linux GTK 托盘事件在 GPUI 前台线程分派。设置根据能力禁用不可用功能。新增原生 Unix 打包脚本及 Ubuntu/macOS CI/发布任务；macOS `.app` 仅 ad-hoc 签名，不包含 Apple 公证。
+- 三平台验证：223 个 Rust 文件通过行数限制和格式检查；Windows `just check`、350 项测试（2 项忽略）、Release 构建及隔离窗口站剪贴板往返通过。实际启动 Release 并用原生窗口渲染捕获确认设置数据页，退出码 0，交互桌面剪贴板序列号保持 1466。完整 workspace 的 `aarch64-apple-darwin` 与 `x86_64-unknown-linux-gnu` 交叉目标 Clippy（all-targets、`-D warnings`）通过；macOS 检查使用从上游源码生成的真实 GPUI shader bindings/source，Linux 使用 Ubuntu 24.04 真实头文件与 pkg-config 元数据。交叉检查不包含原生链接、桌面交互或打包验收；本机无对应桌面环境，新增 CI 尚未运行。macOS 依赖 `block 0.1.6` 仍有 Rust future-incompat 提示。
 - 精简设置关于页为记录与查找、整理与复用、按需设置三组中英文介绍，移除控件名称、缓存格式及开发说明；同步简化存储和备份恢复描述。
-- 将 GPUI 原生系统集成集中至 `src/windows/`，从窗口材质代码拆出通用效果状态、Root 插件与颜色计算；UI 不再直接调用 Win32 API 或使用原生坐标/句柄类型。当前应用仍仅支持 Windows，尚未接入 macOS 服务后端。
+- 将 GPUI 的 Windows 原生系统集成集中至 `src/windows/`，从窗口材质代码拆出通用效果状态、Root 插件与颜色计算；UI 不再直接调用 Win32 API 或使用原生坐标/句柄类型。
 - 本轮验证：179 个 Rust 文件通过 500 行限制，`just check`、`just test`（350 项通过、2 项忽略）及 `just build` 成功。Release 使用独立临时数据目录实际打开设置并切换关于页，截图确认三组介绍及作者链接完整显示；进程退出码 0，剪贴板序列号保持 1414。未覆盖全部托盘、快捷键、外部拖放和材质切换交互。
 - 列表静态图片按实际卡片尺寸和 DPI 生成后台缩略图，解码最多两个并发任务，离屏任务结果丢弃；外部文件按大小和修改时间重新检查，拖动快照保留图片至结束。动态图沿用原始显示路径，完整预览、复制与导出仍使用原图。缩略图片控件显式采用显示区域宽高比，防止竖图固有比例扩大布局后被裁切。
 - 普通复制成功入队后，同时取消等待后台结果与等待修饰键释放的旧回贴，避免晚到回执重新聚焦原窗口；回贴复制与快捷槽位查询按独立请求编号匹配成功／失败回执，取消后重试同一记录或跨分组使用同一槽位时，旧结果不再消耗新请求；补齐英文界面的目标失效、剪贴板变化与等待超时反馈。

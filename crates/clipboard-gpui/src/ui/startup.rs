@@ -31,6 +31,24 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            #[cfg(target_os = "linux")]
+            cx.spawn(async move |cx| {
+                // tray-icon uses GTK, while GPUI owns the platform event loop.
+                // Both creation and dispatch stay on this foreground thread.
+                loop {
+                    let context = gtk::glib::MainContext::default();
+                    for _ in 0..64 {
+                        if !context.pending() {
+                            break;
+                        }
+                        context.iteration(false);
+                    }
+                    cx.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                }
+            })
+            .detach();
             // 晚于 gpui-component 注册，才能在根 div 上覆盖它刷的不透明背景。
             window_effect::register_root_plugin(cx);
             cx.bind_keys([
@@ -55,6 +73,14 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("escape", DismissOrHide, Some("ClipboardApp")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
                 KeyBinding::new("down", FocusFirstHistoryItem, Some("HistorySearch > Input")),
+            ]);
+            #[cfg(target_os = "macos")]
+            cx.bind_keys([
+                KeyBinding::new("cmd-left", PreviousGroup, Some("HistoryList")),
+                KeyBinding::new("cmd-right", NextGroup, Some("HistoryList")),
+                KeyBinding::new("cmd-a", SelectAllLoaded, Some("HistoryList")),
+                KeyBinding::new("cmd-enter", PasteSelected, Some("HistoryList")),
+                KeyBinding::new("cmd-f", FocusSearch, Some("ClipboardApp")),
             ]);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {

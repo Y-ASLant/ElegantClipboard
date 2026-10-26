@@ -125,8 +125,8 @@ impl SettingsWindowView {
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(
                         language,
-                        "适用于 Windows 的剪贴板管理器，帮助你轻松找回和复用复制过的内容。",
-                        "A clipboard manager for Windows that helps you find and reuse what you have copied.",
+                        "适用于 Windows、Linux 和 macOS 的剪贴板管理器，帮助你轻松找回和复用复制过的内容。",
+                        "A clipboard manager for Windows, Linux and macOS that helps you find and reuse what you have copied.",
                     )),
             )
             .children(FEATURE_GROUPS.iter().map(|group| {

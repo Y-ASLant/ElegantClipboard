@@ -6,6 +6,10 @@ use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
 };
 
+#[cfg(target_os = "linux")]
+#[path = "linux/tray.rs"]
+mod linux;
+
 #[derive(Clone, Copy)]
 pub enum TrayCommand {
     Toggle,
@@ -21,6 +25,8 @@ pub fn create(
     paused: bool,
     monitoring: bool,
 ) -> Result<TrayIcon> {
+    #[cfg(target_os = "linux")]
+    linux::initialize()?;
     let menu = create_menu(language, paused, monitoring)?;
     let icon = app_icon()?;
     let tray = TrayIconBuilder::new()
@@ -33,6 +39,7 @@ pub fn create(
     let menu_sender = sender.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
+            "toggle" => Some(TrayCommand::Toggle),
             "clear-history" => Some(TrayCommand::ClearHistory),
             "settings" => Some(TrayCommand::Settings),
             "toggle-pause" => Some(TrayCommand::TogglePause),
@@ -53,7 +60,7 @@ pub fn create(
             && let Ok(mut previous) = last_left_click.lock()
         {
             let now = Instant::now();
-            let double_click_interval = super::input::double_click_interval();
+            let double_click_interval = crate::native::input::double_click_interval();
             if previous.is_none_or(|last| now.duration_since(last) > double_click_interval) {
                 let _ = sender.try_send(TrayCommand::Toggle);
             }
@@ -132,6 +139,17 @@ fn pause_item_label(
 fn create_menu(language: LanguagePreference, paused: bool, monitoring: bool) -> Result<Menu> {
     let menu = Menu::new();
     let english = language == LanguagePreference::English;
+    menu.append(&MenuItem::with_id(
+        "toggle",
+        if english {
+            "Show / hide history"
+        } else {
+            "显示 / 隐藏历史"
+        },
+        true,
+        None,
+    ))
+    .context("无法创建托盘菜单")?;
     let (pause_label, pause_enabled) = pause_item_label(language, paused, monitoring);
     menu.append(&MenuItem::with_id(
         "toggle-pause",
@@ -185,7 +203,7 @@ pub fn is_tray_click(tray: &TrayIcon, position: (i32, i32)) -> bool {
 
 fn app_icon() -> Result<Icon> {
     let image = image::load_from_memory_with_format(
-        include_bytes!("../../../../App.ico"),
+        include_bytes!("../../../App.ico"),
         image::ImageFormat::Ico,
     )
     .context("无法读取应用图标")?;
@@ -202,21 +220,14 @@ fn app_icon() -> Result<Icon> {
 mod tests {
     use super::*;
     #[test]
-    fn tray_recording_control_tracks_monitoring_availability() -> Result<()> {
+    fn tray_recording_control_tracks_monitoring_availability() {
         for language in [LanguagePreference::Chinese, LanguagePreference::English] {
             for monitoring in [false, true] {
                 for paused in [false, true] {
-                    let menu = create_menu(language, paused, monitoring)?;
-                    let items = menu.items();
-                    let pause = items
-                        .iter()
-                        .find(|item| item.id().as_ref() == "toggle-pause")
-                        .and_then(|item| item.as_menuitem())
-                        .expect("recording control");
-                    assert_eq!(pause.is_enabled(), monitoring);
+                    let (_, enabled) = pause_item_label(language, paused, monitoring);
+                    assert_eq!(enabled, monitoring);
                 }
             }
         }
-        Ok(())
     }
 }

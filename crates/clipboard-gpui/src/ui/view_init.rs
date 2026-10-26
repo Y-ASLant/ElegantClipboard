@@ -10,6 +10,8 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        #[cfg(target_os = "linux")]
+        Self::watch_native_listeners(cx);
         let language = service.initial_language;
         let window_position = service.initial_window_position;
         let hover_preference = service.initial_hover_preview;
@@ -173,17 +175,7 @@ impl ClipboardView {
         } else {
             Ok(None)
         };
-        let outside_click_events = cx.spawn_in(window, async move |view, cx| {
-            while let Ok(position) = outside_click_receiver.recv().await {
-                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                    this.handle_outside_click(position, window, cx);
-                })
-                .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        let outside_click_events = Self::outside_click_events(outside_click_receiver, window, cx);
         let outside_click_error = outside_click_monitor
             .as_ref()
             .err()

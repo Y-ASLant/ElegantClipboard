@@ -1,16 +1,19 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod capabilities;
+#[cfg(windows)]
+#[path = "windows/mod.rs"]
+mod native;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[path = "unix/mod.rs"]
+mod native;
 mod options;
-#[cfg(any(windows, test))]
+mod popup_geometry;
 mod state;
-#[cfg(windows)]
+mod tray;
 mod ui;
-#[cfg(windows)]
 mod visual;
-#[cfg(windows)]
 mod window_effect;
-#[cfg(windows)]
-mod windows;
 
 fn main() -> anyhow::Result<()> {
     let Some(options) = options::Options::parse(std::env::args_os().skip(1))? else {
@@ -19,7 +22,7 @@ fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     };
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     {
         if let Some(source) = &options.import_legacy_backup {
             let data_dir = options.data_dir.clone().expect("参数已校验");
@@ -60,9 +63,9 @@ fn main() -> anyhow::Result<()> {
         }
         ui::run(options)
     }
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         let _ = options;
-        anyhow::bail!("当前基础版仅支持 Windows；macOS 与 Linux 后端尚未接入")
+        anyhow::bail!("This operating system is not supported")
     }
 }

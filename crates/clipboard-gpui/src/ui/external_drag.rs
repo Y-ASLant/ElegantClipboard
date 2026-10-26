@@ -22,6 +22,18 @@ pub(super) struct CardDragSession {
 }
 
 impl ClipboardView {
+    #[cfg(target_os = "linux")]
+    pub(super) fn wayland_drag_payload(&self, drag: &HistoryDrag) -> Option<ExternalDragPayload> {
+        let prepared = self
+            .drag_preparation
+            .as_ref()
+            .filter(|prepared| prepared.id == drag.id)?;
+        let payload = prepared.result.as_ref()?.as_ref().ok()?;
+        let paths = payload.file_paths()?;
+        Some(ExternalDragPayload::Files(FileDragPaths::new(
+            paths.iter().map(|path| (path.clone(), path.is_dir())),
+        )))
+    }
     pub(super) fn card_drag_active(&self, cx: &App) -> bool {
         self.external_drag.is_some() || cx.has_active_drag()
     }
@@ -78,7 +90,11 @@ impl ClipboardView {
         if dimensions.width <= px(0.) || dimensions.height <= px(0.) {
             return false;
         }
-        let scale = window.scale_factor();
+        let scale = if cfg!(target_os = "macos") {
+            1.0
+        } else {
+            window.scale_factor()
+        };
         let offset = (
             (f32::from(cursor_offset.x) * scale).round() as i32,
             (f32::from(cursor_offset.y) * scale).round() as i32,
@@ -163,7 +179,7 @@ impl ClipboardView {
                         }
                     };
                     if !outside {
-                        if let Ok((x, y)) = native::drag_pointer_in_client(source, pointer, window.scale_factor()) {
+                        if let Ok((x, y)) = native::drag_pointer_in_client(source, pointer, if cfg!(target_os = "macos") { 1.0 } else { window.scale_factor() }) {
                             this.update_card_drag_target(&drag, point(px(x), px(y)), cx);
                         }
                     } else {
@@ -207,6 +223,11 @@ impl ClipboardView {
                     last_position = Some(position);
                 }
                 if let Some(payload) = payload {
+                    #[cfg(target_os = "linux")]
+                    let result = cx.background_executor().spawn(async move {
+                        native::run_external_drag(payload, options)
+                    }).await;
+                    #[cfg(not(target_os = "linux"))]
                     let result = native::run_external_drag(payload, options);
                     let keep = update_clipboard_window(&view, main, cx, |this, window, cx| {
                         let Some(session) = this.external_drag.as_mut().filter(|session| session.token == token) else { return false; };
@@ -218,7 +239,7 @@ impl ClipboardView {
                             Ok(ExternalDragOutcome::ReturnedToSource) => true,
                             Ok(ExternalDragOutcome::ReleasedInSource) => {
                                 if let Ok(pointer) = native::poll_drag_pointer()
-                                    && let Ok((x, y)) = native::drag_pointer_in_client(options.source_window, pointer, window.scale_factor()) {
+                                    && let Ok((x, y)) = native::drag_pointer_in_client(options.source_window, pointer, if cfg!(target_os = "macos") { 1.0 } else { window.scale_factor() }) {
                                     this.update_card_drag_target(&drag, point(px(x), px(y)), cx);
                                     this.drop_history_card(&drag, cx);
                                 }

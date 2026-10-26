@@ -435,6 +435,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// 原生格式保真与瞬时过滤场景（拆分自本文件，保持 500 行限制）。
+#[cfg(windows)]
 mod scenarios;
 
+#[cfg(windows)]
 use scenarios::{native_format_roundtrip, transient_filtering};

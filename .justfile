@@ -19,13 +19,26 @@ build:
 package:
     pwsh.exe -NoProfile -File scripts/package-gpui-windows.ps1
 
+# 在 macOS/Linux 本机生成对应的原生包（需要 PowerShell 7）
+[unix]
+package-unix:
+    pwsh -NoProfile -File scripts/package-gpui-unix.ps1
+
 # 运行 GPUI 应用
 run:
     cargo run -p elegant-clipboard-gpui --locked
 
 # 检查模块行数、rustfmt、cargo check 与 Clippy
+[windows]
 check:
     powershell.exe -NoProfile -File scripts/check-source-size.ps1
+    cargo fmt --all -- --check
+    cargo check --workspace --all-targets --locked
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+
+[unix]
+check:
+    pwsh -NoProfile -File scripts/check-source-size.ps1
     cargo fmt --all -- --check
     cargo check --workspace --all-targets --locked
     cargo clippy --workspace --all-targets --locked -- -D warnings

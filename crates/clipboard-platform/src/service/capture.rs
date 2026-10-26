@@ -1,9 +1,9 @@
 use super::{
     Command, Event,
     queue::{CaptureFeedback, CommandQueue},
-    read_formats::ClipboardSnapshot,
+    read_content::ClipboardSnapshot,
 };
-use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+use crate::sequence::current_sequence;
 use anyhow::{Result, anyhow, bail};
 use clipboard_rs::{ClipboardContext, ClipboardHandler};
 use std::{
@@ -64,12 +64,15 @@ fn read_stable_capture(
 }
 
 impl WatchHandler {
-    fn read_change(&mut self) -> Result<()> {
+    pub(super) fn read_change(&mut self) -> Result<()> {
         // Keep our own writes serialized with the entire snapshot, including retries.
         let mut state = lock_capture_state(&self.state)?;
+        if state.paused {
+            return Ok(());
+        }
         let Some((sequence, snapshot)) = read_stable_capture(
             &state,
-            || unsafe { GetClipboardSequenceNumber() },
+            || current_sequence(&self.clipboard).unwrap_or(0),
             || super::read_formats::read_clipboard(&self.clipboard),
         )?
         else {
@@ -95,7 +98,7 @@ impl WatchHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{source_app, windows::CapturedClipboard};
+    use crate::{CapturedClipboard, source_app};
 
     fn rich_snapshot(label: &str) -> ClipboardSnapshot {
         ClipboardSnapshot {

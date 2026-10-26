@@ -15,7 +15,7 @@
 
 ## 模块边界与维护约束
 
-依赖方向为 `clipboard-gpui -> clipboard-platform -> clipboard-core`，GPUI 可以直接调用核心层。业务校验、SQLite 和备份格式属于核心层；Windows API、剪贴板线程与服务协议属于平台层；窗口、托盘、交互状态和 GPUI Kit 组件属于界面层。
+依赖方向为 `clipboard-gpui -> clipboard-platform -> clipboard-core`，GPUI 可以直接调用核心层。业务校验、SQLite 和备份格式属于核心层；共享服务协议、剪贴板线程及各系统原生 API 属于平台层；窗口、托盘、交互状态和 GPUI Kit 组件属于界面层。
 
 - 单个 `.rs` 文件最多 **500 物理行**，空行、注释、示例与测试均计入；Cargo.lock、文档和生成的构建产物不属于源码行数限制。
 - 同一类型可在职责明确的私有子模块中分别实现方法；跨模块可见性只开放到实际需要的父模块，不为了拆文件扩大 crate 公共 API。
@@ -44,27 +44,34 @@
 
 数据库打开时只转换旧的 UNIQUE 内容哈希索引，已完成迁移的非唯一索引不再重建。查询继续使用现有条件构造器，以 SQLite `Value` 和迭代绑定参数；媒体路径重映射借用原字段，未修改的字段保持原值。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。
 
-### Windows 平台层
+### 平台层与共享服务
 
-`crates/clipboard-platform/src/window_effect.rs` 独立负责 Windows 版本探测、材质能力与降级策略，不修改已保存的偏好。界面层的 `ui/settings_window_effect.rs` 显示可用选项和保存值的降级说明；`windows/acrylic.rs` 只在初始化或有效材质变化时配置原生窗口，遮罩强度变化只更新背景并重绘。
+`clipboard-platform/src/service/` 保存三平台唯一的 Service、命令协议、队列和 Worker，避免复制数据库与偏好业务。`windows/` 保留 Windows 原生格式及剪贴板写回；`unix/` 实现 clipboard-rs 读写、数据目录隔离的本地 socket 单实例唤回及 Linux 文件 URI 处理。`macos/`、`linux/` 分别实现原生热键、来源、自动启动、外部点击、粘贴目标及拖放。
 
-| 路径（相对 `crates/clipboard-platform/src/windows`） | 职责 |
+| 路径（相对 `crates/clipboard-platform/src`） | 职责 |
 |---|---|
-| `mod.rs`、`protocol.rs` | 对外入口；命令、事件、采集载荷与失败分类 |
-| `service.rs` | 服务启动、线程与监听器生命周期、关闭 |
-| `capture.rs`、`queue.rs` | 剪贴板监听、有界队列及反馈背压 |
-| `data.rs`、`file_actions.rs` | 数据目录、实例锁、导入恢复与占用统计；文件定位和另存为 |
-| `worker/` | 命令分发、采集保存、剪贴板写回、历史操作、偏好设置和快照 |
-| `tests/mod.rs` | 有超时、区分通道关闭的事件等待；严格下一事件与按条件匹配分别保留顺序语义 |
-| `tests/` | 采集、剪贴板、数据、事件投递、分组、历史、生命周期、偏好和预览测试 |
+| `service/protocol.rs`、`service/lifecycle.rs` | 完整命令/事件协议、服务启动及线程关闭 |
+| `service/capture.rs`、`service/read_content.rs`、`service/watcher.rs`、`service/queue.rs` | 采集快照、监听、有界队列和反馈背压 |
+| `service/data.rs`、`service/file_actions.rs` | 数据目录、实例锁、导入恢复、占用统计及系统文件定位 |
+| `service/worker/` | 共用命令分发、采集入库、历史、偏好、备份及快照 |
+| `windows/read_formats.rs`、`windows/worker/`、`windows/privacy.rs` | Windows 格式保真、写回和隐私标记 |
+| `unix/read_formats.rs`、`unix/clipboard.rs`、`unix/instance.rs`、`unix/file_list.rs` | Unix 剪贴板读写、单实例、本地文件 URI 编码与校验 |
+| `linux/` | X11/XRes 来源、XTEST、XInput2、被动按键抓取、XDND/INCR 传输和 XDG 自动启动 |
+| `macos/` | Carbon 快捷键、NSWorkspace 来源、NSEvent、NSDraggingSession、Accessibility 粘贴及 LaunchAgent |
+| `sequence.rs`、`unix/x11_sequence.rs` | Windows 序列号、macOS changeCount、X11 XFixes generation 和 Wayland 内容身份 |
+| `windows/tests/` | 原有 Windows 服务与剪贴板行为回归；Unix 的隔离测试位于所属模块 |
+
+Linux X11 采集内容与来源查询整体受前后 selection generation 校验保护；不以无关前台窗口冒充 clipboard owner。XDND 在释放鼠标后锁定目标和位置，等待最终响应期间不重新投放到另一窗口。Wayland 必须支持 data-control，按完整载荷轮询检测变化，不能区分相同内容的再次复制。
+
+`window_effect.rs` 提供当前系统的真实材质能力及降级策略，不覆盖已保存的偏好；Windows DWM、macOS 模糊和 Linux 不透明分别由 GPUI 原生层应用。
 
 ### GPUI 界面层
 
 `crates/clipboard-gpui/src/ui.rs` 保留共享视图状态和动作声明；入口、渲染及交互实现位于私有 `ui/` 子模块，不改变 `main.rs` 的 `ui::run` 调用。
 
-GPUI 的 Windows 原生实现集中在 `src/windows/`，由 `#[cfg(windows)] mod windows` 控制，包括窗口句柄与显隐、输入状态、托盘、粘贴、定位、音效、链接及 DWM 材质。`ui/` 不直接调用 Win32 API，也不传递 `POINT` 或访问 HWND 字段；外部点击事件传递屏幕坐标 `(i32, i32)`。
+GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的窗口实现分别在 `macos/` 和 `linux/`，浮窗几何在 `popup_geometry.rs` 共用。`ui/`、`state.rs`、`visual.rs` 和 `window_effect.rs` 由三平台共用，不直接调用 Win32。`capabilities.rs` 将 Wayland、粘贴按键和音效能力映射到设置说明与禁用状态。
 
-`src/window_effect.rs` 保留不依赖 Win32 的 GPUI 效果状态、Root 插件与外壳颜色计算，`src/visual.rs` 保留通用视觉逻辑。这里是源码职责分离，不是 macOS 支持：`ui.rs` 的应用编排仍依赖 Windows 剪贴板服务、热键和拖放后端，GPUI 依赖及应用入口仍受 Windows 条件编译限制。
+`tray.rs` 共用托盘菜单与事件，`linux/tray.rs` 负责 Linux 宿主检测；Linux GTK 事件在 GPUI 前台任务中分派。`unix/` 使用真实窗口目标、剪贴板身份和修饰键校验控制自动粘贴，macOS 的 `Cmd+V` 需要辅助功能授权。平台限制和本机构建命令见根 README。
 
 | `ui/` 模块 | 职责 |
 |---|---|

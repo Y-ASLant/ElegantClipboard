@@ -2,7 +2,7 @@
 
 English | [中文](README.md)
 
-ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, and gpui-kit. This branch contains only the GPUI application and does not require Node.js, WebView, or Tauri.
+ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-kit. Windows, macOS, and Linux share the UI and data service, with separate native integrations. This branch does not require Node.js, WebView, or Tauri. Platform capabilities and verification limits are described below.
 
 ## Current features
 
@@ -32,14 +32,27 @@ ElegantClipboard is a native Windows clipboard manager built with Rust, GPUI, an
 - Optional regular-file copies are off by default (50 MiB per file, 256 MiB total); copy images as files and convert HTML when plain text is missing
 - Verify clipboard contents after writing, wait a bounded time for modifier release before pasting, validate the target, and honor producer opt-outs from local clipboard history
 
-See [Windows GPUI status](docs/WINDOWS_MVP.md) for implementation details and known limits.
+See [Windows GPUI status](docs/WINDOWS_MVP.md) for Windows implementation details and historical verification. Features above are subject to these platform limits.
+
+## Platform differences
+
+| Platform | Integration and limits |
+|---|---|
+| Windows | Existing native clipboard formats, hotkeys, tray, OLE drag-and-drop, controlled paste, and DWM materials are retained |
+| macOS | Carbon hotkeys, menu-bar tray, LaunchAgent login startup, and AppKit drag-and-drop. Automatic paste uses `Cmd+V` and requires Accessibility permission; `Shift+Insert` is unavailable. Source attribution uses the frontmost app on a best-effort basis, not a reliable clipboard-owner identity. Blur is supported; Windows Mica is not |
+| Linux X11 | X11 hotkeys, XTEST paste, XInput2 outside clicks, XDND, and XDG autostart. Source attribution prefers the selection owner's XRes PID and remains unknown when unresolved. The X server must provide the required extensions |
+| Linux Wayland | Clipboard capture requires compositor data-control support; an incomplete XWayland fallback is rejected. Global shortcuts, automatic paste, source identification, and exact window/hover-popup positioning are unavailable. Internal sorting and native file/image drag-out remain available; text/rich-text drag-out is unavailable. Polling cannot distinguish repeated copies of identical content |
+
+Linux needs a StatusNotifier/XEmbed tray host (GNOME usually needs an AppIndicator extension); the app avoids hiding into an inaccessible tray when no host is found. Audio uses `paplay` (`pulseaudio-utils`, also compatible with PipeWire Pulse), and opening/revealing files uses `xdg-open` / `dbus-send`. macOS uses built-in `open` / `afplay`.
+
+The new backends have not yet undergone native macOS/Linux desktop acceptance. Windows native-window and isolated clipboard roundtrip checks have run; desktop permissions, interactions, and package artifacts on other systems still require native verification. CI now has native OS jobs; configuration alone is not evidence of a successful CI run.
 
 ## Repository layout
 
 ```text
 crates/
   clipboard-core/      Data model, SQLite, queries, backups, and business rules
-  clipboard-platform/  Windows clipboard, shortcuts, tray, and OS integration
+  clipboard-platform/  Shared clipboard service and Windows/macOS/Linux integrations
   clipboard-gpui/      GPUI application entry point, state, and UI
 scripts/               Packaging and verification helpers
 docs/                  Architecture decisions, feature status, and QA evidence
@@ -53,10 +66,19 @@ Every Rust source, example, and test file is limited to **500 physical lines**, 
 
 Requirements:
 
-- Windows 10/11 x64
-- Rust 1.98 or newer with the MSVC toolchain
-- PowerShell 7 (`pwsh`) for packaging
+- Windows 10/11 x64 with MSVC; or macOS with Xcode Command Line Tools; or Linux with the dependencies below
+- Rust 1.98 or newer with the native toolchain for the current OS
+- PowerShell 7 (`pwsh`) for source-size checks and packaging
 - [`just`](https://github.com/casey/just) (optional, for the shortcut commands below)
+
+On macOS, install development tools using `xcode-select --install`. On Ubuntu 24.04:
+
+```sh
+sudo apt-get update
+sudo apt-get install build-essential clang cmake pkg-config libssl-dev libgtk-3-dev libayatana-appindicator3-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-randr0-dev libasound2-dev libudev-dev mesa-vulkan-drivers xdg-utils dbus-x11 pulseaudio-utils
+```
+
+Linux requires a graphical session and a working Vulkan driver; a headless SSH shell alone cannot run the GUI.
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked
@@ -68,7 +90,7 @@ Or use:
 just run
 ```
 
-By default, data is stored in the `ElegantClipboard-GPUI` application directory under the current user's LocalAppData. For an isolated run, specify a directory explicitly:
+Data uses the current OS's application-data directory: LocalAppData on Windows, Application Support on macOS, and XDG data home on Linux. For an isolated run, specify a directory explicitly:
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
@@ -82,7 +104,7 @@ just test
 just build
 ```
 
-The release executable is written to `target\release\elegant-clipboard-gpui.exe`.
+The release executable is `target/release/elegant-clipboard-gpui.exe` on Windows, or `target/release/elegant-clipboard-gpui` on macOS/Linux.
 
 Create an unsigned Windows x64 standalone ZIP:
 
@@ -90,7 +112,16 @@ Create an unsigned Windows x64 standalone ZIP:
 just package
 ```
 
-The archive and its SHA-256 file are written to `target\packages\`. Installers, automatic updates, and ARM64 artifacts are not currently provided.
+Package **on the native macOS or Linux host**:
+
+```sh
+just package-unix
+# or pwsh -NoProfile -File scripts/package-gpui-unix.ps1
+```
+
+macOS creates a ZIP containing an ad-hoc-signed `.app`; this is not Developer ID signing or Apple notarization. Linux creates a `.tar.gz` containing the executable, license, and instructions, without bundling system libraries. Keep the runtime dependencies listed above installed. Filenames include the actual Rust host target; the script accepts native x86_64 and aarch64 macOS/Linux toolchains.
+
+Packages and SHA-256 files are written to `target/packages/`. Installers and automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
 
 ## Versioning
 

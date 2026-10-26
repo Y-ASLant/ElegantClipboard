@@ -1,9 +1,8 @@
 use anyhow::{Context, Result, bail};
 use clipboard_core::{History, database::ClipboardItem};
-use std::{
-    borrow::Cow,
-    path::{Path, PathBuf},
-};
+#[cfg(windows)]
+use std::path::PathBuf;
+use std::{borrow::Cow, path::Path};
 
 pub(super) fn plain_text_for_copy(item: &ClipboardItem) -> Result<Cow<'_, str>> {
     if !matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf") {
@@ -37,18 +36,24 @@ pub(super) fn item_paths_for_action(
 }
 
 pub(super) fn reveal_in_explorer(path: &Path) -> Result<()> {
-    explorer_command(path)?
-        .spawn()
-        .context("无法启动 Windows 资源管理器")?;
+    let mut command = explorer_command(path)?;
+    #[cfg(windows)]
+    command.spawn().context("无法启动资源管理器")?;
+    #[cfg(unix)]
+    if !command.status().context("无法启动文件管理器")?.success() {
+        bail!("文件管理器未能定位文件");
+    }
     Ok(())
 }
 
+#[cfg(windows)]
 pub(super) fn explorer_command(path: &Path) -> Result<std::process::Command> {
     let mut command = std::process::Command::new(explorer_executable()?);
     command.arg("/select,").arg(path);
     Ok(command)
 }
 
+#[cfg(windows)]
 fn explorer_executable() -> Result<PathBuf> {
     let system_root = std::env::var_os("SystemRoot").context("无法确定 Windows 系统目录")?;
     let explorer = PathBuf::from(system_root).join("explorer.exe");
@@ -58,10 +63,39 @@ fn explorer_executable() -> Result<PathBuf> {
     Ok(explorer)
 }
 
+#[cfg(target_os = "macos")]
+pub(super) fn explorer_command(path: &Path) -> Result<std::process::Command> {
+    let mut command = std::process::Command::new("/usr/bin/open");
+    command.arg("-R").arg(path);
+    Ok(command)
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn explorer_command(path: &Path) -> Result<std::process::Command> {
+    let path = path.canonicalize().context("无法解析文件路径")?;
+    let uri = url::Url::from_file_path(path).map_err(|_| anyhow::anyhow!("无法转换文件 URI"))?;
+    let mut command = std::process::Command::new("dbus-send");
+    command.args([
+        "--session",
+        "--print-reply",
+        "--dest=org.freedesktop.FileManager1",
+        "/org/freedesktop/FileManager1",
+        "org.freedesktop.FileManager1.ShowItems",
+    ]);
+    command
+        .arg(format!("array:string:{}", uri.as_str().replace(',', "%2C")))
+        .arg("string:");
+    Ok(command)
+}
+
 pub(super) fn open_data_directory(data_dir: &Path) -> Result<()> {
-    data_directory_command(data_dir)?
-        .spawn()
-        .context("无法打开数据目录")?;
+    let mut command = data_directory_command(data_dir)?;
+    #[cfg(windows)]
+    command.spawn().context("无法打开数据目录")?;
+    #[cfg(unix)]
+    if !command.status().context("无法打开数据目录")?.success() {
+        bail!("文件管理器未能打开数据目录");
+    }
     Ok(())
 }
 
@@ -69,7 +103,12 @@ pub(super) fn data_directory_command(data_dir: &Path) -> Result<std::process::Co
     if !data_dir.is_dir() {
         bail!("数据目录不存在");
     }
+    #[cfg(windows)]
     let mut command = std::process::Command::new(explorer_executable()?);
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("/usr/bin/open");
+    #[cfg(target_os = "linux")]
+    let mut command = std::process::Command::new("xdg-open");
     command.arg(data_dir);
     Ok(command)
 }

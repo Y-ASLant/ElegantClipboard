@@ -124,7 +124,14 @@ impl ClipboardView {
                 .items_center()
                 .gap_1()
                 .child(tr(language, "按", "Press"))
-                .child(shortcut_kbd("Ctrl+F").expect("onboarding search key"))
+                .child(
+                    shortcut_kbd(if cfg!(target_os = "macos") {
+                        "Cmd+F"
+                    } else {
+                        "Ctrl+F"
+                    })
+                    .expect("onboarding search key"),
+                )
                 .child(tip)
                 .into_any_element(),
             3 => div()

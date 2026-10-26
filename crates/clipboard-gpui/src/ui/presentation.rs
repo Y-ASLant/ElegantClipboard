@@ -51,9 +51,13 @@ pub(super) fn tr(
 }
 pub(super) fn localize_service_message(language: LanguagePreference, message: String) -> String {
     if language == LanguagePreference::Chinese {
-        return message;
+        return if cfg!(target_os = "macos") {
+            message.replace("Ctrl+V", "Command+V")
+        } else {
+            message
+        };
     }
-    match message.as_str() {
+    let localized = match message.as_str() {
         "目标窗口已关闭，内容已复制，请手动粘贴" =>
             "The target window has closed. The content was copied; paste it manually.".into(),
         "前台窗口已变化，已取消自动粘贴，请检查后手动粘贴" =>
@@ -69,7 +73,7 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
         "富文本超过 1 MiB，按纯文本保存" => {
             "Rich text exceeded 1 MiB and was saved as plain text".into()
         }
-        "已在资源管理器中定位" => "Located in File Explorer".into(),
+        "已在资源管理器中定位" => "Located in file manager".into(),
         "已打开数据目录" => "Data folder opened".into(),
         "路径已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
             "Paths copied; switch to the target app and press Ctrl+V".into()
@@ -96,5 +100,10 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
             "Copied; switch to the target app and press Ctrl+V".into()
         }
         _ => message,
+    };
+    if cfg!(target_os = "macos") {
+        localized.replace("Ctrl+V", "Command+V")
+    } else {
+        localized
     }
 }

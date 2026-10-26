@@ -15,6 +15,7 @@ mod history_list;
 mod hover_lifecycle;
 mod hover_window;
 mod image_assets;
+mod native_health;
 mod navigation;
 mod onboarding;
 mod paste_actions;
@@ -38,6 +39,7 @@ mod settings_file_staging;
 mod settings_general;
 mod settings_hover;
 mod settings_layout;
+mod settings_positioning;
 mod settings_retention;
 mod settings_shortcuts;
 mod settings_window;
@@ -62,16 +64,16 @@ use shortcut_labels::{
 };
 use window_lifecycle::update_clipboard_window;
 
-use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
-use crate::window_effect;
-use crate::windows::{
+use crate::native::{
     acrylic, input,
     links::{self, ProjectLink},
     paste, position,
     sound::{self, Sound},
-    tray::{self, TrayCommand},
     window as native_window,
 };
+use crate::tray::{self, TrayCommand};
+use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
+use crate::window_effect;
 use crate::{
     options::Options,
     state::{

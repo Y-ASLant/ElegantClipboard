@@ -79,7 +79,7 @@ impl Worker {
         Ok(())
     }
 }
-pub(in crate::windows) fn filter_observed_capture(
+pub(in crate::service) fn filter_observed_capture(
     content: CapturedClipboard,
     allowed: MonitorTypesPreference,
 ) -> Option<CapturedClipboard> {

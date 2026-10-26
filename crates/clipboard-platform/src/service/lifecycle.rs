@@ -6,8 +6,8 @@ use super::{
     worker::Worker,
 };
 use crate::instance::InstanceSignal;
-use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
-use anyhow::{Result, anyhow};
+use crate::sequence::current_sequence;
+use anyhow::Result;
 use clipboard_core::{
     ContentCategory, History, PAGE_SIZE,
     database::Database,
@@ -18,7 +18,7 @@ use clipboard_core::{
         WindowPositionPreference, WindowSizePreference,
     },
 };
-use clipboard_rs::{ClipboardContext, ClipboardWatcher, ClipboardWatcherContext, WatcherShutdown};
+use clipboard_rs::WatcherShutdown;
 use std::{
     fs::File,
     path::PathBuf,
@@ -119,8 +119,7 @@ impl Service {
         } else {
             false
         };
-        let writer =
-            ClipboardContext::new().map_err(|error| anyhow!("初始化剪贴板失败：{error}"))?;
+        let writer = crate::sequence::new_clipboard()?;
         let commands = Arc::new(CommandQueue::default());
         let incoming = commands.clone();
         let capture_feedback = Arc::new(CaptureFeedback::default());
@@ -308,31 +307,19 @@ impl Service {
             },
         )?);
         if monitor {
-            let clipboard =
-                ClipboardContext::new().map_err(|error| anyhow!("初始化监听失败：{error}"))?;
-            let mut watcher = ClipboardWatcherContext::new()
-                .map_err(|error| anyhow!("初始化监听失败：{error}"))?;
-            watcher.add_handler(WatchHandler {
-                clipboard,
-                state,
-                commands,
-                events: events.clone(),
-                feedback: capture_feedback.clone(),
-            });
-            service.shutdown = Some(watcher.get_shutdown_channel());
-            let stop = service.stop.clone();
-            let watcher_events = events.clone();
-            service.watcher = Some(
-                thread::Builder::new()
-                    .name("clipboard-watcher".into())
-                    .spawn(move || {
-                        watcher.start_watch();
-                        if !stop.load(Ordering::Acquire) {
-                            capture_feedback.error("剪贴板监听已停止，请重启应用".into());
-                            capture_feedback.flush(&watcher_events);
-                        }
-                    })?,
-            );
+            let clipboard = crate::sequence::new_clipboard()?;
+            let (shutdown, watcher) = super::watcher::start(
+                WatchHandler {
+                    clipboard,
+                    state,
+                    commands,
+                    events: events.clone(),
+                    feedback: capture_feedback,
+                },
+                service.stop.clone(),
+            )?;
+            service.shutdown = shutdown;
+            service.watcher = Some(watcher);
         }
         match InstanceSignal::start(&service.data_dir, events.clone()) {
             Ok(signal) => service.instance_signal = Some(signal),
@@ -360,12 +347,12 @@ fn last_seen_sequence(state: &Mutex<CaptureState>) -> u32 {
 fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
     let mut deliver = Vec::new();
     {
-        let Ok(state) = crate::windows::capture::lock_capture_state(&worker.state) else {
+        let Ok(state) = super::capture::lock_capture_state(&worker.state) else {
             return;
         };
         let ignored_sequence = state.ignored_sequence;
         let mut reread = || {
-            let sequence = unsafe { GetClipboardSequenceNumber() };
+            let sequence = current_sequence(&worker.clipboard)?;
             let content = super::read_formats::read_current_content(&worker.clipboard)?;
             Ok((sequence, content))
         };
