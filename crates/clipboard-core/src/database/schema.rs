@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     char_count INTEGER,
     source_app_name TEXT,
     source_app_icon TEXT,
+    note TEXT,
     group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
 );
 

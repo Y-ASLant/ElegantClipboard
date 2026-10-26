@@ -304,6 +304,21 @@ impl Database {
             info!("Migration complete: file_payload column added");
         }
 
+        // 迁移 12: 条目备注（NULL = 无备注；搜索参与 LIKE 匹配）
+        let has_note: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'note'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_note {
+            info!("Migrating database: adding note column");
+            conn.execute_batch("ALTER TABLE clipboard_items ADD COLUMN note TEXT;")?;
+            info!("Migration complete: note column added");
+        }
+
         Ok(())
     }
 

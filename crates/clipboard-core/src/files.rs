@@ -55,7 +55,9 @@ pub(crate) fn file_capture_item(paths: &[String]) -> Result<NewClipboardItem> {
 impl History {
     pub fn capture_files(&self, paths: &[String], images_dir: &Path) -> Result<i64> {
         let item = file_capture_item(paths)?;
-        if let Some(id) = self.repo.touch_by_hash(&item.content_hash, None)? {
+        if self.dedup_allows_reuse()
+            && let Some(id) = self.repo.touch_by_hash(&item.content_hash, None)?
+        {
             return Ok(id);
         }
         let id = self.repo.insert(item)?;

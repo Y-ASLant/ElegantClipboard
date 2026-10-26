@@ -1,4 +1,5 @@
 use super::super::{
+    CapturedClipboard,
     capture::lock_capture_state,
     file_actions::{item_paths_for_action, plain_text_for_copy},
     read_content::RTF_FORMAT,
@@ -26,6 +27,21 @@ pub(super) enum CopyMode {
     PlainText,
     Paths,
     Files,
+    /// 富文本条目的单一格式复制（HTML 或 RTF），缺少该格式时报错不降级。
+    Html,
+    Rtf,
+    /// 文本转换后的纯文本复制（见决策 0003）。
+    Transform(clipboard_core::TextTransform),
+}
+
+impl CopyMode {
+    pub(super) fn from(format: crate::service::protocol::CopyFormat) -> Self {
+        match format {
+            crate::service::protocol::CopyFormat::PlainText => Self::PlainText,
+            crate::service::protocol::CopyFormat::Html => Self::Html,
+            crate::service::protocol::CopyFormat::Rtf => Self::Rtf,
+        }
+    }
 }
 
 impl Worker {
@@ -63,6 +79,29 @@ impl Worker {
             CopyMode::PlainText => contents.push(ClipboardContent::Text(
                 plain_text_for_copy(&item)?.into_owned(),
             )),
+            CopyMode::Transform(transform) => contents.push(ClipboardContent::Text(
+                transform.apply(&plain_text_for_copy(&item)?),
+            )),
+            CopyMode::Html | CopyMode::Rtf => {
+                if mode == CopyMode::Html {
+                    let html = item
+                        .html_content
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .context("该记录没有 HTML 格式内容")?;
+                    contents.push(ClipboardContent::Html(html.to_owned()));
+                } else {
+                    let rtf = item
+                        .rtf_content
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                        .context("该记录没有 RTF 格式内容")?;
+                    contents.push(ClipboardContent::Other(
+                        RTF_FORMAT.into(),
+                        rtf.as_bytes().to_vec(),
+                    ));
+                }
+            }
             CopyMode::Paths => contents.push(ClipboardContent::Text(
                 item_paths_for_action(&item, &self.staged_dir)?.join("\n"),
             )),
@@ -137,6 +176,10 @@ impl Worker {
                     .map(|(name, data)| ClipboardContent::Other(name, data)),
             );
         }
+        // 受控粘贴（Original）且开启恢复时，先在写回前暂存用户剪贴板。
+        if request_id.is_some() && mode == CopyMode::Original {
+            self.stash_clipboard_if_enabled();
+        }
         if contents.is_empty() {
             bail!("记录没有可写回的剪贴板内容");
         }
@@ -144,17 +187,64 @@ impl Worker {
         let clipboard_sequence =
             write_verified(&self.clipboard, contents, &mut state.ignored_sequence)?;
         drop(state);
+        let message = match mode {
+            CopyMode::Html => "HTML 已复制",
+            CopyMode::Rtf => "RTF 已复制",
+            CopyMode::Transform(_) => "转换后的文本已复制",
+            _ if rich => "富文本已复制",
+            _ => "内容已复制",
+        };
         self.send_event(Event::Copied {
             id,
             request_id,
             clipboard_sequence,
-            message: if rich {
-                "富文本已复制"
-            } else {
-                "内容已复制"
-            }
-            .into(),
+            message: message.into(),
         })
+    }
+
+    pub(super) fn handle_restore_stash(&mut self) -> Result<()> {
+        let Some(stash) = self.clipboard_stash.take() else {
+            self.send_event(Event::ClipboardRestored(Ok(false)))?;
+            return Ok(());
+        };
+        let mut contents = match &stash.content {
+            CapturedClipboard::Text(text) => vec![ClipboardContent::Text(text.clone())],
+            CapturedClipboard::Rich { html, rtf, text } => {
+                let mut contents = Vec::with_capacity(3);
+                if let Some(text) = text {
+                    contents.push(ClipboardContent::Text(text.clone()));
+                }
+                if let Some(html) = html {
+                    contents.push(ClipboardContent::Html(html.clone()));
+                }
+                if let Some(rtf) = rtf {
+                    contents.push(ClipboardContent::Other(RTF_FORMAT.into(), rtf.clone()));
+                }
+                contents
+            }
+            CapturedClipboard::Files(paths) => vec![ClipboardContent::Files(paths.clone())],
+            CapturedClipboard::Image { png, .. } => {
+                let image = RustImageData::from_bytes(png)
+                    .map_err(|error| anyhow!("恢复图片失败：{error}"))?;
+                vec![ClipboardContent::Image(image)]
+            }
+        };
+        contents.extend(
+            stash
+                .extra
+                .iter()
+                .map(|format| ClipboardContent::Other(format.name.clone(), format.data.clone())),
+        );
+        let result = self
+            .clipboard
+            .set(contents)
+            .map(|_| true)
+            .map_err(|error| anyhow!("恢复原剪贴板失败：{error}"));
+        // 无论成败都抑制自捕获（部分写入也是自我写入）。
+        let mut state = lock_capture_state(&self.state)?;
+        state.ignored_sequence = current_sequence(&self.clipboard).unwrap_or(0);
+        drop(state);
+        self.send_event(Event::ClipboardRestored(result.map_err(|e| e.to_string())))
     }
 }
 

@@ -149,3 +149,172 @@ fn clipboard_format_list() -> Option<Vec<String>> {
     drop(clipboard);
     Some(names)
 }
+
+/// 决策 0003 的四个变体：去重策略切换、文本转换复制、按格式复制、条目备注。
+pub(super) fn core_paste_variants(
+    service: &Service,
+    events: &async_channel::Receiver<Event>,
+    clipboard: &ClipboardContext,
+    data_dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use clipboard_core::ContentCategory;
+    use clipboard_core::TextTransform;
+    use clipboard_core::database::ClipboardItem as DbSnapshotItem;
+    use clipboard_core::preferences::DedupStrategy;
+    use clipboard_platform::CopyFormat;
+
+    let history = || clipboard_core::History::open(data_dir.join("clipboard.db"));
+    let wait_history = |search: &str| -> anyhow::Result<Vec<DbSnapshotItem>> {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let rows = history()?.list(search, 100, false)?;
+            if !rows.is_empty() {
+                return Ok(rows);
+            }
+            if Instant::now() >= deadline {
+                bail!("等待历史记录超时：{search}");
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let status = || -> anyhow::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            match events.try_recv() {
+                Ok(Event::Copied { .. })
+                | Ok(Event::Status(_))
+                | Ok(Event::NoteSaved(_))
+                | Ok(Event::DedupStrategySaved(_))
+                | Ok(Event::RestoreClipboardSaved(_))
+                | Ok(Event::ClipboardRestored(_)) => return Ok(()),
+                Ok(Event::CommandFailed { message, .. }) => bail!("命令失败：{message}"),
+                Ok(Event::Error(message)) => bail!("{message}"),
+                Ok(_) => {}
+                Err(_) => {}
+            }
+            if Instant::now() >= deadline {
+                bail!("等待命令确认超时");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let wait_for_snapshot =
+        |predicate: &dyn Fn(&[DbSnapshotItem]) -> bool| -> anyhow::Result<bool> {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            loop {
+                match events.try_recv() {
+                    Ok(Event::Snapshot { items, .. }) if predicate(&items) => return Ok(true),
+                    Ok(Event::BackgroundError(message)) | Ok(Event::Error(message)) => {
+                        bail!("{message}")
+                    }
+                    Ok(_) => {}
+                    Err(_) => {}
+                }
+                if Instant::now() >= deadline {
+                    return Ok(false);
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+
+    // 备注持久化并参与搜索。
+    service.send(Command::Capture("note smoke".into()))?;
+    let note_id = wait_history("note smoke")?
+        .first()
+        .context("缺少备注冒烟记录")?
+        .id;
+    service.send(Command::SetNote {
+        id: note_id,
+        note: "smoke 备注".into(),
+    })?;
+    status()?;
+    service.send(Command::Query {
+        search: "smoke 备注".into(),
+        favorite_only: false,
+        category: ContentCategory::All,
+        group_id: None,
+        limit: 100,
+        generation: 0,
+    })?;
+    assert!(
+        wait_for_snapshot(&|items| items
+            .iter()
+            .any(|item| item.id == note_id && item.note.as_deref() == Some("smoke 备注")))?,
+        "备注未参与搜索或未随快照返回"
+    );
+
+    // 文本转换复制。
+    service.send(Command::CopyTransformed {
+        id: note_id,
+        transform: TextTransform::Uppercase,
+    })?;
+    status()?;
+    assert_eq!(
+        clipboard
+            .get_text()
+            .map_err(|error| anyhow!("读回转换文本失败：{error}"))?,
+        "NOTE SMOKE"
+    );
+
+    // 按格式复制：先捕一条富文本，再分别取 HTML 与 RTF。
+    service.send(Command::CaptureRich {
+        html: Some("<b>format smoke</b>".into()),
+        rtf: Some(b"{\\rtf1 format smoke}".as_slice().to_vec()),
+        text: Some("format smoke".into()),
+    })?;
+    let rich_id = wait_history("format smoke")?
+        .first()
+        .context("缺少按格式冒烟记录")?
+        .id;
+    service.send(Command::CopyAsFormat {
+        id: rich_id,
+        format: CopyFormat::Html,
+    })?;
+    status()?;
+    assert!(
+        clipboard
+            .get_html()
+            .map_err(|error| anyhow!("读回 HTML 失败：{error}"))?
+            .contains("format smoke")
+    );
+    service.send(Command::CopyAsFormat {
+        id: rich_id,
+        format: CopyFormat::Rtf,
+    })?;
+    status()?;
+    let rtf_actual = clipboard
+        .get_buffer("Rich Text Format")
+        .map_err(|error| anyhow!("读回 RTF 失败：{error}"))?;
+    // 写回的 RTF 带系统惯例的 NUL 终止符。
+    assert_eq!(
+        rtf_actual
+            .strip_suffix([0u8].as_slice())
+            .unwrap_or(&rtf_actual),
+        b"{\\rtf1 format smoke}".as_slice()
+    );
+
+    // 去重策略：always_new 下同文本产生新条目；切回后合并。
+    service.send(Command::SetDedupStrategy(DedupStrategy::AlwaysNew))?;
+    status()?;
+    service.send(Command::Capture("dedup smoke".into()))?;
+    wait_history("dedup smoke")?;
+    service.send(Command::Capture("dedup smoke".into()))?;
+    let mut dedup_count = 0;
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        dedup_count = history()?.list("dedup smoke", 100, false)?.len();
+        if dedup_count >= 2 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(dedup_count, 2, "always_new 应各存一条");
+    service.send(Command::SetDedupStrategy(DedupStrategy::MoveToTop))?;
+    status()?;
+    service.send(Command::Capture("dedup smoke".into()))?;
+    thread::sleep(Duration::from_millis(200));
+    let merged_count = history()?.list("dedup smoke", 100, false)?.len();
+    assert_eq!(merged_count, 2, "move_to_top 不应新增第三条");
+    Ok(())
+}

@@ -42,6 +42,7 @@ mod settings_layout;
 mod settings_positioning;
 mod settings_retention;
 mod settings_shortcuts;
+mod settings_storage;
 mod settings_window;
 mod settings_window_effect;
 mod shortcut_events;
@@ -56,7 +57,9 @@ mod window_render;
 
 pub use startup::run;
 
-use file_cards::{image_file_dimensions, single_file_image_path, single_image_file_paths};
+use file_cards::{
+    FileCardInfo, image_file_dimensions, single_file_image_path, single_image_file_paths,
+};
 use navigation::{history_row_height, history_top_row};
 use presentation::{apply_theme, format_bytes, localize_service_message, tr, window_shell};
 use shortcut_labels::{
@@ -82,15 +85,15 @@ use crate::{
     },
 };
 use clipboard_core::{
-    ContentCategory, FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent,
+    ContentCategory, FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent, TextTransform,
     backup::BackupReport,
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{
-        AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
-        HotkeyPreference, HoverPreviewPosition, HoverPreviewPreference, LanguagePreference,
-        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, SoundTiming,
-        SourceAppDisplay, ThemePreference, TimeFormat, WindowEffect, WindowEffectPreference,
-        WindowPositionPreference, WindowSizePreference,
+        AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DedupStrategy,
+        DisplayPreference, HotkeyPreference, HoverPreviewPosition, HoverPreviewPreference,
+        LanguagePreference, MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig,
+        SoundTiming, SourceAppDisplay, ThemePreference, TimeFormat, WindowEffect,
+        WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -99,7 +102,7 @@ use clipboard_platform::hotkey::{
 };
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
-use clipboard_platform::{Command, DataSizeInfo, Event, FailureKind, Service};
+use clipboard_platform::{Command, CopyFormat, DataSizeInfo, Event, FailureKind, Service};
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::scroll::{ScrollableElement, ScrollbarAxis};
@@ -132,29 +135,6 @@ const CATEGORY_FILTERS: [Option<ContentCategory>; 4] = [
     Some(ContentCategory::Text),
     Some(ContentCategory::Other),
 ];
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FileCardAvailability {
-    Available,
-    Missing,
-    Unreadable,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FileCardKind {
-    File,
-    Folder,
-    Multiple,
-}
-
-#[derive(Clone, Debug)]
-struct FileCardInfo {
-    availability: FileCardAvailability,
-    kind: FileCardKind,
-    image_path: Option<PathBuf>,
-    image_too_large: bool,
-    total_size: Option<u64>,
-}
 
 gpui_kit::actions!(
     history,
@@ -226,6 +206,10 @@ struct DragMotionState {
 enum HistoryMenuAction {
     Paste,
     PastePlainText,
+    /// 富文本条目按单一格式复制/粘贴。
+    PasteAsFormat(CopyFormat),
+    /// 文本转换后的复制/粘贴。
+    PasteTransformed(TextTransform),
     Copy,
     CopyPath,
     CopyAsFile,
@@ -288,6 +272,9 @@ struct ClipboardView {
     group_move_pending: bool,
     preview: PreviewState,
     preview_input: Entity<TextareaState>,
+    /// 预览页备注输入（打开预览时同步记录的备注值）。
+    note_input: Entity<InputState>,
+    note_save_pending: bool,
     preview_source_hash: Option<String>,
     preview_editing: bool,
     preview_edit_requested: bool,
@@ -360,6 +347,8 @@ struct ClipboardView {
     paste_close_window: PendingPref<bool>,
     paste_key: PendingPref<PasteKeyPreference>,
     paste_move_to_top: PendingPref<bool>,
+    dedup_strategy: PendingPref<DedupStrategy>,
+    restore_clipboard: PendingPref<bool>,
     display: DisplayPreference,
     display_pending: bool,
     audio: PendingPref<AudioPreference>,

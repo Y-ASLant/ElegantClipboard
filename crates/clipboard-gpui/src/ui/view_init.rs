@@ -138,6 +138,8 @@ impl ClipboardView {
         let hotkey_error = hotkey.as_ref().err().map(ToString::to_string);
         let quick_paste_enabled = service.initial_quick_paste_enabled;
         let paste_shortcuts = service.initial_paste_shortcuts.clone();
+        let initial_dedup_strategy = service.initial_dedup_strategy;
+        let initial_restore_clipboard = service.initial_restore_clipboard;
         let (paste_hotkey_sender, paste_hotkey_receiver) = async_channel::bounded(16);
         let paste_hotkeys = if startup.monitoring && quick_paste_enabled {
             PasteHotkeys::start(
@@ -200,16 +202,7 @@ impl ClipboardView {
         .into_iter()
         .flatten()
         .collect();
-        if let Err(error) = &autostart {
-            startup_errors.push(format!(
-                "{}: {error}",
-                tr(
-                    language,
-                    "无法读取开机启动设置",
-                    "Unable to read startup settings"
-                )
-            ));
-        }
+        startup_errors.extend(Self::autostart_startup_error(language, &autostart));
         let theme = service.initial_theme;
         let window_effect = service.initial_window_effect;
         let paused = service.initial_paused;
@@ -315,6 +308,14 @@ impl ClipboardView {
             group_move_pending: false,
             preview: PreviewState::default(),
             preview_input: cx.new(|cx| TextareaState::new(window, cx)),
+            note_input: cx.new(|cx| {
+                InputState::new(window, cx).placeholder(tr(
+                    language,
+                    "添加备注（参与搜索）",
+                    "Add a note (searchable)",
+                ))
+            }),
+            note_save_pending: false,
             preview_source_hash: None,
             preview_editing: false,
             preview_edit_requested: false,
@@ -410,6 +411,14 @@ impl ClipboardView {
             },
             paste_move_to_top: PendingPref {
                 value: paste_move_to_top,
+                pending: false,
+            },
+            dedup_strategy: PendingPref {
+                value: initial_dedup_strategy,
+                pending: false,
+            },
+            restore_clipboard: PendingPref {
+                value: initial_restore_clipboard,
                 pending: false,
             },
             display,

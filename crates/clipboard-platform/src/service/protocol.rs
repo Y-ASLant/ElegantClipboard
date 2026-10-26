@@ -1,11 +1,11 @@
 use crate::source_app;
 use anyhow::Result;
 use clipboard_core::{
-    ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent,
+    ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent, TextTransform,
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
-        AppFilterPreference, AudioPreference, DisplayPreference, HotkeyPreference,
+        AppFilterPreference, AudioPreference, DedupStrategy, DisplayPreference, HotkeyPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
         PasteShortcutConfig, ThemePreference, WindowEffectPreference, WindowPositionPreference,
         WindowSizePreference,
@@ -13,6 +13,14 @@ use clipboard_core::{
     retention::RetentionPolicy,
 };
 use std::path::PathBuf;
+
+/// 按格式粘贴的目标格式（富文本条目）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyFormat {
+    PlainText,
+    Html,
+    Rtf,
+}
 
 pub enum Command {
     Query {
@@ -35,6 +43,33 @@ pub enum Command {
     CopyPathForPaste(i64, u64),
     CopyAsFile(i64),
     CopyAsFileForPaste(i64, u64),
+    /// 按单一格式复制富文本条目（缺少该格式时报错，不降级）。
+    CopyAsFormat {
+        id: i64,
+        format: CopyFormat,
+    },
+    CopyAsFormatForPaste {
+        id: i64,
+        format: CopyFormat,
+        request_id: u64,
+    },
+    /// 文本转换后的复制/粘贴变体。
+    CopyTransformed {
+        id: i64,
+        transform: TextTransform,
+    },
+    CopyTransformedForPaste {
+        id: i64,
+        transform: TextTransform,
+        request_id: u64,
+    },
+    /// 受控粘贴成功后把粘贴前暂存的用户剪贴板写回（见决策 0003）。
+    RestoreStashedClipboard,
+    /// 保存条目备注；空串清空（上限在 core 校验）。
+    SetNote {
+        id: i64,
+        note: String,
+    },
     RevealInExplorer(i64),
     SaveAs {
         id: i64,
@@ -116,6 +151,8 @@ pub enum Command {
     SetMonitorTypes(MonitorTypesPreference),
     SetAppFilter(Box<AppFilterPreference>),
     SetWindowEffect(WindowEffectPreference),
+    SetDedupStrategy(DedupStrategy),
+    SetRestoreClipboard(bool),
     ListRunningApps,
     CompleteOnboarding,
     BumpToTop(i64),
@@ -215,11 +252,18 @@ impl Command {
             Self::CopyForPaste(_, request_id)
             | Self::CopyPlainTextForPaste(_, request_id)
             | Self::CopyPathForPaste(_, request_id)
-            | Self::CopyAsFileForPaste(_, request_id) => Some(FailureKind::Paste(*request_id)),
+            | Self::CopyAsFileForPaste(_, request_id)
+            | Self::CopyAsFormatForPaste { request_id, .. }
+            | Self::CopyTransformedForPaste { request_id, .. } => {
+                Some(FailureKind::Paste(*request_id))
+            }
             Self::ResolveQuickPaste { request_id, .. } => {
                 Some(FailureKind::QuickPaste(*request_id))
             }
             Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
+            Self::CopyAsFormat { .. } | Self::CopyTransformed { .. } => Some(FailureKind::Other),
+            Self::RestoreStashedClipboard => None,
+            Self::SetNote { .. } => Some(FailureKind::Other),
             Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
             Self::ReorderGroup { .. } => Some(FailureKind::Other),
@@ -269,6 +313,8 @@ impl Command {
             | Self::SetStageFiles(_)
             | Self::SetMonitorTypes(_)
             | Self::SetAppFilter(_)
+            | Self::SetDedupStrategy(_)
+            | Self::SetRestoreClipboard(_)
             | Self::SetTransientFilter(_)
             | Self::SetWindowEffect(_)
             | Self::ListRunningApps
@@ -377,6 +423,11 @@ pub enum Event {
     MonitorTypesSaved(Result<MonitorTypesPreference, String>),
     AppFilterSaved(Result<Box<AppFilterPreference>, String>),
     WindowEffectSaved(Result<WindowEffectPreference, String>),
+    DedupStrategySaved(Result<DedupStrategy, String>),
+    RestoreClipboardSaved(Result<bool, String>),
+    NoteSaved(Result<i64, String>),
+    /// RestoreStashedClipboard 完成（Ok 内为是否真的有快照可恢复）。
+    ClipboardRestored(Result<bool, String>),
     RunningApps(Vec<source_app::RunningApp>),
     OnboardingCompleted(Result<(), String>),
     AutostartSaved(Result<bool, String>),

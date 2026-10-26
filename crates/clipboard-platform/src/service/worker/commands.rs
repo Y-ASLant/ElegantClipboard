@@ -105,6 +105,27 @@ impl Worker {
             Command::CopyAsFileForPaste(id, request_id) => {
                 return self.handle_copy(id, Some(request_id), CopyMode::Files);
             }
+            Command::CopyAsFormat { id, format } => {
+                return self.handle_copy(id, None, CopyMode::from(format));
+            }
+            Command::CopyAsFormatForPaste {
+                id,
+                format,
+                request_id,
+            } => {
+                return self.handle_copy(id, Some(request_id), CopyMode::from(format));
+            }
+            Command::CopyTransformed { id, transform } => {
+                return self.handle_copy(id, None, CopyMode::Transform(transform));
+            }
+            Command::CopyTransformedForPaste {
+                id,
+                transform,
+                request_id,
+            } => {
+                return self.handle_copy(id, Some(request_id), CopyMode::Transform(transform));
+            }
+            Command::RestoreStashedClipboard => return self.handle_restore_stash(),
             Command::Preview { id, generation } => {
                 self.send_event(Event::Preview {
                     id,
@@ -343,6 +364,32 @@ impl Worker {
                     Preferences::set_window_effect,
                     Event::WindowEffectSaved,
                 );
+            }
+            Command::SetDedupStrategy(strategy) => {
+                return self.save_setting(
+                    strategy,
+                    Preferences::set_dedup_strategy,
+                    Event::DedupStrategySaved,
+                );
+            }
+            Command::SetRestoreClipboard(enabled) => {
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_restore_clipboard,
+                    Event::RestoreClipboardSaved,
+                );
+            }
+            Command::SetNote { id, note } => {
+                let result = self
+                    .history
+                    .set_note(id, &note)
+                    .map(|_| id)
+                    .map_err(|error| error.to_string());
+                if result.is_ok() {
+                    self.snapshot()?;
+                }
+                self.send_event(Event::NoteSaved(result))?;
+                return Ok(());
             }
             Command::ListRunningApps => {
                 let apps = source_app::running_apps(&self.icons_dir);

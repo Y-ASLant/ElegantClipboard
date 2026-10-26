@@ -1,4 +1,64 @@
 use super::*;
+use preferences::DedupStrategy;
+
+#[test]
+fn always_new_strategy_keeps_duplicate_copies_and_move_to_top_merges() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let history = History::open(dir.path().join("clipboard.db"))?;
+    // 默认策略：同哈希移顶合并。
+    let first = history.capture("repeat")?.unwrap();
+    assert_eq!(history.capture("repeat")?.unwrap(), first);
+    assert_eq!(history.count("", false)?, 1);
+    // always_new：同哈希也各存一条；文本与富文本路径都受策略控制。
+    let preferences = Preferences::new(&history.db);
+    preferences.set_dedup_strategy(DedupStrategy::AlwaysNew)?;
+    let second = history.capture("repeat")?.unwrap();
+    assert_ne!(second, first);
+    let rich_second = history.capture_rich(
+        Some("<b>repeat</b>"),
+        None,
+        Some("repeat"),
+        &dir.path().join("images"),
+    )?;
+    assert_ne!(rich_second, first);
+    assert_eq!(history.count("", false)?, 3);
+    // 切回默认策略后恢复合并，且 always_new 期间的条目仍可被触碰。
+    preferences.set_dedup_strategy(DedupStrategy::MoveToTop)?;
+    assert_eq!(history.capture("repeat")?.unwrap(), second);
+    assert_eq!(history.count("", false)?, 3);
+    Ok(())
+}
+
+#[test]
+fn notes_persist_search_and_reject_oversize() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let history = History::open(dir.path().join("clipboard.db"))?;
+    let id = history.capture("noted body")?.unwrap();
+    assert!(history.item(id)?.note.is_none());
+    history.set_note(id, "  发布说明草稿  ")?;
+    assert_eq!(history.item(id)?.note.as_deref(), Some("发布说明草稿"));
+    // 备注参与关键词搜索。
+    assert_eq!(history.count("发布说明", false)?, 1);
+    assert_eq!(history.count("不存在的备注", false)?, 0);
+    // 空串清空；超限拒绝且不改动原值。
+    history.set_note(id, "   ")?;
+    assert_eq!(history.item(id)?.note, None);
+    let oversize = "字".repeat(MAX_NOTE_CHARS + 1);
+    assert!(history.set_note(id, &oversize).is_err());
+    assert!(history.set_note(999_999, "任意").is_err());
+    Ok(())
+}
+
+#[test]
+fn text_transforms_cover_the_four_special_paste_modes() {
+    assert_eq!(TextTransform::Trim.apply("  Hello World  "), "Hello World");
+    assert_eq!(
+        TextTransform::RemoveLineBreaks.apply("  Hello\r\nWorld  "),
+        "Hello World"
+    );
+    assert_eq!(TextTransform::Uppercase.apply("abc"), "ABC");
+    assert_eq!(TextTransform::Lowercase.apply("ABC"), "abc");
+}
 
 #[test]
 fn database_maintenance_reclaims_free_pages_and_preserves_history() -> Result<()> {

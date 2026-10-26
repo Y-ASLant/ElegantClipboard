@@ -36,6 +36,8 @@ pub struct ClipboardItem {
     pub char_count: Option<i64>,
     pub source_app_name: Option<String>,
     pub source_app_icon: Option<String>,
+    /// 用户备注（NULL = 无备注；参与关键词搜索）
+    pub note: Option<String>,
     /// 所属分组（NULL = 默认分组，Some(id) = 自定义分组）
     pub group_id: Option<i64>,
 }
@@ -121,7 +123,8 @@ impl ConditionBuilder {
             }
             pattern.push('%');
             builder = builder.condition_with_param(
-                "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\')",
+                "(text_content LIKE ?1 ESCAPE '\\' OR file_paths LIKE ?1 ESCAPE '\\' \
+                 OR note LIKE ?1 ESCAPE '\\')",
                 pattern,
             );
         }

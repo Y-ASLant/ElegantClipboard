@@ -90,6 +90,17 @@ impl ClipboardView {
         let generation = self.preview.open(id);
         self.preview_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        // 备注输入同步当前记录的已存值；列表行携带 note（查询列含 note）。
+        let note = self
+            .history
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .and_then(|item| item.note.clone())
+            .unwrap_or_default();
+        self.note_input
+            .update(cx, |input, cx| input.set_value(note, window, cx));
+        self.note_save_pending = false;
         if !self.send(Command::Preview { id, generation }, cx) {
             self.preview
                 .apply(id, generation, Err(self.message.clone()));
@@ -133,6 +144,9 @@ impl ClipboardView {
         self.image_zoom_percent = 100;
         self.preview_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.note_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.note_save_pending = false;
         window.focus(&self.list_focus, cx);
         cx.notify();
     }
@@ -158,6 +172,19 @@ impl ClipboardView {
         let next = (i32::from(self.image_zoom_percent) + i32::from(change)).clamp(50, 400) as u16;
         if next != self.image_zoom_percent {
             self.image_zoom_percent = next;
+            cx.notify();
+        }
+    }
+    pub(super) fn save_preview_note(&mut self, cx: &mut Context<Self>) {
+        if self.note_save_pending {
+            return;
+        }
+        let Some(id) = self.preview.id else {
+            return;
+        };
+        let note = self.note_input.read(cx).value().to_string();
+        if self.send(Command::SetNote { id, note }, cx) {
+            self.note_save_pending = true;
             cx.notify();
         }
     }

@@ -200,6 +200,60 @@ impl ClipboardView {
                 );
                 true
             }
+            Event::DedupStrategySaved(result) => {
+                self.acknowledge_save(
+                    result,
+                    |this| &mut this.dedup_strategy,
+                    ("去重策略已保存", "Dedup strategy saved"),
+                    ("保存去重策略失败", "Failed to save dedup strategy"),
+                );
+                true
+            }
+            Event::RestoreClipboardSaved(result) => {
+                self.acknowledge_save(
+                    result,
+                    |this| &mut this.restore_clipboard,
+                    ("恢复剪贴板设置已保存", "Clipboard restore setting saved"),
+                    (
+                        "保存恢复剪贴板设置失败",
+                        "Failed to save clipboard restore setting",
+                    ),
+                );
+                true
+            }
+            Event::NoteSaved(result) => match result {
+                Ok(_) => {
+                    self.note_save_pending = false;
+                    self.set_feedback_message(tr(self.language, "备注已保存", "Note saved").into());
+                    self.is_error = false;
+                    true
+                }
+                Err(error) => {
+                    self.note_save_pending = false;
+                    self.set_feedback_message(format!(
+                        "{}: {error}",
+                        tr(self.language, "保存备注失败", "Failed to save note")
+                    ));
+                    self.is_error = true;
+                    true
+                }
+            },
+            Event::ClipboardRestored(result) => match result {
+                // 没有快照（偏好关闭或读取失败）不打扰用户；失败要提示。
+                Ok(_) => false,
+                Err(error) => {
+                    self.set_feedback_message(format!(
+                        "{}: {error}",
+                        tr(
+                            self.language,
+                            "恢复原剪贴板失败",
+                            "Failed to restore clipboard"
+                        )
+                    ));
+                    self.is_error = true;
+                    true
+                }
+            },
             Event::QuickPasteEnabledSaved(result) => self.apply_quick_paste_enabled_saved(result),
             Event::PasteShortcutsSaved(result) => self.apply_paste_shortcuts_saved(result),
             Event::QuickPasteResolved { request_id, result } => {

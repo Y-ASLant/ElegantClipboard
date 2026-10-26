@@ -243,4 +243,12 @@ impl ClipboardRepository {
         )?;
         Ok(())
     }
+
+    /// 写入条目备注；None 清空。返回 false 表示记录已不存在。
+    pub fn set_note(&self, id: i64, note: Option<&str>) -> Result<bool, rusqlite::Error> {
+        Ok(self.write_conn.lock().execute(
+            "UPDATE clipboard_items SET note = ?1 WHERE id = ?2",
+            params![note, id],
+        )? > 0)
+    }
 }

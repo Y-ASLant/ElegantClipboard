@@ -21,6 +21,7 @@ pub mod retention;
 pub mod rich;
 pub(crate) mod same_text;
 pub mod search;
+pub mod text_transform;
 pub use blob_store::sweep_pending_at;
 pub use file_staging::{FileCaptureOutcome, MAX_STAGED_DIRECTORY_BYTES, MAX_STAGED_FILE_BYTES};
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
@@ -30,17 +31,21 @@ pub use native_format::{
     MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES, NativeFormatCapture,
 };
 pub use preview::{FilePreviewEntry, PreviewContent};
+pub use text_transform::TextTransform;
 
 use anyhow::{Context, Result, bail};
 use database::{
     ClipboardItem, ClipboardRepository, ContentType, Database, Group, GroupRepository,
     NewClipboardItem, QueryOptions,
 };
+use preferences::{DedupStrategy, Preferences};
 use std::path::{Path, PathBuf};
 
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const HISTORY_LIMIT: i64 = 10_000;
 pub const PAGE_SIZE: i64 = 100;
+/// 条目备注上限（字符数）。
+pub const MAX_NOTE_CHARS: usize = 2_000;
 
 pub fn is_url_text(text: &str) -> bool {
     clipboard::is_url(text)
@@ -228,20 +233,22 @@ impl History {
                 (ContentType::Text, text, b"text:".as_slice())
             };
         let hash = clipboard::hash_with_prefix(hash_prefix, text.as_bytes());
-        // URL trimming matches the legacy database; other text keeps exact bytes.
-        if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
-            return Ok(Some(id));
-        }
-        // 同文合并：默认分组内已有相同纯文本的条目时并入而不新建。
-        if let Some(target) = self.find_same_text_item(text)? {
-            let input = same_text::MergeInput {
-                content_type,
-                html: None,
-                rtf: None,
-                text,
-                hash,
-            };
-            return Ok(Some(self.merge_same_text(&target, &input, images_dir)?));
+        // always_new 跳过哈希触碰与同文合并（两者都是去重形态），直接各存一条。
+        if self.dedup_allows_reuse() {
+            if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
+                return Ok(Some(id));
+            }
+            // 同文合并：默认分组内已有相同纯文本的条目时并入而不新建。
+            if let Some(target) = self.find_same_text_item(text)? {
+                let input = same_text::MergeInput {
+                    content_type,
+                    html: None,
+                    rtf: None,
+                    text,
+                    hash,
+                };
+                return Ok(Some(self.merge_same_text(&target, &input, images_dir)?));
+            }
         }
         let id = self.repo.insert(NewClipboardItem {
             content_type,
@@ -365,6 +372,28 @@ impl History {
 
     pub fn toggle_pin(&self, id: i64) -> Result<bool> {
         Ok(self.repo.toggle_pin(id)?)
+    }
+
+    /// 保存条目备注；空串清空备注。
+    pub fn set_note(&self, id: i64, note: &str) -> Result<()> {
+        let trimmed = note.trim();
+        if trimmed.chars().count() > MAX_NOTE_CHARS {
+            bail!("备注不能超过 {MAX_NOTE_CHARS} 个字符");
+        }
+        let note = (!trimmed.is_empty()).then_some(trimmed);
+        if !self.repo.set_note(id, note)? {
+            bail!("记录已不存在");
+        }
+        Ok(())
+    }
+
+    /// 当前去重策略是否允许复用既有条目（false = always_new，各存一条）。
+    /// 读取失败按默认策略处理（复用），与首次运行的种子值一致。
+    fn dedup_allows_reuse(&self) -> bool {
+        Preferences::new(&self.db)
+            .dedup_strategy()
+            .map(|strategy| strategy == DedupStrategy::MoveToTop)
+            .unwrap_or(true)
     }
 }
 

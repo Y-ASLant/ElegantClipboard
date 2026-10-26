@@ -1,6 +1,6 @@
 use super::file_cards::{copy_or_paste_label, save_as_suggested_name};
 use super::*;
-use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 pub(super) fn history_menu_item(
     label: impl Into<SharedString>,
     disabled: bool,
@@ -37,6 +37,12 @@ impl ClipboardView {
         match action {
             HistoryMenuAction::Paste => self.paste_selected(id, window, cx),
             HistoryMenuAction::PastePlainText => self.copy_or_paste_plain_text(id, window, cx),
+            HistoryMenuAction::PasteAsFormat(format) => {
+                self.copy_or_paste_format(id, *format, window, cx)
+            }
+            HistoryMenuAction::PasteTransformed(transform) => {
+                self.copy_or_paste_transform(id, *transform, window, cx)
+            }
             HistoryMenuAction::Copy => {
                 self.send(Command::Copy(id), cx);
             }
@@ -74,6 +80,8 @@ impl ClipboardView {
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
+        let is_rich_item = matches!(item.content_type.as_str(), "html" | "rtf");
+        let is_text_item = matches!(item.content_type.as_str(), "text" | "url");
         let favorite = item.is_favorite;
         let pinned = item.is_pinned;
         let entity = cx.entity();
@@ -99,7 +107,7 @@ impl ClipboardView {
         if batch_mode {
             row.into_any_element()
         } else {
-            row.context_menu(move |menu, _, _| {
+            row.context_menu(move |menu, window, cx| {
                 let menu = menu
                     .item(history_menu_item(
                         tr(language, "粘贴到原窗口", "Paste to previous window"),
@@ -115,6 +123,112 @@ impl ClipboardView {
                             entity.clone(),
                             id,
                             HistoryMenuAction::PastePlainText,
+                        ))
+                    })
+                    // 富文本条目：按单一目标格式复制/粘贴的子菜单。
+                    .when(is_rich_item, |menu| {
+                        let submenu =
+                            |menu: PopupMenu,
+                             _window: &mut Window,
+                             _cx: &mut Context<PopupMenu>| {
+                                let mut menu = menu;
+                                for (label, format) in [
+                                    (tr(language, "HTML", "HTML"), CopyFormat::Html),
+                                    (tr(language, "RTF", "RTF"), CopyFormat::Rtf),
+                                ] {
+                                    let action = HistoryMenuAction::PasteAsFormat(format);
+                                    let (menu_label, menu_label_en) = if can_paste {
+                                        ("粘贴为", "Paste as")
+                                    } else {
+                                        ("复制为", "Copy as")
+                                    };
+                                    menu = menu.item(
+                                        PopupMenuItem::new(format!(
+                                            "{} {label}",
+                                            tr(language, menu_label, menu_label_en)
+                                        ))
+                                        .disabled(paste_pending)
+                                        .on_click({
+                                            let entity = entity.clone();
+                                            move |_, window, cx| {
+                                                entity.update(cx, |this, cx| {
+                                                    this.perform_history_menu_action(
+                                                        id, &action, window, cx,
+                                                    );
+                                                });
+                                            }
+                                        }),
+                                    );
+                                }
+                                menu
+                            };
+                        menu.item(PopupMenuItem::submenu(
+                            if can_paste {
+                                tr(language, "按格式粘贴", "Paste as format")
+                            } else {
+                                tr(language, "按格式复制", "Copy as format")
+                            },
+                            PopupMenu::build(window, cx, submenu),
+                        ))
+                    })
+                    // 文本条目：转换后的复制/粘贴子菜单。
+                    .when(is_text_item, |menu| {
+                        let submenu =
+                            |menu: PopupMenu,
+                             _window: &mut Window,
+                             _cx: &mut Context<PopupMenu>| {
+                                let mut menu = menu;
+                                for (label, transform) in [
+                                    (
+                                        tr(language, "去除首尾空白", "Trim whitespace"),
+                                        TextTransform::Trim,
+                                    ),
+                                    (
+                                        tr(language, "去除换行", "Remove line breaks"),
+                                        TextTransform::RemoveLineBreaks,
+                                    ),
+                                    (
+                                        tr(language, "转大写", "UPPERCASE"),
+                                        TextTransform::Uppercase,
+                                    ),
+                                    (
+                                        tr(language, "转小写", "lowercase"),
+                                        TextTransform::Lowercase,
+                                    ),
+                                ] {
+                                    let action = HistoryMenuAction::PasteTransformed(transform);
+                                    let (menu_label, menu_label_en) = if can_paste {
+                                        ("粘贴为", "Paste as")
+                                    } else {
+                                        ("复制为", "Copy as")
+                                    };
+                                    menu = menu.item(
+                                        PopupMenuItem::new(format!(
+                                            "{} {label}",
+                                            tr(language, menu_label, menu_label_en)
+                                        ))
+                                        .disabled(paste_pending)
+                                        .on_click({
+                                            let entity = entity.clone();
+                                            move |_, window, cx| {
+                                                entity.update(cx, |this, cx| {
+                                                    this.perform_history_menu_action(
+                                                        id, &action, window, cx,
+                                                    );
+                                                });
+                                            }
+                                        }),
+                                    );
+                                }
+                                menu
+                            };
+                        menu.item(PopupMenuItem::submenu(
+                            if can_paste {
+                                tr(language, "转换后粘贴", "Paste transformed")
+                            } else {
+                                tr(language, "转换后复制", "Copy transformed")
+                            },
+                            PopupMenu::build(window, cx, submenu),
                         ))
                     })
                     .item(history_menu_item(

@@ -1,3 +1,4 @@
+use super::file_cards::{FileCardAvailability, FileCardKind};
 use super::*;
 use clipboard_core::search::search_highlight_ranges;
 

@@ -25,7 +25,7 @@ pub use data::{
     show_existing_instance,
 };
 pub use lifecycle::Service;
-pub use protocol::{CapturedClipboard, Command, DataSizeInfo, Event, FailureKind};
+pub use protocol::{CapturedClipboard, Command, CopyFormat, DataSizeInfo, Event, FailureKind};
 
 #[cfg(all(test, windows))]
 #[path = "../windows/tests/mod.rs"]

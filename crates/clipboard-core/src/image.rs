@@ -36,7 +36,9 @@ impl History {
             bail!("图片尺寸无效或超过 2500 万像素");
         }
         let hash = crate::clipboard::hash_with_prefix(b"image:", png);
-        if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
+        if self.dedup_allows_reuse()
+            && let Some(id) = self.repo.touch_by_hash(&hash, None)?
+        {
             let item = self.repo.get_by_id(id)?.context("图片记录已不存在")?;
             if item
                 .image_path

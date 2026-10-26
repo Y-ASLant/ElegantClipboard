@@ -80,6 +80,14 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
+        chinese: "去重与剪贴板",
+        english: "Dedup & clipboard",
+        description_chinese: "选择相同内容的去重策略，以及粘贴后是否恢复原剪贴板",
+        description_english: "Choose how duplicate copies are merged and whether pasting restores the clipboard",
+        content: SettingsWindowView::settings_dedup_content,
+    },
+    Section {
+        page: SettingsPage::Data,
         chinese: "保留策略",
         english: "Retention",
         description_chinese: "按分组限制普通历史数量和天数；收藏与置顶保留",

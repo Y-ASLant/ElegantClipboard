@@ -15,6 +15,23 @@ pub(super) fn update_clipboard_window<R>(
 }
 
 impl ClipboardView {
+    /// 开机启动设置读取失败的启动提示（仅失败时产生一条）。
+    pub(super) fn autostart_startup_error(
+        language: LanguagePreference,
+        autostart: &Result<bool, anyhow::Error>,
+    ) -> Option<String> {
+        autostart.as_ref().err().map(|error| {
+            format!(
+                "{}: {error}",
+                tr(
+                    language,
+                    "无法读取开机启动设置",
+                    "Unable to read startup settings"
+                )
+            )
+        })
+    }
+
     pub(super) fn refresh_tray_menu(&self) -> anyhow::Result<()> {
         if let Some(tray) = &self._tray {
             tray::update_menu(tray, self.language, self.paused, self.monitoring)?;

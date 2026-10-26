@@ -163,6 +163,101 @@ impl ClipboardView {
         );
     }
 
+    pub(super) fn copy_or_paste_format(
+        &mut self,
+        id: i64,
+        format: CopyFormat,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let label = match format {
+            CopyFormat::Html => (
+                "正在复制 HTML 并返回原窗口…",
+                "Copying HTML and returning to the previous window…",
+            ),
+            CopyFormat::Rtf => (
+                "正在复制 RTF 并返回原窗口…",
+                "Copying RTF and returning to the previous window…",
+            ),
+            CopyFormat::PlainText => (
+                "正在复制纯文本并返回原窗口…",
+                "Copying plain text and returning to the previous window…",
+            ),
+        };
+        self.copy_or_paste_generic(
+            id,
+            |id| Command::CopyAsFormat { id, format },
+            |id, request_id| Command::CopyAsFormatForPaste {
+                id,
+                format,
+                request_id,
+            },
+            label,
+            window,
+            cx,
+        );
+    }
+
+    pub(super) fn copy_or_paste_transform(
+        &mut self,
+        id: i64,
+        transform: TextTransform,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.copy_or_paste_generic(
+            id,
+            |id| Command::CopyTransformed { id, transform },
+            |id, request_id| Command::CopyTransformedForPaste {
+                id,
+                transform,
+                request_id,
+            },
+            (
+                "正在复制转换后的文本并返回原窗口…",
+                "Copying the transformed text and returning to the previous window…",
+            ),
+            window,
+            cx,
+        );
+    }
+
+    /// 转换/格式变体的通用复制粘贴（与 copy_or_paste_variant 同构，
+    /// 但命令按需构造而非常量元组）。
+    fn copy_or_paste_generic(
+        &mut self,
+        id: i64,
+        copy: impl Fn(i64) -> Command,
+        paste: impl Fn(i64, u64) -> Command,
+        paste_message: (&'static str, &'static str),
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_pending_row_click();
+        if self.paste_pending.is_some() {
+            return;
+        }
+        let target = self
+            .paste_target
+            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
+        if self.paste_target.is_some() && target.is_none() {
+            self.paste_target = None;
+        }
+        let command = if let Some(target) = target {
+            let request_id = self.paste_pending.begin(target);
+            paste(id, request_id)
+        } else {
+            copy(id)
+        };
+        if !self.send(command, cx) {
+            self.paste_pending.take();
+        } else if target.is_some() {
+            self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
+            self.is_error = false;
+            cx.notify();
+        }
+    }
+
     pub(super) fn copy_or_paste_variant(
         &mut self,
         id: i64,
@@ -261,6 +356,8 @@ impl ClipboardView {
                                     .into(),
                                 );
                                 this.is_error = false;
+                                // 粘贴已送达：按偏好写回用户原剪贴板（决策 0003）。
+                                this.send(Command::RestoreStashedClipboard, cx);
                                 if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top.value)
                                 {
                                     this.send(Command::BumpToTop(id), cx);

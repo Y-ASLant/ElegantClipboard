@@ -12,7 +12,7 @@ use clipboard_core::{
     ContentCategory, History, PAGE_SIZE,
     database::Database,
     preferences::{
-        AppFilterPreference, AudioPreference, DisplayPreference, HotkeyPreference,
+        AppFilterPreference, AudioPreference, DedupStrategy, DisplayPreference, HotkeyPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
         PasteShortcutConfig, Preferences, ThemePreference, WindowEffectPreference,
         WindowPositionPreference, WindowSizePreference,
@@ -54,6 +54,8 @@ pub struct Service {
     pub initial_paste_close_window: bool,
     pub initial_paste_key: PasteKeyPreference,
     pub initial_paste_move_to_top: bool,
+    pub initial_dedup_strategy: DedupStrategy,
+    pub initial_restore_clipboard: bool,
     pub initial_quick_paste_enabled: bool,
     pub initial_paste_shortcuts: PasteShortcutConfig,
     pub initial_window_position: WindowPositionPreference,
@@ -95,6 +97,8 @@ impl Service {
         let initial_paste_close_window = preferences.paste_close_window()?;
         let initial_paste_key = preferences.paste_key()?;
         let initial_paste_move_to_top = preferences.paste_move_to_top()?;
+        let initial_dedup_strategy = preferences.dedup_strategy()?;
+        let initial_restore_clipboard = preferences.restore_clipboard()?;
         let initial_quick_paste_enabled = preferences.quick_paste_enabled()?;
         let initial_paste_shortcuts = preferences.paste_shortcuts()?;
         let initial_window_position = preferences.window_position()?;
@@ -151,6 +155,8 @@ impl Service {
             initial_paste_close_window,
             initial_paste_key,
             initial_paste_move_to_top,
+            initial_dedup_strategy,
+            initial_restore_clipboard,
             initial_quick_paste_enabled,
             initial_paste_shortcuts,
             initial_window_position,
@@ -190,6 +196,7 @@ impl Service {
                     transient: super::worker::transient::TransientWindow::new(
                         initial_transient_filter,
                     ),
+                    clipboard_stash: None,
                     search: String::new(),
                     favorite_only: false,
                     category: ContentCategory::All,

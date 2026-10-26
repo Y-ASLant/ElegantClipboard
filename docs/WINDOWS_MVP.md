@@ -107,7 +107,11 @@ Release 以体积优先：`opt-level = "z"`、`lto = "fat"`、`codegen-units = 1
 
 从解压包运行隔离数据目录、`--no-monitor` 的原生验收已观察四条合成记录：GIF、APNG、WebP 和外部 PNG 均能显示；外部 PNG 旋转后缩略图更新，删除后旧图在版本检查后消失。三种动态图在一次四帧短采样中各自像素摘要不变，本轮仅确认可显示，未确认动画播放。删除文件后的失败文字在小缩略区域被裁切（`deleted-settled.png`），作为已知显示问题保留，本轮未扩展修复和复测。截图仅保留本地 `target/qa/native-images/`，不发布。验收进程已退出，临时 PowerShell／Python 脚本已删除；合成数据和截图留作本地证据。
 
-## 启动与操作
+## 2026-10-26 基础粘贴链路补齐（决策 0003）
+
+按决策 0003（`docs/decisions/0003-core-paste-parity.md`）实现五项：粘贴后恢复原剪贴板（默认关闭，`gpui_restore_clipboard`，数据设置切换）、去重策略切换（`gpui_dedup_strategy`，move_to_top 默认 / always_new 跳过哈希触碰与同文合并）、文本转换复制/粘贴（去首尾空白、去换行、大小写，作为 CopyMode::Transform 接入 Windows 与 X11 路径）、富文本条目按单一格式复制/粘贴（CopyAsFormat，纯文本/HTML/RTF，缺少所选格式报错不降级）、条目备注（迁移 12 新增 `note` 列，2000 字符上限，参与 LIKE 搜索，完整预览页编辑）。恢复剪贴板在受控粘贴的 Original 写回前由 worker 暂存快照（`read_clipboard` 全量），UI 在粘贴送达后发 `RestoreStashedClipboard` 写回并抑制自捕获；隐私标记内容读不到即无快照。富文本条目行菜单新增「按格式粘贴/复制」与文本条目「转换后粘贴/复制」子菜单（gpui-kit `PopupMenuItem::submenu`）。
+
+自动验证：229 个 Rust 文件符合 500 行上限，`cargo fmt --check`、workspace/all-targets 编译与 Clippy `-D warnings` 通过，354 项测试通过（2 项原有忽略），Release 构建通过。隔离窗口站冒烟扩展 `core_paste_variants` 场景并全部通过：备注保存后经 `Query` 搜索随快照返回（note 列随 SEARCH_COLUMNS 下发）、Uppercase 转换复制读回 `NOTE SMOKE`、CopyAsFormat HTML 读回包含原文且无 Text 格式、CopyAsFormat RTF 读回含 NUL 终止符的原始字节、always_new 下同文本两次捕获产生两条且切回 move_to_top 后不再新增。实现注意点：clipboard-rs 的 `set_html` 读回带 CF_HTML 文档头（校验用包含语义），RTF 写回带 NUL 终止符（两侧剥离后比对）；单一格式写回复用 clipboard-rs `set`，ignored_sequence 在 set 后立即记录以抑制自捕获。恢复剪贴板的真实跨应用回贴（含目标应用读取时序竞争）尚未实机验收，与既有跨应用回贴矩阵一并执行。
 
 ```powershell
 # 正常使用：启动原生窗口并记录后续复制的受支持内容

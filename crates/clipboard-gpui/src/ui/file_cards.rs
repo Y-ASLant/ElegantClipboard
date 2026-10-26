@@ -1,4 +1,29 @@
 use super::*;
+
+/// 文件卡片可用性（历史卡片与预检共用）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FileCardAvailability {
+    Available,
+    Missing,
+    Unreadable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FileCardKind {
+    File,
+    Folder,
+    Multiple,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct FileCardInfo {
+    pub(super) availability: FileCardAvailability,
+    pub(super) kind: FileCardKind,
+    pub(super) image_path: Option<PathBuf>,
+    pub(super) image_too_large: bool,
+    pub(super) total_size: Option<u64>,
+}
+
 pub(super) fn single_file_image_path(entries: &[FilePreviewEntry]) -> Option<PathBuf> {
     let [entry] = entries else { return None };
     if !entry.exists || entry.is_dir || entry.metadata_error.is_some() {

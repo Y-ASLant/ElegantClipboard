@@ -31,6 +31,8 @@ const APP_FILTER_KEY: &str = "gpui_app_filter";
 const ONBOARDING_COMPLETED_KEY: &str = "gpui_onboarding_completed";
 const AUDIO_KEY: &str = "gpui_audio";
 const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
+const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
+const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
 pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
      ('gpui_theme_mode', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size',
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
@@ -38,7 +40,8 @@ pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
       'gpui_display', 'gpui_monitor_types', 'gpui_app_filter', 'gpui_stage_files', 'gpui_transient_filter',
       'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect', 'gpui_retention',
-      '_migration_url_content_type', '_migration_backfill_semantic_hash')";
+      '_migration_url_content_type', '_migration_backfill_semantic_hash', 'gpui_dedup_strategy',
+      'gpui_restore_clipboard')";
 
 pub struct Preferences {
     repository: SettingsRepository,
@@ -412,6 +415,38 @@ impl Preferences {
 
     pub fn app_filter(&self) -> Result<AppFilterPreference> {
         self.read_json(APP_FILTER_KEY, AppFilterPreference::valid)
+    }
+
+    /// 去重策略：move_to_top（默认，同哈希移顶）或 always_new（同哈希也新建）。
+    pub fn dedup_strategy(&self) -> Result<DedupStrategy> {
+        Ok(match self.repository.get(DEDUP_STRATEGY_KEY)?.as_deref() {
+            Some("always_new") => DedupStrategy::AlwaysNew,
+            _ => DedupStrategy::MoveToTop,
+        })
+    }
+
+    pub fn set_dedup_strategy(&self, strategy: DedupStrategy) -> Result<()> {
+        let value = match strategy {
+            DedupStrategy::MoveToTop => "move_to_top",
+            DedupStrategy::AlwaysNew => "always_new",
+        };
+        Ok(self.repository.set(DEDUP_STRATEGY_KEY, value)?)
+    }
+
+    /// 受控粘贴后是否把用户原剪贴板内容写回（见决策 0003，默认关闭）。
+    pub fn restore_clipboard(&self) -> Result<bool> {
+        Ok(matches!(
+            self.repository.get(RESTORE_CLIPBOARD_KEY)?.as_deref(),
+            Some("true")
+        ))
+    }
+
+    pub fn set_restore_clipboard(&self, enabled: bool) -> Result<()> {
+        self.repository.set(
+            RESTORE_CLIPBOARD_KEY,
+            if enabled { "true" } else { "false" },
+        )?;
+        Ok(())
     }
 
     pub fn set_app_filter(&self, preference: &AppFilterPreference) -> Result<()> {

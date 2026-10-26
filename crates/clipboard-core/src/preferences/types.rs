@@ -25,6 +25,15 @@ pub enum AppFilterMode {
     Whitelist,
 }
 
+/// 历史去重策略：相同内容再次复制时是移顶既有条目还是另存一条。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DedupStrategy {
+    #[default]
+    MoveToTop,
+    AlwaysNew,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppFilterPreference {

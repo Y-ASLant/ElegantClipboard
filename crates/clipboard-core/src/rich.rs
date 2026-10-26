@@ -72,25 +72,27 @@ impl History {
             }
         }
         let hash = hasher.finalize().to_hex().to_string();
-        if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
-            return Ok(id);
-        }
-        // 同文合并：默认分组内已有相同纯文本的条目时并入而不新建。
-        if let Some(text) = text
-            && let Some(target) = self.find_same_text_item(text)?
-        {
-            let input = crate::same_text::MergeInput {
-                content_type: if html.is_some() {
-                    ContentType::Html
-                } else {
-                    ContentType::Rtf
-                },
-                html,
-                rtf,
-                text,
-                hash: hash.clone(),
-            };
-            return self.merge_same_text(&target, &input, Some(images_dir));
+        if self.dedup_allows_reuse() {
+            if let Some(id) = self.repo.touch_by_hash(&hash, None)? {
+                return Ok(id);
+            }
+            // 同文合并：默认分组内已有相同纯文本的条目时并入而不新建。
+            if let Some(text) = text
+                && let Some(target) = self.find_same_text_item(text)?
+            {
+                let input = crate::same_text::MergeInput {
+                    content_type: if html.is_some() {
+                        ContentType::Html
+                    } else {
+                        ContentType::Rtf
+                    },
+                    html,
+                    rtf,
+                    text,
+                    hash: hash.clone(),
+                };
+                return self.merge_same_text(&target, &input, Some(images_dir));
+            }
         }
         let rtf_content = rtf.map(encode_rtf_for_storage);
         let id = self.repo.insert(NewClipboardItem {

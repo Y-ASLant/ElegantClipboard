@@ -428,6 +428,8 @@ fn main() -> anyhow::Result<()> {
     println!("native format fidelity roundtrip ok");
     transient_filtering(&events, &clipboard, directory.path())?;
     println!("transient window filtering ok");
+    core_paste_variants(&service, &events, &clipboard, directory.path())?;
+    println!("dedup/transform/format/note variants ok");
 
     drop(service);
     println!("isolated clipboard roundtrip passed");
@@ -439,4 +441,4 @@ fn main() -> anyhow::Result<()> {
 mod scenarios;
 
 #[cfg(windows)]
-use scenarios::{native_format_roundtrip, transient_filtering};
+use scenarios::{core_paste_variants, native_format_roundtrip, transient_filtering};

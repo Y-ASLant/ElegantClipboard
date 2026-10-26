@@ -245,6 +245,33 @@ impl ClipboardView {
                     .child(message),
             )
             .child(div().flex_1().min_h_0().child(body))
+            .child(self.render_preview_note(cx))
             .child(self.render_preview_toolbar(id, cx))
+    }
+
+    /// 预览页底部的备注编辑行：单行输入 + 保存按钮。
+    fn render_preview_note(&self, cx: &mut Context<Self>) -> Div {
+        let note_id = format!("preview-note-{}", self.preview.id.unwrap_or(0));
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                Input::new(&self.note_input)
+                    .id(SharedString::from(note_id))
+                    .small(),
+            )
+            .child(
+                Button::new("preview-note-save")
+                    .small()
+                    .outline()
+                    .label(if self.note_save_pending {
+                        tr(self.language, "保存中…", "Saving…")
+                    } else {
+                        tr(self.language, "保存备注", "Save note")
+                    })
+                    .disabled(self.note_save_pending)
+                    .on_click(cx.listener(|this, _, _, cx| this.save_preview_note(cx))),
+            )
     }
 }
