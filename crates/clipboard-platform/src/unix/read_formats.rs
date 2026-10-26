@@ -17,6 +17,7 @@ const PRIVATE_FORMATS: &[&str] = &[
     "ExcludeClipboardContentFromMonitorProcessing",
 ];
 /// X11 选择机制的元数据格式：不是内容，不参与额外格式捕获与内容身份哈希。
+#[cfg(target_os = "linux")]
 pub(crate) const X11_META_FORMATS: &[&str] = &[
     "TARGETS",
     "TIMESTAMP",
@@ -88,7 +89,11 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
             extra: Vec::new(),
         });
     }
-    let (content, warning) = read_content(clipboard, Some(&formats))?;
+    let (content, warning) = read_content(
+        clipboard,
+        #[cfg(target_os = "linux")]
+        Some(&formats),
+    )?;
     let mut extra = Vec::new();
     let mut total = 0usize;
     if content.is_some() {
@@ -125,5 +130,10 @@ pub(super) fn read_current_content(
     if is_private(&formats, clipboard) {
         return Ok(None);
     }
-    Ok(read_content(clipboard, Some(&formats))?.0)
+    Ok(read_content(
+        clipboard,
+        #[cfg(target_os = "linux")]
+        Some(&formats),
+    )?
+    .0)
 }

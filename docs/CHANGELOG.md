@@ -6,6 +6,9 @@
 
 ### 重构
 
+- 修复 macOS CI 文件暂存测试的临时目录夹具：在规范化后的系统临时目录中创建测试数据，避免 `/var -> /private/var` 祖先链接触发既有安全拒绝策略。保留恢复、共享副本、预算、数据库回滚与非法内容覆盖；新增 Unix 源文件链接、祖先目录链接及数据目录链接拒绝回归，不放宽生产代码的符号链接限制。
+- 修复 Unix CI 编译失败：`read_content` 的格式列表参数在调用处同步限定为 Linux，避免 macOS 参数数量不匹配；Unix `read_formats` 模块改为 crate 内可见，使 Linux 剪贴板序列哈希能访问共享的 X11 元数据格式列表，保持格式过滤行为不变。X11 常量仅在 Linux 编译，连接与键盘映射缓存使用局部类型别名，消除 macOS 未使用常量和 Linux 类型复杂度的严格 Clippy 错误。
+
 - 将完整 Service、Command/Event、队列和 Worker 从 Windows 专属目录移至共享 `clipboard-platform/src/service/`，三个平台共用采集、查询、编辑、分组、偏好、备份及恢复业务。Windows 原生格式读写保持独立；Unix 使用真实 clipboard-rs 后端、本地 socket 单实例唤回和文件 URI 校验。
 - 新增 `clipboard-platform/src/macos/` 与 `linux/`：实现 Carbon/X11 热键、来源应用、登录启动、外部点击、原生拖放及受控粘贴。Linux 来源按 selection owner/XRes 归因，采集快照校验 XFixes generation；XDND 松开后锁定目标，热键匹配使用实际锁定键掩码。Wayland 使用 data-control，缺少协议时拒绝静默 XWayland 降级，并明确全局系统能力限制。
 - GPUI 界面、状态和托盘菜单由 Windows/macOS/Linux 共用，平台窗口适配分离；macOS 自动粘贴使用 Cmd+V 并检查辅助功能授权，Linux GTK 托盘事件在 GPUI 前台线程分派。设置根据能力禁用不可用功能。新增原生 Unix 打包脚本及 Ubuntu/macOS CI/发布任务；macOS `.app` 仅 ad-hoc 签名，不包含 Apple 公证。

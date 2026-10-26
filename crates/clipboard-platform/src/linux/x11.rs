@@ -28,7 +28,8 @@ impl X11 {
     /// 每次都新建 socket + setup 握手的开销过高，因此进程内复用一条连接
     /// （调用方短暂持有 Arc；仅在缓存记录上次连接失败时跳过重复重试）。
     pub fn connect() -> Result<Self> {
-        static SHARED: LazyLock<Mutex<Option<Result<(Arc<RustConnection>, u32), String>>>> =
+        type ConnectionResult = Result<(Arc<RustConnection>, u32), String>;
+        static SHARED: LazyLock<Mutex<Option<ConnectionResult>>> =
             LazyLock::new(|| Mutex::new(None));
         let mut shared = SHARED.lock().unwrap_or_else(|error| error.into_inner());
         match shared.as_ref() {
@@ -106,8 +107,8 @@ impl X11 {
     pub fn keycode(&self, keysym: u32) -> Result<u8> {
         // 键盘映射极少变化；xdnd 主循环、快捷键注册与粘贴路径会反复查询，
         // 用 (min_keycode, 映射) 的内容寻址缓存避免每次拉取约 6KB 的回复。
-        static CACHE: LazyLock<Mutex<Option<(u8, u8, Vec<u32>)>>> =
-            LazyLock::new(|| Mutex::new(None));
+        type KeyboardMapping = (u8, u8, Vec<u32>);
+        static CACHE: LazyLock<Mutex<Option<KeyboardMapping>>> = LazyLock::new(|| Mutex::new(None));
         let mut cache = CACHE.lock().unwrap_or_else(|error| error.into_inner());
         if cache.is_none() {
             let setup = self.connection.setup();
