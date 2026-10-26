@@ -32,10 +32,10 @@ jobs:
         run: .\scripts\package-gpui-windows.ps1
 
       - name: Upload Windows package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: package-windows-x64
-          path: target/packages/*
+          path: target/packages/*.zip
           if-no-files-found: error
 
   unix:
@@ -57,10 +57,12 @@ jobs:
         shell: pwsh
         run: ./scripts/package-gpui-unix.ps1
       - name: Upload native package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: package-${{ matrix.os }}
-          path: target/packages/*
+          path: |
+            target/packages/*.zip
+            target/packages/*.tar.gz
           if-no-files-found: error
 
   publish:
@@ -69,17 +71,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           pattern: package-*
           merge-multiple: true
           path: packages
       - name: Create draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           draft: true
           generate_release_notes: true
           files: |
             packages/*.zip
             packages/*.tar.gz
-            packages/*.sha256

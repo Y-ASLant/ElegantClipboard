@@ -154,7 +154,7 @@ pub(crate) fn is_url(text: &str) -> bool {
 /// Strip volatile fields from RTF that Word/Outlook regenerate on every copy,
 /// so identical user-visible content produces the same hash.
 ///
-/// Removed (matching Ditto's `GenerateCRC` logic):
+/// Removed fields:
 /// - `{\*\datastore{...}}` block (Word's rich-data XML, changes per document instance)
 /// - `\rsid`, `\insrsid` control words with trailing decimal digits
 /// - `\mdispDef1` control word (no numeric arg)

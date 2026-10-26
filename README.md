@@ -127,7 +127,7 @@ just package-unix
 
 macOS 生成包含 `.app` 的 ZIP，并进行本地 ad-hoc 签名；这不等同 Developer ID 签名或 Apple 公证。Linux 生成原生二进制、许可证和说明的 `.tar.gz`，不会捆绑系统动态库，需保留上述运行依赖。文件名包含实际 Rust host target；脚本支持 macOS/Linux 的 x86_64 和 aarch64 原生工具链。
 
-产物与 SHA-256 文件写入 `target/packages/`。不提供安装器或自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
+产物与 SHA-256 文件写入本地 `target/packages/`，CI artifact 与 GitHub Release 仅上传平台包，不上传 `.sha256` 文件。不提供安装器或自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
 
 ## 版本管理
 

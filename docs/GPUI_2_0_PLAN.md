@@ -8,19 +8,13 @@
 
 2.0 首版完成一个能长期用于 Windows 日常工作的本地剪贴板管理器：复制内容自动保存，随时唤出并检索，按原来的操作习惯粘贴回目标应用，重启不丢历史，数据可管理、备份及恢复。
 
-- **能力参考 Ditto**：采集、持久历史、搜索、回到原窗口粘贴、多格式与纯文本、常用内容组织、快捷键、保留策略。仅采用经官方资料核实的能力作为参照，不承诺与 Ditto 所有功能或任意自定义剪贴板格式完全等价。
-- **交互基准采用原 `main`**：主窗口结构、默认入口、卡片动作、分类与分组、批量操作、独立设置与编辑窗口。不是复制 Ditto 的窗口外观。
+- **基础能力范围**：采集、持久历史、搜索、回到原窗口粘贴、多格式与纯文本、常用内容组织、快捷键、保留策略。不承诺支持任意自定义剪贴板格式。
+- **交互基准采用原 `main`**：主窗口结构、默认入口、卡片动作、分类与分组、批量操作、独立设置与编辑窗口。
 - **实现延续当前 GPUI 工程**：复用已有 core/platform/gpui 分层、数据库兼容、后台 worker 和 Kit 组件，不从零重写。
 - 本版优先本地功能。WebDAV、翻译、插件框架和在线更新不进入基础版发布门槛。
 
 参考来源：
 
-- Ditto 官方仓库及使用说明：<https://github.com/sabrogden/Ditto>
-- Ditto 官方网站：<https://ditto-cp.sourceforge.io/>
-- Ditto 官方 Wiki：<https://github.com/sabrogden/Ditto/wiki>（原窗口粘贴、Shift+Enter 纯文本、内容查看、多选与分组）。
-- Ditto 自动清理：<https://github.com/sabrogden/Ditto/wiki/Auto-Delete>（数量/时长、受保护条目；Ditto 使用后台空闲清理，2.0 不机械照搬触发时机）。
-- Ditto 官方隐私说明：<https://ditto-cp.sourceforge.io/PrivacyPolicy.php>（本地 SQLite）。
-- Ditto 官方英文界面资源：<https://github.com/sabrogden/Ditto/blob/master/Debug/Language/English.xml>（检索及多选分隔符选项；控件存在不代表本次已核实其所有执行语义）。
 - 原版 `main:FEATURES.md`、`main:src/App.tsx`、`main:src/stores/ui-settings.ts`、`main:src/stores/clipboard.ts`、`main:src/components/ClipboardItemCard.tsx`、`main:src/pages/Settings.tsx`。
 - GPUI Kit 官方组件目录：<https://gpui-kit.com/zh-CN/component>（同目录英文入口 <https://gpui-kit.com/component>）。
 
@@ -172,7 +166,7 @@
 - 官方目录已有的控件必须用 Kit：Input、Button、Tabs/TabBar、Select、Menu、Dialog、Tooltip、Settings、TitleBar、VirtualList、Kbd、Scrollable、Checkbox/Switch、NumberInput 等；应用卡片和窗口拖动布局用 GPUI primitives。
 - core 不依赖 Windows/GPUI；Windows 剪贴板格式、目标窗口、快捷键、目录生命周期在 platform；UI 仅维护视图与提交请求，不再复制业务规则。
 - 源代码仍可模块化拆分，但不把全库重构和新增通用框架当作基础功能里程碑。
-- Ditto 是功能参考；若以后复用源码，先核对具体文件许可及分发要求，本计划不引入其代码或依赖。
+- 复用第三方源码前，先核对具体文件许可及分发要求。
 - 自动测试使用隔离临时目录；涉及真实系统剪贴板的测试必须明确限制在非交互窗口站。桌面跨应用验收需显式说明测试内容与对真实剪贴板的影响。
 
 ## 7. 当前基线与文档维护

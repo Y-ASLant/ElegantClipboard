@@ -2,6 +2,10 @@
 
 本日志从 Windows 原生 GPUI 重构版 `2.0.0` 开始记录；此前版本不在此处补录。版本号来自根目录 `Cargo.toml` 的 `[workspace.package]`，发布标签须与之对应（如 `v2.0.0`）。
 
+## 未发布
+
+- 发布流水线仅上传平台包，不再上传 `.sha256` 附件；本地打包仍生成校验文件。`upload-artifact` 升至 `v7.0.2`、`download-artifact` 升至 `v8.0.2`、`action-gh-release` 升至 `v3.0.3`，均使用 Node.js 24 运行时。
+
 ## 2.0.0-beta.1（预发行版）
 
 发布标签为 `v2.0.0-beta.1`，作为 GitHub Pre-release 提供 Windows、Linux 与 macOS 包。macOS 包名保留完整预发行版本，应用包内 Apple 版本字段使用数字版本 `2.0.0`；仅 ad-hoc 签名，未公证。

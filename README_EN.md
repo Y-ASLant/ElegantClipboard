@@ -121,7 +121,7 @@ just package-unix
 
 macOS creates a ZIP containing an ad-hoc-signed `.app`; this is not Developer ID signing or Apple notarization. Linux creates a `.tar.gz` containing the executable, license, and instructions, without bundling system libraries. Keep the runtime dependencies listed above installed. Filenames include the actual Rust host target; the script accepts native x86_64 and aarch64 macOS/Linux toolchains.
 
-Packages and SHA-256 files are written to `target/packages/`. Installers and automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
+Packages and SHA-256 files are written locally to `target/packages/`; CI artifacts and GitHub Releases upload only platform packages, not `.sha256` files. Installers and automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
 
 ## Versioning
 
