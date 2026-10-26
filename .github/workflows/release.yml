@@ -56,12 +56,17 @@ jobs:
       - name: Build native package
         shell: pwsh
         run: ./scripts/package-gpui-unix.ps1
+      - name: macOS DMG smoke
+        if: runner.os == 'macOS'
+        timeout-minutes: 2
+        shell: pwsh
+        run: ./scripts/smoke-gpui-macos-package.ps1 -Image (Get-Item target/packages/*-apple-darwin.dmg).FullName
       - name: Upload native package
         uses: actions/upload-artifact@v7.0.2
         with:
           name: package-${{ matrix.os }}
           path: |
-            target/packages/*.zip
+            target/packages/*.dmg
             target/packages/*.tar.gz
           if-no-files-found: error
 
@@ -83,4 +88,5 @@ jobs:
           generate_release_notes: true
           files: |
             packages/*.zip
+            packages/*.dmg
             packages/*.tar.gz

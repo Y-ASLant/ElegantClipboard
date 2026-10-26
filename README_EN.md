@@ -119,9 +119,11 @@ just package-unix
 # or pwsh -NoProfile -File scripts/package-gpui-unix.ps1
 ```
 
-macOS creates a ZIP containing an ad-hoc-signed `.app`; this is not Developer ID signing or Apple notarization. Linux creates a `.tar.gz` containing the executable, license, and instructions, without bundling system libraries. Keep the runtime dependencies listed above installed. Filenames include the actual Rust host target; the script accepts native x86_64 and aarch64 macOS/Linux toolchains.
+macOS creates `ElegantClipboard-v<version>-<arch>-apple-darwin.dmg` containing `ElegantClipboard.app` and an `/Applications` shortcut. Open the DMG, drag the app to Applications, eject the image, then launch it from Applications. The app is only ad-hoc signed, without Developer ID signing or Apple notarization. If macOS blocks the first launch, verify the download source before using **System Settings → Privacy & Security → Open Anyway**; do not disable system-wide security checks. Automatic paste requires Accessibility permission.
 
-Packages and SHA-256 files are written locally to `target/packages/`; CI artifacts and GitHub Releases upload only platform packages, not `.sha256` files. Installers and automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
+Linux creates a `.tar.gz` containing the executable, license, and instructions, without bundling system libraries. Keep the runtime dependencies listed above installed. Filenames include the actual Rust host target; the script accepts native x86_64 and aarch64 macOS/Linux toolchains. macOS CI and release jobs verify and mount the DMG read-only, check the Applications shortcut and app signature, then launch the packaged application with isolated smoke-test data.
+
+Packages and SHA-256 files are written locally to `target/packages/`; CI artifacts and GitHub Releases upload only platform packages, not `.sha256` files. Installation wizards and automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
 
 ## Versioning
 

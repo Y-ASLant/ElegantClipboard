@@ -125,9 +125,11 @@ just package-unix
 # 或 pwsh -NoProfile -File scripts/package-gpui-unix.ps1
 ```
 
-macOS 生成包含 `.app` 的 ZIP，并进行本地 ad-hoc 签名；这不等同 Developer ID 签名或 Apple 公证。Linux 生成原生二进制、许可证和说明的 `.tar.gz`，不会捆绑系统动态库，需保留上述运行依赖。文件名包含实际 Rust host target；脚本支持 macOS/Linux 的 x86_64 和 aarch64 原生工具链。
+macOS 生成 `ElegantClipboard-v<版本>-<架构>-apple-darwin.dmg`，内含 `ElegantClipboard.app` 和指向 `/Applications` 的快捷方式。打开 DMG，将应用拖到 Applications，推出磁盘映像后从“应用程序”启动。应用仅进行本地 ad-hoc 签名，未使用 Developer ID 签名或 Apple 公证；确认下载来源可信后，如首次启动被拦截，可在“系统设置 → 隐私与安全性”中选择“仍要打开”，不要关闭全局安全检查。自动粘贴需授予辅助功能权限。
 
-产物与 SHA-256 文件写入本地 `target/packages/`，CI artifact 与 GitHub Release 仅上传平台包，不上传 `.sha256` 文件。不提供安装器或自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
+Linux 生成原生二进制、许可证和说明的 `.tar.gz`，不会捆绑系统动态库，需保留上述运行依赖。文件名包含实际 Rust host target；脚本支持 macOS/Linux 的 x86_64 和 aarch64 原生工具链。macOS CI 与发布任务会校验 DMG、只读挂载、检查 Applications 快捷方式与应用签名，并从映像内启动隔离数据目录的窗口 smoke。
+
+产物与 SHA-256 文件写入本地 `target/packages/`，CI artifact 与 GitHub Release 仅上传平台包，不上传 `.sha256` 文件。不提供安装向导或自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
 
 ## 版本管理
 

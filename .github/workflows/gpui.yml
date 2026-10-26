@@ -71,7 +71,8 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 2
         run: dbus-run-session -- xvfb-run -a ./target/release/elegant-clipboard-gpui --smoke-test --data-dir "$RUNNER_TEMP/elegant-gpui-smoke"
-      - name: macOS native window smoke
+      - name: macOS DMG smoke
         if: runner.os == 'macOS'
         timeout-minutes: 2
-        run: ./target/release/elegant-clipboard-gpui --smoke-test --data-dir "$RUNNER_TEMP/elegant-gpui-smoke"
+        shell: pwsh
+        run: ./scripts/smoke-gpui-macos-package.ps1 -Image (Get-Item target/packages/*-apple-darwin.dmg).FullName

@@ -62,8 +62,10 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'Ad-hoc application signing failed.' }
             Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $stage
             Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $stage
-            $archive = Join-Path $packageRoot "$name.zip"
-            & ditto -c -k --sequesterRsrc $stage $archive
+            & ln -s /Applications (Join-Path $stage 'Applications')
+            if ($LASTEXITCODE -ne 0) { throw 'Unable to create the Applications shortcut.' }
+            $archive = Join-Path $packageRoot "$name.dmg"
+            & hdiutil create -ov -volname 'ElegantClipboard' -srcfolder $stage -fs HFS+ -format UDZO $archive
         } else {
             $bundle = Join-Path $stage $name
             New-Item -ItemType Directory -Path $bundle | Out-Null
