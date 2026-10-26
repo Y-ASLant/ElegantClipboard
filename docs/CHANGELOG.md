@@ -2,7 +2,9 @@
 
 本日志从 Windows 原生 GPUI 重构版 `2.0.0` 开始记录；此前版本不在此处补录。版本号来自根目录 `Cargo.toml` 的 `[workspace.package]`，发布标签须与之对应（如 `v2.0.0`）。
 
-## 2.0.0（未发布）
+## 2.0.0-beta.1（预发行版）
+
+发布标签为 `v2.0.0-beta.1`，作为 GitHub Pre-release 提供 Windows、Linux 与 macOS 包。macOS 包名保留完整预发行版本，应用包内 Apple 版本字段使用数字版本 `2.0.0`；仅 ad-hoc 签名，未公证。
 
 ### 重构
 
@@ -116,4 +118,4 @@
 
 - GPUI Kit 更新至稳定版 `0.7.0`，配套 `gpui-base`/`gpui-component` 更新至 `0.7.0`、GPUI 快照更新至 `gpui-pre-* 0.3.7`。主窗口、设置窗口与悬停预览改用 Kit `open_window`，由 Base Root 自动承载弹窗浮层；移除手动 Root 构造与 Dialog 层渲染，保留异步弹窗反馈。上游 ropey 预发布依赖例外见 [依赖策略](WINDOWS_MVP.md#依赖策略)。
 
-功能细节及限制见 [Windows GPUI 状态](WINDOWS_MVP.md)。本节为待发布版本记录，不表示已创建 `v2.0.0` 标签或正式发布。
+功能细节及限制见 [Windows GPUI 状态](WINDOWS_MVP.md)。本节为 `2.0.0-beta.1` 预发行版记录，不代表 `2.0.0` 正式版发布。

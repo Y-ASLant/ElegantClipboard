@@ -35,6 +35,8 @@ try {
     try {
         $name = "elegant-clipboard-gpui-v$version-$hostTarget"
         if ($IsMacOS) {
+            # Apple bundle version fields use the numeric release version, not SemVer prerelease labels.
+            $bundleVersion = ($version -split '[-+]')[0]
             $app = Join-Path $stage 'ElegantClipboard.app'
             $contents = Join-Path $app 'Contents'
             New-Item -ItemType Directory -Path (Join-Path $contents 'MacOS') | Out-Null
@@ -47,8 +49,8 @@ try {
 <key>CFBundleName</key><string>ElegantClipboard</string>
 <key>CFBundleExecutable</key><string>elegant-clipboard-gpui</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>$version</string>
-<key>CFBundleVersion</key><string>$version</string>
+<key>CFBundleShortVersionString</key><string>$bundleVersion</string>
+<key>CFBundleVersion</key><string>$bundleVersion</string>
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 "@
