@@ -32,7 +32,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         .run(move |cx| {
             gpui_kit::init(cx);
             // 晚于 gpui-component 注册，才能在根 div 上覆盖它刷的不透明背景。
-            acrylic::register_root_plugin(cx);
+            window_effect::register_root_plugin(cx);
             cx.bind_keys([
                 KeyBinding::new("down", Next, Some("HistoryList")),
                 KeyBinding::new("up", Previous, Some("HistoryList")),

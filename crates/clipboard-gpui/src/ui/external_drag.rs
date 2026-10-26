@@ -71,7 +71,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         self.finish_external_drag(cx);
-        let Some(source) = tray::window_hwnd(window) else {
+        let Some(source) = native_window::window_id(window) else {
             return false;
         };
         let dimensions = drag.size.get();
@@ -101,7 +101,7 @@ impl ClipboardView {
         self.external_drag = Some(CardDragSession {
             token,
             drag: Rc::new(drag.clone()),
-            source_hwnd: source.0 as isize,
+            source_hwnd: source,
             preview_hwnd,
             offset,
             native_active: false,

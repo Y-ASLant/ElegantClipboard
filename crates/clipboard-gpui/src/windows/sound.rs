@@ -1,9 +1,9 @@
-use clipboard_core::preferences::{AudioPreference, SoundTiming};
-use std::sync::OnceLock;
-use windows::{
+use ::windows::{
     Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT},
     core::PCWSTR,
 };
+use clipboard_core::preferences::{AudioPreference, SoundTiming};
+use std::sync::OnceLock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sound {

@@ -106,16 +106,16 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "本地数据",
         english: "Storage",
-        description_chinese: "数据库、受管图片和暂存文件",
-        description_english: "Database, managed images and staged files",
+        description_chinese: "查看和管理历史记录、图片与文件副本的存储空间",
+        description_english: "View and manage storage for history, images and file copies",
         content: SettingsWindowView::settings_storage_content,
     },
     Section {
         page: SettingsPage::Data,
         chinese: "导入与恢复",
         english: "Import & restore",
-        description_chinese: "将旧版数据库、旧版 ZIP 或 GPUI 备份恢复到独立空目录",
-        description_english: "Restore a legacy database, legacy ZIP or GPUI backup to a separate empty folder",
+        description_chinese: "将旧版数据或备份恢复到独立空目录",
+        description_english: "Restore legacy data or a backup to a separate empty folder",
         content: SettingsWindowView::settings_import_content,
     },
     Section {
@@ -170,8 +170,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::About,
         chinese: "关于 ElegantClipboard",
         english: "About ElegantClipboard",
-        description_chinese: "Windows 原生 GPUI 剪贴板管理器",
-        description_english: "Native GPUI clipboard manager for Windows",
+        description_chinese: "Windows 剪贴板管理器",
+        description_english: "Clipboard manager for Windows",
         content: SettingsWindowView::settings_about_intro_content,
     },
     Section {
@@ -201,9 +201,10 @@ fn paste_audio_content(
 fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
     TitleBar::new()
         .bg(cx.theme().background)
-        .when(acrylic::active(cx).effect != WindowEffect::None, |bar| {
-            bar.bg(transparent_black())
-        })
+        .when(
+            window_effect::active(cx).effect != WindowEffect::None,
+            |bar| bar.bg(transparent_black()),
+        )
         .child(
             div()
                 .text_sm()
@@ -321,7 +322,7 @@ impl Render for SettingsWindowView {
                     .sidebar_width(px(224.))
                     .sidebar_size_range(px(212.)..px(280.))
                     .when(
-                        acrylic::active(cx).effect != WindowEffect::None,
+                        window_effect::active(cx).effect != WindowEffect::None,
                         |settings| {
                             // Only the sidebar container exposes the shell; its controls keep
                             // their theme surfaces, so there is no second tint layer.

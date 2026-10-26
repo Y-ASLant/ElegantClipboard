@@ -1,8 +1,8 @@
-use anyhow::{Result, bail};
-use windows::{
+use ::windows::{
     Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
     core::{PCWSTR, w},
 };
+use anyhow::{Result, bail};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectLink {

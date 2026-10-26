@@ -9,7 +9,7 @@
 //!    `DWMWA_USE_HOSTBACKDROPBRUSH` 是 Win11 22H2+ 让背板铺进客户区的开关。
 //! 3. **让客户区透出**。`Window::set_background_appearance` 非 `Opaque` 时 GPUI 才把
 //!    交换链清成透明色。
-//! 4. **根 div 不能有不透明背景**。见 [`AcrylicRootPlugin`]——这是最隐蔽的一条。
+//! 4. **根 div 不能有不透明背景**。通用 GPUI 根插件位于 `crate::window_effect`。
 //!
 //! 材质只作用于窗口外壳，不修改组件主题。控件与浮层保留原有底色，
 //! 避免半透明表面透出自身阴影；装饰性容器可局部透明以露出同一层外壳。
@@ -17,87 +17,50 @@
 //! 生效值通过 Global 广播：三处窗口（主窗口、设置窗口、悬停预览）在创建时套用，
 //! 偏好保存成功后由全局刷新推送给所有已打开窗口。
 
-use clipboard_core::preferences::{WindowEffect, WindowEffectPreference};
-use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
-use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{
+use ::windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
+use ::windows::Win32::Graphics::Dwm::{
     DWM_SYSTEMBACKDROP_TYPE, DWM_WINDOW_CORNER_PREFERENCE, DWMSBT_MAINWINDOW, DWMSBT_NONE,
     DWMSBT_TABBEDWINDOW, DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_COLOR_DEFAULT,
     DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_HOSTBACKDROPBRUSH,
     DWMWA_VISIBLE_FRAME_BORDER_THICKNESS, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT,
     DWMWCP_ROUND, DWMWINDOWATTRIBUTE, DwmSetWindowAttribute,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
+use ::windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, GetClientRect, GetWindowLongW, PostMessageW, SIZE_RESTORED, SWP_FRAMECHANGED,
     SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongW, SetWindowPos,
     WINDOW_STYLE, WM_SIZE, WS_BORDER, WS_DLGFRAME,
 };
-use windows::core::BOOL;
-
-use gpui_kit::base::{Root, RootPlugin};
-use gpui_kit::{
-    App, Context, Div, Global, Hsla, IntoElement, Render, Stateful, StyleRefinement, Window,
-    WindowBackgroundAppearance, div, prelude::*, transparent_black,
-};
+use ::windows::core::BOOL;
+use clipboard_core::preferences::{WindowEffect, WindowEffectPreference};
+use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
+use gpui_kit::{App, Window, WindowBackgroundAppearance};
 
 mod frameless;
 
 use frameless::set_frameless;
-
-#[derive(Clone, Copy, Default)]
-pub(crate) struct WindowEffectSetting(pub(crate) WindowEffectPreference);
-
-impl Global for WindowEffectSetting {}
-
-/// 只广播本机实际生效的效果；请求值继续保存在视图和 SQLite 中。
-pub(crate) fn record(preference: WindowEffectPreference, cx: &mut App) {
+/// Resolve native capabilities before the first GPUI frame, then configure the window.
+pub(crate) fn init_window_effect(
+    preference: WindowEffectPreference,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let effect = WindowEffectCapabilities::current()
         .resolve(preference.effect)
         .effect();
-    cx.set_global(WindowEffectSetting(WindowEffectPreference {
-        effect,
-        ..preference
-    }));
+    crate::window_effect::record(preference, effect, cx);
+    apply(preference.effect, window);
 }
 
-pub(crate) fn active(cx: &App) -> WindowEffectPreference {
-    cx.try_global::<WindowEffectSetting>()
-        .map_or_else(WindowEffectPreference::default, |setting| setting.0)
-}
-
-/// 在应用初始化之后注册，晚于 gpui-component 的 `WindowState`。
-///
-/// GPUI 的直接混合状态是 `SrcBlendAlpha = ONE, DestBlendAlpha = ONE`，即 **alpha
-/// 加法累积**：任何一层不透明 quad 一旦落笔，整个客户区的 alpha 就被钉死成 1，
-/// 之后无论叠多少半透明层都救不回来。gpui-component 的 `WindowState::style` 恰恰
-/// 给根 div 刷了一层不透明 `theme().tokens.background`，表现就是「边框透出背板、
-/// 内容区纯黑」——DComp 只看到 alpha=1。
-///
-/// 根插件按注册顺序依次 `refine`，后注册者覆盖先注册者，所以这里在效果开启时把根背景
-/// 改写为**全透明**：GPUI 的 `paint_quad` 会直接跳过透明背景，alpha 不再被钉死。
-struct AcrylicRootPlugin;
-
-impl Render for AcrylicRootPlugin {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-    }
-}
-
-impl RootPlugin for AcrylicRootPlugin {
-    fn style(&self, surface: &mut Stateful<Div>, _: &mut Window, cx: &mut App) {
-        if active(cx).effect == WindowEffect::None {
-            return;
+/// Only a material change reconfigures native windows; tint changes just repaint.
+pub(crate) fn apply_to_open_windows(effect: WindowEffect, window: &mut Window, cx: &mut App) {
+    apply(effect, window);
+    let current = window.window_handle().window_id();
+    for handle in cx.windows() {
+        if handle.window_id() == current {
+            continue;
         }
-        surface
-            .style()
-            .refine(&StyleRefinement::default().bg(transparent_black()));
+        let _ = handle.update(cx, |_, window, _| apply(effect, window));
     }
-}
-
-/// 注册根插件。必须在 `gpui_kit::init` 之后调用才有覆盖 `WindowState` 的资格，
-/// 且只影响之后创建的窗口。
-pub(crate) fn register_root_plugin(cx: &mut App) {
-    Root::register_plugin::<AcrylicRootPlugin>(cx, |_, _| AcrylicRootPlugin);
 }
 
 /// 首次开窗或有效材质变化时调用；遮罩强度不参与原生窗口配置。
@@ -105,7 +68,7 @@ pub(crate) fn apply(effect: WindowEffect, window: &mut Window) {
     let capabilities = WindowEffectCapabilities::current();
     let backend = capabilities.resolve(effect);
     window.set_background_appearance(appearance(backend));
-    let Some(hwnd) = crate::tray::window_hwnd(window) else {
+    let Some(hwnd) = super::window::window_hwnd(window) else {
         return;
     };
     let enabled = backend != WindowEffectBackend::Opaque;
@@ -177,17 +140,6 @@ fn backdrop(effect: WindowEffect) -> DWM_SYSTEMBACKDROP_TYPE {
         WindowEffect::Acrylic => DWMSBT_TRANSIENTWINDOW,
         WindowEffect::Mica => DWMSBT_MAINWINDOW,
         WindowEffect::MicaAlt => DWMSBT_TABBEDWINDOW,
-    }
-}
-
-/// 外壳只绘制一层主题染色；强度不分摊给控件，也不改变 DWM 的模糊半径。
-pub(crate) fn shell_background(base: Hsla, preference: WindowEffectPreference) -> Hsla {
-    if preference.effect == WindowEffect::None {
-        return base;
-    }
-    Hsla {
-        a: f32::from(preference.opacity) / 100.0,
-        ..base
     }
 }
 
@@ -290,7 +242,7 @@ unsafe fn set_attribute<T>(
     hwnd: HWND,
     attribute: DWMWINDOWATTRIBUTE,
     value: &T,
-) -> windows::core::Result<()> {
+) -> ::windows::core::Result<()> {
     unsafe {
         DwmSetWindowAttribute(
             hwnd,

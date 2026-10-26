@@ -2,7 +2,7 @@ use super::settings_common::owner_language;
 use super::*;
 use gpui_kit::component::alert::Alert;
 
-/// 「关于」页特性分组，与中英文 README 的当前功能保持一致。
+/// 「关于」页的简要功能介绍。
 struct FeatureGroup {
     chinese: &'static str,
     english: &'static str,
@@ -11,124 +11,28 @@ struct FeatureGroup {
 
 const FEATURE_GROUPS: &[FeatureGroup] = &[
     FeatureGroup {
-        chinese: "剪贴板历史",
-        english: "Clipboard history",
-        items: &[
-            (
-                "采集和检索文本、URL、HTML/RTF、图片及文件路径",
-                "Capture and search text, URLs, HTML/RTF, images, and file paths",
-            ),
-            (
-                "文本编辑、富文本/图片/文件预览、单张图片文件卡片缩略图与失效来源提示，以及复制、纯文本复制和自动粘贴",
-                "Edit text, preview rich text/images/files, see image thumbnails and missing-source hints, plus copy, copy as plain text, and auto-paste",
-            ),
-            (
-                "历史列表右下角提供返回顶部按钮，记录数固定显示在列表下方",
-                "A floating button returns to the top; the item count stays below the scrolling list",
-            ),
-        ],
-    },
-    FeatureGroup {
-        chinese: "整理与分组",
-        english: "Organize and group",
-        items: &[
-            (
-                "收藏、置顶、通过 Select 选择分组并在 GPUI Kit Dialog 中新建或重命名分组（支持删除和上移/下移排序）、通过卡片两侧区域拖拽排序、批量删除与历史清理；拖动区域提示可在显示设置中隐藏",
-                "Favorite and pin, choose a group via Select, create or rename groups in a GPUI Kit Dialog (delete and reorder supported), drag cards from their side areas to reorder, batch delete and clear history; the drag-area hint can be hidden in display settings",
-            ),
-            (
-                "卡片预览行数、绝对/相对时间、字符数、大小和来源应用信息可在设置窗口配置；来源应用可按名称、图标或两者显示，图标缓存为 PNG",
-                "Configure card preview lines, absolute/relative time, character count, size, and source-app info in the settings window; source apps can show by name, icon, or both, with icons cached as PNG",
-            ),
-            (
-                "设置页可隐藏分类筛选栏，并选择紧凑、标准或宽松的历史卡片密度。默认两行文字预览较图片卡片更矮；正文或居中的图片缩略图在上，时间、大小和来源应用在下，悬停卡片显示操作按钮",
-                "Hide the category filter bar in settings and pick compact, standard, or spacious card density. Text cards default to two preview lines and are shorter than image cards; text or centered image thumbnail on top, time/size/source app below, hover for action buttons",
-            ),
-        ],
-    },
-    FeatureGroup {
-        chinese: "采集规则",
-        english: "Capture rules",
-        items: &[
-            (
-                "设置窗口可分别启停文本、网址、HTML、RTF、图片和文件的历史采集，至少保留一种类型",
-                "Enable or disable history capture for text, URLs, HTML, RTF, images, and files independently in the settings window, keeping at least one type",
-            ),
-            (
-                "来源应用过滤支持黑名单、白名单、手工规则及运行中应用选择，规则可按应用名、进程名或路径匹配并支持 `*`、`?`",
-                "Source-app filtering supports blacklist, whitelist, manual rules, and picking running apps; rules match on app name, process name, or path and support `*` and `?`",
-            ),
-            (
-                "可分别配置复制与受控粘贴音效的开关、立即或成功后播放，并在设置页试听",
-                "Configure copy and controlled-paste sounds independently, choose immediate or after-success playback, and preview them in settings",
-            ),
-        ],
-    },
-    FeatureGroup {
-        chinese: "快捷键与粘贴",
-        english: "Shortcuts and paste",
-        items: &[
-            (
-                "可输入或录制全局唤出快捷键，支持冲突拒绝及失败回滚；系统托盘、开机启动、暂停采集和单实例唤回",
-                "Type or record the global shortcut with conflict checks and rollback; system tray, autostart, pause capture, and single-instance wake-up",
-            ),
-            (
-                "快速粘贴快捷键默认关闭，可在设置的“快捷键”页按需启用或再次关闭；单个槽位支持录制或输入组合键，两组各 10 个槽位可批量停用或恢复默认。启用后预置 Alt+1～Alt+0 粘贴当前分组前十条记录，Ctrl+Alt+1～3 粘贴前三条收藏记录，数字键支持数字小键盘；自动粘贴按键可选 Ctrl+V 或 Shift+Insert",
-                "Quick-paste shortcuts are off by default and can be enabled or disabled again on the Shortcuts settings page. Each slot supports recording or typing a key combination, and the two 10-slot groups can be batch-disabled or reset. When enabled, Alt+1 through Alt+0 paste the top ten items of the current group and Ctrl+Alt+1 through 3 paste the first three favorites; numpad digits work, and the auto-paste key can be Ctrl+V or Shift+Insert",
-            ),
-        ],
-    },
-    FeatureGroup {
-        chinese: "悬停预览",
-        english: "Hover preview",
+        chinese: "记录与查找",
+        english: "Capture and find",
         items: &[(
-            "可配置的独立悬停预览：图片、文本、网址及 HTML/RTF 默认开启，文件可单独开启；文本浮窗按延时读取完整正文并可滚动。支持配置延时、位置、图片缩放步进和按钮，以及按图片尺寸扩大浮窗；已保存的关闭设置保持生效。图片浮窗支持滚轮无极缩放和左键拖拽平移，按住标题可拖动整个浮窗，浮窗出现后固定 5 秒自动关闭",
-            "A configurable standalone hover preview: images, text, URLs, and HTML/RTF are on by default while files can be enabled separately. The text popup reads the full body after a delay and scrolls. Delay, position, image zoom step and buttons, and enlarging the popup by image size are all configurable, and saved dismiss choices keep working. Image popups support continuous wheel zoom and left-button drag-to-pan, the whole popup can be dragged by its title, and it closes itself five seconds after appearing",
+            "保存文本、图片和文件等复制记录，随时搜索与预览。",
+            "Keep copied text, images, files, and more, ready to search and preview.",
         )],
     },
     FeatureGroup {
-        chinese: "新手引导",
-        english: "Onboarding",
+        chinese: "整理与复用",
+        english: "Organize and reuse",
         items: &[(
-            "新数据目录首次打开时提供四步中文/英文引导，介绍采集、搜索、收藏与快捷键，可跳过或按 Esc 结束",
-            "A four-step bilingual onboarding on first open with a new data directory, introducing capture, search, favorites, and shortcuts; it can be skipped or ended with Esc",
+            "通过收藏、置顶和分组整理常用内容，使用快捷键快速粘贴。",
+            "Organize frequently used content with favorites, pins, and groups, and paste quickly with shortcuts.",
         )],
     },
     FeatureGroup {
-        chinese: "窗口与界面",
-        english: "Window and interface",
-        items: &[
-            (
-                "简体中文/English 界面（默认简体中文）、明暗主题、窗口置顶、点击外部隐藏、唤出位置，以及粘贴后窗口显隐和排序设置",
-                "Simplified Chinese/English UI (Chinese by default), light and dark themes, always-on-top, hide on outside click, summon position, and post-paste visibility and ordering settings",
-            ),
-            (
-                "无顶部标题栏的主窗口：按住搜索框上方的浅色短横握柄移动窗口，顶部边缘仍可缩放；搜索框独占一行，分类标签与 GPUI Kit 分组 Select 同行；从卡片“选择”或列表 Ctrl+A 进入多选，使用批量操作栏退出；清理历史、窗口置顶和设置入口位于托盘菜单",
-                "A main window with no title bar: drag the light grip above the search field to move the window while the top edge stays resizable. The search field occupies its own row and category tabs share a row with the GPUI Kit group Select. Enter multi-select from a card's Select or the list's Ctrl+A and leave via the batch action bar; clear history, always-on-top, and settings live in the tray menu",
-            ),
-            (
-                "常规设置可选择从托盘菜单清理当前分组历史时跳过确认，默认仍要求确认",
-                "General settings can skip the confirmation when clearing the current group's history from the tray menu, though confirmation remains the default",
-            ),
-            (
-                "主窗口、设置窗口与悬停预览浮窗按系统能力提供关闭、亚克力、云母或云母 Alt；不支持的已保存选项保留，并明确显示降级说明。背景遮罩强度可选 40%/55%/72%/85%，仅重绘背景，不重复设置原生材质。材质只作用于窗口外壳，控件、卡片与通知保留原有主题表面；开启后保持无边框与边缘缩放",
-                "System-capable window effects for the main window, settings window, and hover preview: off, Acrylic, Mica, or Mica Alt. Unsupported saved choices are retained with an explicit fallback notice. The 40%/55%/72%/85% background tint only repaints the background without reapplying native materials. Controls, cards, and notifications retain their theme surfaces; enabled effects keep a borderless frame with resizable edges",
-            ),
-        ],
-    },
-    FeatureGroup {
-        chinese: "备份与数据",
-        english: "Backup and data",
-        items: &[
-            (
-                "在数据设置导出备份，或将旧数据库、旧版 ZIP 和 GPUI 备份恢复到独立空目录，显示恢复报告并打开恢复数据",
-                "Export backups or restore legacy databases, legacy ZIPs and GPUI backups into a separate empty folder, with a report and an action to open restored data",
-            ),
-            (
-                "按分组限制历史数量与天数，保护置顶和收藏，首次启用及收紧需确认；可选文件副本默认关闭，单文件 50 MiB、总预算 256 MiB",
-                "Per-group count and age limits protect pinned and favorite items and require confirmation when enabled or tightened; optional file copies are off by default, with 50 MiB per file and 256 MiB total",
-            ),
-        ],
+        chinese: "按需设置",
+        english: "Make it yours",
+        items: &[(
+            "自定义外观与采集规则，管理历史保留时间并备份数据。",
+            "Customize appearance and capture rules, manage how long history is kept, and back up your data.",
+        )],
     },
 ];
 
@@ -221,8 +125,8 @@ impl SettingsWindowView {
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(
                         language,
-                        "使用 Rust、GPUI 和 GPUI Kit 构建的 Windows 原生剪贴板管理器。设置窗口按常规、显示、外观、数据、应用过滤、音效、快捷键和关于分类，本节与项目 README 的特性清单保持一致。",
-                        "A native Windows clipboard manager built with Rust, GPUI, and GPUI Kit. The settings window is grouped into General, Display, Appearance, Data, App filter, Audio, Shortcuts, and About; this section mirrors the feature list in the project README.",
+                        "适用于 Windows 的剪贴板管理器，帮助你轻松找回和复用复制过的内容。",
+                        "A clipboard manager for Windows that helps you find and reuse what you have copied.",
                     )),
             )
             .children(FEATURE_GROUPS.iter().map(|group| {

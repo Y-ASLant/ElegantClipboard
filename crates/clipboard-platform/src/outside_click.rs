@@ -15,8 +15,13 @@ use windows::Win32::{
     },
 };
 
+struct ClickTarget {
+    sender: Sender<(i32, i32)>,
+    hwnd: isize,
+}
+
 thread_local! {
-    static CLICK_EVENTS: RefCell<Option<(Sender<POINT>, isize)>> = const { RefCell::new(None) };
+    static CLICK_EVENTS: RefCell<Option<ClickTarget>> = const { RefCell::new(None) };
 }
 
 unsafe extern "system" fn mouse_hook(code: i32, button: WPARAM, data: LPARAM) -> LRESULT {
@@ -24,11 +29,11 @@ unsafe extern "system" fn mouse_hook(code: i32, button: WPARAM, data: LPARAM) ->
         // A low-level hook runs on the installing thread. Never wait for the UI here.
         let position = unsafe { (*(data.0 as *const MSLLHOOKSTRUCT)).pt };
         CLICK_EVENTS.with(|events| {
-            if let Some((sender, hwnd)) = events.borrow().as_ref()
+            if let Some(ClickTarget { sender, hwnd }) = events.borrow().as_ref()
                 && unsafe { IsWindowVisible(HWND(*hwnd as *mut _)) }.as_bool()
                 && !is_current_process_window(position)
             {
-                let _ = sender.try_send(position);
+                let _ = sender.try_send((position.x, position.y));
             }
         });
     }
@@ -48,7 +53,7 @@ pub struct OutsideClickMonitor {
 }
 
 impl OutsideClickMonitor {
-    pub fn start(events: Sender<POINT>, window_handle: isize) -> Result<Self> {
+    pub fn start(events: Sender<(i32, i32)>, window_handle: isize) -> Result<Self> {
         let (ready, receiver) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("outside-click-monitor".into())
@@ -58,7 +63,12 @@ impl OutsideClickMonitor {
                     let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
                 }
                 let thread_id = unsafe { GetCurrentThreadId() };
-                CLICK_EVENTS.with(|slot| *slot.borrow_mut() = Some((events, window_handle)));
+                CLICK_EVENTS.with(|slot| {
+                    *slot.borrow_mut() = Some(ClickTarget {
+                        sender: events,
+                        hwnd: window_handle,
+                    });
+                });
                 let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0) };
                 let Ok(hook) = hook else {
                     CLICK_EVENTS.with(|slot| *slot.borrow_mut() = None);

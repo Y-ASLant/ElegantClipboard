@@ -1,5 +1,4 @@
 use super::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
 
 impl SettingsWindowView {
     pub(super) fn begin_shortcut_edit(
@@ -100,8 +99,7 @@ impl SettingsWindowView {
             cx.notify();
             return;
         }
-        let shift_down = event.keystroke.modifiers.shift
-            || unsafe { GetAsyncKeyState(i32::from(VK_SHIFT.0)) } < 0;
+        let shift_down = event.keystroke.modifiers.shift || input::shift_pressed();
         match shortcut_from_keystroke(
             &event.keystroke,
             shift_down,

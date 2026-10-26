@@ -1,24 +1,9 @@
 use anyhow::{Context, Result};
 use clipboard_core::preferences::LanguagePreference;
-use gpui_kit::Window;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::{
-    sync::Mutex,
-    time::{Duration, Instant},
-};
+use std::{sync::Mutex, time::Instant};
 use tray_icon::{
     Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem},
-};
-use windows::Win32::{
-    Foundation::{HWND, POINT},
-    UI::{
-        Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_MENU},
-        WindowsAndMessaging::{
-            IsIconic, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOW, SetForegroundWindow,
-            ShowWindow,
-        },
-    },
 };
 
 #[derive(Clone, Copy)]
@@ -68,8 +53,7 @@ pub fn create(
             && let Ok(mut previous) = last_left_click.lock()
         {
             let now = Instant::now();
-            let double_click_interval =
-                Duration::from_millis(unsafe { GetDoubleClickTime() } as u64);
+            let double_click_interval = super::input::double_click_interval();
             if previous.is_none_or(|last| now.duration_since(last) > double_click_interval) {
                 let _ = sender.try_send(TrayCommand::Toggle);
             }
@@ -188,52 +172,10 @@ fn create_menu(language: LanguagePreference, paused: bool, monitoring: bool) -> 
     Ok(menu)
 }
 
-pub fn set_window_visible(window: &Window, visible: bool) {
-    if let Some(hwnd) = window_hwnd(window) {
-        unsafe {
-            let command = if !visible {
-                SW_HIDE
-            } else if IsIconic(hwnd).as_bool() {
-                SW_RESTORE
-            } else {
-                SW_SHOW
-            };
-            let _ = ShowWindow(hwnd, command);
-        }
-        if visible {
-            if unsafe { GetAsyncKeyState(i32::from(VK_MENU.0)) } < 0 {
-                // GPUI activation injects Alt down/up, which releases a held Alt+C
-                // chord and prevents pressing C again until Alt is physically reset.
-                unsafe {
-                    let _ = SetForegroundWindow(hwnd);
-                }
-            } else {
-                window.activate_window();
-            }
-        }
-    }
-}
-
-pub fn window_hwnd(window: &Window) -> Option<HWND> {
-    let handle = HasWindowHandle::window_handle(window).ok()?;
-    match handle.as_raw() {
-        RawWindowHandle::Win32(handle) => Some(HWND(handle.hwnd.get() as *mut _)),
-        _ => None,
-    }
-}
-
-pub fn is_window_shown(window: &Window) -> bool {
-    window_hwnd(window).is_some_and(|hwnd| unsafe { IsWindowVisible(hwnd) }.as_bool())
-}
-
-pub fn is_window_minimized(window: &Window) -> bool {
-    window_hwnd(window).is_some_and(|hwnd| unsafe { IsIconic(hwnd) }.as_bool())
-}
-
-pub fn is_tray_click(tray: &TrayIcon, position: POINT) -> bool {
+pub fn is_tray_click(tray: &TrayIcon, position: (i32, i32)) -> bool {
     tray.rect().is_some_and(|rect| {
-        let x = f64::from(position.x);
-        let y = f64::from(position.y);
+        let x = f64::from(position.0);
+        let y = f64::from(position.1);
         x >= rect.position.x
             && x < rect.position.x + f64::from(rect.size.width)
             && y >= rect.position.y
@@ -243,7 +185,7 @@ pub fn is_tray_click(tray: &TrayIcon, position: POINT) -> bool {
 
 fn app_icon() -> Result<Icon> {
     let image = image::load_from_memory_with_format(
-        include_bytes!("../../../App.ico"),
+        include_bytes!("../../../../App.ico"),
         image::ImageFormat::Ico,
     )
     .context("无法读取应用图标")?;

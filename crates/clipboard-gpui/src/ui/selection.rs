@@ -1,5 +1,4 @@
 use super::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
 
 impl ClipboardView {
     pub(super) fn reset_selection(&mut self) {
@@ -92,12 +91,11 @@ impl ClipboardView {
         self.pending_row_click = Some((id, generation));
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);
-        let delay = unsafe { GetDoubleClickTime() }.max(1).saturating_add(30);
+        let delay = input::double_click_interval().max(Duration::from_millis(1))
+            + Duration::from_millis(30);
         let main_window = window.window_handle();
         self.row_click_task = Some(cx.spawn_in(window, async move |view, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(u64::from(delay)))
-                .await;
+            cx.background_executor().timer(delay).await;
             let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
                 if this.pending_row_click == Some((id, generation))
                     && this.history.generation == generation

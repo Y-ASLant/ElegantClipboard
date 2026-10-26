@@ -46,7 +46,7 @@
 
 ### Windows 平台层
 
-`crates/clipboard-platform/src/window_effect.rs` 独立负责 Windows 版本探测、材质能力与降级策略，不修改已保存的偏好。界面层的 `ui/settings_window_effect.rs` 显示可用选项和保存值的降级说明；`acrylic.rs` 只在初始化或有效材质变化时配置原生窗口，遮罩强度变化只更新背景并重绘。
+`crates/clipboard-platform/src/window_effect.rs` 独立负责 Windows 版本探测、材质能力与降级策略，不修改已保存的偏好。界面层的 `ui/settings_window_effect.rs` 显示可用选项和保存值的降级说明；`windows/acrylic.rs` 只在初始化或有效材质变化时配置原生窗口，遮罩强度变化只更新背景并重绘。
 
 | 路径（相对 `crates/clipboard-platform/src/windows`） | 职责 |
 |---|---|
@@ -61,6 +61,10 @@
 ### GPUI 界面层
 
 `crates/clipboard-gpui/src/ui.rs` 保留共享视图状态和动作声明；入口、渲染及交互实现位于私有 `ui/` 子模块，不改变 `main.rs` 的 `ui::run` 调用。
+
+GPUI 的 Windows 原生实现集中在 `src/windows/`，由 `#[cfg(windows)] mod windows` 控制，包括窗口句柄与显隐、输入状态、托盘、粘贴、定位、音效、链接及 DWM 材质。`ui/` 不直接调用 Win32 API，也不传递 `POINT` 或访问 HWND 字段；外部点击事件传递屏幕坐标 `(i32, i32)`。
+
+`src/window_effect.rs` 保留不依赖 Win32 的 GPUI 效果状态、Root 插件与外壳颜色计算，`src/visual.rs` 保留通用视觉逻辑。这里是源码职责分离，不是 macOS 支持：`ui.rs` 的应用编排仍依赖 Windows 剪贴板服务、热键和拖放后端，GPUI 依赖及应用入口仍受 Windows 条件编译限制。
 
 | `ui/` 模块 | 职责 |
 |---|---|

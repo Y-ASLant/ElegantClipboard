@@ -1,24 +1,16 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-#[cfg(windows)]
-mod acrylic;
-#[cfg(windows)]
-mod links;
 mod options;
-#[cfg(windows)]
-mod paste;
-#[cfg(windows)]
-mod position;
-#[cfg(windows)]
-mod sound;
 #[cfg(any(windows, test))]
 mod state;
-#[cfg(windows)]
-mod tray;
 #[cfg(windows)]
 mod ui;
 #[cfg(windows)]
 mod visual;
+#[cfg(windows)]
+mod window_effect;
+#[cfg(windows)]
+mod windows;
 
 fn main() -> anyhow::Result<()> {
     let Some(options) = options::Options::parse(std::env::args_os().skip(1))? else {

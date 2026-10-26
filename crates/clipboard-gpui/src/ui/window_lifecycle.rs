@@ -14,22 +14,6 @@ pub(super) fn update_clipboard_window<R>(
     })
 }
 
-/// 当前前台窗口是否属于本进程。
-///
-/// 用于区分「用户切去了别的应用」和「用户点了我们自己的浮窗」——后者前台窗口仍是
-/// 本进程的，不该被当成离开应用。
-fn foreground_window_is_ours() -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-
-    let foreground = unsafe { GetForegroundWindow() };
-    if foreground.0.is_null() {
-        return false;
-    }
-    let mut process_id = 0u32;
-    unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
-    process_id == std::process::id()
-}
-
 impl ClipboardView {
     pub(super) fn refresh_tray_menu(&self) -> anyhow::Result<()> {
         if let Some(tray) = &self._tray {
@@ -66,11 +50,11 @@ impl ClipboardView {
     }
     pub(super) fn handle_outside_click(
         &mut self,
-        position: windows::Win32::Foundation::POINT,
+        position: (i32, i32),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !tray::is_window_shown(window)
+        if !native_window::is_window_shown(window)
             || self.external_drag.is_some()
             || cx.has_active_drag()
             || self._tray.is_none()
@@ -94,9 +78,9 @@ impl ClipboardView {
         self.paste_delivery_task = None;
         // 窗口又要显示了：取消隐藏时的延迟释放，避免缩略图白解码一遍。
         self.image_release_task = None;
-        let was_minimized = tray::is_window_minimized(window);
+        let was_minimized = native_window::is_window_minimized(window);
         if was_minimized {
-            tray::set_window_visible(window, true);
+            native_window::set_window_visible(window, true);
         }
         if let Err(error) = position::position_window(window, self.window_position.value) {
             self.set_feedback_message(format!(
@@ -106,7 +90,7 @@ impl ClipboardView {
             self.is_error = true;
         }
         if !was_minimized {
-            tray::set_window_visible(window, true);
+            native_window::set_window_visible(window, true);
         }
         if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
             self.search_task = None;
@@ -154,7 +138,7 @@ impl ClipboardView {
     /// 失活回调触发的那一刻浮窗往往还没被系统标记为激活，会把点浮窗误判成切走，
     /// 结果预览被一点就没（之前就是这么错的）。
     pub(super) fn handle_window_deactivated(&mut self, cx: &mut Context<Self>) {
-        if foreground_window_is_ours() {
+        if native_window::foreground_window_is_ours() {
             return;
         }
         self.close_hover_preview(cx);
@@ -181,7 +165,7 @@ impl ClipboardView {
             return;
         }
         self.prepare_to_hide(window, cx);
-        tray::set_window_visible(window, false);
+        native_window::set_window_visible(window, false);
         self.schedule_image_release(cx);
         cx.notify();
     }

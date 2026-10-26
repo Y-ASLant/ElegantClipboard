@@ -324,7 +324,7 @@ impl SettingsWindowView {
             ),
             (
                 "restore-backup",
-                tr(language, "恢复 GPUI 备份", "Restore GPUI backup"),
+                tr(language, "恢复备份", "Restore backup"),
                 ImportSource::Backup,
             ),
         ];

@@ -23,23 +23,13 @@ pub(super) fn apply_theme(preference: ThemePreference, window: &mut Window, cx: 
     }
 }
 
-/// 开窗时套用窗口效果：先 `record` 让外壳底色算对，再由 `apply` 改 DWM 与窗口样式。
-/// 必须在窗口首次绘制之前调用，否则第一帧仍是不透明背景。
-pub(super) fn init_window_effect(
-    preference: WindowEffectPreference,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    acrylic::record(preference, cx);
-    acrylic::apply(preference.effect, window);
-}
-
 /// 所有窗口统一使用的界面字体。
 pub(super) const UI_FONT_FAMILY: &str = "Microsoft YaHei UI";
 
 /// 所有窗口共用的外壳：仅此处绘制材质染色并统一界面字体，内容表面保留原有主题。
 pub(super) fn window_shell(cx: &App) -> Div {
-    let background = acrylic::shell_background(cx.theme().background, acrylic::active(cx));
+    let background =
+        window_effect::shell_background(cx.theme().background, window_effect::active(cx));
     div()
         .size_full()
         .flex()

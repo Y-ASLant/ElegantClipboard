@@ -1,14 +1,14 @@
-use anyhow::{Context, Result, anyhow};
-use clipboard_core::preferences::{HoverPreviewPosition, WindowPositionPreference};
-use gpui_kit::{Bounds, Pixels, Point, Window, point, px, size};
-use std::mem::size_of;
-use windows::Win32::{
+use ::windows::Win32::{
     Foundation::{POINT, RECT},
     Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint},
     UI::WindowsAndMessaging::{
         GetCursorPos, GetWindowRect, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
     },
 };
+use anyhow::{Context, Result, anyhow};
+use clipboard_core::preferences::{HoverPreviewPosition, WindowPositionPreference};
+use gpui_kit::{Bounds, Pixels, Point, Window, point, px, size};
+use std::mem::size_of;
 
 const CURSOR_GAP: i32 = 12;
 /// 未开启大图预览时的浮窗尺寸。
@@ -117,7 +117,7 @@ pub fn position_window(window: &Window, mode: WindowPositionPreference) -> Resul
     {
         return Ok(());
     }
-    let hwnd = crate::tray::window_hwnd(window).context("无法取得窗口句柄")?;
+    let hwnd = super::window::window_hwnd(window).context("无法取得窗口句柄")?;
     let mut cursor = POINT::default();
     unsafe { GetCursorPos(&mut cursor) }.context("无法读取光标位置")?;
     let monitor = unsafe { MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST) };

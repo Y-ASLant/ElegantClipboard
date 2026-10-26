@@ -1,4 +1,3 @@
-use super::window_effect_apply::apply_window_effect_to_open_windows;
 use super::*;
 
 impl<T> PendingPref<T> {
@@ -352,10 +351,14 @@ impl ClipboardView {
                     let material_changed = capabilities.resolve(preference.effect)
                         != capabilities.resolve(self.window_effect.effect);
                     self.window_effect = preference;
-                    acrylic::record(preference, cx);
+                    window_effect::record(
+                        preference,
+                        capabilities.resolve(preference.effect).effect(),
+                        cx,
+                    );
                     if material_changed {
                         self.close_hover_preview(cx);
-                        apply_window_effect_to_open_windows(preference.effect, window, cx);
+                        acrylic::apply_to_open_windows(preference.effect, window, cx);
                     }
                     cx.refresh_windows();
                 }

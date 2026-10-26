@@ -26,7 +26,7 @@ impl ClipboardView {
             && let Ok(hwnd) = popup.update(cx, |preview, window, cx| {
                 preview.card = Some(card.clone());
                 cx.notify();
-                tray::window_hwnd(window).map(|hwnd| hwnd.0 as isize)
+                native_window::window_id(window)
             })
         {
             return hwnd;
@@ -54,9 +54,7 @@ impl ClipboardView {
             )
             .ok()?;
         let hwnd = popup
-            .update(cx, |_, window, _| {
-                tray::window_hwnd(window).map(|hwnd| hwnd.0 as isize)
-            })
+            .update(cx, |_, window, _| native_window::window_id(window))
             .ok()
             .flatten()?;
         self.drag_preview_window = Some(popup);

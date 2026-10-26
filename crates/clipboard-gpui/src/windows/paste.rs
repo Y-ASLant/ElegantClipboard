@@ -1,9 +1,6 @@
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
-use clipboard_core::preferences::PasteKeyPreference;
-use gpui_kit::Window;
-use windows::Win32::{
+use ::windows::Win32::{
     Foundation::HWND,
     System::DataExchange::GetClipboardSequenceNumber,
     UI::{
@@ -17,6 +14,9 @@ use windows::Win32::{
         },
     },
 };
+use anyhow::{Result, bail};
+use clipboard_core::preferences::PasteKeyPreference;
+use gpui_kit::Window;
 
 const MODIFIER_WAIT: Duration = Duration::from_secs(2);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -25,7 +25,7 @@ pub fn is_external_target(window: &Window, target: (isize, u32)) -> bool {
     if !is_same_window(target) || target.1 == std::process::id() {
         return false;
     }
-    crate::tray::window_hwnd(window).is_some_and(|own| own.0 as isize != target.0)
+    super::window::window_hwnd(window).is_some_and(|own| own.0 as isize != target.0)
 }
 
 pub struct PendingPaste {

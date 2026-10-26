@@ -229,7 +229,7 @@ impl ClipboardView {
                     return;
                 }
             };
-        let hide_window = self.paste_close_window.value && tray::is_window_shown(window);
+        let hide_window = self.paste_close_window.value && native_window::is_window_shown(window);
         if hide_window {
             self.hide_window(window, cx);
         }

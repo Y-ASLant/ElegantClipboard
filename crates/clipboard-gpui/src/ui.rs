@@ -49,7 +49,6 @@ mod startup;
 mod storage;
 mod thumbnail_cache;
 mod view_init;
-mod window_effect_apply;
 mod window_lifecycle;
 mod window_render;
 
@@ -57,21 +56,22 @@ pub use startup::run;
 
 use file_cards::{image_file_dimensions, single_file_image_path, single_image_file_paths};
 use navigation::{history_row_height, history_top_row};
-use presentation::{
-    apply_theme, format_bytes, init_window_effect, localize_service_message, tr, window_shell,
-};
+use presentation::{apply_theme, format_bytes, localize_service_message, tr, window_shell};
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_from_keystroke, shortcut_kbd,
 };
 use window_lifecycle::update_clipboard_window;
 
-use crate::acrylic;
-use crate::links::{self, ProjectLink};
-use crate::paste;
-use crate::position;
-use crate::sound::{self, Sound};
-use crate::tray::{self, TrayCommand};
 use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
+use crate::window_effect;
+use crate::windows::{
+    acrylic, input,
+    links::{self, ProjectLink},
+    paste, position,
+    sound::{self, Sound},
+    tray::{self, TrayCommand},
+    window as native_window,
+};
 use crate::{
     options::Options,
     state::{

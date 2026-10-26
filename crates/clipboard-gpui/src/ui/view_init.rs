@@ -61,14 +61,16 @@ impl ClipboardView {
         );
         tray_enabled.set(tray.is_ok());
         if startup.hidden && tray.is_err() {
-            tray::set_window_visible(window, true);
+            native_window::set_window_visible(window, true);
         }
         let tray_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(command) = tray_receiver.recv().await {
                 if update_clipboard_window(&view, main_window, cx, |this, window, cx| match command
                 {
                     TrayCommand::Toggle => {
-                        if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
+                        if native_window::is_window_shown(window)
+                            && !native_window::is_window_minimized(window)
+                        {
                             this.hide_visible_window(window, cx);
                         } else {
                             this.paste_target = None;
@@ -115,7 +117,9 @@ impl ClipboardView {
         let hotkey_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(target) = hotkey_receiver.recv().await {
                 if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                    if tray::is_window_shown(window) && !tray::is_window_minimized(window) {
+                    if native_window::is_window_shown(window)
+                        && !native_window::is_window_minimized(window)
+                    {
                         this.hide_visible_window(window, cx);
                         return;
                     }
@@ -162,9 +166,9 @@ impl ClipboardView {
             .unwrap_or_default();
         let (outside_click_sender, outside_click_receiver) = async_channel::bounded(16);
         let outside_click_monitor = if tray.is_ok() {
-            tray::window_hwnd(window)
+            native_window::window_id(window)
                 .ok_or_else(|| anyhow::anyhow!("无法取得历史窗口句柄"))
-                .and_then(|hwnd| OutsideClickMonitor::start(outside_click_sender, hwnd.0 as isize))
+                .and_then(|handle| OutsideClickMonitor::start(outside_click_sender, handle))
                 .map(Some)
         } else {
             Ok(None)
@@ -240,7 +244,7 @@ impl ClipboardView {
         {
             startup_errors.push(error.to_string());
         }
-        init_window_effect(window_effect, window, cx);
+        acrylic::init_window_effect(window_effect, window, cx);
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {

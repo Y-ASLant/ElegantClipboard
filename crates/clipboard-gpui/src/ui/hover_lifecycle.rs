@@ -279,7 +279,7 @@ impl ClipboardView {
                     },
                     move |window, cx| {
                         apply_theme(theme, window, cx);
-                        init_window_effect(window_effect, window, cx);
+                        acrylic::init_window_effect(window_effect, window, cx);
                         cx.new(|cx| {
                             HoverPreviewWindowView::new(
                                 popup_owner.clone(),
