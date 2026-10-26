@@ -57,18 +57,3 @@ pub fn is_window_minimized(window: &Window) -> bool {
 pub(crate) fn window_id(window: &Window) -> Option<isize> {
     window_hwnd(window).map(|hwnd| hwnd.0 as isize)
 }
-
-/// Distinguish another application's foreground window from our own popups.
-pub(crate) fn foreground_window_is_ours() -> bool {
-    use ::windows::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowThreadProcessId,
-    };
-
-    let foreground = unsafe { GetForegroundWindow() };
-    if foreground.0.is_null() {
-        return false;
-    }
-    let mut process_id = 0u32;
-    unsafe { GetWindowThreadProcessId(foreground, Some(&mut process_id)) };
-    process_id == std::process::id()
-}

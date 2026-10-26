@@ -138,7 +138,7 @@ impl ClipboardView {
     /// 失活回调触发的那一刻浮窗往往还没被系统标记为激活，会把点浮窗误判成切走，
     /// 结果预览被一点就没（之前就是这么错的）。
     pub(super) fn handle_window_deactivated(&mut self, cx: &mut Context<Self>) {
-        if native_window::foreground_window_is_ours() {
+        if crate::native::foreground_window_is_ours() {
             return;
         }
         self.close_hover_preview(cx);
