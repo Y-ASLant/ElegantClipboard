@@ -4,18 +4,7 @@ use objc2::{class, msg_send, rc::Retained, runtime::AnyObject};
 use objc2_foundation::{NSData, NSString};
 use std::{collections::HashSet, io::Write, path::Path};
 
-#[derive(Clone)]
-pub struct SourceApp {
-    pub name: String,
-    pub executable: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct RunningApp {
-    pub name: String,
-    pub process: String,
-    pub icon: Option<String>,
-}
+pub use crate::source_app_types::{RunningApp, SourceApp};
 
 fn source(application: &AnyObject) -> Option<SourceApp> {
     let pid: i32 = unsafe { msg_send![application, processIdentifier] };
@@ -69,12 +58,13 @@ pub fn running_apps(icons_dir: &Path) -> Vec<RunningApp> {
             else {
                 continue;
             };
-            if !seen.insert(process.to_owned()) {
+            let process = process.to_owned();
+            if !seen.insert(process.clone()) {
                 continue;
             }
             result.push(RunningApp {
                 name: source.name,
-                process: process.to_owned(),
+                process,
                 icon: extract_and_cache_icon(&executable, icons_dir),
             });
         }

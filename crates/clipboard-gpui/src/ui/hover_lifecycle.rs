@@ -100,7 +100,7 @@ impl ClipboardView {
     }
 
     pub(super) fn set_hover_source(&mut self, id: i64, entered: bool, cx: &mut Context<Self>) {
-        if crate::capabilities::positioning_unavailable_reason().is_some() {
+        if crate::capabilities::desktop_unavailable_reason().is_some() {
             return;
         }
         if entered {
@@ -222,7 +222,7 @@ impl ClipboardView {
                     _ => None,
                 })
                 .flatten();
-        let bounds = position::hover_popup_bounds(
+        let bounds = crate::popup_geometry::hover_popup_bounds(
             point(
                 window.bounds().origin.x + window.mouse_position().x,
                 window.bounds().origin.y + window.mouse_position().y,

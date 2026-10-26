@@ -22,6 +22,7 @@ pub(super) struct ClipboardSnapshot {
 }
 pub(super) fn read_content(
     clipboard: &ClipboardContext,
+    #[cfg(target_os = "linux")] formats: Option<&[String]>,
 ) -> Result<(Option<CapturedClipboard>, Option<&'static str>)> {
     if clipboard.has(ContentFormat::Files) {
         #[cfg(target_os = "linux")]
@@ -49,7 +50,7 @@ pub(super) fn read_content(
         .flatten()
         .filter(|value| !value.is_empty());
     #[cfg(target_os = "linux")]
-    let text = linux_text(clipboard)?;
+    let text = linux_text(clipboard, formats)?;
     #[cfg(not(target_os = "linux"))]
     let text = clipboard
         .has(ContentFormat::Text)
@@ -102,10 +103,17 @@ pub(super) fn read_content(
 }
 
 #[cfg(target_os = "linux")]
-fn linux_text(clipboard: &ClipboardContext) -> Result<Option<String>> {
-    let formats = clipboard
-        .available_formats()
-        .map_err(|error| anyhow::anyhow!("读取文本格式失败：{error}"))?;
+fn linux_text(clipboard: &ClipboardContext, formats: Option<&[String]>) -> Result<Option<String>> {
+    let fetched;
+    let formats = match formats {
+        Some(formats) => formats,
+        None => {
+            fetched = clipboard
+                .available_formats()
+                .map_err(|error| anyhow::anyhow!("读取文本格式失败：{error}"))?;
+            &fetched
+        }
+    };
     for format in [
         "UTF8_STRING",
         "text/plain;charset=utf-8",

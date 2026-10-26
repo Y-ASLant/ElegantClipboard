@@ -69,7 +69,7 @@ Linux X11 采集内容与来源查询整体受前后 selection generation 校验
 
 `crates/clipboard-gpui/src/ui.rs` 保留共享视图状态和动作声明；入口、渲染及交互实现位于私有 `ui/` 子模块，不改变 `main.rs` 的 `ui::run` 调用。
 
-GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的窗口实现分别在 `macos/` 和 `linux/`，浮窗几何在 `popup_geometry.rs` 共用。`ui/`、`state.rs`、`visual.rs` 和 `window_effect.rs` 由三平台共用，不直接调用 Win32。`capabilities.rs` 将 Wayland、粘贴按键和音效能力映射到设置说明与禁用状态。
+GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的窗口实现分别在 `macos/` 和 `linux/`，浮窗几何在 `popup_geometry.rs` 共用。`ui/`、`state.rs`、`visual.rs` 和 `window_effect.rs` 由三平台共用，不直接调用 Win32。音效的 `Sound` 枚举、启停判定与 WAVE 合成位于三平台共用的 `sound_core.rs`，`windows/` 与 `unix/` 的 `sound.rs` 只保留各自播放后端。`capabilities.rs` 将 Wayland、粘贴按键和音效能力映射到设置说明与禁用状态。
 
 `tray.rs` 共用托盘菜单与事件，`linux/tray.rs` 负责 Linux 宿主检测；Linux GTK 事件在 GPUI 前台任务中分派。`unix/` 使用真实窗口目标、剪贴板身份和修饰键校验控制自动粘贴，macOS 的 `Cmd+V` 需要辅助功能授权。平台限制和本机构建命令见根 README。
 

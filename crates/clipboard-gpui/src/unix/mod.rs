@@ -11,3 +11,9 @@ pub(crate) mod window;
 #[cfg(target_os = "macos")]
 #[path = "../macos/window.rs"]
 pub(crate) mod window;
+
+/// 前台窗口属于本进程（两平台的粘贴目标实现均委托 clipboard_platform::desktop）。
+pub(crate) fn foreground_window_is_ours() -> bool {
+    clipboard_platform::desktop::foreground_target()
+        .is_some_and(|target| target.1 == std::process::id())
+}

@@ -11,7 +11,7 @@ impl SettingsWindowView {
         let pending = state.hotkey_pending
             || state.paste_shortcuts_pending.is_some()
             || state.quick_paste_pending_setting
-            || crate::capabilities::positioning_unavailable_reason().is_some();
+            || crate::capabilities::desktop_unavailable_reason().is_some();
         let disabled = state.hotkey_choice == HotkeyPreference::Disabled;
         let label = hotkey_label(language, &state.hotkey_choice).to_owned();
         let owner = self.owner.clone();
@@ -58,7 +58,7 @@ impl SettingsWindowView {
                     ),
             )
             .when_some(
-                crate::capabilities::positioning_unavailable_reason(),
+                crate::capabilities::desktop_unavailable_reason(),
                 |panel, reason| {
                     panel.child(Alert::warning("global-shortcut-capability", reason).small())
                 },

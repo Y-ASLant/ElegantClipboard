@@ -89,7 +89,6 @@ pub fn prepare_external_drag(
 }
 
 fn file_uris(paths: &[String]) -> Result<Vec<u8>> {
-    use std::fmt::Write;
     if paths.is_empty() {
         bail!("File list is empty");
     }
@@ -99,14 +98,9 @@ fn file_uris(paths: &[String]) -> Result<Vec<u8>> {
         if !file.is_absolute() || !file.exists() {
             bail!("Drag source no longer exists: {path}");
         }
-        result.push_str("file://");
-        for byte in path.bytes() {
-            if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
-                result.push(char::from(byte));
-            } else {
-                write!(result, "%{byte:02X}")?;
-            }
-        }
+        let uri = url::Url::from_file_path(file)
+            .map_err(|_| anyhow::anyhow!("Invalid file path: {path}"))?;
+        result.push_str(uri.as_str());
         result.push_str("\r\n");
     }
     Ok(result.into_bytes())

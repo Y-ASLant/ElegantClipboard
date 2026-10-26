@@ -1,4 +1,6 @@
 use clipboard_core::preferences::HoverPreviewPosition;
+#[cfg(any(windows, target_os = "linux"))]
+use clipboard_core::preferences::WindowPositionPreference;
 use gpui_kit::{Bounds, Pixels, Point, point, px, size};
 /// 未开启大图预览时的浮窗尺寸。
 const DEFAULT_POPUP_SIZE: (f32, f32) = (460., 300.);
@@ -67,6 +69,53 @@ fn popup_size(display: Bounds<Pixels>, image_dimensions: Option<(i64, i64)>) -> 
     )
 }
 
+/// FollowCursor 模式下窗口边缘与光标的间距，Windows / X11 原实现均为 12。
+#[cfg(any(windows, target_os = "linux"))]
+const CURSOR_GAP: i32 = 12;
+
+/// 主窗口摆放：top-left 原点整数像素坐标（x 向右、y 向下，Windows 与 X11 均如此）下的纯运算。
+///
+/// - `FollowCursor`：先放光标右下方、偏移 `CURSOR_GAP`；右侧放不下整体翻到左侧；x/y 都夹进工作区。
+/// - `ScreenCenter`：在工作区内居中。
+/// - `FixedPosition`：不在此处理（`position_window` 已提前返回）。
+///
+/// `work` 为 `(left, top, right, bottom)`，`cursor` 为指针位置，返回夹取后的左上角坐标。
+/// macOS 的 Cocoa 坐标系 y 轴向上且光标坐标带小数，纵向运算与这里是镜像关系，
+/// 不经由此函数（见 `unix/position.rs`）。
+#[cfg(any(windows, target_os = "linux"))]
+pub fn placement(
+    mode: WindowPositionPreference,
+    cursor: (i32, i32),
+    work: (i32, i32, i32, i32),
+    width: i32,
+    height: i32,
+) -> (i32, i32) {
+    let (left, top, right, bottom) = work;
+    let max_x = (right - width).max(left);
+    let max_y = (bottom - height).max(top);
+    match mode {
+        WindowPositionPreference::FollowCursor => {
+            let right_x = cursor.0 + CURSOR_GAP;
+            let x = if right_x + width > right {
+                cursor.0 - width - CURSOR_GAP
+            } else {
+                right_x
+            };
+            (
+                x.clamp(left, max_x),
+                (cursor.1 + CURSOR_GAP).clamp(top, max_y),
+            )
+        }
+        WindowPositionPreference::ScreenCenter => (
+            (left + (right - left - width) / 2).clamp(left, max_x),
+            (top + (bottom - top - height) / 2).clamp(top, max_y),
+        ),
+        WindowPositionPreference::FixedPosition => {
+            unreachable!("fixed mode keeps the current position")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +165,59 @@ mod tests {
         assert_eq!(
             hover_popup_bounds(cursor, display, HoverPreviewPosition::Auto, Some((0, 800))).size,
             standard.size,
+        );
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn follow_cursor_flips_and_clamps_within_work_area() {
+        // 负坐标副屏：先放光标右下，放不下翻左，越界夹回工作区。
+        let work = (-1920, 0, 0, 1040);
+        assert_eq!(
+            placement(
+                WindowPositionPreference::FollowCursor,
+                (-1000, 200),
+                work,
+                500,
+                600
+            ),
+            (-988, 212)
+        );
+        assert_eq!(
+            placement(
+                WindowPositionPreference::FollowCursor,
+                (-100, 900),
+                work,
+                500,
+                600
+            ),
+            (-612, 440)
+        );
+        assert_eq!(
+            placement(
+                WindowPositionPreference::FollowCursor,
+                (-1910, 10),
+                work,
+                2200,
+                1200
+            ),
+            (-1920, 0)
+        );
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn screen_center_uses_selected_monitor_work_area() {
+        // 居中取光标所在显示器的工作区，不是主屏的。
+        assert_eq!(
+            placement(
+                WindowPositionPreference::ScreenCenter,
+                (2500, 500),
+                (1920, 40, 3840, 1080),
+                560,
+                760
+            ),
+            (2600, 180)
         );
     }
 }

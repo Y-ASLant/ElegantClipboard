@@ -7,10 +7,6 @@ use x11rb::{
     protocol::{xproto::*, xtest::ConnectionExt as _},
 };
 
-pub fn x11_available() -> bool {
-    X11::connect().is_ok()
-}
-
 pub fn foreground_target() -> Option<(isize, u32)> {
     X11::connect().ok()?.foreground().ok()
 }

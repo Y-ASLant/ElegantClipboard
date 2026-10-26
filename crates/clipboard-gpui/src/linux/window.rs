@@ -51,8 +51,3 @@ pub fn is_window_shown(window: &Window) -> bool {
 pub fn is_window_minimized(window: &Window) -> bool {
     !is_window_shown(window)
 }
-
-pub fn foreground_window_is_ours() -> bool {
-    clipboard_platform::desktop::foreground_target()
-        .is_some_and(|target| target.1 == std::process::id())
-}

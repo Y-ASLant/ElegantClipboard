@@ -1,4 +1,3 @@
-pub use crate::popup_geometry::hover_popup_bounds;
 use anyhow::Result;
 use clipboard_core::preferences::WindowPositionPreference;
 use gpui_kit::Window;
@@ -73,19 +72,10 @@ fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<()
     }
     let width = i32::from(geometry.width);
     let height = i32::from(geometry.height);
-    let (x, y) = if mode == WindowPositionPreference::ScreenCenter {
-        (
-            left + (right - left - width) / 2,
-            top + (bottom - top - height) / 2,
-        )
-    } else {
-        let x = if cursor.0 + 12 + width > right {
-            cursor.0 - width - 12
-        } else {
-            cursor.0 + 12
-        };
-        (x, cursor.1 + 12)
-    };
+    // FollowCursor / ScreenCenter 纯运算与 Windows 共用 crate::popup_geometry::placement；
+    // FixedPosition 已在 position_window 提前返回，不会走到这里。
+    let (x, y) =
+        crate::popup_geometry::placement(mode, cursor, (left, top, right, bottom), width, height);
     connection
         .configure_window(
             id,

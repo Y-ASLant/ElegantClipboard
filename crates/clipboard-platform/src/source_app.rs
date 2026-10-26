@@ -15,18 +15,7 @@ use windows::Win32::{
 };
 use windows::core::BOOL;
 
-#[derive(Clone)]
-pub struct SourceApp {
-    pub name: String,
-    pub executable: Option<String>,
-}
-
-#[derive(Clone, Debug)]
-pub struct RunningApp {
-    pub name: String,
-    pub process: String,
-    pub icon: Option<String>,
-}
+pub use crate::source_app_types::{RunningApp, SourceApp};
 
 pub fn running_apps(icons_dir: &Path) -> Vec<RunningApp> {
     struct Context {

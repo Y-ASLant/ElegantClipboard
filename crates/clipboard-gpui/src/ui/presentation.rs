@@ -50,14 +50,12 @@ pub(super) fn tr(
     }
 }
 pub(super) fn localize_service_message(language: LanguagePreference, message: String) -> String {
+    // 含 "Ctrl+V" 的消息只产自 Windows 平台层；macOS 的按键符号由
+    // capabilities::paste_key_label 持有，这里不重复替换。
     if language == LanguagePreference::Chinese {
-        return if cfg!(target_os = "macos") {
-            message.replace("Ctrl+V", "Command+V")
-        } else {
-            message
-        };
+        return message;
     }
-    let localized = match message.as_str() {
+    match message.as_str() {
         "目标窗口已关闭，内容已复制，请手动粘贴" =>
             "The target window has closed. The content was copied; paste it manually.".into(),
         "前台窗口已变化，已取消自动粘贴，请检查后手动粘贴" =>
@@ -100,10 +98,5 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
             "Copied; switch to the target app and press Ctrl+V".into()
         }
         _ => message,
-    };
-    if cfg!(target_os = "macos") {
-        localized.replace("Ctrl+V", "Command+V")
-    } else {
-        localized
     }
 }

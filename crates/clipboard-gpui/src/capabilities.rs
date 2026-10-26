@@ -9,28 +9,6 @@ pub fn desktop_unavailable_reason() -> Option<&'static str> {
     }
 }
 
-pub fn positioning_unavailable_reason() -> Option<&'static str> {
-    #[cfg(target_os = "linux")]
-    {
-        clipboard_platform::desktop::unavailable_reason()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
-}
-
-pub fn source_unavailable_reason() -> Option<&'static str> {
-    #[cfg(target_os = "linux")]
-    {
-        clipboard_platform::desktop::unavailable_reason()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        None
-    }
-}
-
 pub fn paste_key_supported(key: clipboard_core::preferences::PasteKeyPreference) -> bool {
     !cfg!(target_os = "macos") || key == clipboard_core::preferences::PasteKeyPreference::CtrlV
 }

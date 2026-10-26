@@ -97,7 +97,7 @@ impl Render for ClipboardView {
                             .bg(cx.theme().border),
                     ),
             )
-            .when_some(crate::capabilities::source_unavailable_reason(), |shell, reason| {
+            .when_some(crate::capabilities::desktop_unavailable_reason(), |shell, reason| {
                 shell.child(Alert::warning("desktop-capabilities", format!(
                     "{reason}\nWayland：支持文件和图片拖出、窗口内排序；不支持文字/富文本拖出。关闭窗口时使用最小化。\nWayland: file/image export and in-app reordering work; text/rich-text export is unavailable. Hide minimizes the window."
                 )).small())

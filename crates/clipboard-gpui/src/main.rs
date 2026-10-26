@@ -9,6 +9,7 @@ mod native;
 mod native;
 mod options;
 mod popup_geometry;
+mod sound_core;
 mod state;
 mod tray;
 mod ui;

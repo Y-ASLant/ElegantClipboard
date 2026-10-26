@@ -5,17 +5,7 @@ use x11rb::protocol::{
     xproto::ConnectionExt,
 };
 
-#[derive(Clone)]
-pub struct SourceApp {
-    pub name: String,
-    pub executable: Option<String>,
-}
-#[derive(Clone, Debug)]
-pub struct RunningApp {
-    pub name: String,
-    pub process: String,
-    pub icon: Option<String>,
-}
+pub use crate::source_app_types::{RunningApp, SourceApp};
 
 fn executable(x: &X11, window: u32) -> Option<String> {
     let pid = x.pid(window).ok()?;

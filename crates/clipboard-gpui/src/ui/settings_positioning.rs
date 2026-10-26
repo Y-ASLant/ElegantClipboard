@@ -8,7 +8,7 @@ impl SettingsWindowView {
         };
         let language = state.language;
         let window_position = state.window_position.value;
-        let reason = crate::capabilities::positioning_unavailable_reason();
+        let reason = crate::capabilities::desktop_unavailable_reason();
         let pending = state.window_position.pending;
         let choices = [
             WindowPositionPreference::FollowCursor,

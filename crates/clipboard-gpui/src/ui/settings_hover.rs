@@ -7,7 +7,7 @@ impl SettingsWindowView {
         let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
         };
-        if let Some(reason) = crate::capabilities::positioning_unavailable_reason() {
+        if let Some(reason) = crate::capabilities::desktop_unavailable_reason() {
             return Alert::warning("hover-position-capability", format!(
                 "{reason}\n悬停浮窗不可定位；仍可使用卡片预览按钮。 / Use the card preview button instead of a positioned hover window."
             )).small().into_any_element();

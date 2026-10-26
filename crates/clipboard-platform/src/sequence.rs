@@ -79,10 +79,7 @@ fn linux_content_identity(clipboard: &ClipboardContext) -> Result<u32> {
     }
     let mut readable = false;
     for format in formats {
-        if matches!(
-            format.as_str(),
-            "TARGETS" | "TIMESTAMP" | "MULTIPLE" | "SAVE_TARGETS" | "DELETE" | "INCR"
-        ) {
+        if crate::service::read_formats::X11_META_FORMATS.contains(&format.as_str()) {
             continue;
         }
         format.hash(&mut hash);

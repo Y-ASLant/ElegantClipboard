@@ -142,28 +142,10 @@ impl Drop for Hotkey {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PasteHotkeyEvent {
-    pub slot: u8,
-    pub favorite: bool,
-    pub target: (isize, u32),
-}
+pub use crate::paste_types::{PasteHotkeyEvent, PasteRegistrationWarning};
 
 pub struct PasteHotkeys {
     thread: MessageThread,
-}
-
-#[derive(Clone, Debug)]
-pub struct PasteRegistrationWarning {
-    pub slot: u8,
-    pub favorite: bool,
-    pub message: String,
-}
-
-impl std::fmt::Display for PasteRegistrationWarning {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.message)
-    }
 }
 
 struct ParsedPasteShortcut {

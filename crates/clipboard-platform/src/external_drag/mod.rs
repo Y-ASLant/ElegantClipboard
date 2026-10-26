@@ -38,29 +38,7 @@ use windows::Win32::{
     },
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DragPointerState {
-    pub x: i32,
-    pub y: i32,
-    pub left_button_down: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ExternalDragOptions {
-    pub source_window: isize,
-    pub preview_window: Option<isize>,
-    /// Cursor minus preview origin, in physical screen pixels.
-    pub preview_offset: (i32, i32),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExternalDragOutcome {
-    Dropped,
-    Cancelled,
-    ReturnedToSource,
-    /// OLE cancelled its self-drop; the UI should commit its internal drop.
-    ReleasedInSource,
-}
+pub use crate::drag_types::{DragPointerState, ExternalDragOptions, ExternalDragOutcome};
 
 pub fn poll_drag_pointer() -> Result<DragPointerState> {
     let mut point = POINT::default();
