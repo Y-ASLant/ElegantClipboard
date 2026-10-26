@@ -33,7 +33,7 @@ try {
     $stage = Join-Path $packageRoot ('stage-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage | Out-Null
     try {
-        $name = "elegant-clipboard-gpui-v$version-$hostTarget"
+        $name = "ElegantClipboard-v$version-$hostTarget"
         if ($IsMacOS) {
             # Apple bundle version fields use the numeric release version, not SemVer prerelease labels.
             $bundleVersion = ($version -split '[-+]')[0]

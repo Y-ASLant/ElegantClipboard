@@ -2,6 +2,10 @@
 
 本日志从 Windows 原生 GPUI 重构版 `2.0.0` 开始记录；此前版本不在此处补录。版本号来自根目录 `Cargo.toml` 的 `[workspace.package]`，发布标签须与之对应（如 `v2.0.0`）。
 
+## 未发布
+
+- 三平台打包脚本统一使用 `ElegantClipboard-v<版本>-<平台>` 命名，移除包名中的技术框架后缀；beta.2 草稿中的三个平台附件已同步更名，附件内容未变。Cargo 包名、可执行文件名和数据目录保持不变。
+
 ## 2.0.0-beta.2（预发行版）
 
 - 发布流水线仅上传平台包，不再上传 `.sha256` 附件；本地打包仍生成校验文件。`upload-artifact` 升至 `v7.0.2`、`download-artifact` 升至 `v8.0.2`、`action-gh-release` 升至 `v3.0.3`，均使用 Node.js 24 运行时。

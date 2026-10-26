@@ -201,7 +201,7 @@ cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 .\scripts\package-gpui-windows.ps1
 ```
 
-打包脚本仅接受 Windows x64 MSVC 构建，使用锁定依赖生成 `target/packages/elegant-clipboard-gpui-v<版本>-windows-x64.zip` 与 `.zip.sha256`。压缩包含 exe、许可证和运行说明，程序默认在 LocalAppData 保存数据；这是未经签名的独立压缩包，不是安装器或自动更新制品。
+打包脚本仅接受 Windows x64 MSVC 构建，使用锁定依赖生成 `target/packages/ElegantClipboard-v<版本>-windows-x64.zip` 与 `.zip.sha256`，校验文件仅保留在本地，不作为发布附件上传。压缩包含 exe、许可证和运行说明，程序默认在 LocalAppData 保存数据；这是未经签名的独立压缩包，不是安装器或自动更新制品。
 
 2026-10-11 模块重构后，249 项测试通过（核心 149、Windows 后端 69、应用 31），另有 2 项依赖系统程序图标的测试默认跳过。源码行数检查、fmt、workspace all-targets check、Clippy（warnings 视为错误）与 Release 构建通过，最终输出无错误或警告。非交互窗口站中的真实剪贴板冒烟通过文本、富文本、纯文本转换、图片、文件、路径、合并复制和采集错误隔离场景。
 

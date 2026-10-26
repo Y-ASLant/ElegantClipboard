@@ -25,7 +25,7 @@ try {
     if ($package.Count -ne 1) {
         throw '无法确定 GPUI 应用版本'
     }
-    $filename = "elegant-clipboard-gpui-v$($package[0].version)-windows-x64.zip"
+    $filename = "ElegantClipboard-v$($package[0].version)-windows-x64.zip"
     $packageRoot = Join-Path $metadata.target_directory 'packages'
     $executable = Join-Path $metadata.target_directory 'release\elegant-clipboard-gpui.exe'
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
