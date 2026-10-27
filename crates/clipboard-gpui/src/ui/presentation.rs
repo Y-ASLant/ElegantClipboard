@@ -97,6 +97,47 @@ pub(super) fn localize_service_message(language: LanguagePreference, message: St
         "已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
             "Copied; switch to the target app and press Ctrl+V".into()
         }
+        "HTML 已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "HTML copied; switch to the target app and press Ctrl+V".into()
+        }
+        "RTF 已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "RTF copied; switch to the target app and press Ctrl+V".into()
+        }
+        "转换后的文本已复制，可切换到目标应用按 Ctrl+V 粘贴" => {
+            "Transformed text copied; switch to the target app and press Ctrl+V".into()
+        }
+        // Unix 复制路径的短形式消息（不带「可切换…」后缀）。
+        "内容已复制" => "Content copied".into(),
+        "富文本已复制" => "Rich text copied".into(),
+        "HTML 已复制" => "HTML copied".into(),
+        "RTF 已复制" => "RTF copied".into(),
+        "转换后的文本已复制" => "Transformed text copied".into(),
+        "恢复原剪贴板失败" => "Failed to restore the previous clipboard".into(),
+        _ if message.starts_with("恢复原剪贴板失败：") => message.replacen(
+            "恢复原剪贴板失败：",
+            "Failed to restore the previous clipboard: ",
+            1,
+        ),
+        _ if message.starts_with("部分原生格式未写回：") => message.replacen(
+            "部分原生格式未写回：",
+            "Some native formats were not restored: ",
+            1,
+        ),
+        _ if message.starts_with("部分原生格式未保存：") => message.replacen(
+            "部分原生格式未保存：",
+            "Some native formats were not saved: ",
+            1,
+        ),
+        _ if message.starts_with("已在资源管理器中定位第一项，共") => message.replacen(
+            "已在资源管理器中定位第一项，共",
+            "Located the first item in the file manager; ",
+            1,
+        ).replacen("项", " items total", 1),
+        _ if message.starts_with("警告：文件路径已保存，但部分暂存操作未完成：") => message.replacen(
+            "警告：文件路径已保存，但部分暂存操作未完成：",
+            "Warning: file paths were saved, but some staging steps failed: ",
+            1,
+        ),
         _ => message,
     }
 }
