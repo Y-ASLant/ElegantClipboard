@@ -166,7 +166,7 @@ impl Hotkey {
         register(&x, key, parsed.modifiers, &locks)?;
         let worker = Worker::start(
             x,
-            vec![(key, parsed.modifiers, 0, false)],
+            vec![(key, parsed.modifiers, 0, Some(false))],
             &locks,
             move |_, _, target| {
                 let _ = events.try_send(target);
