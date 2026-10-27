@@ -12,6 +12,7 @@
 - [跨平台正确性修复验证](evidence/cross-platform-correctness-2026-10-27.md)：平台能力、粘贴目标与请求归属、格式编码和延迟采集修复的验证范围。
 - [默认数据目录迁移验证](evidence/data-directory-migration-2026-10-27.md)：三平台统一目录、旧数据引用与自启迁移、冲突保护和清理规则。
 - [普通文件仅保存路径](evidence/file-paths-only-2026-10-27.md)：移除文件副本、启动清理及旧备份兼容行为。
+- [首次引导布局与动效](evidence/onboarding-motion-2026-10-27.md)：原生四步动态预览、无跳过入口及中英最小窗口验证。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。
@@ -87,7 +88,7 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
-| `onboarding`、`content`、`presentation` | 首次引导、内容展示助手、主题及本地化展示 |
+| `onboarding`、`onboarding_preview`、`onboarding_scenes`、`content`、`presentation` | 首次引导导航、预览外壳与场景渲染、内容展示助手、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于完整预览与复制。
 

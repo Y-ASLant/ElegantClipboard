@@ -315,6 +315,7 @@ struct ClipboardView {
     monitoring: bool,
     onboarding_completed: bool,
     onboarding_step: usize,
+    onboarding_revision: usize,
     onboarding_pending: bool,
     show_onboarding: bool,
     settings_window: Option<AnyWindowHandle>,

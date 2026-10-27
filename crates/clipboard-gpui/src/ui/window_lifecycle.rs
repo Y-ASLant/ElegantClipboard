@@ -122,6 +122,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if !native_window::is_window_shown(window)
+            || self.onboarding_visible()
             || self.external_drag.is_some()
             || cx.has_active_drag()
             || self._tray.is_none()
@@ -299,7 +300,6 @@ impl ClipboardView {
 
     pub(super) fn dismiss_or_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.onboarding_visible() {
-            self.complete_onboarding(cx);
             return;
         }
         self.cancel_pending_row_click();

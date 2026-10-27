@@ -1,9 +1,21 @@
 use super::*;
 use gpui_kit::component::stepper::{Stepper, StepperItem};
 
+#[path = "onboarding_preview.rs"]
+mod preview;
+
 impl ClipboardView {
     pub(super) fn onboarding_visible(&self) -> bool {
         self.show_onboarding && !self.onboarding_completed
+    }
+
+    fn select_onboarding_step(&mut self, step: usize, cx: &mut Context<Self>) {
+        let step = step.min(3);
+        if self.onboarding_visible() && !self.onboarding_pending && self.onboarding_step != step {
+            self.onboarding_step = step;
+            self.onboarding_revision = self.onboarding_revision.wrapping_add(1);
+            cx.notify();
+        }
     }
 
     pub(super) fn advance_onboarding(&mut self, cx: &mut Context<Self>) {
@@ -11,15 +23,15 @@ impl ClipboardView {
             return;
         }
         if self.onboarding_step < 3 {
-            self.onboarding_step += 1;
-            cx.notify();
+            self.select_onboarding_step(self.onboarding_step + 1, cx);
         } else {
             self.complete_onboarding(cx);
         }
     }
 
-    pub(super) fn complete_onboarding(&mut self, cx: &mut Context<Self>) {
+    fn complete_onboarding(&mut self, cx: &mut Context<Self>) {
         if self.onboarding_visible()
+            && self.onboarding_step == 3
             && !self.onboarding_pending
             && self.send(Command::CompleteOnboarding, cx)
         {
@@ -27,228 +39,238 @@ impl ClipboardView {
             cx.notify();
         }
     }
-    pub(super) fn render_onboarding(&self, cx: &mut Context<Self>) -> Div {
+
+    pub(super) fn render_onboarding(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let language = self.language;
+        let step = self.onboarding_step.min(3);
+        let compact = window.viewport_size().height < px(640.);
+        let accent = cx.theme().blue;
         let steps = [
             (
-                IconName::Copy,
-                tr(language, "采集", "Capture"),
-                tr(
-                    language,
-                    "欢迎使用 ElegantClipboard",
-                    "Welcome to ElegantClipboard",
-                ),
-                tr(
-                    language,
-                    "复制的内容保存在本机，随时可从历史中查找。",
-                    "Copied content stays on this device and is easy to find later.",
-                ),
-                tr(
-                    language,
-                    "复制文本、图片或文件即可开始记录",
-                    "Copy text, images, or files to start recording",
-                ),
+                "采集",
+                "Capture",
+                "复制一次，随时找回",
+                "Copy once. Find it later.",
+                "文本、图片和文件路径，自动整理在你的剪贴板历史中。",
+                "Text, images and file paths, together in your clipboard history.",
             ),
             (
-                IconName::Eye,
-                tr(language, "搜索", "Search"),
-                tr(language, "快速搜索", "Quick search"),
-                tr(
-                    language,
-                    "在顶部搜索框输入关键词，历史卡片会显示匹配内容。",
-                    "Search from the top field and see matches in your history cards.",
-                ),
-                tr(language, "聚焦搜索框", "to focus search"),
+                "搜索",
+                "Search",
+                "想找的内容，一搜就到",
+                "Less searching. More finding.",
+                "输入几个关键词，从历史里找回刚才那段文字。",
+                "A few keywords bring the right item back into view.",
             ),
             (
-                IconName::Star,
-                tr(language, "收藏", "Favorites"),
-                tr(language, "置顶与收藏", "Pin and favorite"),
-                tr(
-                    language,
-                    "把常用记录置顶或收藏，也可以通过卡片按钮查看详情。",
-                    "Pin or favorite useful items and open card details when needed.",
-                ),
-                tr(
-                    language,
-                    "从目标应用用快捷键唤出后，点击卡片可自动粘贴",
-                    "Open from a target app with the shortcut, then click a card to paste",
-                ),
+                "收藏",
+                "Save",
+                "常用的，留在手边",
+                "Keep the useful things close.",
+                "收藏常用内容，置顶重要记录。下次需要，不必重新寻找。",
+                "Favorite everyday snippets and pin important items for next time.",
             ),
             (
-                IconName::SquareTerminal,
-                tr(language, "快捷键", "Shortcuts"),
-                tr(language, "键盘快捷键", "Keyboard shortcuts"),
-                tr(
-                    language,
-                    "使用键盘管理历史",
-                    "Manage history with the keyboard",
-                ),
-                tr(
-                    language,
-                    "使用纯文本表示",
-                    "uses the plain-text representation",
-                ),
+                "快捷键",
+                "Paste",
+                "回到原处，接着输入",
+                "Back to where you were.",
+                "在目标应用中用快捷键唤出历史，选择记录，粘贴回原窗口。",
+                "Open history from your target app, choose an item and paste it back.",
             ),
         ];
-        let (icon, _, title, description, tip) = steps[self.onboarding_step.min(3)].clone();
-        let is_last = self.onboarding_step == 3;
-        let description_content = if self.onboarding_step == 3 {
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_1()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr(language, "方向键选择记录；", "Arrow keys select items;"))
-                .child(shortcut_kbd("Enter").expect("onboarding enter key"))
-                .child(tr(language, "复制或粘贴；", "to copy or paste;"))
-                .child(shortcut_kbd("Delete").expect("onboarding delete key"))
-                .child(tr(language, "删除；", "to delete;"))
-                .child(shortcut_kbd("Left").expect("onboarding left key"))
-                .child(tr(language, "和", "and"))
-                .child(shortcut_kbd("Right").expect("onboarding right key"))
-                .child(tr(language, "切换分类。", "change categories."))
-                .into_any_element()
+        let (_, _, title_cn, title_en, description_cn, description_en) = steps[step];
+        let description = div()
+            .relative()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_size(px(if compact { 23. } else { 27. }))
+                    .font_semibold()
+                    .text_color(cx.theme().foreground)
+                    .child(tr(language, title_cn, title_en)),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .line_height(relative(1.65))
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(language, description_cn, description_en)),
+            );
+        let description = if cx.reduce_motion() {
+            description.into_any_element()
         } else {
-            div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(description)
+            description
+                .with_animation(
+                    ("onboarding-copy", self.onboarding_revision),
+                    Animation::new(Duration::from_millis(320)).with_easing(ease_out_quint()),
+                    |element, progress| element.top(px(10. * (1. - progress))).opacity(progress),
+                )
                 .into_any_element()
         };
-        let tip_content = match self.onboarding_step {
-            1 => div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(tr(language, "按", "Press"))
-                .child(
+        let tip = self.onboarding_tip(cx);
+        div()
+            .key_context("ClipboardApp")
+            .track_focus(&self.list_focus)
+            .size_full()
+            .px(px(if compact { 20. } else { 28. }))
+            .pt(px(if compact { 8. } else { 16. }))
+            .pb(px(if compact { 12. } else { 24. }))
+            .flex()
+            .flex_col()
+            .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
+                this.dismiss_or_hide(window, cx);
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .max_w(px(440.))
+                    .mx_auto()
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .gap(px(if compact { 10. } else { 16. }))
+                    .child(preview::render(self, compact, cx))
+                    .child(description)
+                    .child(tip)
+                    .child(
+                        div()
+                            .w_full()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(cx.theme().border.opacity(0.7))
+                            .bg(cx.theme().muted.opacity(0.35))
+                            .px_2()
+                            .py(px(if compact { 8. } else { 12. }))
+                            .child(
+                                Stepper::new("onboarding-steps")
+                                    .text_center(true)
+                                    .selected_index(step)
+                                    .disabled(self.onboarding_pending)
+                                    .items(steps.iter().enumerate().map(|(index, (cn, en, ..))| {
+                                        StepperItem::new()
+                                            .when(index < step, |item| {
+                                                item.icon(Icon::new(IconName::Check).xsmall())
+                                            })
+                                            .child(
+                                                div()
+                                                    .px_2()
+                                                    .py(px(2.))
+                                                    .rounded_md()
+                                                    .text_xs()
+                                                    .text_color(if index == step {
+                                                        accent
+                                                    } else if index < step {
+                                                        cx.theme().foreground
+                                                    } else {
+                                                        cx.theme().muted_foreground
+                                                    })
+                                                    .when(index == step, |label| {
+                                                        label
+                                                            .bg(accent.opacity(0.1))
+                                                            .font_semibold()
+                                                    })
+                                                    .child(tr(language, cn, en)),
+                                            )
+                                    }))
+                                    .on_click(cx.listener(|this, index, _, cx| {
+                                        this.select_onboarding_step(*index, cx)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                Button::new("onboarding-back")
+                                    .ghost()
+                                    .icon(IconName::ArrowLeft)
+                                    .label(tr(language, "上一步", "Back"))
+                                    .disabled(step == 0 || self.onboarding_pending)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.select_onboarding_step(
+                                            this.onboarding_step.saturating_sub(1),
+                                            cx,
+                                        )
+                                    })),
+                            )
+                            .child(
+                                Button::new("onboarding-next")
+                                    .primary()
+                                    .h(px(40.))
+                                    .px_5()
+                                    .rounded_lg()
+                                    .label(if self.onboarding_pending {
+                                        tr(language, "正在准备…", "Preparing…")
+                                    } else if step == 3 {
+                                        tr(language, "开始使用", "Get started")
+                                    } else {
+                                        tr(language, "下一步", "Continue")
+                                    })
+                                    .child(Icon::new(IconName::ArrowRight).small())
+                                    .disabled(self.onboarding_pending)
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.advance_onboarding(cx)),
+                                    ),
+                            ),
+                    ),
+            )
+    }
+
+    fn onboarding_tip(&self, cx: &App) -> Div {
+        let language = self.language;
+        let row = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_xs()
+            .text_color(cx.theme().muted_foreground);
+        let (row, text) = match self.onboarding_step {
+            1 => (
+                row.child(
                     shortcut_kbd(if cfg!(target_os = "macos") {
                         "Cmd+F"
                     } else {
                         "Ctrl+F"
                     })
                     .expect("onboarding search key"),
-                )
-                .child(tip)
-                .into_any_element(),
-            3 => div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(shortcut_kbd("Shift+Enter").expect("onboarding plain text key"))
-                .child(tip)
-                .into_any_element(),
-            _ => div().child(tip).into_any_element(),
+                ),
+                tr(language, "快速聚焦搜索", "Jump straight to search"),
+            ),
+            2 => (
+                row.child(Icon::new(IconName::Star).small()),
+                tr(
+                    language,
+                    "在记录上选择「收藏」即可保留常用内容",
+                    "Favorite a history item to keep it handy",
+                ),
+            ),
+            3 => (
+                row.child(shortcut_kbd("Shift+Enter").expect("onboarding plain text key")),
+                tr(
+                    language,
+                    "需要去掉格式时，使用纯文本粘贴",
+                    "Paste as plain text when formatting gets in the way",
+                ),
+            ),
+            _ => (
+                row.child(Icon::new(IconName::Check).small()),
+                tr(
+                    language,
+                    "历史保存在本机，普通文件仅记录路径",
+                    "History stays local; files are stored as paths",
+                ),
+            ),
         };
-        div()
-            .key_context("ClipboardApp")
-            .track_focus(&self.list_focus)
-            .size_full()
-            .p_4()
-            .flex()
-            .items_center()
-            .justify_center()
-            .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
-                this.dismiss_or_hide(window, cx);
-            }))
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(390.))
-                    .rounded_md()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
-                    .p_4()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        div()
-                            .w(px(64.))
-                            .h(px(64.))
-                            .rounded_md()
-                            .bg(cx.theme().accent)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(Icon::new(icon).text_color(cx.theme().primary)),
-                    )
-                    .child(div().text_lg().font_semibold().child(title))
-                    .child(description_content)
-                    .child(
-                        div()
-                            .rounded_md()
-                            .bg(cx.theme().accent)
-                            .px_3()
-                            .py_2()
-                            .text_xs()
-                            .text_color(cx.theme().primary)
-                            .child(tip_content),
-                    )
-                    .child(
-                        Stepper::new("onboarding-steps")
-                            .small()
-                            .text_center(true)
-                            .selected_index(self.onboarding_step)
-                            .disabled(self.onboarding_pending)
-                            .items(
-                                steps
-                                    .iter()
-                                    .map(|(_, label, _, _, _)| StepperItem::new().child(*label)),
-                            )
-                            .on_click(cx.listener(|this, index, _, cx| {
-                                if this.onboarding_visible() && !this.onboarding_pending {
-                                    this.onboarding_step = *index;
-                                    cx.notify();
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .justify_between()
-                            .child(
-                                Button::new("onboarding-skip")
-                                    .small()
-                                    .ghost()
-                                    .label(tr(language, "跳过", "Skip"))
-                                    .disabled(self.onboarding_pending)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.complete_onboarding(cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("onboarding-next")
-                                    .small()
-                                    .primary()
-                                    .label(if is_last {
-                                        tr(language, "开始使用", "Get started")
-                                    } else {
-                                        tr(language, "下一步", "Next")
-                                    })
-                                    .disabled(self.onboarding_pending)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.advance_onboarding(cx);
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(language, "按", "Press"))
-                            .child(shortcut_kbd("Esc").expect("onboarding skip key"))
-                            .child(tr(language, "跳过引导", "to skip onboarding")),
-                    ),
-            )
+        row.child(div().flex_1().min_w_0().child(text))
     }
 }

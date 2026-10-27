@@ -109,7 +109,7 @@ impl Render for ClipboardView {
                     "{reason}{wayland_note}"
                 )).small())
             })
-            .child(div().flex_1().min_h_0().child(self.render_content(cx)))
+            .child(div().flex_1().min_h_0().child(self.render_content(window, cx)))
             .child(self.render_status(cx))
     }
 }

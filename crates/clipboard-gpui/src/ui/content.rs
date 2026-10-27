@@ -1,9 +1,9 @@
 use super::*;
 
 impl ClipboardView {
-    pub(super) fn render_content(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_content(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         if self.onboarding_visible() {
-            return self.render_onboarding(cx).into_any_element();
+            return self.render_onboarding(window, cx).into_any_element();
         }
         if self.preview.id.is_some() {
             return visual::reveal(

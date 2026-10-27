@@ -7,7 +7,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 ## Current features
 
 - Capture and search text, URLs, HTML/RTF, images, and file paths
-- A four-step Chinese/English first-run guide for capture, search, favorites, and shortcuts, with Skip and Esc
+- A four-step Chinese/English first-run guide with animated previews for capture, search, favorites and shortcuts; navigate back and forward, then select Get started on the final step
 - Settings navigation for General, Display, Appearance, Data, App filter, Audio, Shortcuts, and About
 - General settings can skip confirmation when clearing the current group's history from the tray menu; confirmation remains the default
 - Separate copy and controlled-paste sound settings with immediate or success timing and preview buttons

@@ -328,6 +328,7 @@ impl ClipboardView {
             monitoring: startup.monitoring,
             onboarding_completed,
             onboarding_step: 0,
+            onboarding_revision: 0,
             onboarding_pending: false,
             show_onboarding: startup.show_onboarding,
             settings_window: None,
