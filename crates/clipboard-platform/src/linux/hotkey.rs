@@ -179,9 +179,7 @@ impl Hotkey {
     }
 }
 
-pub use crate::paste_types::{
-    PasteHotkeyEvent, PasteRegistrationWarning, SequenceAdvanceEvent,
-};
+pub use crate::paste_types::{PasteHotkeyEvent, PasteRegistrationWarning, SequenceAdvanceEvent};
 
 pub struct PasteHotkeys {
     worker: Worker,
