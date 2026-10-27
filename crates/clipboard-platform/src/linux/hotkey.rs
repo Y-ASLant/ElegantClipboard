@@ -3,7 +3,6 @@ pub use super::shortcut::{
     validate_sequence_shortcut,
 };
 use super::{shortcut::parse, x11::X11};
-use crate::paste_types::SequenceAdvanceEvent;
 use anyhow::{Context, Result, bail};
 use async_channel::Sender;
 use clipboard_core::preferences::{HotkeyPreference, PasteShortcutConfig};
@@ -180,7 +179,9 @@ impl Hotkey {
     }
 }
 
-pub use crate::paste_types::{PasteHotkeyEvent, PasteRegistrationWarning};
+pub use crate::paste_types::{
+    PasteHotkeyEvent, PasteRegistrationWarning, SequenceAdvanceEvent,
+};
 
 pub struct PasteHotkeys {
     worker: Worker,
