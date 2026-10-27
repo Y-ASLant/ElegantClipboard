@@ -85,6 +85,7 @@ jobs:
         uses: softprops/action-gh-release@v3.0.3
         with:
           draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: |
             packages/*.zip

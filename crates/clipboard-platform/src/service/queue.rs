@@ -221,6 +221,7 @@ mod tests {
             source: None,
             extra: Vec::new(),
             deferred: false,
+            sequence: 0,
         }
     }
 
@@ -263,6 +264,54 @@ mod tests {
         queue.try_send(capture("b"))?;
         assert!(queue.try_send(capture("c")).is_err());
         assert!(queue.try_send(Command::Pause(true)).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn deferred_capture_holds_byte_budget_until_delivered_discarded_or_cancelled() -> Result<()> {
+        use super::super::worker::transient::{TRANSIENT_WINDOW, TransientWindow, new_pending};
+
+        for deliver in [true, false] {
+            let queue = Arc::new(CommandQueue {
+                byte_limit: 8,
+                ..Default::default()
+            });
+            let mut window = TransientWindow::new(true);
+            queue.try_send(capture("12345678"))?;
+            let (command, permit) = queue.recv_timeout(Duration::ZERO)?;
+            let Command::ObservedCapture {
+                content,
+                extra,
+                source,
+                ..
+            } = command
+            else {
+                unreachable!();
+            };
+            let now = Instant::now();
+            window.push(new_pending(1, content, extra, source, now).hold_permit(permit));
+            assert!(queue.try_send(capture("x")).is_err());
+            let outcomes = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
+                Ok((if deliver { 1 } else { 2 }, None))
+            });
+            assert!(queue.try_send(capture("x")).is_err());
+            drop(outcomes);
+            queue.try_send(capture("12345678"))?;
+            let (command, permit) = queue.recv_timeout(Duration::ZERO)?;
+            let Command::ObservedCapture {
+                content,
+                extra,
+                source,
+                ..
+            } = command
+            else {
+                unreachable!();
+            };
+            window.push(new_pending(3, content, extra, source, now).hold_permit(permit));
+            assert!(queue.try_send(capture("x")).is_err());
+            window.drain();
+            queue.try_send(capture("x"))?;
+        }
         Ok(())
     }
 

@@ -8,6 +8,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if matches!(event, InputEvent::Change) {
+            self.cancel_sequence(cx);
             self.cancel_pending_row_click();
             self.close_hover_preview(cx);
             if matches!(

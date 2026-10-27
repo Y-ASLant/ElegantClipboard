@@ -244,7 +244,7 @@ impl Service {
                         })
                         .unwrap_or(Duration::from_millis(250));
                     match incoming.recv_timeout(timeout) {
-                        Ok((command, _permit)) => {
+                        Ok((command, permit)) => {
                             let observed_capture =
                                 matches!(command, Command::ObservedCapture { .. });
                             if stop.load(Ordering::Acquire)
@@ -259,21 +259,23 @@ impl Service {
                             }
                             // 真实 watcher 的采集先进 300ms 瞬时确认窗口。
                             if let Command::ObservedCapture {
+                                sequence,
                                 content,
                                 source,
                                 extra,
                                 deferred: true,
                             } = command
                             {
-                                for flushed in
-                                    worker.transient.push(super::worker::transient::new_pending(
-                                        last_seen_sequence(&worker.state),
+                                for flushed in worker.transient.push(
+                                    super::worker::transient::new_pending(
+                                        sequence,
                                         content,
                                         extra,
                                         source,
                                         std::time::Instant::now(),
-                                    ))
-                                {
+                                    )
+                                    .hold_permit(permit),
+                                ) {
                                     if let Err(error) = worker.handle_observed_capture(
                                         flushed.content,
                                         flushed.extra,
@@ -347,11 +349,6 @@ impl Service {
     }
 }
 
-/// watcher 入队时的序列号；瞬时窗口用它比对确认时的当前序列号。
-fn last_seen_sequence(state: &Mutex<CaptureState>) -> u32 {
-    state.lock().map(|state| state.last_sequence).unwrap_or(0)
-}
-
 /// 逐条确认到期的瞬时条目：在 CaptureState 临界区内重读当前剪贴板，
 /// 与 watcher 的稳定读互斥（模式同 handle_copy 的写回锁）。
 fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
@@ -364,6 +361,10 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
         let mut reread = || {
             let sequence = current_sequence(&worker.clipboard)?;
             let content = super::read_formats::read_current_content(&worker.clipboard)?;
+            anyhow::ensure!(
+                current_sequence(&worker.clipboard)? == sequence,
+                "确认瞬时内容时剪贴板已变化"
+            );
             Ok((sequence, content))
         };
         for (entry, outcome) in

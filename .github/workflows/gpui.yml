@@ -61,6 +61,12 @@ jobs:
       - name: Linux tests in isolated X server
         if: runner.os == 'Linux'
         run: dbus-run-session -- xvfb-run -a cargo test --workspace --locked
+      - name: X11 event ownership and resource release
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        env:
+          ELEGANT_X11_TEST_SERVER: private-xvfb
+        run: dbus-run-session -- xvfb-run -a cargo test -p clipboard-platform --locked x11_consumers_keep_events_separate_and_release_owned_resources -- --ignored
       - name: macOS tests
         if: runner.os == 'macOS'
         run: cargo test --workspace --locked

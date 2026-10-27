@@ -42,9 +42,9 @@ fn install_handler() {
             if !dispatch {
                 return;
             }
-            let Some(target) = desktop::foreground_target() else {
-                return;
-            };
+            // Carbon 快捷键不依赖辅助功能权限；无 AX 目标时仍唤起面板，
+            // 粘贴消费者会拒绝窗口令牌为零的目标。
+            let target = desktop::foreground_target().unwrap_or((0, 0));
             match &route.destination {
                 Destination::Main(events) => {
                     let _ = events.try_send(target);

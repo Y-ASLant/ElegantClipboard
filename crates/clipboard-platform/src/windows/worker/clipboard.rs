@@ -1,5 +1,4 @@
 use super::super::{
-    CapturedClipboard,
     capture::lock_capture_state,
     file_actions::{item_paths_for_action, plain_text_for_copy},
 };
@@ -7,7 +6,7 @@ use super::clipboard_write::{
     rich_clipboard_matches, verified_copy_sequence, write_extras_session, write_image_with_file,
     write_rich_clipboard,
 };
-use super::{Event, Worker};
+use super::{Event, Worker, clipboard_content::rtf_for_copy};
 use crate::service::read_content::RTF_FORMAT;
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
@@ -29,60 +28,8 @@ impl CopyMode {
 }
 
 impl Worker {
-    pub(super) fn handle_restore_stash(&mut self) -> Result<()> {
-        let Some(stash) = self.clipboard_stash.take() else {
-            self.send_event(Event::ClipboardRestored(Ok(false)))?;
-            return Ok(());
-        };
-        let restored = self
-            .write_stashed(&stash)
-            .map(|_| true)
-            .map_err(|error| error.to_string());
-        self.send_event(Event::ClipboardRestored(restored))
-    }
-
-    /// 把 stash 写回剪贴板：主内容 + 额外格式，尽力而为（额外格式失败不阻塞）。
-    fn write_stashed(&self, stash: &super::StashedClipboard) -> Result<()> {
-        let mut contents = match &stash.content {
-            CapturedClipboard::Text(text) => vec![ClipboardContent::Text(text.clone())],
-            CapturedClipboard::Rich { html, rtf, text } => {
-                let mut contents = Vec::with_capacity(3);
-                if let Some(text) = text {
-                    contents.push(ClipboardContent::Text(text.clone()));
-                }
-                if let Some(html) = html {
-                    contents.push(ClipboardContent::Html(html.clone()));
-                }
-                if let Some(rtf) = rtf {
-                    contents.push(ClipboardContent::Other(RTF_FORMAT.into(), rtf.clone()));
-                }
-                contents
-            }
-            CapturedClipboard::Files(paths) => vec![ClipboardContent::Files(paths.clone())],
-            CapturedClipboard::Image { png, .. } => {
-                let image = RustImageData::from_bytes(png.as_slice())
-                    .map_err(|error| anyhow!("恢复图片失败：{error}"))?;
-                vec![ClipboardContent::Image(image)]
-            }
-        };
-        contents.extend(
-            stash
-                .extra
-                .iter()
-                .map(|format| ClipboardContent::Other(format.name.clone(), format.data.clone())),
-        );
-        let result = self
-            .clipboard
-            .set(contents)
-            .map_err(|error| anyhow!("恢复原剪贴板失败：{error}"));
-        // 无论成败都抑制自捕获（部分写入也是自我写入）。
-        let mut state = lock_capture_state(&self.state)?;
-        state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
-        drop(state);
-        result
-    }
-
-    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, for_paste: bool) -> Result<()> {
+    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
+        self.clipboard_stash = None;
         let item_count = ids.len();
         let merged = self.history.merge_content(&ids, &self.staged_dir)?;
         let mut state = lock_capture_state(&self.state)?;
@@ -90,7 +37,8 @@ impl Worker {
             write_merged_clipboard(&self.clipboard, &merged, &mut state.ignored_sequence)?;
         drop(state);
         self.send_event(Event::Merged {
-            for_paste,
+            for_paste: request_id.is_some(),
+            request_id,
             clipboard_sequence,
             item_count,
         })
@@ -102,6 +50,7 @@ impl Worker {
         request_id: Option<u64>,
         mode: CopyMode,
     ) -> Result<()> {
+        self.clipboard_stash = None;
         let mut item = self.history.item(id)?;
         let plain_text = match mode {
             CopyMode::PlainText => Some(plain_text_for_copy(&item).map(|text| text.into_owned())),
@@ -183,11 +132,10 @@ impl Worker {
         } else {
             None
         };
-        // 额外原生格式：仅在会写入的 rich/text 分支装载（files/image 不注入）。
-        // 受控粘贴（Original）且开启恢复时，先在写回前暂存用户剪贴板。
-        if request_id.is_some() && mode == CopyMode::Original {
-            self.stash_clipboard_if_enabled();
-        }
+        // 快照只在此次写回及成功事件均完成后才绑定到请求。
+        let stash = (request_id.is_some() && mode == CopyMode::Original)
+            .then(|| self.snapshot_clipboard_for_paste())
+            .flatten();
         let mut state = lock_capture_state(&self.state)?;
         let mut rich_preserved = false;
         // A setter can fail after clearing or writing one image format. Record
@@ -202,10 +150,7 @@ impl Worker {
             )?
         } else if let Some((png, pixels)) = image {
             // 图片写回：CF_HDROP（临时文件）+ CF_DIB + PNG，纯图片可直接以文件粘贴。
-            let (width, height) = (
-                item.image_width.unwrap_or(0).max(0) as u32,
-                item.image_height.unwrap_or(0).max(0) as u32,
-            );
+            let (width, height) = pixels.dimensions();
             write_image_with_file(
                 &item,
                 &self.data_dir,
@@ -257,20 +202,14 @@ impl Worker {
                 let html = item.html_content.clone().unwrap_or_default();
                 (vec![ClipboardContent::Html(html.clone())], Some(html))
             } else {
-                let rtf = item
-                    .rtf_content
-                    .as_deref()
-                    .and_then(clipboard_core::rich::decode_rtf_for_clipboard)
-                    .context("RTF 内容解码失败")?;
-                (vec![ClipboardContent::Other(RTF_FORMAT.into(), rtf)], None)
+                (vec![rtf_for_copy(item.rtf_content.as_deref())?], None)
             };
             let result = self.clipboard.set(contents);
             state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
             result.map_err(|error| anyhow!("复制{label}失败：{error}"))?;
             let matches = |clipboard: &ClipboardContext| {
                 if let Some(expected) = &expected_html {
-                    clipboard
-                        .get_html()
+                    crate::service::read_html::read_html(clipboard)
                         .ok()
                         .is_some_and(|actual| actual.contains(expected.as_str()))
                 } else {
@@ -303,14 +242,19 @@ impl Worker {
             let result = self.clipboard.set_text(text.clone());
             state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
             result.map_err(|error| anyhow!("复制文本失败：{error}"))?;
-            // 纯文本路径的额外格式：独立短会话 NoClear 追加（不 empty）。
-            let extras = self.history.native_formats_for_copy(id)?;
+            // 原生格式仅补充 Original；纯文本、转换和路径复制必须保持纯文本。
+            let extras = if mode == CopyMode::Original {
+                self.history.native_formats_for_copy(id)?
+            } else {
+                Vec::new()
+            };
             let extras_failed = if extras.is_empty() {
                 Vec::new()
             } else {
                 write_extras_session(&extras)
                     .unwrap_or_else(|_| extras.iter().map(|(name, _)| name.clone()).collect())
             };
+            state.ignored_sequence = unsafe { GetClipboardSequenceNumber() };
             let sequence = verified_copy_sequence(
                 || unsafe { GetClipboardSequenceNumber() },
                 || {
@@ -326,9 +270,10 @@ impl Worker {
             }
             sequence
         };
-        // 成功路径统一在此写 ignored_sequence；失败路径由写回函数经 &mut 记录部分写。
-        state.ignored_sequence = clipboard_sequence;
-        if unsafe { GetClipboardSequenceNumber() } != clipboard_sequence {
+        // 确认结果必须仍是 setter 记录的写后序列；外部复制即使内容相同也不接管其序列。
+        if clipboard_sequence != state.ignored_sequence
+            || unsafe { GetClipboardSequenceNumber() } != clipboard_sequence
+        {
             bail!("复制过程中剪贴板已被其他应用修改，请重试");
         }
         drop(state);
@@ -352,7 +297,9 @@ impl Worker {
                 _ => "已复制，可切换到目标应用按 Ctrl+V 粘贴",
             }
             .into(),
-        })
+        })?;
+        self.remember_paste_stash(request_id, clipboard_sequence, stash);
+        Ok(())
     }
 }
 

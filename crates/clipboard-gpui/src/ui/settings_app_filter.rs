@@ -8,7 +8,7 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner_state.language;
-        if let Some(reason) = crate::capabilities::desktop_unavailable_reason() {
+        if let Some(reason) = crate::capabilities::source_app_unavailable_reason(language) {
             return Alert::warning("source-app-capability", reason)
                 .small()
                 .into_any_element();

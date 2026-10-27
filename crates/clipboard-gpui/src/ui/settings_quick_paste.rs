@@ -12,15 +12,13 @@ impl SettingsWindowView {
         let paste_key = state.paste_key.value;
         let paste_key_pending = state.paste_key.pending;
         let paste_shortcuts = state.paste_shortcuts.clone();
-        let shortcut_actions_pending = state.paste_shortcuts_pending.is_some()
-            || state.quick_paste_pending_setting
-            || state.hotkey_pending
-            || crate::capabilities::desktop_unavailable_reason().is_some();
+        let shortcut_actions_pending = state.shortcut_change_pending()
+            || crate::capabilities::paste_unavailable_reason(language).is_some();
         let paste_shortcut_status = state.paste_shortcut_status.clone();
         let monitoring = state.monitoring;
         let quick_paste_owner = self.owner.clone();
         let sequence_hotkey = state.sequence_hotkey.clone();
-        let sequence_pending = state.sequence_hotkey_pending;
+        let sequence_pending = shortcut_actions_pending;
         let sequence_owner = self.owner.clone();
         let sequence_label = if sequence_hotkey.trim().is_empty() {
             tr(language, "已停用", "Disabled").to_owned()
@@ -66,7 +64,7 @@ impl SettingsWindowView {
                         });
                     }),
             )
-            .when_some(crate::capabilities::desktop_unavailable_reason(), |panel, reason| {
+            .when_some(crate::capabilities::paste_unavailable_reason(language), |panel, reason| {
                 panel.child(Alert::warning("paste-capability", reason).small())
             })
             // 序列粘贴推进键（决策 0004）：录制或停用，与主热键/槽位互斥。

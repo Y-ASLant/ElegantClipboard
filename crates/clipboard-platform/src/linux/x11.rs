@@ -24,38 +24,26 @@ pub fn unavailable_reason() -> Option<&'static str> {
 }
 
 impl X11 {
-    /// 桌面功能（粘贴等待、拖拽循环、前台查询）每秒会调用数十次；
-    /// 每次都新建 socket + setup 握手的开销过高，因此进程内复用一条连接
-    /// （调用方短暂持有 Arc；仅在缓存记录上次连接失败时跳过重复重试）。
+    /// 短时查询和请求复用这条连接，不允许消费事件队列。
+    /// 事件监听使用 connect_events() 专有连接，退出时一并释放队列与服务端资源。
     pub fn connect() -> Result<Self> {
-        type ConnectionResult = Result<(Arc<RustConnection>, u32), String>;
-        static SHARED: LazyLock<Mutex<Option<ConnectionResult>>> =
+        type SharedConnection = (Arc<RustConnection>, u32);
+        static SHARED: LazyLock<Mutex<Option<SharedConnection>>> =
             LazyLock::new(|| Mutex::new(None));
         let mut shared = SHARED.lock().unwrap_or_else(|error| error.into_inner());
-        match shared.as_ref() {
-            Some(Ok((connection, root))) => Ok(Self {
+        if let Some((connection, root)) = shared.as_ref() {
+            return Ok(Self {
                 connection: Arc::clone(connection),
                 root: *root,
-            }),
-            Some(Err(reason)) => bail!("{reason}"),
-            None => {
-                let established = Self::establish().map_err(|error| error.to_string());
-                match established {
-                    Ok(x11) => {
-                        let shared_entry = (Arc::clone(&x11.connection), x11.root);
-                        *shared = Some(Ok(shared_entry));
-                        Ok(x11)
-                    }
-                    Err(reason) => {
-                        *shared = Some(Err(reason.clone()));
-                        bail!("{reason}")
-                    }
-                }
-            }
+            });
         }
+        let x = Self::connect_events()?;
+        *shared = Some((Arc::clone(&x.connection), x.root));
+        Ok(x)
     }
 
-    fn establish() -> Result<Self> {
+    /// 监听器的事件队列、grab 和自建窗口均随此专有连接释放。
+    pub fn connect_events() -> Result<Self> {
         if let Some(reason) = unavailable_reason() {
             bail!(reason);
         }
@@ -127,3 +115,7 @@ impl X11 {
             .context("Shortcut key is not present in the current X11 keyboard layout")
     }
 }
+
+#[cfg(test)]
+#[path = "x11_tests.rs"]
+mod tests;

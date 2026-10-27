@@ -342,6 +342,7 @@ impl ClipboardView {
             language_pending: false,
             hotkey_choice,
             hotkey_pending: false,
+            shortcut_change: None,
             quick_paste_enabled,
             quick_paste_pending_setting: false,
             quick_paste_registration_warning: None,

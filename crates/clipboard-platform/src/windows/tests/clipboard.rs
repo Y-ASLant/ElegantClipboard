@@ -165,12 +165,15 @@ fn failed_merge_identifies_only_the_batch_request() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
-    service.send(Command::MergeForPaste(vec![424242, 424243]))?;
+    service.send(Command::MergeForPaste {
+        ids: vec![424242, 424243],
+        request_id: 17,
+    })?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(
         next_event(&events),
         Event::CommandFailed {
-            kind: FailureKind::Merge,
+            kind: FailureKind::Paste(17),
             ..
         }
     ));

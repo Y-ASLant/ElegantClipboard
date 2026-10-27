@@ -97,10 +97,11 @@ impl Render for ClipboardView {
                             .bg(cx.theme().border),
                     ),
             )
-            .when_some(crate::capabilities::desktop_unavailable_reason(), |shell, reason| {
-                // Wayland 降级说明仅存在于 Linux；macOS 的辅助功能提示不应附带它。
-                let wayland_note = if cfg!(target_os = "linux") {
-                    "\nWayland：支持文件和图片拖出、窗口内排序；不支持文字/富文本拖出。关闭窗口时使用最小化。\nWayland: file/image export and in-app reordering work; text/rich-text export is unavailable. Hide minimizes the window."
+            .when_some(crate::capabilities::paste_unavailable_reason(self.language), |shell, reason| {
+                let wayland_note = if crate::capabilities::wayland_session() {
+                    tr(self.language,
+                        "\nWayland：支持文件和图片拖出、窗口内排序；不支持文字/富文本拖出。关闭窗口时使用最小化。",
+                        "\nWayland: file/image export and in-app reordering work; text/rich-text export is unavailable. Hide minimizes the window.")
                 } else {
                     ""
                 };

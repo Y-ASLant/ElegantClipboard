@@ -159,7 +159,7 @@ impl Hotkey {
             bail!("Global shortcut is disabled");
         };
         let parsed = parse(value, true)?;
-        let x = X11::connect()?;
+        let x = X11::connect_events()?;
         let key = x.keycode(parsed.key)?;
         let locks = lock_masks(&x)?;
         register(&x, key, parsed.modifiers, &locks)?;
@@ -198,7 +198,7 @@ impl PasteHotkeys {
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main)?;
         validate_sequence_shortcut(shortcuts, sequence_shortcut, main)?;
-        let x = X11::connect()?;
+        let x = X11::connect_events()?;
         let locks = lock_masks(&x)?;
         let mut bindings: Vec<Binding> = Vec::new();
         let mut warnings = Vec::new();

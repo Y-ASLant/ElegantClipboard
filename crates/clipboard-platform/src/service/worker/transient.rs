@@ -1,4 +1,5 @@
 use super::super::super::{CapturedClipboard, source_app};
+use super::super::queue::CommandPermit;
 use anyhow::Result;
 use clipboard_core::NativeFormatCapture;
 use std::{
@@ -22,6 +23,7 @@ pub(crate) struct PendingCapture {
     pub(crate) source: Option<source_app::SourceApp>,
     pub(crate) due: Instant,
     pub(crate) attempts: u8,
+    _permit: Option<CommandPermit>,
 }
 
 /// 300ms 瞬时内容确认窗口。
@@ -32,6 +34,13 @@ pub(crate) struct PendingCapture {
 pub(crate) struct TransientWindow {
     enabled: bool,
     pending: VecDeque<PendingCapture>,
+}
+
+impl PendingCapture {
+    pub(in crate::service) fn hold_permit(mut self, permit: CommandPermit) -> Self {
+        self._permit = Some(permit);
+        self
+    }
 }
 
 pub(crate) enum PollOutcome {
@@ -89,24 +98,11 @@ impl TransientWindow {
         while self.pending.front().is_some_and(|front| front.due <= now) {
             let mut entry = self.pending.pop_front().expect("checked front above");
             let outcome = {
-                let read = match &cached {
-                    Some(Ok(cached_read)) => Ok(cached_read.clone()),
-                    Some(Err(())) => Err(()),
-                    None => match reread() {
-                        Ok(read) => {
-                            cached = Some(Ok(read.clone()));
-                            Ok(read)
-                        }
-                        Err(_) => {
-                            cached = Some(Err(()));
-                            Err(())
-                        }
-                    },
-                };
+                let read = cached.get_or_insert_with(|| reread().map_err(|_| ()));
                 match read {
                     Ok((current, content)) => {
-                        if current == entry.sequence
-                            || (ignored_sequence != 0 && current == ignored_sequence)
+                        if *current == entry.sequence
+                            || (ignored_sequence != 0 && *current == ignored_sequence)
                         {
                             // 序列号未变（确认成功）或被自身回贴取代：照常入库。
                             PollOutcome::Deliver
@@ -114,7 +110,7 @@ impl TransientWindow {
                             match content {
                                 // 内容为空/不同：被还原或取代，丢弃。
                                 None => PollOutcome::Discard,
-                                Some(current_content) if current_content == entry.content => {
+                                Some(current_content) if *current_content == entry.content => {
                                     PollOutcome::Deliver
                                 }
                                 Some(_) => PollOutcome::Discard,
@@ -158,6 +154,7 @@ pub(crate) fn new_pending(
         source,
         due: now + TRANSIENT_WINDOW,
         attempts: 0,
+        _permit: None,
     }
 }
 

@@ -6,8 +6,8 @@ use ::windows::Win32::{
     UI::{
         Input::KeyboardAndMouse::{
             GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-            KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_INSERT, VK_LWIN, VK_MENU,
-            VK_RWIN, VK_SHIFT, VK_V,
+            KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_INSERT,
+            VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
         },
         WindowsAndMessaging::{
             GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
@@ -149,8 +149,12 @@ fn key_input(key: VIRTUAL_KEY, up: bool) -> INPUT {
             ki: KEYBDINPUT {
                 wVk: key,
                 wScan: 0,
-                dwFlags: if up {
+                dwFlags: (if up {
                     KEYEVENTF_KEYUP
+                } else {
+                    KEYBD_EVENT_FLAGS(0)
+                }) | if key == VK_INSERT {
+                    KEYEVENTF_EXTENDEDKEY
                 } else {
                     KEYBD_EVENT_FLAGS(0)
                 },
@@ -234,9 +238,14 @@ mod tests {
                 actual.map(|input| input.wVk),
                 [modifier, key, key, modifier]
             );
+            let extended = if key == VK_INSERT {
+                KEYEVENTF_EXTENDEDKEY
+            } else {
+                KEYBD_EVENT_FLAGS(0)
+            };
             assert_eq!(actual[0].dwFlags, KEYBD_EVENT_FLAGS(0));
-            assert_eq!(actual[1].dwFlags, KEYBD_EVENT_FLAGS(0));
-            assert_eq!(actual[2].dwFlags, KEYEVENTF_KEYUP);
+            assert_eq!(actual[1].dwFlags, extended);
+            assert_eq!(actual[2].dwFlags, extended | KEYEVENTF_KEYUP);
             assert_eq!(actual[3].dwFlags, KEYEVENTF_KEYUP);
         }
     }

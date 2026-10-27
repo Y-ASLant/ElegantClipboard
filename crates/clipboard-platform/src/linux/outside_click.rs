@@ -25,7 +25,7 @@ pub struct OutsideClickMonitor {
 
 impl OutsideClickMonitor {
     pub fn start(events: Sender<(i32, i32)>, window_handle: isize) -> Result<Self> {
-        let x = X11::connect()?;
+        let x = X11::connect_events()?;
         let version = x.connection.xinput_xi_query_version(2, 0)?.reply()?;
         if version.major_version < 2 {
             bail!("Outside-click monitoring requires XInput 2");

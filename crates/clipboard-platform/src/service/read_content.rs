@@ -41,7 +41,7 @@ pub(super) fn read_content(
     }
     let html = clipboard
         .has(ContentFormat::Html)
-        .then(|| clipboard.get_html().ok())
+        .then(|| super::read_html::read_html(clipboard).ok())
         .flatten()
         .filter(|value| !value.is_empty());
     let rtf = clipboard
@@ -57,6 +57,12 @@ pub(super) fn read_content(
         .then(|| clipboard.get_text().ok())
         .flatten()
         .filter(|value| !value.is_empty());
+    if prefer_image(html.as_deref(), rtf.as_deref(), text.as_deref())
+        && clipboard.has(ContentFormat::Image)
+        && let Ok(image) = read_image(clipboard)
+    {
+        return Ok((Some(image), None));
+    }
     let mut warning = None;
     if html.is_some() || rtf.is_some() {
         let bytes = html.as_ref().map_or(0, String::len)
@@ -77,29 +83,38 @@ pub(super) fn read_content(
         return Ok((Some(CapturedClipboard::Text(text)), warning));
     }
     if clipboard.has(ContentFormat::Image) {
-        let image = clipboard
-            .get_image()
-            .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
-        let (width, height) = image.get_size();
-        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
-            anyhow::bail!("图片尺寸无效或超过 2500 万像素");
-        }
-        let png = image
-            .to_png()
-            .map_err(|error| anyhow::anyhow!("编码剪贴板图片失败：{error}"))?;
-        if png.get_bytes().len() > MAX_IMAGE_BYTES {
-            anyhow::bail!("图片超过 50 MiB，未保存");
-        }
-        return Ok((
-            Some(CapturedClipboard::Image {
-                png: png.get_bytes().to_vec(),
-                width,
-                height,
-            }),
-            None,
-        ));
+        return Ok((Some(read_image(clipboard)?), None));
     }
     Ok((None, None))
+}
+
+fn prefer_image(html: Option<&str>, rtf: Option<&[u8]>, text: Option<&str>) -> bool {
+    rtf.is_none()
+        && text.is_none()
+        && html.is_some_and(|html| {
+            clipboard_core::html_text::is_image_only_html(html).unwrap_or(false)
+        })
+}
+
+fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
+    let image = clipboard
+        .get_image()
+        .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
+    let (width, height) = image.get_size();
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
+        anyhow::bail!("图片尺寸无效或超过 2500 万像素");
+    }
+    let png = image
+        .to_png()
+        .map_err(|error| anyhow::anyhow!("编码剪贴板图片失败：{error}"))?;
+    if png.get_bytes().len() > MAX_IMAGE_BYTES {
+        anyhow::bail!("图片超过 50 MiB，未保存");
+    }
+    Ok(CapturedClipboard::Image {
+        png: png.get_bytes().to_vec(),
+        width,
+        height,
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -139,4 +154,20 @@ fn linux_text(clipboard: &ClipboardContext, formats: Option<&[String]>) -> Resul
         return Ok((!text.is_empty()).then_some(text));
     }
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefer_image;
+
+    #[test]
+    fn image_markup_preserves_pixels_without_displacing_document_text_or_rtf() {
+        let html = Some("<html><body><img src='blob:image'></body></html>");
+        assert!(prefer_image(html, None, None));
+        assert!(!prefer_image(html, None, Some(" \n")));
+        assert!(!prefer_image(html, None, Some("正文")));
+        assert!(!prefer_image(html, Some(b"{\\rtf1 image}"), None));
+        assert!(!prefer_image(Some("<p>正文<img src=x></p>"), None, None));
+        assert!(!prefer_image(None, None, None));
+    }
 }

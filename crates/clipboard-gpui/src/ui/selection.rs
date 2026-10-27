@@ -177,8 +177,9 @@ impl ClipboardView {
         if self.paste_target.is_some() && target.is_none() {
             self.paste_target = None;
         }
-        let command = if target.is_some() {
-            Command::MergeForPaste(ids)
+        let command = if let Some(target) = target {
+            let request_id = self.paste_pending.begin(target);
+            Command::MergeForPaste { ids, request_id }
         } else {
             Command::MergeCopy(ids)
         };
@@ -206,6 +207,8 @@ impl ClipboardView {
             );
             self.is_error = false;
             cx.notify();
+        } else {
+            self.interrupt_paste_except(None);
         }
     }
 

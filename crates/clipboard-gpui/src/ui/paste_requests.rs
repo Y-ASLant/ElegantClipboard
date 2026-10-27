@@ -16,10 +16,18 @@ impl<T> PendingRequest<T> {
     }
 
     pub(super) fn complete(&mut self, request_id: u64) -> Option<T> {
-        if request_id != self.generation {
-            return None;
-        }
+        self.get(request_id)?;
         self.take()
+    }
+
+    pub(super) fn get(&self, request_id: u64) -> Option<&T> {
+        (request_id == self.generation)
+            .then_some(self.pending.as_ref())
+            .flatten()
+    }
+
+    pub(super) fn request_id(&self) -> Option<u64> {
+        self.pending.as_ref().map(|_| self.generation)
     }
 
     pub(super) fn take(&mut self) -> Option<T> {

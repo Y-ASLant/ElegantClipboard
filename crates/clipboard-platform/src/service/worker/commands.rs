@@ -49,6 +49,7 @@ impl Worker {
                 source,
                 extra,
                 deferred,
+                ..
             } => {
                 // deferred 仅由 service.rs 路由瞬时窗口；到达 worker 的命令一律直通。
                 let _ = deferred;
@@ -56,8 +57,10 @@ impl Worker {
                 self.snapshot_pending = true;
                 return self.flush_capture_snapshot();
             }
-            Command::MergeCopy(ids) => return self.handle_merge(ids, false),
-            Command::MergeForPaste(ids) => return self.handle_merge(ids, true),
+            Command::MergeCopy(ids) => return self.handle_merge(ids, None),
+            Command::MergeForPaste { ids, request_id } => {
+                return self.handle_merge(ids, Some(request_id));
+            }
             Command::RevealInExplorer(id) => {
                 let item = self.history.item(id)?;
                 let paths = item_paths_for_action(&item, &self.staged_dir)?;
@@ -125,7 +128,14 @@ impl Worker {
             } => {
                 return self.handle_copy(id, Some(request_id), CopyMode::Transform(transform));
             }
-            Command::RestoreStashedClipboard => return self.handle_restore_stash(),
+            Command::RestoreStashedClipboard {
+                request_id,
+                clipboard_sequence,
+            } => return self.handle_restore_stash(request_id, clipboard_sequence),
+            Command::CancelPaste { request_id } => {
+                self.cancel_paste_stash(request_id);
+                return Ok(());
+            }
             Command::Preview { id, generation } => {
                 self.send_event(Event::Preview {
                     id,
@@ -373,20 +383,18 @@ impl Worker {
                 );
             }
             Command::SetRestoreClipboard(enabled) => {
-                return self.save_setting(
-                    enabled,
-                    Preferences::set_restore_clipboard,
-                    Event::RestoreClipboardSaved,
-                );
-            }
-            Command::SetSequenceHotkey(shortcut) => {
                 let result = self
                     .preferences
-                    .set_sequence_paste_hotkey(&shortcut)
-                    .map(|()| shortcut)
+                    .set_restore_clipboard(enabled)
+                    .map(|()| enabled)
                     .map_err(|error| error.to_string());
-                self.send_event(Event::SequenceHotkeySaved(result))?;
-                return Ok(());
+                if matches!(result, Ok(false)) {
+                    self.clipboard_stash = None;
+                }
+                return self.send_event(Event::RestoreClipboardSaved(result));
+            }
+            Command::SetSequenceHotkey(shortcut) => {
+                return self.handle_set_sequence_hotkey(shortcut);
             }
             Command::SetNote { id, note } => {
                 let result = self

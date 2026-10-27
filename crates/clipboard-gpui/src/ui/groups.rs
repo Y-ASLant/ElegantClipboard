@@ -100,6 +100,7 @@ impl ClipboardView {
         if self.history.group_id() == group_id {
             return;
         }
+        self.cancel_sequence(cx);
         self.cancel_pending_row_click();
         self.close_hover_preview(cx);
         self.search_task = None;

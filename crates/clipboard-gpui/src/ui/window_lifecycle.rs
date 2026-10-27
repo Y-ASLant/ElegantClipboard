@@ -142,7 +142,8 @@ impl ClipboardView {
     }
 
     pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.paste_delivery_task = None;
+        self.interrupt_paste_except(None);
+        self.quick_paste_pending.take();
         // 窗口又要显示了：取消隐藏时的延迟释放，避免缩略图白解码一遍。
         self.image_release_task = None;
         let was_minimized = native_window::is_window_minimized(window);
@@ -210,14 +211,28 @@ impl ClipboardView {
         }
         self.close_hover_preview(cx);
         self.cancel_pending_row_click();
-        let had_target = self.paste_target.take().is_some();
-        let had_pending = self.paste_pending.take().is_some();
-        let had_batch_pending = self.batch_paste_pending.take().is_some();
-        // 离开面板即取消序列（决策 0004）：目标已随失活失效。
-        if self.sequence_queue.take().is_some() {
-            self.reset_selection();
+        // 回贴会在隐藏面板前聚焦原目标；正常失活须保留等待中的投递和序列。
+        let foreground = crate::native::foreground_target();
+        if self.sequence_keeps_target(foreground)
+            || self
+                .paste_pending
+                .request_id()
+                .is_some_and(|request_id| self.paste_pending.get(request_id).copied() == foreground)
+            || self
+                .quick_paste_pending
+                .request_id()
+                .is_some_and(|request_id| {
+                    self.quick_paste_pending.get(request_id).copied() == foreground
+                })
+        {
+            return;
         }
-        if had_target || had_pending || had_batch_pending {
+        let had_target = self.paste_target.take().is_some();
+        let had_pending = self.paste_pending.is_some() || self.quick_paste_pending.is_some();
+        let had_sequence = self.sequence_queue.is_some();
+        self.interrupt_paste_except(None);
+        self.quick_paste_pending.take();
+        if had_target || had_pending || had_sequence {
             self.set_feedback_message(
                 tr(
                     self.language,
@@ -245,8 +260,14 @@ impl ClipboardView {
         self.cancel_pending_row_click();
         self.close_hover_preview(cx);
         self.paste_target = None;
-        self.reset_selection();
-        if self.auto_reset_state.value {
+        if self.paste_pending.is_none() {
+            self.interrupt_paste_except(None);
+            self.quick_paste_pending.take();
+        }
+        if self.sequence_queue.is_none() {
+            self.reset_selection();
+        }
+        if self.auto_reset_state.value && self.sequence_queue.is_none() {
             self.search_task = None;
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));

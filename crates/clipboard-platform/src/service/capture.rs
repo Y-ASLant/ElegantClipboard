@@ -80,6 +80,7 @@ impl WatchHandler {
         };
         if let Some(content) = snapshot.content {
             self.commands.try_send(Command::ObservedCapture {
+                sequence,
                 content,
                 source: snapshot.source,
                 extra: snapshot.extra,

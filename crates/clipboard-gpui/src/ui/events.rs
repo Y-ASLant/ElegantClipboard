@@ -2,33 +2,28 @@ use super::*;
 
 impl ClipboardView {
     pub(super) fn send(&mut self, command: Command, cx: &mut Context<Self>) -> bool {
-        let copy_requested = matches!(
+        if matches!(
             &command,
-            Command::Copy(_)
-                | Command::CopyPlainText(_)
-                | Command::CopyPlainTextForPaste(..)
-                | Command::CopyForPaste(..)
-                | Command::CopyPath(_)
-                | Command::CopyPathForPaste(..)
-                | Command::CopyAsFile(_)
-                | Command::CopyAsFileForPaste(..)
-                | Command::MergeCopy(_)
-                | Command::MergeForPaste(_)
-        );
-        let copy_only = matches!(
-            &command,
-            Command::Copy(_)
-                | Command::CopyPlainText(_)
-                | Command::CopyPath(_)
-                | Command::CopyAsFile(_)
-                | Command::MergeCopy(_)
-        );
-        if copy_requested || matches!(&command, Command::ResolveQuickPaste { .. }) {
-            // Dropping the task cancels the old wait before this request can replace its data.
-            self.paste_delivery_task = None;
-            // 复制/合并/快捷粘贴打断序列队列（决策 0004）。
-            if copy_requested && self.sequence_queue.take().is_some() {
-                self.reset_selection();
+            Command::Delete(_)
+                | Command::DeleteBatch { .. }
+                | Command::DeleteGroup { .. }
+                | Command::ClearHistory { .. }
+                | Command::ClearAllHistory
+        ) {
+            self.cancel_sequence(cx);
+        }
+        let replacement = paste_delivery::replacement_request(&command);
+        let resolving_quick = matches!(&command, Command::ResolveQuickPaste { .. });
+        if let Some(request_id) = replacement {
+            let sequence_owned = self
+                .sequence_queue
+                .as_ref()
+                .is_some_and(|queue| queue.owns_command(&command));
+            if !sequence_owned {
+                self.interrupt_paste_except(request_id);
+            }
+            if !resolving_quick {
+                self.quick_paste_pending.take();
             }
         }
         if let Err(error) = self.service.send(command) {
@@ -37,13 +32,10 @@ impl ClipboardView {
             cx.notify();
             return false;
         }
-        if copy_only {
-            // Late acknowledgements must not resurrect a paste superseded by a copy.
-            self.paste_pending.take();
-            self.batch_paste_pending = None;
-            self.quick_paste_pending.take();
-        }
-        if copy_requested && sound::enabled(self.audio.value, Sound::Copy, SoundTiming::Immediate) {
+        if replacement.is_some()
+            && !resolving_quick
+            && sound::enabled(self.audio.value, Sound::Copy, SoundTiming::Immediate)
+        {
             sound::play(Sound::Copy);
         }
         true
@@ -115,9 +107,17 @@ impl ClipboardView {
             } => self.apply_copied(id, request_id, clipboard_sequence, message, window, cx),
             Event::Merged {
                 for_paste,
+                request_id,
                 clipboard_sequence,
                 item_count,
-            } => self.apply_merged(for_paste, clipboard_sequence, item_count, window, cx),
+            } => self.apply_merged(
+                for_paste,
+                request_id,
+                clipboard_sequence,
+                item_count,
+                window,
+                cx,
+            ),
             Event::ThemeSaved(result) => self.apply_theme_saved(result, window, cx),
             Event::WindowEffectSaved(result) => self.apply_window_effect_saved(result, window, cx),
             Event::LanguageSaved(result) => self.apply_language_saved(result, window, cx),
@@ -225,35 +225,7 @@ impl ClipboardView {
                 );
                 true
             }
-            Event::SequenceHotkeySaved(result) => {
-                self.sequence_hotkey_pending = false;
-                match result {
-                    Ok(shortcut) => {
-                        self.sequence_hotkey = shortcut;
-                        self.set_feedback_message(
-                            tr(
-                                self.language,
-                                "序列粘贴推进键已保存",
-                                "Sequence paste advance key saved",
-                            )
-                            .into(),
-                        );
-                        self.is_error = false;
-                    }
-                    Err(error) => {
-                        self.set_feedback_message(format!(
-                            "{}: {error}",
-                            tr(
-                                self.language,
-                                "保存序列粘贴推进键失败",
-                                "Failed to save sequence paste advance key"
-                            )
-                        ));
-                        self.is_error = true;
-                    }
-                }
-                true
-            }
+            Event::SequenceHotkeySaved(result) => self.apply_sequence_hotkey_saved(result),
             Event::NoteSaved(result) => match result {
                 Ok(_) => {
                     self.note_save_pending = false;
@@ -388,9 +360,10 @@ impl ClipboardView {
         match kind {
             FailureKind::Query(_) => {}
             FailureKind::Paste(request_id) => {
-                if self.paste_pending.complete(request_id).is_none() {
+                if self.paste_pending.get(request_id).is_none() {
                     return false;
                 }
+                self.interrupt_paste_except(None);
             }
             FailureKind::QuickPaste(request_id) => {
                 if self.quick_paste_pending.complete(request_id).is_none() {

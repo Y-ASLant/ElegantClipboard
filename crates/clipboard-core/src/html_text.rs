@@ -9,6 +9,16 @@ use std::cell::{Cell, RefCell};
 /// Extract visible text without wrapping or truncating the body. Source plain text
 /// should take precedence over this fallback, including whitespace-only text.
 pub fn html_to_text(html: &str) -> Result<String> {
+    Ok(tokenize(html)?.text.into_inner())
+}
+
+/// 带原生位图的纯图片 HTML 应优先保存像素，不以图片地址替代图片内容。
+pub fn is_image_only_html(html: &str) -> Result<bool> {
+    let sink = tokenize(html)?;
+    Ok(sink.has_image.get() && sink.text.borrow().trim().is_empty())
+}
+
+fn tokenize(html: &str) -> Result<TextSink> {
     if html.len() > MAX_TEXT_BYTES {
         bail!("HTML 内容超过 1 MiB，无法转换为纯文本");
     }
@@ -20,7 +30,7 @@ pub fn html_to_text(html: &str) -> Result<String> {
     if tokenizer.sink.overflow.get() {
         bail!("HTML 转换后的纯文本超过 1 MiB，未复制");
     }
-    Ok(tokenizer.sink.text.into_inner())
+    Ok(tokenizer.sink)
 }
 
 #[derive(Default)]
@@ -30,6 +40,7 @@ struct TextSink {
     hidden: RefCell<Option<String>>,
     preformatted: Cell<usize>,
     overflow: Cell<bool>,
+    has_image: Cell<bool>,
 }
 
 impl TextSink {
@@ -81,6 +92,9 @@ impl TokenSink for TextSink {
                         *self.hidden.borrow_mut() = None;
                     }
                     return TokenSinkResult::Continue;
+                }
+                if start && name == "img" {
+                    self.has_image.set(true);
                 }
                 if start && matches!(name, "script" | "style" | "title") {
                     *self.hidden.borrow_mut() = Some(name.to_owned());
@@ -189,6 +203,20 @@ mod tests {
             html_to_text("<p>A &amp; B<script>hidden < invalid")?,
             "A & B"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn distinguishes_image_markup_from_visible_text_and_hidden_images() -> Result<()> {
+        assert!(is_image_only_html(
+            "<html><body><!--StartFragment--><IMG src='blob:test' alt='图片'><!--EndFragment--></body></html>"
+        )?);
+        assert!(is_image_only_html("<div> \n<img src='image.png'></div>")?);
+        assert!(!is_image_only_html("<p>正文<img src='image.png'></p>")?);
+        assert!(!is_image_only_html(
+            "<script>const x = '<img src=x>';</script>"
+        )?);
+        assert!(!is_image_only_html("<!-- <img src=x> --><p> </p>")?);
         Ok(())
     }
 

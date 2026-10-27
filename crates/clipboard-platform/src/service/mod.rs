@@ -17,6 +17,7 @@ mod read_formats;
 #[cfg(unix)]
 #[path = "../unix/read_formats.rs"]
 pub(crate) mod read_formats;
+pub(crate) mod read_html;
 mod watcher;
 mod worker;
 

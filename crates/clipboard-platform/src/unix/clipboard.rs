@@ -4,7 +4,7 @@ use super::super::{
     file_actions::{item_paths_for_action, plain_text_for_copy},
     read_content::RTF_FORMAT,
 };
-use super::{Event, Worker, image_tmp::ensure_temp_png};
+use super::{Event, Worker, clipboard_content::rtf_for_copy, image_tmp::ensure_temp_png};
 use crate::sequence::current_sequence;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::History;
@@ -45,7 +45,8 @@ impl CopyMode {
 }
 
 impl Worker {
-    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, for_paste: bool) -> Result<()> {
+    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
+        self.clipboard_stash = None;
         let item_count = ids.len();
         let merged = self.history.merge_content(&ids, &self.staged_dir)?;
         let mut contents = Vec::with_capacity(2);
@@ -60,7 +61,8 @@ impl Worker {
             write_verified(&self.clipboard, contents, &mut state.ignored_sequence)?;
         drop(state);
         self.send_event(Event::Merged {
-            for_paste,
+            for_paste: request_id.is_some(),
+            request_id,
             clipboard_sequence,
             item_count,
         })
@@ -72,6 +74,7 @@ impl Worker {
         request_id: Option<u64>,
         mode: CopyMode,
     ) -> Result<()> {
+        self.clipboard_stash = None;
         let item = self.history.item(id)?;
         let mut contents = Vec::new();
         let mut rich = false;
@@ -91,15 +94,7 @@ impl Worker {
                         .context("该记录没有 HTML 格式内容")?;
                     contents.push(ClipboardContent::Html(html.to_owned()));
                 } else {
-                    let rtf = item
-                        .rtf_content
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                        .context("该记录没有 RTF 格式内容")?;
-                    contents.push(ClipboardContent::Other(
-                        RTF_FORMAT.into(),
-                        rtf.as_bytes().to_vec(),
-                    ));
+                    contents.push(rtf_for_copy(item.rtf_content.as_deref())?);
                 }
             }
             CopyMode::Paths => contents.push(ClipboardContent::Text(
@@ -176,10 +171,9 @@ impl Worker {
                     .map(|(name, data)| ClipboardContent::Other(name, data)),
             );
         }
-        // 受控粘贴（Original）且开启恢复时，先在写回前暂存用户剪贴板。
-        if request_id.is_some() && mode == CopyMode::Original {
-            self.stash_clipboard_if_enabled();
-        }
+        let stash = (request_id.is_some() && mode == CopyMode::Original)
+            .then(|| self.snapshot_clipboard_for_paste())
+            .flatten();
         if contents.is_empty() {
             bail!("记录没有可写回的剪贴板内容");
         }
@@ -199,53 +193,74 @@ impl Worker {
             request_id,
             clipboard_sequence,
             message: message.into(),
-        })
+        })?;
+        self.remember_paste_stash(request_id, clipboard_sequence, stash);
+        Ok(())
     }
 
-    pub(super) fn handle_restore_stash(&mut self) -> Result<()> {
-        let Some(stash) = self.clipboard_stash.take() else {
-            self.send_event(Event::ClipboardRestored(Ok(false)))?;
-            return Ok(());
-        };
-        let mut contents = match &stash.content {
-            CapturedClipboard::Text(text) => vec![ClipboardContent::Text(text.clone())],
-            CapturedClipboard::Rich { html, rtf, text } => {
-                let mut contents = Vec::with_capacity(3);
-                if let Some(text) = text {
-                    contents.push(ClipboardContent::Text(text.clone()));
-                }
-                if let Some(html) = html {
-                    contents.push(ClipboardContent::Html(html.clone()));
-                }
-                if let Some(rtf) = rtf {
-                    contents.push(ClipboardContent::Other(RTF_FORMAT.into(), rtf.clone()));
-                }
-                contents
+    pub(super) fn handle_restore_stash(
+        &mut self,
+        request_id: u64,
+        clipboard_sequence: u32,
+    ) -> Result<()> {
+        let result = (|| {
+            let Some(stash) = self.take_stash_for_restore(request_id, clipboard_sequence) else {
+                return Ok(false);
+            };
+            let contents = restore_contents(&stash.content, &stash.extra)?;
+            let mut state = lock_capture_state(&self.state)?;
+            // Unix backends expose no compare-and-set primitive. Recheck after
+            // preparation, immediately before transferring clipboard ownership.
+            if !stash.is_current(current_sequence(&self.clipboard)?) {
+                return Ok(false);
             }
-            CapturedClipboard::Files(paths) => vec![ClipboardContent::Files(paths.clone())],
-            CapturedClipboard::Image { png, .. } => {
-                let image = RustImageData::from_bytes(png)
-                    .map_err(|error| anyhow!("恢复图片失败：{error}"))?;
-                vec![ClipboardContent::Image(image)]
-            }
-        };
-        contents.extend(
-            stash
-                .extra
-                .iter()
-                .map(|format| ClipboardContent::Other(format.name.clone(), format.data.clone())),
-        );
-        let result = self
-            .clipboard
-            .set(contents)
-            .map(|_| true)
-            .map_err(|error| anyhow!("恢复原剪贴板失败：{error}"));
-        // 无论成败都抑制自捕获（部分写入也是自我写入）。
-        let mut state = lock_capture_state(&self.state)?;
-        state.ignored_sequence = current_sequence(&self.clipboard).unwrap_or(0);
-        drop(state);
-        self.send_event(Event::ClipboardRestored(result.map_err(|e| e.to_string())))
+            let written = self
+                .clipboard
+                .set(contents)
+                .map_err(|error| anyhow!("恢复原剪贴板失败：{error}"));
+            state.ignored_sequence = current_sequence(&self.clipboard).unwrap_or(0);
+            written.map(|_| true)
+        })();
+        self.send_event(Event::ClipboardRestored(
+            result.map_err(|error: anyhow::Error| error.to_string()),
+        ))
     }
+}
+
+fn restore_contents(
+    content: &CapturedClipboard,
+    extra: &[clipboard_core::NativeFormatCapture],
+) -> Result<Vec<ClipboardContent>> {
+    let mut contents = match content {
+        CapturedClipboard::Text(text) => vec![ClipboardContent::Text(text.clone())],
+        CapturedClipboard::Rich { html, rtf, text } => {
+            let mut contents = Vec::with_capacity(3);
+            if let Some(text) = text {
+                contents.push(ClipboardContent::Text(text.clone()));
+            }
+            if let Some(html) = html {
+                contents.push(ClipboardContent::Html(html.clone()));
+            }
+            if let Some(rtf) = rtf {
+                contents.push(ClipboardContent::Other(RTF_FORMAT.into(), rtf.clone()));
+            }
+            contents
+        }
+        CapturedClipboard::Files(paths) => vec![ClipboardContent::Files(paths.clone())],
+        CapturedClipboard::Image { png, .. } => {
+            let image =
+                RustImageData::from_bytes(png).map_err(|error| anyhow!("恢复图片失败：{error}"))?;
+            vec![ClipboardContent::Image(image)]
+        }
+    };
+    contents.extend(
+        extra
+            .iter()
+            .map(|format| ClipboardContent::Other(format.name.clone(), format.data.clone())),
+    );
+    #[cfg(target_os = "linux")]
+    let contents = super::super::file_list::encode_contents(contents)?;
+    Ok(contents)
 }
 
 // Keep only digests while the backend takes ownership of the payload; do not duplicate images.
@@ -306,4 +321,34 @@ fn write_verified(
         std::thread::yield_now();
     }
     bail!("复制过程中剪贴板已被其他应用修改，请重试")
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restoring_files_encodes_reserved_path_characters_and_rejects_relative_paths() -> Result<()> {
+        let path = "/tmp/中文 file#%?\n.txt";
+        let contents = restore_contents(&CapturedClipboard::Files(vec![path.into()]), &[])?;
+        let uri_bytes = contents
+            .iter()
+            .find_map(|content| match content {
+                ClipboardContent::Other(name, bytes) if name == "text/uri-list" => Some(bytes),
+                _ => None,
+            })
+            .context("missing URI list")?;
+        let uri = url::Url::parse(std::str::from_utf8(uri_bytes)?)?;
+        assert_eq!(uri.to_file_path().unwrap(), Path::new(path));
+        assert!(uri.as_str().contains("%23%25%3F%0A"));
+        assert!(
+            !contents
+                .iter()
+                .any(|content| matches!(content, ClipboardContent::Files(_)))
+        );
+        assert!(
+            restore_contents(&CapturedClipboard::Files(vec!["relative.txt".into()]), &[]).is_err()
+        );
+        Ok(())
+    }
 }

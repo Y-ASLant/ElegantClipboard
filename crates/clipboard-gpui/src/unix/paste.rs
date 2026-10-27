@@ -8,7 +8,8 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const MODIFIER_WAIT: Duration = Duration::from_secs(2);
 
 pub fn is_external_target(_: &Window, target: (isize, u32)) -> bool {
-    desktop::unavailable_reason().is_none()
+    target.0 != 0
+        && desktop::unavailable_reason().is_none()
         && target.1 != std::process::id()
         && desktop::target_alive(target)
 }
@@ -26,7 +27,7 @@ impl PendingPaste {
         sequence: u32,
         paste_key: PasteKeyPreference,
     ) -> Result<Self> {
-        if target.1 == std::process::id() || !desktop::target_alive(target) {
+        if target.0 == 0 || target.1 == std::process::id() || !desktop::target_alive(target) {
             bail!("目标窗口已关闭，内容已复制，请手动粘贴");
         }
         if !desktop::foreground_target()

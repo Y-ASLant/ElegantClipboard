@@ -118,6 +118,7 @@ pub(super) fn write_image_with_file(
     height: u32,
     ignored_sequence: &mut u32,
 ) -> Result<()> {
+    let dib = build_cf_dib(pixels, width, height)?;
     let hex = item.content_hash.trim_start_matches("image:");
     let temp_path = ensure_temp_png(data_dir, hex, png)?;
     let temp_string = temp_path.to_string_lossy().into_owned();
@@ -134,7 +135,6 @@ pub(super) fn write_image_with_file(
         )
         .map_err(|error| anyhow!("写入图片文件格式失败：{error}"))?;
         // CF_DIB：手工组 BITMAPINFOHEADER + 自底向上 BGRA 像素。
-        let dib = build_cf_dib(pixels, width, height);
         clipboard_win::raw::set_without_clear(8, &dib)
             .map_err(|error| anyhow!("写入图片位图格式失败：{error}"))?;
         // PNG 主格式。
@@ -153,37 +153,46 @@ pub(super) fn write_image_with_file(
 }
 
 /// CF_DIB 字节：40 字节 BITMAPINFOHEADER + 32 位像素（自底向上，BGRA）。
-/// `pixels` 是扁平 RGBA 缓冲（每像素 4 字节，行优先），直接下标取用避免整帧拷贝。
-pub(super) fn build_cf_dib(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let pixel_count = pixels.len() / 4;
-    let mut dib = Vec::with_capacity(40 + pixel_count * 4);
+/// `pixels` 是扁平 RGBA 缓冲（每像素 4 字节，行优先），尺寸须来自实际解码的图片。
+pub(super) fn build_cf_dib(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    if width == 0 || height == 0 {
+        bail!("图片尺寸不能为空");
+    }
+    let width_i32 = i32::try_from(width).context("图片宽度超过位图限制")?;
+    let height_i32 = i32::try_from(height).context("图片高度超过位图限制")?;
+    let row_bytes = usize::try_from(width)?
+        .checked_mul(4)
+        .context("图片行长度溢出")?;
+    let image_bytes = row_bytes
+        .checked_mul(usize::try_from(height)?)
+        .context("图片缓冲长度溢出")?;
+    let image_size = u32::try_from(image_bytes).context("图片像素超过位图长度限制")?;
+    if pixels.len() != image_bytes {
+        bail!("图片像素长度与实际尺寸不符");
+    }
+    let dib_size = image_bytes.checked_add(40).context("位图长度溢出")?;
+    let mut dib = Vec::new();
+    dib.try_reserve_exact(dib_size)
+        .context("位图缓冲分配失败")?;
     // BITMAPINFOHEADER
     dib.extend_from_slice(&40u32.to_le_bytes());
-    dib.extend_from_slice(&(i32::try_from(width).unwrap_or(0)).to_le_bytes());
+    dib.extend_from_slice(&width_i32.to_le_bytes());
     // 正高度 = 自底向上。
-    dib.extend_from_slice(&(i32::try_from(height).unwrap_or(0)).to_le_bytes());
+    dib.extend_from_slice(&height_i32.to_le_bytes());
     dib.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
     dib.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
     dib.extend_from_slice(&0u32.to_le_bytes()); // biCompression = BI_RGB
-    dib.extend_from_slice(&((pixel_count * 4) as u32).to_le_bytes()); // biSizeImage
+    dib.extend_from_slice(&image_size.to_le_bytes()); // biSizeImage
     dib.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
     dib.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
     dib.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
     dib.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
-    // 像素：自底向上行序；BGRA（RGBA 交换 R/B）。
-    let row_len = width as usize;
-    for row in (0..height as usize).rev() {
-        for column in 0..row_len {
-            let offset = (row * row_len + column) * 4;
-            dib.extend_from_slice(&[
-                pixels[offset + 2],
-                pixels[offset + 1],
-                pixels[offset],
-                pixels[offset + 3],
-            ]);
+    for row in pixels.chunks_exact(row_bytes).rev() {
+        for rgba in row.as_chunks::<4>().0 {
+            dib.extend_from_slice(&[rgba[2], rgba[1], rgba[0], rgba[3]]);
         }
     }
-    dib
+    Ok(dib)
 }
 
 pub(super) fn rich_clipboard_matches(
@@ -200,8 +209,7 @@ pub(super) fn rich_clipboard_matches(
         .as_deref()
         .filter(|value| !value.is_empty());
     let html_matches = html.is_none_or(|expected| {
-        clipboard
-            .get_html()
+        crate::service::read_html::read_html(clipboard)
             .ok()
             .is_some_and(|actual| actual.contains(expected))
     });
@@ -244,6 +252,30 @@ mod tests {
     }
 
     #[test]
+    fn cf_dib_rejects_dimensions_and_buffer_lengths_that_cannot_describe_rgba() {
+        for (width, height, len) in [
+            (0, 1, 0),
+            (1, 0, 0),
+            (u32::MAX, 1, 0),
+            (1, u32::MAX, 0),
+            (i32::MAX as u32, i32::MAX as u32, 0),
+            (65_536, 16_384, 0), // biSizeImage cannot hold 4 GiB.
+            (2, 2, 12),          // Truncated or stale larger dimensions.
+            (1, 1, 5),           // Excess bytes must not produce an inconsistent header.
+            (1, 1, 3),           // Partial pixel.
+        ] {
+            assert!(build_cf_dib(&vec![0; len], width, height).is_err());
+        }
+    }
+
+    #[test]
+    fn cf_dib_single_pixel_preserves_alpha() {
+        let dib = build_cf_dib(&[1, 2, 3, 4], 1, 1).unwrap();
+        assert_eq!(&dib[40..], &[3, 2, 1, 4]);
+        assert_eq!(&dib[20..24], &4u32.to_le_bytes());
+    }
+
+    #[test]
     fn cf_dib_layout_matches_header_and_bottom_up_bgra_pixels() {
         // 2×2 像素扁平 RGBA：上行 [p0, p1]，下行 [p2, p3]。自底向上存储时下行在先。
         let pixels: Vec<u8> = [
@@ -255,8 +287,9 @@ mod tests {
         .iter()
         .flat_map(|pixel| pixel.iter().copied())
         .collect();
-        let dib = build_cf_dib(&pixels, 2, 2);
+        let dib = build_cf_dib(&pixels, 2, 2).unwrap();
         assert_eq!(dib.len(), 40 + 16);
+        assert_eq!(&dib[20..24], &16u32.to_le_bytes());
         assert_eq!(&dib[..4], &40u32.to_le_bytes());
         assert_eq!(&dib[4..8], &2i32.to_le_bytes());
         assert_eq!(&dib[8..12], &2i32.to_le_bytes());

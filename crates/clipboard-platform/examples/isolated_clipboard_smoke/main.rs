@@ -118,6 +118,7 @@ fn main() -> anyhow::Result<()> {
                     for_paste,
                     clipboard_sequence,
                     item_count,
+                    ..
                 }) => {
                     assert!(!for_paste);
                     assert_eq!(item_count, expected_count);
@@ -430,12 +431,16 @@ fn main() -> anyhow::Result<()> {
     println!("transient window filtering ok");
     core_paste_variants(&service, &events, &clipboard, directory.path())?;
     println!("dedup/transform/format/note variants ok");
+    regressions::run(&service, &events, &clipboard, directory.path())?;
+    println!("cross-platform regression roundtrips ok");
 
     drop(service);
     println!("isolated clipboard roundtrip passed");
     Ok(())
 }
 
+#[cfg(windows)]
+mod regressions;
 /// 原生格式保真与瞬时过滤场景（拆分自本文件，保持 500 行限制）。
 #[cfg(windows)]
 mod scenarios;

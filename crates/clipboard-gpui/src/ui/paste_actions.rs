@@ -11,10 +11,11 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         let target = if let Some(request_id) = request_id {
-            let Some(target) = self.paste_pending.complete(request_id) else {
+            let Some(target) = self.paste_pending.get(request_id) else {
+                let _ = self.service.send(Command::CancelPaste { request_id });
                 return false;
             };
-            Some(target)
+            Some(*target)
         } else {
             None
         };
@@ -23,8 +24,15 @@ impl ClipboardView {
         if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
-        if let Some(target) = target {
-            self.return_to_paste_target(target, clipboard_sequence, Some(id), window, cx);
+        if let Some((target, request_id)) = target.zip(request_id) {
+            self.return_to_paste_target(
+                target,
+                clipboard_sequence,
+                Some(id),
+                request_id,
+                window,
+                cx,
+            );
         }
         true
     }
@@ -32,11 +40,24 @@ impl ClipboardView {
     pub(super) fn apply_merged(
         &mut self,
         for_paste: bool,
+        request_id: Option<u64>,
         clipboard_sequence: u32,
         item_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let target = if for_paste {
+            let Some(request_id) = request_id else {
+                return false;
+            };
+            let Some(target) = self.paste_pending.get(request_id).copied() else {
+                let _ = self.service.send(Command::CancelPaste { request_id });
+                return false;
+            };
+            Some((target, request_id))
+        } else {
+            None
+        };
         self.batch_pending = false;
         if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
             self.close_history_confirmation(window, cx);
@@ -45,10 +66,17 @@ impl ClipboardView {
         if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
-        let target = self.batch_paste_pending.take();
+        self.batch_paste_pending = None;
         if for_paste {
-            if let Some(target) = target {
-                self.return_to_paste_target(target, clipboard_sequence, None, window, cx);
+            if let Some((target, request_id)) = target {
+                self.return_to_paste_target(
+                    target,
+                    clipboard_sequence,
+                    None,
+                    request_id,
+                    window,
+                    cx,
+                );
             } else {
                 self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Merged and copied {item_count} items; paste manually")
@@ -110,7 +138,7 @@ impl ClipboardView {
             self.is_error = false;
             cx.notify();
         } else {
-            self.paste_pending.take();
+            self.interrupt_paste_except(None);
         }
     }
 
@@ -250,7 +278,7 @@ impl ClipboardView {
             copy(id)
         };
         if !self.send(command, cx) {
-            self.paste_pending.take();
+            self.interrupt_paste_except(None);
         } else if target.is_some() {
             self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
             self.is_error = false;
@@ -283,106 +311,11 @@ impl ClipboardView {
             commands.0
         };
         if !self.send(command, cx) {
-            self.paste_pending.take();
+            self.interrupt_paste_except(None);
         } else if target.is_some() {
             self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
             self.is_error = false;
             cx.notify();
         }
-    }
-
-    pub(super) fn return_to_paste_target(
-        &mut self,
-        target: (isize, u32),
-        clipboard_sequence: u32,
-        pasted_id: Option<i64>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.paste_delivery_task = None;
-        if !paste::is_external_target(window, target) {
-            self.set_feedback_message(
-                tr(
-                    self.language,
-                    "目标窗口已变化，内容已复制，请手动粘贴",
-                    "The target window changed. The content was copied; paste it manually.",
-                )
-                .into(),
-            );
-            self.is_error = true;
-            return;
-        }
-        let pending =
-            match paste::PendingPaste::begin(target, clipboard_sequence, self.paste_key.value) {
-                Ok(pending) => pending,
-                Err(error) => {
-                    self.set_feedback_message(localize_service_message(
-                        self.language,
-                        error.to_string(),
-                    ));
-                    self.is_error = true;
-                    return;
-                }
-            };
-        let hide_window = self.paste_close_window.value && native_window::is_window_shown(window);
-        if hide_window {
-            self.hide_window(window, cx);
-        }
-        if sound::enabled(self.audio.value, Sound::Paste, SoundTiming::Immediate) {
-            sound::play(Sound::Paste);
-        }
-        let main_window = window.window_handle();
-        self.paste_delivery_task = Some(cx.spawn_in(window, async move |view, cx| {
-            loop {
-                cx.background_executor().timer(paste::POLL_INTERVAL).await;
-                let finished =
-                    update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                        match pending.try_send() {
-                            Ok(false) => return false,
-                            Ok(true) => {
-                                if sound::enabled(
-                                    this.audio.value,
-                                    Sound::Paste,
-                                    SoundTiming::AfterSuccess,
-                                ) {
-                                    sound::play(Sound::Paste);
-                                }
-                                this.set_feedback_message(
-                                    tr(
-                                        this.language,
-                                        "已发送粘贴快捷键，请检查目标应用",
-                                        "Paste shortcut sent; check the target app.",
-                                    )
-                                    .into(),
-                                );
-                                this.is_error = false;
-                                // 粘贴已送达：按偏好写回用户原剪贴板（决策 0003）。
-                                this.send(Command::RestoreStashedClipboard, cx);
-                                if let Some(id) = pasted_id.filter(|_| this.paste_move_to_top.value)
-                                {
-                                    this.send(Command::BumpToTop(id), cx);
-                                }
-                                // 序列粘贴：送达一条即记录，等推进键触发下一条（决策 0004）。
-                                this.sequence_paste_delivered(cx);
-                            }
-                            Err(error) => {
-                                if hide_window {
-                                    this.show_window(window, cx);
-                                }
-                                this.set_feedback_message(localize_service_message(
-                                    this.language,
-                                    error.to_string(),
-                                ));
-                                this.is_error = true;
-                            }
-                        }
-                        cx.notify();
-                        true
-                    });
-                if !matches!(finished, Ok(false)) {
-                    break;
-                }
-            }
-        }));
     }
 }

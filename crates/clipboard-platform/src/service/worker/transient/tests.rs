@@ -124,6 +124,24 @@ fn overflow_flushes_oldest_entry() {
 }
 
 #[test]
+fn queued_captures_keep_their_own_sequence_and_only_the_final_content_survives() {
+    let now = Instant::now();
+    let mut window = TransientWindow::new(true);
+    window.push(entry(101, "brief", now));
+    window.push(entry(102, "final", now + Duration::from_millis(100)));
+    let outcomes = window.poll_due(
+        now + TRANSIENT_WINDOW + Duration::from_millis(100),
+        0,
+        &mut || Ok((102, Some(text_capture("final")))),
+    );
+    assert_eq!(outcomes.len(), 2);
+    assert!(matches!(outcomes[0].1, PollOutcome::Discard));
+    assert!(matches!(outcomes[1].1, PollOutcome::Deliver));
+    assert_eq!(outcomes[1].0.sequence, 102);
+    assert_eq!(outcomes[1].0.content, text_capture("final"));
+}
+
+#[test]
 fn drain_clears_all_pending() {
     let mut window = TransientWindow::new(true);
     let now = Instant::now();

@@ -59,6 +59,7 @@ fn enqueue_observed_text(service: &Service, text: String) -> Result<()> {
         source: None,
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })
 }
 

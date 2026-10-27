@@ -27,6 +27,7 @@ impl Worker {
         extra: Vec<NativeFormatCapture>,
         source: Option<source_app::SourceApp>,
     ) -> Result<()> {
+        self.discard_changed_stash();
         let excluded = self.app_filter.excludes(
             source.as_ref().map(|app| app.name.as_str()),
             source.as_ref().and_then(|app| app.executable.as_deref()),
@@ -54,6 +55,7 @@ impl Worker {
                         .capture_image(&png, width, height, &self.images_dir)?,
                 ),
             };
+        self.snapshot_pending |= id.is_some();
         if let (Some(id), Some(source)) = (id, source) {
             let icon = source.executable.as_deref().and_then(|executable| {
                 source_app::extract_and_cache_icon(executable, &self.icons_dir)

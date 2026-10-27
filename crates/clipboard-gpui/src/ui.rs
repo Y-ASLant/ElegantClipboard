@@ -19,6 +19,7 @@ mod native_health;
 mod navigation;
 mod onboarding;
 mod paste_actions;
+mod paste_delivery;
 mod paste_requests;
 mod preference_events;
 mod presentation;
@@ -49,6 +50,7 @@ mod settings_window;
 mod settings_window_effect;
 mod shortcut_events;
 mod shortcut_labels;
+mod shortcut_registration;
 mod shortcuts;
 mod startup;
 mod storage;
@@ -326,6 +328,7 @@ struct ClipboardView {
     language_pending: bool,
     hotkey_choice: HotkeyPreference,
     hotkey_pending: bool,
+    shortcut_change: Option<shortcut_registration::ShortcutChange>,
     quick_paste_enabled: bool,
     quick_paste_pending_setting: bool,
     quick_paste_registration_warning: Option<String>,

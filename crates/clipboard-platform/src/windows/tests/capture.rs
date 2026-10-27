@@ -65,6 +65,31 @@ fn observed_capture_filter_distinguishes_url_and_preserves_allowed_rich_format()
 }
 
 #[test]
+fn disabled_transient_filter_still_refreshes_deferred_captures() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let db = Database::new(directory.path().join("clipboard.db"))?;
+    Preferences::new(&db).set_transient_filter(false)?;
+    drop(db);
+    let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
+    next_snapshot(&events, 0);
+    service.send(Command::ObservedCapture {
+        content: CapturedClipboard::Text("deferred without filter".into()),
+        source: None,
+        extra: Vec::new(),
+        deferred: true,
+        sequence: 17,
+    })?;
+    let items = next_snapshot(&events, 0);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].preview.as_deref(), Some("deferred without filter"));
+    assert_eq!(
+        History::open(directory.path().join("clipboard.db"))?.count("", false)?,
+        1
+    );
+    Ok(())
+}
+
+#[test]
 fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
@@ -79,12 +104,14 @@ fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
         source: None,
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("https://example.com".into()),
         source: None,
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     service.send(Command::Query {
         search: String::new(),
@@ -123,12 +150,14 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         source: Some(notepad.clone()),
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("unknown source".into()),
         source: None,
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     service.send(Command::Query {
         search: String::new(),
@@ -152,6 +181,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         source: Some(notepad),
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("blocked browser".into()),
@@ -161,6 +191,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         }),
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     service.send(Command::Query {
         search: String::new(),
@@ -202,6 +233,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
         }),
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Editor"));
@@ -214,6 +246,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
         }),
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Browser"));
@@ -248,6 +281,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
             }),
             extra: Vec::new(),
             deferred: false,
+            sequence: 0,
         })?;
         let items = next_snapshot(&events, 0);
         assert_eq!(items[0].source_app_name.as_deref(), Some(source));
@@ -272,6 +306,7 @@ fn observed_capture_persists_a_cached_source_icon() -> Result<()> {
         }),
         extra: Vec::new(),
         deferred: false,
+        sequence: 0,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Notepad"));

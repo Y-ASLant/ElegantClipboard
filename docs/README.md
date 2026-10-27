@@ -9,6 +9,7 @@
 - [Windows 独立包说明](WINDOWS_PACKAGE_README.txt)：ZIP 制品的运行与数据目录说明。
 - [技术决策](decisions/0001-windows-gpui.md)：GPUI 和 gpui-kit 的选择依据。
 - [技术决策 0002](decisions/0002-native-fidelity-transient-merge.md)：原生格式保真、瞬时过滤、同文合并与 blob 存储。
+- [跨平台正确性修复验证](evidence/cross-platform-correctness-2026-10-27.md)：平台能力、粘贴目标与请求归属、格式编码和延迟采集修复的验证范围。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。

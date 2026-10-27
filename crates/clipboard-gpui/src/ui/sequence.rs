@@ -1,36 +1,70 @@
 use super::*;
 
-/// 序列粘贴队列（决策 0004）：待贴条目按列表顺序逐条受控粘贴。
+/// 历史窗口隐藏后，序列仍保留开始时的目标窗口。
 pub(super) struct SequenceQueue {
-    pub(super) ids: Vec<i64>,
-    /// 已发起受控粘贴的条目数（含进行中的一条）。
-    pub(super) started: usize,
-    /// 已成功送达目标的条目数。
-    pub(super) delivered: usize,
+    ids: Vec<i64>,
+    target: (isize, u32),
+    started: usize,
+    delivered: usize,
+    request: Option<(u64, i64)>,
 }
 
 impl SequenceQueue {
-    pub(super) fn new(ids: Vec<i64>) -> Self {
+    pub(super) fn new(ids: Vec<i64>, target: (isize, u32)) -> Self {
         Self {
             ids,
+            target,
             started: 0,
             delivered: 0,
+            request: None,
         }
     }
 
     pub(super) fn remaining(&self) -> usize {
-        self.ids.len() - self.started
+        self.ids.len() - self.delivered
     }
 
-    pub(super) fn next_id(&self) -> Option<i64> {
-        self.ids.get(self.started).copied()
+    fn next_id(&self) -> Option<i64> {
+        self.request
+            .is_none()
+            .then(|| self.ids.get(self.started).copied())
+            .flatten()
+    }
+
+    fn begin(&mut self, request_id: u64) -> Option<i64> {
+        let id = self.next_id()?;
+        self.request = Some((request_id, id));
+        self.started += 1;
+        Some(id)
+    }
+
+    pub(super) fn owns_command(&self, command: &Command) -> bool {
+        matches!(command, Command::CopyForPaste(id, request_id)
+            if self.request == Some((*request_id, *id)))
+    }
+
+    fn delivered(&mut self, request_id: u64) -> bool {
+        if self.request.map(|(request, _)| request) != Some(request_id) {
+            return false;
+        }
+        self.request = None;
+        self.delivered += 1;
+        self.delivered == self.ids.len()
+    }
+
+    fn keeps_target(&self, target: Option<(isize, u32)>) -> bool {
+        target == Some(self.target)
     }
 }
 
 impl ClipboardView {
-    /// 进入序列粘贴：要求有效的原窗口目标与推进键；立即送出第一条。
     pub(super) fn start_sequence_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.batch_pending || self.paste_pending.is_some() || self.sequence_queue.is_some() {
+        if self.shortcut_change_pending()
+            || self.batch_pending
+            || self.paste_pending.is_some()
+            || self.quick_paste_pending.is_some()
+            || self.sequence_queue.is_some()
+        {
             return;
         }
         if self.sequence_hotkey.trim().is_empty() {
@@ -46,20 +80,18 @@ impl ClipboardView {
             cx.notify();
             return;
         }
-        let target = self
+        let Some(target) = self
             .paste_target
-            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
-        if target.is_none() {
+            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target))
+        else {
             self.paste_target = None;
-            self.set_feedback_message(tr(
-                self.language,
+            self.set_feedback_message(tr(self.language,
                 "请从目标应用按全局快捷键唤出，再使用序列粘贴",
-                "Open the clipboard with the global shortcut from the target app before sequence pasting",
-            ).into());
+                "Open the clipboard with the global shortcut from the target app before sequence pasting").into());
             self.is_error = true;
             cx.notify();
             return;
-        }
+        };
         let ids: Vec<_> = self
             .history
             .items
@@ -71,73 +103,81 @@ impl ClipboardView {
             return;
         }
         self.close_hover_preview(cx);
-        self.sequence_queue = Some(sequence::SequenceQueue::new(ids));
+        self.sequence_queue = Some(SequenceQueue::new(ids, target));
         if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
             self.close_history_confirmation(window, cx);
         }
-        // 送出第一条；失败即取消序列。
         if !self.advance_sequence(window, cx) {
-            self.cancel_sequence(cx);
+            self.interrupt_paste_except(None);
         }
     }
 
-    /// 送出队列中的下一条。返回 false 表示队列已尽或发送失败。
-    /// 返回 true 时窗口已隐藏、粘贴流程在后台推进。
     pub(super) fn advance_sequence(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(queue) = &mut self.sequence_queue else {
-            return false;
-        };
-        let Some(id) = queue.next_id() else {
-            return false;
-        };
-        let remaining = queue.remaining();
-        // 复用 paste_selected 的完整受控粘贴校验；它隐藏窗口并发送粘贴键。
-        self.paste_selected(id, window, cx);
-        if self.paste_pending.is_none() {
+        if self.paste_pending.is_some() || self.quick_paste_pending.is_some() || self.batch_pending
+        {
             return false;
         }
-        let queue = self.sequence_queue.as_mut().expect("queue checked above");
-        queue.started += 1;
-        let message = if self.language == LanguagePreference::English {
-            format!(
-                "Sequence paste: {remaining} left (advance with {})",
-                self.sequence_hotkey
-            )
-        } else {
-            format!(
-                "序列粘贴中：剩余 {remaining} 条（推进键 {}）",
-                self.sequence_hotkey
-            )
+        let Some(queue) = self.sequence_queue.as_ref() else {
+            return false;
         };
-        self.set_feedback_message(message);
-        self.is_error = false;
-        true
-    }
-
-    /// 粘贴送达确认后推进队列；队列耗尽时结束序列。
-    pub(super) fn sequence_paste_delivered(&mut self, cx: &mut Context<Self>) {
-        let Some(queue) = &mut self.sequence_queue else {
-            return;
+        if queue.next_id().is_none() || !paste::is_external_target(window, queue.target) {
+            return false;
+        }
+        let request_id = self.paste_pending.begin(queue.target);
+        let Some(id) = self
+            .sequence_queue
+            .as_mut()
+            .and_then(|queue| queue.begin(request_id))
+        else {
+            self.interrupt_paste_except(None);
+            return false;
         };
-        queue.delivered += 1;
-        if queue.delivered >= queue.ids.len() {
-            let total = queue.ids.len();
-            self.sequence_queue = None;
-            self.reset_selection();
+        // 发送前记录请求归属，首条复制不会把自己的序列当作用户打断。
+        if !self.send(Command::CopyForPaste(id, request_id), cx) {
+            self.interrupt_paste_except(None);
+            return false;
+        }
+        if let Some(queue) = &self.sequence_queue {
+            let remaining = queue.remaining();
             let message = if self.language == LanguagePreference::English {
-                format!("Sequence paste finished: {total} items")
+                format!(
+                    "Sequence paste: {remaining} left (advance with {})",
+                    self.sequence_hotkey
+                )
             } else {
-                format!("序列粘贴完成，共 {total} 条")
+                format!(
+                    "序列粘贴中：剩余 {remaining} 条（推进键 {}）",
+                    self.sequence_hotkey
+                )
             };
             self.set_feedback_message(message);
             self.is_error = false;
-            cx.notify();
         }
+        cx.notify();
+        true
+    }
+
+    pub(super) fn sequence_paste_delivered(&mut self, request_id: u64, cx: &mut Context<Self>) {
+        let Some(queue) = &mut self.sequence_queue else {
+            return;
+        };
+        if queue.delivered(request_id) {
+            let total = queue.ids.len();
+            self.sequence_queue = None;
+            self.reset_selection();
+            self.set_feedback_message(if self.language == LanguagePreference::English {
+                format!("Sequence paste finished: {total} items")
+            } else {
+                format!("序列粘贴完成，共 {total} 条")
+            });
+            self.is_error = false;
+        }
+        cx.notify();
     }
 
     pub(super) fn cancel_sequence(&mut self, cx: &mut Context<Self>) {
-        if self.sequence_queue.take().is_some() {
-            self.reset_selection();
+        if self.sequence_queue.is_some() {
+            self.interrupt_paste_except(None);
             self.set_feedback_message(
                 tr(self.language, "序列粘贴已取消", "Sequence paste cancelled").into(),
             );
@@ -146,22 +186,78 @@ impl ClipboardView {
         }
     }
 
-    /// 推进键热键事件：仅在序列激活且目标仍有效时推进。
+    pub(super) fn sequence_keeps_target(&self, target: Option<(isize, u32)>) -> bool {
+        self.sequence_queue
+            .as_ref()
+            .is_some_and(|queue| queue.keeps_target(target))
+    }
+
     pub(super) fn handle_sequence_advance(
         &mut self,
         target: (isize, u32),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.sequence_queue.is_none() || self.paste_pending.is_some() {
+        if self.shortcut_change_pending()
+            || self.sequence_queue.is_none()
+            || self.paste_pending.is_some()
+        {
             return;
         }
-        if self.paste_target != Some(target) || !paste::is_external_target(window, target) {
+        if !self.sequence_keeps_target(Some(target)) || !paste::is_external_target(window, target) {
             self.cancel_sequence(cx);
             return;
         }
         if !self.advance_sequence(window, cx) {
             self.cancel_sequence(cx);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[::core::prelude::v1::test]
+    fn first_copy_keeps_its_queue_and_advance_waits_until_delivery() {
+        let mut queue = SequenceQueue::new(vec![10, 20], (1, 2));
+        assert_eq!(queue.begin(7), Some(10));
+        assert!(queue.owns_command(&Command::CopyForPaste(10, 7)));
+        assert_eq!(queue.next_id(), None);
+        assert_eq!(queue.begin(8), None);
+        assert_eq!(queue.remaining(), 2);
+        assert!(!queue.delivered(6));
+        assert_eq!(queue.next_id(), None);
+        assert!(!queue.delivered(7));
+        assert_eq!(queue.next_id(), Some(20));
+        assert_eq!(queue.remaining(), 1);
+        assert_eq!(queue.begin(8), Some(20));
+        assert!(!queue.delivered(7));
+        assert!(queue.delivered(8));
+        assert_eq!(queue.next_id(), None);
+        assert_eq!(queue.remaining(), 0);
+        assert!(!queue.delivered(8));
+    }
+
+    #[::core::prelude::v1::test]
+    fn return_to_original_target_preserves_sequence_but_other_targets_do_not() {
+        let mut queue = SequenceQueue::new(vec![10, 20], (1, 2));
+        queue.begin(3);
+        assert!(queue.keeps_target(Some((1, 2))));
+        queue.delivered(3);
+        assert!(queue.keeps_target(Some((1, 2))));
+        for target in [None, Some((1, 3)), Some((2, 2))] {
+            assert!(!queue.keeps_target(target));
+        }
+        assert_eq!(queue.next_id(), Some(20));
+        assert!(!queue.owns_command(&Command::CopyForPaste(10, 4)));
+        assert!(!queue.owns_command(&Command::CopyAsFormat {
+            id: 10,
+            format: CopyFormat::Html
+        }));
+        assert!(!queue.owns_command(&Command::CopyTransformed {
+            id: 10,
+            transform: TextTransform::Uppercase
+        }));
     }
 }

@@ -119,7 +119,7 @@ pub(super) fn run(
     payload: PreparedExternalDrag,
     options: ExternalDragOptions,
 ) -> Result<ExternalDragOutcome> {
-    let x = X11::connect()?;
+    let x = X11::connect_events()?;
     let atoms = Atoms::new(&x)?;
     let mut selection = Selection::new(&x, payload)?;
     let owner = x.connection.generate_id()?;

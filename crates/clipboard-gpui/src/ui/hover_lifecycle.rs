@@ -100,7 +100,7 @@ impl ClipboardView {
     }
 
     pub(super) fn set_hover_source(&mut self, id: i64, entered: bool, cx: &mut Context<Self>) {
-        if crate::capabilities::desktop_unavailable_reason().is_some() {
+        if crate::capabilities::positioning_unavailable_reason(self.language).is_some() {
             return;
         }
         if entered {

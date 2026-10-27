@@ -8,10 +8,8 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = state.language;
-        let pending = state.hotkey_pending
-            || state.paste_shortcuts_pending.is_some()
-            || state.quick_paste_pending_setting
-            || crate::capabilities::desktop_unavailable_reason().is_some();
+        let pending = state.shortcut_change_pending()
+            || crate::capabilities::global_shortcut_unavailable_reason(language).is_some();
         let disabled = state.hotkey_choice == HotkeyPreference::Disabled;
         let label = hotkey_label(language, &state.hotkey_choice).to_owned();
         let owner = self.owner.clone();
@@ -58,7 +56,7 @@ impl SettingsWindowView {
                     ),
             )
             .when_some(
-                crate::capabilities::desktop_unavailable_reason(),
+                crate::capabilities::global_shortcut_unavailable_reason(language),
                 |panel, reason| {
                     panel.child(Alert::warning("global-shortcut-capability", reason).small())
                 },
@@ -204,7 +202,7 @@ impl SettingsWindowView {
     fn sequence_hotkey_pending(&self, cx: &Context<Self>) -> bool {
         self.owner
             .upgrade()
-            .is_some_and(|owner| owner.read(cx).sequence_hotkey_pending)
+            .is_some_and(|owner| owner.read(cx).shortcut_change_pending())
     }
 
     pub(super) fn settings_startup_content(&self, cx: &mut Context<Self>) -> AnyElement {

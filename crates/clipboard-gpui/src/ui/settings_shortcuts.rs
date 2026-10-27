@@ -41,6 +41,9 @@ impl SettingsWindowView {
         let Some(owner) = self.owner.upgrade() else {
             return;
         };
+        if owner.read(cx).shortcut_change_pending() {
+            return;
+        }
         let Some(shortcut_input) = &self.shortcut_input else {
             return;
         };

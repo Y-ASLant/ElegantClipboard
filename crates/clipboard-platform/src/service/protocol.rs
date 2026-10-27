@@ -63,8 +63,15 @@ pub enum Command {
         transform: TextTransform,
         request_id: u64,
     },
-    /// 受控粘贴成功后把粘贴前暂存的用户剪贴板写回（见决策 0003）。
-    RestoreStashedClipboard,
+    /// 对应粘贴输入投递成功后请求恢复；输入投递不代表目标应用已消费内容。
+    RestoreStashedClipboard {
+        request_id: u64,
+        clipboard_sequence: u32,
+    },
+    /// 取消粘贴时丢弃该请求的快照，不改写剪贴板。
+    CancelPaste {
+        request_id: u64,
+    },
     /// 保存条目备注；空串清空（上限在 core 校验）。
     SetNote {
         id: i64,
@@ -76,7 +83,10 @@ pub enum Command {
         destination: PathBuf,
     },
     MergeCopy(Vec<i64>),
-    MergeForPaste(Vec<i64>),
+    MergeForPaste {
+        ids: Vec<i64>,
+        request_id: u64,
+    },
     CreateGroup(String),
     ReorderGroup {
         from: i64,
@@ -196,6 +206,7 @@ pub enum Command {
         height: u32,
     },
     ObservedCapture {
+        sequence: u32,
         content: CapturedClipboard,
         source: Option<source_app::SourceApp>,
         extra: Vec<NativeFormatCapture>,
@@ -256,17 +267,16 @@ impl Command {
             | Self::CopyPathForPaste(_, request_id)
             | Self::CopyAsFileForPaste(_, request_id)
             | Self::CopyAsFormatForPaste { request_id, .. }
-            | Self::CopyTransformedForPaste { request_id, .. } => {
-                Some(FailureKind::Paste(*request_id))
-            }
+            | Self::CopyTransformedForPaste { request_id, .. }
+            | Self::MergeForPaste { request_id, .. } => Some(FailureKind::Paste(*request_id)),
             Self::ResolveQuickPaste { request_id, .. } => {
                 Some(FailureKind::QuickPaste(*request_id))
             }
             Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
             Self::CopyAsFormat { .. } | Self::CopyTransformed { .. } => Some(FailureKind::Other),
-            Self::RestoreStashedClipboard => None,
+            Self::RestoreStashedClipboard { .. } | Self::CancelPaste { .. } => None,
             Self::SetNote { .. } => Some(FailureKind::Other),
-            Self::MergeCopy(_) | Self::MergeForPaste(_) => Some(FailureKind::Merge),
+            Self::MergeCopy(_) => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
             Self::ReorderGroup { .. } => Some(FailureKind::Other),
             Self::DeleteGroup { .. } => Some(FailureKind::GroupDelete),
@@ -363,6 +373,7 @@ pub enum Event {
     },
     Merged {
         for_paste: bool,
+        request_id: Option<u64>,
         clipboard_sequence: u32,
         item_count: usize,
     },
@@ -430,7 +441,7 @@ pub enum Event {
     RestoreClipboardSaved(Result<bool, String>),
     SequenceHotkeySaved(Result<String, String>),
     NoteSaved(Result<i64, String>),
-    /// RestoreStashedClipboard 完成（Ok 内为是否真的有快照可恢复）。
+    /// 恢复完成；Ok(false) 包括无匹配快照、已取消或剪贴板已改变。
     ClipboardRestored(Result<bool, String>),
     RunningApps(Vec<source_app::RunningApp>),
     OnboardingCompleted(Result<(), String>),

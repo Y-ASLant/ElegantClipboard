@@ -1,7 +1,7 @@
 use super::{CapturedClipboard, Command, Event, capture::CaptureState};
 use anyhow::{Result, anyhow};
 use clipboard_core::{
-    ContentCategory, History, NativeFormatCapture,
+    ContentCategory, History,
     preferences::{AppFilterPreference, MonitorTypesPreference, Preferences},
     search::search_excerpt,
 };
@@ -18,6 +18,10 @@ mod clipboard;
 #[cfg(unix)]
 #[path = "../../unix/clipboard.rs"]
 mod clipboard;
+mod clipboard_content;
+#[cfg(windows)]
+#[path = "../../windows/worker/clipboard_restore.rs"]
+mod clipboard_restore;
 #[cfg(windows)]
 #[path = "../../windows/worker/clipboard_write.rs"]
 mod clipboard_write;
@@ -26,13 +30,10 @@ mod history;
 mod image_tmp;
 mod retention;
 mod settings;
+mod stash;
 pub(crate) mod transient;
 
-/// 受控粘贴前暂存的用户剪贴板快照（主内容 + 额外原生格式）。
-pub(super) struct StashedClipboard {
-    pub(super) content: CapturedClipboard,
-    pub(super) extra: Vec<NativeFormatCapture>,
-}
+use stash::StashedClipboard;
 
 #[cfg(all(test, windows))]
 pub(super) use capture::filter_observed_capture;
@@ -62,29 +63,6 @@ pub(super) struct Worker {
 }
 
 impl Worker {
-    /// 受控粘贴前暂存用户剪贴板（决策 0003）。仅在偏好开启时写入；
-    /// 快照读取失败静默放弃（恢复是尽力而为的增强）。
-    pub(super) fn stash_clipboard_if_enabled(&mut self) {
-        self.clipboard_stash = None;
-        let Ok(enabled) = self.preferences.restore_clipboard() else {
-            return;
-        };
-        if !enabled {
-            return;
-        }
-        let Ok(snapshot) = super::read_formats::read_clipboard(&self.clipboard) else {
-            return;
-        };
-        // 隐私标记命中时主内容读不到，没有可恢复的东西。
-        let Some(content) = snapshot.content else {
-            return;
-        };
-        self.clipboard_stash = Some(StashedClipboard {
-            content,
-            extra: snapshot.extra,
-        });
-    }
-
     /// 启动清扫：blob pending 残留与过期图片临时文件。
     pub(super) fn sweep_temp_media(&self) -> Result<()> {
         image_tmp::sweep_image_tmp(&self.data_dir)?;
