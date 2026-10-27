@@ -19,6 +19,7 @@
 - 全工作区 `cargo check --workspace --all-targets --locked`、严格 Clippy、格式和模块行数检查通过；256 个 Rust 源码/测试/示例均不超过 500 行。
 - `cargo test --workspace --locked`：404 项通过（core 218、platform 129、GPUI 57），2 项原有忽略。
 - Linux x64 与 macOS ARM64 的 `clipboard-platform --lib` 实际 zigbuild 交叉编译通过；这不等同于原生桌面运行。
+- beta.8 原生 CI 首轮在 macOS 的 6 项旧附件清理测试失败：测试直接使用 `/var` 临时目录，而 `/var` 为系统符号链接。测试夹具改为在规范化的临时根目录创建隔离数据；生产清理的链接拒绝规则保持不变，所有清理、共享引用和错误回执断言保留。
 
 ## Windows 原生验证
 
