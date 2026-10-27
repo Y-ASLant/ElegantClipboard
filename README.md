@@ -37,7 +37,7 @@ ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的原生剪贴板管�
 - 数据设置可导出 GPUI ZIP，并将 GPUI/旧版 ZIP 或旧数据库恢复到独立空目录，显示结果并打开恢复的数据
 - 分组、分类与关键词组合筛选；主唤出快捷键可录制或输入，冲突或保存失败保留原配置
 - 按分组配置历史数量和天数，保护收藏与置顶；首次启用或收紧策略需确认，旧数据升级不自动扩大清理范围
-- 可选普通文件副本默认关闭，单文件 50 MiB、总预算 256 MiB；图片可作为文件复制，HTML 缺少纯文本时自动转换
+- 普通文件只保存原始路径，不复制文件实体；原件移动或删除后提示路径失效。图片历史仍保存像素并可作为文件复制，HTML 缺少纯文本时自动转换
 - 复制后读回校验，回贴有界等待修饰键释放并核对目标；采集尊重应用声明的本地历史隐私标记
 - 已知限制：HTML 预览中引用 http(s) 的远程图片不加载（gpui 无内置网络图片管线，本地图片正常）；编辑 HTML 条目保存后仍降级为纯文本；图片回贴临时文件位于数据目录 image_tmp/（24 小时或超过 64 个时启动清扫）
 
@@ -99,7 +99,17 @@ cargo run -p elegant-clipboard-gpui --locked
 just run
 ```
 
-默认数据使用当前系统的应用数据目录（Windows 为 LocalAppData，macOS 为 Application Support，Linux 为 XDG data home）。测试或隔离运行可显式指定目录：
+默认数据目录统一使用应用名称，不包含作者或框架名称：
+
+| 平台 | 默认数据目录 |
+|---|---|
+| Windows | `%LOCALAPPDATA%\ElegantClipboard` |
+| macOS | `~/Library/Application Support/ElegantClipboard` |
+| Linux | `$XDG_DATA_HOME/elegantclipboard`，默认 `~/.local/share/elegantclipboard` |
+
+升级时自动迁移旧 GPUI 默认目录中的数据库、图片、图标及原生格式 blob，并修正附件引用和开机启动路径；迁移成功后清理旧目录及空的专属父目录。新版启动时移除历史 `staged` 文件副本及数据库中的副本引用，保留普通文件原始路径；导入或恢复旧备份也不重新落盘副本。新旧目录均有数据时使用新目录、保留旧目录并提示，不自动覆盖或合并。旧版仍运行时先唤回旧实例，退出后再迁移。指向旧默认目录的 `--data-dir` 会兼容重定向到新目录，其他自定义目录保持原样。
+
+测试或隔离运行可显式指定目录：
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check

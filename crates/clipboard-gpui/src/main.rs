@@ -29,11 +29,10 @@ fn main() -> anyhow::Result<()> {
             let data_dir = options.data_dir.clone().expect("参数已校验");
             let (path, report) = clipboard_platform::import_legacy_backup_data(source, data_dir)?;
             println!(
-                "旧版备份导入完成：{} 条记录，{} 张图片、{} 个图标、{} 个暂存文件；{} 条图片引用未包含在备份中。新数据库：{}",
+                "旧版备份导入完成：{} 条记录，{} 张图片、{} 个图标；{} 条图片引用未包含在备份中。新数据库：{}",
                 report.items.total_items,
                 report.images,
                 report.icons,
-                report.staged_files,
                 report.unbundled_images,
                 path.display()
             );
@@ -43,12 +42,11 @@ fn main() -> anyhow::Result<()> {
             let data_dir = options.data_dir.clone().expect("参数已校验");
             let (path, report) = clipboard_platform::restore_backup_data(source, data_dir)?;
             println!(
-                "恢复完成：{} 条记录、{} 张图片、{} 个图标、{} 个暂存文件；{} 个源附件未包含在备份中。新数据库：{}",
+                "恢复完成：{} 条记录、{} 张图片、{} 个图标；{} 个源附件未包含在备份中。新数据库：{}",
                 report.total_items,
                 report.restored_images,
                 report.restored_icons,
-                report.restored_staged,
-                report.missing_images + report.missing_icons + report.missing_staged,
+                report.missing_images + report.missing_icons,
                 path.display()
             );
             return Ok(());

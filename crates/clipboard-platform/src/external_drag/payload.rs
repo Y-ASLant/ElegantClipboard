@@ -36,14 +36,11 @@ impl FormatData {
 
 /// Checks attachment paths, but never decodes images or writes the clipboard.
 /// The bounded DIB renderer runs separately; a DIB consumer may wait for its result.
-pub fn prepare_external_drag(
-    item: &ClipboardItem,
-    staged_dir: &Path,
-) -> Result<PreparedExternalDrag> {
+pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDrag> {
     let mut formats = Vec::new();
     match item.content_type.as_str() {
         "files" => {
-            let paths = History::file_paths_for_copy(item, staged_dir)?;
+            let paths = History::file_paths_for_copy(item)?;
             formats.push((CF_HDROP.0, file_drop(&paths)?.into()));
         }
         "image" => {

@@ -214,7 +214,7 @@ fn import_to_directory(
                 clipboard_platform::import_legacy_backup_data(path, directory.clone())?;
             (
                 report.items.total_items,
-                Some(report.images + report.icons + report.staged_files),
+                Some(report.images + report.icons),
                 report.unbundled_images,
             )
         }
@@ -222,8 +222,8 @@ fn import_to_directory(
             let (_, report) = clipboard_platform::restore_backup_data(path, directory.clone())?;
             (
                 report.total_items,
-                Some(report.restored_images + report.restored_icons + report.restored_staged),
-                report.missing_images + report.missing_icons + report.missing_staged,
+                Some(report.restored_images + report.restored_icons),
+                report.missing_images + report.missing_icons,
             )
         }
     };

@@ -22,23 +22,34 @@ impl SettingsWindowView {
                 .to_owned()
             },
             |size| {
-                if language == LanguagePreference::English {
+                let detail = if language == LanguagePreference::English {
                     format!(
-                        "Total {} · Database {} · Images {} / {} · Staged {} / {}",
+                        "Total {} · Database {} · Images {} / {}",
                         format_bytes(size.total_bytes),
                         format_bytes(size.database_bytes),
                         size.image_count,
-                        format_bytes(size.image_bytes),
+                        format_bytes(size.image_bytes)
+                    )
+                } else {
+                    format!(
+                        "共 {} · 数据库 {} · 图片 {} 个 / {}",
+                        format_bytes(size.total_bytes),
+                        format_bytes(size.database_bytes),
+                        size.image_count,
+                        format_bytes(size.image_bytes)
+                    )
+                };
+                if size.staged_count == 0 && size.staged_bytes == 0 {
+                    detail
+                } else if language == LanguagePreference::English {
+                    format!(
+                        "{detail} · Legacy file copies pending cleanup {} / {}",
                         size.staged_count,
                         format_bytes(size.staged_bytes)
                     )
                 } else {
                     format!(
-                        "共 {} · 数据库 {} · 图片 {} 个 / {} · 暂存 {} 个 / {}",
-                        format_bytes(size.total_bytes),
-                        format_bytes(size.database_bytes),
-                        size.image_count,
-                        format_bytes(size.image_bytes),
+                        "{detail} · 待清理旧文件副本 {} 个 / {}",
                         size.staged_count,
                         format_bytes(size.staged_bytes)
                     )

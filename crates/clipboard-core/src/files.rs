@@ -1,11 +1,11 @@
-use crate::image::{canonical_media_path, remove_media_file};
+use crate::file_copy_cleanup::{checked_staged_directory, is_reparse};
 use crate::{
     FilePreviewEntry, History,
     database::{ClipboardItem, ContentType, NewClipboardItem},
 };
 use anyhow::{Context, Result, bail};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -73,36 +73,19 @@ impl History {
         parse_file_paths(item.file_paths.as_deref())
     }
 
-    /// Prefer original files; use a recovered staged copy only when it is
-    /// still contained in this GPUI data directory's staged folder.
-    pub fn file_paths_for_copy(item: &ClipboardItem, staged_dir: &Path) -> Result<Vec<String>> {
+    /// 普通文件历史始终仅使用原始路径进行复制。
+    pub fn file_paths_for_copy(item: &ClipboardItem) -> Result<Vec<String>> {
         if item.content_type != "files" {
             bail!("记录不是文件");
         }
-        Ok(resolved_file_paths(
-            parse_file_paths(item.file_paths.as_deref())?,
-            item.file_payload.as_deref(),
-            staged_dir,
-        ))
+        parse_file_paths(item.file_paths.as_deref())
     }
 
-    pub(crate) fn file_preview_entries(
-        item: &ClipboardItem,
-        staged_dir: Option<&Path>,
-    ) -> Result<Vec<FilePreviewEntry>> {
-        if item.content_type != "files" {
-            bail!("记录不是文件");
-        }
-        let originals = parse_file_paths(item.file_paths.as_deref())?;
-        let resolved = staged_dir.map_or_else(
-            || originals.clone(),
-            |dir| resolved_file_paths(originals.clone(), item.file_payload.as_deref(), dir),
-        );
-        Ok(originals
+    pub(crate) fn file_preview_entries(item: &ClipboardItem) -> Result<Vec<FilePreviewEntry>> {
+        Ok(Self::file_paths_for_copy(item)?
             .into_iter()
-            .zip(resolved)
-            .map(|(original_path, resolved_path)| {
-                let recovered = original_path != resolved_path;
+            .map(|original_path| {
+                let resolved_path = original_path.clone();
                 match fs::metadata(&resolved_path) {
                     Ok(metadata) => FilePreviewEntry {
                         original_path,
@@ -110,7 +93,6 @@ impl History {
                         exists: true,
                         is_dir: metadata.is_dir(),
                         size: metadata.is_file().then_some(metadata.len()),
-                        recovered,
                         metadata_error: None,
                     },
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -120,7 +102,6 @@ impl History {
                             exists: false,
                             is_dir: false,
                             size: None,
-                            recovered,
                             metadata_error: None,
                         }
                     }
@@ -130,7 +111,6 @@ impl History {
                         exists: false,
                         is_dir: false,
                         size: None,
-                        recovered,
                         metadata_error: Some(error.to_string()),
                     },
                 }
@@ -142,13 +122,11 @@ impl History {
         if candidates.is_empty() {
             return Ok(());
         }
-        let staged_dir = images_dir
-            .parent()
-            .context("无法确定暂存目录")?
-            .join("staged");
-        let Some(root) = canonical_media_path(&staged_dir)? else {
+        let data_dir = images_dir.parent().context("无法确定暂存目录")?;
+        let Some(root) = checked_staged_directory(data_dir)? else {
             return Ok(());
         };
+        let staged_dir = std::path::absolute(data_dir.join("staged"))?;
         let current_payloads = self
             .repo
             .get_all_file_payloads()
@@ -156,7 +134,7 @@ impl History {
         let mut used = HashSet::<PathBuf>::new();
         for payload in current_payloads {
             for path in staged_paths(&payload)? {
-                if let Some(path) = canonical_media_path(Path::new(&path))? {
+                if let Some(path) = legacy_staged_file(Path::new(&path), &staged_dir, &root)? {
                     used.insert(path);
                 }
             }
@@ -172,16 +150,11 @@ impl History {
             };
             for path in paths {
                 let result = (|| -> Result<()> {
-                    let raw = Path::new(&path);
-                    let parent = raw.parent().context("暂存附件路径没有父目录")?;
-                    if canonical_media_path(parent)?.as_deref() != Some(root.as_path()) {
-                        return Ok(());
-                    }
-                    let Some(canonical) = canonical_media_path(raw)? else {
-                        return Ok(());
-                    };
-                    if canonical.parent() == Some(root.as_path()) && !used.contains(&canonical) {
-                        remove_media_file(raw)?;
+                    if let Some(file) = legacy_staged_file(Path::new(&path), &staged_dir, &root)?
+                        && !used.contains(&file)
+                    {
+                        fs::remove_file(&file)
+                            .with_context(|| format!("无法清理旧文件副本 {}", file.display()))?;
                     }
                     Ok(())
                 })();
@@ -197,50 +170,38 @@ impl History {
     }
 }
 
-fn resolved_file_paths(
-    originals: Vec<String>,
-    payload: Option<&str>,
-    staged_dir: &Path,
-) -> Vec<String> {
-    if originals.iter().all(|path| Path::new(path).exists()) {
-        return originals;
-    }
-    let Ok(root) = fs::canonicalize(staged_dir) else {
-        return originals;
+fn legacy_staged_file(path: &Path, staged_dir: &Path, root: &Path) -> Result<Option<PathBuf>> {
+    // 不检查载荷中指向本应用暂存目录以外的路径。
+    let Ok(relative) = path
+        .strip_prefix(staged_dir)
+        .or_else(|_| path.strip_prefix(root))
+    else {
+        return Ok(None);
     };
-    let staged: HashMap<String, String> = payload
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
-        .and_then(|value| {
-            value.get("staged")?.as_array().map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|entry| {
-                        Some((
-                            entry.get("original")?.as_str()?.to_owned(),
-                            entry.get("staged")?.as_str()?.to_owned(),
-                        ))
-                    })
-                    .collect()
-            })
-        })
-        .unwrap_or_default();
-    originals
-        .into_iter()
-        .map(|original| {
-            if Path::new(&original).exists() {
-                return original;
-            }
-            staged
-                .get(&original)
-                .filter(|candidate| {
-                    fs::canonicalize(candidate)
-                        .ok()
-                        .is_some_and(|path| path.is_file() && path.parent() == Some(root.as_path()))
-                })
-                .cloned()
-                .unwrap_or(original)
-        })
-        .collect()
+    if !relative
+        .components()
+        .all(|part| matches!(part, std::path::Component::Normal(_)))
+    {
+        return Ok(None);
+    }
+    let mut current = root.to_owned();
+    for component in relative.components() {
+        current.push(component);
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error).context("无法检查旧文件副本路径"),
+        };
+        if is_reparse(&metadata) {
+            return Ok(None);
+        }
+    }
+    anyhow::ensure!(
+        current != root && fs::symlink_metadata(&current)?.is_file(),
+        "旧文件副本不是普通文件：{}",
+        current.display()
+    );
+    Ok(Some(current))
 }
 
 fn staged_paths(raw: &str) -> Result<Vec<String>> {
@@ -295,7 +256,6 @@ mod tests {
                 exists: true,
                 is_dir: false,
                 size: Some(6),
-                recovered: false,
                 metadata_error: None,
             }])
         );
@@ -326,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn staged_fallback_accepts_only_files_inside_managed_directory() -> Result<()> {
+    fn copy_and_preview_keep_missing_originals_even_with_legacy_copies() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;
         let staged_dir = directory.path().join("staged");
@@ -348,28 +308,18 @@ mod tests {
                 "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
                 rusqlite::params![payload.to_string(), id],
             )?;
-            let resolved = History::file_paths_for_copy(&history.item(id)?, &staged_dir)?;
             assert_eq!(
-                resolved,
-                vec![if candidate == &staged {
-                    staged.to_string_lossy().into_owned()
-                } else {
-                    original.clone()
-                }]
+                History::file_paths_for_copy(&history.item(id)?)?,
+                vec![original.clone()]
             );
             assert_eq!(
-                history.preview_content_with_staged(id, &staged_dir)?,
+                history.preview_content(id)?,
                 PreviewContent::Files(vec![FilePreviewEntry {
                     original_path: original.clone(),
-                    resolved_path: if candidate == &staged {
-                        staged.to_string_lossy().into_owned()
-                    } else {
-                        original.clone()
-                    },
-                    exists: candidate == &staged,
+                    resolved_path: original.clone(),
+                    exists: false,
                     is_dir: false,
-                    size: (candidate == &staged).then_some(9),
-                    recovered: candidate == &staged,
+                    size: None,
                     metadata_error: None,
                 }])
             );

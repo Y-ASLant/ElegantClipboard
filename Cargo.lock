@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "clipboard-core"
-version = "2.0.0-beta.7"
+version = "2.0.0-beta.8"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "clipboard-platform"
-version = "2.0.0-beta.7"
+version = "2.0.0-beta.8"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -933,6 +933,8 @@ dependencies = [
  "image",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
+ "serde",
+ "serde_json",
  "tempfile",
  "url",
  "windows 0.62.2",
@@ -1543,7 +1545,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "elegant-clipboard-gpui"
-version = "2.0.0-beta.7"
+version = "2.0.0-beta.8"
 dependencies = [
  "anyhow",
  "async-channel",

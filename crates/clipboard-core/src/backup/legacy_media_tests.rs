@@ -67,12 +67,8 @@ fn old_zip_preserves_unbundled_paths_and_rebases_windows_basename() -> Result<()
         Some(missing_image)
     );
     let mapped: Value = serde_json::from_str(&item.file_payload.unwrap())?;
-    let staged = PathBuf::from(mapped["staged"][0]["staged"].as_str().unwrap());
-    assert!(staged.starts_with(fs::canonicalize(target.join("staged"))?));
-    assert_eq!(fs::read(staged)?, b"draft");
-    assert_eq!(mapped["staged"][0]["size"], 7);
-    assert_eq!(mapped["staged"][1]["staged"], r"C:\old\staged\missing.txt");
-    assert_eq!(mapped["staged"][1]["size"], 9);
+    assert!(mapped.get("staged").is_none());
+    assert!(!target.join("staged").exists());
     assert_eq!(mapped["metadata"], "preserved");
     Ok(())
 }

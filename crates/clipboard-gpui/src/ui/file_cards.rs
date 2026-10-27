@@ -144,7 +144,6 @@ fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
                     exists: true,
                     is_dir: false,
                     size: Some(metadata.len()),
-                    recovered: false,
                     metadata_error: None,
                 }]);
             }
@@ -265,7 +264,6 @@ mod file_image_preview_tests {
             exists: true,
             is_dir: false,
             size,
-            recovered: false,
             metadata_error: None,
         }
     }

@@ -14,8 +14,8 @@ const FEATURE_GROUPS: &[FeatureGroup] = &[
         chinese: "记录与查找",
         english: "Capture and find",
         items: &[(
-            "保存文本、图片和文件等复制记录，随时搜索与预览。",
-            "Keep copied text, images, files, and more, ready to search and preview.",
+            "保存文本、图片和文件路径等复制记录，随时搜索与预览。",
+            "Keep copied text, images, file paths, and more, ready to search and preview.",
         )],
     },
     FeatureGroup {

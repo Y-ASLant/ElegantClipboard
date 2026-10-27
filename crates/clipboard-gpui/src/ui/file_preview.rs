@@ -114,20 +114,6 @@ impl ClipboardView {
                                 format!("原始路径：{}", entry.original_path)
                             }),
                     )
-                    .when(entry.recovered, |row| {
-                        row.child(
-                            div()
-                                .text_xs()
-                                .line_clamp(2)
-                                .text_ellipsis()
-                                .text_color(cx.theme().primary)
-                                .child(if self.language == LanguagePreference::English {
-                                    format!("Backup copy: {}", entry.resolved_path)
-                                } else {
-                                    format!("备份副本：{}", entry.resolved_path)
-                                }),
-                        )
-                    })
                     .when_some(entry.metadata_error.clone(), |row, error| {
                         row.child(div().text_xs().text_color(cx.theme().danger).child(
                             if self.language == LanguagePreference::English {

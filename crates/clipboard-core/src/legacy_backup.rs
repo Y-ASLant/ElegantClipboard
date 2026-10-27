@@ -4,7 +4,7 @@ use crate::backup::hash_token;
 use crate::backup_common::{
     MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES,
     check_central_directory_names, ensure_destination_unused, install_staged_tree,
-    remap_media_rows, remap_staged_payload, verify_staged_database,
+    remap_media_rows, verify_staged_database,
 };
 use crate::import::{ImportReport, import_legacy_database};
 use anyhow::{Context, Result, bail};
@@ -22,7 +22,6 @@ pub struct LegacyBackupReport {
     pub items: ImportReport,
     pub images: usize,
     pub icons: usize,
-    pub staged_files: usize,
     pub unbundled_images: usize,
 }
 
@@ -30,7 +29,6 @@ pub struct LegacyBackupReport {
 struct Assets {
     images: HashMap<String, String>,
     icons: HashMap<String, String>,
-    staged: HashMap<String, String>,
 }
 
 impl Assets {
@@ -38,7 +36,6 @@ impl Assets {
         match category {
             "images" => &mut self.images,
             "icons" => &mut self.icons,
-            "staged" => &mut self.staged,
             _ => unreachable!(),
         }
     }
@@ -93,6 +90,10 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
             raw_db.clone()
         } else {
             let (category, filename) = checked_asset_name(&name)?;
+            // 旧备份的普通文件副本只做路径/大小校验，不解压或恢复。
+            if category == "staged" {
+                continue;
+            }
             let extension = filename
                 .rsplit_once('.')
                 .map(|(_, suffix)| suffix)
@@ -129,7 +130,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
     let mut unbundled_images = 0;
     {
         let tx = connection.transaction()?;
-        remap_media_rows(&tx, |image, icon, payload| {
+        remap_media_rows(&tx, |image, icon, _payload| {
             let mapped_image =
                 image.and_then(|raw| rebase_path(raw, "images", &assets.images, &data_dir));
             if image.is_some() && mapped_image.is_none() {
@@ -137,15 +138,7 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
             }
             let mapped_icon =
                 icon.and_then(|raw| rebase_path(raw, "icons", &assets.icons, &data_dir));
-            let mapped_payload = payload
-                .map(|raw| {
-                    remap_staged_payload(raw, |path| {
-                        Ok(rebase_path(path, "staged", &assets.staged, &data_dir))
-                    })
-                })
-                .transpose()?
-                .flatten();
-            Ok((mapped_image, mapped_icon, mapped_payload))
+            Ok((mapped_image, mapped_icon, None))
         })?;
         tx.commit()?;
     }
@@ -164,7 +157,6 @@ pub fn import_legacy_backup(archive_path: &Path, data_dir: &Path) -> Result<Lega
         items,
         images: assets.images.len(),
         icons: assets.icons.len(),
-        staged_files: assets.staged.len(),
         unbundled_images,
     })
 }
@@ -217,7 +209,6 @@ mod tests {
     use super::*;
     use crate::{History, PreviewContent};
     use rusqlite::{backup::Backup, params};
-    use serde_json::Value;
     use std::{
         io::{Read, Write},
         path::PathBuf,
@@ -301,10 +292,8 @@ mod tests {
         fs::create_dir_all(&target)?;
         let report = import_legacy_backup(&archive_path, &target)?;
         assert_eq!(report.items.total_items, 3);
-        assert_eq!(
-            (report.images, report.icons, report.staged_files),
-            (1, 1, 1)
-        );
+        assert_eq!((report.images, report.icons), (1, 1));
+        assert!(!target.join("staged").exists());
         assert_eq!(report.unbundled_images, 0);
         let restored = History::open(target.join("clipboard.db"))?;
         assert_eq!(restored.groups()?[0].name, "旧分组");
@@ -317,14 +306,12 @@ mod tests {
         let icon = PathBuf::from(restored_text.source_app_icon.unwrap());
         assert!(icon.starts_with(fs::canonicalize(target.join("icons"))?));
         assert_eq!(fs::read(icon)?, b"icon bytes");
-        let payload: Value = serde_json::from_str(&restored.item(file)?.file_payload.unwrap())?;
-        let staged = PathBuf::from(payload["staged"][0]["staged"].as_str().unwrap());
-        assert!(staged.starts_with(fs::canonicalize(target.join("staged"))?));
-        assert_eq!(fs::read(staged)?, b"draft bytes");
-        assert_eq!(restored.files(file)?, vec![original_file]);
-        let copied = History::file_paths_for_copy(&restored.item(file)?, &target.join("staged"))?;
-        assert_eq!(copied.len(), 1);
-        assert_eq!(fs::read(&copied[0])?, b"draft bytes");
+        let payload: serde_json::Value =
+            serde_json::from_str(&restored.item(file)?.file_payload.unwrap())?;
+        assert!(payload.get("staged").is_none());
+        assert_eq!(restored.files(file)?, vec![original_file.clone()]);
+        let copied = History::file_paths_for_copy(&restored.item(file)?)?;
+        assert_eq!(copied, vec![original_file]);
         assert_eq!(
             restored.db.read_connection().lock().query_row(
                 "SELECT COUNT(*) FROM settings WHERE key = 'secret_token'",

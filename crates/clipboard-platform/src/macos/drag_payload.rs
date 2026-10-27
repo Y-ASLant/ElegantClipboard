@@ -11,14 +11,11 @@ pub(super) struct DragItem {
     pub formats: Vec<(&'static str, Vec<u8>)>,
 }
 
-pub fn prepare_external_drag(
-    item: &ClipboardItem,
-    staged_dir: &Path,
-) -> Result<PreparedExternalDrag> {
+pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDrag> {
     let mut items = Vec::new();
     match item.content_type.as_str() {
         "files" => {
-            for path in History::file_paths_for_copy(item, staged_dir)? {
+            for path in History::file_paths_for_copy(item)? {
                 validate_path(&path)?;
                 items.push(DragItem {
                     path: Some(path),

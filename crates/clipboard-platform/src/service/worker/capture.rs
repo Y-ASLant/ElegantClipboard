@@ -6,19 +6,7 @@ use clipboard_core::{NativeFormatCapture, is_url_text, preferences::MonitorTypes
 
 impl Worker {
     pub(super) fn capture_files(&self, paths: &[String]) -> Result<i64> {
-        if !self.preferences.stage_files()? {
-            return self.history.capture_files(paths, &self.images_dir);
-        }
-        let outcome = self
-            .history
-            .capture_files_with_staging(paths, &self.images_dir)?;
-        if !outcome.warnings.is_empty() {
-            self.send_event(super::Event::Status(format!(
-                "警告：文件路径已保存，但部分暂存操作未完成：{}",
-                outcome.warnings.join("；")
-            )))?;
-        }
-        Ok(outcome.id)
+        self.history.capture_files(paths, &self.images_dir)
     }
 
     pub(crate) fn handle_observed_capture(

@@ -29,7 +29,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 - Data settings export GPUI backups and restore GPUI/legacy ZIPs or older databases into a separate empty folder, with a result report and an action to open the restored data
 - Combine group, category and keyword filters; record or type the main shortcut, with conflict rejection and rollback on save failure
 - Per-group count and age limits protect pinned and favorite items; first activation and tighter policies require confirmation, without expanding cleanup automatically on upgrade
-- Optional regular-file copies are off by default (50 MiB per file, 256 MiB total); copy images as files and convert HTML when plain text is missing
+- Regular-file history stores original paths without copying file contents; moved or deleted sources are reported as unavailable. Image history still preserves pixels and can be copied as files; HTML is converted when plain text is missing
 - Verify clipboard contents after writing, wait a bounded time for modifier release before pasting, validate the target, and honor producer opt-outs from local clipboard history
 
 See [Windows GPUI status](docs/WINDOWS_MVP.md) for Windows implementation details and historical verification. Features above are subject to these platform limits.
@@ -90,7 +90,17 @@ Or use:
 just run
 ```
 
-Data uses the current OS's application-data directory: LocalAppData on Windows, Application Support on macOS, and XDG data home on Linux. For an isolated run, specify a directory explicitly:
+Default data folders use only the application name:
+
+| Platform | Default data directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\ElegantClipboard` |
+| macOS | `~/Library/Application Support/ElegantClipboard` |
+| Linux | `$XDG_DATA_HOME/elegantclipboard`, defaulting to `~/.local/share/elegantclipboard` |
+
+Upgrades migrate the previous GPUI default directory, including the database, images, icons and native-format blobs. Managed paths and login startup entries are updated before migration cleanup completes. Startup removes legacy `staged` file copies and their database references while retaining original paths and history metadata; importing or restoring an old backup does not recreate these copies. Old directories and empty dedicated parents are removed after success. If both folders contain data, the new folder is used and the old folder is preserved with a warning; histories are never overwritten or silently merged. A running old instance is activated first, and migration waits until it exits. An explicit `--data-dir` pointing to the old default is redirected for compatibility; other custom directories are unchanged.
+
+For an isolated run, specify a directory explicitly:
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check

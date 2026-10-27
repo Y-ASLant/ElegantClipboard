@@ -172,6 +172,7 @@ impl ClipboardView {
             paste_registration_summary(language, &paste_hotkey_warnings),
             outside_click_error,
             Self::autostart_startup_error(language, &autostart),
+            service.initial_data_warning.clone(),
         ]
         .into_iter()
         .flatten()
@@ -196,10 +197,7 @@ impl ClipboardView {
         let audio = service.initial_audio;
         let (retention, retention_saved) =
             (service.initial_retention, service.initial_retention_saved);
-        let (stage_files, transient_filter) = (
-            service.initial_stage_files,
-            service.initial_transient_filter,
-        );
+        let transient_filter = service.initial_transient_filter;
         let monitor_types = service.initial_monitor_types;
         let app_filter = service.initial_app_filter.clone();
         let onboarding_completed = service.initial_onboarding_completed;
@@ -415,10 +413,6 @@ impl ClipboardView {
             },
             audio: PendingPref {
                 value: audio,
-                pending: false,
-            },
-            stage_files: PendingPref {
-                value: stage_files,
                 pending: false,
             },
             transient_filter: PendingPref {

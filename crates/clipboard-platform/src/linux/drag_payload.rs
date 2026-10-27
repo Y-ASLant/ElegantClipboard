@@ -19,15 +19,12 @@ impl PreparedExternalDrag {
     }
 }
 
-pub fn prepare_external_drag(
-    item: &ClipboardItem,
-    staged_dir: &Path,
-) -> Result<PreparedExternalDrag> {
+pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDrag> {
     let mut formats: Vec<EncodedFormat> = Vec::new();
     let mut files = None;
     match item.content_type.as_str() {
         "files" => {
-            let paths = History::file_paths_for_copy(item, staged_dir)?;
+            let paths = History::file_paths_for_copy(item)?;
             formats.push(("text/uri-list", file_uris(&paths)?.into()));
             files = Some(
                 paths

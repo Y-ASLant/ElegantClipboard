@@ -197,9 +197,8 @@ impl ClipboardView {
         self.export_pending = false;
         match result {
             Ok(report) => {
-                let included =
-                    report.included_images + report.included_icons + report.included_staged;
-                let missing = report.missing_images + report.missing_icons + report.missing_staged;
+                let included = report.included_images + report.included_icons;
+                let missing = report.missing_images + report.missing_icons;
                 self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!(
                         "Backed up {} items and {} attachments to {}{}",

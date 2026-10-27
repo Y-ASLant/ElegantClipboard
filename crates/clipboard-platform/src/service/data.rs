@@ -1,12 +1,10 @@
 use super::DataSizeInfo;
-use crate::instance;
 use anyhow::{Context, Result, bail};
 use clipboard_core::{
     backup::{RestoreReport, restore_backup},
     import::{ImportReport, import_legacy_database},
     legacy_backup::{LegacyBackupReport, import_legacy_backup},
 };
-use directories::ProjectDirs;
 use std::{
     fs::{File, OpenOptions},
     path::{Path, PathBuf},
@@ -23,16 +21,6 @@ impl std::fmt::Display for InstanceBusy {
 
 impl std::error::Error for InstanceBusy {}
 
-pub(super) fn resolve_data_dir(data_dir: Option<PathBuf>) -> Result<PathBuf> {
-    match data_dir {
-        Some(path) => Ok(path),
-        None => Ok(ProjectDirs::from("com", "ASLant", "ElegantClipboard-GPUI")
-            .context("无法确定用户数据目录")?
-            .data_local_dir()
-            .to_owned()),
-    }
-}
-
 pub(super) fn lock_instance(data_dir: &Path) -> Result<File> {
     std::fs::create_dir_all(data_dir).context("无法创建数据目录")?;
     let file = OpenOptions::new()
@@ -46,23 +34,24 @@ pub(super) fn lock_instance(data_dir: &Path) -> Result<File> {
 }
 
 pub fn show_existing_instance(data_dir: Option<PathBuf>) -> Result<bool> {
-    instance::show_existing(&resolve_data_dir(data_dir)?)
+    super::data_directory::show_existing(data_dir)
 }
 
 pub fn import_legacy_data(
     source: &Path,
     data_dir: Option<PathBuf>,
 ) -> Result<(PathBuf, ImportReport)> {
-    let data_dir = resolve_data_dir(data_dir)?;
-    let _instance_lock = lock_instance(&data_dir)?;
-    let destination = data_dir.join("clipboard.db");
+    let prepared = super::data_directory::prepare(data_dir)?;
+    let _instance_lock = prepared.lock;
+    let destination = prepared.path.join("clipboard.db");
     let report = import_legacy_database(source, &destination)?;
     Ok((destination, report))
 }
 
 pub fn restore_backup_data(source: &Path, data_dir: PathBuf) -> Result<(PathBuf, RestoreReport)> {
-    let _instance_lock = lock_instance(&data_dir)?;
-    let data_dir = data_dir.canonicalize().context("无法解析恢复目录")?;
+    let prepared = super::data_directory::prepare(Some(data_dir))?;
+    let _instance_lock = prepared.lock;
+    let data_dir = prepared.path.canonicalize().context("无法解析恢复目录")?;
     let report = restore_backup(source, &data_dir)?;
     Ok((data_dir.join("clipboard.db"), report))
 }
@@ -71,8 +60,9 @@ pub fn import_legacy_backup_data(
     source: &Path,
     data_dir: PathBuf,
 ) -> Result<(PathBuf, LegacyBackupReport)> {
-    let _instance_lock = lock_instance(&data_dir)?;
-    let data_dir = data_dir.canonicalize().context("无法解析导入目录")?;
+    let prepared = super::data_directory::prepare(Some(data_dir))?;
+    let _instance_lock = prepared.lock;
+    let data_dir = prepared.path.canonicalize().context("无法解析导入目录")?;
     let report = import_legacy_backup(source, &data_dir)?;
     Ok((data_dir.join("clipboard.db"), report))
 }

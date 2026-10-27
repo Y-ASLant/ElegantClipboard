@@ -2,7 +2,7 @@ use super::{FORMAT_VERSION, Manifest, RestoreReport};
 use crate::backup_common::{
     MAX_ARCHIVE_BYTES, MAX_ASSET_BYTES, MAX_DATABASE_BYTES, MAX_ENTRIES,
     check_central_directory_names, ensure_destination_unused, install_staged_tree,
-    remap_media_rows, remap_staged_payload, verify_staged_database,
+    remap_media_rows, verify_staged_database,
 };
 use anyhow::{Context, Result, bail};
 use rusqlite::Connection;
@@ -86,6 +86,10 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         {
             bail!("备份媒体条目无效：{name}");
         }
+        // 兼容识别旧备份条目，但不再落盘普通文件副本。
+        if category == "staged" {
+            continue;
+        }
         let media_path = stage.path().join(category).join(filename);
         fs::create_dir_all(media_path.parent().unwrap())?;
         let copied = io::copy(&mut entry, &mut File::create(media_path)?)?;
@@ -95,9 +99,10 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     }
 
     let mut restored_db = Connection::open(&staged_db)?;
+    crate::file_copy_cleanup::clear_file_copy_references(&mut restored_db)?;
     let tx = restored_db.transaction()?;
     tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
-    remap_media_rows(&tx, |image, icon, payload| {
+    remap_media_rows(&tx, |image, icon, _payload| {
         let mapped_image = image
             .map(|raw| rebase_archive_path(raw, "images", &extracted, data_dir))
             .transpose()?
@@ -106,15 +111,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
             .map(|raw| rebase_archive_path(raw, "icons", &extracted, data_dir))
             .transpose()?
             .flatten();
-        let mapped_payload = payload
-            .map(|raw| {
-                remap_staged_payload(raw, |path| {
-                    rebase_archive_path(path, "staged", &extracted, data_dir)
-                })
-            })
-            .transpose()?
-            .flatten();
-        Ok((mapped_image, mapped_icon, mapped_payload))
+        Ok((mapped_image, mapped_icon, None))
     })?;
     tx.commit()?;
     let total_items = verify_staged_database(&restored_db, "恢复数据库校验失败")?;
@@ -137,8 +134,6 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
         missing_images: manifest.missing_images,
         restored_icons: extracted.get("icons").map_or(0, HashSet::len),
         missing_icons: manifest.missing_icons,
-        restored_staged: extracted.get("staged").map_or(0, HashSet::len),
-        missing_staged: manifest.missing_staged,
         restored_blobs: extracted.get("blobs").map_or(0, HashSet::len),
         missing_blobs: manifest.missing_blobs,
     })

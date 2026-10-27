@@ -5,7 +5,6 @@
 
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, Transaction, params};
-use serde_json::Value;
 use std::{
     collections::HashSet,
     fs::File,
@@ -127,32 +126,6 @@ pub(crate) fn remap_media_rows(
     Ok(())
 }
 
-/// Rewrites staged attachment paths without changing other payload fields.
-/// Invalid JSON or a missing staged array is left untouched, as are entries
-/// without a string path. `None` from the resolver preserves the original path.
-pub(crate) fn remap_staged_payload(
-    raw: &str,
-    mut resolve: impl FnMut(&str) -> Result<Option<String>>,
-) -> Result<Option<String>> {
-    let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
-        return Ok(None);
-    };
-    let Some(entries) = value.get_mut("staged").and_then(Value::as_array_mut) else {
-        return Ok(None);
-    };
-    let mut changed = false;
-    for entry in entries {
-        let Some(path) = entry.get("staged").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(mapped) = resolve(path)? {
-            entry["staged"] = Value::String(mapped);
-            changed = true;
-        }
-    }
-    Ok(changed.then(|| value.to_string()))
-}
-
 /// Runs `PRAGMA quick_check` and returns the total history count.
 /// `context` names the flow for the failure message.
 pub(crate) fn verify_staged_database(
@@ -177,7 +150,7 @@ pub(crate) fn install_staged_tree(
     db_context: &'static str,
 ) -> Result<()> {
     let mut installed = Vec::new();
-    for category in ["images", "icons", "staged", "blobs"] {
+    for category in ["images", "icons", "blobs"] {
         let source = stage_path.join(category);
         if source.exists() {
             let final_path = data_dir.join(category);

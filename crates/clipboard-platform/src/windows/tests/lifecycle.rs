@@ -34,6 +34,65 @@ fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
 }
 
 #[test]
+fn startup_removes_legacy_file_copies_and_keeps_original_paths_and_history() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let original = root.join("original.txt");
+    std::fs::write(&original, b"user file")?;
+    let staged = root.join("staged/old-hash/path-hash_copy.txt");
+    std::fs::create_dir_all(staged.parent().unwrap())?;
+    std::fs::write(&staged, b"retired copy")?;
+    let history = History::open(root.join("clipboard.db"))?;
+    let id = history.capture_files(
+        &[original.to_string_lossy().into_owned()],
+        &root.join("images"),
+    )?;
+    history.set_note(id, "keep note")?;
+    history.toggle_favorite(id)?;
+    let payload =
+        serde_json::json!({"staged":[{"original":original,"staged":staged}],"metadata":"keep"});
+    let db = Database::new(root.join("clipboard.db"))?;
+    db.write_connection().lock().execute(
+        "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
+        (payload.to_string(), id),
+    )?;
+    db.write_connection().lock().execute(
+        "INSERT OR REPLACE INTO settings(key,value) VALUES('gpui_stage_files','true')",
+        [],
+    )?;
+    drop(db);
+    drop(history);
+    let (service, events) = Service::start(Some(root.to_owned()), false)?;
+    assert!(service.initial_data_warning.is_none());
+    let rows = next_snapshot(&events, 0);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, id);
+    assert!(rows[0].is_favorite);
+    assert!(!root.join("staged").exists());
+    assert_eq!(std::fs::read(&original)?, b"user file");
+    let saved = History::open(root.join("clipboard.db"))?.item(id)?;
+    assert_eq!(saved.note.as_deref(), Some("keep note"));
+    let cleaned: serde_json::Value = serde_json::from_str(&saved.file_payload.unwrap())?;
+    assert!(cleaned.get("staged").is_none());
+    assert_eq!(cleaned["metadata"], "keep");
+    let db = Database::new(root.join("clipboard.db"))?;
+    assert_eq!(
+        db.read_connection().lock().query_row(
+            "SELECT COUNT(*) FROM settings WHERE key='gpui_stage_files'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?,
+        0
+    );
+    service.send(Command::CaptureFiles(vec![
+        original.to_string_lossy().into_owned(),
+    ]))?;
+    next_snapshot(&events, 0);
+    assert!(!root.join("staged").exists());
+    Ok(())
+}
+
+#[test]
 fn invalid_history_row_reports_startup_error() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let db = Database::new(directory.path().join("clipboard.db"))?;

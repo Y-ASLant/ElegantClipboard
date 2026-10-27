@@ -75,6 +75,9 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
             .write_connection()
             .lock()
             .execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
+        crate::file_copy_cleanup::clear_file_copy_references(
+            &mut database.write_connection().lock(),
+        )?;
         let report = {
             let reader = database.read_connection();
             let connection = reader.lock();
@@ -148,6 +151,50 @@ mod tests {
         assert_eq!(source_secret_count, 1);
         assert!(import_legacy_database(&source_path, &destination).is_err());
         assert_eq!(imported.count("", false)?, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn importing_legacy_database_drops_copy_references_without_modifying_source_assets()
+    -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let source_dir = directory.path().join("old");
+        std::fs::create_dir_all(source_dir.join("staged"))?;
+        let source_path = source_dir.join("clipboard.db");
+        let history = History::open(source_path.clone())?;
+        let original = directory.path().join("original.txt");
+        std::fs::write(&original, b"original")?;
+        let copied = source_dir.join("staged/copy.txt");
+        std::fs::write(&copied, b"retired copy")?;
+        let id = history.capture_files(
+            &[original.to_string_lossy().into_owned()],
+            &source_dir.join("images"),
+        )?;
+        let payload =
+            serde_json::json!({"staged":[{"original":original,"staged":copied}],"legacy":"keep"})
+                .to_string();
+        history.db.write_connection().lock().execute(
+            "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
+            rusqlite::params![payload, id],
+        )?;
+        let destination = directory.path().join("new/clipboard.db");
+        import_legacy_database(&source_path, &destination)?;
+        let restored = History::open(destination)?;
+        let item = restored.item(id)?;
+        let cleaned: serde_json::Value = serde_json::from_str(&item.file_payload.unwrap())?;
+        assert!(cleaned.get("staged").is_none());
+        assert_eq!(cleaned["legacy"], "keep");
+        assert_eq!(
+            restored.files(id)?,
+            vec![original.to_string_lossy().into_owned()]
+        );
+        assert_eq!(
+            history.item(id)?.file_payload.as_deref(),
+            Some(payload.as_str())
+        );
+        assert_eq!(std::fs::read(copied)?, b"retired copy");
+        assert_eq!(std::fs::read(original)?, b"original");
+        assert!(!directory.path().join("new/staged").exists());
         Ok(())
     }
 

@@ -20,12 +20,9 @@ pub(super) fn plain_text_for_copy(item: &ClipboardItem) -> Result<Cow<'_, str>> 
     bail!("记录没有可复制的纯文本")
 }
 
-pub(super) fn item_paths_for_action(
-    item: &ClipboardItem,
-    staged_dir: &Path,
-) -> Result<Vec<String>> {
+pub(super) fn item_paths_for_action(item: &ClipboardItem) -> Result<Vec<String>> {
     let paths = match item.content_type.as_str() {
-        "files" => History::file_paths_for_copy(item, staged_dir)?,
+        "files" => History::file_paths_for_copy(item)?,
         "image" => vec![item.image_path.clone().context("图片文件路径缺失")?],
         _ => bail!("该记录不是文件或图片"),
     };
@@ -113,11 +110,7 @@ pub(super) fn data_directory_command(data_dir: &Path) -> Result<std::process::Co
     Ok(command)
 }
 
-pub(super) fn save_item_as(
-    item: &ClipboardItem,
-    staged_dir: &Path,
-    destination: &Path,
-) -> Result<u64> {
+pub(super) fn save_item_as(item: &ClipboardItem, destination: &Path) -> Result<u64> {
     if !destination.is_absolute() {
         bail!("另存为目标必须是绝对路径");
     }
@@ -130,7 +123,7 @@ pub(super) fn save_item_as(
         bail!("另存为目标不能是文件夹");
     }
 
-    let paths = item_paths_for_action(item, staged_dir)?;
+    let paths = item_paths_for_action(item)?;
     let source = Path::new(&paths[0]);
     if !source.is_file() {
         bail!("文件夹不支持另存为，请先在资源管理器中复制");

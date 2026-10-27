@@ -157,7 +157,6 @@ pub enum Command {
         policy: RetentionPolicy,
         confirmed: bool,
     },
-    SetStageFiles(bool),
     SetMonitorTypes(MonitorTypesPreference),
     SetAppFilter(Box<AppFilterPreference>),
     SetWindowEffect(WindowEffectPreference),
@@ -322,7 +321,6 @@ impl Command {
             | Self::SetDisplay(_)
             | Self::SetAudio(_)
             | Self::SetRetention { .. }
-            | Self::SetStageFiles(_)
             | Self::SetMonitorTypes(_)
             | Self::SetAppFilter(_)
             | Self::SetDedupStrategy(_)
@@ -433,7 +431,6 @@ pub enum Event {
     DisplaySaved(Result<DisplayPreference, String>),
     AudioSaved(Result<AudioPreference, String>),
     RetentionSaved(Result<(RetentionPolicy, DeletionOutcome), String>),
-    StageFilesSaved(Result<bool, String>),
     MonitorTypesSaved(Result<MonitorTypesPreference, String>),
     AppFilterSaved(Result<Box<AppFilterPreference>, String>),
     WindowEffectSaved(Result<WindowEffectPreference, String>),

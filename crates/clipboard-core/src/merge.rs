@@ -9,7 +9,7 @@ pub struct MergedContent {
 }
 
 impl History {
-    pub fn merge_content(&self, ids: &[i64], staged_dir: &Path) -> Result<MergedContent> {
+    pub fn merge_content(&self, ids: &[i64]) -> Result<MergedContent> {
         if ids.len() < 2 {
             bail!("请至少选择两条记录进行合并");
         }
@@ -27,7 +27,7 @@ impl History {
                 .with_context(|| format!("无法读取待合并记录 {id}"))?;
             match item.content_type.as_str() {
                 "files" => {
-                    let paths = Self::file_paths_for_copy(&item, staged_dir)
+                    let paths = Self::file_paths_for_copy(&item)
                         .with_context(|| format!("无法读取记录 {id} 的文件路径"))?;
                     if paths.iter().any(|path| !Path::new(path).exists()) {
                         bail!("记录 {id} 的源文件或文件夹已不存在，无法合并");
@@ -114,8 +114,7 @@ mod tests {
         )?;
         let repeated = history.capture_files(&[shared.to_string_lossy().into_owned()], &images)?;
 
-        let merged =
-            history.merge_content(&[files, first, repeated], &directory.path().join("staged"))?;
+        let merged = history.merge_content(&[files, first, repeated])?;
         let expected_text = format!(
             "{}\n{}\n第一条\n{}",
             shared.display(),
@@ -139,22 +138,12 @@ mod tests {
         let history = History::open(directory.path().join("clipboard.db"))?;
         let images = directory.path().join("images");
         let text = history.capture("text")?.unwrap();
-        assert!(
-            history
-                .merge_content(&[text], &directory.path().join("staged"))
-                .is_err()
-        );
-        assert!(
-            history
-                .merge_content(&[text, text], &directory.path().join("staged"))
-                .is_err()
-        );
+        assert!(history.merge_content(&[text]).is_err());
+        assert!(history.merge_content(&[text, text]).is_err());
 
         let missing = directory.path().join("missing.txt");
         let file = history.capture_files(&[missing.to_string_lossy().into_owned()], &images)?;
-        let error = history
-            .merge_content(&[text, file], &directory.path().join("staged"))
-            .unwrap_err();
+        let error = history.merge_content(&[text, file]).unwrap_err();
         assert!(error.to_string().contains("已不存在"));
         Ok(())
     }
@@ -173,17 +162,12 @@ mod tests {
         legacy.html_content = Some("\0".repeat(crate::MAX_TEXT_BYTES / 3 + 1));
         assert!(merge_text(&legacy).is_err());
         assert_eq!(
-            history
-                .merge_content(&[html, text], &directory.path().join("staged"))?
-                .text
-                .as_deref(),
+            history.merge_content(&[html, text])?.text.as_deref(),
             Some("Hello world\nplain")
         );
 
         let rtf = history.capture_rich(None, Some(b"{\\rtf1 no text}"), None, &images)?;
-        let error = history
-            .merge_content(&[text, rtf], &directory.path().join("staged"))
-            .unwrap_err();
+        let error = history.merge_content(&[text, rtf]).unwrap_err();
         assert!(error.to_string().contains("没有可合并的文本表示"));
         Ok(())
     }

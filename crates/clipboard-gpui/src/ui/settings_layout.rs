@@ -96,14 +96,6 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
-        chinese: "文件副本",
-        english: "File copies",
-        description_chinese: "可选保存普通文件副本，原件失效时用于恢复",
-        description_english: "Optionally retain regular files for recovery when originals are missing",
-        content: SettingsWindowView::render_file_staging_settings,
-    },
-    Section {
-        page: SettingsPage::Data,
         chinese: "每日历史条数",
         english: "Daily history",
         description_chinese: "最近 7 天每天保存的剪贴板记录数（含今天）",
@@ -114,8 +106,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "本地数据",
         english: "Storage",
-        description_chinese: "查看和管理历史记录、图片与文件副本的存储空间",
-        description_english: "View and manage storage for history, images and file copies",
+        description_chinese: "查看和管理历史记录与图片的存储空间",
+        description_english: "View and manage storage for history and images",
         content: SettingsWindowView::settings_storage_content,
     },
     Section {

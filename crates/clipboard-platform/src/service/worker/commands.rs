@@ -63,7 +63,7 @@ impl Worker {
             }
             Command::RevealInExplorer(id) => {
                 let item = self.history.item(id)?;
-                let paths = item_paths_for_action(&item, &self.staged_dir)?;
+                let paths = item_paths_for_action(&item)?;
                 reveal_in_explorer(Path::new(&paths[0]))?;
                 self.send_event(Event::Status(if paths.len() == 1 {
                     "已在资源管理器中定位".into()
@@ -76,7 +76,7 @@ impl Worker {
                 let result = self
                     .history
                     .item(id)
-                    .and_then(|item| save_item_as(&item, &self.staged_dir, &destination))
+                    .and_then(|item| save_item_as(&item, &destination))
                     .map(|_| destination)
                     .map_err(|error| error.to_string());
                 self.send_event(Event::SavedAs { id, result })?;
@@ -86,9 +86,7 @@ impl Worker {
                 let result = self
                     .history
                     .item(id)
-                    .and_then(|item| {
-                        crate::external_drag::prepare_external_drag(&item, &self.staged_dir)
-                    })
+                    .and_then(|item| crate::external_drag::prepare_external_drag(&item))
                     .map_err(|error| error.to_string());
                 return self.send_event(Event::ExternalDragPrepared { id, token, result });
             }
@@ -142,7 +140,7 @@ impl Worker {
                     generation,
                     result: self
                         .history
-                        .preview_content_with_staged(id, &self.staged_dir)
+                        .preview_content(id)
                         .map_err(|error| error.to_string()),
                 })?;
                 return Ok(());
@@ -153,7 +151,7 @@ impl Worker {
                     generation,
                     result: self
                         .history
-                        .preview_content_with_staged(id, &self.staged_dir)
+                        .preview_content(id)
                         .map_err(|error| error.to_string()),
                 })?;
                 return Ok(());
@@ -352,14 +350,6 @@ impl Worker {
             }
             Command::SetAudio(preference) => {
                 return self.save_setting(preference, Preferences::set_audio, Event::AudioSaved);
-            }
-            Command::SetStageFiles(enabled) => {
-                let result = self
-                    .preferences
-                    .set_stage_files(enabled)
-                    .map(|()| enabled)
-                    .map_err(|error| error.to_string());
-                return self.send_event(Event::StageFilesSaved(result));
             }
             Command::SetMonitorTypes(preference) => {
                 return self.handle_set_monitor_types(preference);

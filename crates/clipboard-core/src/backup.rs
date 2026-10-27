@@ -1,5 +1,5 @@
 use crate::History;
-use crate::backup_common::{remap_staged_payload, verify_staged_database};
+use crate::backup_common::verify_staged_database;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, backup::Backup, params};
 use serde::{Deserialize, Serialize};
@@ -27,8 +27,6 @@ struct Manifest {
     #[serde(default)]
     missing_icons: usize,
     #[serde(default)]
-    missing_staged: usize,
-    #[serde(default)]
     missing_blobs: usize,
 }
 
@@ -40,8 +38,6 @@ pub struct BackupReport {
     pub missing_images: usize,
     pub included_icons: usize,
     pub missing_icons: usize,
-    pub included_staged: usize,
-    pub missing_staged: usize,
     pub included_blobs: usize,
     pub missing_blobs: usize,
 }
@@ -53,8 +49,6 @@ pub struct RestoreReport {
     pub missing_images: usize,
     pub restored_icons: usize,
     pub missing_icons: usize,
-    pub restored_staged: usize,
-    pub missing_staged: usize,
     pub restored_blobs: usize,
     pub missing_blobs: usize,
 }
@@ -111,6 +105,7 @@ impl History {
                 .context("数据库在线备份失败")?;
         }
 
+        crate::file_copy_cleanup::clear_file_copy_references(&mut snapshot)?;
         // Keep snapshot settings and media rewrites in one transaction; the
         // source database has already been released by the online backup.
         let tx = snapshot.transaction()?;
@@ -137,43 +132,24 @@ impl History {
                 update.execute(params![format!("images/{name}"), id])?;
             }
         }
-        let media_rows: Vec<(i64, Option<String>, Option<String>)> = {
+        let icon_rows: Vec<(i64, String)> = {
             let mut query = tx.prepare(
-                "SELECT id, source_app_icon, file_payload FROM clipboard_items
-                 WHERE source_app_icon IS NOT NULL OR file_payload IS NOT NULL",
+                "SELECT id, source_app_icon FROM clipboard_items WHERE source_app_icon IS NOT NULL",
             )?;
             query
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .collect::<Result<_, _>>()?
         };
         let mut icons = AssetMap::new();
-        let mut staged = AssetMap::new();
         let mut missing_icons = 0;
-        let mut missing_staged = 0;
         {
-            let mut update_icon =
+            let mut update =
                 tx.prepare("UPDATE clipboard_items SET source_app_icon = ?1 WHERE id = ?2")?;
-            let mut update_payload =
-                tx.prepare("UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2")?;
-            for (id, icon, payload) in media_rows {
-                if let Some(raw_icon) = icon {
-                    if let Some(name) = register_asset(&raw_icon, &mut icons, "bin") {
-                        update_icon.execute(params![format!("icons/{name}"), id])?;
-                    } else {
-                        missing_icons += 1;
-                    }
-                }
-                if let Some(raw_payload) = payload
-                    && let Some(mapped) = remap_staged_payload(&raw_payload, |raw_path| {
-                        if let Some(name) = register_asset(raw_path, &mut staged, "bin") {
-                            Ok(Some(format!("staged/{name}")))
-                        } else {
-                            missing_staged += 1;
-                            Ok(None)
-                        }
-                    })?
-                {
-                    update_payload.execute(params![mapped, id])?;
+            for (id, raw_icon) in icon_rows {
+                if let Some(name) = register_asset(&raw_icon, &mut icons, "bin") {
+                    update.execute(params![format!("icons/{name}"), id])?;
+                } else {
+                    missing_icons += 1;
                 }
             }
         }
@@ -204,19 +180,13 @@ impl History {
             total_items,
             missing_images,
             missing_icons,
-            missing_staged,
             missing_blobs,
         };
         write_backup_zip(
             &manifest,
             &snapshot_path,
             parent,
-            [
-                ("images", &images),
-                ("icons", &icons),
-                ("staged", &staged),
-                ("blobs", &blobs),
-            ],
+            [("images", &images), ("icons", &icons), ("blobs", &blobs)],
             destination,
         )?;
         Ok(BackupReport {
@@ -226,8 +196,6 @@ impl History {
             missing_images,
             included_icons: icons.len(),
             missing_icons,
-            included_staged: staged.len(),
-            missing_staged,
             included_blobs: blobs.len(),
             missing_blobs,
         })
@@ -238,7 +206,7 @@ fn write_backup_zip(
     manifest: &Manifest,
     snapshot_path: &Path,
     parent: &Path,
-    categories: [(&str, &AssetMap); 4],
+    categories: [(&str, &AssetMap); 3],
     destination: &Path,
 ) -> Result<()> {
     let mut output = tempfile::Builder::new()

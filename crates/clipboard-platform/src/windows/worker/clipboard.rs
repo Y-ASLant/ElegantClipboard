@@ -31,7 +31,7 @@ impl Worker {
     pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
         self.clipboard_stash = None;
         let item_count = ids.len();
-        let merged = self.history.merge_content(&ids, &self.staged_dir)?;
+        let merged = self.history.merge_content(&ids)?;
         let mut state = lock_capture_state(&self.state)?;
         let clipboard_sequence =
             write_merged_clipboard(&self.clipboard, &merged, &mut state.ignored_sequence)?;
@@ -70,7 +70,7 @@ impl Worker {
             )?);
         }
         let path_text = (mode == CopyMode::Paths)
-            .then(|| item_paths_for_action(&item, &self.staged_dir).map(|paths| paths.join("\n")))
+            .then(|| item_paths_for_action(&item).map(|paths| paths.join("\n")))
             .transpose()?;
         let single_format = match mode {
             CopyMode::Html => Some(("html", "HTML 格式")),
@@ -104,7 +104,7 @@ impl Worker {
             }
             Some(vec![path.to_owned()])
         } else if mode == CopyMode::Original && item.content_type == "files" {
-            let paths = History::file_paths_for_copy(&item, &self.staged_dir)?;
+            let paths = History::file_paths_for_copy(&item)?;
             if paths.iter().any(|path| !Path::new(path).exists()) {
                 bail!("源文件或文件夹已不存在，无法复制");
             }

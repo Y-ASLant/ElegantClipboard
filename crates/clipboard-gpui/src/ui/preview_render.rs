@@ -92,7 +92,6 @@ impl ClipboardView {
                         .iter()
                         .filter(|entry| entry.metadata_error.is_some())
                         .count();
-                    let recovered = entries.iter().filter(|entry| entry.recovered).count();
                     let mut details = vec![if self.language == LanguagePreference::English {
                         format!("{} items", entries.len())
                     } else {
@@ -117,13 +116,6 @@ impl ClipboardView {
                             format!("{unreadable} unreadable")
                         } else {
                             format!("{unreadable} 项无法读取")
-                        });
-                    }
-                    if recovered > 0 {
-                        details.push(if self.language == LanguagePreference::English {
-                            format!("{recovered} from backup copies")
-                        } else {
-                            format!("{recovered} 项使用备份副本")
                         });
                     }
                     details.join(" · ")

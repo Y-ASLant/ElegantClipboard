@@ -4,6 +4,13 @@
 
 ## 未发布
 
+## 2.0.0-beta.8（预发行版）
+
+- 移除普通文件副本功能及设置：文件历史仅记录原始路径，原件失效时明确报错，不自动备份文件实体。启动时清理数据目录内旧 `staged` 副本并移除对应数据库引用，保留原始路径、历史元数据和截图；备份不再携带副本，旧备份恢复时跳过副本文件，避免重新占用空间。
+
+- 三平台默认数据目录统一为应用名称：Windows `%LOCALAPPDATA%\ElegantClipboard`、macOS `~/Library/Application Support/ElegantClipboard`、Linux `$XDG_DATA_HOME/elegantclipboard`（默认 `~/.local/share/elegantclipboard`）。兼容迁移旧 GPUI 默认目录，保留数据库和附件，重定位内部路径及开机启动条目，成功后清理旧目录与空的专属父目录；迁移中断可重试，新旧两处已有数据时保留并提示，不覆盖历史。其他自定义目录保持原样。
+- 验证：404 项测试通过、2 项原有忽略；完整本地检查、Release 构建和隔离剪贴板往返通过，原生隔离样本确认旧副本清理、原文件和历史保留。Linux x64、macOS ARM64 平台库交叉编译通过。详见[仅路径存储验证](evidence/file-paths-only-2026-10-27.md)与[目录迁移验证](evidence/data-directory-migration-2026-10-27.md)。
+
 ## 2.0.0-beta.7（预发行版）
 
 - 修复 macOS 错误显示 Wayland 说明，以及新增复制状态的英文映射遗漏。

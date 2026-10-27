@@ -372,7 +372,6 @@ fn file_paths_are_saved_and_missing_sources_do_not_touch_clipboard() -> Result<(
                         exists: true,
                         is_dir: false,
                         size: Some(6),
-                        recovered: false,
                         metadata_error: None,
                     }])
                 );

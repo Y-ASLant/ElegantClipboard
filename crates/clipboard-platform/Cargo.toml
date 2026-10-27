@@ -13,6 +13,8 @@ async-channel.workspace = true
 clipboard-rs.workspace = true
 directories.workspace = true
 image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(windows)'.dependencies]

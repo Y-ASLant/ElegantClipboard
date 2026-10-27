@@ -10,6 +10,8 @@
 - [技术决策](decisions/0001-windows-gpui.md)：GPUI 和 gpui-kit 的选择依据。
 - [技术决策 0002](decisions/0002-native-fidelity-transient-merge.md)：原生格式保真、瞬时过滤、同文合并与 blob 存储。
 - [跨平台正确性修复验证](evidence/cross-platform-correctness-2026-10-27.md)：平台能力、粘贴目标与请求归属、格式编码和延迟采集修复的验证范围。
+- [默认数据目录迁移验证](evidence/data-directory-migration-2026-10-27.md)：三平台统一目录、旧数据引用与自启迁移、冲突保护和清理规则。
+- [普通文件仅保存路径](evidence/file-paths-only-2026-10-27.md)：移除文件副本、启动清理及旧备份兼容行为。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。

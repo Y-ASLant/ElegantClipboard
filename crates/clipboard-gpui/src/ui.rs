@@ -37,7 +37,6 @@ mod settings_audio;
 mod settings_common;
 mod settings_data;
 mod settings_display;
-mod settings_file_staging;
 mod settings_general;
 mod settings_hover;
 mod settings_layout;
@@ -361,7 +360,6 @@ struct ClipboardView {
     audio: PendingPref<AudioPreference>,
     retention: PendingPref<clipboard_core::retention::RetentionPolicy>,
     retention_saved: bool,
-    stage_files: PendingPref<bool>,
     transient_filter: PendingPref<bool>,
     monitor_types: PendingPref<MonitorTypesPreference>,
     app_filter: PendingPref<AppFilterPreference>,

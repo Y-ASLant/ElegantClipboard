@@ -115,7 +115,14 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     assert_eq!(exported.total_items, 3);
     assert_eq!(exported.included_images, 1);
     assert_eq!(exported.missing_images, 0);
-    assert_eq!((exported.included_icons, exported.included_staged), (1, 1));
+    assert_eq!(exported.included_icons, 1);
+    let archive = ZipArchive::new(File::open(&backup)?)?;
+    for name in archive.file_names() {
+        assert!(!name?.starts_with("staged/"));
+    }
+    // 导出只处理快照，不清理原目录或改写源数据库。
+    assert!(staged.is_file());
+    assert!(history.item(file)?.file_payload.unwrap().contains("staged"));
     assert!(history.export_backup(&backup).is_err());
 
     let target = dir.path().join("restored");
@@ -123,7 +130,8 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     let report = restore_backup(&backup, &target)?;
     assert_eq!(report.total_items, 3);
     assert_eq!(report.restored_images, 1);
-    assert_eq!((report.restored_icons, report.restored_staged), (1, 1));
+    assert_eq!(report.restored_icons, 1);
+    assert!(!target.join("staged").exists());
     let restored = History::open(target.join("clipboard.db"))?;
     assert_eq!(restored.groups()?[0].name, "工作");
     assert!(restored.item(id)?.is_favorite);
@@ -177,9 +185,11 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     let icon = PathBuf::from(restored.item(id)?.source_app_icon.unwrap());
     assert!(icon.starts_with(target.join("icons")));
     assert_eq!(fs::read(icon)?, b"icon bytes");
-    let copied = History::file_paths_for_copy(&restored.item(file)?, &target.join("staged"))?;
-    assert_eq!(copied.len(), 1);
-    assert_eq!(fs::read(&copied[0])?, b"draft bytes");
+    let copied = History::file_paths_for_copy(&restored.item(file)?)?;
+    assert_eq!(copied, vec![original_file]);
+    let payload: serde_json::Value =
+        serde_json::from_str(&restored.item(file)?.file_payload.unwrap())?;
+    assert!(payload.get("staged").is_none());
     assert_eq!(
         restored.db.read_connection().lock().query_row(
             "SELECT COUNT(*) FROM settings WHERE key IN ('secret_token', 'gpui_toolbar')",
@@ -260,7 +270,7 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
     fs::create_dir_all(&target)?;
     let report = restore_backup(&previous, &target)?;
     assert_eq!(report.total_items, 2);
-    assert_eq!((report.restored_icons, report.restored_staged), (0, 0));
+    assert_eq!(report.restored_icons, 0);
     assert_eq!(
         History::open(target.join("clipboard.db"))?.text(id)?,
         "v1 text"
@@ -321,6 +331,53 @@ fn invalid_backup_cannot_create_destination_database() -> Result<()> {
     fs::create_dir_all(&target)?;
     assert!(restore_backup(&invalid, &target).is_err());
     assert!(!target.join("clipboard.db").exists());
+    Ok(())
+}
+
+#[test]
+fn old_gpui_backup_discards_file_copies_without_recreating_them() -> Result<()> {
+    let dir = tempfile::tempdir()?;
+    let source_dir = dir.path().join("source");
+    fs::create_dir_all(&source_dir)?;
+    let history = History::open(source_dir.join("clipboard.db"))?;
+    let original = dir.path().join("original.txt");
+    fs::write(&original, b"original contents")?;
+    let id = history.capture_files(
+        &[original.to_string_lossy().into_owned()],
+        &source_dir.join("images"),
+    )?;
+    history.set_note(id, "retain file history")?;
+    history.db.write_connection().lock().execute(
+        "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
+        params![r#"{"staged":[{"original":"original.txt","staged":"staged/copy.txt"}],"metadata":"keep"}"#, id],
+    )?;
+    crate::import::checkpoint_staged_database(&history.db.write_connection().lock())?;
+    drop(history);
+    let backup = dir.path().join("old-gpui.zip");
+    let mut zip = ZipWriter::new(File::create(&backup)?);
+    zip.start_file("manifest.json", SimpleFileOptions::default())?;
+    zip.write_all(br#"{"format":"elegantclipboard-gpui","version":2,"total_items":1,"missing_images":0,"missing_staged":0}"#)?;
+    zip.start_file("clipboard.db", SimpleFileOptions::default())?;
+    io::copy(&mut File::open(source_dir.join("clipboard.db"))?, &mut zip)?;
+    zip.start_file("staged/copy.txt", SimpleFileOptions::default())?;
+    zip.write_all(b"retired copy bytes")?;
+    zip.finish()?;
+    let target = dir.path().join("target");
+    fs::create_dir_all(&target)?;
+    let report = restore_backup(&backup, &target)?;
+    assert_eq!(report.total_items, 1);
+    let restored = History::open(target.join("clipboard.db"))?;
+    let item = restored.item(id)?;
+    let payload: serde_json::Value = serde_json::from_str(&item.file_payload.unwrap())?;
+    assert!(payload.get("staged").is_none());
+    assert_eq!(payload["metadata"], "keep");
+    assert_eq!(item.note.as_deref(), Some("retain file history"));
+    assert_eq!(
+        restored.files(id)?,
+        vec![original.to_string_lossy().into_owned()]
+    );
+    assert!(!target.join("staged").exists());
+    assert_eq!(fs::read(original)?, b"original contents");
     Ok(())
 }
 

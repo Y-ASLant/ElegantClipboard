@@ -48,7 +48,7 @@ impl Worker {
     pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
         self.clipboard_stash = None;
         let item_count = ids.len();
-        let merged = self.history.merge_content(&ids, &self.staged_dir)?;
+        let merged = self.history.merge_content(&ids)?;
         let mut contents = Vec::with_capacity(2);
         if !merged.files.is_empty() {
             contents.push(ClipboardContent::Files(merged.files));
@@ -98,20 +98,17 @@ impl Worker {
                 }
             }
             CopyMode::Paths => contents.push(ClipboardContent::Text(
-                item_paths_for_action(&item, &self.staged_dir)?.join("\n"),
+                item_paths_for_action(&item)?.join("\n"),
             )),
             CopyMode::Files => {
                 if item.content_type != "image" {
                     bail!("该记录不是图片，无法作为文件复制");
                 }
-                contents.push(ClipboardContent::Files(item_paths_for_action(
-                    &item,
-                    &self.staged_dir,
-                )?));
+                contents.push(ClipboardContent::Files(item_paths_for_action(&item)?));
             }
             CopyMode::Original => match item.content_type.as_str() {
                 "files" => {
-                    let files = History::file_paths_for_copy(&item, &self.staged_dir)?;
+                    let files = History::file_paths_for_copy(&item)?;
                     if files.iter().any(|path| !Path::new(path).exists()) {
                         bail!("源文件或文件夹已不存在，无法复制");
                     }

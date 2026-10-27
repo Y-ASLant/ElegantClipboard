@@ -51,7 +51,7 @@ fn text_item(text: &str) -> Result<ClipboardItem> {
 #[test]
 fn data_medium_outlives_object_and_repeated_requests_are_independent() -> Result<()> {
     let item = text_item("文本 😀\r\nsecond line")?;
-    let payload = prepare_external_drag(&item, Path::new("unused"))?;
+    let payload = prepare_external_drag(&item)?;
     let object = data_object::data_object(payload);
     let first = get(&object, CF_UNICODETEXT.0);
     let second = get(&object, CF_UNICODETEXT.0);
@@ -72,10 +72,7 @@ fn data_medium_outlives_object_and_repeated_requests_are_independent() -> Result
 
 #[test]
 fn com_requests_reject_unsupported_aspects_indices_media_and_formats() -> Result<()> {
-    let object = data_object::data_object(prepare_external_drag(
-        &text_item("hello")?,
-        Path::new("unused"),
-    )?);
+    let object = data_object::data_object(prepare_external_drag(&text_item("hello")?)?);
     for (field, expected) in [
         (0, DV_E_DVASPECT),
         (1, DV_E_LINDEX),
@@ -145,7 +142,7 @@ fn rich_payload_preserves_utf8_fragment_boundaries_and_rtf_bytes() -> Result<()>
         directory.path(),
     )?;
     let item = history.item(id)?;
-    let object = data_object::data_object(prepare_external_drag(&item, Path::new("unused"))?);
+    let object = data_object::data_object(prepare_external_drag(&item)?);
     let html_id = clipboard_win::register_format("HTML Format").unwrap().get() as u16;
     let html = get(&object, html_id).bytes();
     let text = std::str::from_utf8(&html)?.trim_end_matches('\0');
@@ -181,7 +178,7 @@ fn image_supplies_original_file_and_decodable_bitmap_without_clipboard_writes() 
     let mut item = text_item("image fixture")?;
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
-    let object = data_object::data_object(prepare_external_drag(&item, directory.path())?);
+    let object = data_object::data_object(prepare_external_drag(&item)?);
     let medium = get(&object, CF_HDROP.0);
     let hdrop = HDROP(unsafe { medium.0.u.hGlobal }.0);
     assert_eq!(unsafe { DragQueryFileW(hdrop, u32::MAX, None) }, 1);
@@ -203,7 +200,7 @@ fn image_supplies_original_file_and_decodable_bitmap_without_clipboard_writes() 
     let second = get(&object, CF_DIB.0);
     assert_ne!(unsafe { first.0.u.hGlobal }, unsafe { second.0.u.hGlobal });
     assert_eq!(first.bytes(), second.bytes());
-    assert!(prepare_external_drag(&item, directory.path()).is_err());
+    assert!(prepare_external_drag(&item).is_err());
     Ok(())
 }
 
@@ -355,7 +352,7 @@ fn file_drop_encodes_multiple_paths_and_rejects_partial_missing_batches() -> Res
         .collect();
     let id = history.capture_files(&names, directory.path())?;
     let item = history.item(id)?;
-    let object = data_object::data_object(prepare_external_drag(&item, directory.path())?);
+    let object = data_object::data_object(prepare_external_drag(&item)?);
     let medium = get(&object, CF_HDROP.0);
     let hdrop = HDROP(unsafe { medium.0.u.hGlobal }.0);
     assert_eq!(unsafe { DragQueryFileW(hdrop, u32::MAX, None) }, 2);
@@ -365,7 +362,7 @@ fn file_drop_encodes_multiple_paths_and_rejects_partial_missing_batches() -> Res
         assert_eq!(&String::from_utf16(&name[..length])?, expected);
     }
     std::fs::remove_file(&paths[0])?;
-    assert!(prepare_external_drag(&item, directory.path()).is_err());
+    assert!(prepare_external_drag(&item).is_err());
     Ok(())
 }
 
@@ -377,7 +374,7 @@ fn oversized_image_attachment_is_rejected_before_decode() -> Result<()> {
     let mut item = text_item("image fixture")?;
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
-    assert!(prepare_external_drag(&item, directory.path()).is_err());
+    assert!(prepare_external_drag(&item).is_err());
     Ok(())
 }
 
@@ -389,7 +386,7 @@ fn deferred_dib_failure_preserves_file_format_and_is_cached() -> Result<()> {
     let mut item = text_item("image fixture")?;
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
-    let object = data_object::data_object(prepare_external_drag(&item, directory.path())?);
+    let object = data_object::data_object(prepare_external_drag(&item)?);
     let dib_format = data_object::format_etc(CF_DIB.0);
     assert_eq!(unsafe { object.QueryGetData(&dib_format) }, S_OK);
     let files = get(&object, CF_HDROP.0);
@@ -418,12 +415,10 @@ fn deferred_dib_rejects_excessive_dimensions_before_pixel_allocation() -> Result
     let mut item = text_item("image fixture")?;
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
-    let object = data_object::data_object(prepare_external_drag(&item, directory.path())?);
+    let object = data_object::data_object(prepare_external_drag(&item)?);
     let error = unsafe { object.GetData(&data_object::format_etc(CF_DIB.0)) }
         .err()
         .unwrap();
     assert!(error.message().contains("2500"));
     Ok(())
 }
-
-use std::path::Path;

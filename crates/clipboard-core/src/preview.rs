@@ -12,7 +12,6 @@ pub struct FilePreviewEntry {
     pub exists: bool,
     pub is_dir: bool,
     pub size: Option<u64>,
-    pub recovered: bool,
     pub metadata_error: Option<String>,
 }
 
@@ -62,27 +61,9 @@ pub fn html_preview_fragment(html: &str) -> String {
 
 impl History {
     pub fn preview_content(&self, id: i64) -> Result<PreviewContent> {
-        self.preview_content_inner(id, None)
-    }
-
-    pub fn preview_content_with_staged(
-        &self,
-        id: i64,
-        staged_dir: &std::path::Path,
-    ) -> Result<PreviewContent> {
-        self.preview_content_inner(id, Some(staged_dir))
-    }
-
-    fn preview_content_inner(
-        &self,
-        id: i64,
-        staged_dir: Option<&std::path::Path>,
-    ) -> Result<PreviewContent> {
         let item = self.item(id)?;
         if item.content_type == "files" {
-            return Ok(PreviewContent::Files(History::file_preview_entries(
-                &item, staged_dir,
-            )?));
+            return Ok(PreviewContent::Files(History::file_preview_entries(&item)?));
         }
         if matches!(item.content_type.as_str(), "html" | "rtf") {
             if item.content_type == "html"

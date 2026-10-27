@@ -1,7 +1,7 @@
 use super::{
     Command, Event,
     capture::{CaptureState, WatchHandler},
-    data::{lock_instance, resolve_data_dir},
+    data_directory,
     queue::{CaptureFeedback, CommandQueue},
     worker::Worker,
 };
@@ -41,6 +41,7 @@ pub struct Service {
     pub(super) events: async_channel::Sender<Event>,
     _instance_lock: File,
     pub data_dir: PathBuf,
+    pub initial_data_warning: Option<String>,
     pub initial_theme: ThemePreference,
     pub initial_language: LanguagePreference,
     pub initial_hotkey: HotkeyPreference,
@@ -65,7 +66,6 @@ pub struct Service {
     pub initial_audio: AudioPreference,
     pub initial_retention: clipboard_core::retention::RetentionPolicy,
     pub initial_retention_saved: bool,
-    pub initial_stage_files: bool,
     pub initial_transient_filter: bool,
     pub initial_monitor_types: MonitorTypesPreference,
     pub initial_app_filter: AppFilterPreference,
@@ -78,12 +78,22 @@ impl Service {
         data_dir: Option<PathBuf>,
         monitor: bool,
     ) -> Result<(Self, async_channel::Receiver<Event>)> {
-        let data_dir = resolve_data_dir(data_dir)?;
-        let instance_lock = lock_instance(&data_dir)?;
+        let data_directory = data_directory::prepare(data_dir)?;
+        let data_dir = data_directory.path;
+        let instance_lock = data_directory.lock;
         // Startup happens before entering the GUI event loop; subsequent DB work is
         // exclusively owned by the worker thread.
         let db = Database::new(data_dir.join("clipboard.db"))?;
         let history = History::new(&db);
+        let mut initial_data_warning = data_directory.warning;
+        if let Err(error) = history.remove_file_copies(&data_dir) {
+            let warning = format!("清理旧文件副本未完成，将在下次启动重试：{error:#}");
+            if let Some(message) = initial_data_warning.as_mut() {
+                message.push_str(&format!("\n{warning}"));
+            } else {
+                initial_data_warning = Some(warning);
+            }
+        }
         let preferences = Preferences::new(&db);
         let initial_theme = preferences.theme()?;
         let initial_language = preferences.language()?;
@@ -109,7 +119,6 @@ impl Service {
         let initial_audio = preferences.audio()?;
         let initial_retention = preferences.retention()?;
         let initial_retention_saved = preferences.retention_saved()?;
-        let initial_stage_files = preferences.stage_files()?;
         let initial_transient_filter = preferences.transient_filter()?;
         let initial_monitor_types = preferences.monitor_types()?;
         let initial_app_filter = preferences.app_filter()?;
@@ -144,6 +153,7 @@ impl Service {
             instance_signal: None,
             events: events.clone(),
             _instance_lock: instance_lock,
+            initial_data_warning,
             initial_theme,
             initial_language,
             initial_hotkey,
@@ -168,7 +178,6 @@ impl Service {
             initial_audio,
             initial_retention,
             initial_retention_saved,
-            initial_stage_files,
             initial_transient_filter,
             initial_monitor_types,
             initial_app_filter: initial_app_filter.clone(),
