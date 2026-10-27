@@ -29,6 +29,7 @@ mod row_actions;
 mod row_menu;
 mod search_input;
 mod selection;
+mod sequence;
 mod settings_about;
 mod settings_app_filter;
 mod settings_audio;
@@ -40,6 +41,7 @@ mod settings_general;
 mod settings_hover;
 mod settings_layout;
 mod settings_positioning;
+mod settings_quick_paste;
 mod settings_retention;
 mod settings_shortcuts;
 mod settings_storage;
@@ -97,8 +99,8 @@ use clipboard_core::{
     },
 };
 use clipboard_platform::hotkey::{
-    Hotkey, PasteHotkeyEvent, PasteHotkeys, PasteRegistrationWarning, normalize_paste_shortcut,
-    validate_paste_shortcuts,
+    Hotkey, PasteHotkeyEvent, PasteHotkeys, PasteRegistrationWarning, SequenceAdvanceEvent,
+    normalize_paste_shortcut, validate_paste_shortcuts,
 };
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
@@ -242,6 +244,8 @@ struct ClipboardView {
     paste_hotkeys: Option<PasteHotkeys>,
     paste_hotkey_sender: async_channel::Sender<PasteHotkeyEvent>,
     _paste_hotkey_events: Task<()>,
+    sequence_hotkey_sender: async_channel::Sender<SequenceAdvanceEvent>,
+    _sequence_hotkey_events: Task<()>,
     _outside_click_monitor: Option<OutsideClickMonitor>,
     _outside_click_events: Task<()>,
     exiting: Rc<Cell<bool>>,
@@ -364,6 +368,10 @@ struct ClipboardView {
     paste_target: Option<(isize, u32)>,
     paste_pending: paste_requests::PendingRequest<(isize, u32)>,
     paste_delivery_task: Option<Task<()>>,
+    /// 序列粘贴队列（决策 0004）：待贴条目与已送达计数；None = 未激活。
+    sequence_queue: Option<sequence::SequenceQueue>,
+    sequence_hotkey: String,
+    sequence_hotkey_pending: bool,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,
     drag_motion: DragMotionState,
@@ -408,6 +416,8 @@ enum SettingsPage {
 enum ShortcutTarget {
     Main,
     Paste(bool, u8),
+    /// 序列粘贴推进键（决策 0004）。
+    Sequence,
 }
 
 struct SettingsWindowView {

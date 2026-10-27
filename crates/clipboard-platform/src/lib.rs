@@ -15,6 +15,8 @@ pub mod macos;
 pub mod outside_click;
 pub mod paste_types;
 #[cfg(windows)]
+mod shortcut_parse;
+#[cfg(windows)]
 pub mod source_app;
 pub mod source_app_types;
 pub mod window_effect;

@@ -15,6 +15,56 @@ pub(super) fn update_clipboard_window<R>(
 }
 
 impl ClipboardView {
+    /// 托盘命令事件循环（从 view_init 拆分）。
+    pub(super) fn spawn_tray_events(
+        receiver: async_channel::Receiver<TrayCommand>,
+        main_window: AnyWindowHandle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Task<()> {
+        cx.spawn_in(window, async move |view, cx| {
+            while let Ok(command) = receiver.recv().await {
+                if update_clipboard_window(&view, main_window, cx, |this, window, cx| match command
+                {
+                    TrayCommand::Toggle => {
+                        if native_window::is_window_shown(window)
+                            && !native_window::is_window_minimized(window)
+                        {
+                            this.hide_visible_window(window, cx);
+                        } else {
+                            this.paste_target = None;
+                            this.show_window(window, cx);
+                            cx.notify();
+                        }
+                    }
+                    TrayCommand::Settings => this.open_settings_window(SettingsPage::General, cx),
+                    TrayCommand::ClearHistory => {
+                        this.paste_target = None;
+                        this.show_window(window, cx);
+                        this.open_clear_history(window, cx);
+                    }
+                    TrayCommand::TogglePause => {
+                        if this.monitoring
+                            && !this.pause_pending
+                            && this.send(Command::Pause(!this.paused), cx)
+                        {
+                            this.pause_pending = true;
+                            cx.notify();
+                        }
+                    }
+                    TrayCommand::Quit => {
+                        this.exiting.set(true);
+                        cx.quit();
+                    }
+                })
+                .is_err()
+                {
+                    break;
+                }
+            }
+        })
+    }
+
     /// 开机启动设置读取失败的启动提示（仅失败时产生一条）。
     pub(super) fn autostart_startup_error(
         language: LanguagePreference,
@@ -163,6 +213,10 @@ impl ClipboardView {
         let had_target = self.paste_target.take().is_some();
         let had_pending = self.paste_pending.take().is_some();
         let had_batch_pending = self.batch_paste_pending.take().is_some();
+        // 离开面板即取消序列（决策 0004）：目标已随失活失效。
+        if self.sequence_queue.take().is_some() {
+            self.reset_selection();
+        }
         if had_target || had_pending || had_batch_pending {
             self.set_feedback_message(
                 tr(

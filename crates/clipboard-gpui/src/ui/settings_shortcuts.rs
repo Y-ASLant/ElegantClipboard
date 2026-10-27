@@ -21,6 +21,7 @@ impl SettingsWindowView {
                 .slot(favorite, slot)
                 .unwrap_or_default()
                 .to_owned(),
+            ShortcutTarget::Sequence => state.sequence_hotkey.clone(),
         };
         let shortcut_input = self.shortcut_input.get_or_insert_with(|| {
             cx.new(|cx| InputState::new(window, cx).placeholder("Ctrl+Alt+1"))
@@ -63,6 +64,10 @@ impl SettingsWindowView {
                 owner.save_paste_shortcut(favorite, slot, &shortcut, cx);
                 owner.paste_shortcuts_pending.is_some()
             }),
+            ShortcutTarget::Sequence => owner.update(cx, |owner, cx| {
+                owner.select_sequence_hotkey(shortcut, cx);
+                owner.sequence_hotkey_pending
+            }),
         };
         if accepted {
             self.shortcut_editing = None;
@@ -103,7 +108,8 @@ impl SettingsWindowView {
         match shortcut_from_keystroke(
             &event.keystroke,
             shift_down,
-            self.shortcut_editing == Some(ShortcutTarget::Main),
+            self.shortcut_editing == Some(ShortcutTarget::Main)
+                || self.shortcut_editing == Some(ShortcutTarget::Sequence),
         ) {
             Ok(shortcut) => {
                 if let Some(input) = &self.shortcut_input {

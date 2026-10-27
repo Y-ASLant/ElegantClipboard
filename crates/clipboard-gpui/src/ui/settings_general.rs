@@ -1,6 +1,6 @@
 use super::settings_common::{command_checkbox, owner_state};
 use super::*;
-use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox, switch::Switch};
+use gpui_kit::component::{alert::Alert, switch::Switch};
 
 impl SettingsWindowView {
     pub(super) fn settings_shortcut_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -193,6 +193,20 @@ impl SettingsWindowView {
             .into_any_element()
     }
 
+    pub(super) fn sequence_shortcut_editor(
+        &self,
+        language: LanguagePreference,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.shortcut_editor(language, self.sequence_hotkey_pending(cx), cx)
+    }
+
+    fn sequence_hotkey_pending(&self, cx: &Context<Self>) -> bool {
+        self.owner
+            .upgrade()
+            .is_some_and(|owner| owner.read(cx).sequence_hotkey_pending)
+    }
+
     pub(super) fn settings_startup_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();
@@ -214,209 +228,6 @@ impl SettingsWindowView {
                                 cx.notify();
                             }
                         });
-                    }),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn settings_quick_paste_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(state) = owner_state(&self.owner, cx) else {
-            return div().into_any_element();
-        };
-        let language = state.language;
-        let quick_paste_enabled = state.quick_paste_enabled;
-        let paste_key = state.paste_key.value;
-        let paste_key_pending = state.paste_key.pending;
-        let paste_shortcuts = state.paste_shortcuts.clone();
-        let shortcut_actions_pending = state.paste_shortcuts_pending.is_some()
-            || state.quick_paste_pending_setting
-            || state.hotkey_pending
-            || crate::capabilities::desktop_unavailable_reason().is_some();
-        let paste_shortcut_status = state.paste_shortcut_status.clone();
-        let monitoring = state.monitoring;
-        let quick_paste_owner = self.owner.clone();
-        let recent_shortcut_rows = self.recent_shortcuts_expanded.then(|| {
-            self.paste_slot_rows(
-                false,
-                &paste_shortcuts,
-                shortcut_actions_pending,
-                language,
-                cx,
-            )
-            .into_any_element()
-        });
-        let favorite_shortcut_rows = self.favorite_shortcuts_expanded.then(|| {
-            self.paste_slot_rows(
-                true,
-                &paste_shortcuts,
-                shortcut_actions_pending,
-                language,
-                cx,
-            )
-            .into_any_element()
-        });
-        div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap_2()
-            .child(
-                Checkbox::new("quick-paste-enabled")
-                    .text_sm()
-                    .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
-                    .checked(quick_paste_enabled)
-                    .disabled(shortcut_actions_pending || !monitoring)
-                    .on_change(move |checked, _, cx| {
-                        let _ = quick_paste_owner.update(cx, |owner, cx| {
-                            owner.select_quick_paste_enabled(*checked, cx);
-                        });
-                    }),
-            )
-            .when_some(crate::capabilities::desktop_unavailable_reason(), |panel, reason| {
-                panel.child(Alert::warning("paste-capability", reason).small())
-            })
-            .when(cfg!(target_os = "macos"), |panel| {
-                panel.child(Alert::info("mac-paste-key", tr(language,
-                    "macOS 自动粘贴使用 Command+V，不支持 Shift+Insert。请在系统设置中授予辅助功能权限。",
-                    "macOS uses Command+V; Shift+Insert is unavailable. Grant Accessibility permission in System Settings.")).small())
-            })
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().text_xs().child(tr(
-                        language,
-                        "自动粘贴使用按键",
-                        "Key sent for automatic paste",
-                    )))
-                    .child({
-                        let choices = [
-                            (crate::capabilities::paste_key_label(), PasteKeyPreference::CtrlV),
-                            ("Shift+Insert", PasteKeyPreference::ShiftInsert),
-                        ];
-                        let selected_index = choices
-                            .iter()
-                            .position(|(_, key)| *key == paste_key)
-                            .expect("built-in paste key");
-                        let click_choices = choices;
-                        let owner = self.owner.clone();
-                        TabBar::new("settings-paste-key-tabs")
-                            .w_full()
-                            .segmented()
-                            .selected_index(selected_index)
-                            .on_click(move |index: &usize, _, cx| {
-                                if let Some(&(_, key)) = click_choices.get(*index) {
-                                    if !crate::capabilities::paste_key_supported(key) {
-                                        return;
-                                    }
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        if owner.paste_key.value != key
-                                            && owner.send(Command::SetPasteKey(key), cx)
-                                        {
-                                            owner.paste_key.pending = true;
-                                            cx.notify();
-                                        }
-                                    });
-                                }
-                            })
-                            .children(choices.map(|(label, key)| {
-                                Tab::new()
-                                    .aria_label(label)
-                                    .child(
-                                        shortcut_kbd(label)
-                                            .expect("built-in paste key")
-                                            .appearance(false),
-                                    )
-                                    .flex_1()
-                                    .disabled(paste_key_pending || !crate::capabilities::paste_key_supported(key))
-                            }))
-                    }),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(
-                        language,
-                        "可逐项修改、停用或恢复默认快捷键；数字键自动支持数字小键盘",
-                        "Edit, disable, or restore each shortcut; digit keys also work on the numpad",
-                    )),
-            )
-            .when_some(paste_shortcut_status, |panel, (message, is_error)| {
-                panel.child(if is_error {
-                    Alert::error("paste-shortcut-status", message).small()
-                } else {
-                    Alert::info("paste-shortcut-status", message).small()
-                })
-            })
-            .child(
-                Accordion::new("paste-shortcut-groups")
-                    .w_full()
-                    .multiple(true)
-                    .small()
-                    .on_toggle_click({
-                        let settings = cx.entity().downgrade();
-                        move |indices, _, cx| {
-                            let _ = settings.update(cx, |this, cx| {
-                                let recent = indices.contains(&0);
-                                let favorite = indices.contains(&1);
-                                if this.recent_shortcuts_expanded != recent
-                                    || this.favorite_shortcuts_expanded != favorite
-                                {
-                                    this.recent_shortcuts_expanded = recent;
-                                    this.favorite_shortcuts_expanded = favorite;
-                                    cx.notify();
-                                }
-                            });
-                        }
-                    })
-                    .item(|item| {
-                        item.title(tr(language, "普通记录槽位（10）", "Recent slots (10)"))
-                            .open(self.recent_shortcuts_expanded)
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .when(self.recent_shortcuts_expanded, |content| {
-                                        content
-                                            .child(self.paste_group_actions(
-                                                false,
-                                                &paste_shortcuts,
-                                                shortcut_actions_pending,
-                                                language,
-                                            ))
-                                            .when_some(recent_shortcut_rows, |content, rows| {
-                                                content.child(rows)
-                                            })
-                                    }),
-                            )
-                    })
-                    .item(|item| {
-                        item.title(tr(language, "收藏槽位（10）", "Favorite slots (10)"))
-                            .open(self.favorite_shortcuts_expanded)
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .when(self.favorite_shortcuts_expanded, |content| {
-                                        content
-                                            .child(self.paste_group_actions(
-                                                true,
-                                                &paste_shortcuts,
-                                                shortcut_actions_pending,
-                                                language,
-                                            ))
-                                            .when_some(favorite_shortcut_rows, |content, rows| {
-                                                content.child(rows)
-                                            })
-                                    }),
-                            )
                     }),
             )
             .into_any_element()

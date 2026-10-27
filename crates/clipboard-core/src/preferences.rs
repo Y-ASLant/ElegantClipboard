@@ -33,6 +33,7 @@ const AUDIO_KEY: &str = "gpui_audio";
 const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
 const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
 const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
+const SEQUENCE_HOTKEY_KEY: &str = "gpui_sequence_paste_hotkey";
 pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
      ('gpui_theme_mode', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size',
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
@@ -41,7 +42,7 @@ pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE
       'gpui_display', 'gpui_monitor_types', 'gpui_app_filter', 'gpui_stage_files', 'gpui_transient_filter',
       'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect', 'gpui_retention',
       '_migration_url_content_type', '_migration_backfill_semantic_hash', 'gpui_dedup_strategy',
-      'gpui_restore_clipboard')";
+      'gpui_restore_clipboard', 'gpui_sequence_paste_hotkey')";
 
 pub struct Preferences {
     repository: SettingsRepository,
@@ -447,6 +448,18 @@ impl Preferences {
             if enabled { "true" } else { "false" },
         )?;
         Ok(())
+    }
+
+    /// 序列粘贴推进键（决策 0004）；空串表示停用。默认 Ctrl+Shift+G。
+    pub fn sequence_paste_hotkey(&self) -> Result<String> {
+        Ok(self
+            .repository
+            .get(SEQUENCE_HOTKEY_KEY)?
+            .unwrap_or_else(|| "Ctrl+Shift+G".into()))
+    }
+
+    pub fn set_sequence_paste_hotkey(&self, shortcut: &str) -> Result<()> {
+        Ok(self.repository.set(SEQUENCE_HOTKEY_KEY, shortcut.trim())?)
     }
 
     pub fn set_app_filter(&self, preference: &AppFilterPreference) -> Result<()> {

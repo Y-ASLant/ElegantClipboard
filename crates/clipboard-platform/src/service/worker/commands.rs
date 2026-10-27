@@ -379,6 +379,15 @@ impl Worker {
                     Event::RestoreClipboardSaved,
                 );
             }
+            Command::SetSequenceHotkey(shortcut) => {
+                let result = self
+                    .preferences
+                    .set_sequence_paste_hotkey(&shortcut)
+                    .map(|()| shortcut)
+                    .map_err(|error| error.to_string());
+                self.send_event(Event::SequenceHotkeySaved(result))?;
+                return Ok(());
+            }
             Command::SetNote { id, note } => {
                 let result = self
                     .history

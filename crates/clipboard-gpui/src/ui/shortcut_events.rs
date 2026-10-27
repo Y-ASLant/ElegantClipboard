@@ -58,11 +58,7 @@ impl ClipboardView {
             Err(error) => {
                 self.quick_paste_registration_warning = None;
                 if self.quick_paste_enabled && self.paste_hotkeys.is_none() {
-                    if let Ok((hotkeys, _)) = PasteHotkeys::start(
-                        self.paste_hotkey_sender.clone(),
-                        &self.paste_shortcuts,
-                        &self.hotkey_choice,
-                    ) {
+                    if let Ok((hotkeys, _)) = self.start_paste_hotkeys() {
                         self.paste_hotkeys = Some(hotkeys);
                     }
                 } else if !self.quick_paste_enabled {

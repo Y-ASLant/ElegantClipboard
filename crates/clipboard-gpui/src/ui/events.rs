@@ -26,6 +26,10 @@ impl ClipboardView {
         if copy_requested || matches!(&command, Command::ResolveQuickPaste { .. }) {
             // Dropping the task cancels the old wait before this request can replace its data.
             self.paste_delivery_task = None;
+            // 复制/合并/快捷粘贴打断序列队列（决策 0004）。
+            if copy_requested && self.sequence_queue.take().is_some() {
+                self.reset_selection();
+            }
         }
         if let Err(error) = self.service.send(command) {
             self.set_feedback_message(error.to_string());
@@ -219,6 +223,35 @@ impl ClipboardView {
                         "Failed to save clipboard restore setting",
                     ),
                 );
+                true
+            }
+            Event::SequenceHotkeySaved(result) => {
+                self.sequence_hotkey_pending = false;
+                match result {
+                    Ok(shortcut) => {
+                        self.sequence_hotkey = shortcut;
+                        self.set_feedback_message(
+                            tr(
+                                self.language,
+                                "序列粘贴推进键已保存",
+                                "Sequence paste advance key saved",
+                            )
+                            .into(),
+                        );
+                        self.is_error = false;
+                    }
+                    Err(error) => {
+                        self.set_feedback_message(format!(
+                            "{}: {error}",
+                            tr(
+                                self.language,
+                                "保存序列粘贴推进键失败",
+                                "Failed to save sequence paste advance key"
+                            )
+                        ));
+                        self.is_error = true;
+                    }
+                }
                 true
             }
             Event::NoteSaved(result) => match result {

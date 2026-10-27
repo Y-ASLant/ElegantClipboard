@@ -65,47 +65,7 @@ impl ClipboardView {
         if startup.hidden && tray.is_err() {
             native_window::set_window_visible(window, true);
         }
-        let tray_events = cx.spawn_in(window, async move |view, cx| {
-            while let Ok(command) = tray_receiver.recv().await {
-                if update_clipboard_window(&view, main_window, cx, |this, window, cx| match command
-                {
-                    TrayCommand::Toggle => {
-                        if native_window::is_window_shown(window)
-                            && !native_window::is_window_minimized(window)
-                        {
-                            this.hide_visible_window(window, cx);
-                        } else {
-                            this.paste_target = None;
-                            this.show_window(window, cx);
-                            cx.notify();
-                        }
-                    }
-                    TrayCommand::Settings => this.open_settings_window(SettingsPage::General, cx),
-                    TrayCommand::ClearHistory => {
-                        this.paste_target = None;
-                        this.show_window(window, cx);
-                        this.open_clear_history(window, cx);
-                    }
-                    TrayCommand::TogglePause => {
-                        if this.monitoring
-                            && !this.pause_pending
-                            && this.send(Command::Pause(!this.paused), cx)
-                        {
-                            this.pause_pending = true;
-                            cx.notify();
-                        }
-                    }
-                    TrayCommand::Quit => {
-                        this.exiting.set(true);
-                        cx.quit();
-                    }
-                })
-                .is_err()
-                {
-                    break;
-                }
-            }
-        });
+        let tray_events = Self::spawn_tray_events(tray_receiver, main_window, window, cx);
         let tray_error = tray.as_ref().err().map(ToString::to_string);
         // The hotkey thread uses try_send; a full channel must not discard the
         // second press while the first press is still waking the window.
@@ -140,28 +100,41 @@ impl ClipboardView {
         let paste_shortcuts = service.initial_paste_shortcuts.clone();
         let initial_dedup_strategy = service.initial_dedup_strategy;
         let initial_restore_clipboard = service.initial_restore_clipboard;
-        let (paste_hotkey_sender, paste_hotkey_receiver) = async_channel::bounded(16);
-        let paste_hotkeys = if startup.monitoring && quick_paste_enabled {
-            PasteHotkeys::start(
-                paste_hotkey_sender.clone(),
-                &paste_shortcuts,
-                &hotkey_choice,
-            )
-            .map(Some)
-        } else {
-            Ok(None)
-        };
-        let paste_hotkey_events = cx.spawn_in(window, async move |view, cx| {
-            while let Ok(event) = paste_hotkey_receiver.recv().await {
-                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                    this.handle_quick_hotkey(event, window, cx);
-                })
-                .is_err()
-                {
-                    break;
+        let initial_sequence_hotkey = service.initial_sequence_hotkey.clone();
+        let channels = Self::register_paste_hotkeys(
+            startup.monitoring,
+            quick_paste_enabled,
+            &paste_shortcuts,
+            &initial_sequence_hotkey,
+            &hotkey_choice,
+        );
+        let paste_hotkey_sender = channels.paste_sender;
+        let sequence_hotkey_sender = channels.sequence_sender;
+        let paste_hotkeys = channels.result;
+        let (paste_hotkey_events, _sequence_hotkey_events_task) = (
+            cx.spawn_in(window, async move |view, cx| {
+                while let Ok(event) = channels.paste_receiver.recv().await {
+                    if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                        this.handle_quick_hotkey(event, window, cx);
+                    })
+                    .is_err()
+                    {
+                        break;
+                    }
                 }
-            }
-        });
+            }),
+            cx.spawn_in(window, async move |view, cx| {
+                while let Ok(event) = channels.sequence_receiver.recv().await {
+                    if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                        this.handle_sequence_advance(event.target, window, cx);
+                    })
+                    .is_err()
+                    {
+                        break;
+                    }
+                }
+            }),
+        );
         let paste_hotkey_error = paste_hotkeys.as_ref().err().map(ToString::to_string);
         let paste_hotkey_warnings = paste_hotkeys
             .as_ref()
@@ -198,29 +171,35 @@ impl ClipboardView {
             paste_hotkey_error,
             paste_registration_summary(language, &paste_hotkey_warnings),
             outside_click_error,
+            Self::autostart_startup_error(language, &autostart),
         ]
         .into_iter()
         .flatten()
         .collect();
-        startup_errors.extend(Self::autostart_startup_error(language, &autostart));
         let theme = service.initial_theme;
         let window_effect = service.initial_window_effect;
         let paused = service.initial_paused;
-        let initial_window_size = service.initial_window_size;
-        let persist_window_size = service.initial_persist_window_size;
+        let (initial_window_size, persist_window_size) = (
+            service.initial_window_size,
+            service.initial_persist_window_size,
+        );
         let auto_reset_state = service.initial_auto_reset_state;
         let search_auto_focus = service.initial_search_auto_focus;
         let search_auto_clear = service.initial_search_auto_clear;
         let skip_clear_confirm = service.initial_skip_clear_confirm;
-        let paste_close_window = service.initial_paste_close_window;
-        let paste_key = service.initial_paste_key;
-        let paste_move_to_top = service.initial_paste_move_to_top;
+        let (paste_close_window, paste_key, paste_move_to_top) = (
+            service.initial_paste_close_window,
+            service.initial_paste_key,
+            service.initial_paste_move_to_top,
+        );
         let display = service.initial_display;
         let audio = service.initial_audio;
-        let retention = service.initial_retention;
-        let retention_saved = service.initial_retention_saved;
-        let stage_files = service.initial_stage_files;
-        let transient_filter = service.initial_transient_filter;
+        let (retention, retention_saved) =
+            (service.initial_retention, service.initial_retention_saved);
+        let (stage_files, transient_filter) = (
+            service.initial_stage_files,
+            service.initial_transient_filter,
+        );
         let monitor_types = service.initial_monitor_types;
         let app_filter = service.initial_app_filter.clone();
         let onboarding_completed = service.initial_onboarding_completed;
@@ -276,6 +255,8 @@ impl ClipboardView {
             paste_hotkeys: paste_hotkeys.ok().flatten().map(|(hotkeys, _)| hotkeys),
             paste_hotkey_sender,
             _paste_hotkey_events: paste_hotkey_events,
+            sequence_hotkey_sender,
+            _sequence_hotkey_events: _sequence_hotkey_events_task,
             _outside_click_monitor: outside_click_monitor.ok().flatten(),
             _outside_click_events: outside_click_events,
             exiting,
@@ -421,6 +402,9 @@ impl ClipboardView {
                 value: initial_restore_clipboard,
                 pending: false,
             },
+            sequence_queue: None,
+            sequence_hotkey: initial_sequence_hotkey,
+            sequence_hotkey_pending: false,
             display,
             display_pending: false,
             retention_saved,

@@ -1,6 +1,78 @@
 use super::*;
 
+/// 启动时热键装配的全部产物：两条事件通道的收发端与注册结果。
+pub(super) struct PasteHotkeyChannels {
+    pub(super) paste_sender: async_channel::Sender<PasteHotkeyEvent>,
+    pub(super) paste_receiver: async_channel::Receiver<PasteHotkeyEvent>,
+    pub(super) sequence_sender: async_channel::Sender<SequenceAdvanceEvent>,
+    pub(super) sequence_receiver: async_channel::Receiver<SequenceAdvanceEvent>,
+    pub(super) result: Result<Option<(PasteHotkeys, Vec<PasteRegistrationWarning>)>, anyhow::Error>,
+}
+
 impl ClipboardView {
+    /// 启动时的快速粘贴 + 序列推进键热键装配（决策 0004）：
+    /// 创建事件通道并按需注册，返回 (槽位收发, 推进键收发, 注册结果)。
+    pub(super) fn register_paste_hotkeys(
+        monitoring: bool,
+        slots_enabled: bool,
+        shortcuts: &PasteShortcutConfig,
+        sequence_hotkey: &str,
+        main_hotkey: &HotkeyPreference,
+    ) -> PasteHotkeyChannels {
+        let (paste_sender, paste_receiver) = async_channel::bounded(16);
+        let (sequence_sender, sequence_receiver) = async_channel::bounded(4);
+        let result = if monitoring {
+            PasteHotkeys::start(
+                paste_sender.clone(),
+                sequence_sender.clone(),
+                shortcuts,
+                sequence_hotkey,
+                slots_enabled,
+                main_hotkey,
+            )
+            .map(Some)
+        } else {
+            Ok(None)
+        };
+        PasteHotkeyChannels {
+            paste_sender,
+            paste_receiver,
+            sequence_sender,
+            sequence_receiver,
+            result,
+        }
+    }
+
+    /// 统一的快速粘贴 + 序列推进键热键注册入口（决策 0004）。
+    /// 返回 (热键实例, 注册警告汇总)。
+    pub(super) fn start_paste_hotkeys(
+        &self,
+    ) -> Result<(PasteHotkeys, Option<String>), anyhow::Error> {
+        let (hotkeys, warnings) =
+            self.start_paste_hotkeys_with(&self.paste_shortcuts, &self.sequence_hotkey)?;
+        Ok((
+            hotkeys,
+            paste_registration_summary(self.language, &warnings),
+        ))
+    }
+
+    /// 以指定槽位配置与推进键注册（保存新槽位配置时的预检用）。
+    pub(super) fn start_paste_hotkeys_with(
+        &self,
+        shortcuts: &PasteShortcutConfig,
+        sequence_hotkey: &str,
+    ) -> Result<(PasteHotkeys, Vec<PasteRegistrationWarning>), anyhow::Error> {
+        let (hotkeys, warnings) = PasteHotkeys::start(
+            self.paste_hotkey_sender.clone(),
+            self.sequence_hotkey_sender.clone(),
+            shortcuts,
+            sequence_hotkey,
+            self.quick_paste_enabled,
+            &self.hotkey_choice,
+        )?;
+        Ok((hotkeys, warnings))
+    }
+
     pub(super) fn restore_hotkey(&mut self) -> Option<String> {
         if self.hotkey_choice == HotkeyPreference::Disabled {
             return None;
@@ -69,6 +141,77 @@ impl ClipboardView {
         cx.notify();
     }
 
+    pub(super) fn select_sequence_hotkey(&mut self, shortcut: String, cx: &mut Context<Self>) {
+        if self.sequence_hotkey_pending || shortcut == self.sequence_hotkey {
+            return;
+        }
+        // 预检：与主热键/槽位冲突时拒绝；同时验证格式。
+        if let Err(error) = clipboard_platform::hotkey::validate_sequence_shortcut(
+            &self.paste_shortcuts,
+            &shortcut,
+            &self.hotkey_choice,
+        ) {
+            self.set_feedback_message(error.to_string());
+            self.is_error = true;
+            cx.notify();
+            return;
+        }
+        let normalized = if shortcut.trim().is_empty() {
+            String::new()
+        } else {
+            match normalize_paste_shortcut(&shortcut) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.set_feedback_message(error.to_string());
+                    self.is_error = true;
+                    cx.notify();
+                    return;
+                }
+            }
+        };
+        // 重注册（槽位配置不变，推进键可能变化）；失败回滚。
+        let previous = self.sequence_hotkey.clone();
+        self.sequence_hotkey = normalized.clone();
+        self.paste_hotkeys = None;
+        // 未监听时无需注册全局热键，直接保存偏好。
+        let saved = if self.monitoring {
+            match self.start_paste_hotkeys() {
+                Ok((hotkeys, warning)) => {
+                    self.paste_hotkeys = Some(hotkeys);
+                    self.quick_paste_registration_warning = warning;
+                    self.send(Command::SetSequenceHotkey(normalized), cx)
+                }
+                Err(error) => {
+                    self.set_feedback_message(format!(
+                        "{}: {error}",
+                        tr(
+                            self.language,
+                            "推进键注册失败",
+                            "Failed to register advance key"
+                        )
+                    ));
+                    self.is_error = true;
+                    false
+                }
+            }
+        } else {
+            self.send(Command::SetSequenceHotkey(normalized), cx)
+        };
+        if saved {
+            self.sequence_hotkey_pending = true;
+        } else {
+            self.sequence_hotkey = previous;
+            if self.monitoring {
+                self.paste_hotkeys = None;
+                if let Ok((hotkeys, warning)) = self.start_paste_hotkeys() {
+                    self.paste_hotkeys = Some(hotkeys);
+                    self.quick_paste_registration_warning = warning;
+                }
+            }
+        }
+        cx.notify();
+    }
+
     pub(super) fn select_quick_paste_enabled(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if !self.monitoring
             || self.hotkey_pending
@@ -79,15 +222,10 @@ impl ClipboardView {
             return;
         }
         if enabled {
-            match PasteHotkeys::start(
-                self.paste_hotkey_sender.clone(),
-                &self.paste_shortcuts,
-                &self.hotkey_choice,
-            ) {
-                Ok((hotkeys, warnings)) => {
+            match self.start_paste_hotkeys() {
+                Ok((hotkeys, warning)) => {
                     self.paste_hotkeys = Some(hotkeys);
-                    self.quick_paste_registration_warning =
-                        paste_registration_summary(self.language, &warnings);
+                    self.quick_paste_registration_warning = warning;
                 }
                 Err(error) => {
                     self.set_feedback_message(error.to_string());
@@ -105,11 +243,7 @@ impl ClipboardView {
         } else if enabled {
             self.paste_hotkeys = None;
             self.quick_paste_registration_warning = None;
-        } else if let Ok((hotkeys, _)) = PasteHotkeys::start(
-            self.paste_hotkey_sender.clone(),
-            &self.paste_shortcuts,
-            &self.hotkey_choice,
-        ) {
+        } else if let Ok((hotkeys, _)) = self.start_paste_hotkeys() {
             self.paste_hotkeys = Some(hotkeys);
         }
         cx.notify();
@@ -119,14 +253,10 @@ impl ClipboardView {
         if !self.monitoring || !self.quick_paste_enabled {
             return None;
         }
-        match PasteHotkeys::start(
-            self.paste_hotkey_sender.clone(),
-            &self.paste_shortcuts,
-            &self.hotkey_choice,
-        ) {
-            Ok((hotkeys, warnings)) => {
+        match self.start_paste_hotkeys() {
+            Ok((hotkeys, warning)) => {
                 self.paste_hotkeys = Some(hotkeys);
-                paste_registration_summary(self.language, &warnings)
+                warning
             }
             Err(error) => Some(error.to_string()),
         }
@@ -180,8 +310,7 @@ impl ClipboardView {
         }
         self.paste_hotkeys = None;
         if self.monitoring && self.quick_paste_enabled {
-            match PasteHotkeys::start(self.paste_hotkey_sender.clone(), &next, &self.hotkey_choice)
-            {
+            match self.start_paste_hotkeys_with(&next, &self.sequence_hotkey) {
                 Ok((hotkeys, warnings)) => {
                     let changed_slot_failed = warnings.iter().any(|warning| {
                         next.slot(warning.favorite, warning.slot)

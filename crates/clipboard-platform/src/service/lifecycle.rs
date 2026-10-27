@@ -56,6 +56,7 @@ pub struct Service {
     pub initial_paste_move_to_top: bool,
     pub initial_dedup_strategy: DedupStrategy,
     pub initial_restore_clipboard: bool,
+    pub initial_sequence_hotkey: String,
     pub initial_quick_paste_enabled: bool,
     pub initial_paste_shortcuts: PasteShortcutConfig,
     pub initial_window_position: WindowPositionPreference,
@@ -99,6 +100,7 @@ impl Service {
         let initial_paste_move_to_top = preferences.paste_move_to_top()?;
         let initial_dedup_strategy = preferences.dedup_strategy()?;
         let initial_restore_clipboard = preferences.restore_clipboard()?;
+        let initial_sequence_hotkey = preferences.sequence_paste_hotkey()?;
         let initial_quick_paste_enabled = preferences.quick_paste_enabled()?;
         let initial_paste_shortcuts = preferences.paste_shortcuts()?;
         let initial_window_position = preferences.window_position()?;
@@ -157,6 +159,7 @@ impl Service {
             initial_paste_move_to_top,
             initial_dedup_strategy,
             initial_restore_clipboard,
+            initial_sequence_hotkey,
             initial_quick_paste_enabled,
             initial_paste_shortcuts,
             initial_window_position,

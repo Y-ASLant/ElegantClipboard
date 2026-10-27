@@ -190,6 +190,12 @@ cargo run -p elegant-clipboard-gpui --locked -- --import-db "C:\旧版目录\cli
 
 - 常规设置可启用“清理历史免确认”，默认关闭；开启后托盘菜单“清理历史”直接请求清理当前分组未置顶且未收藏的记录。搜索和筛选仍不缩小清理范围。“清空所有记录”和批量删除继续要求确认。设置持久化并随 GPUI 备份保留。
 
+## 2026-10-27 序列粘贴（决策 0004）
+
+多选记录后逐条粘贴到原窗口：批量操作栏新增「序列粘贴」，首条立即受控粘贴送出，其后在目标应用中按全局推进键（默认 `Ctrl+Shift+G`，可录制/停用，与主热键及快速粘贴槽位互斥校验）逐条送出，队列耗尽自动结束并显示总数。队列状态机在 UI 层（`ui/sequence.rs`），复用 `paste_selected` 的完整受控粘贴校验与送达确认回调；worker 保持无状态。推进键常驻注册（三平台 PasteHotkeys 线程/注册器扩展 `SequenceAdvanceEvent`，`slots_enabled` 控制槽位是否随快速粘贴开关注册）；离开面板（窗口失活/隐藏）、复制、合并或删除操作取消队列。偏好 `gpui_sequence_paste_hotkey`，设置页「快捷键 → 快速粘贴」区块提供录制、修改与停用。
+
+自动验证：232 个 Rust 文件符合 500 行上限（热键解析拆出 `shortcut_parse.rs`、快速粘贴设置拆出 `settings_quick_paste.rs`、托盘事件循环拆至 `window_lifecycle.rs`），`cargo fmt --check`、workspace/all-targets 编译与 Clippy `-D warnings` 通过，354 项测试通过（2 项原有忽略），Release 构建通过，隔离窗口站冒烟全链路通过。推进键的真实多选逐条回贴（含修饰键节奏与目标应用焦点变化）未实机验收，与跨应用回贴矩阵一并执行。
+
 ## 验证命令
 
 在仓库根目录运行：

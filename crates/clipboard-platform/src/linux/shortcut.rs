@@ -131,6 +131,45 @@ pub fn validate_paste_shortcuts(
     Ok(())
 }
 
+/// 序列粘贴推进键（决策 0004）与主热键及全部槽位互斥；空串表示停用。
+pub fn validate_sequence_shortcut(
+    config: &PasteShortcutConfig,
+    sequence_shortcut: &str,
+    main: &HotkeyPreference,
+) -> Result<()> {
+    if sequence_shortcut.trim().is_empty() {
+        return Ok(());
+    }
+    let parsed = parse(sequence_shortcut, false)?;
+    let main = match main {
+        HotkeyPreference::Shortcut(value) => Some(parse(value, true)?),
+        HotkeyPreference::Disabled => None,
+    };
+    let sequence_keys: Vec<u32> = std::iter::once(parsed.key).chain(parsed.numpad).collect();
+    if main
+        .as_ref()
+        .is_some_and(|main| main.modifiers == parsed.modifiers && sequence_keys.contains(&main.key))
+    {
+        bail!("{} conflicts with the main shortcut", parsed.canonical);
+    }
+    for favorite in [false, true] {
+        for slot in 1..=10 {
+            let value = config.slot(favorite, slot).unwrap_or_default();
+            if value.is_empty() {
+                continue;
+            }
+            let slot_parsed =
+                parse(value, false).with_context(|| format!("Invalid shortcut for slot {slot}"))?;
+            for key in std::iter::once(slot_parsed.key).chain(slot_parsed.numpad) {
+                if slot_parsed.modifiers == parsed.modifiers && sequence_keys.contains(&key) {
+                    bail!("{} conflicts with a quick-paste slot", parsed.canonical);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

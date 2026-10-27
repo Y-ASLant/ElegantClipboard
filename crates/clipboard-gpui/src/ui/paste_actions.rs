@@ -362,6 +362,8 @@ impl ClipboardView {
                                 {
                                     this.send(Command::BumpToTop(id), cx);
                                 }
+                                // 序列粘贴：送达一条即记录，等推进键触发下一条（决策 0004）。
+                                this.sequence_paste_delivered(cx);
                             }
                             Err(error) => {
                                 if hide_window {

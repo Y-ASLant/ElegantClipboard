@@ -153,6 +153,8 @@ pub enum Command {
     SetWindowEffect(WindowEffectPreference),
     SetDedupStrategy(DedupStrategy),
     SetRestoreClipboard(bool),
+    /// 序列粘贴推进键（决策 0004）；空串停用。校验失败拒绝并回滚。
+    SetSequenceHotkey(String),
     ListRunningApps,
     CompleteOnboarding,
     BumpToTop(i64),
@@ -315,6 +317,7 @@ impl Command {
             | Self::SetAppFilter(_)
             | Self::SetDedupStrategy(_)
             | Self::SetRestoreClipboard(_)
+            | Self::SetSequenceHotkey(_)
             | Self::SetTransientFilter(_)
             | Self::SetWindowEffect(_)
             | Self::ListRunningApps
@@ -425,6 +428,7 @@ pub enum Event {
     WindowEffectSaved(Result<WindowEffectPreference, String>),
     DedupStrategySaved(Result<DedupStrategy, String>),
     RestoreClipboardSaved(Result<bool, String>),
+    SequenceHotkeySaved(Result<String, String>),
     NoteSaved(Result<i64, String>),
     /// RestoreStashedClipboard 完成（Ok 内为是否真的有快照可恢复）。
     ClipboardRestored(Result<bool, String>),

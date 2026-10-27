@@ -1,7 +1,9 @@
 pub use super::shortcut::{
     normalize_main_shortcut, normalize_paste_shortcut, validate_paste_shortcuts,
+    validate_sequence_shortcut,
 };
 use super::{shortcut::parse, x11::X11};
+use crate::paste_types::SequenceAdvanceEvent;
 use anyhow::{Context, Result, bail};
 use async_channel::Sender;
 use clipboard_core::preferences::{HotkeyPreference, PasteShortcutConfig};
@@ -19,6 +21,10 @@ use x11rb::{
     protocol::{Event, xproto::*},
 };
 
+/// bindings 的第四元：true = 快速粘贴收藏槽位，false = 普通槽位，
+/// slot == 0 时表示序列粘贴推进键（决策 0004）。
+type Binding = (u8, u16, u8, Option<bool>);
+
 struct Worker {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -28,9 +34,9 @@ struct Worker {
 impl Worker {
     fn start(
         x: X11,
-        bindings: Vec<(u8, u16, u8, bool)>,
+        bindings: Vec<Binding>,
         locks: &[u16],
-        dispatch: impl Fn(u8, bool, (isize, u32)) + Send + 'static,
+        dispatch: impl Fn(u8, Option<bool>, (isize, u32)) + Send + 'static,
     ) -> Result<Self> {
         let ignored_locks = locks.iter().fold(0, |mask, lock| mask | lock);
         let stop = Arc::new(AtomicBool::new(false));
@@ -181,34 +187,56 @@ pub struct PasteHotkeys {
 }
 
 impl PasteHotkeys {
+    /// `sequence_shortcut` 是序列粘贴推进键（决策 0004）；空串表示停用。
+    /// 推进键常驻注册（未激活序列时事件由 UI 忽略）；`slots_enabled` 控制槽位是否注册。
     pub fn start(
         events: Sender<PasteHotkeyEvent>,
+        sequence_events: Sender<SequenceAdvanceEvent>,
         shortcuts: &PasteShortcutConfig,
+        sequence_shortcut: &str,
+        slots_enabled: bool,
         main: &HotkeyPreference,
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main)?;
+        validate_sequence_shortcut(shortcuts, sequence_shortcut, main)?;
         let x = X11::connect()?;
         let locks = lock_masks(&x)?;
-        let mut bindings = Vec::new();
+        let mut bindings: Vec<Binding> = Vec::new();
         let mut warnings = Vec::new();
-        for favorite in [false, true] {
-            for slot in 1..=10 {
-                let value = shortcuts.slot(favorite, slot).unwrap_or_default();
-                if value.is_empty() {
-                    continue;
-                }
-                let parsed = parse(value, false)?;
-                for symbol in std::iter::once(parsed.key).chain(parsed.numpad) {
-                    match x.keycode(symbol).and_then(|key| {
-                        register(&x, key, parsed.modifiers, &locks)?;
-                        Ok(key)
-                    }) {
-                        Ok(key) => bindings.push((key, parsed.modifiers, slot, favorite)),
-                        Err(error) => warnings.push(PasteRegistrationWarning {
-                            slot,
-                            favorite,
-                            message: format!("{value}: {error:#}"),
-                        }),
+        if !sequence_shortcut.trim().is_empty() {
+            let parsed = parse(sequence_shortcut, false)?;
+            match x.keycode(parsed.key).and_then(|key| {
+                register(&x, key, parsed.modifiers, &locks)?;
+                Ok(key)
+            }) {
+                Ok(key) => bindings.push((key, parsed.modifiers, 0, None)),
+                Err(error) => warnings.push(PasteRegistrationWarning {
+                    slot: 0,
+                    favorite: false,
+                    message: format!("{sequence_shortcut}: {error:#}"),
+                }),
+            }
+        }
+        if slots_enabled {
+            for favorite in [false, true] {
+                for slot in 1..=10 {
+                    let value = shortcuts.slot(favorite, slot).unwrap_or_default();
+                    if value.is_empty() {
+                        continue;
+                    }
+                    let parsed = parse(value, false)?;
+                    for symbol in std::iter::once(parsed.key).chain(parsed.numpad) {
+                        match x.keycode(symbol).and_then(|key| {
+                            register(&x, key, parsed.modifiers, &locks)?;
+                            Ok(key)
+                        }) {
+                            Ok(key) => bindings.push((key, parsed.modifiers, slot, Some(favorite))),
+                            Err(error) => warnings.push(PasteRegistrationWarning {
+                                slot,
+                                favorite,
+                                message: format!("{value}: {error:#}"),
+                            }),
+                        }
                     }
                 }
             }
@@ -219,13 +247,23 @@ impl PasteHotkeys {
                 warnings[0]
             );
         }
-        let worker = Worker::start(x, bindings, &locks, move |slot, favorite, target| {
-            let _ = events.try_send(PasteHotkeyEvent {
-                slot,
-                favorite,
-                target,
-            });
-        })?;
+        let worker = Worker::start(
+            x,
+            bindings,
+            &locks,
+            move |slot, favorite, target| match favorite {
+                Some(favorite) => {
+                    let _ = events.try_send(PasteHotkeyEvent {
+                        slot,
+                        favorite,
+                        target,
+                    });
+                }
+                None => {
+                    let _ = sequence_events.try_send(SequenceAdvanceEvent { target });
+                }
+            },
+        )?;
         Ok((Self { worker }, warnings))
     }
 

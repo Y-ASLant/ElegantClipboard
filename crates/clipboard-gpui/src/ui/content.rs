@@ -273,6 +273,57 @@ impl ClipboardView {
                                     this.merge_selected(window, cx);
                                 })),
                         )
+                        .when(self.sequence_queue.is_none(), |bar| {
+                            bar.child(
+                                Button::new("batch-sequence")
+                                    .small()
+                                    .outline()
+                                    .label(tr(
+                                        self.language,
+                                        if self.sequence_hotkey.trim().is_empty() {
+                                            "序列粘贴（推进键已停用）"
+                                        } else {
+                                            "序列粘贴"
+                                        },
+                                        if self.sequence_hotkey.trim().is_empty() {
+                                            "Sequence paste (advance key off)"
+                                        } else {
+                                            "Sequence paste"
+                                        },
+                                    ))
+                                    .disabled(
+                                        self.batch_pending
+                                            || self.paste_pending.is_some()
+                                            || self.selected_ids.len() < 2
+                                            || self.paste_target.is_none()
+                                            || self._tray.is_none()
+                                            || self.sequence_hotkey.trim().is_empty(),
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.start_sequence_paste(window, cx);
+                                    })),
+                            )
+                        })
+                        .when_some(self.sequence_queue.as_ref(), |bar, queue| {
+                            bar.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if self.language == LanguagePreference::English {
+                                        format!(
+                                            "Sequence: {} left, advance with {}",
+                                            queue.remaining(),
+                                            self.sequence_hotkey
+                                        )
+                                    } else {
+                                        format!(
+                                            "序列中：剩 {} 条，按 {} 推进",
+                                            queue.remaining(),
+                                            self.sequence_hotkey
+                                        )
+                                    }),
+                            )
+                        })
                         .child(
                             Button::new("batch-delete-open")
                                 .small()

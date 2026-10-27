@@ -8,11 +8,12 @@ use std::{
     sync::{LazyLock, Mutex, Once},
 };
 
-pub use crate::paste_types::{PasteHotkeyEvent, PasteRegistrationWarning};
+pub use crate::paste_types::{PasteHotkeyEvent, PasteRegistrationWarning, SequenceAdvanceEvent};
 
 enum Destination {
     Main(Sender<(isize, u32)>),
     Paste(Sender<PasteHotkeyEvent>, u8, bool),
+    SequenceAdvance(Sender<SequenceAdvanceEvent>),
 }
 
 struct Route {
@@ -54,6 +55,9 @@ fn install_handler() {
                         favorite: *favorite,
                         target,
                     });
+                }
+                Destination::SequenceAdvance(events) => {
+                    let _ = events.try_send(SequenceAdvanceEvent { target });
                 }
             }
         }))
@@ -221,34 +225,85 @@ pub fn validate_paste_shortcuts(
     Ok(())
 }
 
+/// 序列粘贴推进键（决策 0004）与主热键及全部槽位互斥；空串表示停用。
+pub fn validate_sequence_shortcut(
+    shortcuts: &PasteShortcutConfig,
+    sequence_shortcut: &str,
+    main: &HotkeyPreference,
+) -> Result<()> {
+    if sequence_shortcut.trim().is_empty() {
+        return Ok(());
+    }
+    let key = parse(sequence_shortcut)?.0.id();
+    let main = match main {
+        HotkeyPreference::Shortcut(value) => Some(parse(value)?.0.id()),
+        _ => None,
+    };
+    if Some(key) == main {
+        bail!("{sequence_shortcut} 与窗口唤出快捷键冲突")
+    }
+    for favorite in [false, true] {
+        for slot in 1..=10 {
+            let value = shortcuts.slot(favorite, slot).unwrap_or_default();
+            if value.is_empty() {
+                continue;
+            }
+            if variants(value)?.iter().any(|slot_key| slot_key.id() == key) {
+                bail!("{sequence_shortcut} 与快速粘贴槽位冲突")
+            }
+        }
+    }
+    Ok(())
+}
+
 pub struct PasteHotkeys {
     _registration: Registration,
 }
 
 impl PasteHotkeys {
+    /// `sequence_shortcut` 是序列粘贴推进键（决策 0004）；空串表示停用。
+    /// 推进键常驻注册（未激活序列时事件由 UI 忽略）；`slots_enabled` 控制槽位是否注册。
     pub fn start(
         events: Sender<PasteHotkeyEvent>,
+        sequence_events: Sender<SequenceAdvanceEvent>,
         shortcuts: &PasteShortcutConfig,
+        sequence_shortcut: &str,
+        slots_enabled: bool,
         main: &HotkeyPreference,
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main)?;
+        validate_sequence_shortcut(shortcuts, sequence_shortcut, main)?;
         let mut registration = Registration::new()?;
         let mut warnings = Vec::new();
-        for favorite in [false, true] {
-            for slot in 1..=10 {
-                let value = shortcuts.slot(favorite, slot).unwrap_or_default();
-                if value.is_empty() {
-                    continue;
-                }
-                for key in variants(value)? {
-                    if let Err(error) = registration
-                        .register(key, Destination::Paste(events.clone(), slot, favorite))
-                    {
-                        warnings.push(PasteRegistrationWarning {
-                            slot,
-                            favorite,
-                            message: format!("{value}: {error:#}"),
-                        });
+        if !sequence_shortcut.trim().is_empty()
+            && let Err(error) = registration.register(
+                parse(sequence_shortcut)?.0,
+                Destination::SequenceAdvance(sequence_events),
+            )
+        {
+            warnings.push(PasteRegistrationWarning {
+                slot: 0,
+                favorite: false,
+                message: format!("{sequence_shortcut}: {error:#}"),
+            });
+        }
+        if slots_enabled {
+            for favorite in [false, true] {
+                for slot in 1..=10 {
+                    let value = shortcuts.slot(favorite, slot).unwrap_or_default();
+                    if value.is_empty() {
+                        continue;
+                    }
+                    for key in variants(value)? {
+                        if let Err(error) = registration
+                            .register(key, Destination::Paste(events.clone(), slot, favorite))
+                        {
+                            warnings.push(PasteRegistrationWarning {
+                                slot,
+                                favorite,
+                                message: format!("{value}: {error:#}"),
+                            });
+                        }
                     }
                 }
             }
