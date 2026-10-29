@@ -62,9 +62,7 @@ fn supported_image_file(path: &str) -> bool {
 /// 复制截图工具（PixPin 等）产出的 JPG 会以「文件」形式进入历史，用户在悬停设置里
 /// 看到的却是「图片」开关，所以这类记录要按图片对待。
 pub(super) fn single_image_file_paths(raw: Option<&str>) -> bool {
-    let Some(paths) = raw.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok()) else {
-        return false;
-    };
+    let paths = clipboard_core::parse_file_paths_for_display(raw);
     matches!(paths.as_slice(), [path] if supported_image_file(path))
 }
 
@@ -112,11 +110,7 @@ fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
         image_too_large: false,
         total_size: Some(0),
     };
-    let Ok(paths) = serde_json::from_str::<Vec<String>>(raw_paths) else {
-        info.availability = FileCardAvailability::Unreadable;
-        info.total_size = None;
-        return info;
-    };
+    let paths = clipboard_core::parse_file_paths_for_display(Some(raw_paths));
     if paths.is_empty() {
         info.availability = FileCardAvailability::Unreadable;
         info.total_size = None;
@@ -202,8 +196,7 @@ impl ClipboardView {
         std::thread::spawn(move || {
             let (local, network): (Vec<_>, Vec<_>) =
                 candidates.into_iter().partition(|(_, raw)| {
-                    !serde_json::from_str::<Vec<String>>(raw)
-                        .unwrap_or_default()
+                    !clipboard_core::parse_file_paths_for_display(Some(raw))
                         .iter()
                         .any(|path| path.starts_with(r"\\"))
                 });

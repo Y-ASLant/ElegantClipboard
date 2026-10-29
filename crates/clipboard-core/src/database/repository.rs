@@ -42,6 +42,13 @@ pub struct ClipboardItem {
     pub group_id: Option<i64>,
 }
 
+impl ClipboardItem {
+    /// 存储的类型串解析为枚举；未知值不作为纯文本处理。
+    pub fn kind(&self) -> Option<ContentType> {
+        ContentType::parse(&self.content_type)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct NewClipboardItem {
     pub content_type: ContentType,

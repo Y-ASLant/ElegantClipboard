@@ -2,7 +2,7 @@ use super::super::{
     data::data_size_info,
     file_actions::{item_paths_for_action, open_data_directory, reveal_in_explorer, save_item_as},
 };
-use super::{Command, Event, Worker, clipboard::CopyMode};
+use super::{Command, Event, Worker, copy_mode::CopyMode};
 use crate::{autostart, source_app};
 use anyhow::{Context, Result};
 use clipboard_core::preferences::Preferences;
@@ -156,6 +156,27 @@ impl Worker {
                 })?;
                 return Ok(());
             }
+            Command::EditContent { id, generation } => {
+                let result = self
+                    .history
+                    .item(id)
+                    .and_then(|item| {
+                        let kind = item.kind().context("该类型记录不支持文本编辑")?;
+                        anyhow::ensure!(kind.is_text_like(), "该类型记录不支持文本编辑");
+                        let text = item.text_content.context("记录没有可编辑的纯文本")?;
+                        Ok(if kind.is_rich() {
+                            clipboard_core::PreviewContent::RichText(text)
+                        } else {
+                            clipboard_core::PreviewContent::Text(text)
+                        })
+                    })
+                    .map_err(|error| error.to_string());
+                return self.send_event(Event::Preview {
+                    id,
+                    generation,
+                    result,
+                });
+            }
             Command::EditText {
                 id,
                 expected_hash,
@@ -246,6 +267,13 @@ impl Worker {
             }
             Command::SetTheme(theme) => {
                 return self.save_setting(theme, Preferences::set_theme, Event::ThemeSaved);
+            }
+            Command::SetCornerRadius(radius) => {
+                return self.save_setting(
+                    radius,
+                    Preferences::set_corner_radius,
+                    Event::CornerRadiusSaved,
+                );
             }
             Command::SetLanguage(language) => {
                 return self.save_setting(

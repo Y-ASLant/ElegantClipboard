@@ -2,11 +2,14 @@ use crate::database::{Database, SettingsRepository};
 use anyhow::Result;
 use serde::{Serialize, de::DeserializeOwned};
 
+mod corner_radius;
 mod types;
+mod window_effect;
 pub use types::*;
 
 pub(crate) const RETENTION_KEY: &str = "gpui_retention";
 const THEME_KEY: &str = "gpui_theme_mode";
+const CORNER_RADIUS_KEY: &str = "gpui_corner_radius";
 const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";
@@ -34,7 +37,7 @@ const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
 const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
 const SEQUENCE_HOTKEY_KEY: &str = "gpui_sequence_paste_hotkey";
 pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
-     ('gpui_theme_mode', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size',
+     ('gpui_theme_mode', 'gpui_corner_radius', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size',
       'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
       'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
       'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
@@ -52,6 +55,26 @@ impl Preferences {
         Self {
             repository: SettingsRepository::new(db),
         }
+    }
+
+    /// 读取 bool 偏好；存储值不是 "true"/"false"（或缺失）时取 `default`。
+    fn bool_pref(&self, key: &str, default: bool) -> Result<bool> {
+        Ok(self
+            .repository
+            .get(key)?
+            .as_deref()
+            .and_then(|value| match value {
+                "true" => Some(true),
+                "false" => Some(false),
+                _ => None,
+            })
+            .unwrap_or(default))
+    }
+
+    fn set_bool_pref(&self, key: &str, enabled: bool) -> Result<()> {
+        Ok(self
+            .repository
+            .set(key, if enabled { "true" } else { "false" })?)
     }
 
     pub fn retention_saved(&self) -> Result<bool> {
@@ -103,6 +126,7 @@ impl Preferences {
 
     pub fn hotkey(&self) -> Result<HotkeyPreference> {
         Ok(match self.repository.get(HOTKEY_KEY)?.as_deref() {
+            Some("ctrl_shift_v") => HotkeyPreference::Shortcut("Ctrl+Shift+V".into()),
             Some("alt_c") => HotkeyPreference::Shortcut("Alt+C".into()),
             Some("ctrl_alt_v") => HotkeyPreference::Shortcut("Ctrl+Alt+V".into()),
             Some("disabled") => HotkeyPreference::Disabled,
@@ -123,18 +147,15 @@ impl Preferences {
 
     /// 瞬时内容确认窗口开关；缺省开启（旧行为的增强，减少划词/碎片噪声）。
     pub fn transient_filter(&self) -> Result<bool> {
-        Ok(!matches!(
-            self.repository.get(TRANSIENT_FILTER_KEY)?.as_deref(),
-            Some("false")
-        ))
+        self.bool_pref(TRANSIENT_FILTER_KEY, true)
     }
 
     pub fn set_transient_filter(&self, enabled: bool) -> Result<()> {
-        self.repository
-            .set(TRANSIENT_FILTER_KEY, if enabled { "true" } else { "false" })?;
-        Ok(())
+        self.set_bool_pref(TRANSIENT_FILTER_KEY, enabled)
     }
 
+    /// 暂停状态特殊：`"false"` 或缺失值表示采集中，其余（含未知值）视为已暂停
+    /// （保守行为，防止迁移残留意外恢复采集）。
     pub fn capture_paused(&self) -> Result<bool> {
         Ok(!matches!(
             self.repository.get(CAPTURE_PAUSED_KEY)?.as_deref(),
@@ -143,9 +164,7 @@ impl Preferences {
     }
 
     pub fn set_capture_paused(&self, paused: bool) -> Result<()> {
-        Ok(self
-            .repository
-            .set(CAPTURE_PAUSED_KEY, if paused { "true" } else { "false" })?)
+        self.set_bool_pref(CAPTURE_PAUSED_KEY, paused)
     }
 
     pub fn window_size(&self) -> Result<Option<WindowSizePreference>> {
@@ -166,10 +185,7 @@ impl Preferences {
     }
 
     pub fn persist_window_size(&self) -> Result<bool> {
-        Ok(!matches!(
-            self.repository.get(PERSIST_WINDOW_SIZE_KEY)?.as_deref(),
-            Some("false")
-        ))
+        self.bool_pref(PERSIST_WINDOW_SIZE_KEY, true)
     }
 
     pub fn set_persist_window_size(&self, enabled: bool) -> Result<()> {
@@ -183,76 +199,43 @@ impl Preferences {
     }
 
     pub fn auto_reset_state(&self) -> Result<bool> {
-        Ok(matches!(
-            self.repository.get(AUTO_RESET_STATE_KEY)?.as_deref(),
-            Some("true")
-        ))
+        self.bool_pref(AUTO_RESET_STATE_KEY, false)
     }
 
     pub fn set_auto_reset_state(&self, enabled: bool) -> Result<()> {
-        self.repository
-            .set(AUTO_RESET_STATE_KEY, if enabled { "true" } else { "false" })?;
-        Ok(())
+        self.set_bool_pref(AUTO_RESET_STATE_KEY, enabled)
     }
 
     pub fn search_auto_focus(&self) -> Result<bool> {
-        Ok(matches!(
-            self.repository.get(SEARCH_AUTO_FOCUS_KEY)?.as_deref(),
-            Some("true")
-        ))
+        self.bool_pref(SEARCH_AUTO_FOCUS_KEY, false)
     }
 
     pub fn set_search_auto_focus(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            SEARCH_AUTO_FOCUS_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(SEARCH_AUTO_FOCUS_KEY, enabled)
     }
 
     pub fn search_auto_clear(&self) -> Result<bool> {
-        Ok(!matches!(
-            self.repository.get(SEARCH_AUTO_CLEAR_KEY)?.as_deref(),
-            Some("false")
-        ))
+        self.bool_pref(SEARCH_AUTO_CLEAR_KEY, true)
     }
 
     pub fn set_search_auto_clear(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            SEARCH_AUTO_CLEAR_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(SEARCH_AUTO_CLEAR_KEY, enabled)
     }
 
     pub fn skip_clear_confirm(&self) -> Result<bool> {
-        Ok(matches!(
-            self.repository.get(SKIP_CLEAR_CONFIRM_KEY)?.as_deref(),
-            Some("true")
-        ))
+        self.bool_pref(SKIP_CLEAR_CONFIRM_KEY, false)
     }
 
     pub fn set_skip_clear_confirm(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            SKIP_CLEAR_CONFIRM_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(SKIP_CLEAR_CONFIRM_KEY, enabled)
     }
 
     pub fn paste_close_window(&self) -> Result<bool> {
-        Ok(!matches!(
-            self.repository.get(PASTE_CLOSE_WINDOW_KEY)?.as_deref(),
-            Some("false")
-        ))
+        self.bool_pref(PASTE_CLOSE_WINDOW_KEY, true)
     }
 
     pub fn set_paste_close_window(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            PASTE_CLOSE_WINDOW_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(PASTE_CLOSE_WINDOW_KEY, enabled)
     }
 
     pub fn paste_key(&self) -> Result<PasteKeyPreference> {
@@ -274,33 +257,19 @@ impl Preferences {
     }
 
     pub fn paste_move_to_top(&self) -> Result<bool> {
-        Ok(!matches!(
-            self.repository.get(PASTE_MOVE_TO_TOP_KEY)?.as_deref(),
-            Some("false")
-        ))
+        self.bool_pref(PASTE_MOVE_TO_TOP_KEY, true)
     }
 
     pub fn set_paste_move_to_top(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            PASTE_MOVE_TO_TOP_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(PASTE_MOVE_TO_TOP_KEY, enabled)
     }
 
     pub fn quick_paste_enabled(&self) -> Result<bool> {
-        Ok(matches!(
-            self.repository.get(QUICK_PASTE_ENABLED_KEY)?.as_deref(),
-            Some("true")
-        ))
+        self.bool_pref(QUICK_PASTE_ENABLED_KEY, false)
     }
 
     pub fn set_quick_paste_enabled(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            QUICK_PASTE_ENABLED_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(QUICK_PASTE_ENABLED_KEY, enabled)
     }
 
     fn read_json<T: DeserializeOwned + Default>(
@@ -380,15 +349,6 @@ impl Preferences {
         self.write_json(AUDIO_KEY, &preference)
     }
 
-    pub fn window_effect(&self) -> Result<WindowEffectPreference> {
-        self.read_json(WINDOW_EFFECT_KEY, WindowEffectPreference::valid)
-    }
-
-    pub fn set_window_effect(&self, preference: WindowEffectPreference) -> Result<()> {
-        anyhow::ensure!(preference.valid(), "窗口效果设置超出允许范围");
-        self.write_json(WINDOW_EFFECT_KEY, &preference)
-    }
-
     pub fn monitor_types(&self) -> Result<MonitorTypesPreference> {
         self.read_json(MONITOR_TYPES_KEY, |preference: &MonitorTypesPreference| {
             preference.valid()
@@ -422,18 +382,11 @@ impl Preferences {
 
     /// 受控粘贴后是否把用户原剪贴板内容写回（见决策 0003，默认关闭）。
     pub fn restore_clipboard(&self) -> Result<bool> {
-        Ok(matches!(
-            self.repository.get(RESTORE_CLIPBOARD_KEY)?.as_deref(),
-            Some("true")
-        ))
+        self.bool_pref(RESTORE_CLIPBOARD_KEY, false)
     }
 
     pub fn set_restore_clipboard(&self, enabled: bool) -> Result<()> {
-        self.repository.set(
-            RESTORE_CLIPBOARD_KEY,
-            if enabled { "true" } else { "false" },
-        )?;
-        Ok(())
+        self.set_bool_pref(RESTORE_CLIPBOARD_KEY, enabled)
     }
 
     /// 序列粘贴推进键（决策 0004）；空串表示停用。默认 Ctrl+Shift+G。
@@ -454,10 +407,7 @@ impl Preferences {
     }
 
     pub fn onboarding_completed(&self) -> Result<bool> {
-        Ok(matches!(
-            self.repository.get(ONBOARDING_COMPLETED_KEY)?.as_deref(),
-            Some("true")
-        ))
+        self.bool_pref(ONBOARDING_COMPLETED_KEY, false)
     }
 
     pub fn set_onboarding_completed(&self) -> Result<()> {
@@ -470,3 +420,7 @@ impl Preferences {
 mod tests;
 #[cfg(test)]
 mod tests_content;
+#[cfg(test)]
+mod tests_corner_radius;
+#[cfg(test)]
+mod tests_window_effect;

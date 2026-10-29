@@ -1,17 +1,24 @@
 use super::file_cards::{FileCardAvailability, FileCardKind};
+use super::presentation::content_type_label;
 use super::*;
 use clipboard_core::search::search_highlight_ranges;
 
 impl ClipboardView {
-    pub(super) fn render_row(&self, index: usize, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_row(
+        &self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let item = &self.history.items[index];
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
-        let file_paths = is_files
-            .then_some(item.file_paths.as_deref())
-            .flatten()
-            .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok());
+        let file_paths = if is_files {
+            clipboard_core::parse_file_paths_for_display(item.file_paths.as_deref())
+        } else {
+            Vec::new()
+        };
         let file_info = self.file_card_info.get(&id);
         let thumbnail_path = if is_image {
             item.image_path.as_ref().map(PathBuf::from)
@@ -37,18 +44,11 @@ impl ClipboardView {
             IconName::File
         };
         let image_too_large = file_info.is_some_and(|info| info.image_too_large);
-        let kind = match item.content_type.as_str() {
-            "image" => tr(self.language, "图片", "Image"),
-            "files" => tr(self.language, "文件", "Files"),
-            "html" => "HTML",
-            "rtf" => "RTF",
-            "url" => tr(self.language, "网址", "URL"),
-            _ => tr(self.language, "文本", "Text"),
-        };
+        let kind = content_type_label(self.language, &item.content_type);
         let summary = self.row_summary(
             item,
             kind,
-            file_paths.as_ref().map_or(0, Vec::len),
+            file_paths.len(),
             file_warning,
             image_too_large,
             file_info.and_then(|info| info.total_size),
@@ -60,30 +60,30 @@ impl ClipboardView {
         } else {
             let saved_preview = item.preview.as_deref().unwrap_or(kind);
             let search = self.search.read(cx).value();
-            let file_names = file_paths
-                .as_deref()
-                .filter(|paths| paths.len() > 1)
-                .map(|paths| {
-                    let mut names = paths
-                        .iter()
-                        .take(3)
-                        .map(|path| {
-                            Path::new(path)
-                                .file_name()
-                                .map(|name| name.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| path.clone())
-                        })
-                        .collect::<Vec<_>>()
-                        .join(if self.language == LanguagePreference::Chinese {
-                            "、"
-                        } else {
-                            ", "
-                        });
-                    if paths.len() > 3 {
-                        names.push('…');
-                    }
-                    names
-                });
+            let file_names = if file_paths.len() > 1 {
+                let paths = &file_paths;
+                let mut names = paths
+                    .iter()
+                    .take(3)
+                    .map(|path| {
+                        Path::new(path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| path.clone())
+                    })
+                    .collect::<Vec<_>>()
+                    .join(if self.language == LanguagePreference::Chinese {
+                        "、"
+                    } else {
+                        ", "
+                    });
+                if paths.len() > 3 {
+                    names.push('…');
+                }
+                Some(names)
+            } else {
+                None
+            };
             let preview_text = file_names.unwrap_or_else(|| saved_preview.to_owned());
             let highlights = search_highlight_ranges(&preview_text, &search)
                 .into_iter()
@@ -91,7 +91,7 @@ impl ClipboardView {
                     (
                         range,
                         HighlightStyle {
-                            color: Some(cx.theme().primary),
+                            color: Some(cx.theme().blue),
                             background_color: Some(cx.theme().primary.opacity(0.18)),
                             font_weight: Some(FontWeight::SEMIBOLD),
                             ..Default::default()
@@ -119,13 +119,71 @@ impl ClipboardView {
             file_warning: file_warning.is_some(),
             file_icon,
             selected: selected || marked,
-            batch_mode: self.batch_mode,
         };
-        let surface = card.surface(false, cx);
+        let hovered = window.use_keyed_state(("history-hover", id as usize), cx, |_, _| false);
+        let is_hovered = *hovered.read(cx);
+        let background = if card.selected {
+            cx.theme().list_active
+        } else if is_hovered {
+            cx.theme().list_hover
+        } else {
+            cx.theme().colors.list
+        };
+        let border = if card.selected {
+            cx.theme().primary
+        } else {
+            crate::design_system::container_border(cx)
+        };
+        let motion = gpui_kit::base::motion::Transition::new(crate::design_system::FAST)
+            .easing(cx.theme().motion.easing_move.clone());
+        // Translucent color interpolation over the shared material canvas produces
+        // additive-alpha fringes. Keep surface changes immediate; actions still fade.
+        let surface_motion = if cx.theme().colors.list.a < 1. {
+            gpui_kit::base::motion::Transition::new(Duration::ZERO)
+        } else {
+            motion.clone()
+        };
+        let surface_channel = if cx.theme().is_dark() {
+            "history-surface-dark"
+        } else {
+            "history-surface-light"
+        };
+        let border_channel = if cx.theme().is_dark() {
+            "history-border-dark"
+        } else {
+            "history-border-light"
+        };
+        let background = gpui_kit::base::motion::transition(
+            ElementId::from((surface_channel, id as usize)),
+            background,
+            surface_motion.clone(),
+            window,
+            cx,
+        );
+        let border = gpui_kit::base::motion::transition(
+            ElementId::from((border_channel, id as usize)),
+            border,
+            surface_motion,
+            window,
+            cx,
+        );
+        let action_opacity = gpui_kit::base::motion::transition(
+            ElementId::from(("history-actions-opacity", id as usize)),
+            if is_hovered && !self.card_drag_active(cx) {
+                1.0_f32
+            } else {
+                0.0
+            },
+            motion,
+            window,
+            cx,
+        );
+        let surface = card.surface(false, cx).bg(background).border_color(border);
         let measured_size = Rc::new(Cell::new(size(px(0.), px(0.))));
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
         let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
         let card_spacing = visual::card_spacing(self.display.card_density);
+        let card_padding = visual::card_padding(self.display.card_density);
         let entity = cx.entity();
         let row = div()
             .id(("history-row", id as usize))
@@ -134,8 +192,24 @@ impl ClipboardView {
                 MouseButton::Right,
                 cx.listener(|this, _, _, _| this.cancel_pending_row_click()),
             )
-            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                this.set_hover_source(id, *hovered, cx);
+            .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                hovered.update(cx, |hovered, _| *hovered = *is_hovered);
+                this.set_hover_source(id, *is_hovered, cx);
+                cx.notify();
+            }))
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                this.update_hover_anchor(id, event.position.y, cx);
+            }))
+            .on_scroll(cx.listener(move |this, event: &ScrollEvent, window, cx| {
+                if event.modifiers.control
+                    && this.zoom_hover_from_card(
+                        id,
+                        event.delta.pixel_delta(window.line_height()).y,
+                        cx,
+                    )
+                {
+                    cx.stop_propagation();
+                }
             }))
             .h(px(history_row_height(item, self.display)))
             .px(px(PAGE_PADDING))
@@ -172,7 +246,7 @@ impl ClipboardView {
                         let mut preview = drag.clone();
                         entity.update(cx, |this, cx| {
                             this.cancel_pending_row_click();
-                            this.close_hover_preview(cx);
+                            this.close_hover_preview("card_drag_started", cx);
                             this.history.selected = Some(drag.id);
                             this.drop_target = None;
                             this.drag_motion.hovered = None;
@@ -203,9 +277,18 @@ impl ClipboardView {
                 .size_full(),
             )
             .child(surface.when(!self.batch_mode, |card| {
-                card.child(self.render_row_action_bar(id, item, card_spacing, cx))
-                    .child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
-                    .child(self.drag_handle(id, false, self.display.show_drag_area_indicator, cx))
+                card.child(
+                    self.render_row_action_bar(id, item, card_padding, cx)
+                        .opacity(action_opacity)
+                        .when(action_opacity == 0., |bar| bar.invisible()),
+                )
+                .child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
+                .child(self.drag_handle(
+                    id,
+                    false,
+                    self.display.show_drag_area_indicator,
+                    cx,
+                ))
             }));
         let row = self.history_row_menu(row, item, cx);
         let row = div()

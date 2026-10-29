@@ -49,7 +49,7 @@ impl History {
             target
                 .preview
                 .clone()
-                .unwrap_or_else(|| input.text.chars().take(240).collect()),
+                .unwrap_or_else(|| crate::truncate_preview(input.text)),
         );
         let connection = self.db.write_connection();
         let mut connection = connection.lock();

@@ -25,7 +25,7 @@ pub mod search;
 pub mod text_transform;
 pub use blob_store::sweep_pending_at;
 pub use data_relocation::relocate_managed_paths;
-pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
+pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES, parse_file_paths_for_display};
 pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, SavedImage, save_png};
 pub use merge::MergedContent;
 pub use native_format::{
@@ -73,6 +73,13 @@ impl ContentCategory {
 pub struct History {
     repo: ClipboardRepository,
     db: Database,
+}
+
+/// 条目预览文本统一截断上限；所有写入路径共用，避免各路径长度漂移。
+pub(crate) const PREVIEW_MAX_CHARS: usize = 240;
+
+pub(crate) fn truncate_preview(text: &str) -> String {
+    text.chars().take(PREVIEW_MAX_CHARS).collect()
 }
 
 impl History {
@@ -256,7 +263,7 @@ impl History {
             text_content: Some(text.to_owned()),
             content_hash: hash.clone(),
             semantic_hash: clipboard::semantic_hash_from_text(text).unwrap_or(hash),
-            preview: Some(text.chars().take(240).collect()),
+            preview: Some(truncate_preview(text)),
             byte_size: text.len() as i64,
             char_count: Some(text.chars().count() as i64),
             ..Default::default()

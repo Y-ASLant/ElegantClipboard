@@ -23,6 +23,15 @@ pub(crate) fn parse_file_paths(raw: Option<&str>) -> Result<Vec<String>> {
     Ok(paths)
 }
 
+/// 宽松解析用于展示的路径列表：不做数量/非空校验，损坏数据返回空。
+///
+/// UI 渲染（卡片、悬停信息、右键菜单）统一走这里，避免各处手写
+/// `serde_json::from_str` 对同一 JSON 字段行为不一致。
+pub fn parse_file_paths_for_display(raw: Option<&str>) -> Vec<String> {
+    raw.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+        .unwrap_or_default()
+}
+
 pub(crate) fn file_capture_item(paths: &[String]) -> Result<NewClipboardItem> {
     if paths.is_empty() || paths.len() > MAX_FILE_PATHS || paths.iter().any(|path| path.is_empty())
     {
@@ -46,7 +55,7 @@ pub(crate) fn file_capture_item(paths: &[String]) -> Result<NewClipboardItem> {
         file_paths: Some(paths.to_vec()),
         content_hash: hash.clone(),
         semantic_hash: hash,
-        preview: Some(preview.chars().take(240).collect()),
+        preview: Some(crate::truncate_preview(&preview)),
         byte_size: serialized.len() as i64,
         ..Default::default()
     })

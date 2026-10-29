@@ -1,4 +1,54 @@
 use super::*;
+
+pub(super) fn log_window_geometry(window: &Window, cx: &App, operation: &'static str) {
+    tracing::debug!(
+        operation,
+        window_id = ?window.window_handle().window_id(),
+        native_window = ?native_window::window_id(window),
+        display_id = ?window.display(cx).map(|display| display.id()),
+        bounds = ?window.bounds(),
+        scale = window.scale_factor(),
+        "Window lifecycle geometry"
+    );
+    #[cfg(windows)]
+    if let Some(hwnd) = native_window::window_id(window) {
+        log_native_geometry(hwnd, operation);
+    }
+}
+
+#[cfg(windows)]
+pub(super) fn log_native_geometry(hwnd: isize, operation: &'static str) {
+    use ::windows::Win32::{
+        Foundation::{HWND, RECT},
+        UI::{
+            HiDpi::GetDpiForWindow,
+            WindowsAndMessaging::{GetClientRect, GetWindowRect},
+        },
+    };
+    let handle = HWND(hwnd as *mut _);
+    let mut outer = RECT::default();
+    let mut client = RECT::default();
+    let result = unsafe {
+        GetWindowRect(handle, &mut outer).and_then(|()| GetClientRect(handle, &mut client))
+    };
+    match result {
+        Ok(()) => tracing::debug!(
+            operation,
+            native_window = hwnd,
+            screen_x = outer.left,
+            screen_y = outer.top,
+            outer_width = outer.right - outer.left,
+            outer_height = outer.bottom - outer.top,
+            client_width = client.right - client.left,
+            client_height = client.bottom - client.top,
+            dpi = unsafe { GetDpiForWindow(handle) },
+            "Native window geometry"
+        ),
+        Err(error) => {
+            tracing::warn!(operation, native_window = hwnd, %error, "Native geometry unavailable")
+        }
+    }
+}
 // Settings also observes the view, so its implicit GPUI window association can
 // point at the settings window. Flush effects even when the main window is hidden.
 pub(super) fn update_clipboard_window<R>(
@@ -24,41 +74,46 @@ impl ClipboardView {
     ) -> Task<()> {
         cx.spawn_in(window, async move |view, cx| {
             while let Ok(command) = receiver.recv().await {
-                if update_clipboard_window(&view, main_window, cx, |this, window, cx| match command
-                {
-                    TrayCommand::Toggle => {
-                        if native_window::is_window_shown(window)
-                            && !native_window::is_window_minimized(window)
-                        {
-                            this.hide_visible_window(window, cx);
-                        } else {
+                if let Err(error) = update_clipboard_window(
+                    &view,
+                    main_window,
+                    cx,
+                    |this, window, cx| match command {
+                        TrayCommand::Toggle => {
+                            if native_window::is_window_shown(window)
+                                && !native_window::is_window_minimized(window)
+                            {
+                                this.hide_visible_window(window, cx);
+                            } else {
+                                this.paste_target = None;
+                                this.show_window(window, cx);
+                                cx.notify();
+                            }
+                        }
+                        TrayCommand::Settings => {
+                            this.open_settings_window(SettingsPage::General, cx)
+                        }
+                        TrayCommand::ClearHistory => {
                             this.paste_target = None;
                             this.show_window(window, cx);
-                            cx.notify();
+                            this.open_clear_history(window, cx);
                         }
-                    }
-                    TrayCommand::Settings => this.open_settings_window(SettingsPage::General, cx),
-                    TrayCommand::ClearHistory => {
-                        this.paste_target = None;
-                        this.show_window(window, cx);
-                        this.open_clear_history(window, cx);
-                    }
-                    TrayCommand::TogglePause => {
-                        if this.monitoring
-                            && !this.pause_pending
-                            && this.send(Command::Pause(!this.paused), cx)
-                        {
-                            this.pause_pending = true;
-                            cx.notify();
+                        TrayCommand::TogglePause => {
+                            if this.monitoring
+                                && !this.pause_pending
+                                && this.send(Command::Pause(!this.paused), cx)
+                            {
+                                this.pause_pending = true;
+                                cx.notify();
+                            }
                         }
-                    }
-                    TrayCommand::Quit => {
-                        this.exiting.set(true);
-                        cx.quit();
-                    }
-                })
-                .is_err()
-                {
+                        TrayCommand::Quit => {
+                            this.exiting.set(true);
+                            cx.quit();
+                        }
+                    },
+                ) {
+                    tracing::warn!(%error, "Tray event window update failed");
                     break;
                 }
             }
@@ -71,6 +126,7 @@ impl ClipboardView {
         autostart: &Result<bool, anyhow::Error>,
     ) -> Option<String> {
         autostart.as_ref().err().map(|error| {
+            tracing::error!(%error, "Reading autostart settings failed");
             format!(
                 "{}: {error}",
                 tr(
@@ -89,6 +145,8 @@ impl ClipboardView {
         Ok(())
     }
     pub(super) fn window_bounds_changed(&mut self, window: &Window, cx: &mut Context<Self>) {
+        log_window_geometry(window, cx, "main_bounds_changed");
+        self.close_hover_preview("owner_bounds_changed", cx);
         if !self.persist_window_size || self.persist_window_size_pending {
             return;
         }
@@ -132,6 +190,7 @@ impl ClipboardView {
             || self.batch_paste_pending.is_some()
             || self.batch_pending
             || self.confirmation.is_some()
+            || self.editor.id.is_some()
             || self
                 ._tray
                 .as_ref()
@@ -142,7 +201,55 @@ impl ClipboardView {
         self.hide_window(window, cx);
     }
 
+    pub(super) fn position_window_deferred(
+        window: &Window,
+        mode: WindowPositionPreference,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<()> {
+        #[cfg(windows)]
+        {
+            let Some(request) = position::prepare_window_position(window, mode)? else {
+                return Ok(());
+            };
+            let main = window.window_handle();
+            cx.spawn(async move |view, cx| {
+                let valid = main
+                    .update(cx, |_, window, _| {
+                        !window.is_maximized() && !window.is_fullscreen()
+                    })
+                    .unwrap_or(false);
+                if !valid {
+                    return;
+                }
+                tracing::debug!(?request, "Applying deferred native window position");
+                // SetWindowPos synchronously dispatches display callbacks. Run it
+                // outside App/Window/Entity updates so GPUI can borrow App again.
+                let result = request.apply();
+                let _ = update_clipboard_window(&view, main, cx, |this, window, cx| {
+                    if let Err(error) = result {
+                        tracing::error!(%error, "Deferred window positioning failed");
+                        this.set_feedback_message(format!(
+                            "{}: {error}",
+                            tr(this.language, "无法定位窗口", "Failed to position window"),
+                        ));
+                        this.is_error = true;
+                    }
+                    log_window_geometry(window, cx, "main_deferred_position_applied");
+                    cx.notify();
+                });
+            })
+            .detach();
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = cx;
+            position::position_window(window, mode)
+        }
+    }
+
     pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        log_window_geometry(window, cx, "main_show_requested");
         self.interrupt_paste_except(None);
         self.quick_paste_pending.take();
         // 窗口又要显示了：取消隐藏时的延迟释放，避免缩略图白解码一遍。
@@ -151,7 +258,8 @@ impl ClipboardView {
         if was_minimized {
             native_window::set_window_visible(window, true);
         }
-        if let Err(error) = position::position_window(window, self.window_position.value) {
+        if let Err(error) = Self::position_window_deferred(window, self.window_position.value, cx) {
+            tracing::error!(%error, "Main window positioning failed");
             self.set_feedback_message(format!(
                 "{}: {error}",
                 tr(self.language, "无法定位窗口", "Failed to position window")
@@ -161,6 +269,7 @@ impl ClipboardView {
         if !was_minimized {
             native_window::set_window_visible(window, true);
         }
+        log_window_geometry(window, cx, "main_shown");
         if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
             self.search_task = None;
             self.search
@@ -169,12 +278,12 @@ impl ClipboardView {
             self.scroll_to_top();
             self.query(cx);
         }
-        if self.preview_editing || self.preview_save_pending {
+        if self.editor.id.is_some() {
             return;
         }
         if self.search_auto_focus.value {
             self.search.update(cx, |input, cx| input.focus(window, cx));
-        } else if self.preview.id.is_none() {
+        } else {
             window.focus(&self.list_focus, cx);
         }
     }
@@ -210,7 +319,7 @@ impl ClipboardView {
         if crate::native::foreground_window_is_ours() {
             return;
         }
-        self.close_hover_preview(cx);
+        self.close_hover_preview("main_deactivated", cx);
         self.cancel_pending_row_click();
         // 回贴会在隐藏面板前聚焦原目标；正常失活须保留等待中的投递和序列。
         let foreground = crate::native::foreground_target();
@@ -248,18 +357,20 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_drag_active(cx) {
+        if self.card_drag_active(cx) || !self.close_editor(window, cx) {
             return;
         }
         self.prepare_to_hide(window, cx);
+        log_window_geometry(window, cx, "main_hide_requested");
         native_window::set_window_visible(window, false);
+        log_window_geometry(window, cx, "main_hidden");
         self.schedule_image_release(cx);
         cx.notify();
     }
 
     pub(super) fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
-        self.close_hover_preview(cx);
+        self.close_hover_preview("main_hiding", cx);
         self.paste_target = None;
         if self.paste_pending.is_none() {
             self.interrupt_paste_except(None);
@@ -275,17 +386,14 @@ impl ClipboardView {
             self.history.reset_filters();
             self.refresh_group_select(window, cx);
             self.scroll_to_top();
-            if !self.preview_editing && !self.preview_save_pending {
-                self.preview.close();
-                self.preview_source_hash = None;
-                self.preview_edit_requested = false;
-            }
             self.query(cx);
         }
     }
     /// 当前打开的覆盖层，按 Esc 关闭优先级排列（同时至多一层）。
     pub(super) fn active_overlay(&self) -> Option<Overlay> {
-        if let Some(kind) = self.confirmation {
+        if self.editor.id.is_some() {
+            Some(Overlay::Editor)
+        } else if let Some(kind) = self.confirmation {
             Some(Overlay::Confirmation(kind))
         } else if self.group_move_id.is_some() {
             Some(Overlay::GroupMove)
@@ -303,7 +411,7 @@ impl ClipboardView {
             return;
         }
         self.cancel_pending_row_click();
-        self.close_hover_preview(cx);
+        self.close_hover_preview("dismiss", cx);
         if self.card_drag_active(cx) {
             cx.stop_active_drag(window);
             self.finish_external_drag(cx);
@@ -313,6 +421,9 @@ impl ClipboardView {
             return;
         }
         match self.active_overlay() {
+            Some(Overlay::Editor) => {
+                self.close_editor(window, cx);
+            }
             Some(Overlay::Confirmation(kind)) => {
                 if self.cancel_confirmation(kind, cx) {
                     window.close_dialog(cx);

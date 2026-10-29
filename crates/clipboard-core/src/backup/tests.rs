@@ -3,10 +3,10 @@ use crate::{
     History, PreviewContent,
     backup_common::{MAX_ARCHIVE_BYTES, MAX_ENTRIES},
     preferences::{
-        AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, DisplayPreference,
-        HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, Preferences, SoundTiming, SourceAppDisplay, ThemePreference,
-        TimeFormat, WindowPositionPreference, WindowSizePreference,
+        AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, CornerRadiusPreference,
+        DisplayPreference, HoverPreviewPreference, LanguagePreference, MonitorTypesPreference,
+        PasteKeyPreference, PasteShortcutConfig, Preferences, SoundTiming, SourceAppDisplay,
+        ThemePreference, TimeFormat, WindowPositionPreference, WindowSizePreference,
     },
 };
 use std::fs;
@@ -49,6 +49,7 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     )?;
     let preferences = Preferences::new(&history.db);
     preferences.set_theme(ThemePreference::Dark)?;
+    preferences.set_corner_radius(CornerRadiusPreference::Fixed(12))?;
     preferences.set_language(LanguagePreference::English)?;
     let window_size = WindowSizePreference::new(900, 700).unwrap();
     preferences.set_window_size(window_size)?;
@@ -139,6 +140,10 @@ fn live_backup_restores_text_groups_images_and_gpui_settings() -> Result<()> {
     assert_eq!(
         Preferences::new(&restored.db).theme()?,
         ThemePreference::Dark
+    );
+    assert_eq!(
+        Preferences::new(&restored.db).corner_radius()?,
+        CornerRadiusPreference::Fixed(12)
     );
     assert_eq!(
         Preferences::new(&restored.db).language()?,

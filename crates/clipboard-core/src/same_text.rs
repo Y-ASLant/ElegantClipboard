@@ -18,7 +18,7 @@ pub(crate) struct MergeInput<'a> {
 /// 类型升级规则：仅纯文本条目可升级为富文本/网址；url 与富文本目标保持类型不变。
 pub(crate) fn upgraded_type(current: &str, incoming: ContentType) -> ContentType {
     if current != "text" {
-        return ContentType::parse(current);
+        return ContentType::parse(current).unwrap_or_default();
     }
     match incoming {
         ContentType::Text | ContentType::Url | ContentType::Html | ContentType::Rtf => incoming,

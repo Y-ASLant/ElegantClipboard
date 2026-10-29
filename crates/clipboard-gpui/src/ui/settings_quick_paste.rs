@@ -1,4 +1,4 @@
-use super::settings_common::owner_state;
+use super::settings_common::{owner_state, settings_description, settings_field, settings_stack};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
 
@@ -45,16 +45,13 @@ impl SettingsWindowView {
             )
             .into_any_element()
         });
-        div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap_2()
+        settings_stack()
             .child(
                 Checkbox::new("quick-paste-enabled")
-                    .text_sm()
+                    .w_full()
+                    .min_h(px(32.))
+                    .py(px(6.))
+                    .text_size(px(14.))
                     .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
                     .checked(quick_paste_enabled)
                     .disabled(shortcut_actions_pending || !monitoring)
@@ -69,19 +66,16 @@ impl SettingsWindowView {
             })
             // 序列粘贴推进键（决策 0004）：录制或停用，与主热键/槽位互斥。
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().text_xs().child(tr(
-                        language,
-                        "序列粘贴推进键（多选后在目标应用中逐条粘贴）",
-                        "Sequence paste advance key (paste selected items one by one)",
-                    )))
+                settings_field(tr(
+                    language,
+                    "序列粘贴推进键（多选后在目标应用中逐条粘贴）",
+                    "Sequence paste advance key (paste selected items one by one)",
+                ))
                     .child(
                         div()
+                            .w_full()
                             .flex()
+                            .flex_wrap()
                             .items_center()
                             .gap_2()
                             .child(if sequence_hotkey.trim().is_empty() {
@@ -94,7 +88,7 @@ impl SettingsWindowView {
                             })
                             .child(
                                 Button::new("sequence-shortcut-edit")
-                                    .small()
+                                    .h(px(32.))
                                     .outline()
                                     .label(tr(language, "修改", "Edit"))
                                     .disabled(sequence_pending)
@@ -108,7 +102,7 @@ impl SettingsWindowView {
                             )
                             .child(
                                 Button::new("sequence-shortcut-disable")
-                                    .small()
+                                    .h(px(32.))
                                     .ghost()
                                     .label(tr(language, "停用", "Disable"))
                                     .disabled(sequence_pending || sequence_hotkey.trim().is_empty())
@@ -132,16 +126,11 @@ impl SettingsWindowView {
                     "macOS uses Command+V; Shift+Insert is unavailable. Grant Accessibility permission in System Settings.")).small())
             })
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().text_xs().child(tr(
-                        language,
-                        "自动粘贴使用按键",
-                        "Key sent for automatic paste",
-                    )))
+                settings_field(tr(
+                    language,
+                    "自动粘贴使用按键",
+                    "Key sent for automatic paste",
+                ))
                     .child({
                         let choices = [
                             (crate::capabilities::paste_key_label(), PasteKeyPreference::CtrlV),
@@ -155,11 +144,15 @@ impl SettingsWindowView {
                         let owner = self.owner.clone();
                         TabBar::new("settings-paste-key-tabs")
                             .w_full()
+                            .min_w_0()
+                            .max_w(px(visual::CHOICE_MAX_WIDTH))
+                            .large()
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .segmented()
                             .selected_index(selected_index)
                             .on_click(move |index: &usize, _, cx| {
                                 if let Some(&(_, key)) = click_choices.get(*index) {
-                                    if !crate::capabilities::paste_key_supported(key) {
+                                    if paste_key_pending || !crate::capabilities::paste_key_supported(key) {
                                         return;
                                     }
                                     let _ = owner.update(cx, |owner, cx| {
@@ -174,6 +167,7 @@ impl SettingsWindowView {
                             })
                             .children(choices.map(|(label, key)| {
                                 Tab::new()
+                                    .text_size(px(visual::TEXT_BODY))
                                     .aria_label(label)
                                     .child(
                                         shortcut_kbd(label)
@@ -186,14 +180,11 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(
-                        language,
-                        "可逐项修改、停用或恢复默认快捷键；数字键自动支持数字小键盘",
-                        "Edit, disable, or restore each shortcut; digit keys also work on the numpad",
-                    )),
+                settings_description(tr(
+                    language,
+                    "可逐项修改、停用或恢复默认快捷键；数字键自动支持数字小键盘",
+                    "Edit, disable, or restore each shortcut; digit keys also work on the numpad",
+                ), cx),
             )
             .when_some(paste_shortcut_status, |panel, (message, is_error)| {
                 panel.child(if is_error {
@@ -206,7 +197,6 @@ impl SettingsWindowView {
                 Accordion::new("paste-shortcut-groups")
                     .w_full()
                     .multiple(true)
-                    .small()
                     .on_toggle_click({
                         let settings = cx.entity().downgrade();
                         move |indices, _, cx| {

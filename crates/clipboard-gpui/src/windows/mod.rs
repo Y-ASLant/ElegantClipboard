@@ -5,6 +5,7 @@ pub(crate) mod input;
 pub(crate) mod links;
 pub(crate) mod paste;
 pub(crate) mod position;
+pub(crate) mod preview;
 pub(crate) mod sound;
 pub(crate) mod window;
 

@@ -16,16 +16,7 @@ use clipboard_rs::{
 };
 use std::{path::Path, thread};
 
-/// protocol 的 CopyFormat → CopyMode 映射。
-impl CopyMode {
-    pub(super) fn from(format: crate::service::protocol::CopyFormat) -> Self {
-        match format {
-            crate::service::protocol::CopyFormat::PlainText => Self::PlainText,
-            crate::service::protocol::CopyFormat::Html => Self::Html,
-            crate::service::protocol::CopyFormat::Rtf => Self::Rtf,
-        }
-    }
-}
+use crate::service::worker::copy_mode::CopyMode;
 
 impl Worker {
     pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
@@ -92,8 +83,7 @@ impl Worker {
                 bail!("该记录没有{label}内容");
             }
         }
-        let is_rich =
-            mode == CopyMode::Original && matches!(item.content_type.as_str(), "html" | "rtf");
+        let is_rich = mode == CopyMode::Original && item.kind().is_some_and(|kind| kind.is_rich());
         let files = if mode == CopyMode::Files {
             if item.content_type != "image" {
                 bail!("该记录不是图片，无法作为文件复制");
@@ -341,19 +331,6 @@ fn verified_rich_sequence(
         thread::yield_now();
     }
     bail!("富文本写回后剪贴板持续变化，请重试")
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum CopyMode {
-    Original,
-    PlainText,
-    Paths,
-    Files,
-    /// 富文本条目的单一格式复制（HTML 或 RTF），缺少该格式时报错不降级。
-    Html,
-    Rtf,
-    /// 文本转换后的纯文本复制（见决策 0003）。
-    Transform(clipboard_core::TextTransform),
 }
 
 fn write_merged_clipboard(

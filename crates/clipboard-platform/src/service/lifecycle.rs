@@ -12,10 +12,10 @@ use clipboard_core::{
     ContentCategory, History, PAGE_SIZE,
     database::Database,
     preferences::{
-        AppFilterPreference, AudioPreference, DedupStrategy, DisplayPreference, HotkeyPreference,
-        HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, Preferences, ThemePreference, WindowEffectPreference,
-        WindowPositionPreference, WindowSizePreference,
+        AppFilterPreference, AudioPreference, CornerRadiusPreference, DedupStrategy,
+        DisplayPreference, HotkeyPreference, HoverPreviewPreference, LanguagePreference,
+        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, Preferences,
+        ThemePreference, WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_rs::WatcherShutdown;
@@ -43,6 +43,7 @@ pub struct Service {
     pub data_dir: PathBuf,
     pub initial_data_warning: Option<String>,
     pub initial_theme: ThemePreference,
+    pub initial_corner_radius: CornerRadiusPreference,
     pub initial_language: LanguagePreference,
     pub initial_hotkey: HotkeyPreference,
     pub initial_paused: bool,
@@ -96,6 +97,7 @@ impl Service {
         }
         let preferences = Preferences::new(&db);
         let initial_theme = preferences.theme()?;
+        let initial_corner_radius = preferences.corner_radius()?;
         let initial_language = preferences.language()?;
         let initial_hotkey = preferences.hotkey()?;
         let initial_paused = preferences.capture_paused()?;
@@ -155,6 +157,7 @@ impl Service {
             _instance_lock: instance_lock,
             initial_data_warning,
             initial_theme,
+            initial_corner_radius,
             initial_language,
             initial_hotkey,
             initial_paused,

@@ -1,4 +1,4 @@
-use crate::{History, MAX_FILE_PATHS, MAX_PATH_LIST_BYTES};
+use crate::{History, MAX_FILE_PATHS, MAX_PATH_LIST_BYTES, database::ContentType};
 use anyhow::{Context, Result, bail};
 use std::{collections::HashSet, path::Path};
 
@@ -43,7 +43,7 @@ impl History {
                     text_parts.push(path.clone());
                     append_unique_files(&mut files, &mut seen_files, [path]);
                 }
-                "text" | "url" | "html" | "rtf" => {
+                kind if ContentType::parse(kind).is_some_and(ContentType::is_text_like) => {
                     let text = merge_text(&item)
                         .with_context(|| format!("记录 {id} 没有可合并的文本表示"))?;
                     text_parts.push(text);
@@ -76,24 +76,40 @@ fn append_unique_files(
 }
 
 fn merge_text(item: &crate::database::ClipboardItem) -> Result<String> {
-    if let Some(text) = item.text_content.as_ref().filter(|text| !text.is_empty()) {
-        return Ok(text.clone());
-    }
-    if let Some(html) = item.html_content.as_deref() {
-        let text = crate::html_text::html_to_text(html)?;
-        if !text.is_empty() {
-            return Ok(text);
-        }
-    }
-    item.preview
-        .clone()
-        .filter(|preview| !preview.is_empty() && !preview.starts_with('['))
+    let text = crate::html_text::item_plain_text(item)?;
+    text.map(|text| text.into_owned())
+        .or_else(|| {
+            // 纯文本兜底：预览占位（如 "[富文本内容]"）不可作为合并正文。
+            item.preview
+                .clone()
+                .filter(|preview| !preview.is_empty() && !preview.starts_with('['))
+        })
         .context("记录没有可合并的文本表示")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_unknown_types_even_with_usable_text_and_preview() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let first = history.capture("first")?.unwrap();
+        let unknown = history.capture("legacy text")?.unwrap();
+        for kind in ["future-format", "", "Text"] {
+            history.db.write_connection().lock().execute(
+                "UPDATE clipboard_items SET content_type = ?1 WHERE id = ?2",
+                rusqlite::params![kind, unknown],
+            )?;
+            assert!(history.merge_content(&[first, unknown]).is_err());
+            assert_eq!(
+                history.item(unknown)?.text_content.as_deref(),
+                Some("legacy text")
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn merges_in_requested_order_and_deduplicates_files() -> Result<()> {

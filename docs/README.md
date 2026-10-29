@@ -12,7 +12,9 @@
 - [跨平台正确性修复验证](evidence/cross-platform-correctness-2026-10-27.md)：平台能力、粘贴目标与请求归属、格式编码和延迟采集修复的验证范围。
 - [默认数据目录迁移验证](evidence/data-directory-migration-2026-10-27.md)：三平台统一目录、旧数据引用与自启迁移、冲突保护和清理规则。
 - [普通文件仅保存路径](evidence/file-paths-only-2026-10-27.md)：移除文件副本、启动清理及旧备份兼容行为。
-- [首次引导布局与动效](evidence/onboarding-motion-2026-10-27.md)：原生四步动态预览、无跳过入口及中英最小窗口验证。
+- [首次引导布局与动效](evidence/onboarding-motion-2026-10-27.md)：beta.9 四步动态预览的历史验证。
+- [首次使用与配置引导](evidence/onboarding-setup-2026-10-28.md)：快捷键、复制粘贴教程、初始偏好与原生窗口验证。
+- [全应用主题与动效](evidence/chakra-theme-2026-10-28.md)：Chakra 风格的原生组件统一、可调圆角与Windows实机验证。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。
@@ -63,6 +65,7 @@
 | `linux/` | X11/XRes 来源、XTEST、XInput2、被动按键抓取、XDND/INCR 传输和 XDG 自动启动 |
 | `macos/` | Carbon 快捷键、NSWorkspace 来源、NSEvent、NSDraggingSession、Accessibility 粘贴及 LaunchAgent |
 | `sequence.rs`、`unix/x11_sequence.rs` | Windows 序列号、macOS changeCount、X11 XFixes generation 和 Wayland 内容身份 |
+| `notification.rs`、`notification/` | Windows WinRT、macOS UserNotifications 与 Linux D-Bus 系统通知；由界面层在后台调用 |
 | `windows/tests/` | 原有 Windows 服务与剪贴板行为回归；Unix 的隔离测试位于所属模块 |
 
 Linux X11 采集内容与来源查询整体受前后 selection generation 校验保护；不以无关前台窗口冒充 clipboard owner。XDND 在释放鼠标后锁定目标和位置，等待最终响应期间不重新投放到另一窗口。Wayland 必须支持 data-control，按完整载荷轮询检测变化，不能区分相同内容的再次复制。
@@ -71,7 +74,7 @@ Linux X11 采集内容与来源查询整体受前后 selection generation 校验
 
 ### GPUI 界面层
 
-`crates/clipboard-gpui/src/ui.rs` 保留共享视图状态和动作声明；入口、渲染及交互实现位于私有 `ui/` 子模块，不改变 `main.rs` 的 `ui::run` 调用。
+`crates/clipboard-gpui/src/design_system.rs` 集中配置主题语义色、字体、圆角与动效，`visual.rs` 管理应用布局和内容动画。`crates/clipboard-gpui/src/ui.rs` 保留共享视图状态和动作声明；入口、渲染及交互实现位于私有 `ui/` 子模块，不改变 `main.rs` 的 `ui::run` 调用。
 
 GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的窗口实现分别在 `macos/` 和 `linux/`，浮窗几何在 `popup_geometry.rs` 共用。`ui/`、`state.rs`、`visual.rs` 和 `window_effect.rs` 由三平台共用，不直接调用 Win32。音效的 `Sound` 枚举、启停判定与 WAVE 合成位于三平台共用的 `sound_core.rs`，`windows/` 与 `unix/` 的 `sound.rs` 只保留各自播放后端。`capabilities.rs` 将 Wayland、粘贴按键和音效能力映射到设置说明与禁用状态。
 
@@ -83,14 +86,14 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `events`、`history_events`、`preference_events`、`shortcut_events` | 平台事件路由和各领域状态更新 |
 | `navigation`、`history_list`、`history_card`、`row_actions`、`row_menu` | 列表导航、虚拟列表、卡片、按钮及上下文菜单 |
 | `drag`、`drag_visual`、`selection`、`groups`、`confirmation` | 拖拽状态与动效、批量选择、分组及确认交互 |
-| `preview_actions`、`preview_render`、`file_preview`、`file_cards` | 完整预览、编辑和文件卡片信息 |
+| `editor_actions`、`file_cards` | 按需加载文本编辑、备注保存及文件卡片信息；主窗口无整页预览 |
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
-| `onboarding`、`onboarding_preview`、`onboarding_scenes`、`content`、`presentation` | 首次引导导航、预览外壳与场景渲染、内容展示助手、主题及本地化展示 |
+| `onboarding`、`onboarding_lessons`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、操作教程与初始偏好、内容展示助手、主题及本地化展示 |
 
-纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于完整预览与复制。
+纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于悬停预览与复制。
 
 确认操作仅由 `HistoryConfirmation` 表示当前类型与分组作用域，保存中的状态仍按操作分别保留。普通偏好使用 `PendingPref<T>`，仅在保存成功后替换生效值；快捷键注册回滚、语言和显示布局等副作用仍由专用处理器负责。窗口隐藏复用清理与隐藏动作，各入口的保护条件不合并。
 

@@ -38,10 +38,6 @@ impl ClipboardView {
         self.external_drag.is_some() || cx.has_active_drag()
     }
 
-    pub(super) fn suppress_drag_click(&self, cx: &App) -> bool {
-        self.card_drag_active(cx) || self.drag_release_pending
-    }
-
     pub(super) fn drag_source_id(&self) -> Option<i64> {
         self.external_drag
             .as_ref()

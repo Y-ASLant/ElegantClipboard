@@ -1,4 +1,4 @@
-use super::settings_common::{command_checkbox, owner_state};
+use super::settings_common::{command_checkbox, owner_state, settings_stack};
 use super::*;
 use gpui_kit::component::{alert::Alert, switch::Switch};
 
@@ -13,11 +13,7 @@ impl SettingsWindowView {
         let disabled = state.hotkey_choice == HotkeyPreference::Disabled;
         let label = hotkey_label(language, &state.hotkey_choice).to_owned();
         let owner = self.owner.clone();
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap_2()
+        settings_stack()
             .child(
                 div()
                     .flex()
@@ -34,7 +30,7 @@ impl SettingsWindowView {
                     })
                     .child(
                         Button::new("main-shortcut-edit")
-                            .small()
+                            .h(px(32.))
                             .outline()
                             .label(tr(language, "修改", "Edit"))
                             .disabled(pending)
@@ -44,7 +40,7 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("main-shortcut-disable")
-                            .small()
+                            .h(px(32.))
                             .ghost()
                             .label(tr(language, "关闭", "Disable"))
                             .disabled(pending || disabled)
@@ -168,12 +164,8 @@ impl SettingsWindowView {
                 |owner| owner.paste_move_to_top.pending = true,
             ),
         ];
-        div()
-            .flex()
-            .w_full()
-            .flex_wrap()
-            .items_start()
-            .gap_3()
+        settings_stack()
+            .gap_1()
             .children(
                 behavior_toggles.map(|(id, chinese, english, command, state_of, on_sent)| {
                     let (checked, pending) = state_of(owner_state);
@@ -213,9 +205,13 @@ impl SettingsWindowView {
         let autostart = state.autostart.value;
         let autostart_pending = state.autostart.pending;
         let startup_owner = self.owner.clone();
-        div()
+        settings_stack()
             .child(
                 Switch::new("settings-window-autostart")
+                    .w_full()
+                    .min_h(px(32.))
+                    .py(px(6.))
+                    .text_size(px(14.))
                     .label(tr(language, "开机自启", "Start on login"))
                     .checked(autostart)
                     .disabled(autostart_pending)

@@ -1,4 +1,7 @@
-use super::settings_common::{choice_tabs, command_checkbox, owner_state};
+use super::settings_common::{
+    choice_tabs, command_checkbox, owner_state, settings_description, settings_field,
+    settings_stack,
+};
 use super::*;
 use gpui_kit::component::chart::BarChart;
 use gpui_kit::component::checkbox::Checkbox;
@@ -9,9 +12,7 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner_state.language;
-        div()
-            .flex()
-            .flex_col()
+        settings_stack()
             .gap_2()
             .child(command_checkbox(
                 "transient-filter",
@@ -26,11 +27,11 @@ impl SettingsWindowView {
                 Command::SetTransientFilter,
                 |owner| owner.transient_filter.pending = true,
             ))
-            .child(div().text_xs().child(tr(
+            .child(settings_description(tr(
                 language,
                 "复制后 300ms 内被撤销或覆盖的内容（划词工具临时复制、表格单元格碎片）不再进入历史。复制后立即从本应用粘贴不受影响。",
                 "Content undone or replaced within 300ms of copying (selection-tool flashes, spreadsheet fragments) no longer enters history. Pasting from this app right after copying is unaffected.",
-            )))
+            ), cx))
             .into_any_element()
     }
 
@@ -42,21 +43,13 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let strategy = owner_state.dedup_strategy.value;
         let strategy_pending = owner_state.dedup_strategy.pending;
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
+        settings_stack()
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(div().text_xs().child(tr(
-                        language,
-                        "相同内容再次复制时",
-                        "When the same content is copied again",
-                    )))
+                settings_field(tr(
+                    language,
+                    "相同内容再次复制时",
+                    "When the same content is copied again",
+                ))
                     .child(choice_tabs(
                         "dedup-strategy-tabs",
                         &self.owner,
@@ -75,13 +68,13 @@ impl SettingsWindowView {
                             }
                         },
                     ))
-                    .child(div().text_xs().text_color(cx.theme().muted_foreground).child(tr(
+                    .child(settings_description(tr(
                         language,
                         "「各存一条」保留每次复制的独立时间线；「移到列表顶部」合并为同一条记录。",
                         "\"Keep separate entries\" preserves each copy on the timeline; \"Move to top\" merges them into one entry.",
-                    ))),
+                    ), cx)),
             )
-            .child(command_checkbox(
+            .child(settings_stack().gap_2().child(command_checkbox(
                 "restore-clipboard",
                 tr(
                     language,
@@ -94,16 +87,11 @@ impl SettingsWindowView {
                 Command::SetRestoreClipboard,
                 |owner| owner.restore_clipboard.pending = true,
             ))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(
-                        language,
-                        "开启后，受控粘贴完成时会把粘贴前的剪贴板内容写回。写入与目标应用读取存在时序竞争，个别应用可能需要再次手动粘贴；默认关闭。",
-                        "When enabled, the clipboard content captured before a controlled paste is written back afterwards. Writing races with the target app reading it; some apps may need a manual paste. Off by default.",
-                    )),
-            )
+            .child(settings_description(tr(
+                language,
+                "开启后，受控粘贴完成时会把粘贴前的剪贴板内容写回。写入与目标应用读取存在时序竞争，个别应用可能需要再次手动粘贴；默认关闭。",
+                "When enabled, the clipboard content captured before a controlled paste is written back afterwards. Writing races with the target app reading it; some apps may need a manual paste. Off by default.",
+            ), cx)))
             .into_any_element()
     }
 
@@ -156,10 +144,8 @@ impl SettingsWindowView {
                 |next, checked| next.files = checked,
             ),
         ];
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
+        settings_stack()
+            .gap_1()
             .children(
                 choices
                     .into_iter()
@@ -168,7 +154,10 @@ impl SettingsWindowView {
                         let mut next = monitor_types;
                         set_checked(&mut next, !selected);
                         Checkbox::new(id)
-                            .text_sm()
+                            .w_full()
+                            .min_h(px(32.))
+                            .py(px(6.))
+                            .text_size(px(14.))
                             .label(label)
                             .checked(selected)
                             .disabled(monitor_types_pending || !next.valid())

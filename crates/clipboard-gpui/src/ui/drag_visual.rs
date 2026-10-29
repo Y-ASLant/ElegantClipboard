@@ -20,20 +20,10 @@ pub(super) struct HistoryCardSnapshot {
     pub(super) file_warning: bool,
     pub(super) file_icon: IconName,
     pub(super) selected: bool,
-    pub(super) batch_mode: bool,
 }
 
 impl HistoryCardSnapshot {
-    pub(super) fn surface(&self, preview: bool, cx: &App) -> Div {
-        let is_image = self.is_image;
-        let show_file_icon = self.is_files && self.thumbnail_path.is_none();
-        let spacing = visual::card_spacing(self.display.card_density);
-        let (thumbnail_width, thumbnail_height) = if is_image {
-            visual::thumbnail_size(self.display.card_density)
-        } else {
-            (48., 36.)
-        };
-        let image_unavailable = tr(self.language, "无法显示", "Cannot display");
+    fn metadata_row(&self, cx: &App) -> Div {
         let source_icon = self
             .source_app_icon
             .as_deref()
@@ -41,175 +31,208 @@ impl HistoryCardSnapshot {
         let (show_source_name, show_source_icon) =
             source_app_parts(self.display.source_app_display, source_icon.is_some());
         div()
+            .h(px(20.))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(visual::SPACE_2))
+            .text_size(px(visual::TEXT_SMALL))
+            .text_color(if self.file_warning {
+                cx.theme().danger
+            } else {
+                cx.theme().muted_foreground
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(self.summary.clone()),
+            )
+            .when(self.display.show_source_app, |footer| {
+                footer.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(visual::SPACE_1))
+                        .max_w(px(118.))
+                        .overflow_hidden()
+                        .when_some(
+                            show_source_icon.then_some(source_icon).flatten(),
+                            |source, path| {
+                                source.child(
+                                    img(PathBuf::from(path))
+                                        .w(px(visual::ICON_SIZE))
+                                        .h(px(visual::ICON_SIZE))
+                                        .flex_none()
+                                        .object_fit(ObjectFit::Contain)
+                                        .with_fallback(|| div().into_any_element()),
+                                )
+                            },
+                        )
+                        .when(show_source_name, |source| {
+                            source.child(
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .text_ellipsis()
+                                    .child(self.source_app_name.clone().unwrap_or_default()),
+                            )
+                        }),
+                )
+            })
+    }
+
+    fn media_visual(&self, preview: bool, cx: &App) -> Div {
+        let is_image = self.is_image;
+        let show_file_icon = self.is_files && self.thumbnail_path.is_none();
+        let (thumbnail_width, thumbnail_height) = if is_image {
+            visual::thumbnail_size(self.display.card_density)
+        } else {
+            (48., 36.)
+        };
+        let visual_height = if show_file_icon {
+            thumbnail_width
+        } else {
+            thumbnail_height
+        };
+        let image_unavailable = tr(self.language, "无法显示", "Cannot display");
+        let image_unavailable_color = cx.theme().muted_foreground;
+        let unavailable = move || {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(visual::TEXT_SMALL))
+                .text_color(image_unavailable_color)
+                .child(image_unavailable)
+        };
+        let icon_color = if self.file_warning {
+            cx.theme().danger
+        } else {
+            cx.theme().primary
+        };
+        div()
+            .w(px(thumbnail_width))
+            .h(px(visual_height))
+            .flex_none()
+            .rounded(cx.theme().radius)
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(if show_file_icon {
+                icon_color.opacity(0.12)
+            } else {
+                cx.theme().muted
+            })
+            .when(show_file_icon, |visual| {
+                visual.child(
+                    Icon::new(self.file_icon.clone())
+                        .size(px(visual::SPACE_6))
+                        .text_color(icon_color),
+                )
+            })
+            .when(is_image && self.thumbnail_path.is_none(), |visual| {
+                visual.child(unavailable())
+            })
+            .when_some(self.thumbnail_path.as_ref(), |visual, path| {
+                let source = self.thumbnail.clone().unwrap_or_else(|| {
+                    if preview {
+                        // A drag started before decoding must not freeze a loading image.
+                        gpui_kit::ImageSource::from(path.clone())
+                    } else {
+                        gpui_kit::ImageSource::Custom(std::sync::Arc::new(|_, _| None))
+                    }
+                });
+                visual.child(
+                    img(source)
+                        .size_full()
+                        // GPUI otherwise uses the source ratio for block layout,
+                        // enlarging portrait bounds before Contain is applied.
+                        .aspect_ratio(thumbnail_width / visual_height)
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(move || unavailable().into_any_element()),
+                )
+            })
+    }
+
+    fn content_text(&self, cx: &App) -> Div {
+        let text = div()
+            .min_w_0()
+            .text_size(px(visual::TEXT_BODY))
+            .line_height(px(20.))
+            .line_clamp(self.display.card_max_lines as usize)
+            .text_ellipsis()
+            .text_color(if self.file_warning {
+                cx.theme().danger
+            } else {
+                cx.theme().foreground
+            });
+        if self.is_image {
+            text.child(tr(self.language, "图片", "Image"))
+        } else {
+            text.child(
+                StyledText::new(self.preview_text.clone()).with_highlights(self.highlights.clone()),
+            )
+        }
+    }
+
+    pub(super) fn surface(&self, preview: bool, cx: &App) -> Div {
+        let media_layout = self.is_image || self.is_files;
+        let spacing = visual::card_spacing(self.display.card_density);
+        let padding = visual::card_padding(self.display.card_density);
+        let body = div()
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .flex()
+            .items_start();
+        let body = if media_layout {
+            body.gap(px(visual::SPACE_3))
+                .child(self.media_visual(preview, cx))
+                .child(
+                    div()
+                        .h_full()
+                        .flex_1()
+                        .min_w_0()
+                        .min_h_0()
+                        .flex()
+                        .flex_col()
+                        .justify_between()
+                        .child(self.content_text(cx).overflow_hidden().font_medium())
+                        .child(self.metadata_row(cx)),
+                )
+        } else {
+            body.child(self.content_text(cx).flex_1())
+        };
+        div()
             .h_full()
             .group("")
-            .when(self.batch_mode, |card| card.px_3())
-            .when(!self.batch_mode, |card| card.px(px(22.)))
-            .py(px(spacing))
-            .rounded_md()
-            .border_1()
-            .when(preview, |card| card.rounded(px(8.)).border(px(1.5)))
+            .p(px(padding))
+            .rounded(cx.theme().radius_lg)
+            .border(px(visual::BORDER_WIDTH))
             .border_color(if self.selected {
                 cx.theme().primary
             } else {
-                cx.theme().border
+                crate::design_system::container_border(cx)
             })
             .bg(if preview {
-                cx.theme().background.opacity(1.0)
+                cx.theme().popover
             } else if self.selected {
-                cx.theme().accent
+                cx.theme().list_active
             } else {
-                cx.theme().background
+                cx.theme().colors.list
             })
             .relative()
             .flex()
             .flex_col()
             .gap(px(spacing))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .rounded_sm()
-                    .when(is_image && !preview, |body| body.bg(cx.theme().muted))
-                    .px_2()
-                    .py(px(spacing))
-                    .flex()
-                    .when(is_image, |body| body.justify_center())
-                    .gap_3()
-                    .when(show_file_icon, |body| {
-                        body.child(
-                            div()
-                                .w(px(thumbnail_width))
-                                .h(px(thumbnail_height))
-                                .flex_none()
-                                .rounded_sm()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(if self.file_warning {
-                                    cx.theme().danger.opacity(0.12)
-                                } else {
-                                    cx.theme().primary.opacity(0.12)
-                                })
-                                .child(Icon::new(self.file_icon.clone()).large().text_color(
-                                    if self.file_warning {
-                                        cx.theme().danger
-                                    } else {
-                                        cx.theme().primary
-                                    },
-                                )),
-                        )
-                    })
-                    .when(is_image && self.thumbnail_path.is_none(), |body| {
-                        body.child(image_unavailable)
-                    })
-                    .when_some(self.thumbnail_path.clone(), |body, path| {
-                        let source = self.thumbnail.clone().unwrap_or_else(|| {
-                            if preview {
-                                // A drag started before decoding must not freeze a loading image.
-                                gpui_kit::ImageSource::from(path)
-                            } else {
-                                gpui_kit::ImageSource::Custom(std::sync::Arc::new(|_, _| None))
-                            }
-                        });
-                        body.child(
-                            div()
-                                .w(px(thumbnail_width))
-                                .h(px(thumbnail_height))
-                                .flex_none()
-                                .rounded_sm()
-                                .overflow_hidden()
-                                .child(
-                                    img(source)
-                                        .size_full()
-                                        // GPUI otherwise uses the source ratio for block layout,
-                                        // enlarging portrait bounds before Contain is applied.
-                                        .aspect_ratio(thumbnail_width / thumbnail_height)
-                                        .object_fit(ObjectFit::Contain)
-                                        .with_fallback(move || {
-                                            div().child(image_unavailable).into_any_element()
-                                        }),
-                                ),
-                        )
-                    })
-                    .when(!is_image, |body| {
-                        body.child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_sm()
-                                .text_color(if self.file_warning {
-                                    cx.theme().danger
-                                } else {
-                                    cx.theme().foreground
-                                })
-                                .line_height(px(20.))
-                                .line_clamp(self.display.card_max_lines as usize)
-                                .text_ellipsis()
-                                .child(
-                                    StyledText::new(self.preview_text.clone())
-                                        .with_highlights(self.highlights.clone()),
-                                ),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .h(px(24.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .text_xs()
-                    .text_color(if self.file_warning {
-                        cx.theme().danger
-                    } else {
-                        cx.theme().muted_foreground
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(self.summary.clone()),
-                    )
-                    .when(self.display.show_source_app, |footer| {
-                        footer.child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1()
-                                .max_w(px(118.))
-                                .overflow_hidden()
-                                .when(!preview, |source| {
-                                    source.group_hover("", |source| source.invisible())
-                                })
-                                .when_some(
-                                    show_source_icon.then_some(source_icon).flatten(),
-                                    |source, path| {
-                                        source.child(
-                                            img(PathBuf::from(path))
-                                                .w(px(16.))
-                                                .h(px(16.))
-                                                .flex_none()
-                                                .object_fit(ObjectFit::Contain)
-                                                .with_fallback(|| div().into_any_element()),
-                                        )
-                                    },
-                                )
-                                .when(show_source_name, |source| {
-                                    source.child(
-                                        div().min_w_0().overflow_hidden().text_ellipsis().child(
-                                            self.source_app_name.clone().unwrap_or_default(),
-                                        ),
-                                    )
-                                }),
-                        )
-                    }),
-            )
+            .child(body)
+            .when(!media_layout, |card| card.child(self.metadata_row(cx)))
     }
 }
 

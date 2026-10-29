@@ -27,7 +27,7 @@ impl ClipboardView {
         if !self.history.items.iter().any(|item| item.id == id) {
             return;
         }
-        self.close_hover_preview(cx);
+        self.close_hover_preview("batch_selection", cx);
         self.batch_mode = true;
         let ids: Vec<_> = self.history.items.iter().map(|item| item.id).collect();
         let range = extend_range
@@ -70,9 +70,11 @@ impl ClipboardView {
         if !event.is_keyboard() && self.drag_release_pending {
             return;
         }
-        let editable = self.history.items.iter().any(|item| {
-            item.id == id && matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf")
-        });
+        let editable = self
+            .history
+            .items
+            .iter()
+            .any(|item| item.id == id && item.kind().is_some_and(|kind| kind.is_text_like()));
         if self.batch_mode || !editable || event.is_keyboard() {
             self.cancel_pending_row_click();
             self.activate_row(id, event.modifiers().shift, window, cx);
@@ -81,13 +83,13 @@ impl ClipboardView {
         if event.click_count() >= 2 {
             self.cancel_pending_row_click();
             if !self.history.loading && !self.batch_pending && self.paste_pending.is_none() {
-                self.open_preview_for_edit(id, window, cx);
+                self.open_editor(id, true, window, cx);
             }
             return;
         }
         self.cancel_pending_row_click();
         let generation = self.history.generation;
-        self.close_hover_preview(cx);
+        self.close_hover_preview("row_click_pending", cx);
         self.pending_row_click = Some((id, generation));
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);
@@ -99,7 +101,7 @@ impl ClipboardView {
             let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
                 if this.pending_row_click == Some((id, generation))
                     && this.history.generation == generation
-                    && this.preview.id.is_none()
+                    && this.editor.id.is_none()
                     && !this.batch_mode
                 {
                     this.cancel_pending_row_click();
@@ -127,7 +129,7 @@ impl ClipboardView {
             return;
         }
         self.cancel_pending_row_click();
-        self.close_hover_preview(cx);
+        self.close_hover_preview("row_activated", cx);
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);
         if self.batch_mode {

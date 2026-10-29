@@ -32,7 +32,7 @@ fn hotkey_preference_persists_independently_of_legacy_setting() -> Result<()> {
     let db = Database::new(path.clone())?;
     let preferences = Preferences::new(&db);
     assert_eq!(preferences.hotkey()?, HotkeyPreference::default());
-    SettingsRepository::new(&db).set("global_shortcut", "Alt+C")?;
+    SettingsRepository::new(&db).set("global_shortcut", "Ctrl+Alt+V")?;
     assert_eq!(preferences.hotkey()?, HotkeyPreference::default());
     preferences.set_hotkey(HotkeyPreference::Shortcut("Ctrl+Alt+F9".into()))?;
     drop(preferences);
@@ -46,7 +46,10 @@ fn hotkey_preference_persists_independently_of_legacy_setting() -> Result<()> {
     preferences.set_hotkey(HotkeyPreference::Disabled)?;
     assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
     for (stored, expected) in [
-        ("ctrl_shift_v", HotkeyPreference::default()),
+        (
+            "ctrl_shift_v",
+            HotkeyPreference::Shortcut("Ctrl+Shift+V".into()),
+        ),
         ("alt_c", HotkeyPreference::Shortcut("Alt+C".into())),
         (
             "ctrl_alt_v",

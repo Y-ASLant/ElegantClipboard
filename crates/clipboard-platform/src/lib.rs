@@ -11,6 +11,7 @@ mod instance;
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+pub mod notification;
 #[cfg(windows)]
 pub mod outside_click;
 pub mod paste_types;

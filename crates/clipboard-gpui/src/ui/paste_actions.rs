@@ -148,9 +148,10 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.copy_or_paste_variant(
+        self.copy_or_paste_generic(
             id,
-            (Command::CopyPlainText(id), Command::CopyPlainTextForPaste),
+            Command::CopyPlainText,
+            Command::CopyPlainTextForPaste,
             (
                 "正在复制纯文本并返回原窗口…",
                 "Copying plain text and returning to the previous window…",
@@ -161,9 +162,10 @@ impl ClipboardView {
     }
 
     pub(super) fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
-        self.copy_or_paste_variant(
+        self.copy_or_paste_generic(
             id,
-            (Command::CopyPath(id), Command::CopyPathForPaste),
+            Command::CopyPath,
+            Command::CopyPathForPaste,
             (
                 "正在复制路径并返回原窗口…",
                 "Copying paths and returning to the previous window…",
@@ -179,9 +181,10 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.copy_or_paste_variant(
+        self.copy_or_paste_generic(
             id,
-            (Command::CopyAsFile(id), Command::CopyAsFileForPaste),
+            Command::CopyAsFile,
+            Command::CopyAsFileForPaste,
             (
                 "正在复制图片文件并返回原窗口…",
                 "Copying the image file and returning to the previous window…",
@@ -250,8 +253,7 @@ impl ClipboardView {
         );
     }
 
-    /// 转换/格式变体的通用复制粘贴（与 copy_or_paste_variant 同构，
-    /// 但命令按需构造而非常量元组）。
+    /// 复制粘贴通用流程：目标窗口可用时走受控粘贴，否则直接复制。
     fn copy_or_paste_generic(
         &mut self,
         id: i64,
@@ -276,39 +278,6 @@ impl ClipboardView {
             paste(id, request_id)
         } else {
             copy(id)
-        };
-        if !self.send(command, cx) {
-            self.interrupt_paste_except(None);
-        } else if target.is_some() {
-            self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
-            self.is_error = false;
-            cx.notify();
-        }
-    }
-
-    pub(super) fn copy_or_paste_variant(
-        &mut self,
-        id: i64,
-        commands: (Command, fn(i64, u64) -> Command),
-        paste_message: (&'static str, &'static str),
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.cancel_pending_row_click();
-        if self.paste_pending.is_some() {
-            return;
-        }
-        let target = self
-            .paste_target
-            .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
-        if self.paste_target.is_some() && target.is_none() {
-            self.paste_target = None;
-        }
-        let command = if let Some(target) = target {
-            let request_id = self.paste_pending.begin(target);
-            commands.1(id, request_id)
-        } else {
-            commands.0
         };
         if !self.send(command, cx) {
             self.interrupt_paste_except(None);

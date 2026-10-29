@@ -1,4 +1,4 @@
-use super::settings_common::owner_language;
+use super::settings_common::{owner_language, settings_description, settings_stack};
 use super::*;
 use gpui_kit::component::alert::Alert;
 
@@ -42,10 +42,8 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
 
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
+        settings_stack()
+            .gap_1()
             .children(
                 [
                     (
@@ -78,6 +76,9 @@ impl SettingsWindowView {
                         .gap_2()
                         .items_center()
                         .justify_between()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
                         .child(
                             div()
                                 .text_sm()
@@ -86,7 +87,7 @@ impl SettingsWindowView {
                         )
                         .child(
                             Button::new(id)
-                                .small()
+                                .h(px(32.))
                                 .ghost()
                                 .icon(icon)
                                 .label(label)
@@ -109,10 +110,7 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
 
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
+        settings_stack()
             .child(
                 div()
                     .text_sm()
@@ -120,25 +118,19 @@ impl SettingsWindowView {
                     .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
             )
             .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(
-                        language,
-                        "适用于 Windows、Linux 和 macOS 的剪贴板管理器，帮助你轻松找回和复用复制过的内容。",
-                        "A clipboard manager for Windows, Linux and macOS that helps you find and reuse what you have copied.",
-                    )),
+                settings_description(tr(
+                    language,
+                    "适用于 Windows、Linux 和 macOS 的剪贴板管理器，帮助你轻松找回和复用复制过的内容。",
+                    "A clipboard manager for Windows, Linux and macOS that helps you find and reuse what you have copied.",
+                ), cx),
             )
             .children(FEATURE_GROUPS.iter().map(|group| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
+                settings_stack()
+                    .gap_2()
                     .child(
                         div()
-                            .text_xs()
+                            .text_size(px(14.))
                             .font_semibold()
-                            .text_color(cx.theme().muted_foreground)
                             .child(tr(language, group.chinese, group.english)),
                     )
                     .children(group.items.iter().map(|(chinese, english)| {
@@ -153,10 +145,8 @@ impl SettingsWindowView {
                                     .mt(px(3.)),
                             )
                             .child(
-                                div()
-                                    .min_w_0()
-                                    .text_sm()
-                                    .child(tr(language, chinese, english)),
+                                settings_description(tr(language, chinese, english), cx)
+                                    .flex_1(),
                             )
                     }))
             }))

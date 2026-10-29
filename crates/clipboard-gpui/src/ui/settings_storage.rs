@@ -1,4 +1,4 @@
-use super::settings_common::owner_state;
+use super::settings_common::{owner_state, settings_description, settings_stack};
 use super::*;
 use gpui_kit::component::{alert::Alert, dialog::DialogFooter};
 
@@ -61,29 +61,17 @@ impl SettingsWindowView {
         let folder_owner = self.owner.clone();
         let export_owner = self.owner.clone();
 
-        div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_3()
+        settings_stack()
+            .child(settings_description(data_size_detail, cx))
             .child(
                 div()
-                    .flex_1()
-                    .min_w(px(240.))
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(data_size_detail),
-            )
-            .child(
-                div()
+                    .w_full()
                     .flex()
-                    .flex_shrink_0()
+                    .flex_wrap()
                     .gap_2()
-                    .ml_auto()
                     .child(
                         Button::new("settings-window-refresh")
                             .outline()
-                            .small()
                             .icon(IconName::RotateCw)
                             .tooltip(tr(language, "刷新占用", "Refresh usage"))
                             .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
@@ -98,7 +86,6 @@ impl SettingsWindowView {
                     .child(
                         Button::new("settings-window-optimize")
                             .outline()
-                            .small()
                             .icon(IconName::HardDrive)
                             .tooltip(tr(language, "整理数据库", "Optimize database"))
                             .accessibility_label(tr(language, "整理数据库", "Optimize database"))
@@ -115,7 +102,6 @@ impl SettingsWindowView {
                     .child(
                         Button::new("settings-window-folder")
                             .outline()
-                            .small()
                             .icon(IconName::FolderOpen)
                             .tooltip(tr(language, "打开数据目录", "Open data folder"))
                             .accessibility_label(tr(language, "打开数据目录", "Open data folder"))
@@ -128,7 +114,6 @@ impl SettingsWindowView {
                     .child(
                         Button::new("settings-window-export")
                             .outline()
-                            .small()
                             .icon(IconName::ExternalLink)
                             .tooltip(tr(language, "导出备份", "Export backup"))
                             .accessibility_label(tr(language, "导出备份", "Export backup"))
@@ -169,21 +154,16 @@ impl SettingsWindowView {
                 ImportSource::Backup,
             ),
         ];
-        div()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(
-                div().text_sm().text_color(cx.theme().muted_foreground).child(tr(
-                    language,
-                    "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据；完成后可打开恢复的数据。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
-                    "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Open the restored data when ready. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
-                )),
-            )
+        settings_stack()
+            .child(settings_description(tr(
+                language,
+                "先选择来源文件，再选择空目标目录。不会覆盖、合并或切换当前数据；完成后可打开恢复的数据。旧版数据库仅复制记录，迁移附件请使用旧版 ZIP。",
+                "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Open the restored data when ready. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
+            ), cx))
             .child(
                 div().flex().flex_wrap().gap_2().children(choices.into_iter().map(|(id, label, source)| {
                     let owner = self.owner.clone();
-                    Button::new(id).outline().small().label(label).disabled(pending)
+                    Button::new(id).outline().h(px(32.)).label(label).disabled(pending)
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |owner, cx| owner.start_data_import(source, cx));
                         })
@@ -196,12 +176,14 @@ impl SettingsWindowView {
                 content
                     .child(div().text_sm().min_w_0().whitespace_normal().child(outcome.description(language)))
                     .child(
-                        Button::new("open-restored-data").outline().small()
-                            .label(tr(language, "打开恢复的数据", "Open restored data"))
-                            .disabled(pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = open_owner.update(cx, |owner, cx| owner.open_imported_data(cx));
-                            }),
+                        div().flex().flex_wrap().child(
+                            Button::new("open-restored-data").outline().h(px(32.))
+                                .label(tr(language, "打开恢复的数据", "Open restored data"))
+                                .disabled(pending)
+                                .on_click(move |_, _, cx| {
+                                    let _ = open_owner.update(cx, |owner, cx| owner.open_imported_data(cx));
+                                }),
+                        ),
                     )
             })
             .into_any_element()
@@ -216,10 +198,13 @@ impl SettingsWindowView {
         let privacy_owner = self.owner.clone();
 
         div()
+            .w_full()
+            .flex()
+            .flex_wrap()
             .child(
                 Button::new("settings-window-clear-all")
                     .danger()
-                    .small()
+                    .h(px(32.))
                     .icon(IconName::Delete)
                     .label(tr(language, "删除全部历史", "Delete all history"))
                     .disabled(clear_all_pending)

@@ -55,19 +55,30 @@ impl ClipboardView {
     /// Keep a small margin for reverse scrolling, plus resources shared by open previews.
     pub(super) fn sync_image_assets(&mut self, cx: &mut App) {
         let range = image_cache_range(self.image_visible_range.clone(), self.history.items.len());
-        let wanted = self.history.items[range.clone()]
-            .iter()
-            .filter_map(|item| {
-                let path = if item.content_type == "image" {
-                    item.image_path.as_ref().map(PathBuf::from)
+        let image_dimensions = visual::thumbnail_size(self.display.card_density);
+        let scale = self.thumbnail_scale;
+        let file_card_info = &self.file_card_info;
+        let wanted = self.history.items[range.clone()].iter().filter_map(|item| {
+            let is_image = item.content_type == "image";
+            let path = if is_image {
+                item.image_path.as_ref().map(PathBuf::from)
+            } else {
+                file_card_info
+                    .get(&item.id)
+                    .and_then(|info| info.image_path.clone())
+            }?;
+            Some(thumbnail_cache::ThumbnailKey::new(
+                path,
+                item.content_hash.clone(),
+                item.content_type == "files",
+                if is_image {
+                    image_dimensions
                 } else {
-                    self.file_card_info
-                        .get(&item.id)
-                        .and_then(|info| info.image_path.clone())
-                }?;
-                Some(self.thumbnail_key(item, path))
-            })
-            .collect();
+                    (48., 36.)
+                },
+                scale,
+            ))
+        });
         self.thumbnails.retain(wanted);
         let rows = self.history.items[range].iter().map(|item| {
             let image = (item.content_type == "image")
@@ -79,9 +90,8 @@ impl ClipboardView {
                 .and_then(|info| info.image_path.clone());
             (image, file)
         });
-        let mut pinned: Vec<_> = [&self.preview, &self.hover_preview]
+        let mut pinned: Vec<_> = preview_image_path(&self.hover_preview)
             .into_iter()
-            .filter_map(preview_image_path)
             .collect();
         if let Some(path) = self.drag_image_path() {
             pinned.push(path);

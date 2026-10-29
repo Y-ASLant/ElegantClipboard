@@ -1,4 +1,4 @@
-use super::settings_common::{choice_tabs, owner_state};
+use super::settings_common::{choice_tabs, owner_state, settings_field, settings_stack};
 use super::*;
 use gpui_kit::component::switch::Switch;
 impl SoundChannel {
@@ -75,64 +75,76 @@ impl SettingsWindowView {
         let timing = channel.timing(audio);
         let toggle_owner = self.owner.clone();
         let preview_owner = self.owner.clone();
-        div()
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(div().text_xs().child(tr(language, "播放时机", "Timing")))
-            .child(div().flex_1().min_w(px(0.)).child(choice_tabs(
-                timing_id,
-                &self.owner,
-                [SoundTiming::Immediate, SoundTiming::AfterSuccess],
-                [
-                    tr(language, "立即", "Immediate"),
-                    tr(language, "成功后", "After success"),
-                ],
-                timing,
-                pending || !enabled,
-                move |owner: &ClipboardView| channel.timing(owner.audio.value),
-                move |owner, timing, cx| {
-                    let mut next = owner.audio.value;
-                    channel.set_timing(&mut next, timing);
-                    owner.save_audio(next, cx);
-                },
-            )))
+        settings_stack()
             .child(
-                Button::new(preview_id)
-                    .outline()
-                    .small()
-                    .label(tr(language, "试听", "Preview"))
-                    .on_click(move |_, _, cx| {
-                        let played = sound::play(channel.sound());
-                        if !played {
-                            let _ = preview_owner.update(cx, |owner, cx| {
-                                owner.set_feedback_message(
-                                    tr(
-                                        owner.language,
-                                        "音频设备不可用，无法试听",
-                                        "Audio device unavailable; preview could not play",
-                                    )
-                                    .into(),
-                                );
-                                owner.is_error = true;
-                                cx.notify();
-                            });
-                        }
-                    }),
+                settings_field(tr(language, "播放时机", "Timing")).child(
+                    choice_tabs(
+                        timing_id,
+                        &self.owner,
+                        [SoundTiming::Immediate, SoundTiming::AfterSuccess],
+                        [
+                            tr(language, "立即", "Immediate"),
+                            tr(language, "成功后", "After success"),
+                        ],
+                        timing,
+                        pending || !enabled,
+                        move |owner: &ClipboardView| channel.timing(owner.audio.value),
+                        move |owner, timing, cx| {
+                            let mut next = owner.audio.value;
+                            channel.set_timing(&mut next, timing);
+                            owner.save_audio(next, cx);
+                        },
+                    )
+                    .max_w(px(360.)),
+                ),
             )
             .child(
-                Switch::new(switch_id)
-                    .label(tr(language, "启用", "Enable"))
-                    .checked(enabled)
-                    .disabled(pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = toggle_owner.update(cx, |owner, cx| {
-                            let mut next = owner.audio.value;
-                            channel.set_enabled(&mut next, *checked);
-                            owner.save_audio(next, cx);
-                        });
-                    }),
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        Button::new(preview_id)
+                            .outline()
+                            .h(px(32.))
+                            .label(tr(language, "试听", "Preview"))
+                            .on_click(move |_, _, cx| {
+                                let played = sound::play(channel.sound());
+                                if !played {
+                                    let _ = preview_owner.update(cx, |owner, cx| {
+                                        owner.set_feedback_message(
+                                            tr(
+                                                owner.language,
+                                                "音频设备不可用，无法试听",
+                                                "Audio device unavailable; preview could not play",
+                                            )
+                                            .into(),
+                                        );
+                                        owner.is_error = true;
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    )
+                    .child(
+                        Switch::new(switch_id)
+                            .min_h(px(32.))
+                            .py(px(6.))
+                            .text_size(px(14.))
+                            .label(tr(language, "启用", "Enable"))
+                            .checked(enabled)
+                            .disabled(pending)
+                            .on_change(move |checked, _, cx| {
+                                let _ = toggle_owner.update(cx, |owner, cx| {
+                                    let mut next = owner.audio.value;
+                                    channel.set_enabled(&mut next, *checked);
+                                    owner.save_audio(next, cx);
+                                });
+                            }),
+                    ),
             )
             .into_any_element()
     }

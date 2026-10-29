@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn hover_preview_only_allows_known_types_enabled_by_their_category() {
+    for image in [false, true] {
+        for text in [false, true] {
+            for files in [false, true] {
+                let preference = HoverPreviewPreference {
+                    image,
+                    text,
+                    files,
+                    ..HoverPreviewPreference::default()
+                };
+                for (kind, allowed) in [
+                    ("image", image),
+                    ("files", files),
+                    ("text", text),
+                    ("url", text),
+                    ("html", text),
+                    ("rtf", text),
+                    ("future-format", false),
+                    ("", false),
+                    ("Text", false),
+                ] {
+                    assert_eq!(preference.allows(kind), allowed, "{kind}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn hover_preview_defaults_persist_and_reject_invalid_values() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("clipboard.db");
@@ -242,43 +271,5 @@ fn onboarding_completion_is_saved_in_gpui_settings() -> Result<()> {
     drop(db);
     let db = Database::new(path)?;
     assert!(Preferences::new(&db).onboarding_completed()?);
-    Ok(())
-}
-
-#[test]
-fn window_effect_persists_and_rejects_out_of_range_opacity() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("clipboard.db");
-    let db = Database::new(path.clone())?;
-    let preferences = Preferences::new(&db);
-    assert_eq!(
-        preferences.window_effect()?,
-        WindowEffectPreference::default()
-    );
-    let preference = WindowEffectPreference {
-        effect: WindowEffect::Acrylic,
-        opacity: 40,
-    };
-    preferences.set_window_effect(preference)?;
-    drop(preferences);
-    drop(db);
-
-    let db = Database::new(path)?;
-    let preferences = Preferences::new(&db);
-    assert_eq!(preferences.window_effect()?, preference);
-    assert!(
-        preferences
-            .set_window_effect(WindowEffectPreference {
-                opacity: MAX_WINDOW_EFFECT_OPACITY + 1,
-                ..preference
-            })
-            .is_err()
-    );
-    assert_eq!(preferences.window_effect()?, preference);
-    SettingsRepository::new(&db).set(WINDOW_EFFECT_KEY, "broken")?;
-    assert_eq!(
-        preferences.window_effect()?,
-        WindowEffectPreference::default()
-    );
     Ok(())
 }

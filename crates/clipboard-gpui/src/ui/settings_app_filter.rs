@@ -1,4 +1,4 @@
-use super::settings_common::{choice_tabs, owner_state};
+use super::settings_common::{choice_tabs, owner_state, settings_description, settings_stack};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
 
@@ -23,14 +23,13 @@ impl SettingsWindowView {
         let running_apps_pending = owner_state.running_apps_pending;
         let filter_enable_owner = self.owner.clone();
 
-        div()
-            .flex()
-            .flex_col()
-            .min_w_0()
-            .gap_2()
+        settings_stack()
             .child(
                 Checkbox::new("app-filter-enabled")
-                    .text_sm()
+                    .w_full()
+                    .min_h(px(32.))
+                    .py(px(6.))
+                    .text_size(px(14.))
                     .label(tr(language, "启用应用过滤", "Enable app filter"))
                     .checked(app_filter.enabled)
                     .disabled(app_filter_pending)
@@ -60,22 +59,28 @@ impl SettingsWindowView {
                 },
             ))
             .child(
-                div().text_xs().text_color(cx.theme().muted_foreground).child(
+                settings_description(
                     if app_filter.mode == AppFilterMode::Blacklist {
                         tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
                     } else {
                         tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
                     },
+                    cx,
                 ),
             )
             .child(
                 div()
+                    .w_full()
                     .flex()
+                    .items_center()
                     .gap_2()
-                    .child(div().flex_1().min_w_0().child(Input::new(&self.app_filter_input)))
+                    .child(div().flex_1().min_w_0().child(
+                        Input::new(&self.app_filter_input)
+                            .refine_style(&StyleRefinement::default().h(px(36.))),
+                    ))
                     .child(
                         Button::new("app-filter-add-rule")
-                            .small()
+                            .h(px(36.))
                             .outline()
                             .label(tr(language, "添加", "Add"))
                             .disabled(app_filter_pending)
@@ -95,8 +100,9 @@ impl SettingsWindowView {
             })
             .when(app_filter.rules.is_empty(), |panel| {
                 panel.child(
-                    div().text_xs().text_color(cx.theme().muted_foreground).child(
+                    settings_description(
                         tr(language, "尚无规则，可输入进程名或 *、? 通配符", "No rules yet. Enter a process name or use * and ? wildcards"),
+                        cx,
                     ),
                 )
             })
@@ -104,13 +110,18 @@ impl SettingsWindowView {
                 let owner = self.owner.clone();
                 let remove_rule = rule.clone();
                 div()
+                    .w_full()
+                    .min_w_0()
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .child(div().flex_1().min_w_0().text_sm().text_ellipsis().child(rule.clone()))
+                    .gap_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(div().flex_1().min_w_0().text_size(px(14.)).whitespace_normal().child(rule.clone()))
                     .child(
                         Button::new(format!("app-filter-remove-{index}"))
-                            .small()
+                            .h(px(32.))
                             .ghost()
                             .label(tr(language, "移除", "Remove"))
                             .disabled(app_filter_pending)
@@ -124,7 +135,7 @@ impl SettingsWindowView {
             }))
             .child(
                 Accordion::new("app-filter-running-apps")
-                    .small()
+                    .w_full()
                     .on_toggle_click({
                         let settings = cx.entity().downgrade();
                         move |indices, _, cx| {
@@ -149,6 +160,8 @@ impl SettingsWindowView {
                         .open(self.app_picker_open)
                         .child(
                             div()
+                                .w_full()
+                                .min_w_0()
                                 .max_h(px(240.))
                                 .overflow_y_scrollbar()
                                 .flex()
@@ -166,9 +179,12 @@ impl SettingsWindowView {
                                         let process = app.process.clone();
                                         let already_added = app_filter.rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
                                         div()
+                                            .w_full()
+                                            .min_w_0()
                                             .flex()
-                                            .items_center()
-                                            .gap_2()
+                                            .items_start()
+                                            .gap_3()
+                                            .py_2()
                                             .when_some(app.icon, |row, path| {
                                                 row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
                                             })
@@ -180,8 +196,9 @@ impl SettingsWindowView {
                                                     .flex_col()
                                                     .child(
                                                         Button::new(format!("app-filter-pick-{index}"))
-                                                            .small()
+                                                            .h(px(32.))
                                                             .ghost()
+                                                            .tooltip(app.process.clone())
                                                             .label(app.process)
                                                             .disabled(app_filter_pending || already_added)
                                                             .on_click(move |_, _, cx| {
@@ -192,13 +209,7 @@ impl SettingsWindowView {
                                                                 });
                                                             }),
                                                     )
-                                                    .child(
-                                                        div()
-                                                            .text_xs()
-                                                            .text_color(cx.theme().muted_foreground)
-                                                            .text_ellipsis()
-                                                            .child(app.name),
-                                                    ),
+                                                    .child(settings_description(app.name, cx)),
                                             )
                                     }))
                                 }),

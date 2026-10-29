@@ -1,5 +1,19 @@
 use serde::{Deserialize, Serialize};
 
+use crate::database::ContentType;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerRadiusPreference {
+    System,
+    Fixed(u8),
+}
+
+impl Default for CornerRadiusPreference {
+    fn default() -> Self {
+        Self::Fixed(4)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SoundTiming {
@@ -329,10 +343,10 @@ impl Default for HoverPreviewPreference {
 
 impl HoverPreviewPreference {
     pub fn allows(self, content_type: &str) -> bool {
-        match content_type {
-            "image" => self.image,
-            "files" => self.files,
-            "text" | "url" | "html" | "rtf" => self.text,
+        match ContentType::parse(content_type) {
+            Some(ContentType::Image) => self.image,
+            Some(ContentType::Files) => self.files,
+            Some(kind) if kind.is_text_like() => self.text,
             _ => false,
         }
     }
@@ -386,22 +400,18 @@ pub enum ThemePreference {
     Dark,
 }
 
-/// 主窗口与设置窗口的系统级材质：None 为纯色，其余为 Windows 合成背板。
-///
-/// 与 `WindowBackgroundAppearance` 的差别在于 Acrylic 走
-/// `DWMSBT_TRANSIENTWINDOW`，GPUI 未暴露该取值，由界面层另行设置。
+/// 主窗口与设置窗口的跨平台背景材质；平台层选择原生实现与安全回退。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowEffect {
     #[default]
-    None,
-    Acrylic,
+    Opaque,
+    Frosted,
     Mica,
-    MicaAlt,
 }
 
-/// 见 `WindowEffect`。`opacity` 是覆盖在背板之上的纯色遮罩浓度，
-/// 0 全透、100 最实；它只影响观感，不影响背板本身是否生效。
+/// `opacity` 是背板之上的纯色遮罩浓度，0 全透、100 最实；
+/// 它不改变原生模糊半径或界面控件的不透明度。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindowEffectPreference {
@@ -412,7 +422,7 @@ pub struct WindowEffectPreference {
 impl Default for WindowEffectPreference {
     fn default() -> Self {
         Self {
-            effect: WindowEffect::None,
+            effect: WindowEffect::Opaque,
             opacity: DEFAULT_WINDOW_EFFECT_OPACITY,
         }
     }
@@ -443,7 +453,7 @@ pub enum HotkeyPreference {
 
 impl Default for HotkeyPreference {
     fn default() -> Self {
-        Self::Shortcut("Ctrl+Shift+V".into())
+        Self::Shortcut("Alt+C".into())
     }
 }
 

@@ -5,10 +5,10 @@ use clipboard_core::{
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
-        AppFilterPreference, AudioPreference, DedupStrategy, DisplayPreference, HotkeyPreference,
-        HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, ThemePreference, WindowEffectPreference, WindowPositionPreference,
-        WindowSizePreference,
+        AppFilterPreference, AudioPreference, CornerRadiusPreference, DedupStrategy,
+        DisplayPreference, HotkeyPreference, HoverPreviewPreference, LanguagePreference,
+        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, ThemePreference,
+        WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
     retention::RetentionPolicy,
 };
@@ -115,6 +115,11 @@ pub enum Command {
         id: i64,
         generation: u64,
     },
+    /// Load the stored plain text for the editing dialog without rendering HTML.
+    EditContent {
+        id: i64,
+        generation: u64,
+    },
     EditText {
         id: i64,
         expected_hash: String,
@@ -136,6 +141,7 @@ pub enum Command {
     ToggleFavorite(i64),
     Pause(bool),
     SetTheme(ThemePreference),
+    SetCornerRadius(CornerRadiusPreference),
     SetLanguage(LanguagePreference),
     SetHotkey(HotkeyPreference),
     SetWindowSize(WindowSizePreference),
@@ -291,49 +297,8 @@ impl Command {
             Self::QueryDataSize => Some(FailureKind::DataSize),
             Self::QueryDailyCounts(_) => Some(FailureKind::Other),
             Self::OptimizeDatabase => Some(FailureKind::DatabaseMaintenance),
-            Self::Copy(_)
-            | Self::CopyPlainText(_)
-            | Self::CopyPath(_)
-            | Self::CopyAsFile(_)
-            | Self::RevealInExplorer(_)
-            | Self::Preview { .. }
-            | Self::HoverPreview { .. }
-            | Self::Delete(_)
-            | Self::TogglePin(_)
-            | Self::ToggleFavorite(_)
-            | Self::Reorder { .. }
-            | Self::SetTheme(_)
-            | Self::SetLanguage(_)
-            | Self::SetHotkey(_)
-            | Self::SetWindowSize(_)
-            | Self::SetPersistWindowSize(_)
-            | Self::SetAutoResetState(_)
-            | Self::SetSearchAutoFocus(_)
-            | Self::SetSearchAutoClear(_)
-            | Self::SetSkipClearConfirm(_)
-            | Self::SetPasteCloseWindow(_)
-            | Self::SetPasteKey(_)
-            | Self::SetPasteMoveToTop(_)
-            | Self::SetQuickPasteEnabled(_)
-            | Self::SetPasteShortcuts(_)
-            | Self::SetWindowPosition(_)
-            | Self::SetHoverPreview(_)
-            | Self::SetDisplay(_)
-            | Self::SetAudio(_)
-            | Self::SetRetention { .. }
-            | Self::SetMonitorTypes(_)
-            | Self::SetAppFilter(_)
-            | Self::SetDedupStrategy(_)
-            | Self::SetRestoreClipboard(_)
-            | Self::SetSequenceHotkey(_)
-            | Self::SetTransientFilter(_)
-            | Self::SetWindowEffect(_)
-            | Self::ListRunningApps
-            | Self::CompleteOnboarding
-            | Self::BumpToTop(_)
-            | Self::SetAutostart(_)
-            | Self::OpenDataDirectory
-            | Self::ExportBackup(_) => Some(FailureKind::Other),
+            // 其余命令（各种复制、设置项、预览、删除等）失败时统一归为 Other。
+            _ => Some(FailureKind::Other),
         }
     }
 }
@@ -408,6 +373,7 @@ pub enum Event {
     BatchDeleted(Result<DeletionOutcome, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
+    CornerRadiusSaved(Result<CornerRadiusPreference, String>),
     TransientFilterSaved(Result<bool, String>),
     LanguageSaved(Result<LanguagePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),

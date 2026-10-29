@@ -29,22 +29,6 @@ impl ClipboardView {
             .flex_1()
             .min_h_0()
             .overflow_hidden()
-            .on_click(cx.listener(|this, _, window, cx| {
-                if !this.suppress_drag_click(cx)
-                    && this._tray.is_some()
-                    && this.settings_window.is_none()
-                    && !this.settings_window_opening
-                {
-                    this.hide_visible_window(window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &PreviewSelected, window, cx| {
-                if !this.batch_mode
-                    && let Some(id) = this.history.selected
-                {
-                    this.open_preview(id, window, cx);
-                }
-            }))
             .on_drag_move(
                 cx.listener(|this, event: &DragMoveEvent<HistoryDrag>, _, cx| {
                     if this.external_drag.is_some() {
@@ -144,12 +128,35 @@ impl ClipboardView {
                 container.child(
                     div()
                         .size_full()
+                        .px(px(visual::SPACE_6))
                         .flex()
+                        .flex_col()
                         .items_center()
                         .justify_center()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(empty_message),
+                        .gap(px(visual::SPACE_3))
+                        .child(
+                            div()
+                                .size(px(48.))
+                                .rounded(cx.theme().radius_lg)
+                                .bg(cx.theme().muted)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    Icon::new(IconName::Copy)
+                                        .size(px(visual::SPACE_6))
+                                        .text_color(cx.theme().muted_foreground),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .max_w(px(320.))
+                                .text_size(px(visual::TEXT_BODY))
+                                .text_center()
+                                .line_height(relative(1.5))
+                                .text_color(cx.theme().muted_foreground)
+                                .child(empty_message),
+                        ),
                 )
             })
             .when(!self.history.items.is_empty(), |container| {
@@ -164,26 +171,42 @@ impl ClipboardView {
                                 self.row_sizes.clone(),
                                 |this, visible, window, cx| {
                                     this.update_image_visible_range(visible.clone(), window, cx);
-                                    visible.map(|index| this.render_row(index, cx)).collect()
+                                    visible
+                                        .map(|index| this.render_row(index, window, cx))
+                                        .collect()
                                 },
                             )
                             .track_scroll(&self.scroll)
                             .size_full(),
                         )
                         .vertical_scrollbar(&self.scroll)
-                        .when(self.history.items.len() > 8, |container| {
+                        .on_scroll(cx.listener(|this, _, _, cx| {
+                            this.scroll_to_top_task = None;
+                            this.close_hover_preview("history_scrolled", cx);
+                            cx.notify();
+                        }))
+                        .when(self.scroll.offset().y < px(-32.), |container| {
                             container.child(
                                 div()
                                     .absolute()
-                                    .right(px(20.))
-                                    .bottom(px(16.))
-                                    .rounded_full()
-                                    .shadow_md()
+                                    .right(px(visual::SPACE_4 + visual::SPACE_1))
+                                    .bottom(px(visual::SPACE_4))
+                                    .rounded(cx.theme().radius)
+                                    .bg(cx.theme().popover)
+                                    .shadow(visual::control_shadow())
                                     .child(
                                         Button::new("history-scroll-to-top")
-                                            .size(px(36.))
-                                            .rounded_full()
-                                            .label("↑")
+                                            .outline()
+                                            .size(px(visual::CONTROL_HEIGHT_LARGE))
+                                            .rounded(cx.theme().radius)
+                                            .bg(cx.theme().popover)
+                                            .border_color(cx.theme().border)
+                                            .icon(
+                                                Icon::new(
+                                                    gpui_kit::assets::IconName::ArrowUpToLine,
+                                                )
+                                                .size(px(visual::ICON_SIZE)),
+                                            )
                                             .tooltip(tr(self.language, "返回顶部", "Back to top"))
                                             .accessibility_label(tr(
                                                 self.language,
@@ -192,7 +215,7 @@ impl ClipboardView {
                                             ))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 cx.stop_propagation();
-                                                this.scroll_to_top();
+                                                this.animate_scroll_to_top(cx);
                                                 cx.notify();
                                             })),
                                     ),

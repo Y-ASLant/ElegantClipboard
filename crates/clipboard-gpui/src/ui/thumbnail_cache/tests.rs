@@ -100,6 +100,116 @@ fn evicted_jobs_do_not_refill_cache_or_overwrite_reentered_requests() {
 }
 
 #[test]
+fn schedules_first_occurrences_in_latest_visible_order_without_duplicate_jobs() {
+    let mut cache = ThumbnailCache::default();
+    let first = key("first.png".into());
+    let second = key("second.png".into());
+    let third = key("third.png".into());
+    let fourth = key("fourth.png".into());
+    cache.retain([
+        first.clone(),
+        third.clone(),
+        third.clone(),
+        second.clone(),
+        fourth.clone(),
+    ]);
+    let initial = cache.next_job().unwrap();
+    assert_eq!(initial.key, first);
+    // Scrolling changes pending priorities, but neither duplicates nor an active key
+    // may take another worker slot.
+    cache.retain([
+        fourth.clone(),
+        third.clone(),
+        fourth.clone(),
+        second.clone(),
+        first.clone(),
+    ]);
+    let next = cache.next_job().unwrap();
+    assert_eq!(next.key, fourth);
+    assert!(cache.next_job().is_none());
+    cache.finish(
+        initial.token,
+        ThumbnailResult {
+            version: None,
+            image: Some(Thumbnail::Original),
+        },
+    );
+    let third_job = cache.next_job().unwrap();
+    assert_eq!(third_job.key, third);
+    for job in [next, third_job] {
+        cache.finish(
+            job.token,
+            ThumbnailResult {
+                version: None,
+                image: Some(Thumbnail::Original),
+            },
+        );
+    }
+    let last = cache.next_job().unwrap();
+    assert_eq!(last.key, second);
+    assert!(cache.next_job().is_none());
+    cache.finish(
+        last.token,
+        ThumbnailResult {
+            version: None,
+            image: Some(Thumbnail::Original),
+        },
+    );
+    cache.retain([second, fourth, first, third]);
+    assert!(cache.next_job().is_none());
+}
+
+#[test]
+fn new_thumbnails_precede_due_external_rechecks_in_visible_order() {
+    let mut cache = ThumbnailCache::default();
+    let mut first = key("first.png".into());
+    first.external = true;
+    let mut second = key("second.png".into());
+    second.external = true;
+    cache.retain([first.clone(), second.clone()]);
+    for _ in 0..2 {
+        let job = cache.next_job().unwrap();
+        cache.finish(
+            job.token,
+            ThumbnailResult {
+                version: None,
+                image: Some(Thumbnail::Original),
+            },
+        );
+    }
+    assert!(cache.next_job().is_none());
+    for entry in cache.entries.values_mut() {
+        entry.checked = Instant::now() - FILE_RECHECK;
+    }
+    let new = key("new.png".into());
+    cache.retain([second.clone(), first.clone(), second.clone(), new.clone()]);
+    let initial = cache.next_job().unwrap();
+    assert_eq!(initial.key, new);
+    let recheck = cache.next_job().unwrap();
+    assert_eq!(recheck.key, second);
+    assert!(cache.next_job().is_none());
+    cache.finish(
+        recheck.token,
+        ThumbnailResult {
+            version: None,
+            image: None,
+        },
+    );
+    let remaining = cache.next_job().unwrap();
+    assert_eq!(remaining.key, first);
+    for job in [initial, remaining] {
+        cache.finish(
+            job.token,
+            ThumbnailResult {
+                version: None,
+                image: Some(Thumbnail::Original),
+            },
+        );
+    }
+    assert!(cache.next_job().is_none());
+}
+
+#[test]
 fn external_version_reuses_unchanged_pixels_and_reloads_changed_or_failed_files() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("file.png");

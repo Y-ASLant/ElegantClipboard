@@ -18,7 +18,8 @@ chrono.workspace = true
 gpui-kit.workspace = true
 directories.workspace = true
 raw-window-handle.workspace = true
-serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
 image = { workspace = true, features = ["ico"] }
 [target.'cfg(windows)'.dependencies]
 tray-icon.workspace = true
@@ -27,7 +28,7 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dw
 [target.'cfg(target_os = "macos")'.dependencies]
 tray-icon.workspace = true
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+objc2-foundation = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-icon = { workspace = true, features = ["libappindicator"] }
@@ -35,4 +36,5 @@ gtk = "0.18"
 x11rb = { version = "0.13", features = ["randr"] }
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true

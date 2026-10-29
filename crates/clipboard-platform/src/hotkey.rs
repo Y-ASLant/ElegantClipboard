@@ -357,7 +357,9 @@ mod paste_tests {
         assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_ok());
         config.set_slot(true, 4, "Alt+Numpad1".into()).unwrap();
         assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_err());
-        config.set_slot(true, 4, "Ctrl+Shift+V".into()).unwrap();
+        config
+            .set_slot(true, 4, HotkeyPreference::default().label().into())
+            .unwrap();
         assert!(validate_paste_shortcuts(&config, &HotkeyPreference::default()).is_err());
     }
 }

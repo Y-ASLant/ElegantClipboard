@@ -1,4 +1,4 @@
-use super::settings_common::owner_state;
+use super::settings_common::{owner_state, settings_stack};
 use super::*;
 
 impl SettingsWindowView {
@@ -21,11 +21,15 @@ impl SettingsWindowView {
             tr(language, "保持位置", "Keep position"),
         ];
         let owner = self.owner.clone();
-        div()
+        settings_stack()
             .child(
                 TabBar::new("settings-window-position-tabs")
+                    .large()
+                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                     .segmented()
                     .w_full()
+                    .min_w_0()
+                    .max_w(px(visual::CHOICE_MAX_WIDTH))
                     .selected_index(
                         choices
                             .iter()
@@ -33,11 +37,15 @@ impl SettingsWindowView {
                             .unwrap_or(0),
                     )
                     .children(choices.iter().zip(labels).map(|(choice, label)| {
-                        Tab::new().label(label).flex_1().disabled(
-                            pending
-                                || (reason.is_some()
-                                    && *choice != WindowPositionPreference::FixedPosition),
-                        )
+                        Tab::new()
+                            .label(label)
+                            .text_size(px(visual::TEXT_BODY))
+                            .flex_1()
+                            .disabled(
+                                pending
+                                    || (reason.is_some()
+                                        && *choice != WindowPositionPreference::FixedPosition),
+                            )
                     }))
                     .on_click(move |index: &usize, _, cx| {
                         let Some(&preference) = choices.get(*index) else {

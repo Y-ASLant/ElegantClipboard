@@ -261,6 +261,8 @@ pub(crate) fn compute_semantic_hash(
     text_content: Option<&str>,
     content_hash: &str,
 ) -> String {
+    // url 刻意不在此列：URL 条目的 content_hash 已含 "url:" 前缀的规范化文本，
+    // 不参与基于正文文本的语义哈希。
     let is_text_like = content_type.eq_ignore_ascii_case("text")
         || content_type.eq_ignore_ascii_case("html")
         || content_type.eq_ignore_ascii_case("rtf");

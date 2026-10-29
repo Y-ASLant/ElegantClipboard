@@ -139,16 +139,30 @@ impl ContentType {
         }
     }
 
-    /// 解析存储中的类型串；未知值回退为纯文本（与旧库兼容行为一致）。
-    pub fn parse(value: &str) -> Self {
-        match value {
+    /// 解析存储中的类型串；未知值不授予任何已知类型的操作能力。
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "text" => ContentType::Text,
             "image" => ContentType::Image,
             "html" => ContentType::Html,
             "rtf" => ContentType::Rtf,
             "files" => ContentType::Files,
             "url" => ContentType::Url,
-            _ => ContentType::Text,
-        }
+            _ => return None,
+        })
+    }
+
+    /// 文本类条目：可编辑、可合并、可纯文本化的类型集合。
+    pub fn is_text_like(self) -> bool {
+        matches!(
+            self,
+            ContentType::Text | ContentType::Url | ContentType::Html | ContentType::Rtf
+        )
+    }
+
+    /// 富文本条目：携带 HTML 或 RTF 表示。
+    pub fn is_rich(self) -> bool {
+        matches!(self, ContentType::Html | ContentType::Rtf)
     }
 }
 

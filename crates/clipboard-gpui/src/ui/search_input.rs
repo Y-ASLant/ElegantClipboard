@@ -10,7 +10,7 @@ impl ClipboardView {
         if matches!(event, InputEvent::Change) {
             self.cancel_sequence(cx);
             self.cancel_pending_row_click();
-            self.close_hover_preview(cx);
+            self.close_hover_preview("search_changed", cx);
             if matches!(
                 self.confirmation,
                 Some(HistoryConfirmation::ClearHistory(_))

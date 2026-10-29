@@ -4,7 +4,9 @@ use super::super::{
     file_actions::{item_paths_for_action, plain_text_for_copy},
     read_content::RTF_FORMAT,
 };
-use super::{Event, Worker, clipboard_content::rtf_for_copy, image_tmp::ensure_temp_png};
+use super::{
+    Event, Worker, clipboard_content::rtf_for_copy, copy_mode::CopyMode, image_tmp::ensure_temp_png,
+};
 use crate::sequence::current_sequence;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::History;
@@ -20,29 +22,6 @@ use std::{
 const PNG_FORMAT: &str = "image/png";
 #[cfg(target_os = "macos")]
 const PNG_FORMAT: &str = "public.png";
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum CopyMode {
-    Original,
-    PlainText,
-    Paths,
-    Files,
-    /// 富文本条目的单一格式复制（HTML 或 RTF），缺少该格式时报错不降级。
-    Html,
-    Rtf,
-    /// 文本转换后的纯文本复制（见决策 0003）。
-    Transform(clipboard_core::TextTransform),
-}
-
-impl CopyMode {
-    pub(super) fn from(format: crate::service::protocol::CopyFormat) -> Self {
-        match format {
-            crate::service::protocol::CopyFormat::PlainText => Self::PlainText,
-            crate::service::protocol::CopyFormat::Html => Self::Html,
-            crate::service::protocol::CopyFormat::Rtf => Self::Rtf,
-        }
-    }
-}
 
 impl Worker {
     pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
@@ -158,9 +137,7 @@ impl Worker {
                 )),
             },
         }
-        if mode == CopyMode::Original
-            && matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf")
-        {
+        if mode == CopyMode::Original && item.kind().is_some_and(|kind| kind.is_text_like()) {
             contents.extend(
                 self.history
                     .native_formats_for_copy(id)?

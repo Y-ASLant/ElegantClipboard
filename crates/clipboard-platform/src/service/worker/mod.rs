@@ -26,6 +26,7 @@ mod clipboard_restore;
 #[path = "../../windows/worker/clipboard_write.rs"]
 mod clipboard_write;
 mod commands;
+mod copy_mode;
 mod history;
 mod image_tmp;
 mod retention;

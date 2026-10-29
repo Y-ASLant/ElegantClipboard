@@ -1,5 +1,6 @@
 use super::file_cards::{copy_or_paste_label, save_as_suggested_name};
 use super::*;
+use gpui_kit::assets::IconName;
 use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
 pub(super) fn history_menu_item(
     label: impl Into<SharedString>,
@@ -8,13 +9,68 @@ pub(super) fn history_menu_item(
     id: i64,
     action: HistoryMenuAction,
 ) -> PopupMenuItem {
+    let label = label.into();
+    let icon = match &action {
+        HistoryMenuAction::Paste => IconName::Replace,
+        HistoryMenuAction::PastePlainText
+        | HistoryMenuAction::PasteAsFormat(_)
+        | HistoryMenuAction::PasteTransformed(_)
+        | HistoryMenuAction::Edit
+        | HistoryMenuAction::EditNote => IconName::FileText,
+        HistoryMenuAction::Copy | HistoryMenuAction::CopyPath => IconName::Copy,
+        HistoryMenuAction::CopyAsFile | HistoryMenuAction::SaveAs(_) => IconName::File,
+        HistoryMenuAction::Reveal => IconName::ExternalLink,
+        HistoryMenuAction::ToggleFavorite => IconName::Heart,
+        HistoryMenuAction::TogglePin => IconName::Star,
+        HistoryMenuAction::MoveToGroup => IconName::Folder,
+        HistoryMenuAction::Delete => IconName::Trash,
+    };
     PopupMenuItem::new(label)
+        .icon(Icon::new(icon).size(px(visual::ICON_SIZE)))
         .disabled(disabled)
         .on_click(move |_, window, cx| {
             view.update(cx, |this, cx| {
                 this.perform_history_menu_action(id, &action, window, cx);
             });
         })
+}
+
+/// 「粘贴为/复制为」子菜单的公共构造：逐项列出 (标签, 动作)，
+/// 样式与点击行为在两个子菜单（按格式/转换后）之间共享。
+#[allow(clippy::too_many_arguments)]
+fn transform_submenu(
+    menu: PopupMenu,
+    language: LanguagePreference,
+    can_paste: bool,
+    paste_pending: bool,
+    id: i64,
+    entity: &Entity<ClipboardView>,
+    items: impl IntoIterator<Item = (&'static str, HistoryMenuAction)>,
+) -> PopupMenu {
+    let mut menu = menu.min_w(px(216.)).max_w(px(320.));
+    let (menu_label, menu_label_en) = if can_paste {
+        ("粘贴为", "Paste as")
+    } else {
+        ("复制为", "Copy as")
+    };
+    for (label, action) in items {
+        menu = menu.item(
+            PopupMenuItem::new(format!(
+                "{} {label}",
+                tr(language, menu_label, menu_label_en)
+            ))
+            .disabled(paste_pending)
+            .on_click({
+                let entity = entity.clone();
+                move |_, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.perform_history_menu_action(id, &action, window, cx);
+                    });
+                }
+            }),
+        );
+    }
+    menu
 }
 
 impl ClipboardView {
@@ -48,8 +104,8 @@ impl ClipboardView {
             }
             HistoryMenuAction::CopyPath => self.copy_or_paste_path(id, window, cx),
             HistoryMenuAction::CopyAsFile => self.copy_or_paste_image_file(id, window, cx),
-            HistoryMenuAction::Preview => self.open_preview(id, window, cx),
-            HistoryMenuAction::Edit => self.open_preview_for_edit(id, window, cx),
+            HistoryMenuAction::Edit => self.open_editor(id, true, window, cx),
+            HistoryMenuAction::EditNote => self.open_editor(id, false, window, cx),
             HistoryMenuAction::Reveal => {
                 self.send(Command::RevealInExplorer(id), cx);
             }
@@ -80,12 +136,12 @@ impl ClipboardView {
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
-        let is_rich_item = matches!(item.content_type.as_str(), "html" | "rtf");
+        let is_rich_item = item.kind().is_some_and(|kind| kind.is_rich());
         let is_text_item = matches!(item.content_type.as_str(), "text" | "url");
         let favorite = item.is_favorite;
         let pinned = item.is_pinned;
         let entity = cx.entity();
-        let text_like = matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf");
+        let text_like = item.kind().is_some_and(|kind| kind.is_text_like());
         let language = self.language;
         let batch_mode = self.batch_mode;
         let can_paste = self.paste_target.is_some() && self._tray.is_some();
@@ -96,10 +152,9 @@ impl ClipboardView {
         let save_as_name = if is_image {
             item.image_path.as_deref().and_then(save_as_suggested_name)
         } else if is_files {
-            item.file_paths
-                .as_deref()
-                .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
-                .and_then(|paths| paths.into_iter().next())
+            clipboard_core::parse_file_paths_for_display(item.file_paths.as_deref())
+                .into_iter()
+                .next()
                 .and_then(save_as_suggested_name)
         } else {
             None
@@ -109,6 +164,9 @@ impl ClipboardView {
         } else {
             row.context_menu(move |menu, window, cx| {
                 let menu = menu
+                    .min_w(px(240.))
+                    .max_w(px(320.))
+                    .scrollable(true)
                     .item(history_menu_item(
                         tr(language, "粘贴到原窗口", "Paste to previous window"),
                         !can_paste || paste_pending,
@@ -131,36 +189,24 @@ impl ClipboardView {
                             |menu: PopupMenu,
                              _window: &mut Window,
                              _cx: &mut Context<PopupMenu>| {
-                                let mut menu = menu;
-                                for (label, format) in [
-                                    (tr(language, "HTML", "HTML"), CopyFormat::Html),
-                                    (tr(language, "RTF", "RTF"), CopyFormat::Rtf),
-                                ] {
-                                    let action = HistoryMenuAction::PasteAsFormat(format);
-                                    let (menu_label, menu_label_en) = if can_paste {
-                                        ("粘贴为", "Paste as")
-                                    } else {
-                                        ("复制为", "Copy as")
-                                    };
-                                    menu = menu.item(
-                                        PopupMenuItem::new(format!(
-                                            "{} {label}",
-                                            tr(language, menu_label, menu_label_en)
-                                        ))
-                                        .disabled(paste_pending)
-                                        .on_click({
-                                            let entity = entity.clone();
-                                            move |_, window, cx| {
-                                                entity.update(cx, |this, cx| {
-                                                    this.perform_history_menu_action(
-                                                        id, &action, window, cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                    );
-                                }
-                                menu
+                                transform_submenu(
+                                    menu,
+                                    language,
+                                    can_paste,
+                                    paste_pending,
+                                    id,
+                                    &entity,
+                                    [
+                                        (
+                                            tr(language, "HTML", "HTML"),
+                                            HistoryMenuAction::PasteAsFormat(CopyFormat::Html),
+                                        ),
+                                        (
+                                            tr(language, "RTF", "RTF"),
+                                            HistoryMenuAction::PasteAsFormat(CopyFormat::Rtf),
+                                        ),
+                                    ],
+                                )
                             };
                         menu.item(PopupMenuItem::submenu(
                             if can_paste {
@@ -177,50 +223,40 @@ impl ClipboardView {
                             |menu: PopupMenu,
                              _window: &mut Window,
                              _cx: &mut Context<PopupMenu>| {
-                                let mut menu = menu;
-                                for (label, transform) in [
-                                    (
-                                        tr(language, "去除首尾空白", "Trim whitespace"),
-                                        TextTransform::Trim,
-                                    ),
-                                    (
-                                        tr(language, "去除换行", "Remove line breaks"),
-                                        TextTransform::RemoveLineBreaks,
-                                    ),
-                                    (
-                                        tr(language, "转大写", "UPPERCASE"),
-                                        TextTransform::Uppercase,
-                                    ),
-                                    (
-                                        tr(language, "转小写", "lowercase"),
-                                        TextTransform::Lowercase,
-                                    ),
-                                ] {
-                                    let action = HistoryMenuAction::PasteTransformed(transform);
-                                    let (menu_label, menu_label_en) = if can_paste {
-                                        ("粘贴为", "Paste as")
-                                    } else {
-                                        ("复制为", "Copy as")
-                                    };
-                                    menu = menu.item(
-                                        PopupMenuItem::new(format!(
-                                            "{} {label}",
-                                            tr(language, menu_label, menu_label_en)
-                                        ))
-                                        .disabled(paste_pending)
-                                        .on_click({
-                                            let entity = entity.clone();
-                                            move |_, window, cx| {
-                                                entity.update(cx, |this, cx| {
-                                                    this.perform_history_menu_action(
-                                                        id, &action, window, cx,
-                                                    );
-                                                });
-                                            }
-                                        }),
-                                    );
-                                }
-                                menu
+                                transform_submenu(
+                                    menu,
+                                    language,
+                                    can_paste,
+                                    paste_pending,
+                                    id,
+                                    &entity,
+                                    [
+                                        (
+                                            tr(language, "去除首尾空白", "Trim whitespace"),
+                                            HistoryMenuAction::PasteTransformed(
+                                                TextTransform::Trim,
+                                            ),
+                                        ),
+                                        (
+                                            tr(language, "去除换行", "Remove line breaks"),
+                                            HistoryMenuAction::PasteTransformed(
+                                                TextTransform::RemoveLineBreaks,
+                                            ),
+                                        ),
+                                        (
+                                            tr(language, "转大写", "UPPERCASE"),
+                                            HistoryMenuAction::PasteTransformed(
+                                                TextTransform::Uppercase,
+                                            ),
+                                        ),
+                                        (
+                                            tr(language, "转小写", "lowercase"),
+                                            HistoryMenuAction::PasteTransformed(
+                                                TextTransform::Lowercase,
+                                            ),
+                                        ),
+                                    ],
+                                )
                             };
                         menu.item(PopupMenuItem::submenu(
                             if can_paste {
@@ -281,13 +317,6 @@ impl ClipboardView {
                     menu
                 };
                 menu.separator()
-                    .item(history_menu_item(
-                        tr(language, "查看详情", "View details"),
-                        false,
-                        entity.clone(),
-                        id,
-                        HistoryMenuAction::Preview,
-                    ))
                     .when(text_like, |menu| {
                         menu.item(history_menu_item(
                             tr(language, "编辑", "Edit"),
@@ -297,29 +326,42 @@ impl ClipboardView {
                             HistoryMenuAction::Edit,
                         ))
                     })
+                    .item(history_menu_item(
+                        tr(language, "编辑备注", "Edit note"),
+                        false,
+                        entity.clone(),
+                        id,
+                        HistoryMenuAction::EditNote,
+                    ))
                     .separator()
-                    .item(history_menu_item(
-                        if favorite {
-                            tr(language, "取消收藏", "Unfavorite")
-                        } else {
-                            tr(language, "收藏", "Favorite")
-                        },
-                        false,
-                        entity.clone(),
-                        id,
-                        HistoryMenuAction::ToggleFavorite,
-                    ))
-                    .item(history_menu_item(
-                        if pinned {
-                            tr(language, "取消置顶", "Unpin")
-                        } else {
-                            tr(language, "置顶", "Pin")
-                        },
-                        false,
-                        entity.clone(),
-                        id,
-                        HistoryMenuAction::TogglePin,
-                    ))
+                    .item(
+                        history_menu_item(
+                            if favorite {
+                                tr(language, "取消收藏", "Unfavorite")
+                            } else {
+                                tr(language, "收藏", "Favorite")
+                            },
+                            false,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::ToggleFavorite,
+                        )
+                        .checked(favorite),
+                    )
+                    .item(
+                        history_menu_item(
+                            if pinned {
+                                tr(language, "取消置顶", "Unpin")
+                            } else {
+                                tr(language, "置顶", "Pin")
+                            },
+                            false,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::TogglePin,
+                        )
+                        .checked(pinned),
+                    )
                     .item(history_menu_item(
                         tr(language, "移动到分组", "Move to group"),
                         group_move_disabled,
@@ -328,13 +370,20 @@ impl ClipboardView {
                         HistoryMenuAction::MoveToGroup,
                     ))
                     .separator()
-                    .item(history_menu_item(
-                        tr(language, "删除", "Delete"),
-                        false,
-                        entity.clone(),
-                        id,
-                        HistoryMenuAction::Delete,
-                    ))
+                    .item(
+                        history_menu_item(
+                            tr(language, "删除", "Delete"),
+                            false,
+                            entity.clone(),
+                            id,
+                            HistoryMenuAction::Delete,
+                        )
+                        .icon(
+                            Icon::new(IconName::Trash)
+                                .size(px(visual::ICON_SIZE))
+                                .text_color(cx.theme().danger),
+                        ),
+                    )
             })
             .into_any_element()
         }

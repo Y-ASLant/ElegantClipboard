@@ -10,6 +10,8 @@
 
 2026-10-12 更新：应用升级至 [gpui-kit 0.7.3](https://github.com/longbridge/gpui-kit/releases/tag/v0.7.3)，配套 `gpui-pre-* 0.3.9`，保持既有窗口入口；本次原生冒烟发现的一次间歇性借用冲突及后续验证结果见 [Windows GPUI 状态](../WINDOWS_MVP.md#依赖策略)。2026-10-16 切回默认 `gpui-pre 0.3.9` 后端。默认后端已提供原生窗口句柄和 `WM_NCCALCSIZE`/`WM_NCHITTEST` 通路，窗口材质不需要可选后端。Release 改为体积优先的 `opt-level = "z"`、完整 LTO、单代码生成单元和符号裁剪；保留 unwind 以支持现有 panic 捕获边界。
 
+当前更新：完整升级至[GPUI Kit 0.8.1](https://github.com/longbridge/gpui-kit/releases/tag/v0.8.1)及其配套0.8.1组件，默认`gpui-pre-*`为0.3.10。按官方版本组合定向更新锁文件，不引入第二套GPUI或可选后端。旧滚轮API已迁移，编译/测试/原生交互证据见[升级验证](../WINDOWS_MVP.md#gpui-kit-081升级验证)；下文历史版本号不代表当前依赖。
+
 ## 栈与依赖
 
 - 首批使用 crates.io 的 `gpui-kit 0.6.2`，与其匹配的 GPUI crate 由 Kit 引入，应用不再自行指定第二套 GPUI。

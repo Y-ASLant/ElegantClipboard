@@ -85,7 +85,8 @@ pub(super) struct ThumbnailResult {
 
 #[derive(Default)]
 pub(super) struct ThumbnailCache {
-    wanted: Vec<ThumbnailKey>,
+    // Keep the first visible position without duplicating keys in an ordered collection.
+    wanted: HashMap<ThumbnailKey, usize>,
     entries: HashMap<ThumbnailKey, Entry>,
     running: HashMap<u64, ThumbnailKey>,
     next_token: u64,
@@ -94,9 +95,16 @@ pub(super) struct ThumbnailCache {
 }
 
 impl ThumbnailCache {
-    pub fn retain(&mut self, wanted: Vec<ThumbnailKey>) {
+    pub fn retain<I>(&mut self, wanted: I)
+    where
+        I: IntoIterator<Item = ThumbnailKey>,
+    {
+        self.wanted.clear();
+        for (position, key) in wanted.into_iter().enumerate() {
+            self.wanted.entry(key).or_insert(position);
+        }
         self.entries.retain(|key, entry| {
-            if wanted.contains(key) {
+            if self.wanted.contains_key(key) {
                 return true;
             }
             if let Some(Thumbnail::Ready(image)) = entry.result.take() {
@@ -104,7 +112,6 @@ impl ThumbnailCache {
             }
             false
         });
-        self.wanted = wanted;
     }
 
     pub fn source(&self, key: &ThumbnailKey) -> Option<ImageSource> {
@@ -118,20 +125,24 @@ impl ThumbnailCache {
         if self.running.len() >= MAX_CONCURRENT {
             return None;
         }
-        let key = self
+        let (key, _) = self
             .wanted
             .iter()
-            .find(|key| !self.entries.contains_key(*key))
+            .filter(|(key, _)| !self.entries.contains_key(*key))
+            .min_by_key(|(_, position)| **position)
             .or_else(|| {
-                self.wanted.iter().find(|key| {
-                    key.external
-                        && self.entries.get(*key).is_some_and(|entry| {
-                            !self.running.contains_key(&entry.token)
-                                && entry.checked.elapsed() >= FILE_RECHECK
-                        })
-                })
-            })?
-            .clone();
+                self.wanted
+                    .iter()
+                    .filter(|(key, _)| {
+                        key.external
+                            && self.entries.get(*key).is_some_and(|entry| {
+                                !self.running.contains_key(&entry.token)
+                                    && entry.checked.elapsed() >= FILE_RECHECK
+                            })
+                    })
+                    .min_by_key(|(_, position)| **position)
+            })?;
+        let key = key.clone();
         self.next_token += 1;
         let token = self.next_token;
         let entry = self.entries.entry(key.clone()).or_insert_with(|| Entry {

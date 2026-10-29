@@ -1,4 +1,6 @@
-use super::settings_common::{choice_tabs, owner_state};
+use super::settings_common::{
+    choice_tabs, owner_state, settings_description, settings_field, settings_stack,
+};
 use super::*;
 use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
 
@@ -14,36 +16,37 @@ impl SettingsWindowView {
         let backend = capabilities.resolve(preference.effect);
         let supported = capabilities.supports(preference.effect);
         let choices = [
-            WindowEffect::None,
-            WindowEffect::Acrylic,
+            WindowEffect::Opaque,
+            WindowEffect::Frosted,
             WindowEffect::Mica,
-            WindowEffect::MicaAlt,
         ]
         .into_iter()
-        .filter(move |effect| capabilities.supports(*effect) || *effect == preference.effect);
+        .filter(move |effect| capabilities.supports(*effect));
         let owner = self.owner.clone();
         let tabs = TabBar::new("settings-window-effect")
             .w_full()
+            .min_w_0()
+            .max_w(px(visual::CHOICE_MAX_WIDTH))
+            .h(px(visual::CONTROL_HEIGHT_LARGE))
+            .large()
             .segmented()
             .selected_index(
                 choices
                     .clone()
-                    .position(|effect| effect == preference.effect)
+                    .position(|effect| effect == backend.effect())
                     .unwrap_or(0),
             )
             .children(choices.clone().map(|effect| {
                 Tab::new()
                     .label(effect_label(language, effect))
-                    .disabled(pending || !capabilities.supports(effect))
+                    .text_size(px(visual::TEXT_BODY))
+                    .disabled(pending)
                     .flex_1()
             }))
             .on_click(move |index: &usize, _, cx| {
                 let Some(effect) = choices.clone().nth(*index) else {
                     return;
                 };
-                if !capabilities.supports(effect) {
-                    return;
-                }
                 let _ = owner.update(cx, |owner, cx| {
                     if !owner.window_effect_pending && owner.window_effect.effect != effect {
                         owner.save_window_effect(
@@ -56,40 +59,17 @@ impl SettingsWindowView {
                     }
                 });
             });
-        div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_w(px(280.))
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(tr(language, "窗口效果", "Window effect"))
-                    .child(div().w_full().min_w_0().child(tabs)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_w(px(280.))
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(tr(language, "背景遮罩强度", "Background tint"))
-                    .child(div().w_full().min_w_0().child(choice_tabs(
+        settings_stack()
+            .child(settings_field(tr(language, "背景材质", "Background material")).child(tabs))
+            .when(backend != WindowEffectBackend::Opaque, |content| {
+                content.child(settings_field(tr(language, "背景浓度", "Background density"))
+                    .child(choice_tabs(
                         "settings-window-effect-opacity",
                         &self.owner,
                         [40_u8, 55_u8, 72_u8, 85_u8],
                         ["40%", "55%", "72%", "85%"],
                         preference.opacity,
-                        pending || backend == WindowEffectBackend::Opaque,
+                        pending,
                         |owner| owner.window_effect.opacity,
                         |owner, opacity, cx| {
                             owner.save_window_effect(
@@ -100,25 +80,22 @@ impl SettingsWindowView {
                                 cx,
                             );
                         },
-                    ))),
-            )
+                    )))
+                    .child(settings_description(tr(
+                        language,
+                        "数值越高，背景越实。窗口、侧栏与内容卡片共享材质层次；文字、控件和浮层保持清晰，不改变系统模糊半径。",
+                        "Higher density makes the background more solid. The window, sidebar and content cards share material surfaces; text, controls and overlays stay clear. The system blur radius is unchanged.",
+                    ), cx))
+            })
             .when(!supported, |content| {
                 let saved = effect_label(language, preference.effect);
-                let actual = match backend {
-                    WindowEffectBackend::Opaque => tr(language, "关闭（不透明）", "Off (opaque)"),
-                    WindowEffectBackend::LegacyAcrylic => tr(
-                        language,
-                        "亚克力（Windows 10 兼容模式）",
-                        "Acrylic (Windows 10 compatibility mode)",
-                    ),
-                    _ => effect_label(language, backend.effect()),
-                };
+                let actual = effect_label(language, backend.effect());
                 let message = match language {
                     LanguagePreference::Chinese => format!(
-                        "已保存的选项“{saved}”在本机不受支持，实际降级为“{actual}”。已保留原设置；你可以选择上方受支持的选项。"
+                        "已保存的材质“{saved}”在本机不受支持，按平台能力使用“{actual}”。原偏好仍保留；选择上方选项后才会修改保存值。"
                     ),
                     LanguagePreference::English => format!(
-                        "The saved option “{saved}” is not supported on this PC. The actual fallback is {actual}. Your saved setting is retained; you can choose a supported option above."
+                        "The saved material “{saved}” is unavailable on this platform, which uses “{actual}” instead. Your preference is retained until you choose a supported option above."
                     ),
                 };
                 content.child(
@@ -131,50 +108,25 @@ impl SettingsWindowView {
             })
             .when(supported && backend == WindowEffectBackend::LegacyAcrylic, |content| {
                 content.child(
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(
-                            language,
-                            "当前使用亚克力（Windows 10 兼容模式）。",
-                            "Acrylic is running in Windows 10 compatibility mode.",
-                        )),
+                    settings_description(tr(
+                        language,
+                        "当前通过 Windows 兼容模式呈现毛玻璃。",
+                        "Frosted glass is using the Windows compatibility backend.",
+                    ), cx),
                 )
             })
             .when(
-                preference.effect == WindowEffect::None
-                    && !capabilities.supports(WindowEffect::Acrylic),
+                preference.effect == WindowEffect::Opaque
+                    && !capabilities.supports(WindowEffect::Frosted),
                 |content| {
                     content.child(
-                        div()
-                            .w_full()
-                            .min_w_0()
-                            .whitespace_normal()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(
-                                language,
-                                "当前系统不支持窗口材质，或无法确认系统版本；窗口效果已关闭，使用不透明背景。",
-                                "Native window materials are unavailable on this desktop. Effects are off; the background is opaque.",
-                            )),
+                        settings_description(tr(
+                            language,
+                            "当前环境没有可用的原生背景模糊能力，使用不透明背景。",
+                            "Native background blur is unavailable in this environment. The background remains opaque.",
+                        ), cx),
                     )
                 },
-            )
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .whitespace_normal()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tr(
-                        language,
-                        "仅调整窗口背景的遮罩，不改变控件透明度或系统模糊半径。数值越高越接近主题纯色，越低越通透。",
-                        "Only changes the window background tint, not control opacity or system blur. Higher values look more solid; lower values reveal more of the backdrop.",
-                    )),
             )
             .into_any_element()
     }
@@ -182,12 +134,8 @@ impl SettingsWindowView {
 
 fn effect_label(language: LanguagePreference, effect: WindowEffect) -> &'static str {
     match effect {
-        WindowEffect::None => tr(language, "关闭", "Off"),
-        WindowEffect::Acrylic if cfg!(target_os = "macos") => {
-            tr(language, "系统毛玻璃", "Native blur")
-        }
-        WindowEffect::Acrylic => tr(language, "亚克力", "Acrylic"),
+        WindowEffect::Opaque => tr(language, "无", "None"),
+        WindowEffect::Frosted => tr(language, "毛玻璃", "Frosted glass"),
         WindowEffect::Mica => tr(language, "云母", "Mica"),
-        WindowEffect::MicaAlt => tr(language, "云母 Alt", "Mica Alt"),
     }
 }

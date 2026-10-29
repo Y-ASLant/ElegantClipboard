@@ -4,12 +4,31 @@ use anyhow::{Result, bail};
 use html5ever::tokenizer::{
     BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, states::RawKind,
 };
-use std::cell::{Cell, RefCell};
+use std::{
+    borrow::Cow,
+    cell::{Cell, RefCell},
+};
 
 /// Extract visible text without wrapping or truncating the body. Source plain text
 /// should take precedence over this fallback, including whitespace-only text.
 pub fn html_to_text(html: &str) -> Result<String> {
     Ok(tokenize(html)?.text.into_inner())
+}
+
+/// 取条目的纯文本表示：优先正文 `text_content`，为空则把 HTML 转纯文本。
+///
+/// 复制/合并等需要文本回退链的场景共用。`Ok(None)` 表示没有可用文本
+/// （无正文、无 HTML 或 HTML 转出空文本）；HTML 转换本身失败（如超限）
+/// 仍返回 `Err`，由调用方决定提示语。
+pub fn item_plain_text(item: &crate::database::ClipboardItem) -> Result<Option<Cow<'_, str>>> {
+    if let Some(text) = item.text_content.as_deref().filter(|text| !text.is_empty()) {
+        return Ok(Some(Cow::Borrowed(text)));
+    }
+    let Some(html) = item.html_content.as_deref() else {
+        return Ok(None);
+    };
+    let text = html_to_text(html)?;
+    Ok((!text.is_empty()).then_some(Cow::Owned(text)))
 }
 
 /// 带原生位图的纯图片 HTML 应优先保存像素，不以图片地址替代图片内容。

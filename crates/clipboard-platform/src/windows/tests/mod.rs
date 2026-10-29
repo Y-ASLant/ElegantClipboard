@@ -6,6 +6,7 @@ use clipboard_core::{
 };
 use std::{thread, time::Duration};
 
+mod appearance;
 mod capture;
 mod clipboard;
 mod data;

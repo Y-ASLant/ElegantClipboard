@@ -27,6 +27,7 @@ impl ClipboardView {
             }
         }
         if let Err(error) = self.service.send(command) {
+            tracing::error!(%error, "Sending backend command failed");
             self.set_feedback_message(error.to_string());
             self.is_error = true;
             cx.notify();
@@ -71,7 +72,7 @@ impl ClipboardView {
                 id,
                 generation,
                 result,
-            } => self.apply_preview_result(id, generation, result, window, cx),
+            } => self.apply_editor_content(id, generation, result, window, cx),
             Event::HoverPreview {
                 id,
                 generation,
@@ -119,6 +120,16 @@ impl ClipboardView {
                 cx,
             ),
             Event::ThemeSaved(result) => self.apply_theme_saved(result, window, cx),
+            Event::CornerRadiusSaved(result) => {
+                self.acknowledge_save(
+                    result,
+                    |this| &mut this.corner_radius,
+                    ("圆角设置已保存", "Corner radius saved"),
+                    ("圆角保存失败", "Failed to save corner radius"),
+                );
+                crate::design_system::set_corner_radius(self.corner_radius.value, cx);
+                true
+            }
             Event::WindowEffectSaved(result) => self.apply_window_effect_saved(result, window, cx),
             Event::LanguageSaved(result) => self.apply_language_saved(result, window, cx),
             Event::HotkeySaved(result) => self.apply_hotkey_saved(result),
@@ -226,23 +237,7 @@ impl ClipboardView {
                 true
             }
             Event::SequenceHotkeySaved(result) => self.apply_sequence_hotkey_saved(result),
-            Event::NoteSaved(result) => match result {
-                Ok(_) => {
-                    self.note_save_pending = false;
-                    self.set_feedback_message(tr(self.language, "备注已保存", "Note saved").into());
-                    self.is_error = false;
-                    true
-                }
-                Err(error) => {
-                    self.note_save_pending = false;
-                    self.set_feedback_message(format!(
-                        "{}: {error}",
-                        tr(self.language, "保存备注失败", "Failed to save note")
-                    ));
-                    self.is_error = true;
-                    true
-                }
-            },
+            Event::NoteSaved(result) => self.apply_note_saved(result, window, cx),
             Event::ClipboardRestored(result) => match result {
                 // 没有快照（偏好关闭或读取失败）不打扰用户；失败要提示。
                 Ok(_) => false,
@@ -316,15 +311,18 @@ impl ClipboardView {
             }
             Event::BackupExported(result) => self.apply_backup_exported(result),
             Event::CommandFailed { kind, message } => {
+                tracing::error!(?kind, "Backend command failed; details shown in UI");
                 self.apply_command_failed(kind, message, window, cx)
             }
             Event::Error(message) => {
+                tracing::error!("Backend error received; details shown in UI");
                 self.set_feedback_message(message);
                 self.is_error = true;
                 self.history.loading = false;
                 true
             }
             Event::BackgroundError(message) => {
+                tracing::error!("Backend background error received; details shown in UI");
                 self.set_feedback_message(message);
                 self.is_error = true;
                 true
@@ -352,7 +350,7 @@ impl ClipboardView {
             return false;
         }
         if let FailureKind::EditText { id, generation } = kind
-            && (self.preview.id != Some(id) || self.preview.generation != generation)
+            && (self.editor.id != Some(id) || self.editor.generation != generation)
         {
             return false;
         }
@@ -400,7 +398,11 @@ impl ClipboardView {
                     self.close_history_confirmation(window, cx);
                 }
             }
-            FailureKind::EditText { .. } => self.preview_save_pending = false,
+            FailureKind::EditText { .. } => {
+                self.editor_save_pending = false;
+                self.editor_error = Some(message.clone());
+                window.refresh();
+            }
             FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
                 self.save_as_pending = None;
             }
@@ -409,6 +411,11 @@ impl ClipboardView {
                 self.database_maintenance_pending = false;
             }
             FailureKind::Pause => self.pause_pending = false,
+            FailureKind::Other if self.note_save_pending => {
+                self.note_save_pending = false;
+                self.editor_error = Some(message.clone());
+                window.refresh();
+            }
             FailureKind::Other | FailureKind::SaveAs(_) => {}
         }
         self.set_feedback_message(message);

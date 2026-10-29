@@ -5,19 +5,10 @@ use std::path::PathBuf;
 use std::{borrow::Cow, path::Path};
 
 pub(super) fn plain_text_for_copy(item: &ClipboardItem) -> Result<Cow<'_, str>> {
-    if !matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf") {
+    if !item.kind().is_some_and(|kind| kind.is_text_like()) {
         bail!("该记录不支持纯文本复制");
     }
-    if let Some(text) = item.text_content.as_deref().filter(|text| !text.is_empty()) {
-        return Ok(Cow::Borrowed(text));
-    }
-    if let Some(html) = item.html_content.as_deref() {
-        let text = clipboard_core::html_text::html_to_text(html)?;
-        if !text.is_empty() {
-            return Ok(Cow::Owned(text));
-        }
-    }
-    bail!("记录没有可复制的纯文本")
+    clipboard_core::html_text::item_plain_text(item)?.context("记录没有可复制的纯文本")
 }
 
 pub(super) fn item_paths_for_action(item: &ClipboardItem) -> Result<Vec<String>> {

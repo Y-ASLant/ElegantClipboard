@@ -5,13 +5,10 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
-        if self.preview.id.is_some() {
-            return visual::reveal(
-                self.render_preview(cx),
-                ("preview-enter", self.preview.generation as usize),
-                cx,
-            );
-        }
+        // Deduct the group selector, row gap, and the Kit segmented-tab insets.
+        let category_width = (window.viewport_size().width
+            - px(PAGE_PADDING * 2. + 138. + visual::SPACE_2 * 2. + 6.))
+            / 4.;
         let empty_message = if self.history.loading {
             tr(self.language, "正在加载…", "Loading…")
         } else if self.search.read(cx).value().is_empty() {
@@ -60,19 +57,23 @@ impl ClipboardView {
             .child(
                 div()
                     .key_context("HistorySearch")
+                    .flex_none()
                     .px(px(PAGE_PADDING))
-                    .pb_2()
+                    .pb(px(visual::SPACE_2))
                     .on_action(cx.listener(|this, _: &FocusFirstHistoryItem, window, cx| {
                         this.focus_first_history_item(window, cx);
                     }))
                     .child(
                         Input::new(&self.search)
+                            .with_size(gpui_kit::component::Size::Medium)
+                            .text_size(px(visual::TEXT_BODY))
+                            .rounded(cx.theme().radius)
                             .cleanable(true)
-                            .prefix(Icon::new(IconName::Search).small())
+                            .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
                             .suffix(
                                 Button::new("history-search-info")
                                     .text()
-                                    .icon(IconName::Info)
+                                    .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
                                     .xsmall()
                                     .accessibility_label(tr(
                                         self.language,
@@ -92,23 +93,26 @@ impl ClipboardView {
                     .id("toolbar-row")
                     .w_full()
                     .px(px(PAGE_PADDING))
-                    .pb_2()
+                    .pb(px(visual::SPACE_2))
                     .flex_none()
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap(px(visual::SPACE_1))
                     .child(
                         div()
                             .w_full()
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap(px(visual::SPACE_2))
                             .when(self.display.show_category_filter, |row| {
                                 row.child(
                                     div().flex_1().min_w_0().child(
                                         TabBar::new("history-category-tabs")
                                             .w_full()
                                             .segmented()
+                                            .h(px(visual::CONTROL_HEIGHT))
+                                            .max_width(category_width)
+                                            .last_empty_space(div().w_0())
                                             .selected_index(self.category_tab_index())
                                             .on_click(cx.listener(
                                                 |this, index: &usize, window, cx| {
@@ -128,6 +132,9 @@ impl ClipboardView {
                                                 ]
                                                 .map(|(chinese, english, accessible)| {
                                                     Tab::new()
+                                                        .text_size(px(visual::TEXT_BODY))
+                                                        .min_w_0()
+                                                        .w(category_width)
                                                         .label(tr(self.language, chinese, english))
                                                         .aria_label(tr(
                                                             self.language,
@@ -144,6 +151,8 @@ impl ClipboardView {
                                 div().w(px(138.)).flex_none().child(
                                     Select::new(&self.group_select)
                                         .w_full()
+                                        .h(px(visual::CONTROL_HEIGHT))
+                                        .text_size(px(visual::TEXT_BODY))
                                         .menu_width(px(190.))
                                         .menu_max_h(px(300.))
                                         .placeholder(tr(self.language, "选择分组", "Select group"))
@@ -163,12 +172,12 @@ impl ClipboardView {
                     div().child(
                         div()
                             .px(px(PAGE_PADDING))
-                            .pb_2()
+                            .pb(px(visual::SPACE_2))
                             .h(px(GROUP_BAR_HEIGHT))
                             .flex_none()
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap(px(visual::SPACE_2))
                             .overflow_x_scrollbar()
                             .child(
                                 Button::new("move-group-cancel")
@@ -181,7 +190,11 @@ impl ClipboardView {
                                         cx.notify();
                                     })),
                             )
-                            .child(div().text_xs().child(tr(self.language, "移至", "Move to")))
+                            .child(div().text_size(px(visual::TEXT_SMALL)).child(tr(
+                                self.language,
+                                "移至",
+                                "Move to",
+                            )))
                             .child(
                                 Button::new("move-group-default")
                                     .small()
@@ -218,14 +231,14 @@ impl ClipboardView {
                 container.child(visual::reveal(
                     div()
                         .px(px(PAGE_PADDING))
-                        .pb_2()
+                        .pb(px(visual::SPACE_2))
                         .flex()
                         .flex_wrap()
                         .items_center()
-                        .gap_2()
+                        .gap(px(visual::SPACE_2))
                         .child(
                             div()
-                                .text_xs()
+                                .text_size(px(visual::TEXT_SMALL))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(if self.language == LanguagePreference::English {
                                     format!("{} selected", self.selected_ids.len())
@@ -307,7 +320,7 @@ impl ClipboardView {
                         .when_some(self.sequence_queue.as_ref(), |bar, queue| {
                             bar.child(
                                 div()
-                                    .text_xs()
+                                    .text_size(px(visual::TEXT_SMALL))
                                     .text_color(cx.theme().muted_foreground)
                                     .child(if self.language == LanguagePreference::English {
                                         format!(
@@ -351,7 +364,7 @@ impl ClipboardView {
                     && self.history.limit < HISTORY_LIMIT,
                 |container| {
                     container.child(
-                        div().px(px(PAGE_PADDING)).py_2().child(
+                        div().px(px(PAGE_PADDING)).py(px(visual::SPACE_2)).child(
                             Button::new("more")
                                 .ghost()
                                 .small()
@@ -372,11 +385,13 @@ impl ClipboardView {
             .child(
                 div()
                     .px(px(PAGE_PADDING))
-                    .h(px(24.))
+                    .h(px(visual::SPACE_6 + visual::SPACE_1))
                     .flex_none()
+                    .border_t(px(visual::BORDER_WIDTH))
+                    .border_color(cx.theme().border)
                     .flex()
                     .items_center()
-                    .text_xs()
+                    .text_size(px(visual::TEXT_SMALL))
                     .text_color(cx.theme().muted_foreground)
                     .window_control_area(WindowControlArea::Drag)
                     .child(if self.language == LanguagePreference::English {

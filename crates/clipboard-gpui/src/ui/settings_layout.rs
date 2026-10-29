@@ -1,6 +1,7 @@
+use super::settings_common::{settings_description, settings_stack};
 use super::*;
 use gpui_kit::component::{
-    group_box::GroupBoxVariant,
+    group_box::{GroupBox, GroupBoxVariant, GroupBoxVariants},
     setting::{SelectIndex, SettingGroup, SettingItem, SettingPage, Settings},
 };
 
@@ -199,18 +200,12 @@ fn paste_audio_content(
 }
 
 fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
-    TitleBar::new()
-        .bg(cx.theme().background)
-        .when(
-            window_effect::active(cx).effect != WindowEffect::None,
-            |bar| bar.bg(transparent_black()),
-        )
-        .child(
-            div()
-                .text_sm()
-                .font_semibold()
-                .child(tr(language, "设置", "Settings")),
-        )
+    TitleBar::new().bg(cx.theme().sidebar).child(
+        div()
+            .text_size(px(visual::TEXT_BODY))
+            .font_semibold()
+            .child(tr(language, "设置", "Settings")),
+    )
 }
 
 impl Render for SettingsWindowView {
@@ -265,8 +260,9 @@ impl Render for SettingsWindowView {
         let pages = SettingsPage::ALL.map(|page| {
             let groups = SECTIONS
                 .iter()
-                .filter(|section| section.page == page)
-                .map(|section| {
+                .enumerate()
+                .filter(|(_, section)| section.page == page)
+                .map(|(section_ix, section)| {
                     let title = tr(language, section.chinese, section.english);
                     let description = tr(
                         language,
@@ -276,21 +272,45 @@ impl Render for SettingsWindowView {
                     let settings = settings.clone();
                     SettingGroup::new()
                         .title(title)
-                        .description(description)
+                        .variant(GroupBoxVariant::Normal)
+                        .text_size(px(visual::TEXT_BODY))
+                        .font_semibold()
+                        .py(px(visual::SPACE_2))
+                        .gap(px(visual::SPACE_2))
                         .item(
                             SettingItem::render(move |_, _, cx| {
-                                div().w_full().min_w_0().child(
-                                    settings
-                                        .update(cx, |view, cx| {
-                                            if view.page != page {
-                                                view.page = page;
-                                                view.shortcut_recording = false;
-                                                view.shortcut_editing = None;
-                                                view.shortcut_capture_error = None;
-                                            }
-                                            (section.content)(view, cx)
-                                        })
-                                        .unwrap_or_else(|_| div().into_any_element()),
+                                let content = settings
+                                    .update(cx, |view, cx| {
+                                        if view.page != page {
+                                            view.page = page;
+                                            view.shortcut_recording = false;
+                                            view.shortcut_editing = None;
+                                            view.shortcut_capture_error = None;
+                                        }
+                                        (section.content)(view, cx)
+                                    })
+                                    .unwrap_or_else(|_| div().into_any_element());
+                                visual::reveal(
+                                    div().w_full().min_w_0().child(
+                                        GroupBox::new()
+                                            .id(("settings-card", section_ix))
+                                            .outline()
+                                            .content_style(
+                                                StyleRefinement::default()
+                                                    .bg(cx.theme().group_box)
+                                                    .border_color(
+                                                        crate::design_system::container_border(cx),
+                                                    )
+                                                    .min_w_0(),
+                                            )
+                                            .child(
+                                                settings_stack()
+                                                    .child(settings_description(description, cx))
+                                                    .child(content),
+                                            ),
+                                    ),
+                                    ("settings-section-reveal", section_ix),
+                                    cx,
                                 )
                             })
                             .keywords([
@@ -302,6 +322,13 @@ impl Render for SettingsWindowView {
                 });
             SettingPage::new(page.label(language))
                 .icon(page.icon())
+                .header_style(
+                    &StyleRefinement::default()
+                        .px(px(visual::SPACE_4))
+                        .py(px(visual::SPACE_3))
+                        .text_size(px(visual::TEXT_TITLE))
+                        .font_semibold(),
+                )
                 .resettable(false)
                 .groups(groups)
         });
@@ -309,30 +336,27 @@ impl Render for SettingsWindowView {
         window_shell(cx)
             .child(settings_title_bar(language, cx))
             .child(
-                div().flex_1().min_h_0().child(
-                    Settings::new(if language == LanguagePreference::Chinese {
-                        "clipboard-settings-zh"
-                    } else {
-                        "clipboard-settings-en"
-                    })
-                    .default_selected_index(SelectIndex {
-                        page_ix: self.page as usize,
-                        group_ix: None,
-                    })
-                    .sidebar_width(px(224.))
-                    .sidebar_size_range(px(212.)..px(280.))
-                    .when(
-                        window_effect::active(cx).effect != WindowEffect::None,
-                        |settings| {
-                            // Only the sidebar container exposes the shell; its controls keep
-                            // their theme surfaces, so there is no second tint layer.
-                            settings
-                                .sidebar_style(&StyleRefinement::default().bg(transparent_black()))
-                        },
-                    )
-                    .with_group_variant(GroupBoxVariant::Outline)
-                    .pages(pages),
-                ),
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .text_size(px(visual::TEXT_BODY))
+                    .child(
+                        Settings::new(if language == LanguagePreference::Chinese {
+                            "clipboard-settings-zh"
+                        } else {
+                            "clipboard-settings-en"
+                        })
+                        .default_selected_index(SelectIndex {
+                            page_ix: self.page as usize,
+                            group_ix: None,
+                        })
+                        .sidebar_width(px(200.))
+                        .sidebar_size_range(px(184.)..px(224.))
+                        .sidebar_style(&StyleRefinement::default().bg(cx.theme().sidebar))
+                        .with_group_variant(GroupBoxVariant::Outline)
+                        .pages(pages),
+                    ),
             )
     }
 }

@@ -8,17 +8,16 @@ pub enum WindowEffectBackend {
     Opaque,
     LegacyAcrylic,
     Acrylic,
+    NativeBlur,
     Mica,
-    MicaAlt,
 }
 
 impl WindowEffectBackend {
     pub fn effect(self) -> WindowEffect {
         match self {
-            Self::Opaque => WindowEffect::None,
-            Self::LegacyAcrylic | Self::Acrylic => WindowEffect::Acrylic,
+            Self::Opaque => WindowEffect::Opaque,
+            Self::LegacyAcrylic | Self::Acrylic | Self::NativeBlur => WindowEffect::Frosted,
             Self::Mica => WindowEffect::Mica,
-            Self::MicaAlt => WindowEffect::MicaAlt,
         }
     }
 }
@@ -33,43 +32,30 @@ impl WindowEffectCapabilities {
     /// Probe the actual OS version once, independently of application compatibility manifests.
     pub fn current() -> Self {
         static CURRENT: OnceLock<WindowEffectCapabilities> = OnceLock::new();
-        *CURRENT.get_or_init(|| Self {
-            native_blur: cfg!(target_os = "macos"),
-            ..Self::from_build(current_build())
-        })
+        *CURRENT.get_or_init(|| Self::from_platform(current_build(), cfg!(target_os = "macos")))
     }
 
-    fn from_build(build: u32) -> Self {
-        Self {
-            build,
-            native_blur: false,
-        }
+    fn from_platform(build: u32, native_blur: bool) -> Self {
+        Self { build, native_blur }
     }
 
     pub fn supports(self, effect: WindowEffect) -> bool {
         match effect {
-            WindowEffect::None => true,
-            WindowEffect::Acrylic => self.native_blur || self.build >= 17_763,
-            WindowEffect::Mica | WindowEffect::MicaAlt => self.supports_system_backdrop(),
+            WindowEffect::Opaque => true,
+            WindowEffect::Frosted => self.native_blur || self.build >= 17_763,
+            WindowEffect::Mica => self.supports_system_backdrop(),
         }
     }
 
     /// Resolve a saved preference without rewriting it when this machine lacks support.
     pub fn resolve(self, effect: WindowEffect) -> WindowEffectBackend {
-        if self.native_blur && effect != WindowEffect::None {
-            return WindowEffectBackend::Acrylic;
-        }
-        if effect == WindowEffect::None || self.build < 17_763 {
-            return WindowEffectBackend::Opaque;
-        }
-        if !self.supports_system_backdrop() {
-            return WindowEffectBackend::LegacyAcrylic;
-        }
         match effect {
-            WindowEffect::None => WindowEffectBackend::Opaque,
-            WindowEffect::Acrylic => WindowEffectBackend::Acrylic,
-            WindowEffect::Mica => WindowEffectBackend::Mica,
-            WindowEffect::MicaAlt => WindowEffectBackend::MicaAlt,
+            WindowEffect::Opaque => WindowEffectBackend::Opaque,
+            WindowEffect::Mica if self.supports_system_backdrop() => WindowEffectBackend::Mica,
+            _ if self.native_blur => WindowEffectBackend::NativeBlur,
+            _ if self.supports_system_backdrop() => WindowEffectBackend::Acrylic,
+            _ if self.build >= 17_763 => WindowEffectBackend::LegacyAcrylic,
+            _ => WindowEffectBackend::Opaque,
         }
     }
 
@@ -109,67 +95,76 @@ mod tests {
     use super::{WindowEffectBackend, WindowEffectCapabilities};
     use clipboard_core::preferences::WindowEffect;
 
-    const EFFECTS: [WindowEffect; 4] = [
-        WindowEffect::None,
-        WindowEffect::Acrylic,
+    const EFFECTS: [WindowEffect; 3] = [
+        WindowEffect::Opaque,
+        WindowEffect::Frosted,
         WindowEffect::Mica,
-        WindowEffect::MicaAlt,
     ];
 
     #[test]
-    fn build_boundaries_select_supported_backends_and_safe_fallbacks() {
-        use WindowEffectBackend::{Acrylic, LegacyAcrylic, Mica, MicaAlt, Opaque};
+    fn windows_build_boundaries_select_supported_backends_and_safe_fallbacks() {
+        use WindowEffectBackend::{Acrylic, LegacyAcrylic, Mica, Opaque};
 
         let cases = [
-            (17_762, [Opaque; 4], [true, false, false, false], false),
+            (0, [Opaque; 3], [true, false, false], false),
+            (17_762, [Opaque; 3], [true, false, false], false),
             (
                 17_763,
-                [Opaque, LegacyAcrylic, LegacyAcrylic, LegacyAcrylic],
-                [true, true, false, false],
+                [Opaque, LegacyAcrylic, LegacyAcrylic],
+                [true, true, false],
                 false,
             ),
             (
                 22_620,
-                [Opaque, LegacyAcrylic, LegacyAcrylic, LegacyAcrylic],
-                [true, true, false, false],
+                [Opaque, LegacyAcrylic, LegacyAcrylic],
+                [true, true, false],
                 false,
             ),
-            (22_621, [Opaque, Acrylic, Mica, MicaAlt], [true; 4], true),
+            (22_621, [Opaque, Acrylic, Mica], [true; 3], true),
+            (u32::MAX, [Opaque, Acrylic, Mica], [true; 3], true),
         ];
         for (build, backends, supported, system_backdrop) in cases {
-            let capabilities = WindowEffectCapabilities::from_build(build);
+            let capabilities = WindowEffectCapabilities::from_platform(build, false);
             assert_eq!(capabilities.supports_system_backdrop(), system_backdrop);
             for ((effect, backend), supported) in EFFECTS.into_iter().zip(backends).zip(supported) {
                 assert_eq!(capabilities.resolve(effect), backend, "build {build}");
                 assert_eq!(capabilities.supports(effect), supported, "build {build}");
                 assert!(capabilities.supports(backend.effect()), "build {build}");
+                if supported {
+                    assert_eq!(backend.effect(), effect, "build {build}");
+                }
             }
         }
     }
 
     #[test]
-    fn unknown_version_only_supports_opaque_material() {
-        let capabilities = WindowEffectCapabilities::from_build(0);
+    fn macos_uses_native_blur_without_advertising_mica() {
+        let capabilities = WindowEffectCapabilities::from_platform(0, true);
+        assert!(!capabilities.supports_system_backdrop());
+        assert!(capabilities.supports(WindowEffect::Opaque));
+        assert!(capabilities.supports(WindowEffect::Frosted));
+        assert!(!capabilities.supports(WindowEffect::Mica));
+        assert_eq!(
+            capabilities.resolve(WindowEffect::Opaque),
+            WindowEffectBackend::Opaque
+        );
+        for effect in [WindowEffect::Frosted, WindowEffect::Mica] {
+            let backend = capabilities.resolve(effect);
+            assert_eq!(backend, WindowEffectBackend::NativeBlur);
+            assert_eq!(backend.effect(), WindowEffect::Frosted);
+        }
+    }
+
+    #[test]
+    fn linux_without_verified_compositor_blur_only_supports_opaque() {
+        let capabilities = WindowEffectCapabilities::from_platform(0, false);
         assert!(!capabilities.supports_system_backdrop());
         for effect in EFFECTS {
             assert_eq!(capabilities.resolve(effect), WindowEffectBackend::Opaque);
-            assert_eq!(capabilities.supports(effect), effect == WindowEffect::None);
-        }
-    }
-
-    #[test]
-    fn supported_preferences_keep_their_material_including_legacy_acrylic() {
-        for build in [0, 17_762, 17_763, 22_620, 22_621, u32::MAX] {
-            let capabilities = WindowEffectCapabilities::from_build(build);
-            for effect in EFFECTS {
-                if capabilities.supports(effect) {
-                    assert_eq!(
-                        capabilities.resolve(effect).effect(),
-                        effect,
-                        "build {build}"
-                    );
-                }
-            }
+            assert_eq!(
+                capabilities.supports(effect),
+                effect == WindowEffect::Opaque
+            );
         }
     }
 }

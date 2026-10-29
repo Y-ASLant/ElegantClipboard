@@ -21,15 +21,16 @@ pub(super) fn apply_theme(preference: ThemePreference, window: &mut Window, cx: 
         ThemePreference::Light => Theme::change(ThemeMode::Light, Some(window), cx),
         ThemePreference::Dark => Theme::change(ThemeMode::Dark, Some(window), cx),
     }
+    crate::design_system::apply(cx);
+    #[cfg(windows)]
+    acrylic::sync_theme(window, cx);
 }
 
-/// 所有窗口统一使用的界面字体。
-pub(super) const UI_FONT_FAMILY: &str = "Microsoft YaHei UI";
+pub(super) use crate::design_system::UI_FONT_FAMILY;
 
-/// 所有窗口共用的外壳：仅此处绘制材质染色并统一界面字体，内容表面保留原有主题。
+/// 所有窗口共用材质画布；内部表面由主题角色统一投影，浮层保持清晰。
 pub(super) fn window_shell(cx: &App) -> Div {
-    let background =
-        window_effect::shell_background(cx.theme().background, window_effect::active(cx));
+    let background = crate::design_system::canvas_background(cx);
     div()
         .size_full()
         .flex()
@@ -37,6 +38,8 @@ pub(super) fn window_shell(cx: &App) -> Div {
         .bg(background)
         .text_color(cx.theme().foreground)
         .font_family(UI_FONT_FAMILY)
+        .text_size(px(visual::TEXT_BODY))
+        .line_height(relative(1.5))
 }
 
 pub(super) fn tr(
@@ -47,6 +50,18 @@ pub(super) fn tr(
     match language {
         LanguagePreference::Chinese => chinese,
         LanguagePreference::English => english,
+    }
+}
+
+/// 内容类型的本地化标签；历史卡片与悬停信息共用，避免译名分叉。
+pub(super) fn content_type_label(language: LanguagePreference, content_type: &str) -> &'static str {
+    match content_type {
+        "image" => tr(language, "图片", "Image"),
+        "files" => tr(language, "文件", "Files"),
+        "html" => "HTML",
+        "rtf" => tr(language, "富文本", "Rich text"),
+        "url" => tr(language, "链接", "Link"),
+        _ => tr(language, "文本", "Text"),
     }
 }
 pub(super) fn localize_service_message(language: LanguagePreference, message: String) -> String {

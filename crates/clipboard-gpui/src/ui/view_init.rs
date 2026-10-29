@@ -178,6 +178,8 @@ impl ClipboardView {
         .flatten()
         .collect();
         let theme = service.initial_theme;
+        let corner_radius = service.initial_corner_radius;
+        crate::design_system::set_corner_radius(corner_radius, cx);
         let window_effect = service.initial_window_effect;
         let paused = service.initial_paused;
         let (initial_window_size, persist_window_size) = (
@@ -202,7 +204,7 @@ impl ClipboardView {
         let app_filter = service.initial_app_filter.clone();
         let onboarding_completed = service.initial_onboarding_completed;
         if (!startup.hidden || tray.is_err())
-            && let Err(error) = position::position_window(window, window_position)
+            && let Err(error) = Self::position_window_deferred(window, window_position, cx)
         {
             startup_errors.push(error.to_string());
         }
@@ -223,10 +225,10 @@ impl ClipboardView {
         });
         let feedback = cx.observe_self(move |this, cx| {
             if this.feedback_pending {
-                Self::schedule_feedback(main_window, cx);
+                Self::schedule_feedback(cx);
             }
         });
-        Self::schedule_feedback(main_window, cx);
+        Self::schedule_feedback(cx);
         cx.on_release(|this, cx| {
             for image in this.thumbnails.drain_images() {
                 cx.drop_image(image, None);
@@ -285,8 +287,8 @@ impl ClipboardView {
             confirmation_error: None,
             group_move_id: None,
             group_move_pending: false,
-            preview: PreviewState::default(),
-            preview_input: cx.new(|cx| TextareaState::new(window, cx)),
+            editor: PreviewState::default(),
+            editor_input: cx.new(|cx| TextareaState::new(window, cx)),
             note_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(
                     language,
@@ -295,12 +297,9 @@ impl ClipboardView {
                 ))
             }),
             note_save_pending: false,
-            preview_source_hash: None,
-            preview_editing: false,
-            preview_edit_requested: false,
-            preview_save_pending: false,
-            image_zoom_percent: 100,
-            image_scroll: ScrollHandle::default(),
+            editor_source_hash: None,
+            editor_save_pending: false,
+            editor_error: None,
             rendered_images: HashSet::new(),
             image_visible_range: 0..0,
             image_sync_pending: false,
@@ -312,10 +311,7 @@ impl ClipboardView {
             hover_popup: None,
             hover_popup_opening: None,
             hover_source_active: false,
-            hover_popup_active: false,
             hover_task: None,
-            hover_close_task: None,
-            hover_autoclose_task: None,
             hover_preference,
             hover_preference_pending: false,
             pending_row_click: None,
@@ -323,6 +319,7 @@ impl ClipboardView {
             save_as_pending: None,
             list_focus,
             scroll: VirtualListScrollHandle::new(),
+            scroll_to_top_task: None,
             row_sizes: Rc::new(Vec::new()),
             row_offsets: vec![px(0.)],
             monitoring: startup.monitoring,
@@ -335,6 +332,10 @@ impl ClipboardView {
             settings_window_opening: false,
             theme,
             theme_pending: false,
+            corner_radius: PendingPref {
+                value: corner_radius,
+                pending: false,
+            },
             window_effect,
             window_effect_pending: false,
             language,

@@ -1,8 +1,34 @@
 use super::*;
 use clipboard_platform::InstanceBusy;
+
+gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine]);
+
+struct AppAssets;
+
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        match ActionIcons.load(path)? {
+            Some(icon) => Ok(Some(icon)),
+            None => gpui_kit::assets::Assets.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
+        let mut paths = gpui_kit::assets::Assets.list(path)?;
+        paths.extend(ActionIcons.list(path)?);
+        Ok(paths)
+    }
+}
+
 pub fn run(options: Options) -> anyhow::Result<()> {
+    tracing::info!(
+        monitoring = options.monitor,
+        hidden = options.start_hidden,
+        "UI startup requested"
+    );
     let data_dir = options.data_dir.clone();
     if clipboard_platform::show_existing_instance(data_dir.clone())? {
+        tracing::info!("Existing instance activated");
         return Ok(());
     }
     let (service, events) = match Service::start(options.data_dir, options.monitor) {
@@ -28,9 +54,16 @@ pub fn run(options: Options) -> anyhow::Result<()> {
     let startup_error = Rc::new(RefCell::new(None));
     let window_error = startup_error.clone();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(AppAssets)
         .run(move |cx| {
             gpui_kit::init(cx);
+            crate::design_system::apply(cx);
+            for monitor in cx.displays() {
+                tracing::info!(
+                    display_id = ?monitor.id(), bounds = ?monitor.bounds(),
+                    visible_bounds = ?monitor.visible_bounds(), "Startup display"
+                );
+            }
             #[cfg(target_os = "linux")]
             cx.spawn(async move |cx| {
                 // tray-icon uses GTK, while GPUI owns the platform event loop.
@@ -67,9 +100,6 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("shift-enter", PastePlainTextSelected, Some("HistoryList")),
                 KeyBinding::new("ctrl-enter", PasteSelected, Some("HistoryList")),
                 KeyBinding::new("delete", DeleteSelected, Some("HistoryList")),
-                KeyBinding::new("space", PreviewSelected, Some("HistoryList")),
-                KeyBinding::new("escape", ClosePreview, Some("Preview")),
-                KeyBinding::new("escape", ClosePreview, Some("Preview > Input")),
                 KeyBinding::new("escape", DismissOrHide, Some("ClipboardApp")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
                 KeyBinding::new("down", FocusFirstHistoryItem, Some("HistorySearch > Input")),
@@ -83,6 +113,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 KeyBinding::new("cmd-f", FocusSearch, Some("ClipboardApp")),
             ]);
             cx.on_window_closed(|cx, _| {
+                tracing::debug!(remaining_windows = cx.windows().len(), "Window closed");
                 if cx.windows().is_empty() {
                     cx.quit();
                 }
@@ -99,6 +130,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
             let tray_enabled = Rc::new(Cell::new(false));
             let exiting = Rc::new(Cell::new(false));
             let smoke_exiting = exiting.clone();
+            tracing::info!(?bounds, hidden = startup.hidden, "Opening main window");
             if let Err(error) = gpui_kit::open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -115,6 +147,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 },
                 cx,
                 |window, cx| {
+                    window_lifecycle::log_window_geometry(window, cx, "main_created");
                     let view = cx.new(|cx| {
                         ClipboardView::new(
                             service,
@@ -140,7 +173,18 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     }
                     let close_view = view.clone();
                     window.on_window_should_close(cx, move |window, cx| {
-                        if exiting.get() || !tray_enabled.get() {
+                        tracing::debug!(
+                            exiting = exiting.get(),
+                            tray_enabled = tray_enabled.get(),
+                            "Main window close requested"
+                        );
+                        if exiting.get() {
+                            return true;
+                        }
+                        if !close_view.update(cx, |this, cx| this.close_editor(window, cx)) {
+                            return false;
+                        }
+                        if !tray_enabled.get() {
                             return true;
                         }
                         close_view.update(cx, |this, cx| {
@@ -157,6 +201,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                     view
                 },
             ) {
+                tracing::error!(error = %format_args!("{error:#}"), "Main window creation failed");
                 *window_error.borrow_mut() =
                     Some(anyhow::anyhow!("无法创建 ElegantClipboard 窗口：{error:?}"));
                 cx.quit();

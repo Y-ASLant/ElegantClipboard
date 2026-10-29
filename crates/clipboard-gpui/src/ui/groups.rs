@@ -102,7 +102,7 @@ impl ClipboardView {
         }
         self.cancel_sequence(cx);
         self.cancel_pending_row_click();
-        self.close_hover_preview(cx);
+        self.close_hover_preview("group_changed", cx);
         self.search_task = None;
         self.group_move_id = None;
         self.close_history_confirmation(window, cx);
@@ -139,6 +139,9 @@ impl ClipboardView {
         self.select_group((next > 0).then(|| self.groups[next - 1].id), window, cx);
     }
     pub(super) fn open_group_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.close_editor(window, cx) {
+            return;
+        }
         self.group_editor_open = true;
         self.group_edit_error = None;
         let owner = cx.entity().downgrade();
@@ -155,12 +158,25 @@ impl ClipboardView {
             let cancel_button_owner = owner.clone();
             let submit_owner = owner.clone();
             dialog
-                .title(if renaming {
-                    tr(language, "重命名分组", "Rename group")
-                } else {
-                    tr(language, "新建分组", "Create group")
-                })
-                .margin_top((window.viewport_size().height - px(180.)) / 2.)
+                .w(px(400.))
+                .p_4()
+                .rounded(cx.theme().radius_lg)
+                .bg(cx.theme().background)
+                .border_color(cx.theme().border)
+                .title(
+                    div()
+                        .pb_3()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .text_size(px(16.))
+                        .font_semibold()
+                        .child(if renaming {
+                            tr(language, "重命名分组", "Rename group")
+                        } else {
+                            tr(language, "新建分组", "Create group")
+                        }),
+                )
+                .margin_top(((window.viewport_size().height - px(240.)) / 2.).max(px(16.)))
                 .close_button(false)
                 .overlay_closable(false)
                 .on_ok(move |_, window, cx| {
@@ -176,16 +192,26 @@ impl ClipboardView {
                     div()
                         .flex()
                         .flex_col()
-                        .p_1()
+                        .pt_1()
                         .gap_2()
-                        .child(tr(language, "分组名称", "Group name"))
-                        .child(Input::new(&input))
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .font_medium()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(tr(language, "分组名称", "Group name")),
+                        )
+                        .child(Input::new(&input).text_size(px(14.)))
                         .when_some(error, |body, error| {
                             body.child(Alert::error("group-edit-error", error).small())
                         }),
                 )
                 .footer(
                     DialogFooter::new()
+                        .pt_3()
+                        .gap_2()
+                        .border_t_1()
+                        .border_color(cx.theme().border)
                         .child(
                             Button::new("group-save-cancel")
                                 .outline()

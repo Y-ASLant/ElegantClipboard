@@ -108,7 +108,7 @@ impl History {
             semantic_hash: text
                 .and_then(crate::clipboard::semantic_hash_from_text)
                 .unwrap_or(hash),
-            preview: Some(text.unwrap_or("[富文本内容]").chars().take(240).collect()),
+            preview: Some(crate::truncate_preview(text.unwrap_or("[富文本内容]"))),
             byte_size: total as i64,
             char_count: text.map(|value| value.chars().count() as i64),
             ..Default::default()

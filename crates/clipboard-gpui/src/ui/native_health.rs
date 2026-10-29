@@ -17,10 +17,12 @@ impl ClipboardView {
                             .as_ref()
                             .and_then(PasteHotkeys::take_error);
                         if hotkey.is_some() {
+                            tracing::error!("Global shortcut listener stopped");
                             this.hotkey = None;
                         }
                         if paste.is_some() {
                             this.paste_hotkeys = None;
+                            tracing::error!("Paste shortcut listener stopped");
                         }
                         let errors: Vec<String> = hotkey.into_iter().chain(paste).collect();
                         if !errors.is_empty() {
@@ -47,12 +49,16 @@ impl ClipboardView {
         let main_window = window.window_handle();
         cx.spawn_in(window, async move |view, cx| {
             while let Ok(position) = receiver.recv().await {
-                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                if let Err(error) = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
                     this.handle_outside_click(position, window, cx);
-                }).is_err() { return; }
+                }) {
+                    tracing::warn!(%error, "Outside-click window update failed");
+                    return;
+                }
             }
             let _ = view.update(cx, |this, cx| {
                 if !this.exiting.get() && this._outside_click_monitor.is_some() {
+                    tracing::error!("Outside-click listener channel closed unexpectedly");
                     this._outside_click_monitor = None;
                     this.set_feedback_message(tr(this.language,
                         "窗口外点击监听已停止；请重启应用以恢复自动隐藏。",

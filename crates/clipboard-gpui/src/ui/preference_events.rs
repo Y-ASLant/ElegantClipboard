@@ -113,7 +113,7 @@ impl ClipboardView {
         self.theme_pending = false;
         match result {
             Ok(theme) => {
-                self.close_hover_preview(cx);
+                self.close_hover_preview("theme_changed", cx);
                 self.theme = theme;
                 apply_theme(theme, window, cx);
                 self.set_feedback_message(
@@ -146,7 +146,7 @@ impl ClipboardView {
         self.language_pending = false;
         match result {
             Ok(language) => {
-                self.close_hover_preview(cx);
+                self.close_hover_preview("language_changed", cx);
                 self.language = language;
                 self.search.update(cx, |input, cx| {
                     input.set_placeholder(
@@ -357,7 +357,7 @@ impl ClipboardView {
                         cx,
                     );
                     if material_changed {
-                        self.close_hover_preview(cx);
+                        self.close_hover_preview("window_material_changed", cx);
                         acrylic::apply_to_open_windows(preference.effect, window, cx);
                     }
                     cx.refresh_windows();
@@ -365,8 +365,8 @@ impl ClipboardView {
                 self.set_feedback_message(
                     tr(
                         self.language,
-                        "窗口效果设置已保存",
-                        "Window effect settings saved",
+                        "背景材质设置已保存",
+                        "Background material settings saved",
                     )
                     .into(),
                 );
@@ -378,8 +378,8 @@ impl ClipboardView {
                     "{}: {error}",
                     tr(
                         self.language,
-                        "窗口效果保存失败",
-                        "Failed to save window effect"
+                        "背景材质保存失败",
+                        "Failed to save background material"
                     )
                 ));
                 self.is_error = true;

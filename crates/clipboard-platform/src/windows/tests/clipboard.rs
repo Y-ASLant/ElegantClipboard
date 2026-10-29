@@ -28,6 +28,15 @@ fn plain_text_copy_preserves_source_and_converts_legacy_html() -> Result<()> {
     assert!(plain_text_for_copy(&history.item(no_text)?).is_err());
     let file = history.capture_files(&["C:\\example.txt".into()], &images)?;
     assert!(plain_text_for_copy(&history.item(file)?).is_err());
+    legacy.text_content = Some("source text".into());
+    for kind in ["text", "url", "html", "rtf"] {
+        legacy.content_type = kind.into();
+        assert_eq!(plain_text_for_copy(&legacy)?, "source text");
+    }
+    for kind in ["image", "files", "future-format", "", "Text"] {
+        legacy.content_type = kind.into();
+        assert!(plain_text_for_copy(&legacy).is_err());
+    }
     Ok(())
 }
 

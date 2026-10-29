@@ -1,12 +1,44 @@
 //! Shared spacing, control sizing and motion for the native UI.
 use clipboard_core::preferences::CardDensity;
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use std::{
     cell::Cell,
     rc::Rc,
     time::{Duration, Instant},
 };
-pub const PAGE_PADDING: f32 = 8.;
+// Logical-pixel scale shared by application layouts and official Kit controls.
+pub const SPACE_1: f32 = 4.;
+pub const SPACE_2: f32 = 8.;
+pub const SPACE_3: f32 = 12.;
+pub const SPACE_4: f32 = 16.;
+pub const SPACE_6: f32 = 24.;
+pub const CONTROL_HEIGHT: f32 = 32.;
+pub const CONTROL_HEIGHT_LARGE: f32 = 36.;
+pub const TEXT_SMALL: f32 = 12.;
+pub const TEXT_BODY: f32 = 14.;
+pub const TEXT_TITLE: f32 = 18.;
+pub const ICON_SMALL: f32 = 14.;
+pub const ICON_SIZE: f32 = 16.;
+pub const BORDER_WIDTH: f32 = 1.;
+pub const CHOICE_MAX_WIDTH: f32 = 640.;
+
+pub fn popover_shadow() -> Vec<BoxShadow> {
+    vec![BoxShadow::new(px(0.), px(2.), hsla(0., 0., 0., 0.2)).blur_radius(px(12.))]
+}
+
+pub fn control_shadow() -> Vec<BoxShadow> {
+    vec![BoxShadow::new(px(0.), px(1.), hsla(0., 0., 0., 0.12)).blur_radius(px(3.))]
+}
+
+pub const PAGE_PADDING: f32 = SPACE_3;
+pub fn card_padding(density: CardDensity) -> f32 {
+    match density {
+        CardDensity::Compact => SPACE_2,
+        CardDensity::Standard => 10.,
+        CardDensity::Spacious => SPACE_3,
+    }
+}
 pub const ROW_HEIGHT: f32 = 96.;
 pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
     let base = match density {
@@ -41,14 +73,15 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
     }
 }
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
-pub const DRAG_MOTION_DURATION: Duration = Duration::from_millis(260);
+pub const DRAG_MOTION_DURATION: Duration = crate::design_system::SLOW;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);
 pub const HISTORY_DRAG_SCROLL_TICKS: usize = 2;
-pub const MOTION_DURATION: Duration = Duration::from_millis(180);
+pub const MOTION_DURATION: Duration = crate::design_system::NORMAL;
 
-fn motion() -> Animation {
-    Animation::new(MOTION_DURATION).with_easing(ease_out_quint())
+fn motion(cx: &App) -> Animation {
+    let easing = cx.theme().motion.easing_enter.clone();
+    Animation::new(MOTION_DURATION).with_easing(move |progress| easing.sample(progress))
 }
 
 pub fn reveal(element: Div, id: impl Into<ElementId>, cx: &App) -> AnyElement {
@@ -56,8 +89,9 @@ pub fn reveal(element: Div, id: impl Into<ElementId>, cx: &App) -> AnyElement {
         return element.into_any_element();
     }
     element
-        .with_animation(id, motion(), |element, progress| {
-            element.opacity(0.65 + 0.35 * progress)
+        .relative()
+        .with_animation(id, motion(cx), |element, progress| {
+            element.top(px(SPACE_1 * (1. - progress))).opacity(progress)
         })
         .into_any_element()
 }
@@ -66,10 +100,12 @@ pub fn reflow(element: Div, offset: f32, id: impl Into<ElementId>, cx: &App) -> 
     if cx.reduce_motion() {
         return element.into_any_element();
     }
+    let easing = cx.theme().motion.easing_move.clone();
     RowTranslation::new(element)
         .with_animation(
             id,
-            Animation::new(DRAG_MOTION_DURATION).with_easing(ease_in_out),
+            Animation::new(DRAG_MOTION_DURATION)
+                .with_easing(move |progress| easing.sample(progress)),
             move |mut element, progress| {
                 element.from = offset * (1. - progress);
                 element.to = element.from;
@@ -183,7 +219,7 @@ impl Element for RowTranslation {
     ) {
         let sample = || {
             self.started.map_or(1., |started| {
-                ease_in_out(
+                cx.theme().motion.easing_move.sample(
                     (started.elapsed().as_secs_f32() / DRAG_MOTION_DURATION.as_secs_f32()).min(1.),
                 )
             })

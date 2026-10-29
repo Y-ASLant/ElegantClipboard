@@ -102,7 +102,7 @@ impl ClipboardView {
         if ids.len() < 2 {
             return;
         }
-        self.close_hover_preview(cx);
+        self.close_hover_preview("sequence_started", cx);
         self.sequence_queue = Some(SequenceQueue::new(ids, target));
         if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
             self.close_history_confirmation(window, cx);

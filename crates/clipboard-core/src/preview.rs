@@ -1,4 +1,4 @@
-use crate::History;
+use crate::{History, database::ContentType};
 use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 
@@ -65,7 +65,7 @@ impl History {
         if item.content_type == "files" {
             return Ok(PreviewContent::Files(History::file_preview_entries(&item)?));
         }
-        if matches!(item.content_type.as_str(), "html" | "rtf") {
+        if ContentType::parse(&item.content_type).is_some_and(ContentType::is_rich) {
             if item.content_type == "html"
                 && let Some(html) = item
                     .html_content

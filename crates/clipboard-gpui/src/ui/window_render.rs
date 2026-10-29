@@ -8,40 +8,44 @@ impl ClipboardView {
         self.feedback_pending = true;
     }
 
-    pub(super) fn schedule_feedback(main_window: AnyWindowHandle, cx: &mut Context<Self>) {
+    pub(super) fn schedule_feedback(cx: &mut Context<Self>) {
         let owner = cx.weak_entity();
-        // Settings reads the same view, so its implicit window association is not stable.
-        // Defer until the observer releases the view before updating the explicit main window.
+        // 等观察者释放视图借用后，再投递设置或系统通知。
         cx.defer(move |cx| {
-            let _ = main_window.update(cx, |_, window, cx| {
-                owner.update(cx, |this, cx| this.show_feedback(window, cx))
-            });
+            let _ = owner.update(cx, |this, cx| this.show_feedback(cx));
         });
     }
 
-    fn show_feedback(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn show_feedback(&mut self, cx: &mut Context<Self>) {
         if !std::mem::take(&mut self.feedback_pending) || self.message.is_empty() {
             return;
         }
-        let notification = || {
-            if self.is_error {
+        if let Some(handle) = self.settings_window {
+            let notification = if self.is_error {
                 Notification::error(self.message.clone())
             } else {
                 Notification::success(self.message.clone())
-            }
-        };
-        // A single destination prevents settings operations from notifying both windows.
-        if let Some(handle) = self.settings_window
-            && !window.is_window_active()
-            && handle
+            };
+            if handle
                 .update(cx, |_, window, cx| {
-                    window.push_notification(notification().id::<ClipboardView>(), cx);
+                    window.push_notification(notification.id::<ClipboardView>(), cx);
                 })
                 .is_ok()
-        {
-            return;
+            {
+                return;
+            }
         }
-        window.push_notification(notification().id::<ClipboardView>(), cx);
+        let message = self.message.clone();
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) =
+                    clipboard_platform::notification::show("ElegantClipboard", &message)
+                {
+                    // 系统禁用通知或投递失败时不递归通知，也不回退到应用内 toast。
+                    tracing::error!(error = %format_args!("{error:#}"), "Sending system notification failed");
+                }
+            })
+            .detach();
     }
 
     fn render_status(&self, cx: &Context<Self>) -> AnyElement {

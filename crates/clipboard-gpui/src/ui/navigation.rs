@@ -73,7 +73,7 @@ impl ClipboardView {
         }
         self.cancel_sequence(cx);
         self.cancel_pending_row_click();
-        self.close_hover_preview(cx);
+        self.close_hover_preview("category_changed", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
         self.reset_selection();
@@ -117,11 +117,54 @@ impl ClipboardView {
             self.select_category(category, window, cx);
         }
     }
-    pub(super) fn scroll_to_top(&self) {
+    pub(super) fn scroll_to_top(&mut self) {
+        self.scroll_to_top_task = None;
         self.scroll.set_offset(point(px(0.), px(0.)));
     }
 
-    pub(super) fn scroll_to_row(&self, index: usize) {
+    pub(super) fn animate_scroll_to_top(&mut self, cx: &mut Context<Self>) {
+        self.scroll_to_top_task = None;
+        self.close_hover_preview("scroll_to_top", cx);
+        let start = self.scroll.offset();
+        if cx.reduce_motion() || start.y >= px(0.) {
+            self.scroll_to_top();
+            cx.notify();
+            return;
+        }
+        self.scroll_to_top_task = Some(cx.spawn(async move |view, cx| {
+            let started = std::time::Instant::now();
+            let mut expected = start;
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let progress = (started.elapsed().as_secs_f32()
+                    / crate::design_system::SLOW.as_secs_f32())
+                .min(1.);
+                let remaining = (1. - progress).powi(3);
+                let next = point(start.x, start.y * remaining);
+                let keep = view
+                    .update(cx, |this, cx| {
+                        // Scrollbar drags, keyboard navigation and other programmatic
+                        // scrolls take precedence over an in-flight return animation.
+                        if this.scroll.offset() != expected {
+                            return false;
+                        }
+                        this.scroll.set_offset(next);
+                        cx.notify();
+                        progress < 1.
+                    })
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+                expected = next;
+            }
+        }));
+    }
+
+    pub(super) fn scroll_to_row(&mut self, index: usize) {
+        self.scroll_to_top_task = None;
         if let Some(offset) = self.row_offsets.get(index) {
             self.scroll.set_offset(point(px(0.), -*offset));
         }
@@ -139,6 +182,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         self.cancel_pending_row_click();
+        self.scroll_to_top_task = None;
         if let Some(index) = self.history.select_relative(direction) {
             self.scroll.scroll_to_item(index, strategy);
         }
@@ -175,6 +219,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         self.cancel_pending_row_click();
+        self.scroll_to_top_task = None;
         if let Some(index) = self.history.select_index(index) {
             if strategy == ScrollStrategy::Top {
                 self.scroll_to_row(index);

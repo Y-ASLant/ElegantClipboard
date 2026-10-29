@@ -1,6 +1,38 @@
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
 
+pub(super) fn settings_stack() -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(visual::SPACE_4))
+        .text_size(px(visual::TEXT_BODY))
+        .font_normal()
+        .line_height(relative(1.5))
+        .whitespace_normal()
+}
+
+pub(super) fn settings_field(label: &'static str) -> Div {
+    settings_stack()
+        .max_w(px(visual::CHOICE_MAX_WIDTH))
+        .gap(px(visual::SPACE_2))
+        .child(div().font_medium().child(label))
+}
+
+pub(super) fn settings_description(text: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .text_size(px(visual::TEXT_SMALL))
+        .font_normal()
+        .line_height(relative(1.5))
+        .text_color(cx.theme().muted_foreground)
+        .whitespace_normal()
+        .child(text.into())
+}
+
 /// 设置各 section 共用的开场：升级 owner 弱引用并读取主窗口状态。
 /// 返回 `None` 表示主窗口实体已释放，调用方应给出各自的占位元素。
 pub(super) fn owner_state<'a>(
@@ -37,7 +69,12 @@ where
     let owner = owner.clone();
     TabBar::new(id)
         .w_full()
+        .min_w_0()
+        .max_w(px(visual::CHOICE_MAX_WIDTH))
+        .large()
+        .h(px(visual::CONTROL_HEIGHT_LARGE))
         .segmented()
+        .last_empty_space(div().w_0())
         .selected_index(
             choices
                 .iter()
@@ -45,6 +82,9 @@ where
                 .unwrap_or(0),
         )
         .on_click(move |index: &usize, _, cx| {
+            if disabled {
+                return;
+            }
             let Some(&value) = choices.get(*index) else {
                 return;
             };
@@ -54,7 +94,13 @@ where
                 }
             });
         })
-        .children(labels.map(|label| Tab::new().label(label).disabled(disabled).flex_1()))
+        .children(labels.map(|label| {
+            Tab::new()
+                .label(label)
+                .text_size(px(visual::TEXT_BODY))
+                .disabled(disabled)
+                .flex_1()
+        }))
 }
 
 /// 行为开关复选框的统一构建：命令发送成功后执行 `on_sent`（置 pending
@@ -70,12 +116,19 @@ pub(super) fn command_checkbox(
 ) -> Checkbox {
     let owner = owner.clone();
     Checkbox::new(id)
-        .w(px(350.))
-        .text_sm()
+        .w_full()
+        .min_w_0()
+        .min_h(px(visual::CONTROL_HEIGHT))
+        .py(px(visual::SPACE_1))
+        .text_size(px(visual::TEXT_BODY))
+        .whitespace_normal()
         .label(label)
         .checked(checked)
         .disabled(disabled)
         .on_change(move |checked, _, cx| {
+            if disabled {
+                return;
+            }
             let _ = owner.update(cx, |owner, cx| {
                 if owner.send(command(*checked), cx) {
                     on_sent(owner);

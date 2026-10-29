@@ -20,7 +20,7 @@ impl History {
             bail!("文本超过 1 MiB，未保存");
         }
         let item = self.item(id)?;
-        if !matches!(item.content_type.as_str(), "text" | "url" | "html" | "rtf") {
+        if !item.kind().is_some_and(|kind| kind.is_text_like()) {
             bail!("该类型记录不支持文本编辑");
         }
         if item.file_payload.is_some() {
@@ -36,7 +36,7 @@ impl History {
         let hash = crate::clipboard::hash_with_prefix(b"text:", new_text.as_bytes());
         let semantic_hash =
             crate::clipboard::semantic_hash_from_text(new_text).unwrap_or_else(|| hash.clone());
-        let preview: String = new_text.chars().take(200).collect();
+        let preview: String = crate::truncate_preview(new_text);
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
@@ -78,6 +78,36 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_types_remain_previewable_but_cannot_be_edited() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let id = history.capture("legacy text")?.unwrap();
+        let original = history.item(id)?;
+        for kind in ["future-format", "", "Text"] {
+            history.db.write_connection().lock().execute(
+                "UPDATE clipboard_items SET content_type = ?1 WHERE id = ?2",
+                params![kind, id],
+            )?;
+            assert!(matches!(
+                history.preview_content(id)?,
+                crate::PreviewContent::Text(text) if text == "legacy text"
+            ));
+            for replacement in ["legacy text", "changed"] {
+                assert!(
+                    history
+                        .edit_text(id, &original.content_hash, replacement, directory.path())
+                        .is_err()
+                );
+            }
+            let unchanged = history.item(id)?;
+            assert_eq!(unchanged.content_type, kind);
+            assert_eq!(unchanged.content_hash, original.content_hash);
+            assert_eq!(unchanged.text_content, original.text_content);
+        }
+        Ok(())
+    }
 
     #[test]
     fn edit_text_keeps_identity_and_rejects_stale_or_empty_content() -> Result<()> {

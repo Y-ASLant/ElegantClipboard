@@ -229,11 +229,9 @@ impl ClipboardView {
                 let count = outcome.deleted;
                 self.reset_selection();
                 self.group_move_id = None;
-                self.preview.close();
-                self.preview_source_hash = None;
-                self.preview_editing = false;
-                self.preview_edit_requested = false;
-                self.preview_save_pending = false;
+                self.editor_save_pending = false;
+                self.note_save_pending = false;
+                self.close_editor(window, cx);
                 self.set_feedback_message(if self.language == LanguagePreference::English {
                     format!("Deleted all {count} items; settings and groups were kept")
                 } else {
@@ -378,7 +376,7 @@ impl ClipboardView {
             .id
             .is_some_and(|id| !loaded_ids.contains(&id))
         {
-            self.close_hover_preview(cx);
+            self.close_hover_preview("history_reconciled", cx);
         }
         self.refresh_file_card_info(cx);
         self.sync_image_assets(cx);

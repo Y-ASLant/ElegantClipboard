@@ -121,7 +121,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.confirmation == Some(kind) {
+        if self.confirmation == Some(kind) || !self.close_editor(window, cx) {
             return;
         }
         self.close_history_confirmation(window, cx);
@@ -180,7 +180,12 @@ impl ClipboardView {
         let keyboard_owner = owner.clone();
         let cancel_owner = owner.clone();
         dialog
-            .title(title)
+            .w(px(448.))
+            .p_4()
+            .rounded(cx.theme().radius_lg)
+            .bg(cx.theme().background)
+            .border_color(cx.theme().border)
+            .title(div().pb_3().border_b_1().border_color(cx.theme().border).text_size(px(16.)).font_semibold().child(title))
             .close_button(false)
             .overlay_closable(false)
             .on_ok(move |_, window, cx| {
@@ -194,12 +199,15 @@ impl ClipboardView {
                 div()
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap_3()
+                    .pt_1()
+                    .text_size(px(14.))
+                    .line_height(relative(1.6))
                     .child(prompt)
                     .when(matches!(kind, HistoryConfirmation::ClearHistory(_)), |body| {
                         body.child(
                             div()
-                                .text_sm()
+                                .text_size(px(12.))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(tr(
                                     language,
@@ -213,6 +221,10 @@ impl ClipboardView {
                     }),
             )
             .footer(DialogFooter::new()
+                .pt_3()
+                .gap_2()
+                .border_t_1()
+                .border_color(cx.theme().border)
                 .child(Button::new("history-confirm-cancel")
                     .outline()
                     .label(tr(language, "取消", "Cancel"))
@@ -265,7 +277,9 @@ impl ClipboardView {
         self.group_editor_open = false;
         self.group_rename_id = None;
         self.group_move_id = None;
-        self.preview.close();
+        if !self.close_editor(window, cx) {
+            return;
+        }
         window.focus(&self.list_focus, cx);
         if self.skip_clear_confirm.value {
             self.close_history_confirmation(window, cx);

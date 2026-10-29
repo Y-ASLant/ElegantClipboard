@@ -1,4 +1,4 @@
-use super::settings_common::{choice_tabs, owner_state};
+use super::settings_common::{choice_tabs, owner_state, settings_field, settings_stack};
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
 
@@ -26,19 +26,10 @@ impl SettingsWindowView {
         let hover_preference = owner_state.hover_preference;
         let hover_pending = owner_state.hover_preference_pending;
         let expanded_hover_owner = self.owner.clone();
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap_2()
+        settings_stack()
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(tr(language, "预览内容", "Preview content"))
-                    .children(
+                settings_field(tr(language, "预览内容", "Preview content")).child(
+                    settings_stack().gap_1().children(
                         [
                             (
                                 "hover-image",
@@ -63,7 +54,10 @@ impl SettingsWindowView {
                         .map(|(id, label, selected, set_checked)| {
                             let owner = self.owner.clone();
                             Checkbox::new(id)
-                                .text_sm()
+                                .w_full()
+                                .min_h(px(32.))
+                                .py(px(6.))
+                                .text_size(px(14.))
                                 .label(label)
                                 .checked(selected)
                                 .disabled(hover_pending)
@@ -76,10 +70,14 @@ impl SettingsWindowView {
                                 })
                         }),
                     ),
+                ),
             )
             .child(
                 Checkbox::new("hover-expanded-image")
-                    .text_sm()
+                    .w_full()
+                    .min_h(px(32.))
+                    .py(px(6.))
+                    .text_size(px(14.))
                     .label(tr(
                         language,
                         "大图使用更大浮窗",
@@ -100,78 +98,73 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                div()
-                    .text_xs()
-                    .child(tr(language, "停留延时", "Hover delay")),
+                settings_field(tr(language, "停留延时", "Hover delay")).child(choice_tabs(
+                    "hover-delay",
+                    &self.owner,
+                    [250, 500, 750, 1000],
+                    ["250 ms", "500 ms", "750 ms", "1000 ms"],
+                    hover_preference.delay_ms,
+                    hover_pending,
+                    |owner| owner.hover_preference.delay_ms,
+                    |owner, delay, cx| {
+                        owner.save_hover_preference(
+                            HoverPreviewPreference {
+                                delay_ms: delay,
+                                ..owner.hover_preference
+                            },
+                            cx,
+                        );
+                    },
+                )),
             )
-            .child(choice_tabs(
-                "hover-delay",
-                &self.owner,
-                [250, 500, 750, 1000],
-                ["250 ms", "500 ms", "750 ms", "1000 ms"],
-                hover_preference.delay_ms,
-                hover_pending,
-                |owner| owner.hover_preference.delay_ms,
-                |owner, delay, cx| {
-                    owner.save_hover_preference(
-                        HoverPreviewPreference {
-                            delay_ms: delay,
-                            ..owner.hover_preference
-                        },
-                        cx,
-                    );
-                },
-            ))
-            .child(div().text_xs().child(tr(language, "浮窗位置", "Position")))
-            .child(choice_tabs(
-                "hover-position",
-                &self.owner,
-                [
-                    HoverPreviewPosition::Auto,
-                    HoverPreviewPosition::Left,
-                    HoverPreviewPosition::Right,
-                ],
-                [
-                    tr(language, "自动", "Auto"),
-                    tr(language, "左侧", "Left"),
-                    tr(language, "右侧", "Right"),
-                ],
-                hover_preference.position,
-                hover_pending,
-                |owner| owner.hover_preference.position,
-                |owner, position, cx| {
-                    owner.save_hover_preference(
-                        HoverPreviewPreference {
-                            position,
-                            ..owner.hover_preference
-                        },
-                        cx,
-                    );
-                },
-            ))
             .child(
-                div()
-                    .text_xs()
-                    .child(tr(language, "图片缩放步进", "Image zoom step")),
+                settings_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
+                    "hover-position",
+                    &self.owner,
+                    [
+                        HoverPreviewPosition::Auto,
+                        HoverPreviewPosition::Left,
+                        HoverPreviewPosition::Right,
+                    ],
+                    [
+                        tr(language, "自动", "Auto"),
+                        tr(language, "左侧", "Left"),
+                        tr(language, "右侧", "Right"),
+                    ],
+                    hover_preference.position,
+                    hover_pending,
+                    |owner| owner.hover_preference.position,
+                    |owner, position, cx| {
+                        owner.save_hover_preference(
+                            HoverPreviewPreference {
+                                position,
+                                ..owner.hover_preference
+                            },
+                            cx,
+                        );
+                    },
+                )),
             )
-            .child(choice_tabs(
-                "hover-zoom-step",
-                &self.owner,
-                [5, 10, 20, 50],
-                ["5%", "10%", "20%", "50%"],
-                hover_preference.zoom_step,
-                hover_pending,
-                |owner| owner.hover_preference.zoom_step,
-                |owner, zoom_step, cx| {
-                    owner.save_hover_preference(
-                        HoverPreviewPreference {
-                            zoom_step,
-                            ..owner.hover_preference
-                        },
-                        cx,
-                    );
-                },
-            ))
+            .child(
+                settings_field(tr(language, "图片缩放步进", "Image zoom step")).child(choice_tabs(
+                    "hover-zoom-step",
+                    &self.owner,
+                    [5, 10, 20, 50],
+                    ["5%", "10%", "20%", "50%"],
+                    hover_preference.zoom_step,
+                    hover_pending,
+                    |owner| owner.hover_preference.zoom_step,
+                    |owner, zoom_step, cx| {
+                        owner.save_hover_preference(
+                            HoverPreviewPreference {
+                                zoom_step,
+                                ..owner.hover_preference
+                            },
+                            cx,
+                        );
+                    },
+                )),
+            )
             .into_any_element()
     }
 }

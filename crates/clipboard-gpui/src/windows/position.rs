@@ -1,5 +1,5 @@
 use ::windows::Win32::{
-    Foundation::{POINT, RECT},
+    Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint},
     UI::WindowsAndMessaging::{
         GetCursorPos, GetWindowRect, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
@@ -12,12 +12,23 @@ use std::mem::size_of;
 
 pub use crate::popup_geometry::placement;
 
-pub fn position_window(window: &Window, mode: WindowPositionPreference) -> Result<()> {
+#[derive(Debug)]
+pub struct WindowPositionRequest {
+    hwnd: HWND,
+    x: i32,
+    y: i32,
+}
+
+/// Compute while the GPUI window is borrowed; apply only after that borrow ends.
+pub fn prepare_window_position(
+    window: &Window,
+    mode: WindowPositionPreference,
+) -> Result<Option<WindowPositionRequest>> {
     if mode == WindowPositionPreference::FixedPosition
         || window.is_maximized()
         || window.is_fullscreen()
     {
-        return Ok(());
+        return Ok(None);
     }
     let hwnd = super::window::window_hwnd(window).context("无法取得窗口句柄")?;
     let mut cursor = POINT::default();
@@ -44,17 +55,23 @@ pub fn position_window(window: &Window, mode: WindowPositionPreference) -> Resul
         window_rect.right - window_rect.left,
         window_rect.bottom - window_rect.top,
     );
-    unsafe {
-        SetWindowPos(
-            hwnd,
-            None,
-            x,
-            y,
-            0,
-            0,
-            SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
-        )
+    Ok(Some(WindowPositionRequest { hwnd, x, y }))
+}
+
+impl WindowPositionRequest {
+    pub fn apply(self) -> Result<()> {
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                None,
+                self.x,
+                self.y,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+            )
+        }
+        .context("无法移动窗口")?;
+        Ok(())
     }
-    .context("无法移动窗口")?;
-    Ok(())
 }

@@ -1,3 +1,4 @@
+use super::settings_common::{settings_description, settings_stack};
 use super::*;
 use clipboard_core::{DeletionOutcome, retention::RetentionPolicy};
 use gpui_kit::component::input::NumberInput;
@@ -68,16 +69,46 @@ impl SettingsWindowView {
         let saved = owner.read(cx).retention;
         let explicitly_saved = owner.read(cx).retention_saved;
         let language = self.language;
-        div().flex().flex_col().gap_3()
-            .child(tr(language,
+        settings_stack()
+            .child(settings_description(tr(
+                language,
                 "每个分组独立限制，置顶和收藏不计入数量且不会自动删除。0 表示关闭对应限制。",
-                "Limits apply per group. Pinned and favorite items are excluded and protected. 0 disables a limit."))
-            .child(div().flex().flex_wrap().items_center().gap_2()
-                .child(tr(language, "保留天数", "Retention days"))
-                .child(div().w(px(150.)).child(NumberInput::new(&self.retention_days_input).small().disabled(saved.pending)))
-                .child(tr(language, "每组数量", "Items per group"))
-                .child(div().w(px(150.)).child(NumberInput::new(&self.retention_count_input).small().disabled(saved.pending))))
-            .child(div().text_sm().text_color(cx.theme().muted_foreground).child(
+                "Limits apply per group. Pinned and favorite items are excluded and protected. 0 disables a limit.",
+            ), cx))
+            .child(
+                settings_stack().gap_3()
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(tr(language, "保留天数", "Retention days"))
+                            .child(div().w(px(180.)).flex_none().child(
+                                NumberInput::new(&self.retention_days_input)
+                                    .h(px(36.))
+                                    .disabled(saved.pending),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_between()
+                            .gap_2()
+                            .child(tr(language, "每组数量", "Items per group"))
+                            .child(div().w(px(180.)).flex_none().child(
+                                NumberInput::new(&self.retention_count_input)
+                                    .h(px(36.))
+                                    .disabled(saved.pending),
+                            )),
+                    ),
+            )
+            .child(settings_description(
                 if !explicitly_saved {
                     tr(language,
                         "尚未应用到全部分组：仅新采集时默认组保留 10000 条，不按天清理。首次保存需要确认。",
@@ -86,12 +117,24 @@ impl SettingsWindowView {
                     format!("Saved: {} days, {} items per group", saved.value.days, saved.value.max_count)
                 } else {
                     format!("当前生效：{} 天，每组 {} 条", saved.value.days, saved.value.max_count)
-                }))
-            .when_some(self.retention_error.clone(), |body, error| body.child(Alert::error("retention-invalid", error).small()))
-            .child(Button::new("save-retention").primary()
-                .label(tr(language, "保存保留策略", "Save retention policy"))
-                .disabled(saved.pending)
-                .on_click(cx.listener(|this, _, window, cx| this.request_retention_save(window, cx))))
+                },
+                cx,
+            ))
+            .when_some(self.retention_error.clone(), |body, error| {
+                body.child(Alert::error("retention-invalid", error).small())
+            })
+            .child(
+                div().flex().flex_wrap().child(
+                    Button::new("save-retention")
+                        .primary()
+                        .h(px(40.))
+                        .label(tr(language, "保存保留策略", "Save retention policy"))
+                        .disabled(saved.pending)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.request_retention_save(window, cx);
+                        })),
+                ),
+            )
             .into_any_element()
     }
 

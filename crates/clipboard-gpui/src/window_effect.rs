@@ -14,10 +14,15 @@ impl Global for WindowEffectSetting {}
 
 /// 保存已由平台能力解析的实际效果；用户请求值仍留在视图和 SQLite 中。
 pub(crate) fn record(preference: WindowEffectPreference, effect: WindowEffect, cx: &mut App) {
-    cx.set_global(WindowEffectSetting(WindowEffectPreference {
+    let resolved = WindowEffectPreference {
         effect,
         ..preference
-    }));
+    };
+    if active(cx) == resolved {
+        return;
+    }
+    cx.set_global(WindowEffectSetting(resolved));
+    crate::design_system::apply(cx);
 }
 
 pub(crate) fn active(cx: &App) -> WindowEffectPreference {
@@ -35,17 +40,17 @@ pub(crate) fn active(cx: &App) -> WindowEffectPreference {
 ///
 /// 根插件按注册顺序依次 `refine`，后注册者覆盖先注册者，所以这里在效果开启时把根背景
 /// 改写为**全透明**：GPUI 的 `paint_quad` 会直接跳过透明背景，alpha 不再被钉死。
-struct AcrylicRootPlugin;
+struct MaterialRootPlugin;
 
-impl Render for AcrylicRootPlugin {
+impl Render for MaterialRootPlugin {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
     }
 }
 
-impl RootPlugin for AcrylicRootPlugin {
+impl RootPlugin for MaterialRootPlugin {
     fn style(&self, surface: &mut Stateful<Div>, _: &mut Window, cx: &mut App) {
-        if active(cx).effect == WindowEffect::None {
+        if active(cx).effect == WindowEffect::Opaque {
             return;
         }
         surface
@@ -57,12 +62,12 @@ impl RootPlugin for AcrylicRootPlugin {
 /// 注册根插件。必须在 `gpui_kit::init` 之后调用才有覆盖 `WindowState` 的资格，
 /// 且只影响之后创建的窗口。
 pub(crate) fn register_root_plugin(cx: &mut App) {
-    Root::register_plugin::<AcrylicRootPlugin>(cx, |_, _| AcrylicRootPlugin);
+    Root::register_plugin::<MaterialRootPlugin>(cx, |_, _| MaterialRootPlugin);
 }
 
-/// 外壳只绘制一层主题染色；强度不分摊给控件，也不改变 DWM 的模糊半径。
+/// The shell owns the base tint; lightweight container surfaces are projected by the theme.
 pub(crate) fn shell_background(base: Hsla, preference: WindowEffectPreference) -> Hsla {
-    if preference.effect == WindowEffect::None {
+    if preference.effect == WindowEffect::Opaque {
         return base;
     }
     Hsla {

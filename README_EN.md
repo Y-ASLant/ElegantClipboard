@@ -7,7 +7,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 ## Current features
 
 - Capture and search text, URLs, HTML/RTF, images, and file paths
-- A four-step Chinese/English first-run guide with animated previews for capture, search, favorites and shortcuts; navigate back and forward, then select Get started on the final step
+- A four-step Chinese/English first-run guide for opening history (Alt+C by default for new profiles), copying, pasting and initial preferences; a reminder to change shortcuts in Settings, plus controls for theme, launch at login and search focus before selecting Get started. Saved shortcuts are preserved
 - Settings navigation for General, Display, Appearance, Data, App filter, Audio, Shortcuts, and About
 - General settings can skip confirmation when clearing the current group's history from the tray menu; confirmation remains the default
 - Separate copy and controlled-paste sound settings with immediate or success timing and preview buttons
@@ -15,16 +15,17 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 - Enable or disable history capture for text, URLs, HTML, RTF, images, and files in settings; at least one type stays enabled
 - Filter new captures by source app with blocklists, allowlists, manual rules, and a running-app picker; rules match names, processes, or paths and support `*` and `?`
 - Favorites, pins, group switching via Select with creation and renaming in a GPUI Kit Dialog (plus deletion and Up/Down ordering), sorting by dragging either card edge, batch deletion, and history cleanup; drag area indicators can be hidden in Display settings
-- Text editing, rich text/image/file previews, single-image file card thumbnails and missing-source warnings, copy, plain-text copy, and automatic paste
-- Configurable hover previews: images, text, URLs and HTML/RTF are on by default; file previews can be enabled separately. Text popups load the full content after a delay and are scrollable. Configure delay, position, image zoom and larger image windows; explicitly saved disabled settings remain unchanged. Image popups support continuous wheel zoom and left-button drag-to-pan, the whole popup can be dragged by its title, and it closes itself five seconds after appearing
+- Dialog-based text and note editing, separate hover previews for rich text/images/files, single-image file thumbnails and missing-source warnings, copy, plain-text copy and automatic paste; the main window keeps the history list without a full-page preview
+- QcClip-style hover previews: a transparent, mouse-passthrough, nonactivating work-area layer with content preferably beside the main window. Images initially fit 480×480 logical pixels, with theme-controlled internal corners, shared popup shadows, a blue curved connector and glowing endpoints. External tags show type, size, resolution/actual zoom, source and controls. A 190ms ease-out-quint expansion and fade grows from the source card; reduced motion shows it directly, and wheel zoom does not replay the entrance. Ctrl+wheel on the source card zooms images or scrolls text; leaving the source closes the preview. Text/HTML surfaces fit measured content instead of a fixed empty window
 - Global shortcut to toggle the window, system tray, autostart, capture pause, and single-instance activation
 - Quick-paste shortcuts are off by default and can be enabled or disabled in Settings → Shortcuts. Record or type a shortcut for each slot, or disable or restore all ten recent or favorite slots together. When enabled, the preset keys are Alt+1 through Alt+0 for recent items and Ctrl+Alt+1 through 3 for favorites; digit keys support the numpad. Automatic paste can send Ctrl+V or Shift+Insert
-- Simplified Chinese and English UI (Chinese by default), light/dark themes, always-on-top mode, hide on outside click, and opening-position, close-after-paste, and move-to-top settings
-- System-capable window effects for the main window, settings window, and hover preview: off, Acrylic, Mica, or Mica Alt. Unsupported saved choices are retained with an explicit fallback notice. The 40%/55%/72%/85% background tint only repaints the background without reapplying native materials. Controls, cards, and notifications retain their theme surfaces; enabled effects keep a borderless frame with resizable edges
+- Simplified Chinese and English UI (Chinese by default), unified Chakra-inspired light/dark styling and motion. Internal component corner radius offers System, Off, 4px, and 16px; the default remains 4px. System restores theme-default control radii; none of these choices modifies native window corners. Saved 8px choices migrate to System. Preferences survive restarts and backups. Always-on-top, hide on outside click, opening-position, close-after-paste and move-to-top settings are available
+- Background material offers None (default), Frosted glass, or Mica, showing only supported choices: native Acrylic/Mica on Windows, native blur on macOS, and conservatively an opaque background on Linux. Unsupported saved preferences are retained with a capability-fallback notice; legacy Mica Alt becomes Mica without changing density. Background density offers 40%/55%/72%/85%; higher values are more opaque and change only background tint, not control opacity or blur radius. Density controls and their explanation are hidden when no material is active; the saved density is retained for re-enabling material. Preview and drag layers stay transparent without system backdrops
+- Material-aware surface roles unify settings groups, the sidebar and ordinary history cards over a single window backdrop, avoiding large white panels and gray artifacts from stacked translucent fills. Inputs, buttons, segmented controls and menus/notifications/dialogs retain clear surfaces. Spacing, typography, icons, borders and shadows share tokens; settings choices cap at 640px and audio timing at 360px. Windows backdrop colors follow the app theme without changing native corner geometry. Startup and theme/material refresh read the system client-area animation preference.
 - Borderless main window: drag the small grip above search to move it (the top edge still resizes); search occupies its own row, with category tabs and the GPUI Kit group Select on the next row. Enter batch selection from a card or Ctrl+A and exit from the batch toolbar; Clear History, Pin Window, and Settings remain in the tray menu
 - Optional category filters and compact, standard, or spacious history cards. Two-line text previews are shorter than image cards by default; text or a centered thumbnail sits above time, size, and source app, while hovering reveals card actions
-- A floating return-to-top button at the lower right of long lists; the item count stays in a fixed footer below the scrolling history
-- Static list images use background thumbnails sized for the card and DPI, with bounded concurrency and a viewport cache; full previews, copying and export retain the originals
+- A neutral outlined return-to-top button appears only after scrolling down and hides near the top. Clicking smoothly scrolls back; user scrolling interrupts the motion. The item count remains in a fixed footer
+- Static list images use background thumbnails sized for the card and DPI, with bounded concurrency and a viewport cache; hover previews, copying and export retain the originals
 - Configurable card preview lines, absolute/relative time, character-count, size, and source-app display by name, icon, or both; source icons are cached as PNG
 - Data settings export GPUI backups and restore GPUI/legacy ZIPs or older databases into a separate empty folder, with a result report and an action to open the restored data
 - Combine group, category and keyword filters; record or type the main shortcut, with conflict rejection and rollback on save failure
@@ -105,6 +106,15 @@ For an isolated run, specify a directory explicitly:
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
 ```
+
+## Diagnostic logs
+
+Local diagnostics are enabled by default; no `RUST_LOG` setup is required. On Windows, logs are stored under `%LOCALAPPDATA%\ElegantClipboardLogs` in a separate directory for each launch. Records include version/process information, startup/shutdown, display coordinates and DPI, and key window/hover-preview lifecycle and zoom operations. Logs are separate from clipboard data so they do not interfere with migrations or empty-directory restore checks.
+
+- `application.log` rotates at 4 MiB with up to three backups. Startup cleanup keeps the five newest inactive sessions and never deletes logs held by another running instance.
+- Rust panics write an independent `panic.log` with the thread, source location and a forced backtrace, synced to disk; the default stderr panic hook is retained.
+- Clipboard text, search terms, image pixels and group names are not intentionally logged. Error messages and backtraces may contain local paths; review logs before sharing.
+- Forced termination, power loss and Windows fail-fast errors can bypass panic hooks. A missing `panic.log` does not rule out a crash. Preserve the complete session directory around the crash time and the corresponding Windows Application event-log entry.
 
 ## Build and verify
 
