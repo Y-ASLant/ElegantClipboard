@@ -206,7 +206,7 @@ mod tests {
         let first = history.capture("group first")?.unwrap();
         let second = history.capture("group second")?.unwrap();
         let groups = GroupRepository::new(&history.db);
-        let group = groups.create("常用", None)?;
+        let group = groups.create("常用")?;
         groups.move_item_to_group(first, Some(group.id))?;
         groups.move_item_to_group(second, Some(group.id))?;
 

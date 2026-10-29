@@ -210,10 +210,6 @@ impl ClipboardView {
                 "正在复制 RTF 并返回原窗口…",
                 "Copying RTF and returning to the previous window…",
             ),
-            CopyFormat::PlainText => (
-                "正在复制纯文本并返回原窗口…",
-                "Copying plain text and returning to the previous window…",
-            ),
         };
         self.copy_or_paste_generic(
             id,

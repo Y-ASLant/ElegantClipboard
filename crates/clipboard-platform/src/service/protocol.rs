@@ -17,7 +17,6 @@ use std::path::PathBuf;
 /// 按格式粘贴的目标格式（富文本条目）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CopyFormat {
-    PlainText,
     Html,
     Rtf,
 }

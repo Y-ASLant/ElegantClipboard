@@ -7,6 +7,14 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 ## Current features
 
 - Capture and search text, URLs, HTML/RTF, images, and file paths
+- Native clipboard formats beyond the primary types (including application-registered custom formats) are captured in full subject to a built-in blocklist and written back with the main format when copying history entries (fidelity paste); formats over 64 KiB move to content-addressed blob storage (zstd compressed, 8 MiB per format, 32 MiB per capture), reclaimed with deletion and retention, and included in backup export/restore
+- A 300 ms confirmation window after copying filters transient content by default (temporary copies from selection tools, fragments overwritten immediately), which can be disabled in Data settings; pasting from this app right after copying is unaffected
+- When identical plain text is copied again as HTML/RTF it merges into the existing entry (formats are completed and the entry moves to the top) without a duplicate record; history entries restore with their original formats
+- The dedup strategy can be switched in Data settings: on a repeated copy, move the entry to the top of the list (default) or keep separate entries to preserve the timeline; item notes are editable from the context menu and participate in search
+- Rich-text entries can be copied or pasted back to the original window as a single format (plain text/HTML/RTF) with an explicit error and no fallback when the chosen format is missing; text entries support transformed copy/paste (trim edges, remove line breaks, case changes), and restoring the original clipboard after paste can be enabled in settings (off by default)
+- Sequence paste: after multi-selecting records, paste them into the original window one by one — the first is sent automatically, subsequent entries advance via a global key in the target app (Ctrl+Shift+G by default, recordable or disableable in Shortcuts settings), and the queue ends automatically when exhausted; leaving the panel or copy/delete operations cancel the queue
+- HTML entries render rich-text layout (including local images) in a separate hover popup; the list and search keep plain-text summaries
+- Copying an image automatically carries file formats (CF_HDROP + CF_DIB + PNG), so Ctrl+V in Explorer or chat windows pastes it as an image file
 - A three-step Chinese/English first-run guide inside the existing clipboard panel: Open, Try it, and Setup. Language selection lives in the first step, alongside actual shortcut registration status and inline editing/recording/saving. Isolated demo records support search, side image previews, Ctrl+wheel zoom and plain-text insertion without changing the system clipboard or real history. Configure theme, launch at login and search focus, then select Get started; there is no skip button or Escape-to-finish action. Saved shortcuts are preserved, and Settings → About can reopen the guide
 - Settings navigation for General, Display, Appearance, Data, App filter, Audio, Shortcuts, and About
 - General settings can skip confirmation when clearing the current group's history from the tray menu; confirmation remains the default
@@ -32,6 +40,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 - Per-group count and age limits protect pinned and favorite items; first activation and tighter policies require confirmation, without expanding cleanup automatically on upgrade
 - Regular-file history stores original paths without copying file contents; moved or deleted sources are reported as unavailable. Image history still preserves pixels and can be copied as files; HTML is converted when plain text is missing
 - Verify clipboard contents after writing, wait a bounded time for modifier release before pasting, validate the target, and honor producer opt-outs from local clipboard history
+- Known limitations: remote http(s) images referenced in HTML previews do not load (GPUI has no built-in network image pipeline; local images work); editing an HTML entry still saves it as plain text; paste-back temporary image files live under `image_tmp/` in the data directory (swept on startup when older than 24 hours or over 64 files)
 
 See [Windows GPUI status](docs/WINDOWS_MVP.md) for Windows implementation details and historical verification. Features above are subject to these platform limits.
 

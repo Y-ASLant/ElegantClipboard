@@ -23,6 +23,7 @@ desktop.ini
 
 # Local analysis output
 .codegraph/
+.rtk/
 
 # Local AI assistant workspace data
 .workbuddy-ai/

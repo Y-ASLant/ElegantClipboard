@@ -123,7 +123,7 @@ impl History {
         if self.groups()?.iter().any(|group| group.name == name) {
             bail!("分组名称已存在");
         }
-        Ok(GroupRepository::new(&self.db).create(name, None)?)
+        Ok(GroupRepository::new(&self.db).create(name)?)
     }
 
     pub fn rename_group(&self, id: i64, name: &str) -> Result<Group> {

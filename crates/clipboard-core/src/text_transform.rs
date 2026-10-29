@@ -10,13 +10,6 @@ pub enum TextTransform {
 }
 
 impl TextTransform {
-    pub const ALL: [Self; 4] = [
-        Self::Trim,
-        Self::RemoveLineBreaks,
-        Self::Uppercase,
-        Self::Lowercase,
-    ];
-
     pub fn apply(self, text: &str) -> String {
         match self {
             Self::Trim => text.trim().to_owned(),

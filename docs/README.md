@@ -9,6 +9,8 @@
 - [Windows 独立包说明](WINDOWS_PACKAGE_README.txt)：ZIP 制品的运行与数据目录说明。
 - [技术决策](decisions/0001-windows-gpui.md)：GPUI 和 gpui-kit 的选择依据。
 - [技术决策 0002](decisions/0002-native-fidelity-transient-merge.md)：原生格式保真、瞬时过滤、同文合并与 blob 存储。
+- [技术决策 0003](decisions/0003-core-paste-parity.md)：恢复剪贴板、去重策略、文本转换、按格式粘贴与条目备注。
+- [技术决策 0004](decisions/0004-sequence-paste.md)：多选记录逐条序列粘贴的设计与快捷键。
 - [跨平台正确性修复验证](evidence/cross-platform-correctness-2026-10-27.md)：平台能力、粘贴目标与请求归属、格式编码和延迟采集修复的验证范围。
 - [默认数据目录迁移验证](evidence/data-directory-migration-2026-10-27.md)：三平台统一目录、旧数据引用与自启迁移、冲突保护和清理规则。
 - [普通文件仅保存路径](evidence/file-paths-only-2026-10-27.md)：移除文件副本、启动清理及旧备份兼容行为。
@@ -91,7 +93,7 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
-| `onboarding`、`onboarding_lessons`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、操作教程与初始偏好、内容展示助手、主题及本地化展示 |
+| `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、快捷键配置、隔离练习教程与初始偏好、内容展示助手、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于悬停预览与复制。
 

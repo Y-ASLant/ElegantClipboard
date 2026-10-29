@@ -61,7 +61,7 @@ fn search_reuses_escaped_pattern_with_filters_and_pagination() {
     let directory = tempfile::tempdir().unwrap();
     let db = Database::new(directory.path().join("clipboard.db")).unwrap();
     let repo = ClipboardRepository::new(&db);
-    let group_id = GroupRepository::new(&db).create("search", None).unwrap().id;
+    let group_id = GroupRepository::new(&db).create("search").unwrap().id;
     let mut text = make_text_item(r"中文%_\text");
     text.group_id = Some(group_id);
     repo.insert(text).unwrap();
@@ -177,7 +177,7 @@ fn daily_counts_groups_all_items_from_inclusive_start_date() {
     let (_dir, db) = temp_db();
     let repo = ClipboardRepository::new(&db);
     let group = GroupRepository::new(&db)
-        .create("Daily counts group", None)
+        .create("Daily counts group")
         .unwrap();
 
     let entries = [
@@ -235,7 +235,7 @@ fn get_by_position() {
     repo.toggle_pin(pinned).unwrap();
     repo.toggle_favorite(pinned).unwrap();
     repo.toggle_favorite(favorite).unwrap();
-    let group = GroupRepository::new(&db).create("positions", None).unwrap();
+    let group = GroupRepository::new(&db).create("positions").unwrap();
     let grouped_old = repo
         .insert(NewClipboardItem {
             group_id: Some(group.id),

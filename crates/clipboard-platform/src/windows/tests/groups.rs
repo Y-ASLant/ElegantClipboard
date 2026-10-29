@@ -10,7 +10,7 @@ fn imported_groups_can_be_browsed_and_reordered_without_mixing_default_history()
     let first = history.capture("custom first")?.unwrap();
     let second = history.capture("custom second")?.unwrap();
     let groups = GroupRepository::new(&db);
-    let group = groups.create("导入分组", None)?;
+    let group = groups.create("导入分组")?;
     groups.move_item_to_group(first, Some(group.id))?;
     groups.move_item_to_group(second, Some(group.id))?;
     drop(history);

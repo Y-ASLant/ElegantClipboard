@@ -22,7 +22,7 @@ impl GroupRepository {
     pub fn list_with_count(&self) -> Result<Vec<Group>, rusqlite::Error> {
         let conn = self.read_conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT g.id, g.name, g.color, g.sort_order, g.created_at, \
+            "SELECT g.id, g.name, g.sort_order, g.created_at, \
              COUNT(ci.id) AS item_count \
              FROM groups g \
              LEFT JOIN clipboard_items ci ON ci.group_id = g.id \
@@ -34,10 +34,9 @@ impl GroupRepository {
                 Ok(Group {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    color: row.get(2)?,
-                    sort_order: row.get(3)?,
-                    created_at: row.get(4)?,
-                    item_count: row.get(5)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                    item_count: row.get(4)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -45,7 +44,7 @@ impl GroupRepository {
     }
 
     /// 创建新分组，返回完整分组对象
-    pub fn create(&self, name: &str, color: Option<&str>) -> Result<Group, rusqlite::Error> {
+    pub fn create(&self, name: &str) -> Result<Group, rusqlite::Error> {
         let conn = self.write_conn.lock();
         let max_sort: i64 = conn
             .query_row(
@@ -55,20 +54,19 @@ impl GroupRepository {
             )
             .unwrap_or(-1);
         conn.execute(
-            "INSERT INTO groups (name, color, sort_order) VALUES (?1, ?2, ?3)",
-            params![name, color, max_sort + 1],
+            "INSERT INTO groups (name, sort_order) VALUES (?1, ?2)",
+            params![name, max_sort + 1],
         )?;
         let id = conn.last_insert_rowid();
         let group = conn.query_row(
-            "SELECT g.id, g.name, g.color, g.sort_order, g.created_at, 0 AS item_count FROM groups g WHERE g.id = ?1",
+            "SELECT g.id, g.name, g.sort_order, g.created_at, 0 AS item_count FROM groups g WHERE g.id = ?1",
             params![id],
             |row| Ok(Group {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                color: row.get(2)?,
-                sort_order: row.get(3)?,
-                created_at: row.get(4)?,
-                item_count: row.get(5)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                item_count: row.get(4)?,
             }),
         )?;
         debug!("Created group: id={}, name={}", id, name);

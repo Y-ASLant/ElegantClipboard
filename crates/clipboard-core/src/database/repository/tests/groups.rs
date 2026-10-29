@@ -4,9 +4,8 @@ use super::*;
 fn group_create_and_list() {
     let (_dir, db) = temp_db();
     let repo = GroupRepository::new(&db);
-    let group = repo.create("Test Group", Some("#ff0000")).unwrap();
+    let group = repo.create("Test Group").unwrap();
     assert_eq!(group.name, "Test Group");
-    assert_eq!(group.color.as_deref(), Some("#ff0000"));
     assert_eq!(group.item_count, 0);
 
     let groups = repo.list_with_count().unwrap();
@@ -18,7 +17,7 @@ fn group_create_and_list() {
 fn group_rename() {
     let (_dir, db) = temp_db();
     let repo = GroupRepository::new(&db);
-    let group = repo.create("Old Name", None).unwrap();
+    let group = repo.create("Old Name").unwrap();
     repo.rename(group.id, "New Name").unwrap();
     let groups = repo.list_with_count().unwrap();
     assert_eq!(groups[0].name, "New Name");
@@ -28,7 +27,7 @@ fn group_rename() {
 fn group_delete() {
     let (_dir, db) = temp_db();
     let repo = GroupRepository::new(&db);
-    let group = repo.create("To Delete", None).unwrap();
+    let group = repo.create("To Delete").unwrap();
     repo.delete(group.id).unwrap();
     assert!(repo.list_with_count().unwrap().is_empty());
 }
@@ -37,7 +36,7 @@ fn group_delete() {
 fn group_delete_cascades_items() {
     let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
-    let group = group_repo.create("Cascade Group", None).unwrap();
+    let group = group_repo.create("Cascade Group").unwrap();
 
     let clip_repo = ClipboardRepository::new(&db);
     let mut item = make_text_item("grouped_item");
@@ -52,7 +51,7 @@ fn group_delete_cascades_items() {
 fn group_move_item() {
     let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
-    let group = group_repo.create("Move Target", None).unwrap();
+    let group = group_repo.create("Move Target").unwrap();
 
     let clip_repo = ClipboardRepository::new(&db);
     let id = clip_repo.insert(make_text_item("movable")).unwrap();
@@ -71,7 +70,7 @@ fn group_move_item() {
 fn group_item_count() {
     let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
-    let group = group_repo.create("Counting", None).unwrap();
+    let group = group_repo.create("Counting").unwrap();
 
     let clip_repo = ClipboardRepository::new(&db);
     let mut item1 = make_text_item("count_a");

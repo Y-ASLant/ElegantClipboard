@@ -169,7 +169,7 @@ fn quick_paste_resolves_recent_and_favorite_slots_with_group_isolation() -> Resu
     let recent = history.capture("recent")?.unwrap();
     let grouped = history.capture("grouped")?.unwrap();
     let groups = GroupRepository::new(&db);
-    let group = groups.create("Group", None)?;
+    let group = groups.create("Group")?;
     groups.move_item_to_group(grouped, Some(group.id))?;
     drop(history);
     drop(db);

@@ -75,7 +75,6 @@ pub struct NewClipboardItem {
 pub struct QueryOptions {
     pub search: Option<String>,
     pub content_type: Option<String>,
-    pub pinned_only: bool,
     pub favorite_only: bool,
     pub group_id: Option<i64>,
     pub limit: Option<i64>,
@@ -86,7 +85,6 @@ pub struct QueryOptions {
 pub struct Group {
     pub id: i64,
     pub name: String,
-    pub color: Option<String>,
     pub sort_order: i64,
     pub created_at: String,
     pub item_count: i64,
@@ -136,9 +134,6 @@ impl ConditionBuilder {
             );
         }
         builder = builder.content_type(options.content_type.as_deref());
-        if options.pinned_only {
-            builder = builder.condition("is_pinned = 1");
-        }
         if options.favorite_only {
             builder = builder.condition("is_favorite = 1");
         }

@@ -18,7 +18,6 @@ pub(super) enum CopyMode {
 impl CopyMode {
     pub(super) fn from(format: crate::service::protocol::CopyFormat) -> Self {
         match format {
-            crate::service::protocol::CopyFormat::PlainText => Self::PlainText,
             crate::service::protocol::CopyFormat::Html => Self::Html,
             crate::service::protocol::CopyFormat::Rtf => Self::Rtf,
         }
