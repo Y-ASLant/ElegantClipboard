@@ -1,5 +1,4 @@
 use super::*;
-use gpui_kit::component::stepper::{Stepper, StepperItem};
 
 #[path = "onboarding_practice.rs"]
 pub(super) mod practice;
@@ -256,11 +255,6 @@ impl ClipboardView {
             ("onboarding-content", self.onboarding_revision),
             cx,
         );
-        let steps = [
-            ("随时唤出", "Open"),
-            ("找回内容", "Try it"),
-            ("开始使用", "Setup"),
-        ];
         div()
             .key_context("ClipboardApp")
             .track_focus(&self.list_focus)
@@ -273,32 +267,6 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
                 this.dismiss_or_hide(window, cx);
             }))
-            .child(
-                Stepper::new("onboarding-steps")
-                    .small()
-                    .text_center(true)
-                    .selected_index(step)
-                    .disabled(pending)
-                    .items(steps.iter().enumerate().map(|(index, (cn, en))| {
-                        StepperItem::new()
-                            .when(index < step, |item| {
-                                item.icon(Icon::new(IconName::Check).size(px(visual::ICON_SMALL)))
-                            })
-                            .child(
-                                div()
-                                    .text_size(px(visual::TEXT_SMALL))
-                                    .text_color(if index == step {
-                                        cx.theme().primary
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    })
-                                    .child(tr(language, cn, en)),
-                            )
-                    }))
-                    .on_click(
-                        cx.listener(|this, index, _, cx| this.select_onboarding_step(*index, cx)),
-                    ),
-            )
             .child(
                 div()
                     .id(("onboarding-scroll", step))
