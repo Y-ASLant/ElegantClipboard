@@ -365,8 +365,8 @@ pub struct WindowSizePreference {
 impl Default for WindowSizePreference {
     fn default() -> Self {
         Self {
-            width: 560,
-            height: 760,
+            width: 420,
+            height: 640,
         }
     }
 }
