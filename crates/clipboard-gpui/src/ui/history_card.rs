@@ -194,6 +194,11 @@ impl ClipboardView {
             )
             .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
                 hovered.update(cx, |hovered, _| *hovered = *is_hovered);
+                // 鼠标驱动的焦点：悬停进入即转移选中态，与键盘/点击同一目标。
+                // 拖拽与批量模式下 selection 不参与渲染与快捷键，保持不变。
+                if *is_hovered && !this.batch_mode && !cx.has_active_drag() {
+                    this.history.selected = Some(id);
+                }
                 this.set_hover_source(id, *is_hovered, cx);
                 cx.notify();
             }))

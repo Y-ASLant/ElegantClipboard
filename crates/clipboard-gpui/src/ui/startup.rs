@@ -139,7 +139,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         appears_transparent: true,
                         ..Default::default()
                     }),
-                    window_min_size: Some(size(px(420.), px(520.))),
+                    window_min_size: Some(size(px(400.), px(520.))),
                     focus: !startup.hidden,
                     show: !startup.hidden,
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),

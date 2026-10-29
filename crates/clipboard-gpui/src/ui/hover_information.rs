@@ -28,6 +28,16 @@ pub(super) struct HoverInformation {
     image_preview: bool,
 }
 
+/// Windows `canonicalize` 写入存储路径的 `\\?\`（及 `\\?\UNC\`）前缀仅服务文件系统，
+/// 展示时还原为普通路径与 UNC 形式。
+fn display_path(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(path).to_owned()
+    }
+}
+
 impl HoverInformation {
     pub(super) fn in_memory_image(dimensions: (i64, i64)) -> Self {
         Self {
@@ -132,7 +142,7 @@ impl HoverInformation {
         self.push(
             if stored { "存储路径" } else { "路径" },
             if stored { "Stored path" } else { "Path" },
-            path.to_owned(),
+            display_path(path),
         );
         if let Some(extension) = path_value
             .extension()
