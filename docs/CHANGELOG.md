@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 2.0.0-beta.10（预发行版）
+
 - 恢复浅色无材质模式的纯白实色画布与白色内容表面，侧栏、控件、描边改回中性灰，移除统一token时引入的冷灰底色。毛玻璃/云母仍独立控制，深色配色及原生窗口圆角、阴影不变。
 - 清理依赖声明：将GPUI包仅用于文件卡片测试的serde_json移至dev-dependencies，移除Windows测试重复启用的GDI feature及两处macOS Foundation默认已启用的feature清单；保留实际平台能力与锁定版本。核对模块树、构建资源、打包与CI入口后，未发现可安全删除的废弃源码、资源或脚本。
 - 完整升级GPUI依赖链至[稳定版GPUI Kit 0.8.1](https://github.com/longbridge/gpui-kit/releases/tag/v0.8.1)：配套Base/Component/Assets/Macros为0.8.1，默认gpui-pre后端及平台包为0.3.10，锁文件同步其布局/渲染依赖。卡片与列表滚轮入口迁移到ScrollEvent/on_scroll，移除弃用API使用；静态快捷键与现有数据格式保持不变。
