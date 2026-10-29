@@ -2,16 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::database::ContentType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CornerRadiusPreference {
+    #[default]
     System,
     Fixed(u8),
-}
-
-impl Default for CornerRadiusPreference {
-    fn default() -> Self {
-        Self::Fixed(4)
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

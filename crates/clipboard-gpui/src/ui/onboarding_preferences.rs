@@ -6,7 +6,7 @@ impl ClipboardView {
         let language = self.language;
         let pending = self.onboarding_saving();
         let owner = cx.weak_entity();
-        lessons::lesson_card(cx)
+        settings_common::settings_stack()
             .child(
                 div()
                     .flex()
@@ -69,8 +69,8 @@ impl ClipboardView {
                                     .text_color(cx.theme().muted_foreground)
                                     .child(tr(
                                         language,
-                                        "后台待命，用快捷键即可唤出。",
-                                        "Stay ready in the tray for your shortcut.",
+                                        "登录后自动启动，随时准备记录。",
+                                        "Start at login and stay ready to capture.",
                                     )),
                             ),
                     )
@@ -147,9 +147,23 @@ impl ClipboardView {
                     .text_color(cx.theme().muted_foreground)
                     .child(tr(
                         language,
-                        "更多选项：右键托盘图标 → 设置。",
-                        "More options: tray icon → Settings.",
+                        "历史默认保存在本机；普通文件只记录路径，不自动复制文件本体。可在托盘暂停记录，并在设置中调整应用过滤和保留期限。",
+                        "History stays on this device. Ordinary files are recorded as paths, not copied. Pause capture from the tray; adjust app filters and retention in Settings.",
                     )),
             )
+            .when(!self.monitoring || self.paused, |content| {
+                content.child(Alert::warning(
+                    "onboarding-capture-status",
+                    if !self.monitoring {
+                        tr(language,
+                            "监听未启用，目前只能体验演示和已有历史；演示操作不会开启真实记录。",
+                            "Capture is disabled. You can use demos and existing history; the exercise does not enable capture.")
+                    } else {
+                        tr(language,
+                            "真实记录已暂停；完成引导后可从托盘恢复。演示不会改变暂停状态。",
+                            "Capture is paused. Resume it from the tray after the guide; the exercise leaves it paused.")
+                    },
+                ).small())
+            })
     }
 }

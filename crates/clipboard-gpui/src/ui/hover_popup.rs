@@ -120,74 +120,11 @@ impl ClipboardView {
             }) {
                 return;
             }
-            // No Root/window-border plugin: the work area is transparent and the
-            // content surface, shadow, connector and information are painted together.
-            let opened = cx.update(|cx| {
-                cx.open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(screen)),
-                        display_id,
-                        titlebar: None,
-                        kind: WindowKind::PopUp,
-                        window_background: WindowBackgroundAppearance::Transparent,
-                        focus: false,
-                        show: false,
-                        is_movable: false,
-                        is_resizable: false,
-                        is_minimizable: false,
-                        window_min_size: Some(size(px(1.), px(1.))),
-                        // Match reference reveal cadence even though the preview never activates.
-                        inactive_frame_interval: None,
-                        app_id: Some("com.aslant.elegant-clipboard-gpui.hover".into()),
-                        ..Default::default()
-                    },
-                    |_, cx| {
-                        cx.new(|_| {
-                            HoverPreviewWindowView::new(
-                                (id, generation),
-                                language,
-                                result,
-                                zoom_step,
-                                setup,
-                            )
-                        })
-                    },
-                )
-            });
-            let opened = opened.and_then(|handle| {
-                // Every native mutation is outside App/Window/entity borrows.
-                let prepared = (|| -> anyhow::Result<()> {
-                    let native = handle
-                        .update(cx, |_, window, _| native_window::window_id(window))?
-                        .ok_or_else(|| anyhow::anyhow!("Preview native handle unavailable"))?;
-                    #[cfg(windows)]
-                    crate::native::preview::configure_overlay(native)?;
-                    clipboard_platform::external_drag::configure_drag_preview(native)?;
-                    #[cfg(windows)]
-                    crate::native::preview::set_bounds(native, screen, scale_factor)?;
-                    #[cfg(not(windows))]
-                    {
-                        use clipboard_platform::external_drag as platform;
-                        platform::move_drag_preview(
-                            native,
-                            (f32::from(screen.left()) * scale_factor).round() as i32,
-                            (f32::from(screen.top()) * scale_factor).round() as i32,
-                        )?;
-                        platform::resize_drag_preview(
-                            native,
-                            (f32::from(screen.size.width) * scale_factor).round() as i32,
-                            (f32::from(screen.size.height) * scale_factor).round() as i32,
-                        )?;
-                    }
-                    clipboard_platform::external_drag::show_drag_preview(native)?;
-                    Ok(())
-                })();
-                if let Err(error) = prepared {
-                    let _ = handle.update(cx, |_, window, _| window.remove_window());
-                    return Err(error);
-                }
-                Ok(handle)
-            });
+            let opened = open_overlay(
+                HoverPreviewWindowView::new((id, generation), language, result, zoom_step, setup),
+                display_id,
+                cx,
+            );
             owner.update(cx, |this, cx| {
                 if this.hover_popup_opening == Some((id, generation)) {
                     this.hover_popup_opening = None;
@@ -241,4 +178,70 @@ impl ClipboardView {
             });
         }
     }
+}
+
+/// Both history and the isolated onboarding exercise use the same passive
+/// native overlay. Callers retain ownership and reject stale async requests.
+pub(super) fn open_overlay(
+    view: HoverPreviewWindowView,
+    display_id: Option<DisplayId>,
+    cx: &mut AsyncApp,
+) -> anyhow::Result<WindowHandle<HoverPreviewWindowView>> {
+    let screen = view.zoom_geometry.display;
+    let scale_factor = view.zoom_geometry.scale_factor;
+    // No Root/window-border plugin: the transparent work area contains the
+    // surface, connector and information together.
+    let handle = cx.update(|cx| {
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(screen)),
+                display_id,
+                titlebar: None,
+                kind: WindowKind::PopUp,
+                window_background: WindowBackgroundAppearance::Transparent,
+                focus: false,
+                show: false,
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_min_size: Some(size(px(1.), px(1.))),
+                inactive_frame_interval: None,
+                app_id: Some("com.aslant.elegant-clipboard-gpui.hover".into()),
+                ..Default::default()
+            },
+            |_, cx| cx.new(|_| view),
+        )
+    })?;
+    // Every native mutation is outside App/Window/entity borrows.
+    let prepared = (|| -> anyhow::Result<()> {
+        let native = handle
+            .update(cx, |_, window, _| native_window::window_id(window))?
+            .ok_or_else(|| anyhow::anyhow!("Preview native handle unavailable"))?;
+        #[cfg(windows)]
+        crate::native::preview::configure_overlay(native)?;
+        clipboard_platform::external_drag::configure_drag_preview(native)?;
+        #[cfg(windows)]
+        crate::native::preview::set_bounds(native, screen, scale_factor)?;
+        #[cfg(not(windows))]
+        {
+            use clipboard_platform::external_drag as platform;
+            platform::move_drag_preview(
+                native,
+                (f32::from(screen.left()) * scale_factor).round() as i32,
+                (f32::from(screen.top()) * scale_factor).round() as i32,
+            )?;
+            platform::resize_drag_preview(
+                native,
+                (f32::from(screen.size.width) * scale_factor).round() as i32,
+                (f32::from(screen.size.height) * scale_factor).round() as i32,
+            )?;
+        }
+        clipboard_platform::external_drag::show_drag_preview(native)?;
+        Ok(())
+    })();
+    if let Err(error) = prepared {
+        let _ = handle.update(cx, |_, window, _| window.remove_window());
+        return Err(error);
+    }
+    Ok(handle)
 }

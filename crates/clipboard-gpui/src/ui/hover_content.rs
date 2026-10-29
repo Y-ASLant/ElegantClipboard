@@ -157,8 +157,13 @@ pub(super) fn render_content(
     dimensions: Size<Pixels>,
     cx: &Context<HoverPreviewWindowView>,
 ) -> AnyElement {
-    if let Some(path) = image {
-        return img(path)
+    let image = view
+        .memory_image
+        .clone()
+        .map(ImageSource::from)
+        .or_else(|| image.map(ImageSource::from));
+    if let Some(image) = image {
+        return img(image)
             .flex_none()
             .w(dimensions.width)
             .h(dimensions.height)

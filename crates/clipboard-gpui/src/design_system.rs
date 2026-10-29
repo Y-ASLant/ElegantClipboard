@@ -42,7 +42,7 @@ pub fn apply(cx: &mut App) {
         Err(error) => tracing::warn!(%error, "failed to read system animation preference"),
     }
     let dark = cx.theme().is_dark();
-    // Capture Kit's unmodified defaults once, before our Fixed(4) startup override.
+    // Capture Kit's unmodified defaults once, before applying any saved preference.
     // Later System selections must not reuse the last user-selected pixel radius.
     if !cx.has_global::<ThemeCornerDefaults>() {
         cx.set_global(ThemeCornerDefaults {

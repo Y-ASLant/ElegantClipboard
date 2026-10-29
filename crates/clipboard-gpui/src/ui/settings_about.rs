@@ -150,6 +150,26 @@ impl SettingsWindowView {
                             )
                     }))
             }))
+            .child(
+                Button::new("about-review-onboarding")
+                    .outline()
+                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                    .w(px(240.))
+                    .label(tr(language, "重新查看快速上手", "Review quick start"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let Some(owner) = this.owner.upgrade() else { return };
+                        let main_window = owner.read(cx).main_window;
+                        if let Err(error) = main_window.update(cx, |_, window, cx| {
+                            owner.update(cx, |owner, cx| owner.restart_onboarding(window, cx));
+                        }) {
+                            this.link_error = Some(format!(
+                                "{}: {error}",
+                                tr(this.language, "无法打开引导", "Could not open the guide")
+                            ));
+                            cx.notify();
+                        }
+                    })),
+            )
             .into_any_element()
     }
 }

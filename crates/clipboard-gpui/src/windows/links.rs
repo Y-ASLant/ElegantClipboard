@@ -1,33 +1,19 @@
+use crate::links_core::ProjectLink;
 use ::windows::{
     Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
-    core::{PCWSTR, w},
+    core::{HSTRING, PCWSTR, w},
 };
 use anyhow::{Result, bail};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProjectLink {
-    Author,
-    Repository,
-    Issues,
-}
-
-impl ProjectLink {
-    fn url(self) -> PCWSTR {
-        match self {
-            Self::Author => w!("https://github.com/Y-ASLant"),
-            Self::Repository => w!("https://github.com/Y-ASLant/ElegantClipboard"),
-            Self::Issues => w!("https://github.com/Y-ASLant/ElegantClipboard/issues"),
-        }
-    }
-}
-
 pub fn open(link: ProjectLink) -> Result<()> {
-    // Only URLs compiled into this module can reach ShellExecuteW.
+    // The URL's only source is the closed ProjectLink enum (links_core), so
+    // ShellExecuteW never sees an arbitrary runtime string.
+    let url = HSTRING::from(link.url());
     let result = unsafe {
         ShellExecuteW(
             None,
             w!("open"),
-            link.url(),
+            PCWSTR(url.as_ptr()),
             PCWSTR::null(),
             PCWSTR::null(),
             SW_SHOWNORMAL,

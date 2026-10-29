@@ -78,7 +78,7 @@ fn invalid_stored_radii_fall_back_without_rewriting() -> Result<()> {
         repository.set(CORNER_RADIUS_KEY, invalid)?;
         assert_eq!(
             preferences.corner_radius()?,
-            CornerRadiusPreference::Fixed(4)
+            CornerRadiusPreference::default()
         );
         assert_eq!(repository.get(CORNER_RADIUS_KEY)?.as_deref(), Some(invalid));
     }

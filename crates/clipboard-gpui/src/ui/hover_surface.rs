@@ -32,7 +32,7 @@ pub(super) fn render_preview(
         Ok(PreviewContent::Image(path)) => Some(path.clone()),
         _ => file_image,
     };
-    let image_preview = image_path.is_some();
+    let image_preview = image_path.is_some() || view.memory_image.is_some();
     let border = if image_preview {
         px(0.)
     } else {

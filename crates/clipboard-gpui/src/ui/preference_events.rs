@@ -407,13 +407,10 @@ impl ClipboardView {
                     .into(),
                 );
                 self.is_error = false;
-                if self.search_auto_focus.value {
-                    self.search.update(cx, |input, cx| input.focus(window, cx));
-                } else {
-                    window.focus(&self.list_focus, cx);
-                }
+                self.leave_onboarding(window, cx);
             }
             Err(error) => {
+                self.onboarding_error = Some(error.clone());
                 self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(

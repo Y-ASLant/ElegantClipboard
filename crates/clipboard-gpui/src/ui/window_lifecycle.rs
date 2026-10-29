@@ -270,6 +270,10 @@ impl ClipboardView {
             native_window::set_window_visible(window, true);
         }
         log_window_geometry(window, cx, "main_shown");
+        if self.onboarding_visible() {
+            window.focus(&self.list_focus, cx);
+            return;
+        }
         if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
             self.search_task = None;
             self.search
@@ -320,6 +324,7 @@ impl ClipboardView {
             return;
         }
         self.close_hover_preview("main_deactivated", cx);
+        self.dismiss_onboarding_transients(cx);
         self.cancel_pending_row_click();
         // 回贴会在隐藏面板前聚焦原目标；正常失活须保留等待中的投递和序列。
         let foreground = crate::native::foreground_target();
@@ -369,6 +374,11 @@ impl ClipboardView {
     }
 
     pub(super) fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.suspend_onboarding(cx);
+        if self.onboarding_visible() {
+            self.paste_target = None;
+            return;
+        }
         self.cancel_pending_row_click();
         self.close_hover_preview("main_hiding", cx);
         self.paste_target = None;
@@ -408,6 +418,8 @@ impl ClipboardView {
 
     pub(super) fn dismiss_or_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.onboarding_visible() {
+            self.dismiss_onboarding_transients(cx);
+            cx.stop_propagation();
             return;
         }
         self.cancel_pending_row_click();

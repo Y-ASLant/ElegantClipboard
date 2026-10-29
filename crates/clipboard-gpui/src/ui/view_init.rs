@@ -79,6 +79,9 @@ impl ClipboardView {
         let hotkey_events = cx.spawn_in(window, async move |view, cx| {
             while let Ok(target) = hotkey_receiver.recv().await {
                 if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                    if this.onboarding_visible() && !this.shortcut_change_pending() {
+                        this.onboarding_hotkey_used = true;
+                    }
                     if native_window::is_window_shown(window)
                         && !native_window::is_window_minimized(window)
                     {
@@ -218,6 +221,8 @@ impl ClipboardView {
         let activation = cx.observe_window_activation(window, |this, window, cx| {
             if !window.is_window_active() {
                 this.handle_window_deactivated(cx);
+            } else if this.onboarding_visible() {
+                cx.notify();
             }
         });
         let bounds = cx.observe_window_bounds(window, |this, window, cx| {
@@ -230,6 +235,7 @@ impl ClipboardView {
         });
         Self::schedule_feedback(cx);
         cx.on_release(|this, cx| {
+            this.suspend_onboarding(cx);
             for image in this.thumbnails.drain_images() {
                 cx.drop_image(image, None);
             }
@@ -245,6 +251,7 @@ impl ClipboardView {
         }
         Self {
             service,
+            main_window,
             _tray: tray.ok(),
             tray_sender,
             tray_enabled,
@@ -327,7 +334,11 @@ impl ClipboardView {
             onboarding_step: 0,
             onboarding_revision: 0,
             onboarding_pending: false,
-            show_onboarding: startup.show_onboarding,
+            show_onboarding: startup.show_onboarding && !onboarding_completed,
+            onboarding_hotkey_used: false,
+            onboarding_error: None,
+            onboarding_shortcut: None,
+            onboarding_practice: None,
             settings_window: None,
             settings_window_opening: false,
             theme,

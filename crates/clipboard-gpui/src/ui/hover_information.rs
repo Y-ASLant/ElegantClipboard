@@ -29,6 +29,16 @@ pub(super) struct HoverInformation {
 }
 
 impl HoverInformation {
+    pub(super) fn in_memory_image(dimensions: (i64, i64)) -> Self {
+        Self {
+            note: None,
+            image_dimensions: Some(dimensions),
+            content_type: "image".into(),
+            fields: Vec::new(),
+            image_preview: true,
+        }
+    }
+
     pub(super) fn new(item: &ClipboardItem, image_dimensions: Option<(i64, i64)>) -> Self {
         let dimensions = image_dimensions
             .or_else(|| item.image_width.zip(item.image_height))

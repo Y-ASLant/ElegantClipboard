@@ -3,6 +3,7 @@
 mod capabilities;
 mod design_system;
 mod diagnostics;
+mod links_core;
 #[cfg(windows)]
 #[path = "windows/mod.rs"]
 mod native;

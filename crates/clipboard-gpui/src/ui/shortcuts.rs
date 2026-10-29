@@ -42,6 +42,9 @@ impl ClipboardView {
     }
 
     pub(super) fn select_hotkey(&mut self, choice: HotkeyPreference, cx: &mut Context<Self>) {
+        if choice != self.hotkey_choice || self.hotkey.is_none() {
+            self.onboarding_hotkey_used = false;
+        }
         let mut next = self.shortcut_config();
         next.main = choice;
         self.begin_shortcut_change(ShortcutChangeKind::Main, next, cx);
@@ -143,6 +146,7 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if !self.monitoring
+            || self.onboarding_visible()
             || !self.quick_paste_enabled
             || self.shortcut_change_pending()
             || self.paste_hotkeys.is_none()

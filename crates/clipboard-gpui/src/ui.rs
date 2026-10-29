@@ -73,10 +73,9 @@ use shortcut_labels::{
 };
 use window_lifecycle::update_clipboard_window;
 
+use crate::links_core::ProjectLink;
 use crate::native::{
-    acrylic, input,
-    links::{self, ProjectLink},
-    paste, position,
+    acrylic, input, links, paste, position,
     sound::{self, Sound},
     window as native_window,
 };
@@ -236,6 +235,7 @@ enum HistoryConfirmation {
 
 struct ClipboardView {
     service: Service,
+    main_window: AnyWindowHandle,
     _tray: Option<TrayIcon>,
     tray_sender: async_channel::Sender<TrayCommand>,
     tray_enabled: Rc<Cell<bool>>,
@@ -312,6 +312,10 @@ struct ClipboardView {
     onboarding_revision: usize,
     onboarding_pending: bool,
     show_onboarding: bool,
+    onboarding_hotkey_used: bool,
+    onboarding_error: Option<String>,
+    onboarding_shortcut: Option<Entity<onboarding::shortcut::OnboardingShortcut>>,
+    onboarding_practice: Option<Entity<onboarding::practice::OnboardingPractice>>,
     settings_window: Option<AnyWindowHandle>,
     settings_window_opening: bool,
     theme: ThemePreference,

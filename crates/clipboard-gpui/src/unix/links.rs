@@ -1,18 +1,8 @@
+use crate::links_core::ProjectLink;
 use anyhow::{Context, Result, bail};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProjectLink {
-    Author,
-    Repository,
-    Issues,
-}
-
 pub fn open(link: ProjectLink) -> Result<()> {
-    let url = match link {
-        ProjectLink::Author => "https://github.com/Y-ASLant",
-        ProjectLink::Repository => "https://github.com/Y-ASLant/ElegantClipboard",
-        ProjectLink::Issues => "https://github.com/Y-ASLant/ElegantClipboard/issues",
-    };
+    let url = link.url();
     let launcher = if cfg!(target_os = "macos") {
         "open"
     } else {
