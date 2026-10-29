@@ -40,6 +40,9 @@ pub struct ClipboardItem {
     pub note: Option<String>,
     /// 所属分组（NULL = 默认分组，Some(id) = 自定义分组）
     pub group_id: Option<i64>,
+    /// 采集时随主格式一并存储的额外剪贴板格式名（native_formats），供预览信息展示。
+    /// 列表查询顺带填充；单点构造（测试、导入）可为空。
+    pub formats: Vec<String>,
 }
 
 impl ClipboardItem {

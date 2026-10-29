@@ -4,12 +4,17 @@ use rusqlite::{OptionalExtension, Row, params, params_from_iter};
 impl ClipboardRepository {
     pub fn get_by_id(&self, id: i64) -> Result<Option<ClipboardItem>, rusqlite::Error> {
         let conn = self.read_conn.lock();
-        conn.query_row(
-            "SELECT * FROM clipboard_items WHERE id = ?1",
-            params![id],
-            Self::row_to_item,
-        )
-        .optional()
+        let mut item = conn
+            .query_row(
+                "SELECT * FROM clipboard_items WHERE id = ?1",
+                params![id],
+                Self::row_to_item,
+            )
+            .optional()?;
+        if let Some(item) = item.as_mut() {
+            fill_formats(&conn, std::slice::from_mut(item))?;
+        }
+        Ok(item)
     }
 
     /// Resolve a quick-paste slot without loading the item's contents.
@@ -95,8 +100,11 @@ impl ClipboardRepository {
         }
 
         let mut stmt = conn.prepare(&sql)?;
-        stmt.query_map(params_from_iter(&builder.params), Self::row_to_item)?
-            .collect()
+        let mut items = stmt
+            .query_map(params_from_iter(&builder.params), Self::row_to_item)?
+            .collect::<Result<Vec<_>, _>>()?;
+        fill_formats(&conn, &mut items)?;
+        Ok(items)
     }
 
     pub fn count(&self, options: QueryOptions) -> Result<i64, rusqlite::Error> {
@@ -147,6 +155,40 @@ impl ClipboardRepository {
             source_app_icon: row.get("source_app_icon")?,
             note: row.get("note")?,
             group_id: row.get("group_id")?,
+            formats: Vec::new(),
         })
     }
+}
+
+/// 按记录 ID 批量回填已存的额外格式名；id 均为整数，直接内联到 IN 列表。
+fn fill_formats(
+    conn: &rusqlite::Connection,
+    items: &mut [ClipboardItem],
+) -> Result<(), rusqlite::Error> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let ids = items
+        .iter()
+        .map(|item| item.id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut statement = conn.prepare(&format!(
+        "SELECT item_id, format_name FROM native_formats \
+         WHERE item_id IN ({ids}) ORDER BY format_name"
+    ))?;
+    let mut rows = statement.query([])?;
+    let mut names = std::collections::HashMap::<i64, Vec<String>>::new();
+    while let Some(row) = rows.next()? {
+        names
+            .entry(row.get::<_, i64>(0)?)
+            .or_default()
+            .push(row.get::<_, String>(1)?);
+    }
+    for item in items {
+        if let Some(item_names) = names.remove(&item.id) {
+            item.formats = item_names;
+        }
+    }
+    Ok(())
 }
