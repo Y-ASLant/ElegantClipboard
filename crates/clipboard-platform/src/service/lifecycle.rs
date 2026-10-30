@@ -275,6 +275,7 @@ impl Service {
                                 content,
                                 source,
                                 extra,
+                                formats,
                                 deferred: true,
                             } = command
                             {
@@ -283,6 +284,7 @@ impl Service {
                                         sequence,
                                         content,
                                         extra,
+                                        formats,
                                         source,
                                         std::time::Instant::now(),
                                     )
@@ -291,6 +293,7 @@ impl Service {
                                     if let Err(error) = worker.handle_observed_capture(
                                         flushed.content,
                                         flushed.extra,
+                                        flushed.formats,
                                         flushed.source,
                                     ) {
                                         worker_feedback.error(error.to_string());
@@ -372,12 +375,12 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
         let ignored_sequence = state.ignored_sequence;
         let mut reread = || {
             let sequence = current_sequence(&worker.clipboard)?;
-            let content = super::read_formats::read_current_content(&worker.clipboard)?;
+            let (content, formats) = super::read_formats::read_current_capture(&worker.clipboard)?;
             anyhow::ensure!(
                 current_sequence(&worker.clipboard)? == sequence,
                 "确认瞬时内容时剪贴板已变化"
             );
-            Ok((sequence, content))
+            Ok((sequence, content, formats))
         };
         for (entry, outcome) in
             worker
@@ -391,7 +394,8 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
         drop(state);
     }
     for entry in deliver {
-        if let Err(error) = worker.handle_observed_capture(entry.content, entry.extra, entry.source)
+        if let Err(error) =
+            worker.handle_observed_capture(entry.content, entry.extra, entry.formats, entry.source)
         {
             feedback.error(error.to_string());
         } else {

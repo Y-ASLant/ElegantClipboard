@@ -42,6 +42,7 @@ fn capture_bytes(command: &Command) -> Option<usize> {
         content,
         source,
         extra,
+        formats,
         ..
     } = command
     else {
@@ -62,7 +63,9 @@ fn capture_bytes(command: &Command) -> Option<usize> {
     } + extra
         .iter()
         .map(|capture| capture.name.capacity() + capture.data.capacity())
-        .sum::<usize>();
+        .sum::<usize>()
+        + formats.capacity() * size_of::<String>()
+        + formats.iter().map(String::capacity).sum::<usize>();
     Some(
         bytes
             + source.as_ref().map_or(0, |source| {
@@ -220,6 +223,7 @@ mod tests {
             content: CapturedClipboard::Text(text.into()),
             source: None,
             extra: Vec::new(),
+            formats: Vec::new(),
             deferred: false,
             sequence: 0,
         }
@@ -268,6 +272,21 @@ mod tests {
     }
 
     #[test]
+    fn capture_budget_includes_native_names_without_payloads() {
+        let queue = Arc::new(CommandQueue {
+            byte_limit: 8,
+            ..Default::default()
+        });
+        let mut command = capture("x");
+        let Command::ObservedCapture { formats, .. } = &mut command else {
+            unreachable!();
+        };
+        formats.push("application/x-native-format".into());
+        assert!(queue.try_send(command).is_err());
+        assert!(queue.try_send(capture("x")).is_ok());
+    }
+
+    #[test]
     fn deferred_capture_holds_byte_budget_until_delivered_discarded_or_cancelled() -> Result<()> {
         use super::super::worker::transient::{TRANSIENT_WINDOW, TransientWindow, new_pending};
 
@@ -282,6 +301,7 @@ mod tests {
             let Command::ObservedCapture {
                 content,
                 extra,
+                formats,
                 source,
                 ..
             } = command
@@ -289,10 +309,10 @@ mod tests {
                 unreachable!();
             };
             let now = Instant::now();
-            window.push(new_pending(1, content, extra, source, now).hold_permit(permit));
+            window.push(new_pending(1, content, extra, formats, source, now).hold_permit(permit));
             assert!(queue.try_send(capture("x")).is_err());
             let outcomes = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-                Ok((if deliver { 1 } else { 2 }, None))
+                Ok((if deliver { 1 } else { 2 }, None, Vec::new()))
             });
             assert!(queue.try_send(capture("x")).is_err());
             drop(outcomes);
@@ -301,13 +321,14 @@ mod tests {
             let Command::ObservedCapture {
                 content,
                 extra,
+                formats,
                 source,
                 ..
             } = command
             else {
                 unreachable!();
             };
-            window.push(new_pending(3, content, extra, source, now).hold_permit(permit));
+            window.push(new_pending(3, content, extra, formats, source, now).hold_permit(permit));
             assert!(queue.try_send(capture("x")).is_err());
             window.drain();
             queue.try_send(capture("x"))?;

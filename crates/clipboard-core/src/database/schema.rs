@@ -63,6 +63,28 @@ CREATE TABLE IF NOT EXISTS native_formats (
 CREATE INDEX IF NOT EXISTS idx_native_formats_blob
     ON native_formats(blob_hash) WHERE blob_hash IS NOT NULL;
 
+-- Authoritative names from the latest observed clipboard snapshot, not payloads.
+-- Creating this empty table also upgrades older databases without guessing names.
+CREATE TABLE IF NOT EXISTS captured_formats (
+    item_id INTEGER NOT NULL REFERENCES clipboard_items(id) ON DELETE CASCADE,
+    format_name TEXT NOT NULL,
+    PRIMARY KEY (item_id, format_name)
+);
+
+-- Content edits invalidate the observed snapshot; metadata/path relocation does not.
+CREATE TRIGGER IF NOT EXISTS clipboard_items_invalidate_captured_formats
+AFTER UPDATE OF content_type, content_hash, text_content, html_content, rtf_content, file_paths
+ON clipboard_items
+WHEN old.content_type IS NOT new.content_type
+  OR old.content_hash IS NOT new.content_hash
+  OR old.text_content IS NOT new.text_content
+  OR old.html_content IS NOT new.html_content
+  OR old.rtf_content IS NOT new.rtf_content
+  OR old.file_paths IS NOT new.file_paths
+BEGIN
+    DELETE FROM captured_formats WHERE item_id = new.id;
+END;
+
 -- Alternative content hashes that deduplicate to one canonical item after
 -- same-text format merges (see same_text.rs).
 CREATE TABLE IF NOT EXISTS content_hash_aliases (

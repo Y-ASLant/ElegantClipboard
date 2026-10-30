@@ -162,7 +162,6 @@ impl ClipboardView {
         let language = self.language;
         let step = self.onboarding_step.min(2);
         let pending = self.onboarding_saving();
-        let compact = window.viewport_size().height < px(640.);
         let body = match step {
             0 => {
                 let owner = cx.weak_entity();
@@ -191,48 +190,49 @@ impl ClipboardView {
         };
         let (title, detail) = match step {
             0 => (
+                tr(language, "设置唤出快捷键", "Set your shortcut"),
                 tr(
                     language,
-                    "刚才复制的，随时找回来",
-                    "Find what you copied, anytime",
-                ),
-                tr(
-                    language,
-                    "先记住唤出方式，再体验搜索和预览。",
-                    "Learn how to open history, then try search and previews.",
+                    "在任何应用中，一键打开剪贴板历史。",
+                    "Open clipboard history from any app.",
                 ),
             ),
             1 => (
+                tr(language, "体验搜索与粘贴", "Find and paste"),
                 tr(
                     language,
-                    "找回内容，试一次就会",
-                    "Try finding it for yourself",
-                ),
-                tr(
-                    language,
-                    "用隔离的演示记录练习，不影响你的剪贴板。",
-                    "Practice with isolated examples, without changing your clipboard.",
+                    "试试搜索、预览和插入，全程使用演示内容。",
+                    "Try search, previews and insertion with sample content.",
                 ),
             ),
             _ => (
-                tr(language, "按你的习惯开始", "Make it yours"),
+                tr(language, "选择使用偏好", "Choose your preferences"),
                 tr(
                     language,
-                    "只设置常用选项，其他功能使用时再发现。",
-                    "Choose the essentials. Discover the rest as you go.",
+                    "选好外观和常用选项，之后可在设置中调整。",
+                    "Choose your appearance and defaults. Change them later in Settings.",
                 ),
             ),
         };
-        let content = settings_common::settings_stack()
-            .gap(px(visual::SPACE_4))
+        let header = div()
+            .w_full()
+            .max_w(px(visual::CHOICE_MAX_WIDTH))
+            .mx_auto()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(visual::SPACE_2))
+            .pb(px(visual::SPACE_2))
             .child(
                 div()
-                    .text_size(px(if compact { 20. } else { 24. }))
+                    .text_size(px(22.))
                     .font_semibold()
-                    .line_height(relative(1.25))
+                    .line_height(px(30.))
                     .child(title),
             )
-            .child(settings_common::settings_description(detail, cx))
+            .child(settings_common::settings_description(detail, cx));
+        let content = settings_common::settings_stack()
+            .gap(px(visual::SPACE_4))
             .when(step == 0, |content| {
                 content.child(
                     div()
@@ -267,6 +267,7 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
                 this.dismiss_or_hide(window, cx);
             }))
+            .child(header)
             .child(
                 div()
                     .id(("onboarding-scroll", step))
@@ -275,6 +276,9 @@ impl ClipboardView {
                     .mx_auto()
                     .flex_1()
                     .min_h_0()
+                    // Official scrollbars overlay the scroll area. Reserve a
+                    // gutter in the content so controls and focus rings stay clear.
+                    .pr(px(visual::SPACE_4))
                     .overflow_y_scrollbar()
                     .child(content),
             )

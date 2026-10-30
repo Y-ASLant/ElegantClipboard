@@ -79,14 +79,32 @@ fn is_private(formats: &[String], clipboard: &ClipboardContext) -> bool {
                 .map_or(true, |value| value.as_slice() != 1u32.to_le_bytes()))
 }
 
+fn is_metadata(name: &str) -> bool {
+    PRIVATE_FORMATS.contains(&name)
+        || matches!(
+            name,
+            "TARGETS"
+                | "TIMESTAMP"
+                | "MULTIPLE"
+                | "SAVE_TARGETS"
+                | "DELETE"
+                | "INCR"
+                | "CanIncludeInClipboardHistory"
+                | "CanUploadToCloudClipboard"
+                | "org.nspasteboard.source"
+                | "com.apple.pasteboard.promised-file-content-type"
+        )
+}
+
 pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSnapshot> {
-    let formats = formats(clipboard)?;
+    let mut formats = formats(clipboard)?;
     if is_private(&formats, clipboard) {
         return Ok(ClipboardSnapshot {
             content: None,
             source: None,
             warning: None,
             extra: Vec::new(),
+            formats: Vec::new(),
         });
     }
     let (content, warning) = read_content(
@@ -97,12 +115,12 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
     let mut extra = Vec::new();
     let mut total = 0usize;
     if content.is_some() {
-        for name in formats {
+        for name in &formats {
             if PRIMARY_FORMATS.contains(&name.as_str()) || PRIVATE_FORMATS.contains(&name.as_str())
             {
                 continue;
             }
-            let Ok(data) = clipboard.get_buffer(&name) else {
+            let Ok(data) = clipboard.get_buffer(name) else {
                 continue;
             };
             if data.is_empty()
@@ -112,28 +130,35 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
                 continue;
             }
             total += data.len();
-            extra.push(NativeFormatCapture { name, data });
+            extra.push(NativeFormatCapture {
+                name: name.clone(),
+                data,
+            });
         }
     }
+    formats.retain(|name| !is_metadata(name));
     Ok(ClipboardSnapshot {
         content,
         source: source_app::clipboard_source(),
         warning,
         extra,
+        formats,
     })
 }
 
-pub(super) fn read_current_content(
+pub(super) fn read_current_capture(
     clipboard: &ClipboardContext,
-) -> Result<Option<CapturedClipboard>> {
-    let formats = formats(clipboard)?;
+) -> Result<(Option<CapturedClipboard>, Vec<String>)> {
+    let mut formats = formats(clipboard)?;
     if is_private(&formats, clipboard) {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
-    Ok(read_content(
+    let content = read_content(
         clipboard,
         #[cfg(target_os = "linux")]
         Some(&formats),
     )?
-    .0)
+    .0;
+    formats.retain(|name| !is_metadata(name));
+    Ok((content, formats))
 }

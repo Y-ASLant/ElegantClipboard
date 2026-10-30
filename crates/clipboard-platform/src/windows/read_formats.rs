@@ -120,6 +120,48 @@ fn is_blacklisted_name(name: &str) -> bool {
         .any(|item| item.eq_ignore_ascii_case(name))
 }
 
+fn captured_format_name(format: u32) -> Option<String> {
+    let standard = match format {
+        1 => "CF_TEXT",
+        2 => "CF_BITMAP",
+        3 => "CF_METAFILEPICT",
+        4 => "CF_SYLK",
+        5 => "CF_DIF",
+        6 => "CF_TIFF",
+        7 => "CF_OEMTEXT",
+        8 => "CF_DIB",
+        9 => "CF_PALETTE",
+        10 => "CF_PENDATA",
+        11 => "CF_RIFF",
+        12 => "CF_WAVE",
+        13 => "CF_UNICODETEXT",
+        14 => "CF_ENHMETAFILE",
+        15 => "CF_HDROP",
+        17 => "CF_DIBV5",
+        0x0081 => "CF_DSPTEXT",
+        0x0082 => "CF_DSPBITMAP",
+        0x0083 => "CF_DSPMETAFILEPICT",
+        0x008e => "CF_DSPENHMETAFILE",
+        // Locale and owner-display are clipboard metadata, not content.
+        16 | 0x0080 => return None,
+        _ => {
+            let name = format_name(format)?;
+            return (!is_blacklisted_name(&name)
+                || ["HTML Format", "Rich Text Format", "PNG"]
+                    .iter()
+                    .any(|primary| primary.eq_ignore_ascii_case(&name)))
+            .then_some(name);
+        }
+    };
+    Some(standard.into())
+}
+
+fn captured_formats(_guard: &clipboard_win::Clipboard) -> Vec<String> {
+    clipboard_win::EnumFormats::new()
+        .filter_map(captured_format_name)
+        .collect()
+}
+
 pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSnapshot> {
     if super::privacy::excludes_history(clipboard)? {
         return Ok(ClipboardSnapshot {
@@ -127,42 +169,47 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
             source: None,
             warning: None,
             extra: Vec::new(),
+            formats: Vec::new(),
         });
     }
     let source = source_app::clipboard_source();
     let (content, warning) = read_content(clipboard)?;
-    // 主内容为 None（剪贴板只有不支持的私有格式）时快照会被丢弃，无需枚举额外格式。
-    let extra = if content.is_some() {
+    // 主内容为空时快照会被丢弃，无需枚举格式。
+    let (extra, formats) = if content.is_some() {
         read_extra_in_session()
     } else {
-        Vec::new()
+        (Vec::new(), Vec::new())
     };
     Ok(ClipboardSnapshot {
         content,
         source,
         warning,
         extra,
+        formats,
     })
 }
 
 /// 额外格式枚举需要独立短会话；主读取（clipboard_rs）已关闭其会话，
 /// 序列号稳定性由调用方的 read_stable_capture 保证。
-fn read_extra_in_session() -> Vec<NativeFormatCapture> {
+fn read_extra_in_session() -> (Vec<NativeFormatCapture>, Vec<String>) {
     let Ok(guard) = clipboard_win::Clipboard::new_attempts(10) else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
+    let formats = captured_formats(&guard);
     let captures = read_extra_formats(&guard);
-    drop(guard);
-    captures
+    (captures, formats)
 }
 
-/// 瞬时确认窗口的重读入口：读取当前剪贴板的主内容（不含额外格式枚举——
-/// 若内容与 pending 相同则直接交付 pending 携带的 extra，无需再枚举）。
-pub(super) fn read_current_content(
+/// 瞬时确认只重读主内容与实际格式名；额外载荷沿用原始快照。
+pub(super) fn read_current_capture(
     clipboard: &ClipboardContext,
-) -> Result<Option<CapturedClipboard>> {
+) -> Result<(Option<CapturedClipboard>, Vec<String>)> {
     if super::privacy::excludes_history(clipboard)? {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
-    Ok(read_content(clipboard)?.0)
+    let content = read_content(clipboard)?.0;
+    let formats = clipboard_win::Clipboard::new_attempts(10)
+        .map(|guard| captured_formats(&guard))
+        .unwrap_or_default();
+    Ok((content, formats))
 }

@@ -113,35 +113,15 @@ impl HoverInformation {
                 information.push("存储格式", "Stored format", format.to_owned());
             }
         }
-        // 「数据格式」先列主剪贴板格式，再拼接捕获时保存的额外格式名。
-        let mut data_formats = Vec::new();
-        match item.content_type.as_str() {
-            "image" => data_formats.push("PNG"),
-            "files" => data_formats.push(if cfg!(windows) {
-                "CF_HDROP"
+        information.push(
+            "数据格式",
+            "Data format",
+            if item.formats.is_empty() {
+                "—".to_owned()
             } else {
-                "File URL"
-            }),
-            "html" => {
-                if item.html_content.is_some() {
-                    data_formats.push("HTML Format");
-                }
-                if item.rtf_content.is_some() {
-                    data_formats.push("Rich Text Format");
-                }
-            }
-            "rtf" => data_formats.push("Rich Text Format"),
-            "text" | "url" => data_formats.push("Unicode Text"),
-            _ => {}
-        }
-        for name in &item.formats {
-            if !data_formats.contains(&name.as_str()) {
-                data_formats.push(name.as_str());
-            }
-        }
-        if !data_formats.is_empty() {
-            information.push("数据格式", "Data format", data_formats.join("、"));
-        }
+                item.formats.join("、")
+            },
+        );
         if let Some(source) = item
             .source_app_name
             .as_deref()

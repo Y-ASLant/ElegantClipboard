@@ -19,6 +19,7 @@ pub(super) struct ClipboardSnapshot {
     pub(super) source: Option<source_app::SourceApp>,
     pub(super) warning: Option<&'static str>,
     pub(super) extra: Vec<NativeFormatCapture>,
+    pub(super) formats: Vec<String>,
 }
 pub(super) fn read_content(
     clipboard: &ClipboardContext,

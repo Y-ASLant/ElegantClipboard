@@ -13,6 +13,7 @@ impl Worker {
         &mut self,
         content: CapturedClipboard,
         extra: Vec<NativeFormatCapture>,
+        formats: Vec<String>,
         source: Option<source_app::SourceApp>,
     ) -> Result<()> {
         self.discard_changed_stash();
@@ -44,6 +45,9 @@ impl Worker {
                 ),
             };
         self.snapshot_pending |= id.is_some();
+        if let Some(id) = id {
+            self.history.set_captured_formats(id, &formats)?;
+        }
         if let (Some(id), Some(source)) = (id, source) {
             let icon = source.executable.as_deref().and_then(|executable| {
                 source_app::extract_and_cache_icon(executable, &self.icons_dir)

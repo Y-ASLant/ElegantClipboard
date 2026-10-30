@@ -214,6 +214,8 @@ pub enum Command {
         content: CapturedClipboard,
         source: Option<source_app::SourceApp>,
         extra: Vec<NativeFormatCapture>,
+        /// 实际采集的原生格式名称，与可还原的额外载荷独立。
+        formats: Vec<String>,
         /// true 仅来自真实 watcher：先进 300ms 瞬时确认窗口；
         /// 测试与 smoke 注入 false 直接入库。
         deferred: bool,

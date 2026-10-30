@@ -20,6 +20,7 @@ pub(crate) struct PendingCapture {
     pub(crate) sequence: u32,
     pub(crate) content: CapturedClipboard,
     pub(crate) extra: Vec<NativeFormatCapture>,
+    pub(crate) formats: Vec<String>,
     pub(crate) source: Option<source_app::SourceApp>,
     pub(crate) due: Instant,
     pub(crate) attempts: u8,
@@ -91,16 +92,16 @@ impl TransientWindow {
         &mut self,
         now: Instant,
         ignored_sequence: u32,
-        reread: &mut dyn FnMut() -> Result<(u32, Option<CapturedClipboard>), anyhow::Error>,
+        reread: &mut dyn FnMut() -> Result<(u32, Option<CapturedClipboard>, Vec<String>)>,
     ) -> Vec<(PendingCapture, PollOutcome)> {
         let mut results = Vec::new();
-        let mut cached: Option<Result<(u32, Option<CapturedClipboard>), ()>> = None;
+        let mut cached = None;
         while self.pending.front().is_some_and(|front| front.due <= now) {
             let mut entry = self.pending.pop_front().expect("checked front above");
             let outcome = {
                 let read = cached.get_or_insert_with(|| reread().map_err(|_| ()));
                 match read {
-                    Ok((current, content)) => {
+                    Ok((current, content, formats)) => {
                         if *current == entry.sequence
                             || (ignored_sequence != 0 && *current == ignored_sequence)
                         {
@@ -111,6 +112,7 @@ impl TransientWindow {
                                 // 内容为空/不同：被还原或取代，丢弃。
                                 None => PollOutcome::Discard,
                                 Some(current_content) if *current_content == entry.content => {
+                                    entry.formats.clone_from(formats);
                                     PollOutcome::Deliver
                                 }
                                 Some(_) => PollOutcome::Discard,
@@ -144,6 +146,7 @@ pub(crate) fn new_pending(
     sequence: u32,
     content: CapturedClipboard,
     extra: Vec<NativeFormatCapture>,
+    formats: Vec<String>,
     source: Option<source_app::SourceApp>,
     now: Instant,
 ) -> PendingCapture {
@@ -151,6 +154,7 @@ pub(crate) fn new_pending(
         sequence,
         content,
         extra,
+        formats,
         source,
         due: now + TRANSIENT_WINDOW,
         attempts: 0,

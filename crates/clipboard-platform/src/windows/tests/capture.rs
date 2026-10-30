@@ -76,12 +76,14 @@ fn disabled_transient_filter_still_refreshes_deferred_captures() -> Result<()> {
         content: CapturedClipboard::Text("deferred without filter".into()),
         source: None,
         extra: Vec::new(),
+        formats: vec!["CF_UNICODETEXT".into()],
         deferred: true,
         sequence: 17,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].preview.as_deref(), Some("deferred without filter"));
+    assert_eq!(items[0].formats, ["CF_UNICODETEXT"]);
     assert_eq!(
         History::open(directory.path().join("clipboard.db"))?.count("", false)?,
         1
@@ -103,6 +105,7 @@ fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
         content: CapturedClipboard::Text("ordinary text".into()),
         source: None,
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
@@ -110,6 +113,7 @@ fn monitor_types_change_applies_to_later_observed_captures() -> Result<()> {
         content: CapturedClipboard::Text("https://example.com".into()),
         source: None,
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
@@ -149,6 +153,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         content: CapturedClipboard::Text("blocked note".into()),
         source: Some(notepad.clone()),
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
@@ -156,6 +161,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         content: CapturedClipboard::Text("unknown source".into()),
         source: None,
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
@@ -180,6 +186,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
         content: CapturedClipboard::Text("allowed note".into()),
         source: Some(notepad),
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
@@ -190,6 +197,7 @@ fn app_filter_changes_apply_to_observed_sources() -> Result<()> {
             executable: Some("C:\\Apps\\browser.exe".into()),
         }),
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
@@ -231,12 +239,17 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
             name: "Editor".into(),
             executable: None,
         }),
-        extra: Vec::new(),
+        extra: vec![clipboard_core::NativeFormatCapture {
+            name: "application/x-retained-payload".into(),
+            data: vec![1, 2, 3],
+        }],
+        formats: vec!["CF_UNICODETEXT".into()],
         deferred: false,
         sequence: 0,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Editor"));
+    assert_eq!(items[0].formats, ["CF_UNICODETEXT"]);
 
     service.send(Command::ObservedCapture {
         content: CapturedClipboard::Text("source test".into()),
@@ -245,13 +258,15 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
             executable: None,
         }),
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;
     let items = next_snapshot(&events, 0);
     assert_eq!(items[0].source_app_name.as_deref(), Some("Browser"));
+    assert!(items[0].formats.is_empty());
 
-    for (content, source) in [
+    for (content, source, format) in [
         (
             CapturedClipboard::Rich {
                 html: Some("<b>rich source</b>".into()),
@@ -259,10 +274,12 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
                 text: Some("rich source".into()),
             },
             "Mail",
+            "HTML Format",
         ),
         (
             CapturedClipboard::Files(vec![r"C:\source-test.txt".into()]),
             "Explorer",
+            "CF_HDROP",
         ),
         (
             CapturedClipboard::Image {
@@ -271,6 +288,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
                 height: 128,
             },
             "Paint",
+            "CF_DIB",
         ),
     ] {
         service.send(Command::ObservedCapture {
@@ -280,11 +298,13 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
                 executable: None,
             }),
             extra: Vec::new(),
+            formats: vec![format.into()],
             deferred: false,
             sequence: 0,
         })?;
         let items = next_snapshot(&events, 0);
         assert_eq!(items[0].source_app_name.as_deref(), Some(source));
+        assert_eq!(items[0].formats, [format]);
     }
     Ok(())
 }
@@ -305,6 +325,7 @@ fn observed_capture_persists_a_cached_source_icon() -> Result<()> {
             executable: Some(executable.to_string_lossy().into_owned()),
         }),
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })?;

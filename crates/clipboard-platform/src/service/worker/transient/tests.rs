@@ -11,6 +11,7 @@ fn entry(sequence: u32, value: &str, now: Instant) -> PendingCapture {
         sequence,
         text_capture(value),
         Vec::new(),
+        vec!["original/native".into()],
         Some(source_app::SourceApp {
             name: "Test".into(),
             executable: None,
@@ -41,9 +42,10 @@ fn due_entry_with_unchanged_sequence_is_delivered() {
     let now = Instant::now();
     assert!(window.push(entry(7, "stable", now)).is_empty());
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-        Ok((7, Some(text_capture("stable"))))
+        Ok((7, Some(text_capture("stable")), Vec::new()))
     });
     assert_eq!(delivered(&results), 1);
+    assert_eq!(results[0].0.formats, ["original/native"]);
 }
 
 #[test]
@@ -52,7 +54,7 @@ fn replaced_by_empty_content_is_discarded() {
     let now = Instant::now();
     window.push(entry(7, "flash", now));
     // 序列号变化且当前剪贴板为空（划词工具还原）。
-    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || Ok((8, None)));
+    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || Ok((8, None, Vec::new())));
     assert_eq!(delivered(&results), 0);
 }
 
@@ -62,20 +64,23 @@ fn replaced_by_different_content_is_discarded() {
     let now = Instant::now();
     window.push(entry(7, "old", now));
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-        Ok((8, Some(text_capture("new content"))))
+        Ok((8, Some(text_capture("new content")), Vec::new()))
     });
     assert_eq!(delivered(&results), 0);
 }
 
 #[test]
-fn replaced_by_identical_content_is_delivered() {
-    let mut window = TransientWindow::new(true);
-    let now = Instant::now();
-    window.push(entry(7, "same", now));
-    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-        Ok((8, Some(text_capture("same"))))
-    });
-    assert_eq!(delivered(&results), 1);
+fn replaced_by_identical_content_uses_latest_formats_even_when_empty() {
+    for formats in [vec!["replacement/native".into()], Vec::new()] {
+        let mut window = TransientWindow::new(true);
+        let now = Instant::now();
+        window.push(entry(7, "same", now));
+        let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
+            Ok((8, Some(text_capture("same")), formats.clone()))
+        });
+        assert_eq!(delivered(&results), 1);
+        assert_eq!(results[0].0.formats, formats);
+    }
 }
 
 #[test]
@@ -85,9 +90,14 @@ fn replaced_by_own_paste_is_still_delivered() {
     window.push(entry(7, "user copy", now));
     // 序列号 9 是自身写回（ignored_sequence=9）。
     let results = window.poll_due(now + TRANSIENT_WINDOW, 9, &mut || {
-        Ok((9, Some(text_capture("pasted item"))))
+        Ok((
+            9,
+            Some(text_capture("pasted item")),
+            vec!["own/paste".into()],
+        ))
     });
     assert_eq!(delivered(&results), 1);
+    assert_eq!(results[0].0.formats, ["original/native"]);
 }
 
 #[test]
@@ -120,6 +130,7 @@ fn overflow_flushes_oldest_entry() {
     let flushed = window.push(entry(99, "newest", now));
     assert_eq!(flushed.len(), 1, "最旧条目应被挤出立即入库");
     assert_eq!(flushed[0].sequence, 1);
+    assert_eq!(flushed[0].formats, ["original/native"]);
     assert_eq!(window.next_deadline().unwrap(), now + TRANSIENT_WINDOW);
 }
 
@@ -132,7 +143,7 @@ fn queued_captures_keep_their_own_sequence_and_only_the_final_content_survives()
     let outcomes = window.poll_due(
         now + TRANSIENT_WINDOW + Duration::from_millis(100),
         0,
-        &mut || Ok((102, Some(text_capture("final")))),
+        &mut || Ok((102, Some(text_capture("final")), Vec::new())),
     );
     assert_eq!(outcomes.len(), 2);
     assert!(matches!(outcomes[0].1, PollOutcome::Discard));

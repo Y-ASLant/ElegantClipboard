@@ -160,7 +160,7 @@ impl ClipboardRepository {
     }
 }
 
-/// 按记录 ID 批量回填已存的额外格式名；id 均为整数，直接内联到 IN 列表。
+/// 按记录 ID 批量回填实际采集的格式名；id 均为整数，直接内联到 IN 列表。
 fn fill_formats(
     conn: &rusqlite::Connection,
     items: &mut [ClipboardItem],
@@ -174,7 +174,7 @@ fn fill_formats(
         .collect::<Vec<_>>()
         .join(",");
     let mut statement = conn.prepare(&format!(
-        "SELECT item_id, format_name FROM native_formats \
+        "SELECT item_id, format_name FROM captured_formats \
          WHERE item_id IN ({ids}) ORDER BY format_name"
     ))?;
     let mut rows = statement.query([])?;

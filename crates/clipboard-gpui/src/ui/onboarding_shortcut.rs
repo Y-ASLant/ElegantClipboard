@@ -187,10 +187,16 @@ impl Render for OnboardingShortcut {
             HotkeyPreference::Shortcut(value) => shortcut_kbd(value),
             HotkeyPreference::Disabled => None,
         }
-        .map(|kbd| kbd.outline().text_size(px(24.)).into_any_element())
+        .map(|kbd| {
+            kbd.text_size(px(visual::TEXT_BODY))
+                .px_2()
+                .py_1()
+                .rounded(cx.theme().radius)
+                .into_any_element()
+        })
         .unwrap_or_else(|| {
             div()
-                .text_xl()
+                .text_sm()
                 .font_semibold()
                 .child(hotkey_label(language, &owner.hotkey_choice).to_owned())
                 .into_any_element()
@@ -213,6 +219,11 @@ impl Render for OnboardingShortcut {
         div()
             .w_full()
             .min_w_0()
+            .p(px(visual::SPACE_4))
+            .rounded(cx.theme().radius_lg)
+            .border_1()
+            .border_color(crate::design_system::container_border(cx))
+            .bg(cx.theme().group_box)
             .flex()
             .flex_col()
             .gap(px(visual::SPACE_4))
@@ -220,22 +231,30 @@ impl Render for OnboardingShortcut {
                 div()
                     .w_full()
                     .min_w_0()
-                    .rounded(cx.theme().radius_lg)
-                    .border_1()
-                    .border_color(crate::design_system::container_border(cx))
-                    .bg(cx.theme().group_box)
-                    .p(px(visual::SPACE_4))
                     .flex()
                     .flex_col()
-                    .gap_3()
+                    .gap(px(visual::SPACE_2))
                     .child(
                         div()
-                            .text_sm()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(tr(language, "当前快捷键", "Current shortcut")),
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(visual::SPACE_2))
+                            .child(
+                                div()
+                                    .text_size(px(visual::TEXT_BODY))
+                                    .font_medium()
+                                    .child(tr(language, "当前快捷键", "Current shortcut")),
+                            )
+                            .child(chord),
                     )
-                    .child(chord)
-                    .child(div().text_sm().child(status))
+                    .child(
+                        div()
+                            .text_size(px(visual::TEXT_SMALL))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(status),
+                    )
                     .child(
                         div()
                             .text_sm()
@@ -243,9 +262,9 @@ impl Render for OnboardingShortcut {
                             .text_color(cx.theme().muted_foreground)
                             .child(if registered && !pending {
                                 if used {
-                                    tr(language, "已收到快捷键。你可以随时用它打开或隐藏面板。", "Shortcut received. Use it anytime to show or hide this panel.")
+                                    tr(language, "已收到快捷键，随时可用它打开或隐藏面板。", "Shortcut received. Use it to show or hide this panel.")
                                 } else {
-                                    tr(language, "现在按一次快捷键隐藏面板，再按一次返回当前引导。", "Press your shortcut to hide this panel, then press it again to return to this guide.")
+                                    tr(language, "按一次隐藏面板，再按一次返回引导。", "Press once to hide the panel, then again to return.")
                                 }
                             } else {
                                 tr(language, "你仍可从系统托盘打开面板并继续引导。", "You can still open this panel from the system tray and continue the guide.")
@@ -275,18 +294,21 @@ impl Render for OnboardingShortcut {
             })
             .child(
                 div()
+                    .pt(px(visual::SPACE_4))
+                    .border_t_1()
+                    .border_color(cx.theme().border)
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap(px(visual::SPACE_2))
                     .child(div().text_sm().font_medium().child(tr(
                         language,
-                        "设置唤出快捷键",
-                        "Set your opening shortcut",
+                        "更换快捷键",
+                        "Change shortcut",
                     )))
                     .child(
                         Input::new(&self.input)
                             .disabled(locked || self.recording)
-                            .refine_style(&StyleRefinement::default().h(px(36.))),
+                            .refine_style(&StyleRefinement::default().h(px(visual::CONTROL_HEIGHT_LARGE))),
                     ),
             )
             .when(self.recording, |panel| {
@@ -299,7 +321,7 @@ impl Render for OnboardingShortcut {
                         .border_color(cx.theme().primary)
                         .p_3()
                         .text_sm()
-                        .child(tr(language, "请按组合键；按 Esc 取消录制。录制后仍需保存。", "Press a shortcut; press Esc to cancel. Save after recording to apply it.")),
+                        .child(tr(language, "按下组合键；Esc 取消，保存后生效。", "Press a shortcut. Esc cancels; save to apply.")),
                 )
             })
             .when_some(self.error.clone(), |panel, error| {
@@ -318,11 +340,14 @@ impl Render for OnboardingShortcut {
                 div()
                     .flex()
                     .flex_wrap()
+                    .items_center()
+                    .justify_end()
                     .gap_2()
                     .child(
                         Button::new("onboarding-shortcut-record")
                             .outline()
-                            .label(tr(language, "录制快捷键", "Record shortcut"))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "录制", "Record"))
                             .disabled(locked || self.recording)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.start_recording(window, cx);
@@ -332,6 +357,7 @@ impl Render for OnboardingShortcut {
                         buttons.child(
                             Button::new("onboarding-shortcut-cancel-recording")
                                 .ghost()
+                                .h(px(visual::CONTROL_HEIGHT_LARGE))
                                 .label(tr(language, "取消录制", "Cancel recording"))
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.suspend(cx);
@@ -342,10 +368,11 @@ impl Render for OnboardingShortcut {
                     .child(
                         Button::new("onboarding-shortcut-save")
                             .primary()
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .label(if pending {
                                 tr(language, "保存中…", "Saving…")
                             } else {
-                                tr(language, "保存快捷键", "Save shortcut")
+                                tr(language, "保存更改", "Save changes")
                             })
                             .disabled(locked || self.recording)
                             .on_click(cx.listener(|this, _, window, cx| {

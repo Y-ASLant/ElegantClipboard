@@ -84,6 +84,7 @@ impl WatchHandler {
                 content,
                 source: snapshot.source,
                 extra: snapshot.extra,
+                formats: snapshot.formats,
                 deferred: true,
             })?;
         }
@@ -114,6 +115,7 @@ mod tests {
             }),
             warning: None,
             extra: Vec::new(),
+            formats: vec![format!("native/{label}")],
         }
     }
 
@@ -133,6 +135,7 @@ mod tests {
         assert_eq!(reads, 2);
         assert_eq!(sequence, 2);
         assert_eq!(snapshot.source.unwrap().name, "stable");
+        assert_eq!(snapshot.formats, ["native/stable"]);
         let Some(CapturedClipboard::Rich { html, rtf, text }) = snapshot.content else {
             panic!("expected rich snapshot");
         };

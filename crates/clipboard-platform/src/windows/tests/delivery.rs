@@ -58,6 +58,7 @@ fn enqueue_observed_text(service: &Service, text: String) -> Result<()> {
         content: CapturedClipboard::Text(text),
         source: None,
         extra: Vec::new(),
+        formats: Vec::new(),
         deferred: false,
         sequence: 0,
     })

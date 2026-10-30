@@ -2,6 +2,7 @@
 pub mod backup;
 pub(crate) mod backup_common;
 mod blob_store;
+mod captured_formats;
 pub(crate) mod clipboard;
 mod data_relocation;
 pub mod database;
