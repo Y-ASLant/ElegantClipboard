@@ -16,6 +16,7 @@ async-channel.workspace = true
 clipboard-platform = { path = "../clipboard-platform" }
 chrono.workspace = true
 gpui-kit.workspace = true
+htmd = "0.5.6"
 directories.workspace = true
 raw-window-handle.workspace = true
 tracing.workspace = true

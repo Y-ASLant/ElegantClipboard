@@ -76,12 +76,26 @@ impl HoverPreviewWindowView {
         zoom_step: u8,
         setup: HoverPreviewSetup,
     ) -> Self {
+        let mut content = content;
         let text = match &content {
-            Ok(
-                PreviewContent::Text(text)
-                | PreviewContent::RichText(text)
-                | PreviewContent::Html(text),
-            ) => text.clone().into(),
+            Ok(PreviewContent::Text(text) | PreviewContent::RichText(text)) => text.clone().into(),
+            // Keep the captured HTML intact; only the display source is converted.
+            // Markdown paragraphs have unique source spans in TextView, unlike HTML.
+            Ok(PreviewContent::Html(html)) => match htmd::convert(html) {
+                Ok(markdown) => markdown.into(),
+                Err(error) => {
+                    let message = format!(
+                        "{}: {error}",
+                        tr(
+                            language,
+                            "富文本预览转换失败",
+                            "Rich text preview conversion failed"
+                        )
+                    );
+                    content = Err(message.clone());
+                    message.into()
+                }
+            },
             Ok(PreviewContent::Files(entries)) => entries
                 .iter()
                 .map(|entry| entry.original_path.as_str())

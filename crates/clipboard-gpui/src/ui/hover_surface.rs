@@ -52,6 +52,7 @@ pub(super) fn render_preview(
                 .font_family(cx.theme().font_family.clone())
                 .child(
                     div()
+                        .id("hover-preview-measure")
                         .absolute()
                         .opacity(0.)
                         .max_w(maximum.width)
@@ -125,7 +126,7 @@ pub(super) fn render_preview(
             )
         })
         .child(hover_content::render_content(
-            view, image_path, body_size, cx,
+            view, image_path, body_size, maximum, cx,
         ));
     let surface = div()
         .size_full()

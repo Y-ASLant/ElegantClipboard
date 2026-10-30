@@ -2,6 +2,10 @@ use super::*;
 use gpui_kit::Size;
 use gpui_kit::component::text::TextView;
 
+/// HTML/Markdown 预览的宽度上限：TextView 在不定宽容器中会退化成 min-content
+/// 宽度（逐字换行），所以始终给它一个确定宽度而不是 `max_w`。
+const HTML_PREVIEW_MAX_WIDTH: f32 = 480.;
+
 pub(super) fn fitted_size(
     view: &HoverPreviewWindowView,
     maximum: Size<Pixels>,
@@ -77,16 +81,17 @@ pub(super) fn html_content(
 ) -> AnyElement {
     let entity = cx.entity().downgrade();
     let generation = view.generation;
+    let width = maximum_width.min(px(HTML_PREVIEW_MAX_WIDTH));
     div()
         .relative()
         .flex_none()
-        .max_w(maximum_width)
+        .w(width)
         .px(px(visual::SPACE_3))
         .py(px(visual::SPACE_2))
         .text_size(px(visual::TEXT_BODY))
         .line_height(px(22.4))
         .child(
-            TextView::html("hover-preview-html", view.text.clone())
+            TextView::markdown("hover-preview-rich-text", view.text.clone())
                 .selectable(false)
                 .scrollable(false),
         )
@@ -155,6 +160,7 @@ pub(super) fn render_content(
     view: &HoverPreviewWindowView,
     image: Option<PathBuf>,
     dimensions: Size<Pixels>,
+    preferred: Size<Pixels>,
     cx: &Context<HoverPreviewWindowView>,
 ) -> AnyElement {
     let image = view
@@ -190,7 +196,7 @@ pub(super) fn render_content(
         .whitespace_normal();
     match &view.content {
         Ok(PreviewContent::Html(_)) => body
-            .child(html_content(view, dimensions.width, cx))
+            .child(html_content(view, preferred.width, cx))
             .into_any_element(),
         Ok(PreviewContent::Files(entries)) => body
             .flex()
