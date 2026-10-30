@@ -1,4 +1,6 @@
-use super::settings_common::{choice_tabs, owner_state, settings_field, settings_stack};
+use super::settings_common::{
+    choice_tabs, owner_state, settings_column, settings_columns, settings_field, settings_inline,
+};
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
 
@@ -26,78 +28,91 @@ impl SettingsWindowView {
         let hover_preference = owner_state.hover_preference;
         let hover_pending = owner_state.hover_preference_pending;
         let expanded_hover_owner = self.owner.clone();
-        settings_stack()
+        settings_columns()
             .child(
-                settings_field(tr(language, "预览内容", "Preview content")).child(
-                    settings_stack().gap_1().children(
-                        [
-                            (
-                                "hover-image",
-                                tr(language, "图片", "Images"),
-                                hover_preference.image,
-                                (|next: &mut HoverPreviewPreference, checked| next.image = checked)
-                                    as fn(&mut HoverPreviewPreference, bool),
+                settings_column()
+                    .child(
+                        settings_field(tr(language, "预览内容", "Preview content")).child(
+                            settings_inline().children(
+                                [
+                                    (
+                                        "hover-image",
+                                        tr(language, "图片", "Images"),
+                                        hover_preference.image,
+                                        (|next: &mut HoverPreviewPreference, checked| {
+                                            next.image = checked
+                                        })
+                                            as fn(&mut HoverPreviewPreference, bool),
+                                    ),
+                                    (
+                                        "hover-text",
+                                        tr(language, "文本", "Text"),
+                                        hover_preference.text,
+                                        |next: &mut HoverPreviewPreference, checked| {
+                                            next.text = checked
+                                        },
+                                    ),
+                                    (
+                                        "hover-files",
+                                        tr(language, "文件", "Files"),
+                                        hover_preference.files,
+                                        |next: &mut HoverPreviewPreference, checked| {
+                                            next.files = checked
+                                        },
+                                    ),
+                                ]
+                                .map(
+                                    |(id, label, selected, set_checked)| {
+                                        let owner = self.owner.clone();
+                                        Checkbox::new(id)
+                                            .min_w_0()
+                                            .min_h(px(32.))
+                                            .py(px(6.))
+                                            .text_size(px(14.))
+                                            .whitespace_normal()
+                                            .label(label)
+                                            .checked(selected)
+                                            .disabled(hover_pending)
+                                            .on_change(move |checked, _, cx| {
+                                                let _ = owner.update(cx, |owner, cx| {
+                                                    let mut next = owner.hover_preference;
+                                                    set_checked(&mut next, *checked);
+                                                    owner.save_hover_preference(next, cx);
+                                                });
+                                            })
+                                    },
+                                ),
                             ),
-                            (
-                                "hover-text",
-                                tr(language, "文本", "Text"),
-                                hover_preference.text,
-                                |next: &mut HoverPreviewPreference, checked| next.text = checked,
-                            ),
-                            (
-                                "hover-files",
-                                tr(language, "文件", "Files"),
-                                hover_preference.files,
-                                |next: &mut HoverPreviewPreference, checked| next.files = checked,
-                            ),
-                        ]
-                        .map(|(id, label, selected, set_checked)| {
-                            let owner = self.owner.clone();
-                            Checkbox::new(id)
-                                .w_full()
-                                .min_h(px(32.))
-                                .py(px(6.))
-                                .text_size(px(14.))
-                                .label(label)
-                                .checked(selected)
-                                .disabled(hover_pending)
-                                .on_change(move |checked, _, cx| {
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        let mut next = owner.hover_preference;
-                                        set_checked(&mut next, *checked);
-                                        owner.save_hover_preference(next, cx);
-                                    });
-                                })
-                        }),
+                        ),
+                    )
+                    .child(
+                        Checkbox::new("hover-expanded-image")
+                            .min_w_0()
+                            .min_h(px(32.))
+                            .py(px(6.))
+                            .text_size(px(14.))
+                            .whitespace_normal()
+                            .label(tr(
+                                language,
+                                "大图使用更大浮窗",
+                                "Expand image hover window",
+                            ))
+                            .checked(hover_preference.expanded_image)
+                            .disabled(hover_pending || !hover_preference.image)
+                            .on_change(move |checked, _, cx| {
+                                let _ = expanded_hover_owner.update(cx, |owner, cx| {
+                                    owner.save_hover_preference(
+                                        HoverPreviewPreference {
+                                            expanded_image: *checked,
+                                            ..owner.hover_preference
+                                        },
+                                        cx,
+                                    );
+                                });
+                            }),
                     ),
-                ),
             )
-            .child(
-                Checkbox::new("hover-expanded-image")
-                    .w_full()
-                    .min_h(px(32.))
-                    .py(px(6.))
-                    .text_size(px(14.))
-                    .label(tr(
-                        language,
-                        "大图使用更大浮窗",
-                        "Expand image hover window",
-                    ))
-                    .checked(hover_preference.expanded_image)
-                    .disabled(hover_pending || !hover_preference.image)
-                    .on_change(move |checked, _, cx| {
-                        let _ = expanded_hover_owner.update(cx, |owner, cx| {
-                            owner.save_hover_preference(
-                                HoverPreviewPreference {
-                                    expanded_image: *checked,
-                                    ..owner.hover_preference
-                                },
-                                cx,
-                            );
-                        });
-                    }),
-            )
-            .child(
+            .child(settings_column().child(
                 settings_field(tr(language, "停留延时", "Hover delay")).child(choice_tabs(
                     "hover-delay",
                     &self.owner,
@@ -116,8 +131,8 @@ impl SettingsWindowView {
                         );
                     },
                 )),
-            )
-            .child(
+            ))
+            .child(settings_column().child(
                 settings_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
                     "hover-position",
                     &self.owner,
@@ -144,8 +159,8 @@ impl SettingsWindowView {
                         );
                     },
                 )),
-            )
-            .child(
+            ))
+            .child(settings_column().child(
                 settings_field(tr(language, "图片缩放步进", "Image zoom step")).child(choice_tabs(
                     "hover-zoom-step",
                     &self.owner,
@@ -164,7 +179,7 @@ impl SettingsWindowView {
                         );
                     },
                 )),
-            )
+            ))
             .into_any_element()
     }
 }

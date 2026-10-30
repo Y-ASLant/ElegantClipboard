@@ -1,4 +1,7 @@
-use super::settings_common::{owner_state, settings_description, settings_field, settings_stack};
+use super::settings_common::{
+    owner_state, settings_column, settings_columns, settings_description, settings_field,
+    settings_inline, settings_stack,
+};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
 
@@ -48,8 +51,7 @@ impl SettingsWindowView {
         settings_stack()
             .child(
                 Checkbox::new("quick-paste-enabled")
-                    .w_full()
-                    .min_h(px(32.))
+                    .min_h(px(visual::CONTROL_HEIGHT_LARGE))
                     .py(px(6.))
                     .text_size(px(14.))
                     .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
@@ -65,19 +67,14 @@ impl SettingsWindowView {
                 panel.child(Alert::warning("paste-capability", reason).small())
             })
             // 序列粘贴推进键（决策 0004）：录制或停用，与主热键/槽位互斥。
-            .child(
-                settings_field(tr(
+            .child(settings_columns().child(
+                settings_column().child(settings_field(tr(
                     language,
                     "序列粘贴推进键（多选后在目标应用中逐条粘贴）",
                     "Sequence paste advance key (paste selected items one by one)",
                 ))
                     .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap_2()
+                        settings_inline()
                             .child(if sequence_hotkey.trim().is_empty() {
                                 div().child(sequence_label).into_any_element()
                             } else {
@@ -88,7 +85,7 @@ impl SettingsWindowView {
                             })
                             .child(
                                 Button::new("sequence-shortcut-edit")
-                                    .h(px(32.))
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                                     .outline()
                                     .label(tr(language, "修改", "Edit"))
                                     .disabled(sequence_pending)
@@ -102,7 +99,7 @@ impl SettingsWindowView {
                             )
                             .child(
                                 Button::new("sequence-shortcut-disable")
-                                    .h(px(32.))
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                                     .ghost()
                                     .label(tr(language, "停用", "Disable"))
                                     .disabled(sequence_pending || sequence_hotkey.trim().is_empty())
@@ -118,8 +115,9 @@ impl SettingsWindowView {
                         |panel| {
                             panel.child(self.sequence_shortcut_editor(language, cx))
                         },
-                    ),
-            )
+                    )),
+            ).child(
+                settings_column()
             .when(cfg!(target_os = "macos"), |panel| {
                 panel.child(Alert::info("mac-paste-key", tr(language,
                     "macOS 自动粘贴使用 Command+V，不支持 Shift+Insert。请在系统设置中授予辅助功能权限。",
@@ -145,10 +143,10 @@ impl SettingsWindowView {
                         TabBar::new("settings-paste-key-tabs")
                             .w_full()
                             .min_w_0()
-                            .max_w(px(visual::CHOICE_MAX_WIDTH))
                             .large()
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .segmented()
+                            .last_empty_space(div().w_0())
                             .selected_index(selected_index)
                             .on_click(move |index: &usize, _, cx| {
                                 if let Some(&(_, key)) = click_choices.get(*index) {
@@ -178,7 +176,7 @@ impl SettingsWindowView {
                                     .disabled(paste_key_pending || !crate::capabilities::paste_key_supported(key))
                             }))
                     }),
-            )
+            )))
             .child(
                 settings_description(tr(
                     language,
@@ -217,10 +215,7 @@ impl SettingsWindowView {
                         item.title(tr(language, "普通记录槽位（10）", "Recent slots (10)"))
                             .open(self.recent_shortcuts_expanded)
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
+                                settings_stack()
                                     .when(self.recent_shortcuts_expanded, |content| {
                                         content
                                             .child(self.paste_group_actions(
@@ -239,10 +234,7 @@ impl SettingsWindowView {
                         item.title(tr(language, "收藏槽位（10）", "Favorite slots (10)"))
                             .open(self.favorite_shortcuts_expanded)
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
+                                settings_stack()
                                     .when(self.favorite_shortcuts_expanded, |content| {
                                         content
                                             .child(self.paste_group_actions(

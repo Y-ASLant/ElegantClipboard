@@ -1,5 +1,6 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_description, settings_field, settings_stack,
+    choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
+    settings_description, settings_inline,
 };
 use super::*;
 use gpui_kit::component::{checkbox::Checkbox, input::NumberInput};
@@ -18,9 +19,9 @@ impl SettingsWindowView {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
             _ => None,
         };
-        settings_stack()
+        settings_columns()
             .child(
-                settings_field(tr(language, "语言", "Language")).child(choice_tabs(
+                settings_column_field(tr(language, "语言", "Language")).child(choice_tabs(
                     "settings-window-language",
                     &self.owner,
                     [LanguagePreference::Chinese, LanguagePreference::English],
@@ -37,7 +38,7 @@ impl SettingsWindowView {
                 )),
             )
             .child(
-                settings_field(tr(language, "主题", "Theme")).child(choice_tabs(
+                settings_column_field(tr(language, "主题", "Theme")).child(choice_tabs(
                     "settings-window-theme",
                     &self.owner,
                     [
@@ -62,7 +63,7 @@ impl SettingsWindowView {
                 )),
             )
             .child(
-                settings_field(tr(language, "圆角", "Corner radius")).child(choice_tabs(
+                settings_column_field(tr(language, "圆角", "Corner radius")).child(choice_tabs(
                     "settings-window-corner-radius",
                     &self.owner,
                     [
@@ -94,7 +95,7 @@ impl SettingsWindowView {
                     LanguagePreference::English => format!("Keeping the saved legacy radius: {value} px. Choose an option above to update it."),
                 }, cx))
             })
-            .child(self.settings_window_effect_content(cx))
+            .child(settings_column().child(self.settings_window_effect_content(cx)))
             .into_any_element()
     }
 
@@ -107,13 +108,11 @@ impl SettingsWindowView {
         let display_pending = owner_state.display_pending;
         let category_owner = self.owner.clone();
         let drag_indicator_owner = self.owner.clone();
-        settings_stack()
+        settings_columns()
             .child(
-                settings_stack()
-                    .gap_1()
+                settings_inline()
                     .child(
                         Checkbox::new("show-category-filter")
-                            .w_full()
                             .min_h(px(32.))
                             .py(px(6.))
                             .text_size(px(14.))
@@ -134,7 +133,6 @@ impl SettingsWindowView {
                     )
                     .child(
                         Checkbox::new("show-drag-area-indicator")
-                            .w_full()
                             .min_h(px(32.))
                             .py(px(6.))
                             .text_size(px(14.))
@@ -155,7 +153,7 @@ impl SettingsWindowView {
                     ),
             )
             .child(
-                settings_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(
+                settings_column_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(
                     "card-density",
                     &self.owner,
                     [
@@ -183,24 +181,16 @@ impl SettingsWindowView {
                 )),
             )
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(tr(language, "卡片预览行数", "Card preview lines"))
-                    .child(
-                        div().w(px(160.)).flex_none().child(
-                            NumberInput::new(&self.preview_lines_input)
-                                .h(px(36.))
-                                .disabled(display_pending),
-                        ),
+                settings_column_field(tr(language, "卡片预览行数", "Card preview lines")).child(
+                    div().w(px(160.)).flex_none().child(
+                        NumberInput::new(&self.preview_lines_input)
+                            .h(px(36.))
+                            .disabled(display_pending),
                     ),
+                ),
             )
             .child(
-                settings_stack().gap_1().children(
+                settings_inline().children(
                     [
                         (
                             "show-card-time",
@@ -232,7 +222,6 @@ impl SettingsWindowView {
                     .map(|(id, label, selected, set_checked)| {
                         let owner = self.owner.clone();
                         Checkbox::new(id)
-                            .w_full()
                             .min_h(px(32.))
                             .py(px(6.))
                             .text_size(px(14.))
@@ -250,7 +239,7 @@ impl SettingsWindowView {
                 ),
             )
             .child(
-                settings_field(tr(language, "时间格式", "Time format")).child(choice_tabs(
+                settings_column_field(tr(language, "时间格式", "Time format")).child(choice_tabs(
                     "time-format",
                     &self.owner,
                     [TimeFormat::Absolute, TimeFormat::Relative],
@@ -273,32 +262,34 @@ impl SettingsWindowView {
                 )),
             )
             .child(
-                settings_field(tr(language, "来源显示", "Source display")).child(choice_tabs(
-                    "source-app-display",
-                    &self.owner,
-                    [
-                        SourceAppDisplay::Both,
-                        SourceAppDisplay::Name,
-                        SourceAppDisplay::Icon,
-                    ],
-                    [
-                        tr(language, "名称和图标", "Name and icon"),
-                        tr(language, "仅名称", "Name only"),
-                        tr(language, "仅图标", "Icon only"),
-                    ],
-                    display.source_app_display,
-                    display_pending || !display.show_source_app,
-                    |owner| owner.display.source_app_display,
-                    |owner, mode, cx| {
-                        owner.save_display(
-                            DisplayPreference {
-                                source_app_display: mode,
-                                ..owner.display
-                            },
-                            cx,
-                        );
-                    },
-                )),
+                settings_column_field(tr(language, "来源显示", "Source display")).child(
+                    choice_tabs(
+                        "source-app-display",
+                        &self.owner,
+                        [
+                            SourceAppDisplay::Both,
+                            SourceAppDisplay::Name,
+                            SourceAppDisplay::Icon,
+                        ],
+                        [
+                            tr(language, "名称和图标", "Name and icon"),
+                            tr(language, "仅名称", "Name only"),
+                            tr(language, "仅图标", "Icon only"),
+                        ],
+                        display.source_app_display,
+                        display_pending || !display.show_source_app,
+                        |owner| owner.display.source_app_display,
+                        |owner, mode, cx| {
+                            owner.save_display(
+                                DisplayPreference {
+                                    source_app_display: mode,
+                                    ..owner.display
+                                },
+                                cx,
+                            );
+                        },
+                    ),
+                ),
             )
             .into_any_element()
     }

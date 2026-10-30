@@ -1,4 +1,7 @@
-use super::settings_common::{owner_language, settings_description, settings_stack};
+use super::settings_common::{
+    owner_language, settings_column, settings_columns, settings_description, settings_inline,
+    settings_stack,
+};
 use super::*;
 use gpui_kit::component::alert::Alert;
 
@@ -42,8 +45,7 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
 
-        settings_stack()
-            .gap_1()
+        settings_inline()
             .children(
                 [
                     (
@@ -69,12 +71,10 @@ impl SettingsWindowView {
                     ),
                 ]
                 .map(|(id, caption, label, icon, link)| {
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .items_center()
+                    settings_inline()
+                        .w_auto()
+                        .flex_basis(px(240.))
+                        .flex_grow(1.)
                         .justify_between()
                         .py_2()
                         .border_b_1()
@@ -82,12 +82,15 @@ impl SettingsWindowView {
                         .child(
                             div()
                                 .text_sm()
+                                .min_w_0()
+                                .whitespace_normal()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(caption),
                         )
                         .child(
                             Button::new(id)
                                 .h(px(32.))
+                                .flex_shrink_0()
                                 .ghost()
                                 .icon(icon)
                                 .label(label)
@@ -110,66 +113,64 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
 
-        settings_stack()
-            .child(
-                div()
-                    .text_sm()
-                    .font_semibold()
-                    .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
-            )
-            .child(
-                settings_description(tr(
-                    language,
-                    "适用于 Windows、Linux 和 macOS 的剪贴板管理器，帮助你轻松找回和复用复制过的内容。",
-                    "A clipboard manager for Windows, Linux and macOS that helps you find and reuse what you have copied.",
-                ), cx),
-            )
-            .children(FEATURE_GROUPS.iter().map(|group| {
-                settings_stack()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_size(px(14.))
-                            .font_semibold()
-                            .child(tr(language, group.chinese, group.english)),
-                    )
-                    .children(group.items.iter().map(|(chinese, english)| {
-                        div()
-                            .flex()
-                            .items_start()
-                            .gap_2()
-                            .child(
-                                Icon::new(IconName::CircleCheck)
-                                    .small()
-                                    .text_color(cx.theme().primary)
-                                    .mt(px(3.)),
-                            )
-                            .child(
-                                settings_description(tr(language, chinese, english), cx)
-                                    .flex_1(),
-                            )
-                    }))
-            }))
-            .child(
-                Button::new("about-review-onboarding")
-                    .outline()
-                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                    .w(px(240.))
-                    .label(tr(language, "重新查看快速上手", "Review quick start"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let Some(owner) = this.owner.upgrade() else { return };
-                        let main_window = owner.read(cx).main_window;
-                        if let Err(error) = main_window.update(cx, |_, window, cx| {
-                            owner.update(cx, |owner, cx| owner.restart_onboarding(window, cx));
-                        }) {
-                            this.link_error = Some(format!(
-                                "{}: {error}",
-                                tr(this.language, "无法打开引导", "Could not open the guide")
-                            ));
-                            cx.notify();
-                        }
-                    })),
-            )
+        let features = settings_column().children(FEATURE_GROUPS.iter().map(|group| {
+            settings_stack()
+                .gap_2()
+                .child(
+                    div()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .text_size(px(14.))
+                        .font_semibold()
+                        .child(tr(language, group.chinese, group.english)),
+                )
+                .children(group.items.iter().map(|(chinese, english)| {
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_start()
+                        .gap_2()
+                        .child(
+                            Icon::new(IconName::CircleCheck)
+                                .small()
+                                .flex_shrink_0()
+                                .text_color(cx.theme().primary)
+                                .mt(px(3.)),
+                        )
+                        .child(settings_description(tr(language, chinese, english), cx).flex_1())
+                }))
+        }));
+        let intro = settings_column()
+            .child(div().text_sm().font_semibold().child(format!("v{}", env!("CARGO_PKG_VERSION"))))
+            .child(settings_description(tr(
+                language,
+                "适用于 Windows、Linux 和 macOS，随时找回并复用复制的内容。",
+                "A clipboard manager for Windows, Linux and macOS that helps you find and reuse what you have copied.",
+            ), cx))
+            .child(settings_inline().child(
+                    Button::new("about-review-onboarding")
+                        .outline()
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
+                        .label(tr(language, "重新查看快速上手", "Review quick start"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let Some(owner) = this.owner.upgrade() else { return };
+                            let main_window = owner.read(cx).main_window;
+                            if let Err(error) = main_window.update(cx, |_, window, cx| {
+                                owner.update(cx, |owner, cx| owner.restart_onboarding(window, cx));
+                            }) {
+                                this.link_error = Some(format!(
+                                    "{}: {error}",
+                                    tr(this.language, "无法打开引导", "Could not open the guide")
+                                ));
+                                cx.notify();
+                            }
+                        })),
+                ),
+            );
+        settings_columns()
+            .child(intro)
+            .child(features)
             .into_any_element()
     }
 }

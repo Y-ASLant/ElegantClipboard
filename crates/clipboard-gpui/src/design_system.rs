@@ -1,6 +1,6 @@
 //! Chakra 风格的原生主题：语义颜色与动效统一投影到 GPUI Kit。
 
-use clipboard_core::preferences::{CornerRadiusPreference, WindowEffect, WindowEffectPreference};
+use clipboard_core::preferences::{CornerRadiusPreference, WindowEffect};
 use gpui_kit::{
     App, Global, Hsla, Pixels,
     base::{Easing, Spring},
@@ -72,7 +72,15 @@ pub fn apply(cx: &mut App) {
     };
     let material = crate::window_effect::active(cx);
     Theme::update(cx, |theme| {
-        apply_colors(&mut theme.colors, dark, material);
+        apply_colors(&mut theme.colors, dark, material.effect);
+        // Kit's segmented selection always paints a raised shadow beneath its
+        // background token. Keep that small elevated fill solid so its own
+        // shadow cannot bleed through; inputs still use the translucent color.
+        theme.tokens.background = theme.colors.background.into();
+        if material.effect != WindowEffect::Opaque {
+            theme.tokens.background.background =
+                color(if dark { 0x414752 } else { 0xf2f3f5 }).into();
+        }
         theme.font_family = UI_FONT_FAMILY.into();
         theme.font_size = px(16.);
         theme.radius = radius;
@@ -117,7 +125,7 @@ pub fn container_border(cx: &App) -> Hsla {
     }
 }
 
-fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPreference) {
+fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     let surface = color(if dark { 0x22252b } else { 0xffffff });
     let foreground = color(if dark { 0xf1f3f5 } else { 0x18181b });
     let subtle = color(if dark { 0x1b1e23 } else { 0xfafafa });
@@ -125,16 +133,30 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPrefe
     let border = color(if dark { 0x3a4049 } else { 0xe4e4e7 });
     let emphasized = color(if dark { 0x515b69 } else { 0xd4d4d8 });
     let secondary_text = color(if dark { 0xb5becb } else { 0x52525b });
-    let has_material = material.effect != WindowEffect::Opaque;
-    // GPUI accumulates destination alpha additively. A second translucent fill
-    // darkens the composed backdrop, so containers expose the single shell tint.
-    // Controls and overlays remain opaque and independently readable.
+    let has_material = effect != WindowEffect::Opaque;
+    // Containers expose the single shell tint. Control contrast is independent
+    // of shell opacity: using the remaining alpha made 85% controls disappear.
+    // Detached overlays keep a separate opaque surface.
     let content = if has_material {
         surface.opacity(0.)
     } else {
         surface
     };
-    let content_hover = subtle;
+    let control_strength = 0.60;
+    let tint = |opaque: Hsla, ink: Hsla, coverage: f32| {
+        if has_material {
+            ink.opacity(control_strength * coverage)
+        } else {
+            opaque
+        }
+    };
+    let ink = color(if dark { 0xffffff } else { 0x000000 });
+    let control = tint(surface, surface, 0.20);
+    let control_muted = tint(muted, ink, 0.16);
+    let control_hover = tint(muted, ink, 0.28);
+    let control_pressed = tint(border, ink, 0.42);
+    let control_selected = tint(surface, color(0xffffff), 0.55);
+    let content_hover = tint(subtle, ink, 0.28);
     let content_border = if has_material {
         border.opacity(0.)
     } else {
@@ -144,12 +166,21 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPrefe
     let primary_text = color(if dark { 0x60a5fa } else { 0x2563eb });
     let blue_subtle = color(if dark { 0x14204a } else { 0xeff6ff });
     let white = color(0xffffff);
+    let selection_surface = tint(blue_subtle, primary, 0.45);
 
-    colors.background = surface;
+    // Kit inputs (including Settings' internal search) use this surface.
+    // Dialogs, menus, notifications and passive previews use popover instead.
+    colors.background = control;
     colors.foreground = foreground;
     colors.border = border;
-    colors.input = emphasized;
-    colors.accent = blue_subtle;
+    colors.input = if has_material && dark {
+        // Kit derives dark input fill from 70% of its input-border color.
+        // Keep its fill and outline stable when only shell opacity changes.
+        foreground.opacity(control_strength * 0.40)
+    } else {
+        emphasized
+    };
+    colors.accent = selection_surface;
     colors.accent_foreground = primary_text;
     colors.primary = primary;
     colors.primary_foreground = white;
@@ -159,19 +190,19 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPrefe
     colors.button_primary_foreground = white;
     colors.button_primary_hover = colors.primary_hover;
     colors.button_primary_active = colors.primary_active;
-    colors.secondary = muted;
+    colors.secondary = control_muted;
     colors.secondary_foreground = foreground;
-    colors.secondary_hover = border;
-    colors.secondary_active = emphasized;
+    colors.secondary_hover = tint(border, ink, 0.28);
+    colors.secondary_active = tint(emphasized, ink, 0.42);
     colors.button_secondary = colors.secondary;
     colors.button_secondary_foreground = foreground;
     colors.button_secondary_hover = colors.secondary_hover;
     colors.button_secondary_active = colors.secondary_active;
-    colors.button = surface;
+    colors.button = control;
     colors.button_foreground = foreground;
-    colors.button_hover = muted;
-    colors.button_active = border;
-    colors.muted = muted;
+    colors.button_hover = control_hover;
+    colors.button_active = control_pressed;
+    colors.muted = control_muted;
     colors.muted_foreground = secondary_text;
     colors.ring = color(0x3b82f6);
     colors.caret = primary_text;
@@ -188,33 +219,33 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPrefe
     };
     colors.sidebar_foreground = secondary_text;
     colors.sidebar_border = content_border;
-    colors.sidebar_accent = blue_subtle;
+    colors.sidebar_accent = selection_surface;
     colors.sidebar_accent_foreground = primary_text;
     colors.sidebar_primary = primary;
     colors.sidebar_primary_foreground = white;
-    colors.tab = surface;
+    colors.tab = control;
     colors.tab_foreground = secondary_text;
-    colors.tab_active = surface;
+    colors.tab_active = control_selected;
     colors.tab_active_foreground = primary_text;
     // Disabled segmented tabs use this token for their outer background.
     // Keep it clear so they do not cover the shared track and selection indicator.
     colors.tab_bar = surface.opacity(0.);
-    colors.tab_bar_segmented = muted;
+    colors.tab_bar_segmented = control_muted;
     colors.list = content;
-    colors.list_head = subtle;
+    colors.list_head = tint(subtle, ink, 0.16);
     colors.list_even = content;
     colors.list_hover = content_hover;
-    colors.list_active = blue_subtle;
+    colors.list_active = selection_surface;
     colors.list_active_border = primary;
     colors.table = content;
-    colors.table_head = subtle;
+    colors.table_head = tint(subtle, ink, 0.16);
     colors.table_head_foreground = secondary_text;
-    colors.table_even = subtle;
-    colors.table_hover = muted;
-    colors.table_active = blue_subtle;
+    colors.table_even = tint(subtle, ink, 0.08);
+    colors.table_hover = control_hover;
+    colors.table_active = selection_surface;
     colors.table_active_border = primary;
     colors.table_row_border = content_border;
-    colors.table_foot = subtle;
+    colors.table_foot = tint(subtle, ink, 0.16);
     colors.table_foot_foreground = secondary_text;
     colors.title_bar = if has_material {
         surface.opacity(0.)
@@ -231,19 +262,19 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPrefe
     colors.scrollbar = surface.opacity(0.);
     colors.scrollbar_thumb = emphasized;
     colors.scrollbar_thumb_hover = secondary_text;
-    colors.switch = emphasized;
+    colors.switch = tint(emphasized, ink, 0.55);
     colors.switch_thumb = white;
-    colors.slider_bar = muted;
+    colors.slider_bar = control_muted;
     colors.slider_thumb = primary;
     colors.progress_bar = primary;
     colors.drag_border = primary;
-    colors.drop_target = blue_subtle;
+    colors.drop_target = selection_surface;
     colors.link = primary_text;
     colors.link_hover = color(if dark { 0xa3cfff } else { 0x173da6 });
     colors.link_active = primary_text;
-    colors.description_list_label = subtle;
+    colors.description_list_label = tint(subtle, ink, 0.16);
     colors.description_list_label_foreground = secondary_text;
-    colors.skeleton = muted;
+    colors.skeleton = control_muted;
     colors.overlay = color(0x09090b).opacity(if dark { 0.7 } else { 0.45 });
     colors.window_border = border;
 
@@ -280,11 +311,23 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, material: WindowEffectPrefe
     colors.button_info_hover = colors.primary_hover;
     colors.button_info_active = colors.primary_active;
     colors.blue = primary_text;
-    colors.blue_light = blue_subtle;
+    colors.blue_light = selection_surface;
     colors.red = colors.danger;
-    colors.red_light = color(if dark { 0x300c0c } else { 0xfef2f2 });
+    colors.red_light = tint(
+        color(if dark { 0x300c0c } else { 0xfef2f2 }),
+        colors.danger,
+        0.35,
+    );
     colors.green = colors.success;
-    colors.green_light = color(if dark { 0x052e16 } else { 0xf0fdf4 });
+    colors.green_light = tint(
+        color(if dark { 0x052e16 } else { 0xf0fdf4 }),
+        colors.success,
+        0.35,
+    );
     colors.yellow = colors.warning;
-    colors.yellow_light = color(if dark { 0x2d1800 } else { 0xfffbeb });
+    colors.yellow_light = tint(
+        color(if dark { 0x2d1800 } else { 0xfffbeb }),
+        colors.warning,
+        0.35,
+    );
 }

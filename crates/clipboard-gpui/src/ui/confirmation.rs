@@ -183,7 +183,7 @@ impl ClipboardView {
             .w(px(448.))
             .p_4()
             .rounded(cx.theme().radius_lg)
-            .bg(cx.theme().background)
+            .bg(cx.theme().popover)
             .border_color(cx.theme().border)
             .title(div().pb_3().border_b_1().border_color(cx.theme().border).text_size(px(16.)).font_semibold().child(title))
             .close_button(false)

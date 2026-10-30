@@ -1,4 +1,7 @@
-use super::settings_common::{choice_tabs, owner_state, settings_description, settings_stack};
+use super::settings_common::{
+    choice_tabs, owner_state, settings_column, settings_columns, settings_description,
+    settings_field, settings_inline, settings_stack,
+};
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
 
@@ -41,52 +44,64 @@ impl SettingsWindowView {
                         });
                     }),
             )
-            .child(choice_tabs(
-                "app-filter-mode",
-                &self.owner,
-                [AppFilterMode::Blacklist, AppFilterMode::Whitelist],
-                [
-                    tr(language, "黑名单", "Blocklist"),
-                    tr(language, "白名单", "Allowlist"),
-                ],
-                app_filter.mode,
-                app_filter_pending,
-                |owner| owner.app_filter.value.mode,
-                |owner, mode, cx| {
-                    let mut next = owner.app_filter.value.clone();
-                    next.mode = mode;
-                    owner.save_app_filter(next, cx);
-                },
-            ))
             .child(
-                settings_description(
-                    if app_filter.mode == AppFilterMode::Blacklist {
-                        tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
-                    } else {
-                        tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
-                    },
-                    cx,
-                ),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().flex_1().min_w_0().child(
-                        Input::new(&self.app_filter_input)
-                            .refine_style(&StyleRefinement::default().h(px(36.))),
-                    ))
+                settings_columns()
                     .child(
-                        Button::new("app-filter-add-rule")
-                            .h(px(36.))
-                            .outline()
-                            .label(tr(language, "添加", "Add"))
-                            .disabled(app_filter_pending)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.add_app_filter_rule(window, cx);
-                            })),
+                        settings_column()
+                            .child(
+                                settings_field(tr(language, "过滤模式", "Filter mode")).child(
+                                    choice_tabs(
+                                        "app-filter-mode",
+                                        &self.owner,
+                                        [AppFilterMode::Blacklist, AppFilterMode::Whitelist],
+                                        [
+                                            tr(language, "黑名单", "Blocklist"),
+                                            tr(language, "白名单", "Allowlist"),
+                                        ],
+                                        app_filter.mode,
+                                        app_filter_pending,
+                                        |owner| owner.app_filter.value.mode,
+                                        |owner, mode, cx| {
+                                            let mut next = owner.app_filter.value.clone();
+                                            next.mode = mode;
+                                            owner.save_app_filter(next, cx);
+                                        },
+                                    ),
+                                ),
+                            )
+                            .child(settings_description(
+                                if app_filter.mode == AppFilterMode::Blacklist {
+                                    tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
+                                } else {
+                                    tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
+                                },
+                                cx,
+                            )),
+                    )
+                    .child(
+                        settings_column().child(
+                            settings_field(tr(language, "进程名或规则", "Process name or pattern"))
+                                .child(
+                                    settings_inline()
+                                        .child(div().flex_1().min_w_0().child(
+                                            Input::new(&self.app_filter_input).refine_style(
+                                                &StyleRefinement::default()
+                                                    .h(px(visual::CONTROL_HEIGHT_LARGE)),
+                                            ),
+                                        ))
+                                        .child(
+                                            Button::new("app-filter-add-rule")
+                                                .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                                .flex_shrink_0()
+                                                .outline()
+                                                .label(tr(language, "添加", "Add"))
+                                                .disabled(app_filter_pending)
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    this.add_app_filter_rule(window, cx);
+                                                })),
+                                        ),
+                                ),
+                        ),
                     ),
             )
             .when(self.app_filter_error, |panel| {
@@ -122,6 +137,7 @@ impl SettingsWindowView {
                     .child(
                         Button::new(format!("app-filter-remove-{index}"))
                             .h(px(32.))
+                            .flex_shrink_0()
                             .ghost()
                             .label(tr(language, "移除", "Remove"))
                             .disabled(app_filter_pending)
@@ -162,8 +178,6 @@ impl SettingsWindowView {
                             div()
                                 .w_full()
                                 .min_w_0()
-                                .max_h(px(240.))
-                                .overflow_y_scrollbar()
                                 .flex()
                                 .flex_col()
                                 .gap_1()
@@ -186,7 +200,7 @@ impl SettingsWindowView {
                                             .gap_3()
                                             .py_2()
                                             .when_some(app.icon, |row, path| {
-                                                row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
+                                                row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).flex_shrink_0().object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
                                             })
                                             .child(
                                                 div()
@@ -195,21 +209,29 @@ impl SettingsWindowView {
                                                     .flex()
                                                     .flex_col()
                                                     .child(
-                                                        Button::new(format!("app-filter-pick-{index}"))
-                                                            .h(px(32.))
-                                                            .ghost()
-                                                            .tooltip(app.process.clone())
-                                                            .label(app.process)
-                                                            .disabled(app_filter_pending || already_added)
-                                                            .on_click(move |_, _, cx| {
-                                                                let _ = owner.update(cx, |owner, cx| {
-                                                                    if let Some(next) = owner.app_filter.value.clone().with_rule(&process) {
-                                                                        owner.save_app_filter(next, cx);
-                                                                    }
-                                                                });
-                                                            }),
+                                                        div()
+                                                            .w_full()
+                                                            .min_w_0()
+                                                            .whitespace_normal()
+                                                            .child(app.process.clone()),
                                                     )
                                                     .child(settings_description(app.name, cx)),
+                                            )
+                                            .child(
+                                                Button::new(format!("app-filter-pick-{index}"))
+                                                    .h(px(32.))
+                                                    .flex_shrink_0()
+                                                    .ghost()
+                                                    .tooltip(app.process)
+                                                    .label(tr(language, "添加", "Add"))
+                                                    .disabled(app_filter_pending || already_added)
+                                                    .on_click(move |_, _, cx| {
+                                                        let _ = owner.update(cx, |owner, cx| {
+                                                            if let Some(next) = owner.app_filter.value.clone().with_rule(&process) {
+                                                                owner.save_app_filter(next, cx);
+                                                            }
+                                                        });
+                                                    }),
                                             )
                                     }))
                                 }),

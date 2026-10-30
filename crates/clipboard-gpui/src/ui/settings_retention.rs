@@ -1,4 +1,7 @@
-use super::settings_common::{settings_description, settings_stack};
+use super::settings_common::{
+    settings_column, settings_columns, settings_description, settings_field, settings_inline,
+    settings_stack,
+};
 use super::*;
 use clipboard_core::{DeletionOutcome, retention::RetentionPolicy};
 use gpui_kit::component::input::NumberInput;
@@ -76,37 +79,25 @@ impl SettingsWindowView {
                 "Limits apply per group. Pinned and favorite items are excluded and protected. 0 disables a limit.",
             ), cx))
             .child(
-                settings_stack().gap_3()
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .child(tr(language, "保留天数", "Retention days"))
-                            .child(div().w(px(180.)).flex_none().child(
+                settings_columns()
+                    .child(settings_column().child(
+                        settings_field(tr(language, "保留天数", "Retention days")).child(
+                            div().w(px(180.)).child(
                                 NumberInput::new(&self.retention_days_input)
                                     .h(px(36.))
                                     .disabled(saved.pending),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_between()
-                            .gap_2()
-                            .child(tr(language, "每组数量", "Items per group"))
-                            .child(div().w(px(180.)).flex_none().child(
+                            ),
+                        ),
+                    ))
+                    .child(settings_column().child(
+                        settings_field(tr(language, "每组数量", "Items per group")).child(
+                            div().w(px(180.)).child(
                                 NumberInput::new(&self.retention_count_input)
                                     .h(px(36.))
                                     .disabled(saved.pending),
-                            )),
-                    ),
+                            ),
+                        ),
+                    )),
             )
             .child(settings_description(
                 if !explicitly_saved {
@@ -124,10 +115,10 @@ impl SettingsWindowView {
                 body.child(Alert::error("retention-invalid", error).small())
             })
             .child(
-                div().flex().flex_wrap().child(
+                settings_inline().child(
                     Button::new("save-retention")
                         .primary()
-                        .h(px(40.))
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
                         .label(tr(language, "保存保留策略", "Save retention policy"))
                         .disabled(saved.pending)
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -169,10 +160,11 @@ impl SettingsWindowView {
         }
         let owner = self.owner.clone();
         let language = self.language;
-        window.open_dialog(cx, move |dialog, _, _| {
+        window.open_dialog(cx, move |dialog, _, cx| {
             let owner = owner.clone();
             let submit_owner = owner.clone();
             dialog.title(tr(language, "确认保留策略", "Confirm retention policy"))
+                .bg(cx.theme().popover)
                 .overlay_closable(false)
                 .child(if language == LanguagePreference::English {
                     format!("Apply {} days and {} items per group to all groups, including existing custom groups (0 disables the limit)? Existing unpinned, non-favorite history beyond either limit will be deleted immediately. This cannot be undone; export a backup first if needed.", policy.days, policy.max_count)

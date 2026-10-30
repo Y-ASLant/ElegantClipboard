@@ -1,4 +1,4 @@
-use super::settings_common::settings_stack;
+use super::settings_common::{settings_inline, settings_stack};
 use super::*;
 
 impl SettingsWindowView {
@@ -134,18 +134,13 @@ impl SettingsWindowView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         settings_stack()
-            .gap_3()
             .p_3()
             .rounded(cx.theme().radius)
             .bg(cx.theme().group_box)
             .border_1()
             .border_color(cx.theme().border)
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_1()
+                settings_inline()
                     .child(tr(
                         language,
                         "输入组合键，例如",
@@ -155,7 +150,7 @@ impl SettingsWindowView {
             )
             .child(
                 Input::new(self.shortcut_input.as_ref().expect("editing input exists"))
-                    .refine_style(&StyleRefinement::default().h(px(36.))),
+                    .refine_style(&StyleRefinement::default().h(px(visual::CONTROL_HEIGHT_LARGE))),
             )
             .when(self.shortcut_recording, |panel| {
                 panel.child(
@@ -167,11 +162,7 @@ impl SettingsWindowView {
                         .border_color(cx.theme().primary)
                         .p_2()
                         .child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .items_center()
-                                .gap_1()
+                            settings_inline()
                                 .child(tr(language, "请按组合键；按", "Press a shortcut; press"))
                                 .child(shortcut_kbd("Esc").expect("recording cancel key"))
                                 .child(tr(language, "取消录制", "to cancel recording")),
@@ -185,13 +176,10 @@ impl SettingsWindowView {
                 panel.child(Alert::error("shortcut-capture-error", error).small())
             })
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
+                settings_inline()
                     .child(
                         Button::new("paste-shortcut-record")
-                            .h(px(32.))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .outline()
                             .label(if self.shortcut_recording {
                                 tr(language, "录制中", "Recording")
@@ -205,7 +193,7 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("paste-shortcut-save")
-                            .h(px(32.))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .primary()
                             .label(tr(language, "保存", "Save"))
                             .disabled(pending)
@@ -215,7 +203,7 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("paste-shortcut-cancel")
-                            .h(px(32.))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .ghost()
                             .label(tr(language, "取消", "Cancel"))
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -255,12 +243,7 @@ impl SettingsWindowView {
             let default = defaults.slot(favorite, slot).unwrap_or_default().to_owned();
             let owner_disable = self.owner.clone();
             let owner_reset = self.owner.clone();
-            div()
-                .w_full()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
+            settings_inline()
                 .py_2()
                 .border_b_1()
                 .border_color(cx.theme().border)
@@ -269,7 +252,6 @@ impl SettingsWindowView {
                         .flex()
                         .flex_wrap()
                         .items_center()
-                        .flex_1()
                         .min_w_0()
                         .gap_2()
                         .child(div().min_w(px(80.)).text_size(px(14.)).child(format!(
@@ -283,14 +265,12 @@ impl SettingsWindowView {
                         .child(shortcut_content),
                 )
                 .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .gap_2()
+                    settings_inline()
+                        .w_auto()
                         .child(
                             Button::new(format!("paste-slot-edit-{favorite}-{slot}"))
                                 .outline()
-                                .h(px(32.))
+                                .h(px(visual::CONTROL_HEIGHT_LARGE))
                                 .label(tr(language, "修改", "Edit"))
                                 .disabled(pending)
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -304,7 +284,7 @@ impl SettingsWindowView {
                         .child(
                             Button::new(format!("paste-slot-disable-{favorite}-{slot}"))
                                 .ghost()
-                                .h(px(32.))
+                                .h(px(visual::CONTROL_HEIGHT_LARGE))
                                 .label(tr(language, "停用", "Disable"))
                                 .disabled(pending || shortcut.is_empty())
                                 .on_click(move |_, _, cx| {
@@ -316,7 +296,7 @@ impl SettingsWindowView {
                         .child(
                             Button::new(format!("paste-slot-reset-{favorite}-{slot}"))
                                 .ghost()
-                                .h(px(32.))
+                                .h(px(visual::CONTROL_HEIGHT_LARGE))
                                 .label(tr(language, "默认", "Default"))
                                 .disabled(pending || shortcut == default)
                                 .on_click(move |_, _, cx| {
@@ -348,14 +328,11 @@ impl SettingsWindowView {
         };
         let reset_owner = self.owner.clone();
         let disable_owner = self.owner.clone();
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_2()
+        settings_inline()
             .child(
                 Button::new(format!("paste-{favorite}-reset-all"))
                     .outline()
-                    .h(px(32.))
+                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                     .label(tr(language, "全部恢复默认", "Restore all defaults"))
                     .disabled(pending || current == defaults)
                     .on_click(move |_, _, cx| {
@@ -367,7 +344,7 @@ impl SettingsWindowView {
             .child(
                 Button::new(format!("paste-{favorite}-disable-all"))
                     .outline()
-                    .h(px(32.))
+                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                     .label(tr(language, "全部停用", "Disable all"))
                     .disabled(pending || current.iter().all(String::is_empty))
                     .on_click(move |_, _, cx| {

@@ -29,7 +29,7 @@ impl SettingsWindowView {
                     .segmented()
                     .w_full()
                     .min_w_0()
-                    .max_w(px(visual::CHOICE_MAX_WIDTH))
+                    .last_empty_space(div().w_0())
                     .selected_index(
                         choices
                             .iter()

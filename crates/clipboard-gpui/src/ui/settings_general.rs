@@ -1,4 +1,4 @@
-use super::settings_common::{command_checkbox, owner_state, settings_stack};
+use super::settings_common::{command_checkbox, owner_state, settings_inline, settings_stack};
 use super::*;
 use gpui_kit::component::{alert::Alert, switch::Switch};
 
@@ -15,11 +15,7 @@ impl SettingsWindowView {
         let owner = self.owner.clone();
         settings_stack()
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
+                settings_inline()
                     .child(if disabled {
                         div().child(label).into_any_element()
                     } else {
@@ -30,7 +26,7 @@ impl SettingsWindowView {
                     })
                     .child(
                         Button::new("main-shortcut-edit")
-                            .h(px(32.))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .outline()
                             .label(tr(language, "修改", "Edit"))
                             .disabled(pending)
@@ -40,7 +36,7 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("main-shortcut-disable")
-                            .h(px(32.))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .ghost()
                             .label(tr(language, "关闭", "Disable"))
                             .disabled(pending || disabled)
@@ -164,8 +160,7 @@ impl SettingsWindowView {
                 |owner| owner.paste_move_to_top.pending = true,
             ),
         ];
-        settings_stack()
-            .gap_1()
+        settings_inline()
             .children(
                 behavior_toggles.map(|(id, chinese, english, command, state_of, on_sent)| {
                     let (checked, pending) = state_of(owner_state);
@@ -178,6 +173,8 @@ impl SettingsWindowView {
                         command,
                         on_sent,
                     )
+                    .w_auto()
+                    .max_w(relative(1.))
                 }),
             )
             .into_any_element()
@@ -205,10 +202,9 @@ impl SettingsWindowView {
         let autostart = state.autostart.value;
         let autostart_pending = state.autostart.pending;
         let startup_owner = self.owner.clone();
-        settings_stack()
+        settings_inline()
             .child(
                 Switch::new("settings-window-autostart")
-                    .w_full()
                     .min_h(px(32.))
                     .py(px(6.))
                     .text_size(px(14.))

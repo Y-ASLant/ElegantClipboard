@@ -14,11 +14,36 @@ pub(super) fn settings_stack() -> Div {
         .whitespace_normal()
 }
 
+/// Related fields share a row when each has enough room, otherwise wrap.
+pub(super) fn settings_columns() -> Div {
+    settings_stack().flex_row().flex_wrap().items_start()
+}
+
+/// Use only as a direct child of `settings_columns`.
+pub(super) fn settings_column() -> Div {
+    settings_stack().flex_basis(px(360.)).flex_grow(1.)
+}
+
+/// Natural-width choices and actions; never stretch individual checkboxes.
+pub(super) fn settings_inline() -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_x(px(visual::SPACE_4))
+        .gap_y(px(visual::SPACE_2))
+}
+
 pub(super) fn settings_field(label: &'static str) -> Div {
     settings_stack()
-        .max_w(px(visual::CHOICE_MAX_WIDTH))
         .gap(px(visual::SPACE_2))
         .child(div().font_medium().child(label))
+}
+
+pub(super) fn settings_column_field(label: &'static str) -> Div {
+    settings_field(label).flex_basis(px(360.)).flex_grow(1.)
 }
 
 pub(super) fn settings_description(text: impl Into<SharedString>, cx: &App) -> Div {
@@ -70,7 +95,6 @@ where
     TabBar::new(id)
         .w_full()
         .min_w_0()
-        .max_w(px(visual::CHOICE_MAX_WIDTH))
         .large()
         .h(px(visual::CONTROL_HEIGHT_LARGE))
         .segmented()

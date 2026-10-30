@@ -66,7 +66,7 @@ const SECTIONS: &[Section] = &[
     Section {
         page: SettingsPage::Data,
         chinese: "监听内容类型",
-        english: "Capture content types",
+        english: "Capture types",
         description_chinese: "选择保存到历史的内容类型；至少保留一种",
         description_english: "Choose which content types enter history; keep at least one",
         content: SettingsWindowView::settings_monitor_content,
@@ -82,7 +82,7 @@ const SECTIONS: &[Section] = &[
     Section {
         page: SettingsPage::Data,
         chinese: "去重与剪贴板",
-        english: "Dedup & clipboard",
+        english: "Deduplication",
         description_chinese: "选择相同内容的去重策略，以及粘贴后是否恢复原剪贴板",
         description_english: "Choose how duplicate copies are merged and whether pasting restores the clipboard",
         content: SettingsWindowView::settings_dedup_content,
@@ -169,8 +169,8 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::About,
-        chinese: "关于 ElegantClipboard",
-        english: "About ElegantClipboard",
+        chinese: "应用简介",
+        english: "Overview",
         description_chinese: "跨平台剪贴板管理器",
         description_english: "Cross-platform clipboard manager",
         content: SettingsWindowView::settings_about_intro_content,

@@ -26,10 +26,10 @@ impl SettingsWindowView {
         let tabs = TabBar::new("settings-window-effect")
             .w_full()
             .min_w_0()
-            .max_w(px(visual::CHOICE_MAX_WIDTH))
             .h(px(visual::CONTROL_HEIGHT_LARGE))
             .large()
             .segmented()
+            .last_empty_space(div().w_0())
             .selected_index(
                 choices
                     .clone()

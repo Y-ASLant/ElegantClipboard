@@ -1,6 +1,6 @@
 use super::settings_common::{
-    choice_tabs, command_checkbox, owner_state, settings_description, settings_field,
-    settings_stack,
+    choice_tabs, command_checkbox, owner_state, settings_column, settings_columns,
+    settings_description, settings_field, settings_inline, settings_stack,
 };
 use super::*;
 use gpui_kit::component::chart::BarChart;
@@ -43,8 +43,8 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let strategy = owner_state.dedup_strategy.value;
         let strategy_pending = owner_state.dedup_strategy.pending;
-        settings_stack()
-            .child(
+        settings_columns()
+            .child(settings_column().child(
                 settings_field(tr(
                     language,
                     "相同内容再次复制时",
@@ -73,8 +73,8 @@ impl SettingsWindowView {
                         "「各存一条」保留每次复制的独立时间线；「移到列表顶部」合并为同一条记录。",
                         "\"Keep separate entries\" preserves each copy on the timeline; \"Move to top\" merges them into one entry.",
                     ), cx)),
-            )
-            .child(settings_stack().gap_2().child(command_checkbox(
+            ))
+            .child(settings_column().gap_2().child(command_checkbox(
                 "restore-clipboard",
                 tr(
                     language,
@@ -144,8 +144,7 @@ impl SettingsWindowView {
                 |next, checked| next.files = checked,
             ),
         ];
-        settings_stack()
-            .gap_1()
+        settings_inline()
             .children(
                 choices
                     .into_iter()
@@ -154,10 +153,11 @@ impl SettingsWindowView {
                         let mut next = monitor_types;
                         set_checked(&mut next, !selected);
                         Checkbox::new(id)
-                            .w_full()
+                            .min_w_0()
                             .min_h(px(32.))
                             .py(px(6.))
                             .text_size(px(14.))
+                            .whitespace_normal()
                             .label(label)
                             .checked(selected)
                             .disabled(monitor_types_pending || !next.valid())
@@ -178,15 +178,15 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let Some(counts) = &owner.daily_counts else {
-            return div()
-                .text_sm()
-                .text_color(cx.theme().muted_foreground)
-                .child(tr(
+            return settings_description(
+                tr(
                     owner.language,
                     "尚未获取每日统计",
                     "Daily counts are not available",
-                ))
-                .into_any_element();
+                ),
+                cx,
+            )
+            .into_any_element();
         };
         let today = chrono::Local::now().date_naive();
         let data = (0..7)
@@ -200,9 +200,18 @@ impl SettingsWindowView {
                 (day, count)
             })
             .collect::<Vec<_>>();
-        let empty = data.iter().all(|(_, count)| *count == 0);
+        if data.iter().all(|(_, count)| *count == 0) {
+            return settings_description(
+                tr(
+                    owner.language,
+                    "最近 7 天没有历史记录",
+                    "No items in the past 7 days",
+                ),
+                cx,
+            )
+            .into_any_element();
+        }
         div()
-            .relative()
             .w_full()
             .min_w_0()
             .h(px(152.))
@@ -215,22 +224,6 @@ impl SettingsWindowView {
                     .label(|(_, count)| count.to_string())
                     .grid(false),
             )
-            .when(empty, |panel| {
-                panel.child(
-                    div()
-                        .absolute()
-                        .top(px(40.))
-                        .w_full()
-                        .text_center()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(tr(
-                            owner.language,
-                            "最近 7 天没有历史记录",
-                            "No items in the past 7 days",
-                        )),
-                )
-            })
             .into_any_element()
     }
 }

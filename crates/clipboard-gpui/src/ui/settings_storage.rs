@@ -1,4 +1,4 @@
-use super::settings_common::{owner_state, settings_description, settings_stack};
+use super::settings_common::{owner_state, settings_description, settings_inline, settings_stack};
 use super::*;
 use gpui_kit::component::{alert::Alert, dialog::DialogFooter};
 
@@ -61,18 +61,22 @@ impl SettingsWindowView {
         let folder_owner = self.owner.clone();
         let export_owner = self.owner.clone();
 
-        settings_stack()
-            .child(settings_description(data_size_detail, cx))
+        settings_inline()
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .gap_2()
+                settings_description(data_size_detail, cx)
+                    .w_auto()
+                    .flex_basis(px(360.))
+                    .flex_grow(1.),
+            )
+            .child(
+                settings_inline()
+                    .w_auto()
                     .child(
                         Button::new("settings-window-refresh")
                             .outline()
                             .icon(IconName::RotateCw)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "刷新", "Refresh"))
                             .tooltip(tr(language, "刷新占用", "Refresh usage"))
                             .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
                             .disabled(data_size_pending || maintenance_pending)
@@ -87,6 +91,8 @@ impl SettingsWindowView {
                         Button::new("settings-window-optimize")
                             .outline()
                             .icon(IconName::HardDrive)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "整理", "Optimize"))
                             .tooltip(tr(language, "整理数据库", "Optimize database"))
                             .accessibility_label(tr(language, "整理数据库", "Optimize database"))
                             .disabled(data_size_pending || maintenance_pending)
@@ -103,6 +109,8 @@ impl SettingsWindowView {
                         Button::new("settings-window-folder")
                             .outline()
                             .icon(IconName::FolderOpen)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "打开目录", "Open folder"))
                             .tooltip(tr(language, "打开数据目录", "Open data folder"))
                             .accessibility_label(tr(language, "打开数据目录", "Open data folder"))
                             .on_click(move |_, _, cx| {
@@ -115,6 +123,8 @@ impl SettingsWindowView {
                         Button::new("settings-window-export")
                             .outline()
                             .icon(IconName::ExternalLink)
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .label(tr(language, "导出备份", "Export backup"))
                             .tooltip(tr(language, "导出备份", "Export backup"))
                             .accessibility_label(tr(language, "导出备份", "Export backup"))
                             .disabled(export_pending)
@@ -161,7 +171,7 @@ impl SettingsWindowView {
                 "Select a source file, then an empty destination folder. Current data will not be overwritten, merged or switched. Open the restored data when ready. A legacy database copies records only; use a legacy ZIP to migrate attachments.",
             ), cx))
             .child(
-                div().flex().flex_wrap().gap_2().children(choices.into_iter().map(|(id, label, source)| {
+                settings_inline().children(choices.into_iter().map(|(id, label, source)| {
                     let owner = self.owner.clone();
                     Button::new(id).outline().h(px(32.)).label(label).disabled(pending)
                         .on_click(move |_, _, cx| {
@@ -170,13 +180,13 @@ impl SettingsWindowView {
                 })),
             )
             .when(pending, |content| {
-                content.child(div().text_sm().child(tr(language, "正在选择路径或恢复数据…", "Selecting paths or restoring data…")))
+                content.child(settings_description(tr(language, "正在选择路径或恢复数据…", "Selecting paths or restoring data…"), cx))
             })
             .when_some(outcome, |content, outcome| {
                 content
-                    .child(div().text_sm().min_w_0().whitespace_normal().child(outcome.description(language)))
+                    .child(settings_description(outcome.description(language), cx))
                     .child(
-                        div().flex().flex_wrap().child(
+                        settings_inline().child(
                             Button::new("open-restored-data").outline().h(px(32.))
                                 .label(tr(language, "打开恢复的数据", "Open restored data"))
                                 .disabled(pending)
@@ -197,10 +207,7 @@ impl SettingsWindowView {
         let clear_all_pending = owner_state.clear_all_pending;
         let privacy_owner = self.owner.clone();
 
-        div()
-            .w_full()
-            .flex()
-            .flex_wrap()
+        settings_inline()
             .child(
                 Button::new("settings-window-clear-all")
                     .danger()
@@ -226,6 +233,7 @@ impl SettingsWindowView {
                             let keyboard_owner = dialog_owner.clone();
                             let cancel_owner = dialog_owner.clone();
                             dialog
+                                .bg(cx.theme().popover)
                                 .title(tr(language, "删除全部历史", "Delete all history"))
                                 .close_button(false)
                                 .overlay_closable(false)
