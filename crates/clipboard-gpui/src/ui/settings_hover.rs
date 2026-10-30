@@ -1,5 +1,6 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column, settings_columns, settings_field, settings_inline,
+    choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
+    settings_field, settings_inline,
 };
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -112,8 +113,8 @@ impl SettingsWindowView {
                             }),
                     ),
             )
-            .child(settings_column().child(
-                settings_field(tr(language, "停留延时", "Hover delay")).child(choice_tabs(
+            .child(
+                settings_column_field(tr(language, "停留延时", "Hover delay")).child(choice_tabs(
                     "hover-delay",
                     &self.owner,
                     [250, 500, 750, 1000],
@@ -131,9 +132,9 @@ impl SettingsWindowView {
                         );
                     },
                 )),
-            ))
-            .child(settings_column().child(
-                settings_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
+            )
+            .child(
+                settings_column_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
                     "hover-position",
                     &self.owner,
                     [
@@ -159,27 +160,29 @@ impl SettingsWindowView {
                         );
                     },
                 )),
-            ))
-            .child(settings_column().child(
-                settings_field(tr(language, "图片缩放步进", "Image zoom step")).child(choice_tabs(
-                    "hover-zoom-step",
-                    &self.owner,
-                    [5, 10, 20, 50],
-                    ["5%", "10%", "20%", "50%"],
-                    hover_preference.zoom_step,
-                    hover_pending,
-                    |owner| owner.hover_preference.zoom_step,
-                    |owner, zoom_step, cx| {
-                        owner.save_hover_preference(
-                            HoverPreviewPreference {
-                                zoom_step,
-                                ..owner.hover_preference
-                            },
-                            cx,
-                        );
-                    },
-                )),
-            ))
+            )
+            .child(
+                settings_column_field(tr(language, "图片缩放步进", "Image zoom step")).child(
+                    choice_tabs(
+                        "hover-zoom-step",
+                        &self.owner,
+                        [5, 10, 20, 50],
+                        ["5%", "10%", "20%", "50%"],
+                        hover_preference.zoom_step,
+                        hover_pending,
+                        |owner| owner.hover_preference.zoom_step,
+                        |owner, zoom_step, cx| {
+                            owner.save_hover_preference(
+                                HoverPreviewPreference {
+                                    zoom_step,
+                                    ..owner.hover_preference
+                                },
+                                cx,
+                            );
+                        },
+                    ),
+                ),
+            )
             .into_any_element()
     }
 }

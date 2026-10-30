@@ -1,5 +1,5 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column, settings_columns, settings_field, settings_inline,
+    choice_tabs, owner_state, settings_column_field, settings_columns, settings_inline,
 };
 use super::*;
 use gpui_kit::component::switch::Switch;
@@ -79,8 +79,7 @@ impl SettingsWindowView {
         let preview_owner = self.owner.clone();
         settings_columns()
             .child(
-                settings_column().child(
-                    settings_field(tr(language, "播放时机", "Timing")).child(choice_tabs(
+                settings_column_field(tr(language, "播放时机", "Timing")).child(choice_tabs(
                         timing_id,
                         &self.owner,
                         [SoundTiming::Immediate, SoundTiming::AfterSuccess],
@@ -97,10 +96,9 @@ impl SettingsWindowView {
                             owner.save_audio(next, cx);
                         },
                     )),
-                ),
             )
-            .child(settings_column().child(
-                settings_field(tr(language, "声音", "Sound")).child(
+            .child(
+                settings_column_field(tr(language, "声音", "Sound")).child(
                     settings_inline()
                         .justify_between()
                         .child(
@@ -144,7 +142,6 @@ impl SettingsWindowView {
                                     });
                                 }),
                         ),
-                ),
             ))
             .into_any_element()
     }

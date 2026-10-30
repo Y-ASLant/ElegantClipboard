@@ -140,7 +140,6 @@ pub(super) fn command_checkbox(
 ) -> Checkbox {
     let owner = owner.clone();
     Checkbox::new(id)
-        .w_full()
         .min_w_0()
         .min_h(px(visual::CONTROL_HEIGHT))
         .py(px(visual::SPACE_1))

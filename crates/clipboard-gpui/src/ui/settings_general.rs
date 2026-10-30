@@ -174,7 +174,6 @@ impl SettingsWindowView {
                         on_sent,
                     )
                     .w_auto()
-                    .max_w(relative(1.))
                 }),
             )
             .into_any_element()
