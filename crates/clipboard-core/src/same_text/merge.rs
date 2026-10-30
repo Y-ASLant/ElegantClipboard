@@ -19,10 +19,11 @@ impl History {
             "SELECT id, content_type, content_hash, preview FROM clipboard_items
              WHERE text_content = ?1 AND group_id IS NULL
                AND content_type IN ('text','url','html','rtf')
+               AND length(text_content) = ?2
              ORDER BY sort_order DESC, created_at DESC, id DESC LIMIT 1",
         )?;
         let target = statement
-            .query_row([text], |row| {
+            .query_row(rusqlite::params![text, text.len() as i64], |row| {
                 Ok(SameTextTarget {
                     id: row.get(0)?,
                     content_type: row.get(1)?,

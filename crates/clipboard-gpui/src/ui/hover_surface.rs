@@ -11,7 +11,7 @@ enum RevealSide {
 }
 
 pub(super) fn render_preview(
-    view: &HoverPreviewWindowView,
+    view: &mut HoverPreviewWindowView,
     window: &mut Window,
     cx: &mut Context<HoverPreviewWindowView>,
 ) -> AnyElement {
@@ -39,10 +39,21 @@ pub(super) fn render_preview(
         px(visual::BORDER_WIDTH)
     };
     let available = available_size(target, side, viewport);
-    let maximum = size(
+    let mut maximum = size(
         (available.width - border * 2.).max(px(1.)),
         (available.height - border * 2.).max(px(1.)),
     );
+    if matches!(view.content, Ok(PreviewContent::Html(_))) {
+        let natural_width = match view.natural_content_width {
+            Some(width) => width,
+            None => {
+                let width = hover_content::natural_width(view, window, cx);
+                view.natural_content_width = Some(width);
+                width
+            }
+        };
+        maximum.width = maximum.width.min(natural_width);
+    }
     if image_preview {
         target = local(geometry.scaled(view.zoom).0);
     } else {
@@ -257,15 +268,16 @@ fn available_size(
     side: RevealSide,
     viewport: Size<Pixels>,
 ) -> Size<Pixels> {
+    let inset = px(crate::popup_geometry::EDGE_INSET);
     let width = match side {
-        RevealSide::Left => target.right() - px(12.),
-        RevealSide::Right => viewport.width - px(12.) - target.left(),
-        _ => viewport.width - px(24.),
+        RevealSide::Left => target.right() - inset,
+        RevealSide::Right => viewport.width - inset - target.left(),
+        _ => viewport.width - inset * 2.,
     };
     let height = match side {
-        RevealSide::Top => target.bottom() - px(12.),
-        RevealSide::Bottom => viewport.height - px(12.) - target.top(),
-        _ => viewport.height - px(24.),
+        RevealSide::Top => target.bottom() - inset,
+        RevealSide::Bottom => viewport.height - inset - target.top(),
+        _ => viewport.height - inset * 2.,
     };
     size(
         width.max(px(1.)),
@@ -290,15 +302,16 @@ fn fitted_bounds(
         RevealSide::Bottom | RevealSide::Overlay => target.top(),
         _ => anchor_y - dimensions.height / 2.,
     };
+    let inset = px(crate::popup_geometry::EDGE_INSET);
     Bounds::new(
         point(
             x.clamp(
-                px(12.),
-                (viewport.width - px(12.) - dimensions.width).max(px(12.)),
+                inset,
+                (viewport.width - inset - dimensions.width).max(inset),
             ),
             y.clamp(
-                px(12.),
-                (viewport.height - px(12.) - dimensions.height).max(px(12.)),
+                inset,
+                (viewport.height - inset - dimensions.height).max(inset),
             ),
         ),
         dimensions,
@@ -326,6 +339,7 @@ fn reveal_bounds(
         start.width + (target.size.width - start.width) * progress,
         start.height + (target.size.height - start.height) * progress,
     );
+    let inset = px(crate::popup_geometry::EDGE_INSET);
     let origin = match side {
         RevealSide::Left | RevealSide::Right => point(
             if matches!(side, RevealSide::Left) {
@@ -334,8 +348,8 @@ fn reveal_bounds(
                 target.left()
             },
             (anchor_y - dimensions.height / 2.).clamp(
-                px(12.),
-                (viewport.height - px(12.) - dimensions.height).max(px(12.)),
+                inset,
+                (viewport.height - inset - dimensions.height).max(inset),
             ),
         ),
         RevealSide::Top | RevealSide::Bottom | RevealSide::Overlay => point(

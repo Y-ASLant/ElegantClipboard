@@ -16,47 +16,45 @@ impl ClipboardView {
         let start = chrono::Local::now().date_naive() - chrono::Duration::days(6);
         self.send(Command::QueryDailyCounts(start.to_string()), cx);
     }
-    pub(super) fn start_export(&mut self, cx: &mut Context<Self>) {
-        if self.export_pending {
-            return;
-        }
+    /// 「选路径 → 发命令」的共享骨架：文档目录优先、service.data_dir 兜底；
+    /// pending 由调用方设置，命令构造和错误文案由调用方提供。
+    fn pick_path_and_send(
+        &mut self,
+        suggested_name: &str,
+        error_label: (&'static str, &'static str),
+        interrupted_label: (&'static str, &'static str),
+        make_command: impl FnOnce(PathBuf) -> Command + 'static,
+        clear_pending: impl FnOnce(&mut Self) + 'static,
+        cx: &mut Context<Self>,
+    ) {
         let directory = UserDirs::new()
             .and_then(|dirs| dirs.document_dir().map(|path| path.to_path_buf()))
             .unwrap_or_else(|| self.service.data_dir.clone());
-        self.export_pending = true;
         cx.notify();
-        let selection = cx.prompt_for_new_path(&directory, Some("ElegantClipboard_backup.zip"));
+        let selection = cx.prompt_for_new_path(&directory, Some(suggested_name));
         cx.spawn(async move |view, cx| {
             let result = selection.await;
             let _ = view.update(cx, |this, cx| {
                 match result {
                     Ok(Ok(Some(path))) => {
-                        if !this.send(Command::ExportBackup(path), cx) {
-                            this.export_pending = false;
+                        if !this.send(make_command(path), cx) {
+                            clear_pending(this);
                         }
                     }
-                    Ok(Ok(None)) => this.export_pending = false,
+                    Ok(Ok(None)) => clear_pending(this),
                     Ok(Err(error)) => {
-                        this.export_pending = false;
+                        clear_pending(this);
                         this.set_feedback_message(format!(
                             "{}: {error}",
-                            tr(
-                                this.language,
-                                "无法选择备份路径",
-                                "Unable to select a backup path"
-                            )
+                            tr(this.language, error_label.0, error_label.1)
                         ));
                         this.is_error = true;
                     }
                     Err(error) => {
-                        this.export_pending = false;
+                        clear_pending(this);
                         this.set_feedback_message(format!(
                             "{}: {error}",
-                            tr(
-                                this.language,
-                                "备份路径选择中断",
-                                "Backup path selection was interrupted"
-                            )
+                            tr(this.language, interrupted_label.0, interrupted_label.1)
                         ));
                         this.is_error = true;
                     }
@@ -65,6 +63,21 @@ impl ClipboardView {
             });
         })
         .detach();
+    }
+
+    pub(super) fn start_export(&mut self, cx: &mut Context<Self>) {
+        if self.export_pending {
+            return;
+        }
+        self.export_pending = true;
+        self.pick_path_and_send(
+            "ElegantClipboard_backup.zip",
+            ("无法选择备份路径", "Unable to select a backup path"),
+            ("备份路径选择中断", "Backup path selection was interrupted"),
+            Command::ExportBackup,
+            |this| this.export_pending = false,
+            cx,
+        );
     }
 
     pub(super) fn start_save_as(
@@ -76,51 +89,18 @@ impl ClipboardView {
         if self.save_as_pending.is_some() {
             return;
         }
-        let directory = UserDirs::new()
-            .and_then(|dirs| dirs.document_dir().map(|path| path.to_path_buf()))
-            .unwrap_or_else(|| self.service.data_dir.clone());
         self.save_as_pending = Some(id);
-        cx.notify();
-        let selection = cx.prompt_for_new_path(&directory, Some(&suggested_name));
-        cx.spawn(async move |view, cx| {
-            let result = selection.await;
-            let _ = view.update(cx, |this, cx| {
-                match result {
-                    Ok(Ok(Some(destination))) => {
-                        if !this.send(Command::SaveAs { id, destination }, cx) {
-                            this.save_as_pending = None;
-                        }
-                    }
-                    Ok(Ok(None)) => this.save_as_pending = None,
-                    Ok(Err(error)) => {
-                        this.save_as_pending = None;
-                        this.set_feedback_message(format!(
-                            "{}: {error}",
-                            tr(
-                                this.language,
-                                "无法选择另存为路径",
-                                "Unable to select a destination"
-                            )
-                        ));
-                        this.is_error = true;
-                    }
-                    Err(error) => {
-                        this.save_as_pending = None;
-                        this.set_feedback_message(format!(
-                            "{}: {error}",
-                            tr(
-                                this.language,
-                                "另存为路径选择中断",
-                                "Destination selection was interrupted"
-                            )
-                        ));
-                        this.is_error = true;
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.pick_path_and_send(
+            &suggested_name,
+            ("无法选择另存为路径", "Unable to select a destination"),
+            (
+                "另存为路径选择中断",
+                "Destination selection was interrupted",
+            ),
+            move |destination| Command::SaveAs { id, destination },
+            |this| this.save_as_pending = None,
+            cx,
+        );
     }
     pub(super) fn apply_saved_as(
         &mut self,

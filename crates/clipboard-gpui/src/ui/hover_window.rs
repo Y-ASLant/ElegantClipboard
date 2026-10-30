@@ -24,6 +24,7 @@ pub(super) struct HoverPreviewWindowView {
     pub scroll: ScrollHandle,
     pub surface_bounds: Option<Bounds<Pixels>>,
     pub content_size: Option<Size<Pixels>>,
+    pub natural_content_width: Option<Pixels>,
 }
 
 impl HoverPreviewWindowView {
@@ -125,6 +126,7 @@ impl HoverPreviewWindowView {
             source_bounds: setup.source_bounds,
             information: setup.information,
             content_size: None,
+            natural_content_width: None,
             scroll: ScrollHandle::new(),
             surface_bounds: None,
         }

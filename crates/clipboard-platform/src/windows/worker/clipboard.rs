@@ -16,6 +16,7 @@ use clipboard_rs::{
 };
 use std::{path::Path, thread};
 
+use crate::service::protocol::CopyFormat;
 use crate::service::worker::copy_mode::CopyMode;
 
 impl Worker {
@@ -64,20 +65,24 @@ impl Worker {
             .then(|| item_paths_for_action(&item).map(|paths| paths.join("\n")))
             .transpose()?;
         let single_format = match mode {
-            CopyMode::Html => Some(("html", "HTML 格式")),
-            CopyMode::Rtf => Some(("rtf", "RTF 格式")),
+            CopyMode::Html => Some(CopyFormat::Html),
+            CopyMode::Rtf => Some(CopyFormat::Rtf),
             _ => None,
         };
-        if let Some((kind, label)) = single_format {
-            let available = match kind {
-                "html" => item
-                    .html_content
-                    .as_deref()
-                    .is_some_and(|value| !value.is_empty()),
-                _ => item
-                    .rtf_content
-                    .as_deref()
-                    .is_some_and(|value| !value.is_empty()),
+        if let Some(format) = single_format {
+            let (label, available) = match format {
+                CopyFormat::Html => (
+                    "HTML 格式",
+                    item.html_content
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty()),
+                ),
+                CopyFormat::Rtf => (
+                    "RTF 格式",
+                    item.rtf_content
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty()),
+                ),
             };
             if !available {
                 bail!("该记录没有{label}内容");
@@ -107,14 +112,10 @@ impl Worker {
             if !Path::new(path).is_file() {
                 bail!("图片文件已丢失，无法复制");
             }
+            // PNG 字节直接读文件，无需解码后重编码；decode 仅为 CF_DIB 像素服务。
+            let png = std::fs::read(path).map_err(|error| anyhow!("读取图片文件失败：{error}"))?;
             let image =
                 RustImageData::from_path(path).map_err(|error| anyhow!("打开图片失败：{error}"))?;
-            // 写回全程使用已编码的字节；clipboard-win 会话内不再二次转换。
-            let png = image
-                .to_png()
-                .map_err(|error| anyhow!("图片 PNG 编码失败：{error}"))?
-                .get_bytes()
-                .to_vec();
             let pixels = image
                 .to_rgba8()
                 .map_err(|error| anyhow!("读取图片像素失败：{error}"))?;
@@ -184,11 +185,15 @@ impl Worker {
                 )))?;
             }
             sequence
-        } else if let Some((kind, label)) = single_format {
+        } else if let Some(format) = single_format {
             // 单一格式写回：HTML 或 RTF，缺少该格式时已在上方报错。
             // HTML 经 clipboard-rs 写回会包上 CF_HTML 片段头，校验用包含语义；
             // RTF 写原始字节，逐字节比对。
-            let (contents, expected_html) = if kind == "html" {
+            let label = match format {
+                CopyFormat::Html => "HTML 格式",
+                CopyFormat::Rtf => "RTF 格式",
+            };
+            let (contents, expected_html) = if format == CopyFormat::Html {
                 let html = item.html_content.clone().unwrap_or_default();
                 (vec![ClipboardContent::Html(html.clone())], Some(html))
             } else {

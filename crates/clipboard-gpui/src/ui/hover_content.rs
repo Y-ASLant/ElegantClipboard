@@ -2,10 +2,6 @@ use super::*;
 use gpui_kit::Size;
 use gpui_kit::component::text::TextView;
 
-/// HTML/Markdown 预览的宽度上限：TextView 在不定宽容器中会退化成 min-content
-/// 宽度（逐字换行），所以始终给它一个确定宽度而不是 `max_w`。
-const HTML_PREVIEW_MAX_WIDTH: f32 = 480.;
-
 pub(super) fn fitted_size(
     view: &HoverPreviewWindowView,
     maximum: Size<Pixels>,
@@ -74,6 +70,13 @@ fn shaped_size(
     )
 }
 
+pub(super) fn natural_width(view: &HoverPreviewWindowView, window: &Window, cx: &App) -> Pixels {
+    // Use the same glyph measurement as plain-text previews to choose a stable
+    // preferred width. Markdown source syntax may add some spare width; the
+    // rendered document is measured separately for its final wrapped height.
+    shaped_size(&view.text, window.viewport_size().width, 22.4, window, cx).width
+}
+
 pub(super) fn html_content(
     view: &HoverPreviewWindowView,
     maximum_width: Pixels,
@@ -81,11 +84,9 @@ pub(super) fn html_content(
 ) -> AnyElement {
     let entity = cx.entity().downgrade();
     let generation = view.generation;
-    let width = maximum_width.min(px(HTML_PREVIEW_MAX_WIDTH));
     div()
         .relative()
         .flex_none()
-        .w(width)
         .px(px(visual::SPACE_3))
         .py(px(visual::SPACE_2))
         .text_size(px(visual::TEXT_BODY))
@@ -95,6 +96,9 @@ pub(super) fn html_content(
                 .selectable(false)
                 .scrollable(false),
         )
+        // Keep a definite width for TextView; an unconstrained visible body can
+        // collapse to min-content. The caller derives this from available space.
+        .w(maximum_width)
         .child(
             canvas(
                 move |bounds, window, cx| {

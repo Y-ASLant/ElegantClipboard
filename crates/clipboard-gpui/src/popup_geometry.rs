@@ -10,7 +10,7 @@ const DEFAULT_POPUP_SIZE: (f32, f32) = (460., 300.);
 /// 用户既看不到别的记录，也没法把鼠标移出去切换到别的图片，只能干瞪眼。
 /// 留出余量后大图依然明显更大，但屏幕上始终有一块列表可见、可点。
 const EXPANDED_MAX_SHARE: f32 = 0.7;
-const EDGE_INSET: f32 = 12.;
+pub(crate) const EDGE_INSET: f32 = 12.;
 
 pub fn hover_popup_bounds(
     owner: Bounds<Pixels>,

@@ -147,8 +147,7 @@ impl ClipboardView {
         let can_paste = self.paste_target.is_some() && self._tray.is_some();
         let paste_pending = self.paste_pending.is_some();
         let save_as_pending = self.save_as_pending.is_some();
-        let group_move_disabled = self.group_move_pending
-            || (self.groups.is_empty() && self.history.group_id().is_none());
+        let group_move_disabled = self.group_move_disabled();
         let save_as_name = if is_image {
             item.image_path.as_deref().and_then(save_as_suggested_name)
         } else if is_files {

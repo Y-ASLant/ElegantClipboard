@@ -1,6 +1,13 @@
 use super::*;
 
 impl<T> PendingPref<T> {
+    pub(super) fn new(value: T) -> Self {
+        Self {
+            value,
+            pending: false,
+        }
+    }
+
     fn acknowledge(&mut self, result: Result<T, String>) -> Result<(), String> {
         self.pending = false;
         self.value = result?;

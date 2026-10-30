@@ -102,7 +102,7 @@ pub(crate) fn save_as_suggested_name(path: impl AsRef<Path>) -> Option<String> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
 }
-fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
+fn inspect_file_card(paths: &[String]) -> FileCardInfo {
     let mut info = FileCardInfo {
         availability: FileCardAvailability::Available,
         kind: FileCardKind::File,
@@ -110,7 +110,6 @@ fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
         image_too_large: false,
         total_size: Some(0),
     };
-    let paths = clipboard_core::parse_file_paths_for_display(Some(raw_paths));
     if paths.is_empty() {
         info.availability = FileCardAvailability::Unreadable;
         info.total_size = None;
@@ -119,7 +118,7 @@ fn inspect_file_card(raw_paths: &str) -> FileCardInfo {
     if paths.len() > 1 {
         info.kind = FileCardKind::Multiple;
     }
-    for path in &paths {
+    for path in paths {
         if !Path::new(path).is_absolute() {
             info.availability = FileCardAvailability::Unreadable;
             info.total_size = None;
@@ -203,7 +202,8 @@ impl ClipboardView {
             let local_results: Vec<_> = local
                 .into_iter()
                 .map(|(id, raw)| {
-                    let info = inspect_file_card(&raw);
+                    let paths = clipboard_core::parse_file_paths_for_display(Some(&raw));
+                    let info = inspect_file_card(&paths);
                     (id, raw, info)
                 })
                 .collect();
@@ -211,7 +211,8 @@ impl ClipboardView {
                 return;
             }
             for (id, raw) in network {
-                let info = inspect_file_card(&raw);
+                let paths = clipboard_core::parse_file_paths_for_display(Some(&raw));
+                let info = inspect_file_card(&paths);
                 let result = (id, raw, info);
                 if sender.send_blocking(vec![result]).is_err() {
                     return;
@@ -321,38 +322,43 @@ mod file_image_preview_tests {
         let dir = tempfile::tempdir().unwrap();
         let image = dir.path().join("sample.png");
         std::fs::write(&image, b"small synthetic payload").unwrap();
-        let checked = inspect_file_card(&serde_json::to_string(&vec![image.clone()]).unwrap());
+        let checked = inspect_file_card(&[image.to_string_lossy().into_owned()]);
         assert_eq!(checked.availability, FileCardAvailability::Available);
         assert_eq!(checked.kind, FileCardKind::File);
         assert_eq!(checked.image_path, Some(image));
         assert_eq!(checked.total_size, Some(23));
         let missing = dir.path().join("missing.png");
-        let checked = inspect_file_card(&serde_json::to_string(&vec![missing]).unwrap());
+        let checked = inspect_file_card(&[missing.to_string_lossy().into_owned()]);
         assert_eq!(checked.availability, FileCardAvailability::Missing);
         assert!(checked.image_path.is_none());
         assert_eq!(checked.total_size, None);
         assert_eq!(
-            inspect_file_card("not json").availability,
+            inspect_file_card(&["not json".to_string()]).availability,
             FileCardAvailability::Unreadable
         );
         let folder = dir.path().join("folder.png");
         std::fs::create_dir(&folder).unwrap();
-        let checked = inspect_file_card(&serde_json::to_string(&vec![folder.clone()]).unwrap());
+        let checked = inspect_file_card(&[folder.to_string_lossy().into_owned()]);
         assert_eq!(checked.availability, FileCardAvailability::Available);
         assert_eq!(checked.kind, FileCardKind::Folder);
         assert!(checked.image_path.is_none());
         assert_eq!(checked.total_size, None);
-        let mixed = serde_json::to_string(&vec![folder, dir.path().join("missing.png")]);
-        let checked = inspect_file_card(&mixed.unwrap());
-        assert_eq!(checked.availability, FileCardAvailability::Missing);
-        assert_eq!(checked.kind, FileCardKind::Multiple);
-        assert_eq!(checked.total_size, None);
+        let mixed = inspect_file_card(&[
+            folder.to_string_lossy().into_owned(),
+            dir.path()
+                .join("missing.png")
+                .to_string_lossy()
+                .into_owned(),
+        ]);
+        assert_eq!(mixed.availability, FileCardAvailability::Missing);
+        assert_eq!(mixed.kind, FileCardKind::Multiple);
+        assert_eq!(mixed.total_size, None);
         let large = dir.path().join("large.png");
         std::fs::File::create(&large)
             .unwrap()
             .set_len(50 * 1024 * 1024 + 1)
             .unwrap();
-        let checked = inspect_file_card(&serde_json::to_string(&vec![large]).unwrap());
+        let checked = inspect_file_card(&[large.to_string_lossy().into_owned()]);
         assert_eq!(checked.availability, FileCardAvailability::Available);
         assert!(checked.image_path.is_none());
         assert!(checked.image_too_large);

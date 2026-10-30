@@ -1,6 +1,11 @@
 use super::*;
 
 impl ClipboardView {
+    /// 「移动到分组」是否可用：有待处理移动、或无分组且在默认分组时禁用。
+    pub(super) fn group_move_disabled(&self) -> bool {
+        self.group_move_pending || (self.groups.is_empty() && self.history.group_id().is_none())
+    }
+
     /// 两侧仅显示拖拽提示；整张卡片负责拖拽手势。
     pub(super) fn drag_handle(
         &self,
@@ -255,8 +260,7 @@ impl ClipboardView {
                 id,
                 IconName::Folder,
                 tr(self.language, "移动到分组", "Move to group"),
-                self.group_move_pending
-                    || (self.groups.is_empty() && self.history.group_id().is_none()),
+                self.group_move_disabled(),
                 false,
                 cx,
                 move |this, _, _, cx| {
