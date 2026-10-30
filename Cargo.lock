@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "clipboard-core"
-version = "2.0.0-beta.12"
+version = "2.0.0-beta.13"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "clipboard-platform"
-version = "2.0.0-beta.12"
+version = "2.0.0-beta.13"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -1518,7 +1518,7 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "elegant-clipboard-gpui"
-version = "2.0.0-beta.12"
+version = "2.0.0-beta.13"
 dependencies = [
  "anyhow",
  "async-channel",
