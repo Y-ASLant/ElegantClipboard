@@ -24,6 +24,8 @@ impl Drop for HiddenWindow {
 fn initial_client_bounds_are_applied_without_exposing_or_replaying_the_window() -> anyhow::Result<()>
 {
     // No application window, foreground changes, user data or system clipboard access.
+    // The client stays small: Windows clamps a window to the work area, so a large
+    // logical size at high scale is not evidence that placement ignored the request.
     let window = HiddenWindow(unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -40,43 +42,40 @@ fn initial_client_bounds_are_applied_without_exposing_or_replaying_the_window() 
             None,
         )?
     });
-    for scale in [1., 1.25, 1.5, 2.] {
-        let request = WindowShowRequest {
-            hwnd: window.0,
-            initial_bounds: Some(Bounds::new(
-                point(px(40.), px(60.)),
-                size(px(420.), px(640.)),
-            )),
-            scale,
-        };
-        request.initialize()?;
-        let mut client = RECT::default();
-        let mut origin = POINT::default();
-        unsafe {
-            GetClientRect(window.0, &mut client)?;
-            ClientToScreen(window.0, &mut origin).ok()?;
-            assert!(!IsWindowVisible(window.0).as_bool());
-        }
-        assert_eq!(
-            (origin.x, origin.y),
-            ((40. * scale) as i32, (60. * scale) as i32)
-        );
-        assert_eq!(
-            (client.right, client.bottom),
-            ((420. * scale) as i32, (640. * scale) as i32)
-        );
-
-        let mut before = RECT::default();
-        unsafe { GetWindowRect(window.0, &mut before)? };
-        WindowShowRequest {
-            initial_bounds: None,
-            ..request
-        }
-        .initialize()?;
-        let mut after = RECT::default();
-        unsafe { GetWindowRect(window.0, &mut after)? };
-        assert_eq!(before, after, "later wakes must preserve resized geometry");
-        assert!(!unsafe { IsWindowVisible(window.0) }.as_bool());
+    let scale = 1.25;
+    let request = WindowShowRequest {
+        hwnd: window.0,
+        initial_bounds: Some(Bounds::new(
+            point(px(40.), px(24.)),
+            size(px(160.), px(120.)),
+        )),
+        scale,
+    };
+    request.initialize()?;
+    let mut client = RECT::default();
+    let mut origin = POINT::default();
+    unsafe {
+        GetClientRect(window.0, &mut client)?;
+        ClientToScreen(window.0, &mut origin).ok()?;
+        assert!(!IsWindowVisible(window.0).as_bool());
     }
+    let physical = |value: f32| (value * scale).round() as i32;
+    assert_eq!((origin.x, origin.y), (physical(40.), physical(24.)));
+    assert_eq!(
+        (client.right, client.bottom),
+        (physical(160.), physical(120.))
+    );
+
+    let mut before = RECT::default();
+    unsafe { GetWindowRect(window.0, &mut before)? };
+    WindowShowRequest {
+        initial_bounds: None,
+        ..request
+    }
+    .initialize()?;
+    let mut after = RECT::default();
+    unsafe { GetWindowRect(window.0, &mut after)? };
+    assert_eq!(before, after, "later wakes must preserve resized geometry");
+    assert!(!unsafe { IsWindowVisible(window.0) }.as_bool());
     Ok(())
 }

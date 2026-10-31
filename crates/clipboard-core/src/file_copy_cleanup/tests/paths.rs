@@ -2,11 +2,12 @@ use super::*;
 
 #[cfg(windows)]
 fn link_directory(source: &Path, destination: &Path) -> Result<()> {
-    // junction 无需符号链接权限，可在 CI 中实际验证重解析点隔离。
+    // cmd 会把路径中的 `/` 当成开关；junction 不需要符号链接权限。
+    let native = |path: &Path| path.to_string_lossy().replace('/', "\\");
     let output = std::process::Command::new("cmd")
         .args(["/C", "mklink", "/J"])
-        .arg(destination)
-        .arg(source)
+        .arg(native(destination))
+        .arg(native(source))
         .output()?;
     ensure!(
         output.status.success(),
@@ -24,7 +25,7 @@ fn link_directory(source: &Path, destination: &Path) -> Result<()> {
 
 #[test]
 fn nested_links_are_removed_without_following_external_directories() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let profile = dir.path().join("profile");
     let external = dir.path().join("external");
     fs::create_dir(&external)?;
@@ -41,7 +42,7 @@ fn nested_links_are_removed_without_following_external_directories() -> Result<(
 
 #[test]
 fn staged_root_link_is_rejected_then_cleanup_retries_after_root_is_repaired() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let profile = dir.path().join("profile");
     let external = dir.path().join("external");
     fs::create_dir(&external)?;
@@ -74,7 +75,7 @@ fn staged_root_link_is_rejected_then_cleanup_retries_after_root_is_repaired() ->
 
 #[test]
 fn linked_data_directory_is_not_used_to_delete_real_profile_copies() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let profile = dir.path().join("profile");
     let alias = dir.path().join("linked-profile");
     let history = History::open(profile.join("clipboard.db"))?;
@@ -94,7 +95,7 @@ fn linked_data_directory_is_not_used_to_delete_real_profile_copies() -> Result<(
 
 #[test]
 fn linked_ancestor_does_not_block_cleanup_of_a_real_data_directory() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let target = dir.path().join("target");
     let linked_parent = dir.path().join("linked-parent");
     fs::create_dir(&target)?;
@@ -120,7 +121,7 @@ fn linked_ancestor_does_not_block_cleanup_of_a_real_data_directory() -> Result<(
 #[test]
 fn locked_copy_failure_preserves_pending_file_and_retries_after_reopen() -> Result<()> {
     use std::os::windows::fs::OpenOptionsExt;
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let db_path = dir.path().join("clipboard.db");
     let history = History::open(db_path.clone())?;
     let id = history.capture("legacy")?.unwrap();

@@ -1,12 +1,6 @@
 use super::*;
 use crate::{database::SettingsRepository, preferences::Preferences};
 
-fn isolated_directory() -> Result<tempfile::TempDir> {
-    // macOS 默认临时根目录 /var 本身是符号链接，使用规范路径隔离测试。
-    let root = fs::canonicalize(std::env::temp_dir())?;
-    Ok(tempfile::tempdir_in(root)?)
-}
-
 fn set_payload(history: &History, id: i64, payload: &str) -> Result<()> {
     history.db.write_connection().lock().execute(
         "UPDATE clipboard_items SET file_payload = ?1 WHERE id = ?2",
@@ -24,7 +18,7 @@ fn settings_snapshot(history: &History) -> Result<Vec<(String, String, Option<St
 
 #[test]
 fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let db_path = dir.path().join("clipboard.db");
     let history = History::open(db_path.clone())?;
     let images = dir.path().join("images");
@@ -125,7 +119,7 @@ fn cleanup_preserves_history_metadata_other_settings_and_image_storage() -> Resu
 #[test]
 fn database_failure_rolls_back_all_references_settings_and_trigger_before_disk_cleanup()
 -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let history = History::open(dir.path().join("clipboard.db"))?;
     let staged = dir.path().join("staged");
     fs::create_dir(&staged)?;
@@ -186,7 +180,7 @@ fn database_failure_rolls_back_all_references_settings_and_trigger_before_disk_c
 
 #[test]
 fn malformed_payload_rolls_back_valid_rows_and_does_not_remove_files() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let history = History::open(dir.path().join("clipboard.db"))?;
     fs::create_dir(dir.path().join("staged"))?;
     fs::write(dir.path().join("staged/copy"), b"keep")?;
@@ -210,7 +204,7 @@ fn malformed_payload_rolls_back_valid_rows_and_does_not_remove_files() -> Result
 #[test]
 fn payload_cleanup_preserves_unknown_legacy_values_and_clears_duplicate_staged_keys() -> Result<()>
 {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let history = History::open(dir.path().join("clipboard.db"))?;
     let id = history.capture("legacy payload")?.unwrap();
     let raw = r#" {"large":18446744073709551616000,"staged":[{"staged":"outside"}],"precise":1.234567890123456789,"staged":false,"legacy":{"staged":"nested stays"},"large":2} "#;
@@ -236,7 +230,7 @@ fn payload_cleanup_preserves_unknown_legacy_values_and_clears_duplicate_staged_k
 
 #[test]
 fn cleanup_ignores_payload_paths_and_keeps_other_profiles_and_their_references() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let profile = dir.path().join("profile");
     let other = dir.path().join("other-profile");
     let history = History::open(profile.join("clipboard.db"))?;
@@ -274,7 +268,7 @@ fn cleanup_ignores_payload_paths_and_keeps_other_profiles_and_their_references()
 
 #[test]
 fn capture_retains_paths_without_making_copies_or_requiring_source_contents() -> Result<()> {
-    let dir = isolated_directory()?;
+    let dir = tempfile::tempdir()?;
     let history = History::open(dir.path().join("clipboard.db"))?;
     let folder = dir.path().join("folder");
     fs::create_dir(&folder)?;

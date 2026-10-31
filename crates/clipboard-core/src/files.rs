@@ -238,13 +238,6 @@ mod tests {
     use super::*;
     use crate::{FilePreviewEntry, PAGE_SIZE, PreviewContent};
 
-    fn isolated_directory() -> Result<tempfile::TempDir> {
-        // macOS 的 /var 临时路径是系统链接，清理测试使用其规范路径。
-        Ok(tempfile::tempdir_in(fs::canonicalize(
-            std::env::temp_dir(),
-        )?)?)
-    }
-
     #[test]
     fn file_paths_are_saved_deduplicated_and_reordered_with_text() -> Result<()> {
         let directory = tempfile::tempdir()?;
@@ -303,7 +296,7 @@ mod tests {
 
     #[test]
     fn copy_and_preview_keep_missing_originals_even_with_legacy_copies() -> Result<()> {
-        let directory = isolated_directory()?;
+        let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;
         let staged_dir = directory.path().join("staged");
         fs::create_dir_all(&staged_dir)?;
@@ -348,7 +341,7 @@ mod tests {
 
     #[test]
     fn clearing_history_preserves_shared_staged_file_until_last_reference() -> Result<()> {
-        let directory = isolated_directory()?;
+        let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;
         let images = directory.path().join("images");
         let staged_dir = directory.path().join("staged");
@@ -379,7 +372,7 @@ mod tests {
 
     #[test]
     fn text_eviction_removes_unreferenced_staged_file() -> Result<()> {
-        let directory = isolated_directory()?;
+        let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;
         let images = directory.path().join("images");
         let staged_dir = directory.path().join("staged");

@@ -4,13 +4,6 @@ use rusqlite::params;
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\nsynthetic";
 
-fn isolated_directory() -> Result<tempfile::TempDir> {
-    // macOS 的 /var 临时路径是系统链接，清理测试使用其规范路径。
-    Ok(tempfile::tempdir_in(std::fs::canonicalize(
-        std::env::temp_dir(),
-    )?)?)
-}
-
 #[test]
 fn image_is_saved_deduplicated_and_missing_file_is_repaired() -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -117,7 +110,7 @@ fn clear_history_is_group_scoped_and_preserves_protected_items() -> Result<()> {
 
 #[test]
 fn clear_all_removes_protected_records_and_media_but_keeps_groups_and_settings() -> Result<()> {
-    let directory = isolated_directory()?;
+    let directory = tempfile::tempdir()?;
     let database = Database::new(directory.path().join("clipboard.db"))?;
     let history = History::new(&database);
     let images = directory.path().join("images");
@@ -181,7 +174,7 @@ fn clear_history_stops_before_deleting_rows_with_unreadable_media_paths() -> Res
 
 #[test]
 fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
-    let directory = isolated_directory()?;
+    let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;
     let images = directory.path().join("images");
     let group = history.create_group("批量测试")?;
@@ -257,7 +250,7 @@ fn batch_delete_is_atomic_and_cleans_only_selected_media() -> Result<()> {
 #[test]
 fn committed_deletions_report_cleanup_failures_and_continue_other_media() -> Result<()> {
     for operation in 0..4 {
-        let directory = isolated_directory()?;
+        let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("clipboard.db"))?;
         let images = directory.path().join("images");
         let id = history.capture_image(PNG, 3, 2, &images)?;
