@@ -79,6 +79,67 @@ pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);
 pub const HISTORY_DRAG_SCROLL_TICKS: usize = 2;
 pub const MOTION_DURATION: Duration = crate::design_system::NORMAL;
 
+/// Interpolate painted channels, not HSL hue: neutral-to-blue must not pass
+/// through green. Premultiplication also excludes invisible endpoint colors.
+#[derive(Clone, Copy, PartialEq)]
+struct TransitionColor(Rgba);
+
+impl TransitionColor {
+    fn new(color: Hsla) -> Self {
+        let color: Rgba = color.into();
+        Self(Rgba {
+            r: color.r * color.a,
+            g: color.g * color.a,
+            b: color.b * color.a,
+            a: color.a,
+        })
+    }
+
+    fn color(self) -> Hsla {
+        let color = self.0;
+        if color.a == 0. {
+            return transparent_black();
+        }
+        Rgba {
+            r: color.r / color.a,
+            g: color.g / color.a,
+            b: color.b / color.a,
+            a: color.a,
+        }
+        .into()
+    }
+}
+
+impl gpui_kit::base::motion::Interpolate for TransitionColor {
+    fn interpolate(&self, target: &Self, progress: f32) -> Self {
+        let progress = progress.clamp(0., 1.);
+        let mix = |from: f32, to: f32| from + (to - from) * progress;
+        Self(Rgba {
+            r: mix(self.0.r, target.0.r),
+            g: mix(self.0.g, target.0.g),
+            b: mix(self.0.b, target.0.b),
+            a: mix(self.0.a, target.0.a),
+        })
+    }
+}
+
+pub fn transition_color(
+    id: impl Into<ElementId>,
+    target: Hsla,
+    transition: gpui_kit::base::motion::Transition,
+    window: &mut Window,
+    cx: &mut App,
+) -> Hsla {
+    gpui_kit::base::motion::transition(
+        id.into(),
+        TransitionColor::new(target),
+        transition,
+        window,
+        cx,
+    )
+    .color()
+}
+
 fn motion(cx: &App) -> Animation {
     let easing = cx.theme().motion.easing_enter.clone();
     Animation::new(MOTION_DURATION).with_easing(move |progress| easing.sample(progress))
@@ -258,5 +319,78 @@ impl Element for RowTranslation {
         cx: &mut App,
     ) {
         self.child.paint(window, cx);
+    }
+}
+
+#[cfg(test)]
+mod color_transition_tests {
+    use super::TransitionColor;
+    use gpui_kit::base::motion::Interpolate as _;
+    use gpui_kit::{Hsla, Rgba, rgb};
+
+    fn assert_channels_between(color: Hsla, from: Hsla, to: Hsla) {
+        let color: Rgba = color.into();
+        let from: Rgba = from.into();
+        let to: Rgba = to.into();
+        for (value, start, end) in [
+            (color.r, from.r, to.r),
+            (color.g, from.g, to.g),
+            (color.b, from.b, to.b),
+        ] {
+            assert!(value >= start.min(end) - 0.00001);
+            assert!(value <= start.max(end) + 0.00001);
+        }
+    }
+
+    #[test]
+    fn neutral_blue_hover_never_introduces_green_on_entry_exit_or_retarget() {
+        for (neutral, blue) in [(0xffffff, 0xeff6ff), (0x252525, 0x284d80)] {
+            let neutral: Hsla = rgb(neutral).into();
+            let blue: Hsla = rgb(blue).into();
+            let start = TransitionColor::new(neutral);
+            let target = TransitionColor::new(blue);
+            for step in 0..=20 {
+                let progress = step as f32 / 20.;
+                let entering = start.interpolate(&target, progress);
+                assert_channels_between(entering.color(), neutral, blue);
+                let interrupted = start.interpolate(&target, 0.37);
+                let leaving = interrupted.interpolate(&start, progress);
+                assert_channels_between(leaving.color(), neutral, blue);
+                let reentered = leaving.interpolate(&target, 0.43);
+                assert_channels_between(reentered.color(), neutral, blue);
+            }
+        }
+    }
+
+    #[test]
+    fn transparent_endpoint_rgb_cannot_tint_a_fading_surface() {
+        let invisible = TransitionColor::new(
+            Rgba {
+                r: 1.,
+                g: 0.,
+                b: 0.,
+                a: 0.,
+            }
+            .into(),
+        );
+        let blue = TransitionColor::new(
+            Rgba {
+                r: 0.,
+                g: 0.,
+                b: 1.,
+                a: 0.6,
+            }
+            .into(),
+        );
+        for step in 1..=10 {
+            let progress = step as f32 / 10.;
+            let color: Rgba = invisible.interpolate(&blue, progress).color().into();
+            assert!(color.r.abs() < 0.00001);
+            assert!(color.g.abs() < 0.00001);
+            assert!((color.b - 1.).abs() < 0.00001);
+            assert!((color.a - 0.6 * progress).abs() < 0.00001);
+        }
+        let hidden: Rgba = blue.interpolate(&invisible, 1.).color().into();
+        assert_eq!((hidden.r, hidden.g, hidden.b, hidden.a), (0., 0., 0., 0.));
     }
 }

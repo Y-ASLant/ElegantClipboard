@@ -153,14 +153,14 @@ impl ClipboardView {
         } else {
             "history-border-light"
         };
-        let background = gpui_kit::base::motion::transition(
+        let background = visual::transition_color(
             ElementId::from((surface_channel, id as usize)),
             background,
             surface_motion.clone(),
             window,
             cx,
         );
-        let border = gpui_kit::base::motion::transition(
+        let border = visual::transition_color(
             ElementId::from((border_channel, id as usize)),
             border,
             surface_motion,
