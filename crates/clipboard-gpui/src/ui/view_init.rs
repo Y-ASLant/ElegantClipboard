@@ -62,9 +62,6 @@ impl ClipboardView {
             startup.monitoring,
         );
         tray_enabled.set(tray.is_ok());
-        if startup.hidden && tray.is_err() {
-            native_window::set_window_visible(window, true);
-        }
         let tray_events = Self::spawn_tray_events(tray_receiver, main_window, window, cx);
         let tray_error = tray.as_ref().err().map(ToString::to_string);
         // The hotkey thread uses try_send; a full channel must not discard the
@@ -82,8 +79,9 @@ impl ClipboardView {
                     if this.onboarding_visible() && !this.shortcut_change_pending() {
                         this.onboarding_hotkey_used = true;
                     }
-                    if native_window::is_window_shown(window)
-                        && !native_window::is_window_minimized(window)
+                    if this.window_show_task.is_some()
+                        || (native_window::is_window_shown(window)
+                            && !native_window::is_window_minimized(window))
                     {
                         this.hide_visible_window(window, cx);
                         return;
@@ -159,7 +157,7 @@ impl ClipboardView {
             .err()
             .map(ToString::to_string);
         let autostart = clipboard_platform::autostart::enabled(&service.data_dir);
-        let mut startup_errors: Vec<_> = [
+        let startup_errors: Vec<_> = [
             tray_error.map(|error| {
                 format!(
                     "{}: {error}",
@@ -206,10 +204,8 @@ impl ClipboardView {
         let monitor_types = service.initial_monitor_types;
         let app_filter = service.initial_app_filter.clone();
         let onboarding_completed = service.initial_onboarding_completed;
-        if (!startup.hidden || tray.is_err())
-            && let Err(error) = Self::position_window_deferred(window, window_position, cx)
-        {
-            startup_errors.push(error.to_string());
+        if !startup.hidden || tray.is_err() {
+            cx.defer_in(window, |this, window, cx| this.show_window(window, cx));
         }
         acrylic::init_window_effect(window_effect, window, cx);
         apply_theme(theme, window, cx);
@@ -311,6 +307,9 @@ impl ClipboardView {
             image_visible_range: 0..0,
             image_sync_pending: false,
             image_release_task: None,
+            window_show_task: None,
+            #[cfg(windows)]
+            initial_window_bounds: None,
             thumbnails: thumbnail_cache::ThumbnailCache::default(),
             thumbnail_scale: window.scale_factor(),
             _thumbnail_maintenance: Self::maintain_thumbnails(cx),

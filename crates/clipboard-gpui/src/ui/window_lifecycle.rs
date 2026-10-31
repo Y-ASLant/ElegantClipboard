@@ -80,8 +80,9 @@ impl ClipboardView {
                     cx,
                     |this, window, cx| match command {
                         TrayCommand::Toggle => {
-                            if native_window::is_window_shown(window)
-                                && !native_window::is_window_minimized(window)
+                            if this.window_show_task.is_some()
+                                || (native_window::is_window_shown(window)
+                                    && !native_window::is_window_minimized(window))
                             {
                                 this.hide_visible_window(window, cx);
                             } else {
@@ -201,97 +202,6 @@ impl ClipboardView {
         self.hide_window(window, cx);
     }
 
-    pub(super) fn position_window_deferred(
-        window: &Window,
-        mode: WindowPositionPreference,
-        cx: &mut Context<Self>,
-    ) -> anyhow::Result<()> {
-        #[cfg(windows)]
-        {
-            let Some(request) = position::prepare_window_position(window, mode)? else {
-                return Ok(());
-            };
-            let main = window.window_handle();
-            cx.spawn(async move |view, cx| {
-                let valid = main
-                    .update(cx, |_, window, _| {
-                        !window.is_maximized() && !window.is_fullscreen()
-                    })
-                    .unwrap_or(false);
-                if !valid {
-                    return;
-                }
-                tracing::debug!(?request, "Applying deferred native window position");
-                // SetWindowPos synchronously dispatches display callbacks. Run it
-                // outside App/Window/Entity updates so GPUI can borrow App again.
-                let result = request.apply();
-                let _ = update_clipboard_window(&view, main, cx, |this, window, cx| {
-                    if let Err(error) = result {
-                        tracing::error!(%error, "Deferred window positioning failed");
-                        this.set_feedback_message(format!(
-                            "{}: {error}",
-                            tr(this.language, "无法定位窗口", "Failed to position window"),
-                        ));
-                        this.is_error = true;
-                    }
-                    log_window_geometry(window, cx, "main_deferred_position_applied");
-                    cx.notify();
-                });
-            })
-            .detach();
-            Ok(())
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = cx;
-            position::position_window(window, mode)
-        }
-    }
-
-    pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        log_window_geometry(window, cx, "main_show_requested");
-        self.interrupt_paste_except(None);
-        self.quick_paste_pending.take();
-        // 窗口又要显示了：取消隐藏时的延迟释放，避免缩略图白解码一遍。
-        self.image_release_task = None;
-        let was_minimized = native_window::is_window_minimized(window);
-        if was_minimized {
-            native_window::set_window_visible(window, true);
-        }
-        if let Err(error) = Self::position_window_deferred(window, self.window_position.value, cx) {
-            tracing::error!(%error, "Main window positioning failed");
-            self.set_feedback_message(format!(
-                "{}: {error}",
-                tr(self.language, "无法定位窗口", "Failed to position window")
-            ));
-            self.is_error = true;
-        }
-        if !was_minimized {
-            native_window::set_window_visible(window, true);
-        }
-        log_window_geometry(window, cx, "main_shown");
-        if self.onboarding_visible() {
-            window.focus(&self.list_focus, cx);
-            return;
-        }
-        if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
-            self.search_task = None;
-            self.search
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            self.history.begin_search();
-            self.scroll_to_top();
-            self.query(cx);
-        }
-        if self.editor.id.is_some() {
-            return;
-        }
-        if self.search_auto_focus.value {
-            self.search.update(cx, |input, cx| input.focus(window, cx));
-        } else {
-            window.focus(&self.list_focus, cx);
-        }
-    }
-
     pub(super) fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.card_drag_active(cx)
             || self.paste_pending.is_some()
@@ -374,6 +284,7 @@ impl ClipboardView {
     }
 
     pub(super) fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_show_task = None;
         self.suspend_onboarding(cx);
         if self.onboarding_visible() {
             self.paste_target = None;

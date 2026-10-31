@@ -60,6 +60,7 @@ mod thumbnail_cache;
 mod view_init;
 mod window_lifecycle;
 mod window_render;
+mod window_show;
 
 pub use startup::run;
 
@@ -288,6 +289,9 @@ struct ClipboardView {
     image_visible_range: std::ops::Range<usize>,
     image_sync_pending: bool,
     image_release_task: Option<Task<()>>,
+    window_show_task: Option<Task<()>>,
+    #[cfg(windows)]
+    initial_window_bounds: Option<Bounds<Pixels>>,
     thumbnails: thumbnail_cache::ThumbnailCache,
     thumbnail_scale: f32,
     _thumbnail_maintenance: Task<()>,

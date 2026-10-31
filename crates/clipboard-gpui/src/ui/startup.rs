@@ -140,8 +140,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         ..Default::default()
                     }),
                     window_min_size: Some(size(px(400.), px(520.))),
-                    focus: !startup.hidden,
-                    show: !startup.hidden,
+                    focus: !cfg!(windows) && !startup.hidden,
+                    show: !cfg!(windows) && !startup.hidden,
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
                     ..WindowOptions::default()
                 },
@@ -159,6 +159,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                             cx,
                         )
                     });
+                    #[cfg(windows)]
+                    view.update(cx, |view, _| view.initial_window_bounds = Some(bounds));
                     if smoke_test {
                         let settings_view = view.clone();
                         cx.spawn(async move |cx| {
@@ -207,6 +209,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                 cx.quit();
                 return;
             }
+            #[cfg(not(windows))]
             if !startup.hidden {
                 cx.activate(true);
             }

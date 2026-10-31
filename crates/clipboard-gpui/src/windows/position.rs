@@ -2,7 +2,9 @@ use ::windows::Win32::{
     Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint},
     UI::WindowsAndMessaging::{
-        GetCursorPos, GetWindowRect, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+        GWL_EXSTYLE, GetCursorPos, GetWindowLongW, GetWindowPlacement, GetWindowRect, IsIconic,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPlacement, SetWindowPos,
+        WINDOWPLACEMENT, WPF_RESTORETOMAXIMIZED, WS_EX_TOOLWINDOW,
     },
 };
 use anyhow::{Context, Result, anyhow};
@@ -17,6 +19,7 @@ pub struct WindowPositionRequest {
     hwnd: HWND,
     x: i32,
     y: i32,
+    restore: Option<WINDOWPLACEMENT>,
 }
 
 /// Compute while the GPUI window is borrowed; apply only after that borrow ends.
@@ -41,8 +44,23 @@ pub fn prepare_window_position(
     if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
         return Err(anyhow!("无法读取光标所在显示器"));
     }
-    let mut window_rect = RECT::default();
-    unsafe { GetWindowRect(hwnd, &mut window_rect) }.context("无法读取窗口尺寸")?;
+    let mut restore = None;
+    let window_rect = if unsafe { IsIconic(hwnd) }.as_bool() {
+        let mut saved = WINDOWPLACEMENT {
+            length: size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        unsafe { GetWindowPlacement(hwnd, &mut saved) }.context("无法读取窗口恢复位置")?;
+        if saved.flags.contains(WPF_RESTORETOMAXIMIZED) {
+            return Ok(None);
+        }
+        restore = Some(saved);
+        saved.rcNormalPosition
+    } else {
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(hwnd, &mut rect) }.context("无法读取窗口尺寸")?;
+        rect
+    };
     let (x, y) = placement(
         mode,
         (cursor.x, cursor.y),
@@ -55,11 +73,40 @@ pub fn prepare_window_position(
         window_rect.right - window_rect.left,
         window_rect.bottom - window_rect.top,
     );
-    Ok(Some(WindowPositionRequest { hwnd, x, y }))
+    if let Some(saved) = &mut restore {
+        // WINDOWPLACEMENT uses workspace coordinates except for tool windows.
+        let tool_window =
+            unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32 & WS_EX_TOOLWINDOW.0 != 0;
+        let (left, top) = if tool_window {
+            (x, y)
+        } else {
+            (
+                x - (info.rcWork.left - info.rcMonitor.left),
+                y - (info.rcWork.top - info.rcMonitor.top),
+            )
+        };
+        saved.rcNormalPosition = RECT {
+            left,
+            top,
+            right: left + window_rect.right - window_rect.left,
+            bottom: top + window_rect.bottom - window_rect.top,
+        };
+    }
+    Ok(Some(WindowPositionRequest {
+        hwnd,
+        x,
+        y,
+        restore,
+    }))
 }
 
 impl WindowPositionRequest {
     pub fn apply(self) -> Result<()> {
+        if let Some(saved) = self.restore {
+            // Update the restore rectangle without first exposing the old one.
+            unsafe { SetWindowPlacement(self.hwnd, &saved) }.context("无法更新窗口恢复位置")?;
+            return Ok(());
+        }
         unsafe {
             SetWindowPos(
                 self.hwnd,
