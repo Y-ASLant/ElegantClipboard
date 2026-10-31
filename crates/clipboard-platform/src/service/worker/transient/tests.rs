@@ -49,6 +49,20 @@ fn due_entry_with_unchanged_sequence_is_delivered() {
 }
 
 #[test]
+fn unchanged_sequence_adopts_format_names_from_the_confirmation_read() {
+    let mut window = TransientWindow::new(true);
+    let now = Instant::now();
+    let mut pending = entry(7, "stable", now);
+    pending.formats.clear();
+    assert!(window.push(pending).is_empty());
+    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
+        Ok((7, Some(text_capture("stable")), vec!["CF_HDROP".into()]))
+    });
+    assert_eq!(delivered(&results), 1);
+    assert_eq!(results[0].0.formats, ["CF_HDROP"]);
+}
+
+#[test]
 fn replaced_by_empty_content_is_discarded() {
     let mut window = TransientWindow::new(true);
     let now = Instant::now();

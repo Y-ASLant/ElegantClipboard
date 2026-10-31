@@ -108,7 +108,7 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 
 ### 发布质量门槛
 
-`gpui.yml` 同时用于分支 CI 与 `workflow_call`。标签发布先检查版本，再对同一提交执行三平台检查、测试、原生剪贴板/窗口冒烟和打包；草稿发布只下载这次质量门槛产出的包，不重新构建。Windows 同时启动构建目录与 ZIP 解压后的程序，macOS 从 DMG 内启动，Linux 使用私有 Xvfb。
+`gpui.yml` 同时用于分支 CI 与 `workflow_call`。标签发布先检查版本，再对同一提交执行三平台检查、测试、原生剪贴板/窗口冒烟和打包；草稿发布只下载这次质量门槛产出的包，不重新构建。Windows 同时启动构建目录与 ZIP 解压后的程序，macOS 从 DMG 内启动，Linux 使用私有 Xvfb。Linux 打包同时产出 `.tar.gz`、`.deb` 和 `.rpm`，并在打包脚本内核对安装路径、版本和关键依赖。
 
 `scripts/run-ci-command.ps1` 保存完整命令输出及真实退出码，失败不转换为成功；CI 使用 `always()` 上传 `target/ci-logs/`。历史失败日志访问受限时不能仅凭本地成功宣称修复。
 

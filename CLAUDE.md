@@ -61,7 +61,7 @@ cargo test -p clipboard-core --lib file_copy_cleanup --locked
 cargo test -p clipboard-platform --locked hotkey_change_is_acknowledged -- --test-threads=8
 ```
 
-Package only on the matching OS. `just package` builds the Windows x64 ZIP; `just package-unix` (macOS/Linux only) builds the DMG or `.tar.gz`. Do not cross-build a Mac or Linux package from Windows.
+Package only on the matching OS. `just package` builds the Windows x64 ZIP; `just package-unix` (macOS/Linux only) builds the DMG, or the Linux `.tar.gz`, `.deb`, and `.rpm`. Linux installers need `dpkg-dev` and `rpm`. Do not cross-build a Mac or Linux package from Windows.
 
 CI (`.github/workflows/gpui.yml`) runs the same checks on `windows-latest`, `ubuntu-24.04`, and `macos-15`. Linux tests run under `dbus-run-session -- xvfb-run -a`; the Windows and macOS test steps call `cargo test --workspace --locked` directly.
 

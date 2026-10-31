@@ -135,7 +135,7 @@ just build
 
 The release executable is `target/release/elegant-clipboard-gpui.exe` on Windows, or `target/release/elegant-clipboard-gpui` on macOS/Linux.
 
-Create an unsigned Windows x64 standalone ZIP:
+Create an unsigned Windows x64 standalone ZIP and NSIS installer. The installer requires NSIS 3 with `makensis` on `PATH`:
 
 ```powershell
 just package
@@ -150,9 +150,9 @@ just package-unix
 
 macOS creates `ElegantClipboard-v<version>-<arch>-apple-darwin.dmg` containing `ElegantClipboard.app` and an `/Applications` shortcut. Open the DMG, drag the app to Applications, eject the image, then launch it from Applications. The app is only ad-hoc signed, without Developer ID signing or Apple notarization. If macOS blocks the first launch, verify the download source before using **System Settings → Privacy & Security → Open Anyway**; do not disable system-wide security checks. Automatic paste requires Accessibility permission.
 
-Linux creates a `.tar.gz` containing the executable, license, and instructions, without bundling system libraries. Keep the runtime dependencies listed above installed. Filenames include the actual Rust host target; the script accepts native x86_64 and aarch64 macOS/Linux toolchains. macOS CI and release jobs verify and mount the DMG read-only, check the Applications shortcut and app signature, then launch the packaged application with isolated smoke-test data.
+Linux also creates `.deb` and `.rpm` installers. Filenames use the same Cargo version and Rust host target as the `.tar.gz` (`x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`). The `.tar.gz` remains the executable, license, and instructions without bundled system libraries. The installers place the command at `/usr/bin/elegant-clipboard` (the real binary is `elegant-clipboard-gpui`) and add a desktop entry plus a `hicolor` icon. Removing the package does not delete history in `$XDG_DATA_HOME/elegantclipboard` (default `~/.local/share/elegantclipboard`). Linked-library dependencies come from `dpkg-shlibdeps` and RPM `rpmdeps` for the binary being packaged. Vulkan, Wayland, Ayatana AppIndicator (or legacy AppIndicator), `xdg-utils`, and `dbus` are also required because the program loads them at runtime. `pulseaudio-utils` and `mesa-vulkan-drivers` are recommended. Building the installers requires `dpkg-dev` and `rpm`. Install with `sudo apt install ./ElegantClipboard-v<version>-<target>.deb` or `sudo dnf install ./ElegantClipboard-v<version>-<target>.rpm`, and remove the package name `elegant-clipboard`. The script accepts native x86_64 and aarch64 macOS/Linux toolchains. macOS CI and release jobs verify and mount the DMG read-only, check the Applications shortcut and app signature, then launch the packaged application with isolated smoke-test data.
 
-Packages and SHA-256 files are written locally to `target/packages/`; CI artifacts and GitHub Releases upload only platform packages, not `.sha256` files. Installation wizards and automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
+Packages and SHA-256 files are written locally to `target/packages/`; CI artifacts and GitHub Releases upload only platform packages, not `.sha256` files. Windows produces both `ElegantClipboard-v<version>-windows-x64.zip` and `ElegantClipboard-v<version>-windows-x64-setup.exe`; Linux produces `.tar.gz`, `.deb`, and `.rpm`. The installer is per-user and uses `%LOCALAPPDATA%\Programs\ElegantClipboard`, adds a Start menu shortcut, and offers a desktop shortcut and launch on the finish page. Uninstall removes that folder, those shortcuts, and current-user startup commands that point at the installed executable. Clipboard history stays in `%LOCALAPPDATA%\ElegantClipboard` and is not removed. Automatic updates are not provided. CI/release jobs build on Windows, Ubuntu, and macOS runners rather than pretending to generate native Unix packages on Windows.
 
 ## Versioning
 

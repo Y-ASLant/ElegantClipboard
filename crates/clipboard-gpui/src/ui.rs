@@ -68,7 +68,7 @@ pub use startup::run;
 use file_cards::{
     FileCardInfo, image_file_dimensions, single_file_image_path, single_image_file_paths,
 };
-use navigation::{history_row_height, history_top_row};
+use navigation::{history_row_height, history_top_row, show_history_scroll_to_top};
 use presentation::{apply_theme, format_bytes, localize_service_message, tr, window_shell};
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_from_keystroke, shortcut_kbd,
@@ -97,10 +97,11 @@ use clipboard_core::{
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, CornerRadiusPreference,
-        DedupStrategy, DisplayPreference, HotkeyPreference, HoverPreviewPosition,
-        HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteKeyPreference,
-        PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemePreference, TimeFormat,
-        WindowEffect, WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
+        DedupStrategy, DisplayPreference, HotkeyPreference, HoverPreviewDetails,
+        HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MonitorTypesPreference,
+        PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemePreference,
+        TimeFormat, WindowEffect, WindowEffectPreference, WindowPositionPreference,
+        WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{

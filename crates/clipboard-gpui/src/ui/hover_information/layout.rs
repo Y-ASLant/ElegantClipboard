@@ -1,6 +1,5 @@
 use super::{GAP, InformationPlacement, ROW_HEIGHT};
 use gpui_kit::{Bounds, Pixels};
-use std::ops::Range;
 
 pub(super) struct InformationLayout {
     pub(super) left: f32,
@@ -8,7 +7,8 @@ pub(super) struct InformationLayout {
     pub(super) width: f32,
     pub(super) height: f32,
     pub(super) align_end: bool,
-    pub(super) rows: Vec<Range<usize>>,
+    pub(super) rows: Vec<Vec<usize>>,
+    pub(super) widths: Vec<f32>,
 }
 
 #[derive(Clone, Copy)]
@@ -64,30 +64,61 @@ impl Rect {
     }
 }
 
-fn row_ranges(widths: &[f32], available: f32) -> impl Iterator<Item = Range<usize>> + '_ {
-    let mut start = 0;
-    std::iter::from_fn(move || {
-        if start >= widths.len() {
-            return None;
+const MIN_FLEXIBLE: f32 = 140.0;
+
+/// Place each chip on the earliest row with room. A flexible chip (a long path)
+/// shrinks into the largest leftover instead of forcing every later chip onto a new row.
+pub(super) fn pack_rows(
+    widths: &[f32],
+    flexible: &[bool],
+    available: f32,
+) -> (Vec<Vec<usize>>, Vec<f32>) {
+    let mut placed = widths.to_vec();
+    let mut rows: Vec<(f32, Vec<usize>)> = Vec::new();
+    for (index, preferred) in widths.iter().copied().enumerate() {
+        let width = preferred.min(available).max(1.0);
+        if let Some(row) = rows.iter_mut().find(|(used, chips)| {
+            let next = if chips.is_empty() {
+                width
+            } else {
+                *used + GAP + width
+            };
+            next <= available + 0.01
+        }) {
+            row.0 = if row.1.is_empty() {
+                width
+            } else {
+                row.0 + GAP + width
+            };
+            row.1.push(index);
+            placed[index] = width;
+            continue;
         }
-        let first = start;
-        let mut used = widths[start].min(available);
-        start += 1;
-        while start < widths.len() {
-            let next = used + GAP + widths[start].min(available);
-            if next > available + 0.01 {
-                break;
-            }
-            used = next;
-            start += 1;
+        let flexible = flexible.get(index).copied().unwrap_or(false);
+        let gap = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(row_index, (used, chips))| {
+                let gap = available - *used - if chips.is_empty() { 0.0 } else { GAP };
+                (flexible && gap >= MIN_FLEXIBLE).then_some((gap, row_index))
+            });
+        if let Some((gap, row_index)) = gap.max_by(|left, right| left.0.total_cmp(&right.0)) {
+            let width = gap.min(width);
+            placed[index] = width;
+            rows[row_index].0 += GAP + width;
+            rows[row_index].1.push(index);
+            continue;
         }
-        Some(first..start)
-    })
+        placed[index] = width;
+        rows.push((width, vec![index]));
+    }
+    (rows.into_iter().map(|(_, chips)| chips).collect(), placed)
 }
 
 pub(super) fn place_information(
     placement: &InformationPlacement,
     widths: &[f32],
+    flexible: &[bool],
 ) -> Option<InformationLayout> {
     if widths.is_empty() {
         return None;
@@ -131,8 +162,9 @@ pub(super) fn place_information(
                 continue;
             }
             let width = natural_width.max(160.0).min(maximum);
-            let row_count = row_ranges(widths, width).count();
-            let height = ROW_HEIGHT * row_count as f32 + GAP * (row_count - 1) as f32;
+            let (rows, placed) = pack_rows(widths, flexible, width);
+            let row_count = rows.len();
+            let height = ROW_HEIGHT * row_count as f32 + GAP * (row_count.saturating_sub(1)) as f32;
             if height > area.bottom - area.top {
                 continue;
             }
@@ -147,7 +179,8 @@ pub(super) fn place_information(
                 width,
                 height,
                 align_end,
-                rows: row_ranges(widths, width).collect(),
+                rows,
+                widths: placed,
             });
         }
     }
@@ -176,16 +209,16 @@ mod tests {
     #[test]
     fn prefers_above_and_wraps_without_covering_owner() {
         let placement = placement([550.0, 250.0, 350.0, 300.0], [50.0, 50.0, 450.0, 600.0]);
-        let layout = place_information(&placement, &[200.0, 200.0, 200.0]).unwrap();
+        let layout = place_information(&placement, &[200.0, 200.0, 200.0], &[false; 3]).unwrap();
         assert!(layout.top + layout.height <= 250.0 - GAP);
         assert!(layout.left >= 500.0 + GAP);
-        assert_eq!(layout.rows, vec![0..2, 2..3]);
+        assert_eq!(layout.rows, vec![vec![0, 1], vec![2]]);
     }
 
     #[test]
     fn falls_below_when_above_is_too_short() {
         let placement = placement([550.0, 10.0, 350.0, 300.0], [50.0, 50.0, 450.0, 600.0]);
-        let layout = place_information(&placement, &[200.0, 200.0]).unwrap();
+        let layout = place_information(&placement, &[200.0, 200.0], &[false; 2]).unwrap();
         assert!(layout.top >= 310.0 + GAP);
         assert!(layout.left >= 500.0 + GAP);
     }
@@ -193,6 +226,19 @@ mod tests {
     #[test]
     fn omits_strip_instead_of_covering_preview_or_owner() {
         let placement = placement([508.0, 0.0, 492.0, 700.0], [0.0, 0.0, 500.0, 700.0]);
-        assert!(place_information(&placement, &[200.0, 200.0]).is_none());
+        assert!(place_information(&placement, &[200.0, 200.0], &[false; 2]).is_none());
+    }
+
+    #[test]
+    fn short_chip_fills_an_earlier_gap_instead_of_a_new_row() {
+        let (rows, _) = pack_rows(&[100.0, 220.0, 80.0], &[false, true, false], 200.0);
+        assert_eq!(rows, vec![vec![0, 2], vec![1]]);
+    }
+
+    #[test]
+    fn long_path_shrinks_into_the_open_gap() {
+        let (rows, placed) = pack_rows(&[100.0, 300.0], &[false, true], 250.0);
+        assert_eq!(rows, vec![vec![0, 1]]);
+        assert!((placed[1] - 142.0).abs() < 0.1);
     }
 }

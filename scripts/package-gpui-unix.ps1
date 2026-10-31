@@ -82,6 +82,9 @@ try {
         Set-Content -LiteralPath "$archive.sha256" -Value "$hash *$([IO.Path]::GetFileName($archive))" -Encoding utf8NoBOM
         Write-Output "Package: $archive"
         Write-Output "SHA256: $hash"
+        if ($IsLinux) {
+            & (Join-Path $PSScriptRoot 'package-gpui-linux.ps1') -Executable $executable -Version $version -HostTarget $hostTarget -OutputDirectory $packageRoot -SourceRoot $root
+        }
     } finally {
         Remove-Item -LiteralPath $stage -Recurse -Force
     }

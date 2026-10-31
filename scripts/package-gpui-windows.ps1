@@ -46,6 +46,51 @@ try {
         Set-Content -LiteralPath "$archive.sha256" -Value "$hash *$filename" -Encoding utf8NoBOM
         Write-Output "Package: $archive"
         Write-Output "SHA256: $hash"
+
+        if ($package[0].version -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$') {
+            throw "无法为 NSIS 生成四段版本号：$($package[0].version)"
+        }
+        $build = if ($Matches[4]) { $Matches[4] } else { '0' }
+        $versionQuad = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$build"
+        $setupName = "ElegantClipboard-v$($package[0].version)-windows-x64-setup.exe"
+        $setup = Join-Path $packageRoot $setupName
+        $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+        if ($makensis) {
+            $makensis = $makensis.Source
+        } else {
+            $candidates = @(
+                (Join-Path ${env:ProgramFiles} 'NSIS\makensis.exe'),
+                (Join-Path ${env:ProgramFiles(x86)} 'NSIS\makensis.exe')
+            )
+            $makensis = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        }
+        if (-not $makensis) {
+            throw '未找到 makensis。请安装 NSIS 3，并确保 makensis 在 PATH 中。'
+        }
+        $nsisPath = {
+            param([string]$Path)
+            if ($Path.Contains('"')) { throw "NSIS 路径不能包含引号：$Path" }
+            return $Path
+        }
+        & $makensis @(
+            '/INPUTCHARSET', 'UTF8',
+            '/V2',
+            "/DVERSION=$($package[0].version)",
+            "/DVERSION_QUAD=$versionQuad",
+            "/DOUTFILE=$(& $nsisPath $setup)",
+            "/DSOURCE_EXE=$(& $nsisPath $executable)",
+            "/DSOURCE_LICENSE=$(& $nsisPath (Join-Path $root 'LICENSE'))",
+            "/DSOURCE_README=$(& $nsisPath (Join-Path $root 'docs\WINDOWS_PACKAGE_README.txt'))",
+            "/DICON=$(& $nsisPath (Join-Path $root 'App.ico'))",
+            (& $nsisPath (Join-Path $root 'scripts\nsis\installer.nsi'))
+        )
+        if ($LASTEXITCODE -ne 0) {
+            throw "NSIS 安装包构建失败：$LASTEXITCODE"
+        }
+        $setupHash = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+        Set-Content -LiteralPath "$setup.sha256" -Value "$setupHash *$setupName" -Encoding utf8NoBOM
+        Write-Output "Installer: $setup"
+        Write-Output "SHA256: $setupHash"
     }
     finally {
         $resolvedRoot = (Resolve-Path -LiteralPath $packageRoot).Path.TrimEnd('\')

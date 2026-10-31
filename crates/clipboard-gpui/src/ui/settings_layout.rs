@@ -51,8 +51,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Display,
         chinese: "悬停预览",
         english: "Hover preview",
-        description_chinese: "分别控制内容类型、延时、位置和图片缩放",
-        description_english: "Choose content types, delay, position and image zoom",
+        description_chinese: "分别控制内容类型、信息标签、延时、位置和图片缩放",
+        description_english: "Choose content types, detail chips, delay, position and image zoom",
         content: SettingsWindowView::settings_hover_content,
     },
     Section {

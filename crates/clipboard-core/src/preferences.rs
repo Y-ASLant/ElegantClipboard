@@ -4,10 +4,12 @@ use serde::{Serialize, de::DeserializeOwned};
 
 mod backup;
 mod corner_radius;
+mod hover_preview;
 mod snapshot;
 mod types;
 mod window_effect;
 pub(crate) use backup::prune_non_gpui_settings;
+pub use hover_preview::*;
 pub use snapshot::PreferenceSnapshot;
 pub use types::*;
 

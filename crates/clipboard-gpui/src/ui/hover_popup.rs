@@ -95,7 +95,11 @@ impl ClipboardView {
             geometry,
             source_bounds,
             image_dimensions,
-            information: hover_information::HoverInformation::new(item, image_dimensions),
+            information: hover_information::HoverInformation::new(
+                item,
+                image_dimensions,
+                self.hover_preference.details,
+            ),
         };
         let language = self.language;
         let zoom_step = self.hover_preference.zoom_step;

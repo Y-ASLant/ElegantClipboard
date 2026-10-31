@@ -40,6 +40,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             delay_ms: 750,
             position: HoverPreviewPosition::Left,
             zoom_step: 25,
+            ..HoverPreviewPreference::default()
         },
         display: DisplayPreference {
             show_category_filter: false,

@@ -202,42 +202,53 @@ impl ClipboardView {
                             this.close_hover_preview("history_scrolled", cx);
                             cx.notify();
                         }))
-                        .when(self.scroll.offset().y < px(-32.), |container| {
-                            container.child(
-                                div()
-                                    .absolute()
-                                    .right(px(visual::SPACE_4 + visual::SPACE_1))
-                                    .bottom(px(visual::SPACE_4))
-                                    .rounded(cx.theme().radius)
-                                    .bg(cx.theme().popover)
-                                    .shadow(visual::control_shadow())
-                                    .child(
-                                        Button::new("history-scroll-to-top")
-                                            .outline()
-                                            .size(px(visual::CONTROL_HEIGHT_LARGE))
-                                            .rounded(cx.theme().radius)
-                                            .bg(cx.theme().popover)
-                                            .border_color(cx.theme().border)
-                                            .icon(
-                                                Icon::new(
-                                                    gpui_kit::assets::IconName::ArrowUpToLine,
+                        .when(
+                            show_history_scroll_to_top(
+                                self.scroll.offset().y,
+                                self.scroll.max_offset().y,
+                                self.scroll.bounds().size.height,
+                            ),
+                            |container| {
+                                container.child(
+                                    div()
+                                        .absolute()
+                                        .right(px(visual::SPACE_4 + visual::SPACE_1))
+                                        .bottom(px(visual::SPACE_4))
+                                        .rounded(cx.theme().radius)
+                                        .bg(cx.theme().popover)
+                                        .shadow(visual::control_shadow())
+                                        .child(
+                                            Button::new("history-scroll-to-top")
+                                                .outline()
+                                                .size(px(visual::CONTROL_HEIGHT_LARGE))
+                                                .rounded(cx.theme().radius)
+                                                .bg(cx.theme().popover)
+                                                .border_color(cx.theme().border)
+                                                .icon(
+                                                    Icon::new(
+                                                        gpui_kit::assets::IconName::ArrowUpToLine,
+                                                    )
+                                                    .size(px(visual::ICON_SIZE)),
                                                 )
-                                                .size(px(visual::ICON_SIZE)),
-                                            )
-                                            .tooltip(tr(self.language, "返回顶部", "Back to top"))
-                                            .accessibility_label(tr(
-                                                self.language,
-                                                "返回顶部",
-                                                "Back to top",
-                                            ))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                cx.stop_propagation();
-                                                this.animate_scroll_to_top(cx);
-                                                cx.notify();
-                                            })),
-                                    ),
-                            )
-                        }),
+                                                .tooltip(tr(
+                                                    self.language,
+                                                    "返回顶部",
+                                                    "Back to top",
+                                                ))
+                                                .accessibility_label(tr(
+                                                    self.language,
+                                                    "返回顶部",
+                                                    "Back to top",
+                                                ))
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    this.animate_scroll_to_top(cx);
+                                                    cx.notify();
+                                                })),
+                                        ),
+                                )
+                            },
+                        ),
                 )
             })
     }

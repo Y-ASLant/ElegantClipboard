@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::database::ContentType;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CornerRadiusPreference {
     #[default]
@@ -299,56 +297,6 @@ pub enum WindowPositionPreference {
     FollowCursor,
     ScreenCenter,
     FixedPosition,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HoverPreviewPosition {
-    #[default]
-    Auto,
-    Left,
-    Right,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct HoverPreviewPreference {
-    pub image: bool,
-    pub text: bool,
-    pub files: bool,
-    pub expanded_image: bool,
-    pub delay_ms: u16,
-    pub position: HoverPreviewPosition,
-    pub zoom_step: u8,
-}
-
-impl Default for HoverPreviewPreference {
-    fn default() -> Self {
-        Self {
-            image: true,
-            text: true,
-            files: false,
-            expanded_image: false,
-            delay_ms: 500,
-            position: HoverPreviewPosition::Auto,
-            zoom_step: 10,
-        }
-    }
-}
-
-impl HoverPreviewPreference {
-    pub fn allows(self, content_type: &str) -> bool {
-        match ContentType::parse(content_type) {
-            Some(ContentType::Image) => self.image,
-            Some(ContentType::Files) => self.files,
-            Some(kind) if kind.is_text_like() => self.text,
-            _ => false,
-        }
-    }
-
-    pub(super) fn valid(self) -> bool {
-        (100..=2000).contains(&self.delay_ms) && (5..=50).contains(&self.zoom_step)
-    }
 }
 
 pub const MIN_WINDOW_WIDTH: u32 = 400;

@@ -38,6 +38,19 @@ pub(super) fn history_top_row(offsets: &[Pixels], scroll_y: Pixels) -> (usize, P
     )
 }
 
+/// One mouse-wheel notch moves farther than a few dozen pixels, so a small
+/// fixed threshold covers the last row's source badge on the first tick.
+/// Show the control only after the first screen has left and another screen
+/// remains below.
+pub(super) fn show_history_scroll_to_top(
+    offset_y: Pixels,
+    max_offset_y: Pixels,
+    viewport_height: Pixels,
+) -> bool {
+    let scrolled = -offset_y;
+    viewport_height > px(0.) && max_offset_y > viewport_height && scrolled > viewport_height
+}
+
 impl ClipboardView {
     pub(super) fn query(&mut self, cx: &mut Context<Self>) {
         let generation = self.history.generation;
@@ -241,7 +254,18 @@ impl ClipboardView {
 }
 #[cfg(test)]
 mod history_virtual_list_tests {
-    use super::{DragPlacement, history_top_row, px};
+    use super::{DragPlacement, history_top_row, px, show_history_scroll_to_top};
+
+    #[test]
+    fn scroll_to_top_stays_hidden_for_a_wheel_notch_and_a_short_list() {
+        let viewport = px(420.);
+        assert!(!show_history_scroll_to_top(px(0.), px(80.), viewport));
+        assert!(!show_history_scroll_to_top(px(-32.), px(2000.), viewport));
+        assert!(!show_history_scroll_to_top(px(-420.), px(2000.), viewport));
+        assert!(show_history_scroll_to_top(px(-421.), px(2000.), viewport));
+        assert!(!show_history_scroll_to_top(px(-800.), px(400.), viewport));
+        assert!(!show_history_scroll_to_top(px(-800.), px(2000.), px(0.)));
+    }
 
     #[test]
     fn mixed_height_rows_preserve_partial_position_across_resizing_and_pagination() {

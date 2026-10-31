@@ -80,6 +80,16 @@ fn hover_preview_defaults_persist_and_reject_invalid_values() -> Result<()> {
 }
 
 #[test]
+fn saved_hover_preview_without_detail_flags_stays_fully_visible() {
+    let parsed: HoverPreviewPreference = serde_json::from_str(
+        r#"{"image":true,"text":true,"files":false,"expanded_image":false,"delay_ms":500,"position":"auto","zoom_step":10}"#,
+    )
+    .unwrap();
+    assert_eq!(parsed.details, HoverPreviewDetails::default());
+    assert!(parsed.details.formats && parsed.details.path && parsed.details.hint);
+}
+
+#[test]
 fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("clipboard.db");

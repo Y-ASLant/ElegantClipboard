@@ -183,6 +183,118 @@ impl SettingsWindowView {
                     ),
                 ),
             )
+            .child(
+                settings_column_field(tr(language, "预览信息", "Preview details")).child(
+                    settings_inline().children(
+                        detail_toggles(language, hover_preference.details)
+                            .into_iter()
+                            .map(|(id, label, selected, set_checked)| {
+                                let owner = self.owner.clone();
+                                Checkbox::new(id)
+                                    .min_w_0()
+                                    .min_h(px(32.))
+                                    .py(px(6.))
+                                    .text_size(px(14.))
+                                    .whitespace_normal()
+                                    .label(label)
+                                    .checked(selected)
+                                    .disabled(hover_pending)
+                                    .on_change(move |checked, _, cx| {
+                                        let _ = owner.update(cx, |owner, cx| {
+                                            let mut details = owner.hover_preference.details;
+                                            set_checked(&mut details, *checked);
+                                            owner.save_hover_preference(
+                                                HoverPreviewPreference {
+                                                    details,
+                                                    ..owner.hover_preference
+                                                },
+                                                cx,
+                                            );
+                                        });
+                                    })
+                            }),
+                    ),
+                ),
+            )
             .into_any_element()
     }
+}
+
+fn detail_toggles(
+    language: LanguagePreference,
+    details: HoverPreviewDetails,
+) -> [(
+    &'static str,
+    &'static str,
+    bool,
+    fn(&mut HoverPreviewDetails, bool),
+); 11] {
+    [
+        (
+            "hover-detail-kind",
+            tr(language, "类型", "Type"),
+            details.kind,
+            |details, checked| details.kind = checked,
+        ),
+        (
+            "hover-detail-size",
+            tr(language, "存储大小", "Stored size"),
+            details.size,
+            |details, checked| details.size = checked,
+        ),
+        (
+            "hover-detail-resolution",
+            tr(language, "分辨率", "Resolution"),
+            details.resolution,
+            |details, checked| details.resolution = checked,
+        ),
+        (
+            "hover-detail-amount",
+            tr(language, "数量", "Counts"),
+            details.amount,
+            |details, checked| details.amount = checked,
+        ),
+        (
+            "hover-detail-name",
+            tr(language, "名称", "Name"),
+            details.name,
+            |details, checked| details.name = checked,
+        ),
+        (
+            "hover-detail-path",
+            tr(language, "路径", "Path"),
+            details.path,
+            |details, checked| details.path = checked,
+        ),
+        (
+            "hover-detail-extension",
+            tr(language, "扩展名", "Extension"),
+            details.extension,
+            |details, checked| details.extension = checked,
+        ),
+        (
+            "hover-detail-formats",
+            tr(language, "数据格式", "Data format"),
+            details.formats,
+            |details, checked| details.formats = checked,
+        ),
+        (
+            "hover-detail-source",
+            tr(language, "来源", "Source"),
+            details.source,
+            |details, checked| details.source = checked,
+        ),
+        (
+            "hover-detail-time",
+            tr(language, "采集时间", "Captured at"),
+            details.captured_at,
+            |details, checked| details.captured_at = checked,
+        ),
+        (
+            "hover-detail-hint",
+            tr(language, "操作提示", "Hint"),
+            details.hint,
+            |details, checked| details.hint = checked,
+        ),
+    ]
 }

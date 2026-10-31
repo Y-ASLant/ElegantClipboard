@@ -105,7 +105,11 @@ impl TransientWindow {
                         if *current == entry.sequence
                             || (ignored_sequence != 0 && *current == ignored_sequence)
                         {
-                            // 序列号未变（确认成功）或被自身回贴取代：照常入库。
+                            // A later read can see format names the first snapshot missed.
+                            // An empty reread must not erase names already captured.
+                            if !formats.is_empty() {
+                                entry.formats.clone_from(formats);
+                            }
                             PollOutcome::Deliver
                         } else {
                             match content {

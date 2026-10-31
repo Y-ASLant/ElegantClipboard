@@ -19,7 +19,7 @@ build:
 package:
     pwsh.exe -NoProfile -File scripts/package-gpui-windows.ps1
 
-# 在 macOS/Linux 本机生成对应的原生包（需要 PowerShell 7）
+# 在 macOS/Linux 本机生成原生包（PowerShell 7；Linux 安装包还需要 dpkg-dev 和 rpm）
 [unix]
 package-unix:
     pwsh -NoProfile -File scripts/package-gpui-unix.ps1

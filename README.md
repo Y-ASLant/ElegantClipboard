@@ -135,7 +135,7 @@ just build
 
 Release 可执行文件为 Windows 的 `target/release/elegant-clipboard-gpui.exe`，或 macOS/Linux 的 `target/release/elegant-clipboard-gpui`。
 
-生成未经签名的 Windows x64 独立 ZIP：
+生成未经签名的 Windows x64 独立 ZIP 和 NSIS 安装包。安装包需要本机已安装 NSIS 3，且 `makensis` 可在 PATH 中找到：
 
 ```powershell
 just package
@@ -150,9 +150,9 @@ just package-unix
 
 macOS 生成 `ElegantClipboard-v<版本>-<架构>-apple-darwin.dmg`，内含 `ElegantClipboard.app` 和指向 `/Applications` 的快捷方式。打开 DMG，将应用拖到 Applications，推出磁盘映像后从“应用程序”启动。应用仅进行本地 ad-hoc 签名，未使用 Developer ID 签名或 Apple 公证；确认下载来源可信后，如首次启动被拦截，可在“系统设置 → 隐私与安全性”中选择“仍要打开”，不要关闭全局安全检查。自动粘贴需授予辅助功能权限。
 
-Linux 生成原生二进制、许可证和说明的 `.tar.gz`，不会捆绑系统动态库，需保留上述运行依赖。文件名包含实际 Rust host target；脚本支持 macOS/Linux 的 x86_64 和 aarch64 原生工具链。macOS CI 与发布任务会校验 DMG、只读挂载、检查 Applications 快捷方式与应用签名，并从映像内启动隔离数据目录的窗口 smoke。
+Linux 额外生成 `.deb` 和 `.rpm`，文件名与 `.tar.gz` 一样包含 Cargo 版本和实际 Rust host target（`x86_64-unknown-linux-gnu` 或 `aarch64-unknown-linux-gnu`）。`.tar.gz` 仍是不捆绑系统动态库的二进制、许可证和说明。安装包把命令放到 `/usr/bin/elegant-clipboard`（实际二进制为 `elegant-clipboard-gpui`），并安装桌面项和 `hicolor` 图标；卸载不删除 `$XDG_DATA_HOME/elegantclipboard`（默认 `~/.local/share/elegantclipboard`）中的历史数据。链接库依赖由 `dpkg-shlibdeps` 和 RPM `rpmdeps` 按本机二进制生成，另外声明运行时加载的 Vulkan、Wayland、Ayatana AppIndicator（或旧 AppIndicator）、`xdg-utils` 和 `dbus`。`pulseaudio-utils` 与 `mesa-vulkan-drivers` 是推荐依赖。生成安装包需要 `dpkg-dev` 和 `rpm`。可用 `sudo apt install ./ElegantClipboard-v<版本>-<target>.deb` 或 `sudo dnf install ./ElegantClipboard-v<版本>-<target>.rpm` 安装，用包名 `elegant-clipboard` 卸载。脚本支持 macOS/Linux 的 x86_64 和 aarch64 原生工具链。macOS CI 与发布任务会校验 DMG、只读挂载、检查 Applications 快捷方式与应用签名，并从映像内启动隔离数据目录的窗口 smoke。
 
-产物与 SHA-256 文件写入本地 `target/packages/`，CI artifact 与 GitHub Release 仅上传平台包，不上传 `.sha256` 文件。不提供安装向导或自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
+产物与 SHA-256 文件写入本地 `target/packages/`，CI artifact 与 GitHub Release 仅上传平台包，不上传 `.sha256` 文件。Windows 同时生成 `ElegantClipboard-v<版本>-windows-x64.zip` 与 `ElegantClipboard-v<版本>-windows-x64-setup.exe`；Linux 同时生成 `.tar.gz`、`.deb` 和 `.rpm`。安装包按当前用户安装到 `%LOCALAPPDATA%\Programs\ElegantClipboard`，开始菜单创建快捷方式，完成页可选桌面快捷方式和立即运行；卸载删除安装目录、这两处快捷方式，以及命令指向该程序的当前用户开机启动项。历史数据仍在 `%LOCALAPPDATA%\ElegantClipboard`，卸载不删除。不提供自动更新。CI/发布矩阵分别在 Windows、Ubuntu 和 macOS runner 上构建，不从 Windows 伪造 Mac/Linux 包。
 
 ## 版本管理
 
