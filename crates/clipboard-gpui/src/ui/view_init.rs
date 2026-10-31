@@ -343,6 +343,7 @@ impl ClipboardView {
             onboarding_shortcut: None,
             onboarding_practice: None,
             settings_window: None,
+            history_menu_window: None,
             settings_window_opening: false,
             theme,
             theme_pending: false,

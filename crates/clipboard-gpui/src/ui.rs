@@ -21,6 +21,7 @@ mod hover_surface;
 mod hover_window;
 use hover_window::HoverPreviewWindowView;
 mod image_assets;
+mod menu_window;
 mod native_health;
 mod navigation;
 mod onboarding;
@@ -325,6 +326,7 @@ struct ClipboardView {
     onboarding_shortcut: Option<Entity<onboarding::shortcut::OnboardingShortcut>>,
     onboarding_practice: Option<Entity<onboarding::practice::OnboardingPractice>>,
     settings_window: Option<AnyWindowHandle>,
+    history_menu_window: Option<AnyWindowHandle>,
     settings_window_opening: bool,
     theme: ThemePreference,
     theme_pending: bool,

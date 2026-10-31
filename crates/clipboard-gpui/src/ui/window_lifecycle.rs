@@ -269,6 +269,9 @@ impl ClipboardView {
     }
 
     pub(super) fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(menu) = self.history_menu_window.take() {
+            let _ = menu.update(cx, |_, window, _| window.remove_window());
+        }
         self.window_show_task = None;
         self.suspend_onboarding(cx);
         if self.onboarding_visible() {
