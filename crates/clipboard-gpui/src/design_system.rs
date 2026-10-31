@@ -99,6 +99,41 @@ pub fn apply(cx: &mut App) {
         theme.motion.spring_control = Spring::new(NORMAL);
         theme.motion.spring_move = Spring::new(SLOW).with_damping(1.).with_epsilon(0.1);
     });
+    apply_scrollbar(cx);
+}
+
+fn apply_scrollbar(cx: &mut App) {
+    // Refine the official Base scrollbar after Kit projects its colors and
+    // system visibility mode. The 12px hit rail fits the history card gutter.
+    let theme = gpui_kit::base::Theme::global_mut(cx);
+    let scrollbar = std::mem::take(&mut theme.scrollbar);
+    let rail_width = px(crate::visual::SCROLLBAR_RAIL_WIDTH);
+    let styles = scrollbar
+        .styles()
+        .clone()
+        .track(|style| style.width(rail_width))
+        .track_hover(|style| style.width(rail_width))
+        .track_active(|style| {
+            style
+                .width(rail_width)
+                .border_color(gpui_kit::transparent_black())
+        })
+        .thumb(|style| {
+            style
+                .width(px(3.))
+                .inset(px(2.))
+                .radius(px(4.))
+                .min_length(px(24.))
+        })
+        .thumb_hover(|style| style.width(px(6.)).inset(px(2.)).radius(px(4.)))
+        .thumb_active(|style| style.width(px(8.)).inset(px(2.)).radius(px(4.)));
+    theme.scrollbar = scrollbar.with_styles(styles).with_motion(
+        gpui_kit::base::ScrollbarMotion::default()
+            .with_idle(Duration::from_millis(900))
+            .with_enter(FAST)
+            .with_exit(NORMAL)
+            .with_expand(Duration::from_millis(180)),
+    );
 }
 
 fn color(value: u32) -> Hsla {
@@ -260,7 +295,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     };
     colors.status_bar_border = content_border;
     colors.scrollbar = surface.opacity(0.);
-    colors.scrollbar_thumb = emphasized;
+    colors.scrollbar_thumb = secondary_text.opacity(0.45);
     colors.scrollbar_thumb_hover = secondary_text;
     colors.switch = tint(emphasized, ink, 0.55);
     colors.switch_thumb = white;

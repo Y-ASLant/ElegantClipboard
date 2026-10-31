@@ -21,6 +21,7 @@ pub const TEXT_TITLE: f32 = 18.;
 pub const ICON_SMALL: f32 = 14.;
 pub const ICON_SIZE: f32 = 16.;
 pub const BORDER_WIDTH: f32 = 1.;
+pub const SCROLLBAR_RAIL_WIDTH: f32 = 12.;
 pub const CHOICE_MAX_WIDTH: f32 = 640.;
 
 pub fn popover_shadow() -> Vec<BoxShadow> {

@@ -48,8 +48,8 @@ impl HoverPreviewWindowView {
                     .width
                     .max(self.zoom_geometry.initial.size.height),
             );
-            // QcClip changes its 480px base by 48px per wheel step. Existing
-            // user sensitivity remains meaningful (10 => the same 48px step).
+            // The 480px base changes by 48px per wheel step; user sensitivity
+            // remains meaningful (10 => the same 48px step).
             let requested = self.zoom + direction * 4.8 * f32::from(self.zoom_step) / base;
             let (_, next) = self.zoom_geometry.scaled(requested);
             self.zoom = next;

@@ -179,7 +179,24 @@ impl ClipboardView {
                             .track_scroll(&self.scroll)
                             .size_full(),
                         )
-                        .vertical_scrollbar(&self.scroll)
+                        .child(
+                            div()
+                                .id("history-scrollbar-rail")
+                                .absolute()
+                                .right_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(visual::SCROLLBAR_RAIL_WIDTH))
+                                .when(self.scroll.max_offset().y > px(0.), |rail| {
+                                    rail.block_mouse_except_scroll()
+                                })
+                                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                    if *hovered && this.scroll.max_offset().y > px(0.) {
+                                        this.close_hover_preview("scrollbar_hovered", cx);
+                                    }
+                                }))
+                                .vertical_scrollbar(&self.scroll),
+                        )
                         .on_scroll(cx.listener(|this, _, _, cx| {
                             this.scroll_to_top_task = None;
                             this.close_hover_preview("history_scrolled", cx);

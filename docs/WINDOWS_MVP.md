@@ -305,7 +305,7 @@ HTML/RTF 接入验证见 [富文本记录](evidence/windows-rich-text-2026-09-19
 
 Windows fail-fast、进程强杀和断电不保证触发 Rust panic hook；没有 `panic.log` 时仍应结合 `application.log` 的最后操作与 Windows Application 事件。用户原始 `0xc0000409 / ucrtbase.dll` 记录与本轮捕获路径有关联可能，但不能仅凭异常码认定所有闪退根因相同。
 
-## QcClip 预览样式与动效对齐
+## 悬停预览样式与动效
 
 当前预览采用覆盖来源显示器工作区的透明穿透绘制层，不再使用“缩放原生小窗口＋单独连接窗口”的结构。窗口隐藏创建，明确选择显示器，在 GPUI 借用之外完成物理客户区定位、无框/不激活/穿透配置后显示；Windows 命中测试返回 `HTTRANSPARENT`。工作区原点保留负坐标，渲染时才转为显示器局部逻辑坐标。
 

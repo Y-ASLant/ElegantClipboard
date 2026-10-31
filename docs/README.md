@@ -2,7 +2,6 @@
 
 本目录记录 ElegantClipboard GPUI 应用的架构决策、Windows 功能状态和验证证据。
 
-- [GPUI 2.0 基础版规划](GPUI_2_0_PLAN.md)：2026-10-09 的规划基线，保留未完成需求与发布门槛；部分交互目标已调整，当前行为以功能状态和 UI 规范为准。
 - [变更日志](CHANGELOG.md)：从 GPUI 重构版 2.0.0 开始的版本记录。
 - [Windows GPUI 状态](WINDOWS_MVP.md)：当前实现、依赖、运行方式、验证命令与限制。
 - [UI 规范](UI_GUIDELINES.md)：GPUI 界面样式与交互约定。

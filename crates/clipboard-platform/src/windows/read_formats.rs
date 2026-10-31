@@ -72,33 +72,11 @@ const BLACKLISTED_STANDARD_IDS: &[u32] = &[
 /// 在已打开的剪贴板会话内枚举并读取全部非黑名单格式。
 /// 五类主格式已由 BLACKLISTED_STANDARD_IDS 与名称黑名单覆盖，无需额外的
 /// consumed 名单——传入的 guard 仅用于满足枚举的「剪贴板已打开」前置条件。
+// read_extra_formats 逻辑已合并到 enum_formats_once；此函数保留以备测试调用。
+#[allow(dead_code)]
 pub(super) fn read_extra_formats(guard: &clipboard_win::Clipboard) -> Vec<NativeFormatCapture> {
     let _ = guard;
-    let mut captures = Vec::new();
-    let mut total = 0usize;
-    for format in clipboard_win::EnumFormats::new() {
-        if BLACKLISTED_STANDARD_IDS.contains(&format) {
-            continue;
-        }
-        let Some(name) = format_name(format) else {
-            continue;
-        };
-        if is_blacklisted_name(&name) {
-            continue;
-        }
-        let mut data = Vec::new();
-        if clipboard_win::raw::get_vec(format, &mut data).is_err() {
-            continue;
-        }
-        if data.is_empty()
-            || data.len() > MAX_NATIVE_FORMAT_BYTES
-            || total + data.len() > MAX_NATIVE_FORMAT_TOTAL_BYTES
-        {
-            continue;
-        }
-        total += data.len();
-        captures.push(NativeFormatCapture { name, data });
-    }
+    let (captures, _) = enum_formats_once();
     captures
 }
 
@@ -195,8 +173,43 @@ fn read_extra_in_session() -> (Vec<NativeFormatCapture>, Vec<String>) {
     let Ok(guard) = clipboard_win::Clipboard::new_attempts(10) else {
         return (Vec::new(), Vec::new());
     };
-    let formats = captured_formats(&guard);
-    let captures = read_extra_formats(&guard);
+    let _ = guard;
+    let (captures, formats) = enum_formats_once();
+    (captures, formats)
+}
+
+/// 单次枚举同时产出 captured_formats（显示名）与 read_extra_formats（载荷），
+/// 避免 EnumFormats + GetClipboardFormatNameW 各跑两遍。
+fn enum_formats_once() -> (Vec<NativeFormatCapture>, Vec<String>) {
+    let mut formats = Vec::new();
+    let mut captures = Vec::new();
+    let mut total = 0usize;
+    for format in clipboard_win::EnumFormats::new() {
+        if let Some(name) = captured_format_name(format) {
+            formats.push(name);
+        }
+        if BLACKLISTED_STANDARD_IDS.contains(&format) {
+            continue;
+        }
+        let Some(name) = format_name(format) else {
+            continue;
+        };
+        if is_blacklisted_name(&name) {
+            continue;
+        }
+        let mut data = Vec::new();
+        if clipboard_win::raw::get_vec(format, &mut data).is_err() {
+            continue;
+        }
+        if data.is_empty()
+            || data.len() > MAX_NATIVE_FORMAT_BYTES
+            || total + data.len() > MAX_NATIVE_FORMAT_TOTAL_BYTES
+        {
+            continue;
+        }
+        total += data.len();
+        captures.push(NativeFormatCapture { name, data });
+    }
     (captures, formats)
 }
 

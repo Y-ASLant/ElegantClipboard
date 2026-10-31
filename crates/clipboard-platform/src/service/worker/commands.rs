@@ -136,26 +136,10 @@ impl Worker {
                 return Ok(());
             }
             Command::Preview { id, generation } => {
-                self.send_event(Event::Preview {
-                    id,
-                    generation,
-                    result: self
-                        .history
-                        .preview_content(id)
-                        .map_err(|error| error.to_string()),
-                })?;
-                return Ok(());
+                return self.handle_preview(id, generation, false);
             }
             Command::HoverPreview { id, generation } => {
-                self.send_event(Event::HoverPreview {
-                    id,
-                    generation,
-                    result: self
-                        .history
-                        .preview_content(id)
-                        .map_err(|error| error.to_string()),
-                })?;
-                return Ok(());
+                return self.handle_preview(id, generation, true);
             }
             Command::EditContent { id, generation } => {
                 let result = self
@@ -484,5 +468,26 @@ impl Worker {
             Command::Pause(paused) => return self.handle_pause(paused),
         }
         self.snapshot()
+    }
+
+    fn handle_preview(&mut self, id: i64, generation: u64, hover: bool) -> Result<()> {
+        let result = self
+            .history
+            .preview_content(id)
+            .map_err(|error| error.to_string());
+        let event = if hover {
+            Event::HoverPreview {
+                id,
+                generation,
+                result,
+            }
+        } else {
+            Event::Preview {
+                id,
+                generation,
+                result,
+            }
+        };
+        self.send_event(event)
     }
 }
