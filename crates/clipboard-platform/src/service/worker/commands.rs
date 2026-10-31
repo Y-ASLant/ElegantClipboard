@@ -215,6 +215,13 @@ impl Worker {
             Command::SetTheme(theme) => {
                 return self.save_setting(theme, Preferences::set_theme, Event::ThemeSaved);
             }
+            Command::SetThemeColor(color) => {
+                return self.save_setting(
+                    color,
+                    Preferences::set_theme_color,
+                    Event::ThemeColorSaved,
+                );
+            }
             Command::SetCornerRadius(radius) => {
                 return self.save_setting(
                     radius,

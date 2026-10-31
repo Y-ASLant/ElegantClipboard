@@ -1,6 +1,8 @@
 //! Chakra 风格的原生主题：语义颜色与动效统一投影到 GPUI Kit。
 
-use clipboard_core::preferences::{CornerRadiusPreference, WindowEffect};
+use clipboard_core::preferences::{
+    CornerRadiusPreference, ThemeColor as AccentColor, WindowEffect,
+};
 use gpui_kit::{
     App, Global, Hsla, Pixels,
     base::{Easing, Spring},
@@ -27,6 +29,15 @@ impl Global for ThemeCornerDefaults {}
 
 pub fn set_corner_radius(preference: CornerRadiusPreference, cx: &mut App) {
     cx.set_global(CornerRadius(preference));
+    apply(cx);
+}
+
+#[derive(Clone, Copy)]
+struct AccentChoice(AccentColor);
+impl Global for AccentChoice {}
+
+pub fn set_theme_color(color: AccentColor, cx: &mut App) {
+    cx.set_global(AccentChoice(color));
     apply(cx);
 }
 pub const FAST: Duration = Duration::from_millis(150);
@@ -71,8 +82,11 @@ pub fn apply(cx: &mut App) {
         CornerRadiusPreference::Fixed(value) => (px(f32::from(value)), px(f32::from(value))),
     };
     let material = crate::window_effect::active(cx);
+    let accent = cx
+        .try_global::<AccentChoice>()
+        .map_or(AccentColor::GoogleBlue, |value| value.0);
     Theme::update(cx, |theme| {
-        apply_colors(&mut theme.colors, dark, material.effect);
+        apply_colors(&mut theme.colors, dark, material.effect, accent);
         // Kit's segmented selection always paints a raised shadow beneath its
         // background token. Keep that small elevated fill solid so its own
         // shadow cannot bleed through; inputs still use the translucent color.
@@ -160,7 +174,7 @@ pub fn container_border(cx: &App) -> Hsla {
     }
 }
 
-fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
+fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accent: AccentColor) {
     let surface = color(if dark { 0x22252b } else { 0xffffff });
     let foreground = color(if dark { 0xf1f3f5 } else { 0x18181b });
     let subtle = color(if dark { 0x1b1e23 } else { 0xfafafa });
@@ -207,11 +221,20 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     } else {
         border
     };
-    let primary = color(0x2563eb);
-    let primary_text = color(if dark { 0x60a5fa } else { 0x2563eb });
-    let blue_subtle = color(if dark { 0x14204a } else { 0xeff6ff });
+    let palette = accent_palette(accent);
+    let primary = color(palette.primary);
+    let primary_text = color(if dark {
+        palette.text_dark
+    } else {
+        palette.text_light
+    });
+    let accent_subtle = color(if dark {
+        palette.subtle_dark
+    } else {
+        palette.subtle_light
+    });
     let white = color(0xffffff);
-    let selection_surface = tint(blue_subtle, primary, 0.45);
+    let selection_surface = tint(accent_subtle, primary, 0.45);
 
     // Kit inputs (including Settings' internal search) use this surface.
     // Dialogs, menus, notifications and passive previews use popover instead.
@@ -229,8 +252,8 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     colors.accent_foreground = primary_text;
     colors.primary = primary;
     colors.primary_foreground = white;
-    colors.primary_hover = color(0x1d4ed8);
-    colors.primary_active = color(0x173da6);
+    colors.primary_hover = color(palette.hover);
+    colors.primary_active = color(palette.active);
     colors.button_primary = colors.primary;
     colors.button_primary_foreground = white;
     colors.button_primary_hover = colors.primary_hover;
@@ -249,9 +272,9 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     colors.button_active = control_pressed;
     colors.muted = control_muted;
     colors.muted_foreground = secondary_text;
-    colors.ring = color(0x3b82f6);
+    colors.ring = color(palette.ring);
     colors.caret = primary_text;
-    colors.selection = color(0x3b82f6).opacity(if dark { 0.35 } else { 0.2 });
+    colors.selection = color(palette.ring).opacity(if dark { 0.35 } else { 0.2 });
     colors.group_box = content;
     colors.group_box_foreground = foreground;
     colors.accordion = content;
@@ -315,7 +338,11 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     colors.drag_border = primary;
     colors.drop_target = selection_surface;
     colors.link = primary_text;
-    colors.link_hover = color(if dark { 0xa3cfff } else { 0x173da6 });
+    colors.link_hover = color(if dark {
+        palette.link_hover_dark
+    } else {
+        palette.link_hover_light
+    });
     colors.link_active = primary_text;
     colors.description_list_label = tint(subtle, ink, 0.16);
     colors.description_list_label_foreground = secondary_text;
@@ -375,4 +402,60 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
         colors.warning,
         0.35,
     );
+}
+
+struct AccentPalette {
+    primary: u32,
+    text_light: u32,
+    text_dark: u32,
+    hover: u32,
+    active: u32,
+    subtle_light: u32,
+    subtle_dark: u32,
+    ring: u32,
+    link_hover_light: u32,
+    link_hover_dark: u32,
+}
+
+fn accent_palette(color: AccentColor) -> AccentPalette {
+    match color {
+        AccentColor::VibrantOrange => AccentPalette {
+            // Opaque white: fill holds white text at 5.2:1, text holds at 6.2:1.
+            primary: 0xc2410c,
+            text_light: 0xae3a0f,
+            text_dark: 0xfdba74,
+            hover: 0x9a3412,
+            active: 0x7c2d12,
+            subtle_light: 0xffedd5,
+            subtle_dark: 0x3b1d0b,
+            ring: 0xea580c,
+            link_hover_light: 0xa63d0a,
+            link_hover_dark: 0xfed7aa,
+        },
+        AccentColor::Cyan => AccentPalette {
+            // Opaque white: fill holds white text at 5.4:1, text holds at 6.2:1.
+            primary: 0x0e7490,
+            text_light: 0x116982,
+            text_dark: 0x67e8f9,
+            hover: 0x155e75,
+            active: 0x164e63,
+            subtle_light: 0xcffafe,
+            subtle_dark: 0x083344,
+            ring: 0x0891b2,
+            link_hover_light: 0x12667a,
+            link_hover_dark: 0xa5f3fc,
+        },
+        AccentColor::GoogleBlue => AccentPalette {
+            primary: 0x1a73e8,
+            text_light: 0x1a73e8,
+            text_dark: 0x8ab4f8,
+            hover: 0x1967d2,
+            active: 0x174ea6,
+            subtle_light: 0xe8f0fe,
+            subtle_dark: 0x1b2a4a,
+            ring: 0x4285f4,
+            link_hover_light: 0x174ea6,
+            link_hover_dark: 0xd2e3fc,
+        },
+    }
 }

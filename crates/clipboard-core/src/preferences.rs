@@ -15,6 +15,7 @@ pub use types::*;
 
 pub(crate) const RETENTION_KEY: &str = "gpui_retention";
 const THEME_KEY: &str = "gpui_theme_mode";
+const THEME_COLOR_KEY: &str = "gpui_theme_color";
 const CORNER_RADIUS_KEY: &str = "gpui_corner_radius";
 const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
@@ -100,6 +101,25 @@ impl Preferences {
                 ThemePreference::System => "system",
                 ThemePreference::Light => "light",
                 ThemePreference::Dark => "dark",
+            },
+        )?)
+    }
+
+    pub fn theme_color(&self) -> Result<ThemeColor> {
+        Ok(match self.repository.get(THEME_COLOR_KEY)?.as_deref() {
+            Some("orange") => ThemeColor::VibrantOrange,
+            Some("cyan") => ThemeColor::Cyan,
+            _ => ThemeColor::GoogleBlue,
+        })
+    }
+
+    pub fn set_theme_color(&self, color: ThemeColor) -> Result<()> {
+        Ok(self.repository.set(
+            THEME_COLOR_KEY,
+            match color {
+                ThemeColor::VibrantOrange => "orange",
+                ThemeColor::Cyan => "cyan",
+                ThemeColor::GoogleBlue => "google_blue",
             },
         )?)
     }

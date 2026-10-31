@@ -180,6 +180,8 @@ impl ClipboardView {
         .flatten()
         .collect();
         let theme = service.initial_preferences.theme;
+        let theme_color = service.initial_preferences.theme_color;
+        crate::design_system::set_theme_color(theme_color, cx);
         let corner_radius = service.initial_preferences.corner_radius;
         crate::design_system::set_corner_radius(corner_radius, cx);
         let window_effect = service.initial_preferences.window_effect;
@@ -344,6 +346,8 @@ impl ClipboardView {
             settings_window_opening: false,
             theme,
             theme_pending: false,
+            theme_color,
+            theme_color_pending: false,
             corner_radius: PendingPref::new(corner_radius),
             window_effect,
             window_effect_pending: false,

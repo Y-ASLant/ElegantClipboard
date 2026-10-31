@@ -57,6 +57,7 @@ mod shortcut_registration;
 mod shortcuts;
 mod startup;
 mod storage;
+mod theme_color;
 mod thumbnail_cache;
 mod view_init;
 mod window_lifecycle;
@@ -99,9 +100,9 @@ use clipboard_core::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, CornerRadiusPreference,
         DedupStrategy, DisplayPreference, HotkeyPreference, HoverPreviewDetails,
         HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MonitorTypesPreference,
-        PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemePreference,
-        TimeFormat, WindowEffect, WindowEffectPreference, WindowPositionPreference,
-        WindowSizePreference,
+        PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor,
+        ThemePreference, TimeFormat, WindowEffect, WindowEffectPreference,
+        WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -327,6 +328,8 @@ struct ClipboardView {
     settings_window_opening: bool,
     theme: ThemePreference,
     theme_pending: bool,
+    theme_color: ThemeColor,
+    theme_color_pending: bool,
     corner_radius: PendingPref<CornerRadiusPreference>,
     window_effect: WindowEffectPreference,
     window_effect_pending: bool,

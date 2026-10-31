@@ -40,22 +40,67 @@ pub fn card_padding(density: CardDensity) -> f32 {
         CardDensity::Spacious => SPACE_3,
     }
 }
-pub const ROW_HEIGHT: f32 = 96.;
-pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
-    let base = match density {
-        CardDensity::Compact => 88.,
-        CardDensity::Standard => ROW_HEIGHT,
-        CardDensity::Spacious => 112.,
-    };
-    base + f32::from(preview_lines.saturating_sub(2)) * 20.
+pub const PREVIEW_LINE_HEIGHT: f32 = 20.;
+pub const METADATA_ROW_HEIGHT: f32 = 20.;
+pub const FILE_THUMBNAIL_WIDTH: f32 = 48.;
+pub const FILE_THUMBNAIL_HEIGHT: f32 = 36.;
+/// Narrow columns across a text card. 14px UI text fits about 44 ASCII
+/// characters, or 22 full-width characters, before it wraps.
+pub const TEXT_COLUMNS_PER_LINE: usize = 44;
+/// The file title sits beside the thumbnail, so it wraps sooner.
+pub const FILE_COLUMNS_PER_LINE: usize = 36;
+
+/// Preview lines are a cap. Narrow characters must not be counted as full-width,
+/// or a two-line key reserves a blank third line.
+pub fn capped_preview_lines(text: &str, max_lines: u8, columns_per_line: usize) -> u8 {
+    let max_lines = usize::from(max_lines.max(1));
+    let per_line = columns_per_line.max(1);
+    let hard = text.split('\n').count().max(1);
+    let columns = text.chars().map(column_width).sum::<usize>();
+    let soft = columns.div_ceil(per_line).max(1);
+    hard.max(soft).min(max_lines) as u8
 }
 
-pub fn image_row_height(density: CardDensity) -> f32 {
-    match density {
-        CardDensity::Compact => 112.,
-        CardDensity::Standard => 124.,
-        CardDensity::Spacious => 148.,
+fn column_width(ch: char) -> usize {
+    match ch {
+        '\n' | '\r' => 0,
+        ch if is_full_width(ch) => 2,
+        _ => 1,
     }
+}
+
+fn is_full_width(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{1100}'..='\u{115F}'
+            | '\u{2E80}'..='\u{A4CF}'
+            | '\u{AC00}'..='\u{D7A3}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FE10}'..='\u{FE6F}'
+            | '\u{FF01}'..='\u{FF60}'
+            | '\u{FFE0}'..='\u{FFE6}'
+            | '\u{1F300}'..='\u{1FAFF}'
+    )
+}
+
+fn card_chrome(density: CardDensity) -> f32 {
+    let spacing = card_spacing(density);
+    // Row padding, card padding and border, the gap above metadata, then the metadata row.
+    spacing * 2. + card_padding(density) * 2. + BORDER_WIDTH * 2. + spacing + METADATA_ROW_HEIGHT
+}
+
+pub fn row_height(density: CardDensity, preview_lines: u8) -> f32 {
+    card_chrome(density) + PREVIEW_LINE_HEIGHT * f32::from(preview_lines.max(1))
+}
+
+pub fn media_row_height(density: CardDensity, image: bool, title_lines: u8) -> f32 {
+    let thumb = if image {
+        thumbnail_size(density).1
+    } else {
+        FILE_THUMBNAIL_HEIGHT
+    };
+    let title = PREVIEW_LINE_HEIGHT * f32::from(title_lines.max(1));
+    card_chrome(density) + thumb.max(title)
 }
 
 pub fn card_spacing(density: CardDensity) -> f32 {
@@ -393,5 +438,29 @@ mod color_transition_tests {
         }
         let hidden: Rgba = blue.interpolate(&invisible, 1.).color().into();
         assert_eq!((hidden.r, hidden.g, hidden.b, hidden.a), (0., 0., 0., 0.));
+    }
+}
+
+#[cfg(test)]
+mod card_height_tests {
+    use super::{
+        CardDensity, TEXT_COLUMNS_PER_LINE, capped_preview_lines, media_row_height, row_height,
+    };
+
+    #[test]
+    fn unused_preview_lines_do_not_stretch_the_card() {
+        let density = CardDensity::Standard;
+        assert!(row_height(density, 1) < row_height(density, 2));
+        assert!(row_height(density, 2) < row_height(density, 3));
+        assert_eq!(capped_preview_lines("只有一行", 3, 24), 1);
+        assert_eq!(capped_preview_lines("第一行\n第二行", 3, 24), 2);
+        assert_eq!(capped_preview_lines("一\n二\n三\n四", 3, 24), 3);
+        let narrow = "n".repeat(62);
+        assert_eq!(capped_preview_lines(&narrow, 3, TEXT_COLUMNS_PER_LINE), 2);
+        assert_eq!(
+            capped_preview_lines(&"字".repeat(23), 3, TEXT_COLUMNS_PER_LINE),
+            2
+        );
+        assert!(media_row_height(density, false, 1) < row_height(density, 3));
     }
 }

@@ -3,10 +3,23 @@ pub(super) fn history_row_height(
     item: &clipboard_core::database::ClipboardItem,
     display: DisplayPreference,
 ) -> f32 {
+    let preview = item.preview.as_deref().unwrap_or("");
     if item.content_type == "image" {
-        visual::image_row_height(display.card_density)
+        visual::media_row_height(display.card_density, true, 1)
+    } else if item.content_type == "files" {
+        let lines = visual::capped_preview_lines(
+            preview,
+            display.card_max_lines,
+            visual::FILE_COLUMNS_PER_LINE,
+        );
+        visual::media_row_height(display.card_density, false, lines)
     } else {
-        visual::row_height(display.card_density, display.card_max_lines)
+        let lines = visual::capped_preview_lines(
+            preview,
+            display.card_max_lines,
+            visual::TEXT_COLUMNS_PER_LINE,
+        );
+        visual::row_height(display.card_density, lines)
     }
 }
 

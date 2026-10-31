@@ -104,6 +104,7 @@ impl ClipboardView {
                 item_count,
             } => self.apply_merged(purpose, clipboard_sequence, item_count, window, cx),
             Event::ThemeSaved(result) => self.apply_theme_saved(result, window, cx),
+            Event::ThemeColorSaved(result) => self.apply_theme_color_saved(result, cx),
             Event::CornerRadiusSaved(result) => {
                 self.acknowledge_save(
                     result,

@@ -26,6 +26,21 @@ fn theme_defaults_persists_and_recovers_unknown_values() -> Result<()> {
 }
 
 #[test]
+fn theme_color_defaults_to_google_blue_and_rejects_unknown_values() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let db = Database::new(directory.path().join("clipboard.db"))?;
+    let preferences = Preferences::new(&db);
+    assert_eq!(preferences.theme_color()?, ThemeColor::GoogleBlue);
+    preferences.set_theme_color(ThemeColor::Cyan)?;
+    assert_eq!(preferences.theme_color()?, ThemeColor::Cyan);
+    preferences.set_theme_color(ThemeColor::VibrantOrange)?;
+    assert_eq!(preferences.theme_color()?, ThemeColor::VibrantOrange);
+    SettingsRepository::new(&db).set(THEME_COLOR_KEY, "unknown")?;
+    assert_eq!(preferences.theme_color()?, ThemeColor::GoogleBlue);
+    Ok(())
+}
+
+#[test]
 fn hotkey_preference_persists_independently_of_legacy_setting() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("clipboard.db");

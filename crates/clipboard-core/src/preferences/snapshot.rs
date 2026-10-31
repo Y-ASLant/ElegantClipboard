@@ -5,6 +5,7 @@ use crate::retention::RetentionPolicy;
 #[derive(Debug, PartialEq, Eq)]
 pub struct PreferenceSnapshot {
     pub theme: ThemePreference,
+    pub theme_color: ThemeColor,
     pub corner_radius: CornerRadiusPreference,
     pub language: LanguagePreference,
     pub hotkey: HotkeyPreference,
@@ -40,6 +41,7 @@ impl Preferences {
     pub fn snapshot(&self) -> Result<PreferenceSnapshot> {
         Ok(PreferenceSnapshot {
             theme: self.theme()?,
+            theme_color: self.theme_color()?,
             corner_radius: self.corner_radius()?,
             language: self.language()?,
             hotkey: self.hotkey()?,

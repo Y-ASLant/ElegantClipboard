@@ -14,6 +14,8 @@ impl SettingsWindowView {
         let language_pending = owner_state.language_pending;
         let theme = owner_state.theme;
         let theme_pending = owner_state.theme_pending;
+        let theme_color = owner_state.theme_color;
+        let theme_color_pending = owner_state.theme_color_pending;
         let corner_radius = owner_state.corner_radius;
         let legacy_radius = match corner_radius.value {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
@@ -61,6 +63,40 @@ impl SettingsWindowView {
                         }
                     },
                 )),
+            )
+            .child(
+                settings_column_field(tr(language, "主题色", "Theme color"))
+                    .child(choice_tabs(
+                        "settings-theme-color",
+                        &self.owner,
+                        [
+                            ThemeColor::VibrantOrange,
+                            ThemeColor::Cyan,
+                            ThemeColor::GoogleBlue,
+                        ],
+                        [
+                            tr(language, "活力橙", "Vibrant orange"),
+                            tr(language, "青色", "Cyan"),
+                            tr(language, "谷歌蓝", "Google blue"),
+                        ],
+                        theme_color,
+                        theme_color_pending,
+                        |owner| owner.theme_color,
+                        |owner, preference, cx| {
+                            if owner.send(Command::SetThemeColor(preference), cx) {
+                                owner.theme_color_pending = true;
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .child(settings_description(
+                        tr(
+                            language,
+                            "主按钮、链接和悬停连线使用的颜色",
+                            "Color used by primary buttons, links, and the hover connector",
+                        ),
+                        cx,
+                    )),
             )
             .child(
                 settings_column_field(tr(language, "圆角", "Corner radius")).child(choice_tabs(

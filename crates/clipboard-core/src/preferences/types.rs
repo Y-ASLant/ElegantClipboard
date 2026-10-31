@@ -343,6 +343,15 @@ pub enum ThemePreference {
     Dark,
 }
 
+/// Brand color for primary controls, links, and the hover connector.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeColor {
+    VibrantOrange,
+    Cyan,
+    #[default]
+    GoogleBlue,
+}
+
 /// 主窗口与设置窗口的跨平台背景材质；平台层选择原生实现与安全回退。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -31,7 +31,7 @@ impl HistoryCardSnapshot {
         let (show_source_name, show_source_icon) =
             source_app_parts(self.display.source_app_display, source_icon.is_some());
         div()
-            .h(px(20.))
+            .h(px(visual::METADATA_ROW_HEIGHT))
             .flex_none()
             .flex()
             .items_center()
@@ -48,6 +48,7 @@ impl HistoryCardSnapshot {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
+                    .whitespace_nowrap()
                     .text_ellipsis()
                     .child(self.summary.clone()),
             )
@@ -91,13 +92,9 @@ impl HistoryCardSnapshot {
         let (thumbnail_width, thumbnail_height) = if is_image {
             visual::thumbnail_size(self.display.card_density)
         } else {
-            (48., 36.)
+            (visual::FILE_THUMBNAIL_WIDTH, visual::FILE_THUMBNAIL_HEIGHT)
         };
-        let visual_height = if show_file_icon {
-            thumbnail_width
-        } else {
-            thumbnail_height
-        };
+        let visual_height = thumbnail_height;
         let image_unavailable = tr(self.language, "无法显示", "Cannot display");
         let image_unavailable_color = cx.theme().muted_foreground;
         let unavailable = move || {
@@ -164,7 +161,7 @@ impl HistoryCardSnapshot {
         let text = div()
             .min_w_0()
             .text_size(px(visual::TEXT_BODY))
-            .line_height(px(20.))
+            .line_height(px(visual::PREVIEW_LINE_HEIGHT))
             .line_clamp(self.display.card_max_lines as usize)
             .text_ellipsis()
             .text_color(if self.file_warning {
@@ -185,29 +182,22 @@ impl HistoryCardSnapshot {
         let media_layout = self.is_image || self.is_files;
         let spacing = visual::card_spacing(self.display.card_density);
         let padding = visual::card_padding(self.display.card_density);
-        let body = div()
-            .flex_1()
-            .min_h_0()
-            .overflow_hidden()
-            .flex()
-            .items_start();
+        let body = div().min_w_0().overflow_hidden().flex().items_start();
+        // The summary stays on its own row. Beside a thumbnail it wraps mid-token
+        // ("今天 20" / "24 · 文件") once the source name takes the remaining width.
         let body = if media_layout {
             body.gap(px(visual::SPACE_3))
                 .child(self.media_visual(preview, cx))
                 .child(
-                    div()
-                        .h_full()
+                    self.content_text(cx)
                         .flex_1()
-                        .min_w_0()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .justify_between()
-                        .child(self.content_text(cx).overflow_hidden().font_medium())
-                        .child(self.metadata_row(cx)),
+                        .overflow_hidden()
+                        .font_medium(),
                 )
         } else {
-            body.child(self.content_text(cx).flex_1())
+            body.flex_1()
+                .min_h_0()
+                .child(self.content_text(cx).flex_1())
         };
         div()
             .h_full()
@@ -232,7 +222,7 @@ impl HistoryCardSnapshot {
             .flex_col()
             .gap(px(spacing))
             .child(body)
-            .when(!media_layout, |card| card.child(self.metadata_row(cx)))
+            .child(self.metadata_row(cx))
     }
 }
 

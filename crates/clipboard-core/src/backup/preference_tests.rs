@@ -10,6 +10,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     let preferences = Preferences::new(&history.db);
     let mut expected = PreferenceSnapshot {
         theme: ThemePreference::Dark,
+        theme_color: ThemeColor::VibrantOrange,
         corner_radius: CornerRadiusPreference::Fixed(12),
         language: LanguagePreference::English,
         hotkey: HotkeyPreference::Shortcut("Ctrl+Shift+F8".into()),
@@ -86,6 +87,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         onboarding_completed: true,
     };
     preferences.set_theme(expected.theme)?;
+    preferences.set_theme_color(expected.theme_color)?;
     preferences.set_corner_radius(expected.corner_radius)?;
     preferences.set_language(expected.language)?;
     preferences.set_hotkey(expected.hotkey.clone())?;

@@ -59,8 +59,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Theme,
         chinese: "外观与语言",
         english: "Appearance & language",
-        description_chinese: "选择界面语言和明暗主题",
-        description_english: "Choose the interface language and theme",
+        description_chinese: "选择界面语言、明暗主题和主题色",
+        description_english: "Choose the interface language, theme, and theme color",
         content: SettingsWindowView::settings_appearance_content,
     },
     Section {

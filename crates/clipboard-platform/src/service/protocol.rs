@@ -7,8 +7,8 @@ use clipboard_core::{
     preferences::{
         AppFilterPreference, AudioPreference, CornerRadiusPreference, DedupStrategy,
         DisplayPreference, HotkeyPreference, HoverPreviewPreference, LanguagePreference,
-        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, ThemePreference,
-        WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
+        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, ThemeColor,
+        ThemePreference, WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
     retention::RetentionPolicy,
 };
@@ -153,6 +153,7 @@ pub enum Command {
     ToggleFavorite(i64),
     Pause(bool),
     SetTheme(ThemePreference),
+    SetThemeColor(ThemeColor),
     SetCornerRadius(CornerRadiusPreference),
     SetLanguage(LanguagePreference),
     SetHotkey(HotkeyPreference),
@@ -386,6 +387,7 @@ pub enum Event {
     BatchDeleted(Result<DeletionOutcome, String>),
     Paused(bool),
     ThemeSaved(Result<ThemePreference, String>),
+    ThemeColorSaved(Result<ThemeColor, String>),
     CornerRadiusSaved(Result<CornerRadiusPreference, String>),
     TransientFilterSaved(Result<bool, String>),
     LanguageSaved(Result<LanguagePreference, String>),

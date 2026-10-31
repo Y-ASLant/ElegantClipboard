@@ -40,15 +40,13 @@ pub(super) fn render_curve(source: Bounds<Pixels>, target: Bounds<Pixels>, cx: &
                 move |bounds, (), window, _| {
                     let local =
                         |p: Point<f32>| point(bounds.origin.x + px(p.x), bounds.origin.y + px(p.y));
-                    let mut path = PathBuilder::stroke(px(1.5));
-                    path.move_to(local(curve.source));
-                    path.cubic_bezier_to(
-                        local(curve.target),
-                        local(curve.control_1),
-                        local(curve.control_2),
-                    );
-                    if let Ok(path) = path.build() {
-                        window.paint_path(path, primary);
+                    for dash in curve_dashes(&curve) {
+                        let mut path = PathBuilder::stroke(px(1.5));
+                        path.move_to(local(dash.start));
+                        path.line_to(local(dash.end));
+                        if let Ok(path) = path.build() {
+                            window.paint_path(path, primary);
+                        }
                     }
                 },
             )
@@ -58,6 +56,78 @@ pub(super) fn render_curve(source: Bounds<Pixels>, target: Bounds<Pixels>, cx: &
         .child(dot(curve.source))
         .child(dot(curve.target))
         .into_any_element()
+}
+
+struct Dash {
+    start: Point<f32>,
+    end: Point<f32>,
+}
+
+fn curve_dashes(curve: &Curve) -> Vec<Dash> {
+    const SAMPLES: usize = 32;
+    const DRAW: f32 = 5.;
+    const SKIP: f32 = 4.;
+    let samples: Vec<_> = (0..=SAMPLES)
+        .map(|step| bezier(curve, step as f32 / SAMPLES as f32))
+        .collect();
+    let mut lengths = vec![0.];
+    for pair in samples.windows(2) {
+        let last = *lengths.last().unwrap_or(&0.);
+        lengths.push(last + (pair[1].x - pair[0].x).hypot(pair[1].y - pair[0].y));
+    }
+    let total = *lengths.last().unwrap_or(&0.);
+    let mut dashes = Vec::new();
+    let mut drawing = true;
+    let mut phase_end = DRAW;
+    let mut cursor = 0.;
+    while cursor < total - 0.5 {
+        let next = phase_end.min(total);
+        if drawing && next > cursor {
+            dashes.push(Dash {
+                start: sample_at(&samples, &lengths, cursor),
+                end: sample_at(&samples, &lengths, next),
+            });
+        }
+        cursor = next;
+        if cursor >= total {
+            break;
+        }
+        drawing = !drawing;
+        phase_end += if drawing { DRAW } else { SKIP };
+    }
+    dashes
+}
+
+fn bezier(curve: &Curve, t: f32) -> Point<f32> {
+    let u = 1. - t;
+    let mix = |a, b, c, d| u * u * u * a + 3. * u * u * t * b + 3. * u * t * t * c + t * t * t * d;
+    point(
+        mix(
+            curve.source.x,
+            curve.control_1.x,
+            curve.control_2.x,
+            curve.target.x,
+        ),
+        mix(
+            curve.source.y,
+            curve.control_1.y,
+            curve.control_2.y,
+            curve.target.y,
+        ),
+    )
+}
+
+fn sample_at(samples: &[Point<f32>], lengths: &[f32], distance: f32) -> Point<f32> {
+    let index = lengths
+        .windows(2)
+        .position(|span| distance <= span[1])
+        .unwrap_or(samples.len().saturating_sub(2));
+    let span = (lengths[index + 1] - lengths[index]).max(0.001);
+    let t = ((distance - lengths[index]) / span).clamp(0., 1.);
+    point(
+        samples[index].x + (samples[index + 1].x - samples[index].x) * t,
+        samples[index].y + (samples[index + 1].y - samples[index].y) * t,
+    )
 }
 
 fn anchors(rect: Bounds<Pixels>) -> [Anchor; 4] {
@@ -146,7 +216,7 @@ fn nearest_curve(source_rect: Bounds<Pixels>, target_rect: Bounds<Pixels>) -> Cu
 
 #[cfg(test)]
 mod tests {
-    use super::nearest_curve;
+    use super::{curve_dashes, nearest_curve};
     use gpui_kit::{Bounds, point, px, size};
 
     #[test]
@@ -164,5 +234,14 @@ mod tests {
             assert_eq!(curve.control_1.y, curve.source.y);
             assert_eq!(curve.control_2.y, curve.target.y);
         }
+    }
+
+    #[test]
+    fn connector_stroke_is_broken_into_dashes() {
+        let source = Bounds::new(point(px(0.), px(0.)), size(px(80.), px(200.)));
+        let target = Bounds::new(point(px(160.), px(20.)), size(px(90.), px(140.)));
+        let dashes = curve_dashes(&nearest_curve(source, target));
+        assert!(dashes.len() > 1);
+        assert!(dashes[0].start.x < dashes.last().unwrap().end.x);
     }
 }

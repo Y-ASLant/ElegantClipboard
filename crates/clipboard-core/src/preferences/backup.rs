@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 // In particular, a gpui_ prefix alone does not authorize an obsolete or unknown key.
 const BACKUP_KEYS: &[&str] = &[
     THEME_KEY,
+    THEME_COLOR_KEY,
     CORNER_RADIUS_KEY,
     LANGUAGE_KEY,
     HOTKEY_KEY,
