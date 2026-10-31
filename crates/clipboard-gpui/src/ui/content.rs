@@ -56,15 +56,11 @@ impl ClipboardView {
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.close_history_menu(cx);
-                }),
+                cx.listener(ClipboardView::close_history_menu_from_press),
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(|this, _, _, cx| {
-                    this.close_history_menu(cx);
-                }),
+                cx.listener(ClipboardView::close_history_menu_from_press),
             )
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.search

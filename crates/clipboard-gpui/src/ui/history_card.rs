@@ -184,6 +184,10 @@ impl ClipboardView {
         let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
         let card_spacing = visual::card_spacing(self.display.card_density);
         let card_padding = visual::card_padding(self.display.card_density);
+        let row_height = self.row_sizes.get(index).map_or_else(
+            || px(history_row_height(item, self.display)),
+            |size| size.height,
+        );
         let entity = cx.entity();
         let row = div()
             .id(("history-row", id as usize))
@@ -216,7 +220,7 @@ impl ClipboardView {
                     cx.stop_propagation();
                 }
             }))
-            .h(px(history_row_height(item, self.display)))
+            .h(row_height)
             .px(px(PAGE_PADDING))
             .py(px(card_spacing))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
@@ -331,7 +335,7 @@ impl ClipboardView {
         // within that root so relative offsets survive the list's positioning.
         div()
             .w_full()
-            .h(px(history_row_height(item, self.display)))
+            .h(row_height)
             .child(positioned)
             .into_any_element()
     }

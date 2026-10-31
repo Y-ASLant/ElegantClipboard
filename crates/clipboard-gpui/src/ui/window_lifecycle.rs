@@ -268,6 +268,15 @@ impl ClipboardView {
         true
     }
 
+    pub(super) fn close_history_menu_from_press(
+        &mut self,
+        _: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_history_menu(cx);
+    }
+
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.card_drag_active(cx) || !self.close_editor(window, cx) {
             return;

@@ -77,6 +77,27 @@ fn transform_submenu(
     menu
 }
 
+#[allow(clippy::too_many_arguments)]
+fn action_submenu<const N: usize>(
+    menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+    title: &'static str,
+    language: LanguagePreference,
+    can_paste: bool,
+    paste_pending: bool,
+    id: i64,
+    entity: Entity<ClipboardView>,
+    items: [(&'static str, HistoryMenuAction); N],
+) -> PopupMenu {
+    menu.item(PopupMenuItem::submenu(
+        title,
+        PopupMenu::build(window, cx, move |menu, _, _| {
+            transform_submenu(menu, language, can_paste, paste_pending, id, &entity, items)
+        }),
+    ))
+}
+
 impl ClipboardView {
     pub(super) fn perform_history_menu_action(
         &mut self,
@@ -138,6 +159,20 @@ impl ClipboardView {
         }
         cx.notify();
     }
+    fn save_as_suggested_for(&self, id: i64) -> Option<String> {
+        let item = self.history.items.iter().find(|item| item.id == id)?;
+        if item.content_type == "image" {
+            item.image_path.as_deref().and_then(save_as_suggested_name)
+        } else if item.content_type == "files" {
+            clipboard_core::parse_file_paths_for_display(item.file_paths.as_deref())
+                .into_iter()
+                .next()
+                .and_then(save_as_suggested_name)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn history_row_menu(
         &self,
         row: Stateful<Div>,
@@ -147,35 +182,26 @@ impl ClipboardView {
         let id = item.id;
         let is_image = item.content_type == "image";
         let is_files = item.content_type == "files";
-        let is_rich_item = item.kind().is_some_and(|kind| kind.is_rich());
+        let kind = item.kind();
+        let is_rich_item = kind.is_some_and(|kind| kind.is_rich());
         let is_text_item = matches!(item.content_type.as_str(), "text" | "url");
         let favorite = item.is_favorite;
         let pinned = item.is_pinned;
         let entity = cx.entity();
-        let text_like = item.kind().is_some_and(|kind| kind.is_text_like());
+        let text_like = kind.is_some_and(|kind| kind.is_text_like());
         let language = self.language;
         let batch_mode = self.batch_mode;
         let can_paste = self.paste_state.target().is_some() && self._tray.is_some();
         let paste_pending = self.paste_state.pending();
         let save_as_pending = self.save_as_pending.is_some();
         let group_move_disabled = self.group_move_disabled();
-        let save_as_name = if is_image {
-            item.image_path.as_deref().and_then(save_as_suggested_name)
-        } else if is_files {
-            clipboard_core::parse_file_paths_for_display(item.file_paths.as_deref())
-                .into_iter()
-                .next()
-                .and_then(save_as_suggested_name)
-        } else {
-            None
-        };
         if batch_mode {
             row.into_any_element()
         } else {
             row.on_mouse_down(MouseButton::Right, move |event, window, cx| {
                 cx.stop_propagation();
                 let entity = entity.clone();
-                let save_as_name = save_as_name.clone();
+                let save_as_name = entity.read(cx).save_as_suggested_for(id);
                 menu_window::HistoryMenuWindow::open(
                     event.position,
                     window,
@@ -206,19 +232,21 @@ impl ClipboardView {
                                     HistoryMenuAction::PastePlainText,
                                 ))
                             })
-                            // 富文本条目：按单一目标格式复制/粘贴的子菜单。
                             .when(is_rich_item, |menu| {
-                                let submenu =
-                            |menu: PopupMenu,
-                             _window: &mut Window,
-                             _cx: &mut Context<PopupMenu>| {
-                                transform_submenu(
+                                action_submenu(
                                     menu,
+                                    window,
+                                    cx,
+                                    if can_paste {
+                                        tr(language, "按格式粘贴", "Paste as format")
+                                    } else {
+                                        tr(language, "按格式复制", "Copy as format")
+                                    },
                                     language,
                                     can_paste,
                                     paste_pending,
                                     id,
-                                    &entity,
+                                    entity.clone(),
                                     [
                                         (
                                             tr(language, "HTML", "HTML"),
@@ -230,29 +258,22 @@ impl ClipboardView {
                                         ),
                                     ],
                                 )
-                            };
-                                menu.item(PopupMenuItem::submenu(
-                                    if can_paste {
-                                        tr(language, "按格式粘贴", "Paste as format")
-                                    } else {
-                                        tr(language, "按格式复制", "Copy as format")
-                                    },
-                                    PopupMenu::build(window, cx, submenu),
-                                ))
                             })
-                            // 文本条目：转换后的复制/粘贴子菜单。
                             .when(is_text_item, |menu| {
-                                let submenu =
-                            |menu: PopupMenu,
-                             _window: &mut Window,
-                             _cx: &mut Context<PopupMenu>| {
-                                transform_submenu(
+                                action_submenu(
                                     menu,
+                                    window,
+                                    cx,
+                                    if can_paste {
+                                        tr(language, "转换后粘贴", "Paste transformed")
+                                    } else {
+                                        tr(language, "转换后复制", "Copy transformed")
+                                    },
                                     language,
                                     can_paste,
                                     paste_pending,
                                     id,
-                                    &entity,
+                                    entity.clone(),
                                     [
                                         (
                                             tr(language, "去除首尾空白", "Trim whitespace"),
@@ -280,15 +301,6 @@ impl ClipboardView {
                                         ),
                                     ],
                                 )
-                            };
-                                menu.item(PopupMenuItem::submenu(
-                                    if can_paste {
-                                        tr(language, "转换后粘贴", "Paste transformed")
-                                    } else {
-                                        tr(language, "转换后复制", "Copy transformed")
-                                    },
-                                    PopupMenu::build(window, cx, submenu),
-                                ))
                             })
                             .item(history_menu_item(
                                 tr(language, "复制", "Copy"),
@@ -311,30 +323,30 @@ impl ClipboardView {
                                 ))
                             });
                         let menu = if is_image || is_files {
-                            let menu = menu.item(history_menu_item(
-                                copy_or_paste_label(language, can_paste, "路径", "paths"),
-                                paste_pending,
-                                entity.clone(),
-                                id,
-                                HistoryMenuAction::CopyPath,
-                            ));
-                            let menu = menu.item(history_menu_item(
-                                tr(language, "在资源管理器中显示", "Show in File Explorer"),
-                                false,
-                                entity.clone(),
-                                id,
-                                HistoryMenuAction::Reveal,
-                            ));
-                            if let Some(name) = save_as_name.clone() {
-                                menu.item(history_menu_item(
+                            let menu = menu
+                                .item(history_menu_item(
+                                    copy_or_paste_label(language, can_paste, "路径", "paths"),
+                                    paste_pending,
+                                    entity.clone(),
+                                    id,
+                                    HistoryMenuAction::CopyPath,
+                                ))
+                                .item(history_menu_item(
+                                    tr(language, "在资源管理器中显示", "Show in File Explorer"),
+                                    false,
+                                    entity.clone(),
+                                    id,
+                                    HistoryMenuAction::Reveal,
+                                ));
+                            match save_as_name.clone() {
+                                Some(name) => menu.item(history_menu_item(
                                     tr(language, "另存为", "Save as"),
                                     save_as_pending,
                                     entity.clone(),
                                     id,
                                     HistoryMenuAction::SaveAs(name),
-                                ))
-                            } else {
-                                menu
+                                )),
+                                None => menu,
                             }
                         } else {
                             menu

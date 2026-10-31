@@ -126,6 +126,11 @@ fn place_menu_window(native: isize, bounds: Bounds<Pixels>, scale: f32) {
     }
 }
 
+fn close_menu_window(_: &MouseDownEvent, window: &mut Window, cx: &mut App) {
+    cx.stop_propagation();
+    window.remove_window();
+}
+
 impl Render for HistoryMenuWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_background_appearance(WindowBackgroundAppearance::Transparent);
@@ -137,47 +142,49 @@ impl Render for HistoryMenuWindow {
             }));
         }
         let menu = self.menu.clone();
-        let shown = self.shown.clone();
+        let reveal_after_layout = !self.shown.get();
         div()
             .size_full()
             .flex()
             .flex_col()
             .items_start()
-            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                cx.stop_propagation();
-                window.remove_window();
-            })
-            .on_mouse_down(MouseButton::Right, |_, window, cx| {
-                cx.stop_propagation();
-                window.remove_window();
-            })
+            .on_mouse_down(MouseButton::Left, close_menu_window)
+            .on_mouse_down(MouseButton::Right, close_menu_window)
             .when_some(menu, |layer, menu| {
                 layer.child(
-                    div().m(px(8.)).max_w(px(320.)).child(menu).child(
-                        canvas(
-                            move |bounds, window, cx| {
-                                if bounds.size.width < px(200.) || bounds.size.height < px(80.) {
-                                    return;
-                                }
-                                if !shown.get()
-                                    && let Some(native) = native_window::window_id(window)
-                                {
-                                    shown.set(true);
-                                    cx.defer(move |_| {
-                                        let _ =
-                                            clipboard_platform::external_drag::show_drag_preview(
-                                                native,
-                                            );
-                                    });
-                                }
-                            },
-                            |_, _, _, _| {},
-                        )
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .size_full(),
-                    ),
+                    div()
+                        .m(px(8.))
+                        .max_w(px(320.))
+                        .child(menu)
+                        .when(reveal_after_layout, |menu| {
+                            let shown = self.shown.clone();
+                            menu.child(
+                                canvas(
+                                    move |bounds, window, cx| {
+                                        if bounds.size.width < px(200.)
+                                            || bounds.size.height < px(80.)
+                                        {
+                                            return;
+                                        }
+                                        if !shown.get()
+                                            && let Some(native) = native_window::window_id(window)
+                                        {
+                                            shown.set(true);
+                                            cx.defer(move |_| {
+                                                let _ = clipboard_platform::external_drag::show_drag_preview(
+                                                    native,
+                                                );
+                                            });
+                                        }
+                                    },
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full(),
+                            )
+                        }),
                 )
             })
     }
