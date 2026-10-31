@@ -91,6 +91,7 @@ impl WindowShowRequest {
         let mut outer = RECT::default();
         let mut client = RECT::default();
         let mut origin = POINT::default();
+        let physical = |value: Pixels| (f32::from(value) * self.scale).round() as i32;
         unsafe {
             GetWindowRect(self.hwnd, &mut outer)?;
             GetClientRect(self.hwnd, &mut client)?;
@@ -98,12 +99,10 @@ impl WindowShowRequest {
             SetWindowPos(
                 self.hwnd,
                 None,
-                (f32::from(bounds.origin.x) * self.scale).round() as i32 - (origin.x - outer.left),
-                (f32::from(bounds.origin.y) * self.scale).round() as i32 - (origin.y - outer.top),
-                (f32::from(bounds.size.width) * self.scale).round() as i32
-                    + (outer.right - outer.left - client.right),
-                (f32::from(bounds.size.height) * self.scale).round() as i32
-                    + (outer.bottom - outer.top - client.bottom),
+                physical(bounds.origin.x) - (origin.x - outer.left),
+                physical(bounds.origin.y) - (origin.y - outer.top),
+                physical(bounds.size.width) + (outer.right - outer.left - client.right),
+                physical(bounds.size.height) + (outer.bottom - outer.top - client.bottom),
                 SWP_NOACTIVATE | SWP_NOZORDER,
             )
         }
@@ -124,7 +123,7 @@ impl WindowShowRequest {
                 && GetAsyncKeyState(i32::from(VK_MENU.0)) >= 0
             {
                 // Preserve the foreground fallback, but never release a held Alt chord.
-                let mut input = INPUT {
+                let key_down = INPUT {
                     r#type: INPUT_KEYBOARD,
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
@@ -133,9 +132,9 @@ impl WindowShowRequest {
                         },
                     },
                 };
-                let down = input;
-                input.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
-                SendInput(&[down, input], std::mem::size_of::<INPUT>() as i32);
+                let mut key_up = key_down;
+                key_up.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+                SendInput(&[key_down, key_up], std::mem::size_of::<INPUT>() as i32);
                 let _ = SetForegroundWindow(self.hwnd);
             }
         }

@@ -24,15 +24,20 @@ impl ClipboardView {
                 // Resize, move, show and activate outside GPUI borrows: all can
                 // synchronously dispatch callbacks, including on a different display.
                 let initialized = request.initialize();
-                let prepared = update_clipboard_window(&view, main, cx, |this, window, _| {
-                    initialized.and_then(|()| {
+                let position_request =
+                    update_clipboard_window(&view, main, cx, |this, window, _| {
+                        initialized?;
                         this.initial_window_bounds = None;
                         position::prepare_window_position(window, this.window_position.value)
-                    })
-                });
-                let Ok(prepared) = prepared else { return };
-                let result = prepared
-                    .and_then(|position| position.map_or(Ok(()), |position| position.apply()));
+                    });
+                let Ok(position_request) = position_request else {
+                    return;
+                };
+                let result = match position_request {
+                    Ok(Some(position)) => position.apply(),
+                    Ok(None) => Ok(()),
+                    Err(error) => Err(error),
+                };
                 request.show();
                 let _ = update_clipboard_window(&view, main, cx, |this, window, cx| {
                     this.window_show_task = None;

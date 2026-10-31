@@ -44,8 +44,7 @@ pub fn prepare_window_position(
     if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
         return Err(anyhow!("无法读取光标所在显示器"));
     }
-    let mut restore = None;
-    let window_rect = if unsafe { IsIconic(hwnd) }.as_bool() {
+    let (window_rect, mut restore) = if unsafe { IsIconic(hwnd) }.as_bool() {
         let mut saved = WINDOWPLACEMENT {
             length: size_of::<WINDOWPLACEMENT>() as u32,
             ..Default::default()
@@ -54,13 +53,14 @@ pub fn prepare_window_position(
         if saved.flags.contains(WPF_RESTORETOMAXIMIZED) {
             return Ok(None);
         }
-        restore = Some(saved);
-        saved.rcNormalPosition
+        (saved.rcNormalPosition, Some(saved))
     } else {
         let mut rect = RECT::default();
         unsafe { GetWindowRect(hwnd, &mut rect) }.context("无法读取窗口尺寸")?;
-        rect
+        (rect, None)
     };
+    let width = window_rect.right - window_rect.left;
+    let height = window_rect.bottom - window_rect.top;
     let (x, y) = placement(
         mode,
         (cursor.x, cursor.y),
@@ -70,8 +70,8 @@ pub fn prepare_window_position(
             info.rcWork.right,
             info.rcWork.bottom,
         ),
-        window_rect.right - window_rect.left,
-        window_rect.bottom - window_rect.top,
+        width,
+        height,
     );
     if let Some(saved) = &mut restore {
         // WINDOWPLACEMENT uses workspace coordinates except for tool windows.
@@ -88,8 +88,8 @@ pub fn prepare_window_position(
         saved.rcNormalPosition = RECT {
             left,
             top,
-            right: left + window_rect.right - window_rect.left,
-            bottom: top + window_rect.bottom - window_rect.top,
+            right: left + width,
+            bottom: top + height,
         };
     }
     Ok(Some(WindowPositionRequest {
@@ -118,7 +118,6 @@ impl WindowPositionRequest {
                 SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
             )
         }
-        .context("无法移动窗口")?;
-        Ok(())
+        .context("无法移动窗口")
     }
 }
