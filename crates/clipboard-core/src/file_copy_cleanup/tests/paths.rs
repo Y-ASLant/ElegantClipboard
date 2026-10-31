@@ -92,6 +92,30 @@ fn linked_data_directory_is_not_used_to_delete_real_profile_copies() -> Result<(
     Ok(())
 }
 
+#[test]
+fn linked_ancestor_does_not_block_cleanup_of_a_real_data_directory() -> Result<()> {
+    let dir = isolated_directory()?;
+    let target = dir.path().join("target");
+    let linked_parent = dir.path().join("linked-parent");
+    fs::create_dir(&target)?;
+    link_directory(&target, &linked_parent)?;
+    let profile = linked_parent.join("profile");
+    let external = dir.path().join("external");
+    fs::create_dir(&external)?;
+    fs::write(external.join("keep.txt"), b"external bytes")?;
+    let history = History::open(profile.join("clipboard.db"))?;
+    fs::create_dir(profile.join("staged"))?;
+    fs::write(profile.join("staged/copy"), b"old copy")?;
+    history.remove_file_copies(&profile)?;
+    assert!(!profile.join("staged").exists());
+    assert_eq!(fs::read(external.join("keep.txt"))?, b"external bytes");
+    #[cfg(windows)]
+    fs::remove_dir(&linked_parent)?;
+    #[cfg(unix)]
+    fs::remove_file(&linked_parent)?;
+    Ok(())
+}
+
 #[cfg(windows)]
 #[test]
 fn locked_copy_failure_preserves_pending_file_and_retries_after_reopen() -> Result<()> {

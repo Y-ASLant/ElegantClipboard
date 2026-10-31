@@ -167,15 +167,16 @@ pub(crate) fn checked_staged_directory(data_dir: &Path) -> Result<Option<PathBuf
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).context("无法检查旧文件副本目录"),
     };
-    for ancestor in data_dir.ancestors() {
-        let metadata = fs::symlink_metadata(ancestor)
-            .with_context(|| format!("无法检查数据目录 {}", ancestor.display()))?;
-        ensure!(
-            metadata.is_dir() && !is_reparse(&metadata),
-            "数据目录含符号链接或重解析路径，未清理旧文件副本：{}",
-            ancestor.display()
-        );
-    }
+    // 只拒绝数据目录自身是链接。canonicalize 会把它解析成真实目录，
+    // 随后的 parent 检查无法挡住对真实 profile 的删除。
+    // 上层目录（例如 macOS 的 /var、/tmp）可以是符号链接。
+    let directory = fs::symlink_metadata(&data_dir)
+        .with_context(|| format!("无法检查数据目录 {}", data_dir.display()))?;
+    ensure!(
+        directory.is_dir() && !is_reparse(&directory),
+        "数据目录含符号链接或重解析路径，未清理旧文件副本：{}",
+        data_dir.display()
+    );
     ensure!(
         metadata.is_dir() && !is_reparse(&metadata),
         "旧文件副本目录不是普通目录，未跟随符号链接或重解析路径：{}",
