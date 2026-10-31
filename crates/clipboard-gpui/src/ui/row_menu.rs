@@ -29,14 +29,24 @@ pub(super) fn history_menu_item(
         .icon(Icon::new(icon).size(px(visual::ICON_SIZE)))
         .disabled(disabled)
         .on_click(move |_, window, cx| {
-            let main = view.read(cx).main_window;
-            let _ = main.update(cx, |_, main_window, cx| {
-                view.update(cx, |this, cx| {
-                    this.perform_history_menu_action(id, &action, main_window, cx);
-                });
-            });
-            window.remove_window();
+            run_history_menu_action(&view, id, &action, window, cx);
         })
+}
+
+fn run_history_menu_action(
+    view: &Entity<ClipboardView>,
+    id: i64,
+    action: &HistoryMenuAction,
+    menu_window: &mut Window,
+    cx: &mut App,
+) {
+    let main = view.read(cx).main_window;
+    let _ = main.update(cx, |_, main_window, cx| {
+        view.update(cx, |this, cx| {
+            this.perform_history_menu_action(id, action, main_window, cx);
+        });
+    });
+    menu_window.remove_window();
 }
 
 /// 「粘贴为/复制为」子菜单的公共构造：逐项列出 (标签, 动作)，
@@ -67,9 +77,7 @@ fn transform_submenu(
             .on_click({
                 let entity = entity.clone();
                 move |_, window, cx| {
-                    entity.update(cx, |this, cx| {
-                        this.perform_history_menu_action(id, &action, window, cx);
-                    });
+                    run_history_menu_action(&entity, id, &action, window, cx);
                 }
             }),
         );
