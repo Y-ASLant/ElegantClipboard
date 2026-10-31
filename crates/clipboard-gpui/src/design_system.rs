@@ -197,6 +197,16 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     } else {
         border
     };
+    // `colors.border` drives both the canvas-shared separators (sidebar edge,
+    // page-header rule, window frame, resize handle) and control outlines.
+    // Solid paint makes those separators read as hard bars cut across the
+    // system backdrop. Dropping alpha keeps them tonal while control outlines
+    // stay legible; controls needing a hard edge use `emphasized`/`input`.
+    let hairline = if has_material {
+        border.opacity(0.55)
+    } else {
+        border
+    };
     let primary = color(0x2563eb);
     let primary_text = color(if dark { 0x60a5fa } else { 0x2563eb });
     let blue_subtle = color(if dark { 0x14204a } else { 0xeff6ff });
@@ -207,7 +217,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect) {
     // Dialogs, menus, notifications and passive previews use popover instead.
     colors.background = control;
     colors.foreground = foreground;
-    colors.border = border;
+    colors.border = hairline;
     colors.input = if has_material && dark {
         // Kit derives dark input fill from 70% of its input-border color.
         // Keep its fill and outline stable when only shell opacity changes.
