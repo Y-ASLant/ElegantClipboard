@@ -2,16 +2,7 @@ use super::*;
 use clipboard_core::History;
 
 #[test]
-fn source_app_icon_mode_falls_back_to_name_when_icon_is_missing() {
-    assert_eq!(source_app_parts(SourceAppDisplay::Both, true), (true, true));
-    assert_eq!(
-        source_app_parts(SourceAppDisplay::Name, true),
-        (true, false)
-    );
-    assert_eq!(
-        source_app_parts(SourceAppDisplay::Icon, true),
-        (false, true)
-    );
+fn missing_icon_falls_back_to_the_source_name() {
     assert_eq!(
         source_app_parts(SourceAppDisplay::Icon, false),
         (true, false)

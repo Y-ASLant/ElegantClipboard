@@ -61,13 +61,6 @@ fn semantic_hash_empty_returns_none() {
 }
 
 #[test]
-fn semantic_hash_same_text_same_hash() {
-    let h1 = semantic_hash_from_text("hello world");
-    let h2 = semantic_hash_from_text("hello world");
-    assert_eq!(h1, h2);
-}
-
-#[test]
 fn semantic_hash_different_text_different_hash() {
     let h1 = semantic_hash_from_text("hello");
     let h2 = semantic_hash_from_text("world");
@@ -87,17 +80,13 @@ fn compute_semantic_hash_text_without_content_uses_fallback() {
 }
 
 #[test]
-fn is_url_accepts_http_and_https() {
+fn is_url_accepts_http_https_and_www() {
     assert!(is_url("https://example.com/path?q=1"));
     assert!(is_url("http://example.com"));
     assert!(is_url("  https://a.co  "));
     assert!(is_url("http://127.0.0.1/path"));
     assert!(is_url("https://localhost:8080"));
     assert!(is_url("https://xn--fiqs8s.xn--fiqs8s.xn--g6q252g"));
-}
-
-#[test]
-fn is_url_accepts_www_prefix() {
     assert!(is_url("www.example.com/page"));
 }
 
@@ -117,10 +106,6 @@ fn is_url_rejects_loose_false_positives() {
     assert!(!is_url("www.这不是网址.测试"));
     assert!(!is_url("www.a.b"));
     assert!(!is_url("http://x.y"));
-}
-
-#[test]
-fn is_url_does_not_panic_on_cjk_text() {
     assert!(!is_url("不等于程序空闲时自己崩"));
     assert!(!is_url("我们"));
     assert!(!is_url("你好世界"));

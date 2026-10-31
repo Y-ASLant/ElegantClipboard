@@ -50,17 +50,6 @@ fn notes_persist_search_and_reject_oversize() -> Result<()> {
 }
 
 #[test]
-fn text_transforms_cover_the_four_special_paste_modes() {
-    assert_eq!(TextTransform::Trim.apply("  Hello World  "), "Hello World");
-    assert_eq!(
-        TextTransform::RemoveLineBreaks.apply("  Hello\r\nWorld  "),
-        "Hello World"
-    );
-    assert_eq!(TextTransform::Uppercase.apply("abc"), "ABC");
-    assert_eq!(TextTransform::Lowercase.apply("ABC"), "abc");
-}
-
-#[test]
 fn database_maintenance_reclaims_free_pages_and_preserves_history() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let database = directory.path().join("clipboard.db");

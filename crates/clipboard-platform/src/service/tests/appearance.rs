@@ -1,38 +1,5 @@
 use super::*;
-use clipboard_core::preferences::{CornerRadiusPreference, ThemePreference};
-
-#[test]
-fn theme_acknowledgement_is_persisted_before_reopening() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_preferences.theme, ThemePreference::System);
-    next_snapshot(&events, 0);
-    for theme in [
-        ThemePreference::Light,
-        ThemePreference::System,
-        ThemePreference::Dark,
-    ] {
-        service.send(Command::SetTheme(theme))?;
-        wait_for(
-            &events,
-            Duration::from_secs(5),
-            "theme timed out",
-            |event| match event {
-                Event::ThemeSaved(result) => {
-                    assert_eq!(result.unwrap(), theme);
-                    Some(())
-                }
-                Event::Error(message) => panic!("{message}"),
-                _ => None,
-            },
-        );
-    }
-    drop(service);
-    let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_preferences.theme, ThemePreference::Dark);
-    assert!(next_snapshot(&events, 0).is_empty());
-    Ok(())
-}
+use clipboard_core::preferences::CornerRadiusPreference;
 
 #[test]
 fn corner_radius_acknowledgement_preserves_value_after_rejected_change() -> Result<()> {

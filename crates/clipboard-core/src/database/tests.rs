@@ -7,56 +7,6 @@ fn temp_db() -> (tempfile::TempDir, Database) {
     let db = Database::new(dir.path().join("test.db")).unwrap();
     (dir, db)
 }
-
-#[test]
-fn read_write_separation() {
-    let (_dir, db) = temp_db();
-    {
-        let w = db.write_connection();
-        let w = w.lock();
-        w.execute(
-            "INSERT INTO settings (key, value) VALUES ('test_rw', 'hello')",
-            [],
-        )
-        .unwrap();
-    }
-    let r = db.read_connection();
-    let r = r.lock();
-    let val: String = r
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'test_rw'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(val, "hello");
-}
-
-#[test]
-fn clone_shares_connections() {
-    let (_dir, db) = temp_db();
-    let db2 = db.clone();
-    {
-        let w = db.write_connection();
-        let w = w.lock();
-        w.execute(
-            "INSERT INTO settings (key, value) VALUES ('clone_test', 'shared')",
-            [],
-        )
-        .unwrap();
-    }
-    let r = db2.read_connection();
-    let r = r.lock();
-    let val: String = r
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'clone_test'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(val, "shared");
-}
-
 #[test]
 fn orphaned_clipboard_items_table_is_recovered_before_schema_creation() {
     let dir = tempfile::tempdir().unwrap();

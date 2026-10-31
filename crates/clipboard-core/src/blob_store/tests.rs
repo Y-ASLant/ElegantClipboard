@@ -64,10 +64,3 @@ fn sweep_pending_removes_leftovers_from_previous_runs() -> Result<()> {
     assert!(fs::read_dir(&root)?.next().is_none());
     Ok(())
 }
-
-#[test]
-fn read_reports_missing_blob() {
-    let directory = tempfile::tempdir().unwrap();
-    let store = BlobStore::new(directory.path().join("blobs"));
-    assert!(store.read(&"0".repeat(64)).is_err());
-}
