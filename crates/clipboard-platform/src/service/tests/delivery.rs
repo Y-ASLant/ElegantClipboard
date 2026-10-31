@@ -18,8 +18,16 @@ fn command_failures_wait_for_room_in_a_full_event_queue() -> Result<()> {
                 .is_ok()
         );
     }
-    service.send(Command::CopyForPaste(424242, 1))?;
-    service.send(Command::CopyPathForPaste(424243, 2))?;
+    service.send(Command::Copy {
+        id: 424242,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Paste { request_id: 1 },
+    })?;
+    service.send(Command::Copy {
+        id: 424243,
+        mode: CopyMode::Paths,
+        purpose: CopyPurpose::Paste { request_id: 2 },
+    })?;
     service.send(Command::Capture("x".repeat(MAX_TEXT_BYTES + 1)))?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
 

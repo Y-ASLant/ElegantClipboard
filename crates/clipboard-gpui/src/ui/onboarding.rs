@@ -55,7 +55,7 @@ impl ClipboardView {
         }
         if self.active_overlay().is_some()
             || self.card_drag_active(cx)
-            || self.sequence_queue.is_some()
+            || self.paste_state.sequence_remaining().is_some()
         {
             self.set_feedback_message(
                 tr(
@@ -79,7 +79,7 @@ impl ClipboardView {
         self.onboarding_hotkey_used = false;
         self.onboarding_error = None;
         self.show_onboarding = true;
-        self.paste_target = None;
+        self.paste_state.set_target(None);
         self.show_window(window, cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
@@ -91,7 +91,7 @@ impl ClipboardView {
         self.onboarding_practice = None;
         self.show_onboarding = false;
         self.onboarding_error = None;
-        self.paste_target = None;
+        self.paste_state.set_target(None);
         if self.search_auto_focus.value {
             self.search.update(cx, |input, cx| input.focus(window, cx));
         } else {

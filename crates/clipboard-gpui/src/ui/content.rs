@@ -276,21 +276,23 @@ impl ClipboardView {
                             Button::new("batch-merge")
                                 .small()
                                 .outline()
-                                .label(if self.paste_target.is_some() && self._tray.is_some() {
-                                    tr(self.language, "合并粘贴", "Merge and paste")
-                                } else {
-                                    tr(self.language, "合并复制", "Merge and copy")
-                                })
+                                .label(
+                                    if self.paste_state.target().is_some() && self._tray.is_some() {
+                                        tr(self.language, "合并粘贴", "Merge and paste")
+                                    } else {
+                                        tr(self.language, "合并复制", "Merge and copy")
+                                    },
+                                )
                                 .disabled(
                                     self.batch_pending
-                                        || self.paste_pending.is_some()
+                                        || self.paste_state.pending()
                                         || self.selected_ids.len() < 2,
                                 )
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.merge_selected(window, cx);
                                 })),
                         )
-                        .when(self.sequence_queue.is_none(), |bar| {
+                        .when(self.paste_state.sequence_remaining().is_none(), |bar| {
                             bar.child(
                                 Button::new("batch-sequence")
                                     .small()
@@ -310,9 +312,9 @@ impl ClipboardView {
                                     ))
                                     .disabled(
                                         self.batch_pending
-                                            || self.paste_pending.is_some()
+                                            || self.paste_state.pending()
                                             || self.selected_ids.len() < 2
-                                            || self.paste_target.is_none()
+                                            || self.paste_state.target().is_none()
                                             || self._tray.is_none()
                                             || self.sequence_hotkey.trim().is_empty(),
                                     )
@@ -321,7 +323,7 @@ impl ClipboardView {
                                     })),
                             )
                         })
-                        .when_some(self.sequence_queue.as_ref(), |bar, queue| {
+                        .when_some(self.paste_state.sequence_remaining(), |bar, remaining| {
                             bar.child(
                                 div()
                                     .text_size(px(visual::TEXT_SMALL))
@@ -329,14 +331,12 @@ impl ClipboardView {
                                     .child(if self.language == LanguagePreference::English {
                                         format!(
                                             "Sequence: {} left, advance with {}",
-                                            queue.remaining(),
-                                            self.sequence_hotkey
+                                            remaining, self.sequence_hotkey
                                         )
                                     } else {
                                         format!(
                                             "序列中：剩 {} 条，按 {} 推进",
-                                            queue.remaining(),
-                                            self.sequence_hotkey
+                                            remaining, self.sequence_hotkey
                                         )
                                     }),
                             )

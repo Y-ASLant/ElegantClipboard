@@ -62,7 +62,7 @@ impl ClipboardView {
             || self.card_drag_active(cx)
             || self.history.loading
             || self.batch_pending
-            || self.paste_pending.is_some()
+            || self.paste_state.pending()
             || !self.history.items.iter().any(|item| item.id == id)
         {
             return;
@@ -82,7 +82,7 @@ impl ClipboardView {
         }
         if event.click_count() >= 2 {
             self.cancel_pending_row_click();
-            if !self.history.loading && !self.batch_pending && self.paste_pending.is_none() {
+            if !self.history.loading && !self.batch_pending && !self.paste_state.pending() {
                 self.open_editor(id, true, window, cx);
             }
             return;
@@ -123,7 +123,7 @@ impl ClipboardView {
             || self.card_drag_active(cx)
             || self.history.loading
             || self.batch_pending
-            || self.paste_pending.is_some()
+            || self.paste_state.pending()
             || !self.history.items.iter().any(|item| item.id == id)
         {
             return;
@@ -136,14 +136,21 @@ impl ClipboardView {
             self.toggle_selection(id, extend_range, window, cx);
             return;
         }
-        let can_paste = self.paste_target.is_some_and(|target| {
+        let can_paste = self.paste_state.target().is_some_and(|target| {
             self._tray.is_some() && paste::is_external_target(window, target)
         });
         if can_paste {
             self.paste_selected(id, window, cx);
         } else {
-            self.paste_target = None;
-            self.send(Command::Copy(id), cx);
+            self.paste_state.set_target(None);
+            self.send(
+                Command::Copy {
+                    id,
+                    mode: CopyMode::Original,
+                    purpose: CopyPurpose::Copy,
+                },
+                cx,
+            );
         }
         cx.notify();
     }
@@ -161,7 +168,7 @@ impl ClipboardView {
     }
 
     pub(super) fn merge_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.batch_pending || self.selected_ids.len() < 2 || self.paste_pending.is_some() {
+        if self.batch_pending || self.selected_ids.len() < 2 || self.paste_state.pending() {
             return;
         }
         let ids: Vec<_> = self
@@ -174,20 +181,22 @@ impl ClipboardView {
             return;
         }
         let target = self
-            .paste_target
+            .paste_state
+            .target()
             .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
-        if self.paste_target.is_some() && target.is_none() {
-            self.paste_target = None;
+        if self.paste_state.target().is_some() && target.is_none() {
+            self.paste_state.set_target(None);
         }
-        let command = if let Some(target) = target {
-            let request_id = self.paste_pending.begin(target);
-            Command::MergeForPaste { ids, request_id }
+        let purpose = if let Some(target) = target {
+            CopyPurpose::Paste {
+                request_id: self.paste_state.begin_copy(target),
+            }
         } else {
-            Command::MergeCopy(ids)
+            CopyPurpose::Copy
         };
-        if self.send(command, cx) {
+        if self.send(Command::Merge { ids, purpose }, cx) {
             self.batch_pending = true;
-            self.batch_paste_pending = target;
+            self.paste_state.mark_merge_started();
             if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
                 self.close_history_confirmation(window, cx);
             }

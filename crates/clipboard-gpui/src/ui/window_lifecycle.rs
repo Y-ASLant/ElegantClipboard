@@ -86,7 +86,7 @@ impl ClipboardView {
                             {
                                 this.hide_visible_window(window, cx);
                             } else {
-                                this.paste_target = None;
+                                this.paste_state.set_target(None);
                                 this.show_window(window, cx);
                                 cx.notify();
                             }
@@ -95,7 +95,7 @@ impl ClipboardView {
                             this.open_settings_window(SettingsPage::General, cx)
                         }
                         TrayCommand::ClearHistory => {
-                            this.paste_target = None;
+                            this.paste_state.set_target(None);
                             this.show_window(window, cx);
                             this.open_clear_history(window, cx);
                         }
@@ -187,8 +187,8 @@ impl ClipboardView {
             || self._tray.is_none()
             || self.settings_window.is_some()
             || self.settings_window_opening
-            || self.paste_pending.is_some()
-            || self.batch_paste_pending.is_some()
+            || self.paste_state.pending()
+            || self.paste_state.merging()
             || self.batch_pending
             || self.confirmation.is_some()
             || self.editor.id.is_some()
@@ -204,8 +204,8 @@ impl ClipboardView {
 
     pub(super) fn hide_visible_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.card_drag_active(cx)
-            || self.paste_pending.is_some()
-            || self.batch_paste_pending.is_some()
+            || self.paste_state.pending()
+            || self.paste_state.merging()
             || self.batch_pending
             || self.group_delete_pending
             || self.clear_pending
@@ -238,26 +238,11 @@ impl ClipboardView {
         self.cancel_pending_row_click();
         // 回贴会在隐藏面板前聚焦原目标；正常失活须保留等待中的投递和序列。
         let foreground = crate::native::foreground_target();
-        if self.sequence_keeps_target(foreground)
-            || self
-                .paste_pending
-                .request_id()
-                .is_some_and(|request_id| self.paste_pending.get(request_id).copied() == foreground)
-            || self
-                .quick_paste_pending
-                .request_id()
-                .is_some_and(|request_id| {
-                    self.quick_paste_pending.get(request_id).copied() == foreground
-                })
-        {
+        let Some((interrupted, was_active)) = self.paste_state.deactivate(foreground) else {
             return;
-        }
-        let had_target = self.paste_target.take().is_some();
-        let had_pending = self.paste_pending.is_some() || self.quick_paste_pending.is_some();
-        let had_sequence = self.sequence_queue.is_some();
-        self.interrupt_paste_except(None);
-        self.quick_paste_pending.take();
-        if had_target || had_pending || had_sequence {
+        };
+        self.apply_paste_interruption(interrupted);
+        if was_active {
             self.set_feedback_message(
                 tr(
                     self.language,
@@ -287,20 +272,18 @@ impl ClipboardView {
         self.window_show_task = None;
         self.suspend_onboarding(cx);
         if self.onboarding_visible() {
-            self.paste_target = None;
+            self.paste_state.set_target(None);
             return;
         }
         self.cancel_pending_row_click();
         self.close_hover_preview("main_hiding", cx);
-        self.paste_target = None;
-        if self.paste_pending.is_none() {
-            self.interrupt_paste_except(None);
-            self.quick_paste_pending.take();
+        if let Some(interrupted) = self.paste_state.hide() {
+            self.apply_paste_interruption(interrupted);
         }
-        if self.sequence_queue.is_none() {
+        if self.paste_state.sequence_remaining().is_none() {
             self.reset_selection();
         }
-        if self.auto_reset_state.value && self.sequence_queue.is_none() {
+        if self.auto_reset_state.value && self.paste_state.sequence_remaining().is_none() {
             self.search_task = None;
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
@@ -370,10 +353,10 @@ impl ClipboardView {
                 }
             }
             None => {
-                if self.paste_pending.is_some() || self.batch_paste_pending.is_some() {
+                if self.paste_state.pending() || self.paste_state.merging() {
                     return;
                 }
-                self.paste_target = None;
+                self.paste_state.set_target(None);
                 if self._tray.is_some() {
                     self.hide_window(window, cx);
                 } else {

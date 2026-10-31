@@ -101,7 +101,7 @@ pub fn restore_backup(archive_path: &Path, data_dir: &Path) -> Result<RestoreRep
     let mut restored_db = Connection::open(&staged_db)?;
     crate::file_copy_cleanup::clear_file_copy_references(&mut restored_db)?;
     let tx = restored_db.transaction()?;
-    tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
+    crate::preferences::prune_non_gpui_settings(&tx)?;
     remap_media_rows(&tx, |image, icon, _payload| {
         let mapped_image = image
             .map(|raw| rebase_archive_path(raw, "images", &extracted, data_dir))

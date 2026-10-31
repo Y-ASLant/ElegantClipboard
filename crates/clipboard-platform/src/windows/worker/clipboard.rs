@@ -16,11 +16,10 @@ use clipboard_rs::{
 };
 use std::{path::Path, thread};
 
-use crate::service::protocol::CopyFormat;
-use crate::service::worker::copy_mode::CopyMode;
+use crate::service::protocol::{CopyFormat, CopyMode, CopyPurpose};
 
 impl Worker {
-    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
+    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, purpose: CopyPurpose) -> Result<()> {
         self.clipboard_stash = None;
         let item_count = ids.len();
         let merged = self.history.merge_content(&ids)?;
@@ -29,8 +28,7 @@ impl Worker {
             write_merged_clipboard(&self.clipboard, &merged, &mut state.ignored_sequence)?;
         drop(state);
         self.send_event(Event::Merged {
-            for_paste: request_id.is_some(),
-            request_id,
+            purpose,
             clipboard_sequence,
             item_count,
         })
@@ -39,8 +37,8 @@ impl Worker {
     pub(super) fn handle_copy(
         &mut self,
         id: i64,
-        request_id: Option<u64>,
         mode: CopyMode,
+        purpose: CopyPurpose,
     ) -> Result<()> {
         self.clipboard_stash = None;
         let mut item = self.history.item(id)?;
@@ -124,7 +122,7 @@ impl Worker {
             None
         };
         // 快照只在此次写回及成功事件均完成后才绑定到请求。
-        let stash = (request_id.is_some() && mode == CopyMode::Original)
+        let stash = (purpose.request_id().is_some() && mode == CopyMode::Original)
             .then(|| self.snapshot_clipboard_for_paste())
             .flatten();
         let mut state = lock_capture_state(&self.state)?;
@@ -274,7 +272,7 @@ impl Worker {
         drop(state);
         self.send_event(Event::Copied {
             id,
-            request_id,
+            purpose,
             clipboard_sequence,
             message: match item.content_type.as_str() {
                 _ if mode == CopyMode::Files => "图片文件已复制，可切换到目标应用按 Ctrl+V 粘贴",
@@ -293,7 +291,7 @@ impl Worker {
             }
             .into(),
         })?;
-        self.remember_paste_stash(request_id, clipboard_sequence, stash);
+        self.remember_paste_stash(purpose.request_id(), clipboard_sequence, stash);
         Ok(())
     }
 }

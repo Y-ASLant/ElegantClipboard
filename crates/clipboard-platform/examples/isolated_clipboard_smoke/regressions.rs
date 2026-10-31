@@ -1,7 +1,7 @@
 //! 仅由已切换到独立窗口站的主程序调用，不读取或写入交互桌面剪贴板。
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{History, database::ClipboardItem};
-use clipboard_platform::{Command, Event, Service};
+use clipboard_platform::{Command, CopyMode, CopyPurpose, Event, Service};
 use clipboard_rs::{
     Clipboard, ClipboardContent, ClipboardContext, RustImageData, common::RustImage,
 };
@@ -53,6 +53,7 @@ pub(super) fn run(
         .set_text("watcher survived invalid HTML".into())
         .map_err(|error| anyhow!("写入隔离监听存活样本失败：{error}"))?;
     wait_item(&|item| item.preview.as_deref() == Some("watcher survived invalid HTML"))?;
+    println!("invalid HTML boundary and watcher recovery ok");
 
     let png = encoded_image(2, 2)?;
     clipboard
@@ -71,12 +72,17 @@ pub(super) fn run(
     let path = item.image_path.as_deref().context("图片未保存为像素附件")?;
     // 外部编辑原附件后，写回必须使用解码后的实际尺寸而不是数据库旧尺寸。
     std::fs::write(path, encoded_image(1, 1)?)?;
-    service.send(Command::Copy(item.id))?;
-    copied(events, None)?;
+    service.send(Command::Copy {
+        id: item.id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
+    copied(events, CopyPurpose::Copy)?;
     let dib: Vec<u8> = clipboard_win::get_clipboard(clipboard_win::formats::RawData(8))
         .map_err(|error| anyhow!("读回隔离 DIB 失败：{error}"))?;
     assert_eq!(i32::from_le_bytes(dib[4..8].try_into()?), 1);
     assert_eq!(i32::from_le_bytes(dib[8..12].try_into()?), 1);
+    println!("image clipboard uses decoded dimensions ok");
 
     let text = "native payload original";
     let native = "ElegantClipboard Regression Native";
@@ -93,8 +99,12 @@ pub(super) fn run(
             .iter()
             .any(|(name, _)| name == native)
     );
-    service.send(Command::CopyPlainText(item.id))?;
-    copied(events, None)?;
+    service.send(Command::Copy {
+        id: item.id,
+        mode: CopyMode::PlainText,
+        purpose: CopyPurpose::Copy,
+    })?;
+    copied(events, CopyPurpose::Copy)?;
     assert!(
         !clipboard
             .available_formats()
@@ -102,11 +112,12 @@ pub(super) fn run(
             .iter()
             .any(|name| name == native)
     );
-    service.send(Command::CopyTransformed {
+    service.send(Command::Copy {
         id: item.id,
-        transform: clipboard_core::TextTransform::Uppercase,
+        mode: CopyMode::Transform(clipboard_core::TextTransform::Uppercase),
+        purpose: CopyPurpose::Copy,
     })?;
-    copied(events, None)?;
+    copied(events, CopyPurpose::Copy)?;
     assert_eq!(
         clipboard.get_text().map_err(|error| anyhow!("{error}"))?,
         text.to_uppercase()
@@ -118,6 +129,7 @@ pub(super) fn run(
             .iter()
             .any(|name| name == native)
     );
+    println!("plain and transformed copies exclude native payloads ok");
 
     // 失败请求的快照不能由后一次纯文本粘贴取走；外部新复制也不能被恢复覆盖。
     service.send(Command::SetRestoreClipboard(true))?;
@@ -127,14 +139,22 @@ pub(super) fn run(
     clipboard
         .set_text("original stash".into())
         .map_err(|error| anyhow!("{error}"))?;
-    service.send(Command::CopyForPaste(item.id, 8001))?;
-    copied(events, Some(8001))?;
+    service.send(Command::Copy {
+        id: item.id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Paste { request_id: 8001 },
+    })?;
+    copied(events, CopyPurpose::Paste { request_id: 8001 })?;
     service.send(Command::CancelPaste { request_id: 8001 })?;
     clipboard
         .set_text("new user copy".into())
         .map_err(|error| anyhow!("{error}"))?;
-    service.send(Command::CopyPlainTextForPaste(item.id, 8002))?;
-    let sequence = copied(events, Some(8002))?;
+    service.send(Command::Copy {
+        id: item.id,
+        mode: CopyMode::PlainText,
+        purpose: CopyPurpose::Paste { request_id: 8002 },
+    })?;
+    let sequence = copied(events, CopyPurpose::Paste { request_id: 8002 })?;
     service.send(Command::RestoreStashedClipboard {
         request_id: 8002,
         clipboard_sequence: sequence,
@@ -146,12 +166,17 @@ pub(super) fn run(
         clipboard.get_text().map_err(|error| anyhow!("{error}"))?,
         text
     );
+    println!("cancelled request cannot restore into a later paste ok");
 
     clipboard
         .set_text("matching request stash".into())
         .map_err(|error| anyhow!("{error}"))?;
-    service.send(Command::CopyForPaste(item.id, 8003))?;
-    let sequence = copied(events, Some(8003))?;
+    service.send(Command::Copy {
+        id: item.id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Paste { request_id: 8003 },
+    })?;
+    let sequence = copied(events, CopyPurpose::Paste { request_id: 8003 })?;
     service.send(Command::RestoreStashedClipboard {
         request_id: 8003,
         clipboard_sequence: sequence,
@@ -163,9 +188,14 @@ pub(super) fn run(
         clipboard.get_text().map_err(|error| anyhow!("{error}"))?,
         "matching request stash"
     );
+    println!("matching clipboard restoration ok");
 
-    service.send(Command::CopyForPaste(item.id, 8004))?;
-    let sequence = copied(events, Some(8004))?;
+    service.send(Command::Copy {
+        id: item.id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Paste { request_id: 8004 },
+    })?;
+    let sequence = copied(events, CopyPurpose::Paste { request_id: 8004 })?;
     clipboard
         .set_text("external content stays".into())
         .map_err(|error| anyhow!("{error}"))?;
@@ -180,6 +210,7 @@ pub(super) fn run(
         clipboard.get_text().map_err(|error| anyhow!("{error}"))?,
         "external content stays"
     );
+    println!("external clipboard content survives restoration request ok");
     service.send(Command::SetRestoreClipboard(false))?;
     wait_event(events, &|event| {
         matches!(event, Event::RestoreClipboardSaved(Ok(false)))
@@ -194,15 +225,15 @@ fn encoded_image(width: u32, height: u32) -> Result<Vec<u8>> {
     Ok(bytes.into_inner())
 }
 
-fn copied(events: &async_channel::Receiver<Event>, request: Option<u64>) -> Result<u32> {
+fn copied(events: &async_channel::Receiver<Event>, expected_purpose: CopyPurpose) -> Result<u32> {
     let deadline = Instant::now() + Duration::from_secs(8);
     loop {
         match events.try_recv() {
             Ok(Event::Copied {
-                request_id,
+                purpose,
                 clipboard_sequence,
                 ..
-            }) if request_id == request => return Ok(clipboard_sequence),
+            }) if purpose == expected_purpose => return Ok(clipboard_sequence),
             Ok(Event::CommandFailed { message, .. } | Event::Error(message)) => bail!("{message}"),
             _ => {}
         }

@@ -26,7 +26,6 @@ mod clipboard_restore;
 #[path = "../../windows/worker/clipboard_write.rs"]
 mod clipboard_write;
 mod commands;
-mod copy_mode;
 mod history;
 mod image_tmp;
 mod retention;
@@ -36,7 +35,7 @@ pub(crate) mod transient;
 
 use stash::StashedClipboard;
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 pub(super) use capture::filter_observed_capture;
 
 pub(super) struct Worker {

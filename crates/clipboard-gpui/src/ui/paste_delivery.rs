@@ -1,41 +1,21 @@
 use super::*;
 
-/// 识别所有会替换剪贴板内容的操作，包含格式与文本转换变体。
-pub(super) fn replacement_request(command: &Command) -> Option<Option<u64>> {
-    match command {
-        Command::Copy(_)
-        | Command::CopyPlainText(_)
-        | Command::CopyPath(_)
-        | Command::CopyAsFile(_)
-        | Command::CopyAsFormat { .. }
-        | Command::CopyTransformed { .. }
-        | Command::MergeCopy(_)
-        | Command::ResolveQuickPaste { .. } => Some(None),
-        Command::CopyForPaste(_, request_id)
-        | Command::CopyPlainTextForPaste(_, request_id)
-        | Command::CopyPathForPaste(_, request_id)
-        | Command::CopyAsFileForPaste(_, request_id)
-        | Command::CopyAsFormatForPaste { request_id, .. }
-        | Command::CopyTransformedForPaste { request_id, .. }
-        | Command::MergeForPaste { request_id, .. } => Some(Some(*request_id)),
-        _ => None,
-    }
-}
-
 impl ClipboardView {
     /// 替换剪贴板前先取消旧投递及其快照，新分配的请求保留到自己的投递结束。
     pub(super) fn interrupt_paste_except(&mut self, keep_request: Option<u64>) {
+        let interrupted = self.paste_state.interrupt(keep_request);
+        self.apply_paste_interruption(interrupted);
+    }
+
+    pub(super) fn apply_paste_interruption(&mut self, interrupted: paste_coordinator::Interrupted) {
         self.paste_delivery_task = None;
-        if let Some(request_id) = self.paste_pending.request_id()
-            && Some(request_id) != keep_request
-        {
-            self.paste_pending.take();
+        if let Some(request_id) = interrupted.request_id {
             let _ = self.service.send(Command::CancelPaste { request_id });
         }
-        if self.batch_paste_pending.take().is_some() {
+        if interrupted.merge {
             self.batch_pending = false;
         }
-        if self.sequence_queue.take().is_some() {
+        if interrupted.sequence {
             self.reset_selection();
         }
     }
@@ -89,13 +69,12 @@ impl ClipboardView {
                 cx.background_executor().timer(paste::POLL_INTERVAL).await;
                 let finished =
                     update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                        if this.paste_pending.get(request_id).is_none() {
+                        if !this.paste_state.delivering(request_id) {
                             return true;
                         }
                         match pending.try_send() {
                             Ok(false) => return false,
                             Ok(true) => {
-                                this.paste_pending.complete(request_id);
                                 if sound::enabled(
                                     this.audio.value,
                                     Sound::Paste,
@@ -124,9 +103,6 @@ impl ClipboardView {
                                     this.send(Command::BumpToTop(id), cx);
                                 }
                                 this.sequence_paste_delivered(request_id, cx);
-                                if this.sequence_queue.is_none() {
-                                    this.paste_target = None;
-                                }
                             }
                             Err(error) => {
                                 this.interrupt_paste_except(None);
@@ -148,74 +124,5 @@ impl ClipboardView {
                 }
             }
         }));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[::core::prelude::v1::test]
-    fn format_and_transform_commands_replace_pending_delivery_with_their_own_request() {
-        let commands = [
-            (
-                Command::CopyAsFormat {
-                    id: 1,
-                    format: CopyFormat::Html,
-                },
-                None,
-            ),
-            (
-                Command::CopyTransformed {
-                    id: 1,
-                    transform: TextTransform::Trim,
-                },
-                None,
-            ),
-            (
-                Command::CopyAsFormatForPaste {
-                    id: 1,
-                    format: CopyFormat::Rtf,
-                    request_id: 9,
-                },
-                Some(9),
-            ),
-            (
-                Command::CopyTransformedForPaste {
-                    id: 1,
-                    transform: TextTransform::Lowercase,
-                    request_id: 10,
-                },
-                Some(10),
-            ),
-            (
-                Command::MergeForPaste {
-                    ids: vec![1, 2],
-                    request_id: 11,
-                },
-                Some(11),
-            ),
-        ];
-        let mut pending = paste_requests::PendingRequest::default();
-        for (command, expected) in commands {
-            let old_request = pending.begin((1, 2));
-            let keep = replacement_request(&command).expect("clipboard replacement");
-            assert_eq!(keep, expected);
-            if pending.request_id() != keep {
-                pending.take();
-            }
-            assert_eq!(pending.complete(old_request), None);
-        }
-        assert_eq!(
-            replacement_request(&Command::CancelPaste { request_id: 1 }),
-            None
-        );
-        assert_eq!(
-            replacement_request(&Command::RestoreStashedClipboard {
-                request_id: 1,
-                clipboard_sequence: 2
-            }),
-            None
-        );
     }
 }

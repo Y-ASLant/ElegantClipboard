@@ -5,7 +5,7 @@ use clipboard_core::preferences::{CornerRadiusPreference, ThemePreference};
 fn theme_acknowledgement_is_persisted_before_reopening() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_theme, ThemePreference::System);
+    assert_eq!(service.initial_preferences.theme, ThemePreference::System);
     next_snapshot(&events, 0);
     for theme in [
         ThemePreference::Light,
@@ -29,7 +29,7 @@ fn theme_acknowledgement_is_persisted_before_reopening() -> Result<()> {
     }
     drop(service);
     let (reopened, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_theme, ThemePreference::Dark);
+    assert_eq!(reopened.initial_preferences.theme, ThemePreference::Dark);
     assert!(next_snapshot(&events, 0).is_empty());
     Ok(())
 }
@@ -71,7 +71,7 @@ fn corner_radius_acknowledgement_preserves_value_after_rejected_change() -> Resu
         }
         drop(service);
         let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(reopened.initial_corner_radius, preference);
+        assert_eq!(reopened.initial_preferences.corner_radius, preference);
     }
     Ok(())
 }
@@ -91,7 +91,7 @@ fn startup_migrates_legacy_eight_and_preserves_other_saved_radii() -> Result<()>
         drop(db);
 
         let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(service.initial_corner_radius, expected);
+        assert_eq!(service.initial_preferences.corner_radius, expected);
         drop(service);
 
         let db = Database::new(path)?;
@@ -103,7 +103,7 @@ fn startup_migrates_legacy_eight_and_preserves_other_saved_radii() -> Result<()>
         );
         drop(db);
         let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(service.initial_corner_radius, expected);
+        assert_eq!(service.initial_preferences.corner_radius, expected);
     }
     Ok(())
 }

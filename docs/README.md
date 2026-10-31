@@ -16,6 +16,8 @@
 - [首次引导布局与动效](evidence/onboarding-motion-2026-10-27.md)：beta.9 四步动态预览的历史验证。
 - [首次使用与配置引导](evidence/onboarding-setup-2026-10-28.md)：快捷键、复制粘贴教程、初始偏好与原生窗口验证。
 - [全应用主题与动效](evidence/chakra-theme-2026-10-28.md)：Chakra 风格的原生组件统一、可调圆角与Windows实机验证。
+- [项目质量与重构评估](evidence/project-quality-review-2026-10-31.md)：重构前的源码、CI 与设计取舍评估。
+- [质量重构验证](evidence/quality-refactor-2026-10-31.md)：协议、粘贴状态、偏好、测试迁移和发布门槛的实现验证。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。
@@ -45,6 +47,7 @@
 | `database/repository.rs`、`repository/` | 记录模型与查询条件；查询、写入、保留策略分别实现 |
 | `database/groups.rs`、`settings.rs` | 分组和设置仓储 |
 | `preferences.rs`、`preferences/types.rs` | 设置键与持久化；设置值类型、默认值和校验 |
+| `preferences/snapshot.rs`、`preferences/backup.rs` | 启动偏好的类型化快照；复用偏好键常量的备份过滤，不更改存储键或格式 |
 | `backup_common.rs::check_central_directory_names` | 新旧 ZIP 共用原始目录项去重与数量校验，避免依赖合并同名条目后漏检 |
 | `backup.rs`、`backup_common.rs`、`import.rs`、`legacy_backup.rs` | GPUI 备份、共享归档校验及旧数据兼容导入 |
 | 各模块的 `tests.rs` / `tests/` | 就近维护的隔离业务测试；仓储测试按记录、查询、保留、分组及设置分类 |
@@ -67,11 +70,13 @@
 | `macos/` | Carbon 快捷键、NSWorkspace 来源、NSEvent、NSDraggingSession、Accessibility 粘贴及 LaunchAgent |
 | `sequence.rs`、`unix/x11_sequence.rs` | Windows 序列号、macOS changeCount、X11 XFixes generation 和 Wayland 内容身份 |
 | `notification.rs`、`notification/` | Windows WinRT、macOS UserNotifications 与 Linux D-Bus 系统通知；由界面层在后台调用 |
-| `windows/tests/` | 原有 Windows 服务与剪贴板行为回归；Unix 的隔离测试位于所属模块 |
+| `service/tests/` | 三平台共用服务行为回归；Windows 图标与信号同步等专属夹具单独按平台编译 |
 
 Linux X11 采集内容与来源查询整体受前后 selection generation 校验保护；不以无关前台窗口冒充 clipboard owner。XDND 在释放鼠标后锁定目标和位置，等待最终响应期间不重新投放到另一窗口。Wayland 必须支持 data-control，按完整载荷轮询检测变化，不能区分相同内容的再次复制。
 
 `window_effect.rs` 提供当前系统的真实材质能力及降级策略，不覆盖已保存的偏好；Windows DWM、macOS 模糊和 Linux 不透明分别由 GPUI 原生层应用。
+
+复制协议统一为 `Command::Copy { id, mode, purpose }` 与 `Command::Merge { ids, purpose }`。`CopyMode` 指定格式/转换，`CopyPurpose` 区分普通复制和带请求编号的回贴；成功回执与失败分类使用同一目的信息，不再维护成对的 `*ForPaste` 命令。`Service.initial_preferences` 持有核心层 `PreferenceSnapshot`，启动数据警告仍独立保存。
 
 ### GPUI 界面层
 
@@ -91,10 +96,27 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
+| `paste_coordinator`、`paste_requests`、`paste_delivery`、`sequence` | 私有粘贴状态、请求代次、原生投递及序列适配；队列与单次投递阶段分别建模 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
 | `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、快捷键配置、隔离练习教程与初始偏好、内容展示助手、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于悬停预览与复制。
 
 确认操作仅由 `HistoryConfirmation` 表示当前类型与分组作用域，保存中的状态仍按操作分别保留。普通偏好使用 `PendingPref<T>`，仅在保存成功后替换生效值；快捷键注册回滚、语言和显示布局等副作用仍由专用处理器负责。窗口隐藏复用清理与隐藏动作，各入口的保护条件不合并。
+
+`PasteCoordinator` 统一持有目标、复制请求、快捷槽位请求、合并状态和序列队列；窗口显隐、失焦、剪贴板替换与回执通过转换方法更新，不由各入口直接修改内部字段。GPUI 适配器保留执行任务与原生窗口副作用；正常回贴隐藏不等同于用户取消。状态回归覆盖取消后重入、旧成功/失败回执、序列首条归属、推进等待和合并释放。
+
+### 发布质量门槛
+
+`gpui.yml` 同时用于分支 CI 与 `workflow_call`。标签发布先检查版本，再对同一提交执行三平台检查、测试、原生剪贴板/窗口冒烟和打包；草稿发布只下载这次质量门槛产出的包，不重新构建。Windows 同时启动构建目录与 ZIP 解压后的程序，macOS 从 DMG 内启动，Linux 使用私有 Xvfb。
+
+`scripts/run-ci-command.ps1` 保存完整命令输出及真实退出码，失败不转换为成功；CI 使用 `always()` 上传 `target/ci-logs/`。历史失败日志访问受限时不能仅凭本地成功宣称修复。
+
+### 可重复测量
+
+运行 `cargo run -p clipboard-core --example measure_history --release --locked`，在临时数据库生成 10000 条确定性文本记录（其中 10 条为 1 MiB），输出首页、ASCII 搜索、中文搜索及未命中查询的 p50/p95。测量范围是预热后的核心列表读取加计数，不包含 UI 防抖、worker 排队或绘制。默认自动清理数据；如需原生浏览同一数据，可追加一个尚不存在的数据目录路径，程序拒绝覆盖已有目录。样本关闭主唤出热键并完成引导；原生验收须使用 `--no-monitor`。
+
+已运行实例的常驻采样复用 `scripts/measure-gpui-idle.ps1`。短时 CPU/内存采样不代表长期稳定性、图片滚动帧率或跨显示器验收。
+
+Windows 隔离剪贴板示例使用空名称窗口站，因此实际复用登录会话窗口站，而不是每次创建私有剪贴板。示例以命名互斥量拒绝并发运行；它仍不写入交互桌面 `WinSta0` 的剪贴板。
 

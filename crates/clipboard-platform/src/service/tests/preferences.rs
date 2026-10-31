@@ -28,7 +28,10 @@ fn capture_error_does_not_replace_an_unrelated_settings_acknowledgement() -> Res
 fn language_defaults_to_chinese_and_is_loaded_after_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_language, LanguagePreference::Chinese);
+    assert_eq!(
+        service.initial_preferences.language,
+        LanguagePreference::Chinese
+    );
     next_snapshot(&events, 0);
     service.send(Command::SetLanguage(LanguagePreference::English))?;
     wait_for(
@@ -46,7 +49,10 @@ fn language_defaults_to_chinese_and_is_loaded_after_restart() -> Result<()> {
     );
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_language, LanguagePreference::English);
+    assert_eq!(
+        reopened.initial_preferences.language,
+        LanguagePreference::English
+    );
     Ok(())
 }
 
@@ -54,7 +60,10 @@ fn language_defaults_to_chinese_and_is_loaded_after_restart() -> Result<()> {
 fn hotkey_change_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_hotkey, HotkeyPreference::default());
+    assert_eq!(
+        service.initial_preferences.hotkey,
+        HotkeyPreference::default()
+    );
     next_snapshot(&events, 0);
     service.send(Command::SetHotkey(HotkeyPreference::Shortcut(
         " alt + control + f9 ".into(),
@@ -96,7 +105,7 @@ fn hotkey_change_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
     assert_eq!(
-        reopened.initial_hotkey,
+        reopened.initial_preferences.hotkey,
         HotkeyPreference::Shortcut("Ctrl+Alt+F9".into())
     );
     Ok(())
@@ -106,7 +115,7 @@ fn hotkey_change_is_acknowledged_and_loaded_on_restart() -> Result<()> {
 fn window_size_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_window_size, None);
+    assert_eq!(service.initial_preferences.window_size, None);
     next_snapshot(&events, 0);
     let size = WindowSizePreference::new(960, 720).unwrap();
     service.send(Command::SetWindowSize(size))?;
@@ -125,7 +134,7 @@ fn window_size_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     );
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_window_size, Some(size));
+    assert_eq!(reopened.initial_preferences.window_size, Some(size));
     Ok(())
 }
 
@@ -134,7 +143,7 @@ fn window_position_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     assert_eq!(
-        service.initial_window_position,
+        service.initial_preferences.window_position,
         WindowPositionPreference::FollowCursor
     );
     next_snapshot(&events, 0);
@@ -157,7 +166,7 @@ fn window_position_is_acknowledged_and_loaded_on_restart() -> Result<()> {
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
     assert_eq!(
-        reopened.initial_window_position,
+        reopened.initial_preferences.window_position,
         WindowPositionPreference::ScreenCenter
     );
     Ok(())
@@ -167,15 +176,18 @@ fn window_position_is_acknowledged_and_loaded_on_restart() -> Result<()> {
 fn window_behavior_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert!(service.initial_persist_window_size);
-    assert!(!service.initial_auto_reset_state);
-    assert!(!service.initial_search_auto_focus);
-    assert!(service.initial_search_auto_clear);
-    assert!(!service.initial_skip_clear_confirm);
-    assert!(service.initial_paste_close_window);
-    assert_eq!(service.initial_paste_key, PasteKeyPreference::CtrlV);
-    assert!(service.initial_paste_move_to_top);
-    assert!(!service.initial_quick_paste_enabled);
+    assert!(service.initial_preferences.persist_window_size);
+    assert!(!service.initial_preferences.auto_reset_state);
+    assert!(!service.initial_preferences.search_auto_focus);
+    assert!(service.initial_preferences.search_auto_clear);
+    assert!(!service.initial_preferences.skip_clear_confirm);
+    assert!(service.initial_preferences.paste_close_window);
+    assert_eq!(
+        service.initial_preferences.paste_key,
+        PasteKeyPreference::CtrlV
+    );
+    assert!(service.initial_preferences.paste_move_to_top);
+    assert!(!service.initial_preferences.quick_paste_enabled);
     next_snapshot(&events, 0);
     service.send(Command::SetPersistWindowSize(false))?;
     service.send(Command::SetAutoResetState(true))?;
@@ -254,15 +266,18 @@ fn window_behavior_settings_are_acknowledged_and_loaded_on_restart() -> Result<(
     );
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert!(!reopened.initial_persist_window_size);
-    assert!(reopened.initial_auto_reset_state);
-    assert!(reopened.initial_search_auto_focus);
-    assert!(!reopened.initial_search_auto_clear);
-    assert!(reopened.initial_skip_clear_confirm);
-    assert!(!reopened.initial_paste_close_window);
-    assert_eq!(reopened.initial_paste_key, PasteKeyPreference::ShiftInsert);
-    assert!(!reopened.initial_paste_move_to_top);
-    assert!(reopened.initial_quick_paste_enabled);
+    assert!(!reopened.initial_preferences.persist_window_size);
+    assert!(reopened.initial_preferences.auto_reset_state);
+    assert!(reopened.initial_preferences.search_auto_focus);
+    assert!(!reopened.initial_preferences.search_auto_clear);
+    assert!(reopened.initial_preferences.skip_clear_confirm);
+    assert!(!reopened.initial_preferences.paste_close_window);
+    assert_eq!(
+        reopened.initial_preferences.paste_key,
+        PasteKeyPreference::ShiftInsert
+    );
+    assert!(!reopened.initial_preferences.paste_move_to_top);
+    assert!(reopened.initial_preferences.quick_paste_enabled);
     Ok(())
 }
 
@@ -271,7 +286,7 @@ fn paste_shortcuts_save_atomically_and_reject_window_hotkey_conflicts() -> Resul
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
-    let mut shortcuts = service.initial_paste_shortcuts.clone();
+    let mut shortcuts = service.initial_preferences.paste_shortcuts.clone();
     shortcuts.set_slot(true, 10, "Ctrl+Shift+Z".into())?;
     service.send(Command::SetPasteShortcuts(Box::new(shortcuts.clone())))?;
     let result = wait_for(
@@ -286,7 +301,7 @@ fn paste_shortcuts_save_atomically_and_reject_window_hotkey_conflicts() -> Resul
     );
     assert_eq!(*result.unwrap(), shortcuts);
     let mut invalid = shortcuts.clone();
-    invalid.set_slot(true, 10, service.initial_hotkey.label().into())?;
+    invalid.set_slot(true, 10, service.initial_preferences.hotkey.label().into())?;
     service.send(Command::SetPasteShortcuts(Box::new(invalid)))?;
     let result = wait_for(
         &events,
@@ -301,7 +316,7 @@ fn paste_shortcuts_save_atomically_and_reject_window_hotkey_conflicts() -> Resul
     assert!(result.is_err());
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_paste_shortcuts, shortcuts);
+    assert_eq!(reopened.initial_preferences.paste_shortcuts, shortcuts);
     Ok(())
 }
 
@@ -311,7 +326,10 @@ fn display_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
 
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_display, DisplayPreference::default());
+    assert_eq!(
+        service.initial_preferences.display,
+        DisplayPreference::default()
+    );
     next_snapshot(&events, 0);
     let display = DisplayPreference {
         show_category_filter: false,
@@ -341,7 +359,7 @@ fn display_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
     );
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_display, display);
+    assert_eq!(reopened.initial_preferences.display, display);
     Ok(())
 }
 
@@ -351,7 +369,10 @@ fn audio_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
 
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(service.initial_audio, AudioPreference::default());
+    assert_eq!(
+        service.initial_preferences.audio,
+        AudioPreference::default()
+    );
     next_snapshot(&events, 0);
     let audio = AudioPreference {
         copy_enabled: true,
@@ -363,7 +384,7 @@ fn audio_settings_are_acknowledged_and_loaded_on_restart() -> Result<()> {
     assert!(matches!(next_event(&events), Event::AudioSaved(Ok(saved)) if saved == audio));
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_audio, audio);
+    assert_eq!(reopened.initial_preferences.audio, audio);
     Ok(())
 }
 
@@ -374,7 +395,7 @@ fn hover_preview_preferences_are_acknowledged_and_loaded_on_restart() -> Result<
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     assert_eq!(
-        service.initial_hover_preview,
+        service.initial_preferences.hover_preview,
         HoverPreviewPreference::default()
     );
     next_snapshot(&events, 0);
@@ -402,7 +423,7 @@ fn hover_preview_preferences_are_acknowledged_and_loaded_on_restart() -> Result<
     );
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert_eq!(reopened.initial_hover_preview, preference);
+    assert_eq!(reopened.initial_preferences.hover_preview, preference);
     Ok(())
 }
 
@@ -410,7 +431,7 @@ fn hover_preview_preferences_are_acknowledged_and_loaded_on_restart() -> Result<
 fn pause_acknowledgement_is_ordered_and_does_not_change_history() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert!(!service.initial_paused);
+    assert!(!service.initial_preferences.paused);
     next_snapshot(&events, 0);
     for paused in [true, false, true] {
         service.send(Command::Pause(paused))?;
@@ -439,6 +460,6 @@ fn pause_acknowledgement_is_ordered_and_does_not_change_history() -> Result<()> 
     assert!(next_snapshot(&events, 1).is_empty());
     drop(service);
     let (reopened, _) = Service::start(Some(directory.path().to_owned()), false)?;
-    assert!(reopened.initial_paused);
+    assert!(reopened.initial_preferences.paused);
     Ok(())
 }

@@ -150,15 +150,15 @@ impl ClipboardView {
             || !self.quick_paste_enabled
             || self.shortcut_change_pending()
             || self.paste_hotkeys.is_none()
-            || self.quick_paste_pending.is_some()
-            || self.paste_pending.is_some()
+            || self.paste_state.quick_pending()
+            || self.paste_state.pending()
             || self.batch_pending
-            || self.batch_paste_pending.is_some()
+            || self.paste_state.merging()
             || !paste::is_external_target(window, event.target)
         {
             return;
         }
-        let request_id = self.quick_paste_pending.begin(event.target);
+        let request_id = self.paste_state.begin_quick(event.target);
         if !self.send(
             Command::ResolveQuickPaste {
                 request_id,
@@ -168,7 +168,7 @@ impl ClipboardView {
             },
             cx,
         ) {
-            self.quick_paste_pending.take();
+            self.paste_state.cancel_quick();
         }
     }
 }

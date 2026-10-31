@@ -100,7 +100,14 @@ impl ClipboardView {
                 self.copy_or_paste_transform(id, *transform, window, cx)
             }
             HistoryMenuAction::Copy => {
-                self.send(Command::Copy(id), cx);
+                self.send(
+                    Command::Copy {
+                        id,
+                        mode: CopyMode::Original,
+                        purpose: CopyPurpose::Copy,
+                    },
+                    cx,
+                );
             }
             HistoryMenuAction::CopyPath => self.copy_or_paste_path(id, window, cx),
             HistoryMenuAction::CopyAsFile => self.copy_or_paste_image_file(id, window, cx),
@@ -144,8 +151,8 @@ impl ClipboardView {
         let text_like = item.kind().is_some_and(|kind| kind.is_text_like());
         let language = self.language;
         let batch_mode = self.batch_mode;
-        let can_paste = self.paste_target.is_some() && self._tray.is_some();
-        let paste_pending = self.paste_pending.is_some();
+        let can_paste = self.paste_state.target().is_some() && self._tray.is_some();
+        let paste_pending = self.paste_state.pending();
         let save_as_pending = self.save_as_pending.is_some();
         let group_move_disabled = self.group_move_disabled();
         let save_as_name = if is_image {

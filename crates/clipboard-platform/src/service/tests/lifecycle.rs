@@ -6,7 +6,7 @@ use clipboard_core::preferences::Preferences;
 fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
     let fresh = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(fresh.path().to_owned()), false)?;
-    assert!(!service.initial_onboarding_completed);
+    assert!(!service.initial_preferences.onboarding_completed);
     next_snapshot(&events, 0);
     service.send(Command::CompleteOnboarding)?;
     assert!(matches!(
@@ -15,7 +15,7 @@ fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
     ));
     drop(service);
     let (service, _) = Service::start(Some(fresh.path().to_owned()), false)?;
-    assert!(service.initial_onboarding_completed);
+    assert!(service.initial_preferences.onboarding_completed);
     drop(service);
 
     let existing = tempfile::tempdir()?;
@@ -26,7 +26,7 @@ fn onboarding_completion_and_existing_history_are_recognized() -> Result<()> {
     assert_eq!(history.count("", false)?, 0);
     drop(history);
     let (service, _) = Service::start(Some(existing.path().to_owned()), false)?;
-    assert!(service.initial_onboarding_completed);
+    assert!(service.initial_preferences.onboarding_completed);
     drop(service);
     let db = Database::new(existing.path().join("clipboard.db"))?;
     assert!(Preferences::new(&db).onboarding_completed()?);
@@ -169,6 +169,8 @@ fn instance_lock_and_shutdown_work_even_with_a_full_event_queue() -> Result<()> 
         thread::sleep(Duration::from_millis(10));
     }
     assert!(show_existing_instance(Some(directory.path().to_owned()))?);
+    // Windows blocks its signal sender; Unix queues a datagram instead.
+    #[cfg(windows)]
     service
         .instance_signal
         .as_ref()
@@ -214,6 +216,7 @@ fn second_launch_wakes_after_a_full_event_queue_drains() -> Result<()> {
         );
     }
     assert!(show_existing_instance(Some(directory.path().to_owned()))?);
+    #[cfg(windows)]
     service
         .instance_signal
         .as_ref()

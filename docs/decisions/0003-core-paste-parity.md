@@ -10,7 +10,7 @@
 
 ### 1. 粘贴后恢复用户原剪贴板（默认关闭）
 
-- 受控粘贴（CopyForPaste）写回条目前，worker 若开启恢复则先读取当前剪贴板完整快照（主内容 + 额外原生格式）暂存在 worker 内存；粘贴快捷键发送成功后由 UI 发 `RestoreStashedClipboard` 写回快照并抑制自捕获。
+- 受控原格式粘贴（`Command::Copy { mode: Original, purpose: Paste { request_id }, .. }`）写回条目前，worker 若开启恢复则先读取当前剪贴板完整快照（主内容 + 额外原生格式）暂存在 worker 内存；粘贴快捷键发送成功后由 UI 发 `RestoreStashedClipboard` 写回快照并抑制自捕获。
 - 默认**关闭**：写回快照与目标应用读取剪贴板存在时序竞争（SendInput 异步），开启恢复会牺牲"粘贴后再手动 Ctrl+V 一次"的场景。关闭时保持现状（剪贴板保留所贴条目）。
 - 快照不可得（隐私标记格式、读取失败）时静默放弃恢复，不影响粘贴本身。隐私标记内容同样参与快照——恢复不是入库，不违背隐私标记的本意；但 `ExcludeClipboardContentFromMonitorProcessing` 命中时主内容读不到，即无快照可恢复。
 - 快照归属到单次 `request_id` 与写后剪贴板序列，恢复命令必须匹配两者；当前剪贴板已被其他应用改写时拒绝恢复。Windows 在打开剪贴板的同一会话内核对序列并恢复，Unix 写前核对当前序列。
@@ -26,7 +26,7 @@
 ### 3. 文本转换复制/粘贴
 
 - `TextTransform`：`Trim`（去首尾空白）、`RemoveLineBreaks`（换行折叠为空格）、`Uppercase`、`Lowercase`。core 纯函数，无平台依赖。
-- 作为复制变体接入既有 `CopyMode`：菜单提供"复制为…"与"粘贴为…"（ForPaste 变体），与纯文本/路径变体同构。大小写转换用 Unicode 大小写映射（`to_uppercase`/`to_lowercase`），不做 Turkey/I18n 细化。
+- 作为复制变体接入既有 `CopyMode::Transform`：菜单提供复制与粘贴操作，统一通过 `CopyPurpose::Copy` 或 `CopyPurpose::Paste { request_id }` 表达目的，不再维护成对的 ForPaste 命令。大小写转换用 Unicode 大小写映射（`to_uppercase`/`to_lowercase`），不做 Turkey/I18n 细化。
 
 ### 4. 按格式粘贴（富文本条目）
 

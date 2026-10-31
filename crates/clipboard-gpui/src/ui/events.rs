@@ -12,19 +12,11 @@ impl ClipboardView {
         ) {
             self.cancel_sequence(cx);
         }
-        let replacement = paste_delivery::replacement_request(&command);
+        let replacement = self.paste_state.replace(&command);
+        let replacing_clipboard = replacement.is_some();
         let resolving_quick = matches!(&command, Command::ResolveQuickPaste { .. });
-        if let Some(request_id) = replacement {
-            let sequence_owned = self
-                .sequence_queue
-                .as_ref()
-                .is_some_and(|queue| queue.owns_command(&command));
-            if !sequence_owned {
-                self.interrupt_paste_except(request_id);
-            }
-            if !resolving_quick {
-                self.quick_paste_pending.take();
-            }
+        if let Some(interrupted) = replacement {
+            self.apply_paste_interruption(interrupted);
         }
         if let Err(error) = self.service.send(command) {
             tracing::error!(%error, "Sending backend command failed");
@@ -33,7 +25,7 @@ impl ClipboardView {
             cx.notify();
             return false;
         }
-        if replacement.is_some()
+        if replacing_clipboard
             && !resolving_quick
             && sound::enabled(self.audio.value, Sound::Copy, SoundTiming::Immediate)
         {
@@ -49,7 +41,7 @@ impl ClipboardView {
     ) {
         let handled: bool = match event {
             Event::ShowWindow => {
-                self.paste_target = None;
+                self.paste_state.set_target(None);
                 self.show_window(window, cx);
                 true
             }
@@ -102,23 +94,15 @@ impl ClipboardView {
             }
             Event::Copied {
                 id,
-                request_id,
+                purpose,
                 clipboard_sequence,
                 message,
-            } => self.apply_copied(id, request_id, clipboard_sequence, message, window, cx),
+            } => self.apply_copied(id, purpose, clipboard_sequence, message, window, cx),
             Event::Merged {
-                for_paste,
-                request_id,
+                purpose,
                 clipboard_sequence,
                 item_count,
-            } => self.apply_merged(
-                for_paste,
-                request_id,
-                clipboard_sequence,
-                item_count,
-                window,
-                cx,
-            ),
+            } => self.apply_merged(purpose, clipboard_sequence, item_count, window, cx),
             Event::ThemeSaved(result) => self.apply_theme_saved(result, window, cx),
             Event::CornerRadiusSaved(result) => {
                 self.acknowledge_save(
@@ -357,19 +341,19 @@ impl ClipboardView {
         match kind {
             FailureKind::Query(_) => {}
             FailureKind::Paste(request_id) => {
-                if self.paste_pending.get(request_id).is_none() {
+                let Some(interrupted) = self.paste_state.fail(request_id) else {
                     return false;
-                }
-                self.interrupt_paste_except(None);
+                };
+                self.apply_paste_interruption(interrupted);
             }
             FailureKind::QuickPaste(request_id) => {
-                if self.quick_paste_pending.complete(request_id).is_none() {
+                if self.paste_state.resolve_quick(request_id).is_none() {
                     return false;
                 }
             }
             FailureKind::Merge => {
                 self.batch_pending = false;
-                self.batch_paste_pending = None;
+                self.paste_state.finish_merge();
             }
             FailureKind::GroupSave => {
                 self.group_save_pending = false;

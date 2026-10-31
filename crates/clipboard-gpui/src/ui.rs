@@ -25,6 +25,7 @@ mod native_health;
 mod navigation;
 mod onboarding;
 mod paste_actions;
+mod paste_coordinator;
 mod paste_delivery;
 mod paste_requests;
 mod preference_events;
@@ -108,7 +109,9 @@ use clipboard_platform::hotkey::{
 };
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
-use clipboard_platform::{Command, CopyFormat, DataSizeInfo, Event, FailureKind, Service};
+use clipboard_platform::{
+    Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind, Service,
+};
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::scroll::ScrollableElement;
@@ -272,7 +275,6 @@ struct ClipboardView {
     selected_ids: HashSet<i64>,
     selection_anchor: Option<i64>,
     batch_pending: bool,
-    batch_paste_pending: Option<(isize, u32)>,
     confirmation: Option<HistoryConfirmation>,
     confirmation_error: Option<String>,
     group_move_id: Option<i64>,
@@ -338,7 +340,6 @@ struct ClipboardView {
     paste_shortcuts: PasteShortcutConfig,
     paste_shortcuts_pending: Option<PasteShortcutConfig>,
     paste_shortcut_status: Option<(String, bool)>,
-    quick_paste_pending: paste_requests::PendingRequest<(isize, u32)>,
     autostart: PendingPref<bool>,
     data_size: Option<DataSizeInfo>,
     daily_counts: Option<Vec<(String, i64)>>,
@@ -370,11 +371,8 @@ struct ClipboardView {
     running_apps: Vec<RunningApp>,
     running_apps_pending: bool,
     last_window_size: Option<WindowSizePreference>,
-    paste_target: Option<(isize, u32)>,
-    paste_pending: paste_requests::PendingRequest<(isize, u32)>,
+    paste_state: paste_coordinator::PasteCoordinator,
     paste_delivery_task: Option<Task<()>>,
-    /// 序列粘贴队列（决策 0004）：待贴条目与已送达计数；None = 未激活。
-    sequence_queue: Option<sequence::SequenceQueue>,
     sequence_hotkey: String,
     sequence_hotkey_pending: bool,
     reorder_pending: bool,

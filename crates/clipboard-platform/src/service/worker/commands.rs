@@ -2,7 +2,7 @@ use super::super::{
     data::data_size_info,
     file_actions::{item_paths_for_action, open_data_directory, reveal_in_explorer, save_item_as},
 };
-use super::{Command, Event, Worker, copy_mode::CopyMode};
+use super::{Command, Event, Worker};
 use crate::{autostart, source_app};
 use anyhow::{Context, Result};
 use clipboard_core::preferences::Preferences;
@@ -58,10 +58,7 @@ impl Worker {
                 self.snapshot_pending = true;
                 return self.flush_capture_snapshot();
             }
-            Command::MergeCopy(ids) => return self.handle_merge(ids, None),
-            Command::MergeForPaste { ids, request_id } => {
-                return self.handle_merge(ids, Some(request_id));
-            }
+            Command::Merge { ids, purpose } => return self.handle_merge(ids, purpose),
             Command::RevealInExplorer(id) => {
                 let item = self.history.item(id)?;
                 let paths = item_paths_for_action(&item)?;
@@ -91,42 +88,7 @@ impl Worker {
                     .map_err(|error| error.to_string());
                 return self.send_event(Event::ExternalDragPrepared { id, token, result });
             }
-            Command::Copy(id) => return self.handle_copy(id, None, CopyMode::Original),
-            Command::CopyPlainText(id) => return self.handle_copy(id, None, CopyMode::PlainText),
-            Command::CopyPlainTextForPaste(id, request_id) => {
-                return self.handle_copy(id, Some(request_id), CopyMode::PlainText);
-            }
-            Command::CopyForPaste(id, request_id) => {
-                return self.handle_copy(id, Some(request_id), CopyMode::Original);
-            }
-            Command::CopyPath(id) => return self.handle_copy(id, None, CopyMode::Paths),
-            Command::CopyPathForPaste(id, request_id) => {
-                return self.handle_copy(id, Some(request_id), CopyMode::Paths);
-            }
-            Command::CopyAsFile(id) => return self.handle_copy(id, None, CopyMode::Files),
-            Command::CopyAsFileForPaste(id, request_id) => {
-                return self.handle_copy(id, Some(request_id), CopyMode::Files);
-            }
-            Command::CopyAsFormat { id, format } => {
-                return self.handle_copy(id, None, CopyMode::from(format));
-            }
-            Command::CopyAsFormatForPaste {
-                id,
-                format,
-                request_id,
-            } => {
-                return self.handle_copy(id, Some(request_id), CopyMode::from(format));
-            }
-            Command::CopyTransformed { id, transform } => {
-                return self.handle_copy(id, None, CopyMode::Transform(transform));
-            }
-            Command::CopyTransformedForPaste {
-                id,
-                transform,
-                request_id,
-            } => {
-                return self.handle_copy(id, Some(request_id), CopyMode::Transform(transform));
-            }
+            Command::Copy { id, mode, purpose } => return self.handle_copy(id, mode, purpose),
             Command::RestoreStashedClipboard {
                 request_id,
                 clipboard_sequence,

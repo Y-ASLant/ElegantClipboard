@@ -11,12 +11,7 @@ use anyhow::Result;
 use clipboard_core::{
     ContentCategory, History, PAGE_SIZE,
     database::Database,
-    preferences::{
-        AppFilterPreference, AudioPreference, CornerRadiusPreference, DedupStrategy,
-        DisplayPreference, HotkeyPreference, HoverPreviewPreference, LanguagePreference,
-        MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig, Preferences,
-        ThemePreference, WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
-    },
+    preferences::{PreferenceSnapshot, Preferences},
 };
 use clipboard_rs::WatcherShutdown;
 use std::{
@@ -42,36 +37,7 @@ pub struct Service {
     _instance_lock: File,
     pub data_dir: PathBuf,
     pub initial_data_warning: Option<String>,
-    pub initial_theme: ThemePreference,
-    pub initial_corner_radius: CornerRadiusPreference,
-    pub initial_language: LanguagePreference,
-    pub initial_hotkey: HotkeyPreference,
-    pub initial_paused: bool,
-    pub initial_window_size: Option<WindowSizePreference>,
-    pub initial_persist_window_size: bool,
-    pub initial_auto_reset_state: bool,
-    pub initial_search_auto_focus: bool,
-    pub initial_search_auto_clear: bool,
-    pub initial_skip_clear_confirm: bool,
-    pub initial_paste_close_window: bool,
-    pub initial_paste_key: PasteKeyPreference,
-    pub initial_paste_move_to_top: bool,
-    pub initial_dedup_strategy: DedupStrategy,
-    pub initial_restore_clipboard: bool,
-    pub initial_sequence_hotkey: String,
-    pub initial_quick_paste_enabled: bool,
-    pub initial_paste_shortcuts: PasteShortcutConfig,
-    pub initial_window_position: WindowPositionPreference,
-    pub initial_hover_preview: HoverPreviewPreference,
-    pub initial_display: DisplayPreference,
-    pub initial_audio: AudioPreference,
-    pub initial_retention: clipboard_core::retention::RetentionPolicy,
-    pub initial_retention_saved: bool,
-    pub initial_transient_filter: bool,
-    pub initial_monitor_types: MonitorTypesPreference,
-    pub initial_app_filter: AppFilterPreference,
-    pub initial_window_effect: WindowEffectPreference,
-    pub initial_onboarding_completed: bool,
+    pub initial_preferences: PreferenceSnapshot,
 }
 
 impl Service {
@@ -96,56 +62,28 @@ impl Service {
             }
         }
         let preferences = Preferences::new(&db);
-        let initial_theme = preferences.theme()?;
-        let initial_corner_radius = preferences.corner_radius()?;
-        let initial_language = preferences.language()?;
-        let initial_hotkey = preferences.hotkey()?;
-        let initial_paused = preferences.capture_paused()?;
-        let initial_window_size = preferences.window_size()?;
-        let initial_persist_window_size = preferences.persist_window_size()?;
-        let initial_auto_reset_state = preferences.auto_reset_state()?;
-        let initial_search_auto_focus = preferences.search_auto_focus()?;
-        let initial_search_auto_clear = preferences.search_auto_clear()?;
-        let initial_skip_clear_confirm = preferences.skip_clear_confirm()?;
-        let initial_paste_close_window = preferences.paste_close_window()?;
-        let initial_paste_key = preferences.paste_key()?;
-        let initial_paste_move_to_top = preferences.paste_move_to_top()?;
-        let initial_dedup_strategy = preferences.dedup_strategy()?;
-        let initial_restore_clipboard = preferences.restore_clipboard()?;
-        let initial_sequence_hotkey = preferences.sequence_paste_hotkey()?;
-        let initial_quick_paste_enabled = preferences.quick_paste_enabled()?;
-        let initial_paste_shortcuts = preferences.paste_shortcuts()?;
-        let initial_window_position = preferences.window_position()?;
-        let initial_hover_preview = preferences.hover_preview()?;
-        let initial_display = preferences.display()?;
-        let initial_audio = preferences.audio()?;
-        let initial_retention = preferences.retention()?;
-        let initial_retention_saved = preferences.retention_saved()?;
-        let initial_transient_filter = preferences.transient_filter()?;
-        let initial_monitor_types = preferences.monitor_types()?;
-        let initial_app_filter = preferences.app_filter()?;
-        let initial_window_effect = preferences.window_effect()?;
-        let initial_onboarding_completed = if preferences.onboarding_completed()? {
-            true
-        } else if history.count("", false)? > 0
-            || history.groups()?.iter().any(|group| group.item_count > 0)
+        let mut initial_preferences = preferences.snapshot()?;
+        if !initial_preferences.onboarding_completed
+            && (history.count("", false)? > 0
+                || history.groups()?.iter().any(|group| group.item_count > 0))
         {
             // Existing GPUI data predates the introduction of onboarding.
             preferences.set_onboarding_completed()?;
-            true
-        } else {
-            false
-        };
+            initial_preferences.onboarding_completed = true;
+        }
         let writer = crate::sequence::new_clipboard()?;
         let commands = Arc::new(CommandQueue::default());
         let incoming = commands.clone();
         let capture_feedback = Arc::new(CaptureFeedback::default());
         let (events, outgoing) = async_channel::bounded(64);
         let state = Arc::new(Mutex::new(CaptureState {
-            paused: initial_paused,
+            paused: initial_preferences.paused,
             ..Default::default()
         }));
         let stop = Arc::new(AtomicBool::new(false));
+        let monitor_types = initial_preferences.monitor_types;
+        let app_filter = initial_preferences.app_filter.clone();
+        let transient_filter = initial_preferences.transient_filter;
         let mut service = Self {
             commands: commands.clone(),
             stop: stop.clone(),
@@ -156,36 +94,7 @@ impl Service {
             events: events.clone(),
             _instance_lock: instance_lock,
             initial_data_warning,
-            initial_theme,
-            initial_corner_radius,
-            initial_language,
-            initial_hotkey,
-            initial_paused,
-            initial_window_size,
-            initial_persist_window_size,
-            initial_auto_reset_state,
-            initial_search_auto_focus,
-            initial_search_auto_clear,
-            initial_skip_clear_confirm,
-            initial_paste_close_window,
-            initial_paste_key,
-            initial_paste_move_to_top,
-            initial_dedup_strategy,
-            initial_restore_clipboard,
-            initial_sequence_hotkey,
-            initial_quick_paste_enabled,
-            initial_paste_shortcuts,
-            initial_window_position,
-            initial_hover_preview,
-            initial_display,
-            initial_audio,
-            initial_retention,
-            initial_retention_saved,
-            initial_transient_filter,
-            initial_monitor_types,
-            initial_app_filter: initial_app_filter.clone(),
-            initial_window_effect,
-            initial_onboarding_completed,
+            initial_preferences,
             data_dir,
         };
         let worker_state = state.clone();
@@ -206,11 +115,9 @@ impl Service {
                     icons_dir,
                     data_dir: worker_data_dir,
                     state: worker_state,
-                    monitor_types: initial_monitor_types,
-                    app_filter: initial_app_filter,
-                    transient: super::worker::transient::TransientWindow::new(
-                        initial_transient_filter,
-                    ),
+                    monitor_types,
+                    app_filter,
+                    transient: super::worker::transient::TransientWindow::new(transient_filter),
                     clipboard_stash: None,
                     search: String::new(),
                     favorite_only: false,

@@ -5,8 +5,8 @@ impl ClipboardView {
     pub(super) fn show_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         log_window_geometry(window, cx, "main_show_requested");
         self.window_show_task = None;
-        self.interrupt_paste_except(None);
-        self.quick_paste_pending.take();
+        let interrupted = self.paste_state.show();
+        self.apply_paste_interruption(interrupted);
         self.image_release_task = None;
 
         #[cfg(windows)]

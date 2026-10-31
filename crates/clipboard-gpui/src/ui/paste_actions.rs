@@ -4,18 +4,19 @@ impl ClipboardView {
     pub(super) fn apply_copied(
         &mut self,
         id: i64,
-        request_id: Option<u64>,
+        purpose: CopyPurpose,
         clipboard_sequence: u32,
         message: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let request_id = purpose.request_id();
         let target = if let Some(request_id) = request_id {
-            let Some(target) = self.paste_pending.get(request_id) else {
+            let Some(target) = self.paste_state.receive(request_id) else {
                 let _ = self.service.send(Command::CancelPaste { request_id });
                 return false;
             };
-            Some(*target)
+            Some(target)
         } else {
             None
         };
@@ -39,18 +40,14 @@ impl ClipboardView {
 
     pub(super) fn apply_merged(
         &mut self,
-        for_paste: bool,
-        request_id: Option<u64>,
+        purpose: CopyPurpose,
         clipboard_sequence: u32,
         item_count: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let target = if for_paste {
-            let Some(request_id) = request_id else {
-                return false;
-            };
-            let Some(target) = self.paste_pending.get(request_id).copied() else {
+        let target = if let Some(request_id) = purpose.request_id() {
+            let Some(target) = self.paste_state.receive(request_id) else {
                 let _ = self.service.send(Command::CancelPaste { request_id });
                 return false;
             };
@@ -66,25 +63,9 @@ impl ClipboardView {
         if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
-        self.batch_paste_pending = None;
-        if for_paste {
-            if let Some((target, request_id)) = target {
-                self.return_to_paste_target(
-                    target,
-                    clipboard_sequence,
-                    None,
-                    request_id,
-                    window,
-                    cx,
-                );
-            } else {
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Merged and copied {item_count} items; paste manually")
-                } else {
-                    format!("已合并 {item_count} 条记录并复制，请手动粘贴")
-                });
-                self.is_error = true;
-            }
+        self.paste_state.finish_merge();
+        if let Some((target, request_id)) = target {
+            self.return_to_paste_target(target, clipboard_sequence, None, request_id, window, cx);
         } else {
             self.set_feedback_message(if self.language == LanguagePreference::English {
                 format!("Merged and copied {item_count} items")
@@ -97,7 +78,7 @@ impl ClipboardView {
     }
     pub(super) fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
         self.cancel_pending_row_click();
-        let Some(target) = self.paste_target else {
+        let Some(target) = self.paste_state.target() else {
             self.set_feedback_message(tr(
                 self.language,
                 "请从目标应用按全局快捷键唤出，再使用粘贴",
@@ -109,7 +90,7 @@ impl ClipboardView {
             return;
         };
         if self._tray.is_none() || !paste::is_external_target(window, target) {
-            self.paste_target = None;
+            self.paste_state.set_target(None);
             self.set_feedback_message(
                 tr(
                     self.language,
@@ -122,11 +103,18 @@ impl ClipboardView {
             cx.notify();
             return;
         }
-        if self.paste_pending.is_some() {
+        if self.paste_state.pending() {
             return;
         }
-        let request_id = self.paste_pending.begin(target);
-        if self.send(Command::CopyForPaste(id, request_id), cx) {
+        let request_id = self.paste_state.begin_copy(target);
+        if self.send(
+            Command::Copy {
+                id,
+                mode: CopyMode::Original,
+                purpose: CopyPurpose::Paste { request_id },
+            },
+            cx,
+        ) {
             self.set_feedback_message(
                 tr(
                     self.language,
@@ -150,8 +138,7 @@ impl ClipboardView {
     ) {
         self.copy_or_paste_generic(
             id,
-            Command::CopyPlainText,
-            Command::CopyPlainTextForPaste,
+            CopyMode::PlainText,
             (
                 "正在复制纯文本并返回原窗口…",
                 "Copying plain text and returning to the previous window…",
@@ -164,8 +151,7 @@ impl ClipboardView {
     pub(super) fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
         self.copy_or_paste_generic(
             id,
-            Command::CopyPath,
-            Command::CopyPathForPaste,
+            CopyMode::Paths,
             (
                 "正在复制路径并返回原窗口…",
                 "Copying paths and returning to the previous window…",
@@ -183,8 +169,7 @@ impl ClipboardView {
     ) {
         self.copy_or_paste_generic(
             id,
-            Command::CopyAsFile,
-            Command::CopyAsFileForPaste,
+            CopyMode::Files,
             (
                 "正在复制图片文件并返回原窗口…",
                 "Copying the image file and returning to the previous window…",
@@ -211,18 +196,7 @@ impl ClipboardView {
                 "Copying RTF and returning to the previous window…",
             ),
         };
-        self.copy_or_paste_generic(
-            id,
-            |id| Command::CopyAsFormat { id, format },
-            |id, request_id| Command::CopyAsFormatForPaste {
-                id,
-                format,
-                request_id,
-            },
-            label,
-            window,
-            cx,
-        );
+        self.copy_or_paste_generic(id, CopyMode::from(format), label, window, cx);
     }
 
     pub(super) fn copy_or_paste_transform(
@@ -234,12 +208,7 @@ impl ClipboardView {
     ) {
         self.copy_or_paste_generic(
             id,
-            |id| Command::CopyTransformed { id, transform },
-            |id, request_id| Command::CopyTransformedForPaste {
-                id,
-                transform,
-                request_id,
-            },
+            CopyMode::Transform(transform),
             (
                 "正在复制转换后的文本并返回原窗口…",
                 "Copying the transformed text and returning to the previous window…",
@@ -253,29 +222,30 @@ impl ClipboardView {
     fn copy_or_paste_generic(
         &mut self,
         id: i64,
-        copy: impl Fn(i64) -> Command,
-        paste: impl Fn(i64, u64) -> Command,
+        mode: CopyMode,
         paste_message: (&'static str, &'static str),
         window: &Window,
         cx: &mut Context<Self>,
     ) {
         self.cancel_pending_row_click();
-        if self.paste_pending.is_some() {
+        if self.paste_state.pending() {
             return;
         }
         let target = self
-            .paste_target
+            .paste_state
+            .target()
             .filter(|target| self._tray.is_some() && paste::is_external_target(window, *target));
-        if self.paste_target.is_some() && target.is_none() {
-            self.paste_target = None;
+        if self.paste_state.target().is_some() && target.is_none() {
+            self.paste_state.set_target(None);
         }
-        let command = if let Some(target) = target {
-            let request_id = self.paste_pending.begin(target);
-            paste(id, request_id)
+        let purpose = if let Some(target) = target {
+            CopyPurpose::Paste {
+                request_id: self.paste_state.begin_copy(target),
+            }
         } else {
-            copy(id)
+            CopyPurpose::Copy
         };
-        if !self.send(command, cx) {
+        if !self.send(Command::Copy { id, mode, purpose }, cx) {
             self.interrupt_paste_except(None);
         } else if target.is_some() {
             self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());

@@ -34,7 +34,14 @@ impl ClipboardView {
             && !self.batch_mode
             && let Some(id) = self.history.selected
         {
-            self.send(Command::Copy(id), cx);
+            self.send(
+                Command::Copy {
+                    id,
+                    mode: CopyMode::Original,
+                    purpose: CopyPurpose::Copy,
+                },
+                cx,
+            );
         }
     }
 }

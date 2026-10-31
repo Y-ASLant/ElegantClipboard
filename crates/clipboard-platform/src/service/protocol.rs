@@ -21,6 +21,43 @@ pub enum CopyFormat {
     Rtf,
 }
 
+/// 选择写入剪贴板的内容集合；各平台负责实际写入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyMode {
+    Original,
+    PlainText,
+    Paths,
+    Files,
+    /// 单一富文本格式；缺少该格式时报错，不降级。
+    Html,
+    Rtf,
+    Transform(TextTransform),
+}
+
+impl From<CopyFormat> for CopyMode {
+    fn from(format: CopyFormat) -> Self {
+        match format {
+            CopyFormat::Html => Self::Html,
+            CopyFormat::Rtf => Self::Rtf,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyPurpose {
+    Copy,
+    Paste { request_id: u64 },
+}
+
+impl CopyPurpose {
+    pub fn request_id(self) -> Option<u64> {
+        match self {
+            Self::Copy => None,
+            Self::Paste { request_id } => Some(request_id),
+        }
+    }
+}
+
 pub enum Command {
     Query {
         search: String,
@@ -34,33 +71,10 @@ pub enum Command {
         id: i64,
         token: u64,
     },
-    Copy(i64),
-    CopyPlainText(i64),
-    CopyPlainTextForPaste(i64, u64),
-    CopyForPaste(i64, u64),
-    CopyPath(i64),
-    CopyPathForPaste(i64, u64),
-    CopyAsFile(i64),
-    CopyAsFileForPaste(i64, u64),
-    /// 按单一格式复制富文本条目（缺少该格式时报错，不降级）。
-    CopyAsFormat {
+    Copy {
         id: i64,
-        format: CopyFormat,
-    },
-    CopyAsFormatForPaste {
-        id: i64,
-        format: CopyFormat,
-        request_id: u64,
-    },
-    /// 文本转换后的复制/粘贴变体。
-    CopyTransformed {
-        id: i64,
-        transform: TextTransform,
-    },
-    CopyTransformedForPaste {
-        id: i64,
-        transform: TextTransform,
-        request_id: u64,
+        mode: CopyMode,
+        purpose: CopyPurpose,
     },
     /// 对应粘贴输入投递成功后请求恢复；输入投递不代表目标应用已消费内容。
     RestoreStashedClipboard {
@@ -81,10 +95,9 @@ pub enum Command {
         id: i64,
         destination: PathBuf,
     },
-    MergeCopy(Vec<i64>),
-    MergeForPaste {
+    Merge {
         ids: Vec<i64>,
-        request_id: u64,
+        purpose: CopyPurpose,
     },
     CreateGroup(String),
     ReorderGroup {
@@ -268,21 +281,21 @@ impl Command {
             | Self::CaptureImage { .. }
             | Self::ObservedCapture { .. } => None,
             Self::Query { generation, .. } => Some(FailureKind::Query(*generation)),
-            Self::CopyForPaste(_, request_id)
-            | Self::CopyPlainTextForPaste(_, request_id)
-            | Self::CopyPathForPaste(_, request_id)
-            | Self::CopyAsFileForPaste(_, request_id)
-            | Self::CopyAsFormatForPaste { request_id, .. }
-            | Self::CopyTransformedForPaste { request_id, .. }
-            | Self::MergeForPaste { request_id, .. } => Some(FailureKind::Paste(*request_id)),
+            Self::Copy {
+                purpose: CopyPurpose::Paste { request_id },
+                ..
+            }
+            | Self::Merge {
+                purpose: CopyPurpose::Paste { request_id },
+                ..
+            } => Some(FailureKind::Paste(*request_id)),
             Self::ResolveQuickPaste { request_id, .. } => {
                 Some(FailureKind::QuickPaste(*request_id))
             }
             Self::SaveAs { id, .. } => Some(FailureKind::SaveAs(*id)),
-            Self::CopyAsFormat { .. } | Self::CopyTransformed { .. } => Some(FailureKind::Other),
             Self::RestoreStashedClipboard { .. } | Self::CancelPaste { .. } => None,
             Self::SetNote { .. } => Some(FailureKind::Other),
-            Self::MergeCopy(_) => Some(FailureKind::Merge),
+            Self::Merge { .. } => Some(FailureKind::Merge),
             Self::CreateGroup(_) | Self::RenameGroup { .. } => Some(FailureKind::GroupSave),
             Self::ReorderGroup { .. } => Some(FailureKind::Other),
             Self::DeleteGroup { .. } => Some(FailureKind::GroupDelete),
@@ -331,13 +344,12 @@ pub enum Event {
     Status(String),
     Copied {
         id: i64,
-        request_id: Option<u64>,
+        purpose: CopyPurpose,
         clipboard_sequence: u32,
         message: String,
     },
     Merged {
-        for_paste: bool,
-        request_id: Option<u64>,
+        purpose: CopyPurpose,
         clipboard_sequence: u32,
         item_count: usize,
     },

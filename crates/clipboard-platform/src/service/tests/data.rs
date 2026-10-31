@@ -31,7 +31,12 @@ fn data_size_counts_database_and_managed_media() -> Result<()> {
         }
     );
     let command = data_directory_command(directory.path())?;
+    #[cfg(windows)]
     assert!(Path::new(command.get_program()).ends_with("explorer.exe"));
+    #[cfg(target_os = "macos")]
+    assert_eq!(Path::new(command.get_program()), Path::new("/usr/bin/open"));
+    #[cfg(target_os = "linux")]
+    assert_eq!(Path::new(command.get_program()), Path::new("xdg-open"));
     assert_eq!(command.get_args().collect::<Vec<_>>(), [directory.path()]);
     Ok(())
 }

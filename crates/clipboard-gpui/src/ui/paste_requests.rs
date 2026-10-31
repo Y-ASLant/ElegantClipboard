@@ -1,8 +1,16 @@
 /// Correlates asynchronous paste results across cancellation and reentry.
-#[derive(Default)]
 pub(super) struct PendingRequest<T> {
     generation: u64,
     pending: Option<T>,
+}
+
+impl<T> Default for PendingRequest<T> {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            pending: None,
+        }
+    }
 }
 
 impl<T> PendingRequest<T> {
@@ -26,6 +34,12 @@ impl<T> PendingRequest<T> {
             .flatten()
     }
 
+    pub(super) fn get_mut(&mut self, request_id: u64) -> Option<&mut T> {
+        (request_id == self.generation)
+            .then_some(self.pending.as_mut())
+            .flatten()
+    }
+
     pub(super) fn request_id(&self) -> Option<u64> {
         self.pending.as_ref().map(|_| self.generation)
     }
@@ -36,10 +50,6 @@ impl<T> PendingRequest<T> {
 
     pub(super) fn is_some(&self) -> bool {
         self.pending.is_some()
-    }
-
-    pub(super) fn is_none(&self) -> bool {
-        self.pending.is_none()
     }
 }
 

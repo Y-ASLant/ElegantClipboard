@@ -110,7 +110,7 @@ impl History {
         // source database has already been released by the online backup.
         let tx = snapshot.transaction()?;
         // The GPUI backup contains only settings this application consumes.
-        tx.execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
+        crate::preferences::prune_non_gpui_settings(&tx)?;
         let image_rows: Vec<(i64, String)> = {
             let mut query = tx.prepare(
                 "SELECT id, image_path FROM clipboard_items WHERE image_path IS NOT NULL",
@@ -239,5 +239,7 @@ fn write_backup_zip(
     Ok(())
 }
 
+#[cfg(test)]
+mod preference_tests;
 #[cfg(test)]
 mod tests;

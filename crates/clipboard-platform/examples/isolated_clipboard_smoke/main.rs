@@ -4,10 +4,13 @@ fn main() {
 }
 
 #[cfg(windows)]
+mod station_guard;
+
+#[cfg(windows)]
 fn main() -> anyhow::Result<()> {
     use anyhow::{Context, anyhow, bail};
     use clipboard_core::PreviewContent;
-    use clipboard_platform::{Command, Event, Service};
+    use clipboard_platform::{Command, CopyMode, CopyPurpose, Event, Service};
     use clipboard_rs::{
         Clipboard, ClipboardContent, ClipboardContext, ContentFormat, RustImageData,
         common::RustImage,
@@ -26,8 +29,9 @@ fn main() -> anyhow::Result<()> {
         core::{PCWSTR, w},
     };
 
-    // This executable creates its own window station before using USER32.
-    // The interactive WinSta0 clipboard is never selected for writes.
+    // NULL creates or reopens the logon-session station; it is not a private
+    // clipboard namespace. The mutex rejects overlapping runs of this example.
+    let _station_guard = station_guard::StationGuard::acquire()?;
     let station = unsafe { CreateWindowStationW(PCWSTR::null(), 0, 0x37f, None) }?;
     let mut station_name = [0u16; 256];
     unsafe {
@@ -88,16 +92,16 @@ fn main() -> anyhow::Result<()> {
             thread::sleep(Duration::from_millis(10));
         }
     };
-    let status = |expected_paste: bool| -> anyhow::Result<u32> {
+    let status = |expected_purpose: CopyPurpose| -> anyhow::Result<u32> {
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             match events.try_recv() {
                 Ok(Event::Copied {
-                    request_id,
+                    purpose,
                     clipboard_sequence,
                     ..
                 }) => {
-                    assert_eq!(request_id.is_some(), expected_paste);
+                    assert_eq!(purpose, expected_purpose);
                     return Ok(clipboard_sequence);
                 }
                 Ok(Event::CommandFailed { message, .. }) => bail!("复制命令失败：{message}"),
@@ -115,12 +119,12 @@ fn main() -> anyhow::Result<()> {
         loop {
             match events.try_recv() {
                 Ok(Event::Merged {
-                    for_paste,
+                    purpose,
                     clipboard_sequence,
                     item_count,
                     ..
                 }) => {
-                    assert!(!for_paste);
+                    assert_eq!(purpose, CopyPurpose::Copy);
                     assert_eq!(item_count, expected_count);
                     return Ok(clipboard_sequence);
                 }
@@ -194,8 +198,12 @@ fn main() -> anyhow::Result<()> {
         .set_text(text.clone())
         .map_err(|error| anyhow!("写入测试文本失败：{error}"))?;
     let text_id = snapshot("text")?;
-    service.send(Command::CopyForPaste(text_id, 1))?;
-    let copied_sequence = status(true)?;
+    service.send(Command::Copy {
+        id: text_id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Paste { request_id: 1 },
+    })?;
+    let copied_sequence = status(CopyPurpose::Paste { request_id: 1 })?;
     assert_ne!(copied_sequence, 0);
     assert_eq!(unsafe { GetClipboardSequenceNumber() }, copied_sequence);
     assert_eq!(
@@ -240,8 +248,12 @@ fn main() -> anyhow::Result<()> {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    service.send(Command::Copy(rich_id))?;
-    status(false)?;
+    service.send(Command::Copy {
+        id: rich_id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
+    status(CopyPurpose::Copy)?;
     assert_eq!(
         clipboard
             .get_text()
@@ -268,8 +280,12 @@ fn main() -> anyhow::Result<()> {
     );
     println!("rich capture/copy ok");
 
-    service.send(Command::CopyPlainText(rich_id))?;
-    status(false)?;
+    service.send(Command::Copy {
+        id: rich_id,
+        mode: CopyMode::PlainText,
+        purpose: CopyPurpose::Copy,
+    })?;
+    status(CopyPurpose::Copy)?;
     assert_eq!(
         clipboard
             .get_text()
@@ -333,8 +349,12 @@ fn main() -> anyhow::Result<()> {
         )])
         .map_err(|error| anyhow!("写入异常 RTF 样本失败：{error}"))?;
     let malformed_id = snapshot("rtf")?;
-    service.send(Command::Copy(malformed_id))?;
-    status(false)?;
+    service.send(Command::Copy {
+        id: malformed_id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
+    status(CopyPurpose::Copy)?;
     assert_eq!(
         clipboard
             .get_buffer("Rich Text Format")
@@ -351,8 +371,12 @@ fn main() -> anyhow::Result<()> {
         .set_image(image)
         .map_err(|error| anyhow!("写入测试图片失败：{error}"))?;
     let image_id = snapshot("image")?;
-    service.send(Command::Copy(image_id))?;
-    status(false)?;
+    service.send(Command::Copy {
+        id: image_id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
+    status(CopyPurpose::Copy)?;
     let image = clipboard
         .get_image()
         .map_err(|error| anyhow!("读回图片失败：{error}"))?;
@@ -366,8 +390,12 @@ fn main() -> anyhow::Result<()> {
         .set_files(vec![file.clone()])
         .map_err(|error| anyhow!("写入测试文件失败：{error}"))?;
     let file_id = snapshot("files")?;
-    service.send(Command::Copy(file_id))?;
-    status(false)?;
+    service.send(Command::Copy {
+        id: file_id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
+    status(CopyPurpose::Copy)?;
     assert_eq!(
         clipboard
             .get_files()
@@ -376,8 +404,12 @@ fn main() -> anyhow::Result<()> {
     );
     println!("files capture/copy ok");
 
-    service.send(Command::CopyPath(file_id))?;
-    status(false)?;
+    service.send(Command::Copy {
+        id: file_id,
+        mode: CopyMode::Paths,
+        purpose: CopyPurpose::Copy,
+    })?;
+    status(CopyPurpose::Copy)?;
     assert_eq!(
         clipboard
             .get_text()
@@ -387,7 +419,10 @@ fn main() -> anyhow::Result<()> {
     assert!(!clipboard.has(ContentFormat::Files));
     println!("file path copy ok");
 
-    service.send(Command::MergeCopy(vec![text_id, rich_id, file_id]))?;
+    service.send(Command::Merge {
+        ids: vec![text_id, rich_id, file_id],
+        purpose: CopyPurpose::Copy,
+    })?;
     let merged_sequence = merged_status(3)?;
     assert_ne!(merged_sequence, 0);
     assert_eq!(unsafe { GetClipboardSequenceNumber() }, merged_sequence);

@@ -12,9 +12,9 @@ impl ClipboardView {
     ) -> Self {
         #[cfg(target_os = "linux")]
         Self::watch_native_listeners(cx);
-        let language = service.initial_language;
-        let window_position = service.initial_window_position;
-        let hover_preference = service.initial_hover_preview;
+        let language = service.initial_preferences.language;
+        let window_position = service.initial_preferences.window_position;
+        let hover_preference = service.initial_preferences.hover_preview;
         let search = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr(
                 language,
@@ -58,7 +58,7 @@ impl ClipboardView {
         let tray = tray::create(
             tray_sender.clone(),
             language,
-            service.initial_paused,
+            service.initial_preferences.paused,
             startup.monitoring,
         );
         tray_enabled.set(tray.is_ok());
@@ -67,7 +67,7 @@ impl ClipboardView {
         // The hotkey thread uses try_send; a full channel must not discard the
         // second press while the first press is still waking the window.
         let (hotkey_sender, hotkey_receiver) = async_channel::unbounded();
-        let hotkey_choice = service.initial_hotkey.clone();
+        let hotkey_choice = service.initial_preferences.hotkey.clone();
         let hotkey = if hotkey_choice == HotkeyPreference::Disabled {
             Ok(None)
         } else {
@@ -86,7 +86,8 @@ impl ClipboardView {
                         this.hide_visible_window(window, cx);
                         return;
                     }
-                    this.paste_target = paste::is_external_target(window, target).then_some(target);
+                    this.paste_state
+                        .set_target(paste::is_external_target(window, target).then_some(target));
                     this.show_window(window, cx);
                     cx.notify();
                 })
@@ -97,11 +98,11 @@ impl ClipboardView {
             }
         });
         let hotkey_error = hotkey.as_ref().err().map(ToString::to_string);
-        let quick_paste_enabled = service.initial_quick_paste_enabled;
-        let paste_shortcuts = service.initial_paste_shortcuts.clone();
-        let initial_dedup_strategy = service.initial_dedup_strategy;
-        let initial_restore_clipboard = service.initial_restore_clipboard;
-        let initial_sequence_hotkey = service.initial_sequence_hotkey.clone();
+        let quick_paste_enabled = service.initial_preferences.quick_paste_enabled;
+        let paste_shortcuts = service.initial_preferences.paste_shortcuts.clone();
+        let initial_dedup_strategy = service.initial_preferences.dedup_strategy;
+        let initial_restore_clipboard = service.initial_preferences.restore_clipboard;
+        let initial_sequence_hotkey = service.initial_preferences.sequence_hotkey.clone();
         let channels = Self::register_paste_hotkeys(
             startup.monitoring,
             quick_paste_enabled,
@@ -178,32 +179,34 @@ impl ClipboardView {
         .into_iter()
         .flatten()
         .collect();
-        let theme = service.initial_theme;
-        let corner_radius = service.initial_corner_radius;
+        let theme = service.initial_preferences.theme;
+        let corner_radius = service.initial_preferences.corner_radius;
         crate::design_system::set_corner_radius(corner_radius, cx);
-        let window_effect = service.initial_window_effect;
-        let paused = service.initial_paused;
+        let window_effect = service.initial_preferences.window_effect;
+        let paused = service.initial_preferences.paused;
         let (initial_window_size, persist_window_size) = (
-            service.initial_window_size,
-            service.initial_persist_window_size,
+            service.initial_preferences.window_size,
+            service.initial_preferences.persist_window_size,
         );
-        let auto_reset_state = service.initial_auto_reset_state;
-        let search_auto_focus = service.initial_search_auto_focus;
-        let search_auto_clear = service.initial_search_auto_clear;
-        let skip_clear_confirm = service.initial_skip_clear_confirm;
+        let auto_reset_state = service.initial_preferences.auto_reset_state;
+        let search_auto_focus = service.initial_preferences.search_auto_focus;
+        let search_auto_clear = service.initial_preferences.search_auto_clear;
+        let skip_clear_confirm = service.initial_preferences.skip_clear_confirm;
         let (paste_close_window, paste_key, paste_move_to_top) = (
-            service.initial_paste_close_window,
-            service.initial_paste_key,
-            service.initial_paste_move_to_top,
+            service.initial_preferences.paste_close_window,
+            service.initial_preferences.paste_key,
+            service.initial_preferences.paste_move_to_top,
         );
-        let display = service.initial_display;
-        let audio = service.initial_audio;
-        let (retention, retention_saved) =
-            (service.initial_retention, service.initial_retention_saved);
-        let transient_filter = service.initial_transient_filter;
-        let monitor_types = service.initial_monitor_types;
-        let app_filter = service.initial_app_filter.clone();
-        let onboarding_completed = service.initial_onboarding_completed;
+        let display = service.initial_preferences.display;
+        let audio = service.initial_preferences.audio;
+        let (retention, retention_saved) = (
+            service.initial_preferences.retention,
+            service.initial_preferences.retention_saved,
+        );
+        let transient_filter = service.initial_preferences.transient_filter;
+        let monitor_types = service.initial_preferences.monitor_types;
+        let app_filter = service.initial_preferences.app_filter.clone();
+        let onboarding_completed = service.initial_preferences.onboarding_completed;
         if !startup.hidden || tray.is_err() {
             cx.defer_in(window, |this, window, cx| this.show_window(window, cx));
         }
@@ -285,7 +288,6 @@ impl ClipboardView {
             selected_ids: HashSet::new(),
             selection_anchor: None,
             batch_pending: false,
-            batch_paste_pending: None,
             confirmation: None,
             confirmation_error: None,
             group_move_id: None,
@@ -356,7 +358,6 @@ impl ClipboardView {
             paste_shortcuts,
             paste_shortcuts_pending: None,
             paste_shortcut_status: None,
-            quick_paste_pending: Default::default(),
             autostart: PendingPref::new(autostart.unwrap_or(false)),
             data_size: None,
             daily_counts: None,
@@ -377,7 +378,6 @@ impl ClipboardView {
             paste_move_to_top: PendingPref::new(paste_move_to_top),
             dedup_strategy: PendingPref::new(initial_dedup_strategy),
             restore_clipboard: PendingPref::new(initial_restore_clipboard),
-            sequence_queue: None,
             sequence_hotkey: initial_sequence_hotkey,
             sequence_hotkey_pending: false,
             display,
@@ -391,8 +391,7 @@ impl ClipboardView {
             running_apps: Vec::new(),
             running_apps_pending: false,
             last_window_size: initial_window_size,
-            paste_target: None,
-            paste_pending: Default::default(),
+            paste_state: Default::default(),
             paste_delivery_task: None,
             reorder_pending: false,
             drop_target: None,

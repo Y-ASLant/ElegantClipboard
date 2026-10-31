@@ -1,4 +1,7 @@
-use super::{Command, Event, Service};
+// Each service uses an isolated temporary data directory with monitoring disabled.
+// Linux needs a display backend; CI provides a private Xvfb server. Copy failures
+// below are rejected before any clipboard write; these tests never replace user data.
+use super::{Command, CopyMode, CopyPurpose, Event, Service};
 use anyhow::{Result, bail};
 use clipboard_core::{
     ContentCategory, History, PAGE_SIZE,

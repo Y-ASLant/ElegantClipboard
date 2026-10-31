@@ -1,13 +1,17 @@
 use super::super::{CapturedClipboard, FailureKind, worker::filter_observed_capture};
 use super::*;
 use crate::source_app;
-use anyhow::{Context, anyhow};
+#[cfg(windows)]
+use anyhow::Context;
+use anyhow::anyhow;
 use clipboard_core::{
     FilePreviewEntry, PreviewContent,
     preferences::{AppFilterPreference, MonitorTypesPreference, Preferences, ThemePreference},
 };
 use clipboard_rs::{RustImageData, common::RustImage};
-use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::path::Path;
+use std::path::PathBuf;
 
 #[test]
 fn observed_capture_filter_distinguishes_url_and_preserves_allowed_rich_format() {
@@ -309,6 +313,7 @@ fn observed_captures_keep_the_source_with_each_record() -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
 #[test]
 #[ignore = "requires a Windows system executable with an icon"]
 fn observed_capture_persists_a_cached_source_icon() -> Result<()> {
@@ -403,7 +408,11 @@ fn file_paths_are_saved_and_missing_sources_do_not_touch_clipboard() -> Result<(
         },
     );
     std::fs::remove_file(path)?;
-    service.send(Command::Copy(id))?;
+    service.send(Command::Copy {
+        id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     wait_for(
         &events,

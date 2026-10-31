@@ -4,10 +4,9 @@ use super::super::{
     file_actions::{item_paths_for_action, plain_text_for_copy},
     read_content::RTF_FORMAT,
 };
-use super::{
-    Event, Worker, clipboard_content::rtf_for_copy, copy_mode::CopyMode, image_tmp::ensure_temp_png,
-};
+use super::{Event, Worker, clipboard_content::rtf_for_copy, image_tmp::ensure_temp_png};
 use crate::sequence::current_sequence;
+use crate::service::protocol::{CopyMode, CopyPurpose};
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::History;
 use clipboard_rs::{
@@ -24,7 +23,7 @@ const PNG_FORMAT: &str = "image/png";
 const PNG_FORMAT: &str = "public.png";
 
 impl Worker {
-    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, request_id: Option<u64>) -> Result<()> {
+    pub(super) fn handle_merge(&mut self, ids: Vec<i64>, purpose: CopyPurpose) -> Result<()> {
         self.clipboard_stash = None;
         let item_count = ids.len();
         let merged = self.history.merge_content(&ids)?;
@@ -40,8 +39,7 @@ impl Worker {
             write_verified(&self.clipboard, contents, &mut state.ignored_sequence)?;
         drop(state);
         self.send_event(Event::Merged {
-            for_paste: request_id.is_some(),
-            request_id,
+            purpose,
             clipboard_sequence,
             item_count,
         })
@@ -50,8 +48,8 @@ impl Worker {
     pub(super) fn handle_copy(
         &mut self,
         id: i64,
-        request_id: Option<u64>,
         mode: CopyMode,
+        purpose: CopyPurpose,
     ) -> Result<()> {
         self.clipboard_stash = None;
         let item = self.history.item(id)?;
@@ -145,7 +143,7 @@ impl Worker {
                     .map(|(name, data)| ClipboardContent::Other(name, data)),
             );
         }
-        let stash = (request_id.is_some() && mode == CopyMode::Original)
+        let stash = (purpose.request_id().is_some() && mode == CopyMode::Original)
             .then(|| self.snapshot_clipboard_for_paste())
             .flatten();
         if contents.is_empty() {
@@ -164,11 +162,11 @@ impl Worker {
         };
         self.send_event(Event::Copied {
             id,
-            request_id,
+            purpose,
             clipboard_sequence,
             message: message.into(),
         })?;
-        self.remember_paste_stash(request_id, clipboard_sequence, stash);
+        self.remember_paste_stash(purpose.request_id(), clipboard_sequence, stash);
         Ok(())
     }
 

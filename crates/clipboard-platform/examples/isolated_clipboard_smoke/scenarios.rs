@@ -1,7 +1,7 @@
 //! 原生格式保真往返与瞬时内容过滤两个冒烟场景（由 isolated_clipboard_smoke 调用）。
 
 use anyhow::{anyhow, bail};
-use clipboard_platform::{Command, Event, Service};
+use clipboard_platform::{Command, CopyMode, CopyPurpose, Event, Service};
 use clipboard_rs::{Clipboard, ClipboardContent, ClipboardContext};
 use std::{
     thread,
@@ -61,7 +61,11 @@ pub(super) fn native_format_roundtrip(
             "额外原生格式应随条目入库"
         );
     }
-    service.send(Command::Copy(native_id))?;
+    service.send(Command::Copy {
+        id: native_id,
+        mode: CopyMode::Original,
+        purpose: CopyPurpose::Copy,
+    })?;
     wait_copied(events)?;
     assert_eq!(
         clipboard
@@ -162,7 +166,6 @@ pub(super) fn core_paste_variants(
     use clipboard_core::TextTransform;
     use clipboard_core::database::ClipboardItem as DbSnapshotItem;
     use clipboard_core::preferences::DedupStrategy;
-    use clipboard_platform::CopyFormat;
 
     let history = || clipboard_core::History::open(data_dir.join("clipboard.db"));
     let wait_history = |search: &str| -> anyhow::Result<Vec<DbSnapshotItem>> {
@@ -245,9 +248,10 @@ pub(super) fn core_paste_variants(
     );
 
     // 文本转换复制。
-    service.send(Command::CopyTransformed {
+    service.send(Command::Copy {
         id: note_id,
-        transform: TextTransform::Uppercase,
+        mode: CopyMode::Transform(TextTransform::Uppercase),
+        purpose: CopyPurpose::Copy,
     })?;
     status()?;
     assert_eq!(
@@ -267,9 +271,10 @@ pub(super) fn core_paste_variants(
         .first()
         .context("缺少按格式冒烟记录")?
         .id;
-    service.send(Command::CopyAsFormat {
+    service.send(Command::Copy {
         id: rich_id,
-        format: CopyFormat::Html,
+        mode: CopyMode::Html,
+        purpose: CopyPurpose::Copy,
     })?;
     status()?;
     assert!(
@@ -278,9 +283,10 @@ pub(super) fn core_paste_variants(
             .map_err(|error| anyhow!("读回 HTML 失败：{error}"))?
             .contains("format smoke")
     );
-    service.send(Command::CopyAsFormat {
+    service.send(Command::Copy {
         id: rich_id,
-        format: CopyFormat::Rtf,
+        mode: CopyMode::Rtf,
+        purpose: CopyPurpose::Copy,
     })?;
     status()?;
     let rtf_actual = clipboard

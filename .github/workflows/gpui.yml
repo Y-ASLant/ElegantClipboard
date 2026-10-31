@@ -6,12 +6,23 @@ on:
   pull_request:
     branches: [gpui]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      package-artifacts:
+        description: Upload the packages validated by this exact-commit quality run
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -25,12 +36,29 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
-        run: cargo test --workspace --locked
+        run: ./scripts/run-ci-command.ps1 -LogName tests -Program cargo -CommandArgs @('test', '--workspace', '--locked')
       - name: Isolated Windows clipboard roundtrip
         timeout-minutes: 5
-        run: cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
-      - name: Build Windows application
-        run: cargo build -p elegant-clipboard-gpui --release --locked
+        run: ./scripts/run-ci-command.ps1 -LogName clipboard-smoke -Program cargo -CommandArgs @('run', '-p', 'clipboard-platform', '--example', 'isolated_clipboard_smoke', '--locked')
+      - name: Build Windows package
+        run: ./scripts/package-gpui-windows.ps1
+      - name: Built and unpacked Windows startup
+        timeout-minutes: 3
+        run: ./scripts/run-ci-command.ps1 -LogName windows-startup -Program pwsh -CommandArgs @('-File', './scripts/smoke-gpui-windows-package.ps1', '-Archive', (Get-Item target/packages/*-windows-x64.zip).FullName, '-Executable', './target/release/elegant-clipboard-gpui.exe')
+      - name: Upload validated Windows package
+        if: inputs.package-artifacts
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: package-windows-x64
+          path: target/packages/*.zip
+          if-no-files-found: error
+      - name: Upload Windows diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: quality-logs-windows
+          path: target/ci-logs/
+          if-no-files-found: ignore
 
   unix:
     strategy:
@@ -40,6 +68,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -60,25 +90,45 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Linux tests in isolated X server
         if: runner.os == 'Linux'
-        run: dbus-run-session -- xvfb-run -a cargo test --workspace --locked
+        shell: pwsh
+        run: ./scripts/run-ci-command.ps1 -LogName tests -Program dbus-run-session -CommandArgs @('--', 'xvfb-run', '-a', 'cargo', 'test', '--workspace', '--locked')
       - name: X11 event ownership and resource release
         if: runner.os == 'Linux'
         timeout-minutes: 2
         env:
           ELEGANT_X11_TEST_SERVER: private-xvfb
-        run: dbus-run-session -- xvfb-run -a cargo test -p clipboard-platform --locked x11_consumers_keep_events_separate_and_release_owned_resources -- --ignored
+        shell: pwsh
+        run: ./scripts/run-ci-command.ps1 -LogName x11-ownership -Program dbus-run-session -CommandArgs @('--', 'xvfb-run', '-a', 'cargo', 'test', '-p', 'clipboard-platform', '--locked', 'x11_consumers_keep_events_separate_and_release_owned_resources', '--', '--ignored')
       - name: macOS tests
         if: runner.os == 'macOS'
-        run: cargo test --workspace --locked
+        shell: pwsh
+        run: ./scripts/run-ci-command.ps1 -LogName tests -Program cargo -CommandArgs @('test', '--workspace', '--locked')
       - name: Native package
         shell: pwsh
         run: ./scripts/package-gpui-unix.ps1
       - name: Linux native window smoke
         if: runner.os == 'Linux'
         timeout-minutes: 2
-        run: dbus-run-session -- xvfb-run -a ./target/release/elegant-clipboard-gpui --smoke-test --data-dir "$RUNNER_TEMP/elegant-gpui-smoke"
+        shell: pwsh
+        run: ./scripts/run-ci-command.ps1 -LogName linux-startup -Program dbus-run-session -CommandArgs @('--', 'xvfb-run', '-a', './target/release/elegant-clipboard-gpui', '--smoke-test', '--data-dir', "$env:RUNNER_TEMP/elegant-gpui-smoke")
       - name: macOS DMG smoke
         if: runner.os == 'macOS'
         timeout-minutes: 2
         shell: pwsh
-        run: ./scripts/smoke-gpui-macos-package.ps1 -Image (Get-Item target/packages/*-apple-darwin.dmg).FullName
+        run: ./scripts/run-ci-command.ps1 -LogName macos-dmg -Program pwsh -CommandArgs @('-File', './scripts/smoke-gpui-macos-package.ps1', '-Image', (Get-Item target/packages/*-apple-darwin.dmg).FullName)
+      - name: Upload validated native package
+        if: inputs.package-artifacts
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: package-${{ matrix.os }}
+          path: |
+            target/packages/*.dmg
+            target/packages/*.tar.gz
+          if-no-files-found: error
+      - name: Upload native diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: quality-logs-${{ matrix.os }}
+          path: target/ci-logs/
+          if-no-files-found: ignore

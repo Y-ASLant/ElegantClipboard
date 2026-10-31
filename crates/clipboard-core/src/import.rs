@@ -71,10 +71,7 @@ pub fn import_legacy_database(source: &Path, destination: &Path) -> Result<Impor
     drop(source_db);
     let report = {
         let database = Database::new(staged.clone()).context("旧版数据库升级失败")?;
-        database
-            .write_connection()
-            .lock()
-            .execute(crate::preferences::PRUNE_NON_GPUI_SETTINGS_SQL, [])?;
+        crate::preferences::prune_non_gpui_settings(&database.write_connection().lock())?;
         crate::file_copy_cleanup::clear_file_copy_references(
             &mut database.write_connection().lock(),
         )?;

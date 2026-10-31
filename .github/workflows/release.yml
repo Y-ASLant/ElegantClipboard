@@ -6,19 +6,23 @@ on:
       - "v*"
 
 jobs:
-  windows-x64:
-    runs-on: windows-latest
+  version:
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.sha }}
       - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2.9.2
 
       - name: Verify tag matches Cargo version
         shell: pwsh
         run: |
           $metadata = cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to read Cargo metadata: $LASTEXITCODE"
+          }
           $package = @($metadata.packages | Where-Object name -eq 'elegant-clipboard-gpui')
           if ($package.Count -ne 1) {
             throw 'Unable to determine the GPUI package version'
@@ -27,51 +31,17 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match Cargo version $($package[0].version)"
           }
 
-      - name: Build Windows x64 package
-        shell: pwsh
-        run: .\scripts\package-gpui-windows.ps1
-
-      - name: Upload Windows package
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: package-windows-x64
-          path: target/packages/*.zip
-          if-no-files-found: error
-
-  unix:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-15]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Linux native dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang cmake pkg-config libssl-dev libgtk-3-dev libayatana-appindicator3-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libx11-xcb-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-randr0-dev libasound2-dev libudev-dev dbus-x11 xdg-utils pulseaudio-utils
-      - uses: swatinem/rust-cache@v2.9.2
-      - name: Build native package
-        shell: pwsh
-        run: ./scripts/package-gpui-unix.ps1
-      - name: macOS DMG smoke
-        if: runner.os == 'macOS'
-        timeout-minutes: 2
-        shell: pwsh
-        run: ./scripts/smoke-gpui-macos-package.ps1 -Image (Get-Item target/packages/*-apple-darwin.dmg).FullName
-      - name: Upload native package
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: package-${{ matrix.os }}
-          path: |
-            target/packages/*.dmg
-            target/packages/*.tar.gz
-          if-no-files-found: error
+  quality:
+    needs: version
+    # A local reusable workflow resolves from the tag commit, not a mutable branch.
+    uses: ./.github/workflows/gpui.yml
+    permissions:
+      contents: read
+    with:
+      package-artifacts: true
 
   publish:
-    needs: [windows-x64, unix]
+    needs: quality
     runs-on: ubuntu-latest
     permissions:
       contents: write

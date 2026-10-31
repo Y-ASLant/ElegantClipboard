@@ -44,7 +44,7 @@ fn plain_text_copy_preserves_source_and_converts_legacy_html() -> Result<()> {
 fn file_path_actions_use_resolved_existing_sources() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;
-    let source = directory.path().join("中文 file.txt");
+    let source = directory.path().join("中文 file#%,.txt");
     std::fs::write(&source, "content")?;
     let id = history.capture_files(
         &[source.to_string_lossy().into_owned()],
@@ -56,11 +56,37 @@ fn file_path_actions_use_resolved_existing_sources() -> Result<()> {
     );
 
     let command = explorer_command(&source)?;
-    assert!(Path::new(command.get_program()).ends_with("explorer.exe"));
-    assert_eq!(
-        command.get_args().collect::<Vec<_>>(),
-        vec![std::ffi::OsStr::new("/select,"), source.as_os_str()]
-    );
+    #[cfg(windows)]
+    {
+        assert!(Path::new(command.get_program()).ends_with("explorer.exe"));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("/select,"), source.as_os_str()]
+        );
+    }
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(Path::new(command.get_program()), Path::new("/usr/bin/open"));
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            vec![std::ffi::OsStr::new("-R"), source.as_os_str()]
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(Path::new(command.get_program()), Path::new("dbus-send"));
+        let arguments = command.get_args().collect::<Vec<_>>();
+        let encoded = arguments[5]
+            .to_str()
+            .unwrap()
+            .strip_prefix("array:string:")
+            .unwrap();
+        assert_eq!(
+            url::Url::parse(encoded)?.to_file_path().unwrap(),
+            source.canonicalize()?
+        );
+        assert_eq!(arguments[6], "string:");
+    }
 
     std::fs::remove_file(&source)?;
     assert!(item_paths_for_action(&history.item(id)?).is_err());
@@ -124,10 +150,18 @@ fn failed_paste_copy_identifies_only_its_own_request() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
-    service.send(Command::CopyForPaste(424242, 1))?;
-    service.send(Command::CopyPathForPaste(424242, 2))?;
-    service.send(Command::CopyAsFileForPaste(424242, 3))?;
-    service.send(Command::CopyPlainTextForPaste(424242, 4))?;
+    for (mode, request_id) in [
+        (CopyMode::Original, 1),
+        (CopyMode::Paths, 2),
+        (CopyMode::Files, 3),
+        (CopyMode::PlainText, 4),
+    ] {
+        service.send(Command::Copy {
+            id: 424242,
+            mode,
+            purpose: CopyPurpose::Paste { request_id },
+        })?;
+    }
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(
         next_event(&events),
@@ -169,9 +203,9 @@ fn failed_merge_identifies_only_the_batch_request() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let (service, events) = Service::start(Some(directory.path().to_owned()), false)?;
     next_snapshot(&events, 0);
-    service.send(Command::MergeForPaste {
+    service.send(Command::Merge {
         ids: vec![424242, 424243],
-        request_id: 17,
+        purpose: CopyPurpose::Paste { request_id: 17 },
     })?;
     service.send(Command::SetTheme(ThemePreference::Dark))?;
     assert!(matches!(

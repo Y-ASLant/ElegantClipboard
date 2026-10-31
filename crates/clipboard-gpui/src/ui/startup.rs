@@ -49,7 +49,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         hidden: options.start_hidden,
         show_onboarding: !options.smoke_test,
     };
-    let initial_window_size = service.initial_window_size.unwrap_or_default();
+    let initial_window_size = service.initial_preferences.window_size.unwrap_or_default();
     let smoke_test = options.smoke_test;
     let startup_error = Rc::new(RefCell::new(None));
     let window_error = startup_error.clone();
@@ -191,8 +191,8 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         }
                         close_view.update(cx, |this, cx| {
                             if this.batch_pending
-                                || this.paste_pending.is_some()
-                                || this.batch_paste_pending.is_some()
+                                || this.paste_state.pending()
+                                || this.paste_state.merging()
                             {
                                 return;
                             }

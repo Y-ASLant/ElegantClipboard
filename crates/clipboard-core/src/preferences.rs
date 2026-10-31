@@ -2,9 +2,13 @@ use crate::database::{Database, SettingsRepository};
 use anyhow::Result;
 use serde::{Serialize, de::DeserializeOwned};
 
+mod backup;
 mod corner_radius;
+mod snapshot;
 mod types;
 mod window_effect;
+pub(crate) use backup::prune_non_gpui_settings;
+pub use snapshot::PreferenceSnapshot;
 pub use types::*;
 
 pub(crate) const RETENTION_KEY: &str = "gpui_retention";
@@ -36,15 +40,6 @@ const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
 const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
 const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
 const SEQUENCE_HOTKEY_KEY: &str = "gpui_sequence_paste_hotkey";
-pub(crate) const PRUNE_NON_GPUI_SETTINGS_SQL: &str = "DELETE FROM settings WHERE key NOT IN
-     ('gpui_theme_mode', 'gpui_corner_radius', 'gpui_language', 'gpui_hotkey', 'gpui_capture_paused', 'gpui_window_size',
-      'gpui_hover_preview', 'gpui_window_position', 'gpui_persist_window_size',
-      'gpui_auto_reset_state', 'gpui_search_auto_focus', 'gpui_search_auto_clear', 'gpui_skip_clear_confirm',
-      'gpui_paste_close_window', 'gpui_paste_key', 'gpui_paste_move_to_top', 'gpui_quick_paste_enabled', 'gpui_paste_shortcuts',
-      'gpui_display', 'gpui_monitor_types', 'gpui_app_filter', 'gpui_transient_filter',
-      'gpui_onboarding_completed', 'gpui_audio', 'gpui_window_effect', 'gpui_retention',
-      '_migration_url_content_type', '_migration_backfill_semantic_hash', 'gpui_dedup_strategy',
-      'gpui_restore_clipboard', 'gpui_sequence_paste_hotkey')";
 
 pub struct Preferences {
     repository: SettingsRepository,
