@@ -1,4 +1,3 @@
-use super::presentation::apply_theme;
 use super::*;
 use gpui_kit::component::menu::PopupMenu;
 
@@ -8,10 +7,10 @@ const MENU_HEIGHT: f32 = 480.;
 type MenuBuild = Box<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
 pub(super) struct HistoryMenuWindow {
-    owner: WeakEntity<ClipboardView>,
     menu: Option<Entity<PopupMenu>>,
     build: Option<MenuBuild>,
     armed: bool,
+    shown: Rc<Cell<bool>>,
     _activation: Subscription,
 }
 
@@ -32,7 +31,8 @@ impl HistoryMenuWindow {
         let screen = window
             .display(cx)
             .map_or(window.bounds(), |display| display.visible_bounds());
-        let width = px(MENU_SLOT).min(screen.size.width);
+        // PopupMenu draws submenus in this same native window.
+        let width = px(MENU_SLOT * 2.).min(screen.size.width);
         let height = px(MENU_HEIGHT).min(screen.size.height);
         let origin_x = cursor
             .x
@@ -63,7 +63,6 @@ impl HistoryMenuWindow {
                 ..Default::default()
             },
             {
-                let owner = weak.clone();
                 move |window, cx| {
                     cx.new(|cx| {
                         let armed = window.is_window_active();
@@ -78,10 +77,10 @@ impl HistoryMenuWindow {
                             },
                         );
                         HistoryMenuWindow {
-                            owner,
                             menu: None,
                             build: Some(Box::new(build)),
                             armed,
+                            shown: Rc::new(Cell::new(false)),
                             _activation,
                         }
                     })
@@ -109,6 +108,8 @@ impl HistoryMenuWindow {
 
 fn place_menu_window(native: isize, bounds: Bounds<Pixels>, scale: f32) {
     #[cfg(windows)]
+    let _ = crate::native::preview::suppress_activation(native);
+    #[cfg(windows)]
     let _ = crate::native::preview::set_bounds(native, bounds, scale);
     #[cfg(not(windows))]
     {
@@ -123,31 +124,25 @@ fn place_menu_window(native: isize, bounds: Bounds<Pixels>, scale: f32) {
             (f32::from(bounds.size.height) * scale).round() as i32,
         );
     }
-    let _ = clipboard_platform::external_drag::show_drag_preview(native);
 }
 
 impl Render for HistoryMenuWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_background_appearance(WindowBackgroundAppearance::Transparent);
-        if self.menu.is_none() {
-            if let Some(owner) = self.owner.upgrade() {
-                let (theme, color) = {
-                    let owner = owner.read(cx);
-                    (owner.theme, owner.theme_color)
-                };
-                apply_theme(theme, window, cx);
-                window.set_background_appearance(WindowBackgroundAppearance::Transparent);
-                crate::design_system::set_theme_color(color, cx);
-            }
-            if let Some(build) = self.build.take() {
-                self.menu = Some(PopupMenu::build(window, cx, move |menu, window, cx| {
-                    build(menu, window, cx)
-                }));
-            }
+        if self.menu.is_none()
+            && let Some(build) = self.build.take()
+        {
+            self.menu = Some(PopupMenu::build(window, cx, move |menu, window, cx| {
+                build(menu, window, cx)
+            }));
         }
         let menu = self.menu.clone();
+        let shown = self.shown.clone();
         div()
             .size_full()
+            .flex()
+            .flex_col()
+            .items_start()
             .on_mouse_down(MouseButton::Left, |_, window, cx| {
                 cx.stop_propagation();
                 window.remove_window();
@@ -158,17 +153,22 @@ impl Render for HistoryMenuWindow {
             })
             .when_some(menu, |layer, menu| {
                 layer.child(
-                    div().w(px(MENU_SLOT)).child(menu).child(
+                    div().m(px(8.)).max_w(px(320.)).child(menu).child(
                         canvas(
-                            |bounds, window, _| {
-                                if bounds.size.width < px(200.) || bounds.size.height < px(120.) {
+                            move |bounds, window, cx| {
+                                if bounds.size.width < px(200.) || bounds.size.height < px(80.) {
                                     return;
                                 }
-                                let viewport = window.viewport_size();
-                                if (viewport.width - bounds.size.width).abs() > px(1.)
-                                    || (viewport.height - bounds.size.height).abs() > px(1.)
+                                if !shown.get()
+                                    && let Some(native) = native_window::window_id(window)
                                 {
-                                    window.resize(bounds.size);
+                                    shown.set(true);
+                                    cx.defer(move |_| {
+                                        let _ =
+                                            clipboard_platform::external_drag::show_drag_preview(
+                                                native,
+                                            );
+                                    });
                                 }
                             },
                             |_, _, _, _| {},

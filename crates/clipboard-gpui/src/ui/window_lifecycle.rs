@@ -147,6 +147,7 @@ impl ClipboardView {
     }
     pub(super) fn window_bounds_changed(&mut self, window: &Window, cx: &mut Context<Self>) {
         log_window_geometry(window, cx, "main_bounds_changed");
+        self.close_history_menu(cx);
         self.close_hover_preview("owner_bounds_changed", cx);
         if !self.persist_window_size || self.persist_window_size_pending {
             return;
@@ -230,6 +231,7 @@ impl ClipboardView {
     /// 失活回调触发的那一刻浮窗往往还没被系统标记为激活，会把点浮窗误判成切走，
     /// 结果预览被一点就没（之前就是这么错的）。
     pub(super) fn handle_window_deactivated(&mut self, cx: &mut Context<Self>) {
+        self.close_history_menu(cx);
         if crate::native::foreground_window_is_ours() {
             return;
         }
@@ -256,6 +258,16 @@ impl ClipboardView {
         }
     }
 
+    pub(super) fn close_history_menu(&mut self, cx: &mut App) -> bool {
+        let Some(menu) = self.history_menu_window.take() else {
+            return false;
+        };
+        cx.defer(move |cx| {
+            let _ = menu.update(cx, |_, window, _| window.remove_window());
+        });
+        true
+    }
+
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.card_drag_active(cx) || !self.close_editor(window, cx) {
             return;
@@ -269,9 +281,7 @@ impl ClipboardView {
     }
 
     pub(super) fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(menu) = self.history_menu_window.take() {
-            let _ = menu.update(cx, |_, window, _| window.remove_window());
-        }
+        self.close_history_menu(cx);
         self.window_show_task = None;
         self.suspend_onboarding(cx);
         if self.onboarding_visible() {
@@ -314,6 +324,10 @@ impl ClipboardView {
     }
 
     pub(super) fn dismiss_or_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.close_history_menu(cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.onboarding_visible() {
             self.dismiss_onboarding_transients(cx);
             cx.stop_propagation();

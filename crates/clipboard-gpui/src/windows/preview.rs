@@ -96,6 +96,10 @@ fn checked_window(handle: isize) -> Result<HWND> {
 
 /// All mutations run on the owning UI thread, outside GPUI borrows.
 pub(crate) fn configure_overlay(handle: isize) -> Result<()> {
+    configure_popup(handle, false)
+}
+
+fn configure_popup(handle: isize, interactive: bool) -> Result<()> {
     let hwnd = checked_window(handle)?;
     unsafe {
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
@@ -108,7 +112,7 @@ pub(crate) fn configure_overlay(handle: isize) -> Result<()> {
         );
         // Per-window subclassing never changes main/settings framing.
         ensure!(
-            SetWindowSubclass(hwnd, Some(preview_proc), 2, 0).as_bool(),
+            SetWindowSubclass(hwnd, Some(preview_proc), 2, usize::from(interactive)).as_bool(),
             "无法设置预览窗口消息处理"
         );
         let style = (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE.0 as isize)
@@ -144,6 +148,11 @@ pub(crate) fn configure_overlay(handle: isize) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// Remove the host frame while retaining menu input and avoiding activation.
+pub(crate) fn suppress_activation(handle: isize) -> Result<()> {
+    configure_popup(handle, true)
 }
 
 /// Set the physical CLIENT rectangle, correcting once after a synchronous DPI change.
@@ -186,12 +195,12 @@ unsafe extern "system" fn preview_proc(
     w: WPARAM,
     l: LPARAM,
     id: usize,
-    _ref_data: usize,
+    interactive: usize,
 ) -> LRESULT {
     unsafe {
         match msg {
             WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
-            WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+            WM_NCHITTEST if interactive == 0 => LRESULT(HTTRANSPARENT as isize),
             WM_NCCALCSIZE if w.0 != 0 && l.0 != 0 => {
                 let params = l.0 as *mut NCCALCSIZE_PARAMS;
                 let rect = std::ptr::addr_of_mut!((*params).rgrc[0]);

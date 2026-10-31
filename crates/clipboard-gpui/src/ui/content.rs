@@ -54,6 +54,18 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
                 this.dismiss_or_hide(window, cx);
             }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.close_history_menu(cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _, _, cx| {
+                    this.close_history_menu(cx);
+                }),
+            )
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.search
                     .update(cx, |search, cx| search.focus(window, cx));

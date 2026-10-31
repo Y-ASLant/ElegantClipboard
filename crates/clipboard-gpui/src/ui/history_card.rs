@@ -221,6 +221,7 @@ impl ClipboardView {
             .py(px(card_spacing))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
+                this.close_history_menu(cx);
                 if this.card_drag_active(cx) {
                     return;
                 }
@@ -244,6 +245,7 @@ impl ClipboardView {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
+                            this.close_history_menu(cx);
                             this.prepare_card_drag(id, cx);
                         }),
                     )
