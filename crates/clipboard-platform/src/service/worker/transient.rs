@@ -102,14 +102,14 @@ impl TransientWindow {
                 let read = cached.get_or_insert_with(|| reread().map_err(|_| ()));
                 match read {
                     Ok((current, content, formats)) => {
-                        if *current == entry.sequence
-                            || (ignored_sequence != 0 && *current == ignored_sequence)
-                        {
-                            // A later read can see format names the first snapshot missed.
-                            // An empty reread must not erase names already captured.
+                        if *current == entry.sequence {
+                            // 确认读可能补上首次快照漏掉的格式名；空结果不覆盖已有名称。
                             if !formats.is_empty() {
                                 entry.formats.clone_from(formats);
                             }
+                            PollOutcome::Deliver
+                        } else if ignored_sequence != 0 && *current == ignored_sequence {
+                            // 自身写回是另一份剪贴板，不采用它的格式名。
                             PollOutcome::Deliver
                         } else {
                             match content {

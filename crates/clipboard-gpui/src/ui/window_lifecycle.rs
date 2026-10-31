@@ -329,7 +329,6 @@ impl ClipboardView {
             return;
         }
         if self.onboarding_visible() {
-            self.dismiss_onboarding_transients(cx);
             cx.stop_propagation();
             return;
         }

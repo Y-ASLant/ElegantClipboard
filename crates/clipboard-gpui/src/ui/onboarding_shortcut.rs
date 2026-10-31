@@ -141,8 +141,8 @@ impl OnboardingShortcut {
     }
 
     fn capture_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
-        // Intercept before application bindings, so Escape cancels recording
-        // rather than completing the guide and other bound chords can be recorded.
+        // Intercept before application bindings so a recorded chord cannot hide
+        // the window. Bare Escape is not a guide control.
         cx.stop_propagation();
         let modifiers = keystroke.modifiers;
         if keystroke.key.eq_ignore_ascii_case("escape")
@@ -151,10 +151,6 @@ impl OnboardingShortcut {
             && !modifiers.shift
             && !modifiers.platform
         {
-            self.recording = false;
-            self.error = None;
-            self.input.update(cx, |input, cx| input.focus(window, cx));
-            cx.notify();
             return;
         }
         match shortcut_from_keystroke(keystroke, modifiers.shift || input::shift_pressed(), true) {
@@ -321,7 +317,7 @@ impl Render for OnboardingShortcut {
                         .border_color(cx.theme().primary)
                         .p_3()
                         .text_sm()
-                        .child(tr(language, "按下组合键；Esc 取消，保存后生效。", "Press a shortcut. Esc cancels; save to apply.")),
+                        .child(tr(language, "按下组合键，保存后生效。", "Press a shortcut, then save.")),
                 )
             })
             .when_some(self.error.clone(), |panel, error| {
