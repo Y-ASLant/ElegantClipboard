@@ -1,6 +1,5 @@
 //! Native outbound OLE drag. Never writes to the Windows clipboard.
 mod data_object;
-mod dib;
 mod payload;
 mod source;
 #[cfg(test)]
@@ -8,6 +7,7 @@ mod tests;
 
 use anyhow::{Context, Result, bail};
 pub use payload::{PreparedExternalDrag, prepare_external_drag};
+use payload::retain_dropped_image;
 use std::{cell::Cell, rc::Rc};
 use windows::Win32::Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP};
 use windows::Win32::{
@@ -280,7 +280,7 @@ pub fn run_external_drag(
     }
     let returned = Rc::new(Cell::new(None));
     let failed = Rc::new(Cell::new(false));
-    let data = data_object::data_object(payload);
+    let data = data_object::data_object(payload.clone());
     let source: IDropSource = source::DragSource {
         rect,
         has_left: Cell::new(!contains(rect, pointer)),
@@ -313,6 +313,7 @@ pub fn run_external_drag(
         return Ok(outcome);
     }
     if result == DRAGDROP_S_DROP && effect.0 & DROPEFFECT_COPY.0 != 0 {
+        retain_dropped_image(&payload);
         Ok(ExternalDragOutcome::Dropped)
     } else if result == DRAGDROP_S_CANCEL || result == DRAGDROP_S_DROP {
         Ok(ExternalDragOutcome::Cancelled)

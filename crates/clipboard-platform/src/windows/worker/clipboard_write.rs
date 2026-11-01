@@ -106,19 +106,15 @@ pub(super) fn write_rich_clipboard(
     Ok(extras_failed)
 }
 
-/// 图片写回：内容寻址临时 PNG 前置 CF_HDROP，使纯图片可直接以文件粘贴。
-/// 单 guard 会话内：empty → CF_HDROP → CF_DIB → PNG。
-/// `content_hash` 是记录已存的哈希（"image:<hex>" 形式），取 hex 段命名临时文件。
+/// 图片写回：先生成 24 位 CF_DIB，再打开剪贴板。QQ 的「以图片形式发送」要这份现成位图。
+/// 同时写 PNG 和临时文件 CF_HDROP。单 guard：empty → CF_DIB → PNG → CF_HDROP。
 pub(super) fn write_image_with_file(
     item: &ClipboardItem,
     data_dir: &Path,
     png: &[u8],
-    pixels: &[u8],
-    width: u32,
-    height: u32,
     ignored_sequence: &mut u32,
 ) -> Result<()> {
-    let dib = build_cf_dib(pixels, width, height)?;
+    let dib = crate::cf_dib::from_png(png)?;
     let hex = item.content_hash.trim_start_matches("image:");
     let temp_path = ensure_temp_png(data_dir, hex, png)?;
     let temp_string = temp_path.to_string_lossy().into_owned();
@@ -128,21 +124,18 @@ pub(super) fn write_image_with_file(
             .map_err(|error| anyhow!("打开剪贴板失败：{error}"))?;
         clipboard_win::raw::empty().map_err(|error| anyhow!("清空剪贴板失败：{error}"))?;
         touched = true;
-        // CF_HDROP：文件路径列表（托管 PNG 临时文件）。
-        clipboard_win::raw::set_file_list_with(
-            std::slice::from_ref(&temp_string),
-            clipboard_win::options::NoClear,
-        )
-        .map_err(|error| anyhow!("写入图片文件格式失败：{error}"))?;
-        // CF_DIB：手工组 BITMAPINFOHEADER + 自底向上 BGRA 像素。
         clipboard_win::raw::set_without_clear(8, &dib)
             .map_err(|error| anyhow!("写入图片位图格式失败：{error}"))?;
-        // PNG 主格式。
         let png_format = clipboard_win::register_format("PNG")
             .context("注册 PNG 剪贴板格式失败")?
             .get();
         clipboard_win::raw::set_without_clear(png_format, png)
             .map_err(|error| anyhow!("写入 PNG 格式失败：{error}"))?;
+        clipboard_win::raw::set_file_list_with(
+            std::slice::from_ref(&temp_string),
+            clipboard_win::options::NoClear,
+        )
+        .map_err(|error| anyhow!("写入图片文件格式失败：{error}"))?;
         drop(clipboard);
         Ok(())
     })();
@@ -150,49 +143,6 @@ pub(super) fn write_image_with_file(
         *ignored_sequence = unsafe { GetClipboardSequenceNumber() };
     }
     result
-}
-
-/// CF_DIB 字节：40 字节 BITMAPINFOHEADER + 32 位像素（自底向上，BGRA）。
-/// `pixels` 是扁平 RGBA 缓冲（每像素 4 字节，行优先），尺寸须来自实际解码的图片。
-pub(super) fn build_cf_dib(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-    if width == 0 || height == 0 {
-        bail!("图片尺寸不能为空");
-    }
-    let width_i32 = i32::try_from(width).context("图片宽度超过位图限制")?;
-    let height_i32 = i32::try_from(height).context("图片高度超过位图限制")?;
-    let row_bytes = usize::try_from(width)?
-        .checked_mul(4)
-        .context("图片行长度溢出")?;
-    let image_bytes = row_bytes
-        .checked_mul(usize::try_from(height)?)
-        .context("图片缓冲长度溢出")?;
-    let image_size = u32::try_from(image_bytes).context("图片像素超过位图长度限制")?;
-    if pixels.len() != image_bytes {
-        bail!("图片像素长度与实际尺寸不符");
-    }
-    let dib_size = image_bytes.checked_add(40).context("位图长度溢出")?;
-    let mut dib = Vec::new();
-    dib.try_reserve_exact(dib_size)
-        .context("位图缓冲分配失败")?;
-    // BITMAPINFOHEADER
-    dib.extend_from_slice(&40u32.to_le_bytes());
-    dib.extend_from_slice(&width_i32.to_le_bytes());
-    // 正高度 = 自底向上。
-    dib.extend_from_slice(&height_i32.to_le_bytes());
-    dib.extend_from_slice(&1u16.to_le_bytes()); // biPlanes
-    dib.extend_from_slice(&32u16.to_le_bytes()); // biBitCount
-    dib.extend_from_slice(&0u32.to_le_bytes()); // biCompression = BI_RGB
-    dib.extend_from_slice(&image_size.to_le_bytes()); // biSizeImage
-    dib.extend_from_slice(&0i32.to_le_bytes()); // biXPelsPerMeter
-    dib.extend_from_slice(&0i32.to_le_bytes()); // biYPelsPerMeter
-    dib.extend_from_slice(&0u32.to_le_bytes()); // biClrUsed
-    dib.extend_from_slice(&0u32.to_le_bytes()); // biClrImportant
-    for row in pixels.chunks_exact(row_bytes).rev() {
-        for rgba in row.as_chunks::<4>().0 {
-            dib.extend_from_slice(&[rgba[2], rgba[1], rgba[0], rgba[3]]);
-        }
-    }
-    Ok(dib)
 }
 
 pub(super) fn rich_clipboard_matches(
@@ -249,54 +199,5 @@ mod tests {
         assert!(verified_copy_sequence(|| 42, || false).is_err());
         assert!(verified_copy_sequence(|| 0, || true).is_err());
         assert_eq!(verified_copy_sequence(|| 42, || true).unwrap(), 42);
-    }
-
-    #[test]
-    fn cf_dib_rejects_dimensions_and_buffer_lengths_that_cannot_describe_rgba() {
-        for (width, height, len) in [
-            (0, 1, 0),
-            (1, 0, 0),
-            (u32::MAX, 1, 0),
-            (1, u32::MAX, 0),
-            (i32::MAX as u32, i32::MAX as u32, 0),
-            (65_536, 16_384, 0), // biSizeImage cannot hold 4 GiB.
-            (2, 2, 12),          // Truncated or stale larger dimensions.
-            (1, 1, 5),           // Excess bytes must not produce an inconsistent header.
-            (1, 1, 3),           // Partial pixel.
-        ] {
-            assert!(build_cf_dib(&vec![0; len], width, height).is_err());
-        }
-    }
-
-    #[test]
-    fn cf_dib_single_pixel_preserves_alpha() {
-        let dib = build_cf_dib(&[1, 2, 3, 4], 1, 1).unwrap();
-        assert_eq!(&dib[40..], &[3, 2, 1, 4]);
-        assert_eq!(&dib[20..24], &4u32.to_le_bytes());
-    }
-
-    #[test]
-    fn cf_dib_layout_matches_header_and_bottom_up_bgra_pixels() {
-        // 2×2 像素扁平 RGBA：上行 [p0, p1]，下行 [p2, p3]。自底向上存储时下行在先。
-        let pixels: Vec<u8> = [
-            [0x11, 0x22, 0x33, 0xFF], // p0 上左
-            [0x44, 0x55, 0x66, 0xFF], // p1 上右
-            [0x77, 0x88, 0x99, 0xFF], // p2 下左
-            [0xAA, 0xBB, 0xCC, 0xFF], // p3 下右
-        ]
-        .iter()
-        .flat_map(|pixel| pixel.iter().copied())
-        .collect();
-        let dib = build_cf_dib(&pixels, 2, 2).unwrap();
-        assert_eq!(dib.len(), 40 + 16);
-        assert_eq!(&dib[20..24], &16u32.to_le_bytes());
-        assert_eq!(&dib[..4], &40u32.to_le_bytes());
-        assert_eq!(&dib[4..8], &2i32.to_le_bytes());
-        assert_eq!(&dib[8..12], &2i32.to_le_bytes());
-        // 自底向上：最底行（p2, p3）在先；行内自左向右；BGRA 字节序。
-        assert_eq!(&dib[40..44], &[0x99, 0x88, 0x77, 0xFF]);
-        assert_eq!(&dib[44..48], &[0xCC, 0xBB, 0xAA, 0xFF]);
-        assert_eq!(&dib[48..52], &[0x33, 0x22, 0x11, 0xFF]);
-        assert_eq!(&dib[52..56], &[0x66, 0x55, 0x44, 0xFF]);
     }
 }

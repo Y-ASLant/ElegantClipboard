@@ -1,4 +1,4 @@
-use super::*;
+use super::{payload::retain_dropped_image, *};
 use anyhow::Result;
 use clipboard_core::{History, database::ClipboardItem};
 use windows::{
@@ -98,12 +98,10 @@ fn com_requests_reject_unsupported_aspects_indices_media_and_formats() -> Result
 
 #[test]
 fn enumeration_clones_position_and_preserves_partial_fetch_and_skip_results() -> Result<()> {
-    let object = data_object::data_object(PreparedExternalDrag {
-        formats: std::sync::Arc::new(vec![
-            (CF_UNICODETEXT.0, vec![0, 0].into()),
-            (CF_DIB.0, vec![1].into()),
-        ]),
-    });
+    let object = data_object::data_object(PreparedExternalDrag::formats_only(vec![
+        (CF_UNICODETEXT.0, vec![0, 0].into()),
+        (CF_DIB.0, vec![1].into()),
+    ]));
     let enumeration = unsafe { object.EnumFormatEtc(DATADIR_GET.0 as u32) }?;
     let mut one = [FORMATETC::default()];
     assert_eq!(unsafe { enumeration.Next(&mut one, None) }, S_OK);
@@ -171,14 +169,19 @@ fn rich_payload_preserves_utf8_fragment_boundaries_and_rtf_bytes() -> Result<()>
 }
 
 #[test]
-fn image_supplies_original_file_and_decodable_bitmap_without_clipboard_writes() -> Result<()> {
+fn image_drop_offers_a_retained_png_copy_before_bitmap_bytes() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("图像.png");
     image::RgbaImage::from_pixel(3, 2, image::Rgba([20, 40, 60, 255])).save(&path)?;
+    let stored = std::fs::read(&path)?;
     let mut item = text_item("image fixture")?;
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
-    let object = data_object::data_object(prepare_external_drag(&item)?);
+    let prepared = prepare_external_drag(&item)?;
+    let formats: Vec<_> = prepared.formats.iter().map(|(id, _)| *id).collect();
+    let png_id = clipboard_win::register_format("PNG").unwrap().get() as u16;
+    assert_eq!(formats, [CF_HDROP.0, CF_DIB.0, png_id]);
+    let object = data_object::data_object(prepared.clone());
     let medium = get(&object, CF_HDROP.0);
     let hdrop = HDROP(unsafe { medium.0.u.hGlobal }.0);
     assert_eq!(unsafe { DragQueryFileW(hdrop, u32::MAX, None) }, 1);
@@ -187,17 +190,25 @@ fn image_supplies_original_file_and_decodable_bitmap_without_clipboard_writes() 
     unsafe {
         DragQueryFileW(hdrop, 0, Some(&mut name));
     }
-    assert_eq!(String::from_utf16(&name[..length])?, path.to_string_lossy());
-    let dib = get(&object, CF_DIB.0).bytes();
-    let decoder =
-        image::codecs::bmp::BmpDecoder::new_without_file_header(std::io::Cursor::new(dib))?;
-    let decoded = image::DynamicImage::from_decoder(decoder)?.to_rgba8();
+    let offered = String::from_utf16(&name[..length])?;
+    assert_ne!(offered, path.to_string_lossy());
+    assert!(offered.contains("elegant-clipboard-drag-"));
+    assert!(offered.ends_with(".png"));
+    assert_eq!(std::fs::read(&offered)?, stored);
+    let png = get(&object, png_id).bytes();
+    assert_eq!(png, stored);
+    retain_dropped_image(&prepared);
+    drop(prepared);
+    assert_eq!(std::fs::read(&offered)?, stored);
+    let decoded = image::codecs::bmp::BmpDecoder::new_without_file_header(
+        std::io::Cursor::new(get(&object, CF_DIB.0).bytes()),
+    )?;
+    let decoded = image::DynamicImage::from_decoder(decoded)?.to_rgba8();
     assert_eq!(decoded.dimensions(), (3, 2));
     assert_eq!(decoded.get_pixel(2, 1).0[..3], [20, 40, 60]);
-    std::fs::remove_file(path)?;
-    // Successful deferred rendering is cached and each consumer still owns its medium.
-    let first = get(&object, CF_DIB.0);
-    let second = get(&object, CF_DIB.0);
+    std::fs::remove_file(&path)?;
+    let first = get(&object, png_id);
+    let second = get(&object, png_id);
     assert_ne!(unsafe { first.0.u.hGlobal }, unsafe { second.0.u.hGlobal });
     assert_eq!(first.bytes(), second.bytes());
     assert!(prepare_external_drag(&item).is_err());
@@ -375,50 +386,5 @@ fn oversized_image_attachment_is_rejected_before_decode() -> Result<()> {
     item.content_type = "image".into();
     item.image_path = Some(path.to_string_lossy().into_owned());
     assert!(prepare_external_drag(&item).is_err());
-    Ok(())
-}
-
-#[test]
-fn deferred_dib_failure_preserves_file_format_and_is_cached() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("invalid.png");
-    std::fs::write(&path, b"invalid image")?;
-    let mut item = text_item("image fixture")?;
-    item.content_type = "image".into();
-    item.image_path = Some(path.to_string_lossy().into_owned());
-    let object = data_object::data_object(prepare_external_drag(&item)?);
-    let dib_format = data_object::format_etc(CF_DIB.0);
-    assert_eq!(unsafe { object.QueryGetData(&dib_format) }, S_OK);
-    let files = get(&object, CF_HDROP.0);
-    assert_eq!(
-        unsafe { DragQueryFileW(HDROP(files.0.u.hGlobal.0), u32::MAX, None) },
-        1
-    );
-    let error = unsafe { object.GetData(&dib_format) }.err().unwrap();
-    // Replacing a corrupt source must not restart rendering on every consumer request.
-    image::RgbImage::new(1, 1).save(&path)?;
-    let repeated = unsafe { object.GetData(&dib_format) }.err().unwrap();
-    assert_eq!(error.code(), repeated.code());
-    assert_eq!(error.message(), repeated.message());
-    Ok(())
-}
-
-#[test]
-fn deferred_dib_rejects_excessive_dimensions_before_pixel_allocation() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("oversized.bmp");
-    image::RgbImage::new(1, 1).save(&path)?;
-    let mut bytes = std::fs::read(&path)?;
-    bytes[18..22].copy_from_slice(&5001i32.to_le_bytes());
-    bytes[22..26].copy_from_slice(&5000i32.to_le_bytes());
-    std::fs::write(&path, bytes)?;
-    let mut item = text_item("image fixture")?;
-    item.content_type = "image".into();
-    item.image_path = Some(path.to_string_lossy().into_owned());
-    let object = data_object::data_object(prepare_external_drag(&item)?);
-    let error = unsafe { object.GetData(&data_object::format_etc(CF_DIB.0)) }
-        .err()
-        .unwrap();
-    assert!(error.message().contains("2500"));
     Ok(())
 }

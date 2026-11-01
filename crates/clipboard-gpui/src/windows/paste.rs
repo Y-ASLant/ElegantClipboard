@@ -5,9 +5,10 @@ use ::windows::Win32::{
     System::DataExchange::GetClipboardSequenceNumber,
     UI::{
         Input::KeyboardAndMouse::{
-            GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-            KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_INSERT,
-            VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
+            GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+            KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC,
+            MapVirtualKeyW, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_INSERT, VK_LWIN, VK_MENU,
+            VK_RWIN, VK_SHIFT, VK_V,
         },
         WindowsAndMessaging::{
             GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
@@ -90,10 +91,15 @@ impl PendingPaste {
             return Ok(false);
         }
         let inputs = paste_inputs(self.paste_key);
-        let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
-        if sent != inputs.len() as u32 {
-            let releases = [inputs[2], inputs[3]];
-            unsafe { SendInput(&releases, std::mem::size_of::<INPUT>() as i32) };
+        let size = std::mem::size_of::<INPUT>() as i32;
+        let sent = unsafe { SendInput(&inputs[..2], size) };
+        if sent != 2 {
+            let _ = unsafe { SendInput(&inputs[2..], size) };
+            bail!("目标窗口未接受粘贴快捷键，内容已复制，请手动粘贴");
+        }
+        std::thread::sleep(Duration::from_millis(8));
+        let sent = unsafe { SendInput(&inputs[2..], size) };
+        if sent != 2 {
             bail!("目标窗口未接受粘贴快捷键，内容已复制，请手动粘贴");
         }
         Ok(true)
@@ -143,21 +149,21 @@ fn is_same_window(target: (isize, u32)) -> bool {
 }
 
 fn key_input(key: VIRTUAL_KEY, up: bool) -> INPUT {
+    let scan = unsafe { MapVirtualKeyW(u32::from(key.0), MAPVK_VK_TO_VSC) } as u16;
+    let mut flags = KEYEVENTF_SCANCODE;
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+    if key == VK_INSERT {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: key,
-                wScan: 0,
-                dwFlags: (if up {
-                    KEYEVENTF_KEYUP
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
-                }) | if key == VK_INSERT {
-                    KEYEVENTF_EXTENDEDKEY
-                } else {
-                    KEYBD_EVENT_FLAGS(0)
-                },
+                wVk: VIRTUAL_KEY(0),
+                wScan: scan,
+                dwFlags: flags,
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -168,6 +174,7 @@ fn key_input(key: VIRTUAL_KEY, up: bool) -> INPUT {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS;
 
     fn pending() -> PendingPaste {
         PendingPaste {
@@ -234,19 +241,23 @@ mod tests {
         ] {
             let inputs = paste_inputs(preference);
             let actual = inputs.map(|input| unsafe { input.Anonymous.ki });
+            assert_eq!(actual.map(|input| input.wVk), [VIRTUAL_KEY(0); 4]);
+            let scan = |key: VIRTUAL_KEY| {
+                unsafe { MapVirtualKeyW(u32::from(key.0), MAPVK_VK_TO_VSC) as u16 }
+            };
             assert_eq!(
-                actual.map(|input| input.wVk),
-                [modifier, key, key, modifier]
+                actual.map(|input| input.wScan),
+                [scan(modifier), scan(key), scan(key), scan(modifier)]
             );
             let extended = if key == VK_INSERT {
                 KEYEVENTF_EXTENDEDKEY
             } else {
                 KEYBD_EVENT_FLAGS(0)
             };
-            assert_eq!(actual[0].dwFlags, KEYBD_EVENT_FLAGS(0));
-            assert_eq!(actual[1].dwFlags, extended);
-            assert_eq!(actual[2].dwFlags, extended | KEYEVENTF_KEYUP);
-            assert_eq!(actual[3].dwFlags, KEYEVENTF_KEYUP);
+            assert_eq!(actual[0].dwFlags, KEYEVENTF_SCANCODE);
+            assert_eq!(actual[1].dwFlags, KEYEVENTF_SCANCODE | extended);
+            assert_eq!(actual[2].dwFlags, KEYEVENTF_SCANCODE | extended | KEYEVENTF_KEYUP);
+            assert_eq!(actual[3].dwFlags, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP);
         }
     }
 }

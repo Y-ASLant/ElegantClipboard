@@ -11,9 +11,7 @@ use crate::service::read_content::RTF_FORMAT;
 use ::windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 use anyhow::{Context, Result, anyhow, bail};
 use clipboard_core::{History, database::ClipboardItem};
-use clipboard_rs::{
-    Clipboard, ClipboardContent, ClipboardContext, RustImageData, common::RustImage,
-};
+use clipboard_rs::{Clipboard, ClipboardContent, ClipboardContext};
 use std::{path::Path, thread};
 
 use crate::service::protocol::{CopyFormat, CopyMode, CopyPurpose};
@@ -110,14 +108,7 @@ impl Worker {
             if !Path::new(path).is_file() {
                 bail!("图片文件已丢失，无法复制");
             }
-            // PNG 字节直接读文件，无需解码后重编码；decode 仅为 CF_DIB 像素服务。
-            let png = std::fs::read(path).map_err(|error| anyhow!("读取图片文件失败：{error}"))?;
-            let image =
-                RustImageData::from_path(path).map_err(|error| anyhow!("打开图片失败：{error}"))?;
-            let pixels = image
-                .to_rgba8()
-                .map_err(|error| anyhow!("读取图片像素失败：{error}"))?;
-            Some((png, pixels))
+            Some(std::fs::read(path).map_err(|error| anyhow!("读取图片文件失败：{error}"))?)
         } else {
             None
         };
@@ -137,23 +128,11 @@ impl Worker {
                 || unsafe { GetClipboardSequenceNumber() },
                 || self.clipboard.get_files().ok().as_ref() == Some(&files),
             )?
-        } else if let Some((png, pixels)) = image {
-            // 图片写回：CF_HDROP（临时文件）+ CF_DIB + PNG，纯图片可直接以文件粘贴。
-            let (width, height) = pixels.dimensions();
-            write_image_with_file(
-                &item,
-                &self.data_dir,
-                &png,
-                &pixels,
-                width,
-                height,
-                &mut state.ignored_sequence,
-            )?;
+        } else if let Some(png) = image {
+            write_image_with_file(&item, &self.data_dir, &png, &mut state.ignored_sequence)?;
             verified_copy_sequence(
                 || unsafe { GetClipboardSequenceNumber() },
                 || {
-                    // 校验：PNG 格式字节一致（HDROP 与 DIB 由写回函数内部保证）。
-                    // clipboard_rs 每次调用自开自关，无需外层 guard。
                     self.clipboard
                         .get_buffer("PNG")
                         .ok()

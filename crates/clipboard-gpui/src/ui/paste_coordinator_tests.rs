@@ -101,6 +101,24 @@ fn ordinary_delivery_and_reopening_preserve_only_new_target() {
 }
 
 #[test]
+fn same_app_window_and_focus_handoff_do_not_cancel_paste() {
+    let mut state = PasteCoordinator::default();
+    state.set_target(Some((10, 20)));
+    assert!(state.deactivate(Some((99, 20))).is_none());
+    assert_eq!(state.target(), Some((10, 20)));
+    let request = state.begin_copy((10, 20));
+    state.receive(request);
+    assert!(state.deactivate(Some((77, 20))).is_none());
+    assert!(state.delivering(request));
+    state.set_handoff(true);
+    assert!(state.deactivate(Some((1, 2))).is_none());
+    state.set_handoff(false);
+    let (interrupted, was_active) = state.deactivate(Some((1, 2))).unwrap();
+    assert!(was_active);
+    assert_eq!(interrupted.request_id, Some(request));
+}
+
+#[test]
 fn quick_failure_and_late_resolution_cannot_consume_a_new_slot_request() {
     let mut state = PasteCoordinator::default();
     let old = state.begin_quick((1, 2));

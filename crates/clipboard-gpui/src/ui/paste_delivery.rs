@@ -43,10 +43,12 @@ impl ClipboardView {
             self.is_error = true;
             return;
         }
+        self.paste_state.set_handoff(true);
         let pending =
             match paste::PendingPaste::begin(target, clipboard_sequence, self.paste_key.value) {
                 Ok(pending) => pending,
                 Err(error) => {
+                    self.paste_state.set_handoff(false);
                     self.interrupt_paste_except(None);
                     self.set_feedback_message(localize_service_message(
                         self.language,
@@ -60,6 +62,7 @@ impl ClipboardView {
         if hide_window {
             self.hide_window(window, cx);
         }
+        self.paste_state.set_handoff(false);
         if sound::enabled(self.audio.value, Sound::Paste, SoundTiming::Immediate) {
             sound::play(Sound::Paste);
         }

@@ -19,6 +19,9 @@ pub mod paste_types;
 mod shortcut_parse;
 #[cfg(windows)]
 pub mod source_app;
+#[cfg(windows)]
+#[path = "windows/cf_dib.rs"]
+mod cf_dib;
 pub mod source_app_types;
 pub mod window_effect;
 #[cfg(target_os = "linux")]

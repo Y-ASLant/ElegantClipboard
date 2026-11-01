@@ -28,6 +28,7 @@ pub(super) struct PasteCoordinator {
     quick: PendingRequest<Target>,
     sequence: Option<Sequence>,
     merging: bool,
+    handoff: bool,
 }
 
 #[derive(Default)]
@@ -176,18 +177,30 @@ impl PasteCoordinator {
             .is_some_and(|owned| Some(owned) == target)
     }
 
-    pub fn keeps_foreground(&self, target: Option<Target>) -> bool {
-        self.sequence_keeps_target(target)
+    pub fn keeps_foreground(&self, foreground: Option<Target>) -> bool {
+        if self.handoff {
+            return true;
+        }
+        let same_destination = |owned: Target| {
+            Some(owned) == foreground
+                || foreground.is_some_and(|current| current.1 != 0 && current.1 == owned.1)
+        };
+        self.sequence_target().is_some_and(same_destination)
             || self
                 .pending
                 .request_id()
                 .and_then(|id| self.pending.get(id))
-                .is_some_and(|pending| Some(pending.target) == target)
+                .is_some_and(|pending| same_destination(pending.target))
             || self
                 .quick
                 .request_id()
                 .and_then(|id| self.quick.get(id))
-                .is_some_and(|pending| Some(*pending) == target)
+                .is_some_and(|pending| same_destination(*pending))
+            || self.target.is_some_and(same_destination)
+    }
+
+    pub fn set_handoff(&mut self, active: bool) {
+        self.handoff = active;
     }
 
     pub fn deactivate(&mut self, foreground: Option<Target>) -> Option<(Interrupted, bool)> {

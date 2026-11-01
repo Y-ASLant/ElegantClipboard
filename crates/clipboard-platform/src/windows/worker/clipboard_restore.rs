@@ -1,7 +1,6 @@
-use super::{Event, StashedClipboard, Worker, clipboard_write::build_cf_dib};
+use super::{Event, StashedClipboard, Worker};
 use crate::service::{CapturedClipboard, capture::lock_capture_state, read_content::RTF_FORMAT};
 use anyhow::{Context, Result, anyhow};
-use clipboard_rs::{RustImageData, common::RustImage};
 use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
 impl Worker {
@@ -18,16 +17,9 @@ impl Worker {
     }
 
     fn write_stashed(&self, stash: &StashedClipboard) -> Result<bool> {
-        // 在打开或清空剪贴板之前完成解码与校验。
-        let dib = if let CapturedClipboard::Image { png, .. } = &stash.content {
-            let image =
-                RustImageData::from_bytes(png).map_err(|error| anyhow!("恢复图片失败：{error}"))?;
-            let pixels = image
-                .to_rgba8()
-                .map_err(|error| anyhow!("读取恢复图片像素失败：{error}"))?;
-            Some(build_cf_dib(&pixels, pixels.width(), pixels.height())?)
-        } else {
-            None
+        let image_dib = match &stash.content {
+            CapturedClipboard::Image { png, .. } => Some(crate::cf_dib::from_png(png)?),
+            _ => None,
         };
         let mut state = lock_capture_state(&self.state)?;
         let mut touched = false;
@@ -40,7 +32,7 @@ impl Worker {
             }
             clipboard_win::raw::empty().map_err(|error| anyhow!("清空剪贴板失败：{error}"))?;
             touched = true;
-            write_content_locked(stash, dib.as_deref())?;
+            write_content_locked(stash, image_dib.as_deref())?;
             for format in &stash.extra {
                 // 额外原生格式保持尽力恢复的既有语义。
                 let _ = write_buffer_locked(&format.name, &format.data);
@@ -55,7 +47,7 @@ impl Worker {
     }
 }
 
-fn write_content_locked(stash: &StashedClipboard, dib: Option<&[u8]>) -> Result<()> {
+fn write_content_locked(stash: &StashedClipboard, image_dib: Option<&[u8]>) -> Result<()> {
     match &stash.content {
         CapturedClipboard::Text(text) => write_text_locked(text),
         CapturedClipboard::Rich { html, rtf, text } => {
@@ -82,8 +74,11 @@ fn write_content_locked(stash: &StashedClipboard, dib: Option<&[u8]>) -> Result<
                 .map_err(|error| anyhow!("恢复文件列表失败：{error}"))
         }
         CapturedClipboard::Image { png, .. } => {
-            clipboard_win::raw::set_without_clear(8, dib.context("恢复图片位图缺失")?)
-                .map_err(|error| anyhow!("恢复图片位图失败：{error}"))?;
+            clipboard_win::raw::set_without_clear(
+                8,
+                image_dib.context("恢复图片位图缺失")?,
+            )
+            .map_err(|error| anyhow!("恢复图片位图失败：{error}"))?;
             write_buffer_locked("PNG", png)
         }
     }
