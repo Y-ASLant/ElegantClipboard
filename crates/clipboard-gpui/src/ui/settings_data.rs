@@ -1,6 +1,6 @@
 use super::settings_common::{
     choice_tabs, command_checkbox, owner_state, settings_column, settings_columns,
-    settings_description, settings_field, settings_inline, settings_stack,
+    settings_description, settings_field, settings_inline, settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::chart::BarChart;
@@ -152,12 +152,8 @@ impl SettingsWindowView {
                         let owner = self.owner.clone();
                         let mut next = monitor_types;
                         set_checked(&mut next, !selected);
-                        Checkbox::new(id)
+                        settings_toggle(Checkbox::new(id))
                             .min_w_0()
-                            .min_h(px(32.))
-                            .py(px(6.))
-                            .text_size(px(14.))
-                            .whitespace_normal()
                             .label(label)
                             .checked(selected)
                             .disabled(monitor_types_pending || !next.valid())

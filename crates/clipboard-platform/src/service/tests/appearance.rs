@@ -42,35 +42,3 @@ fn corner_radius_acknowledgement_preserves_value_after_rejected_change() -> Resu
     }
     Ok(())
 }
-
-#[test]
-fn startup_migrates_legacy_eight_and_preserves_other_saved_radii() -> Result<()> {
-    use clipboard_core::database::{Database, SettingsRepository};
-
-    for (stored, expected, canonical) in [
-        ("8", CornerRadiusPreference::System, "system"),
-        ("12", CornerRadiusPreference::Fixed(12), "12"),
-    ] {
-        let directory = tempfile::tempdir()?;
-        let path = directory.path().join("clipboard.db");
-        let db = Database::new(path.clone())?;
-        SettingsRepository::new(&db).set("gpui_corner_radius", stored)?;
-        drop(db);
-
-        let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(service.initial_preferences.corner_radius, expected);
-        drop(service);
-
-        let db = Database::new(path)?;
-        assert_eq!(
-            SettingsRepository::new(&db)
-                .get("gpui_corner_radius")?
-                .as_deref(),
-            Some(canonical)
-        );
-        drop(db);
-        let (service, _) = Service::start(Some(directory.path().to_owned()), false)?;
-        assert_eq!(service.initial_preferences.corner_radius, expected);
-    }
-    Ok(())
-}

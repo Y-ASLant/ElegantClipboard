@@ -9,6 +9,9 @@ pub enum ProjectLink {
     Author,
     Repository,
     Issues,
+    /// 发布页（仅非 Windows 的「检查更新」打开；Windows 走自动更新流程）。
+    #[allow(dead_code)]
+    Releases,
 }
 
 impl ProjectLink {
@@ -17,6 +20,7 @@ impl ProjectLink {
             Self::Author => "https://github.com/Y-ASLant",
             Self::Repository => "https://github.com/Y-ASLant/ElegantClipboard",
             Self::Issues => "https://github.com/Y-ASLant/ElegantClipboard/issues",
+            Self::Releases => "https://github.com/Y-ASLant/ElegantClipboard/releases",
         }
     }
 }

@@ -1,6 +1,6 @@
 use super::settings_common::{
     choice_tabs, owner_state, settings_column, settings_columns, settings_description,
-    settings_field, settings_inline, settings_stack,
+    settings_field, settings_inline, settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
@@ -28,11 +28,8 @@ impl SettingsWindowView {
 
         settings_stack()
             .child(
-                Checkbox::new("app-filter-enabled")
+                settings_toggle(Checkbox::new("app-filter-enabled"))
                     .w_full()
-                    .min_h(px(32.))
-                    .py(px(6.))
-                    .text_size(px(14.))
                     .label(tr(language, "启用应用过滤", "Enable app filter"))
                     .checked(app_filter.enabled)
                     .disabled(app_filter_pending)
@@ -136,7 +133,7 @@ impl SettingsWindowView {
                     .child(div().flex_1().min_w_0().text_size(px(14.)).whitespace_normal().child(rule.clone()))
                     .child(
                         Button::new(format!("app-filter-remove-{index}"))
-                            .h(px(32.))
+                            .h(px(visual::CONTROL_HEIGHT))
                             .flex_shrink_0()
                             .ghost()
                             .label(tr(language, "移除", "Remove"))
@@ -219,7 +216,7 @@ impl SettingsWindowView {
                                             )
                                             .child(
                                                 Button::new(format!("app-filter-pick-{index}"))
-                                                    .h(px(32.))
+                                                    .h(px(visual::CONTROL_HEIGHT))
                                                     .flex_shrink_0()
                                                     .ghost()
                                                     .tooltip(app.process)

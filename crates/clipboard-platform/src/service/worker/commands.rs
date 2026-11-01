@@ -339,6 +339,23 @@ impl Worker {
             Command::SetTransientFilter(enabled) => {
                 return self.handle_set_transient_filter(enabled);
             }
+            Command::SetDiagnosticsEnabled(enabled) => {
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_diagnostics_enabled,
+                    Event::DiagnosticsEnabledSaved,
+                );
+            }
+            Command::SetRunAsAdmin(enabled) => {
+                return self.save_setting(
+                    enabled,
+                    Preferences::set_run_as_admin,
+                    Event::RunAsAdminSaved,
+                );
+            }
+            Command::CheckUpdate => return self.handle_check_update(),
+            Command::DownloadUpdate(release) => return self.handle_download_update(release),
+            Command::InstallUpdate(path) => return self.handle_install_update(path),
             Command::SetAppFilter(preference) => return self.handle_set_app_filter(preference),
             Command::SetWindowEffect(preference) => {
                 return self.save_setting(

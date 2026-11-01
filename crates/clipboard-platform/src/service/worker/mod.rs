@@ -32,6 +32,7 @@ mod retention;
 mod settings;
 mod stash;
 pub(crate) mod transient;
+mod update;
 
 use stash::StashedClipboard;
 

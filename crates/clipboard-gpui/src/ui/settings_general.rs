@@ -1,4 +1,6 @@
-use super::settings_common::{command_checkbox, owner_state, settings_inline, settings_stack};
+use super::settings_common::{
+    command_checkbox, owner_state, settings_inline, settings_stack, settings_toggle,
+};
 use super::*;
 use gpui_kit::component::{alert::Alert, switch::Switch};
 
@@ -74,7 +76,7 @@ impl SettingsWindowView {
             fn(&ClipboardView) -> (bool, bool),
             fn(&mut ClipboardView),
         );
-        let behavior_toggles: [BehaviorToggle; 7] = [
+        let behavior_toggles: [BehaviorToggle; 8] = [
             (
                 "persist-window-size",
                 "记住窗口大小",
@@ -159,6 +161,19 @@ impl SettingsWindowView {
                 },
                 |owner| owner.paste_move_to_top.pending = true,
             ),
+            (
+                "diagnostics-enabled",
+                "记录诊断日志",
+                "Enable diagnostic logs",
+                Command::SetDiagnosticsEnabled,
+                |state| {
+                    (
+                        state.diagnostics_enabled.value,
+                        state.diagnostics_enabled.pending,
+                    )
+                },
+                |owner| owner.diagnostics_enabled.pending = true,
+            ),
         ];
         settings_inline()
             .children(
@@ -201,24 +216,117 @@ impl SettingsWindowView {
         let autostart = state.autostart.value;
         let autostart_pending = state.autostart.pending;
         let startup_owner = self.owner.clone();
-        settings_inline()
-            .child(
-                Switch::new("settings-window-autostart")
-                    .min_h(px(32.))
-                    .py(px(6.))
-                    .text_size(px(14.))
-                    .label(tr(language, "开机自启", "Start on login"))
-                    .checked(autostart)
-                    .disabled(autostart_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = startup_owner.update(cx, |owner, cx| {
-                            if owner.send(Command::SetAutostart(*checked), cx) {
-                                owner.autostart.pending = true;
+        let panel = settings_inline().child(
+            settings_toggle(Switch::new("settings-window-autostart"))
+                .label(tr(language, "开机自启", "Start on login"))
+                .checked(autostart)
+                .disabled(autostart_pending)
+                .on_change(move |checked, _, cx| {
+                    let _ = startup_owner.update(cx, |owner, cx| {
+                        if owner.send(Command::SetAutostart(*checked), cx) {
+                            owner.autostart.pending = true;
+                            cx.notify();
+                        }
+                    });
+                }),
+        );
+        #[cfg(windows)]
+        let panel = {
+            let run_as_admin = state.run_as_admin.value;
+            let run_as_admin_pending = state.run_as_admin.pending;
+            let is_admin = state.is_admin;
+            let admin_owner = self.owner.clone();
+            panel.child(
+                settings_toggle(Switch::new("settings-window-run-as-admin"))
+                    .label(tr(
+                        language,
+                        "以管理员身份启动",
+                        "Run as administrator",
+                    ))
+                    .checked(run_as_admin)
+                    .disabled(run_as_admin_pending)
+                    .on_change(move |checked, window, cx| {
+                        if *checked && !is_admin {
+                            let owner = admin_owner.clone();
+                            window.open_dialog(cx, move |dialog, _, cx| {
+                                let elevate_owner = owner.clone();
+                                let later_owner = owner.clone();
+                                dialog_shell(dialog, cx)
+                                    .title(dialog_title(
+                                        tr(
+                                            language,
+                                            "以管理员身份启动",
+                                            "Run as administrator",
+                                        ),
+                                        cx,
+                                    ))
+                                    .child(dialog_copy().child(tr(
+                                        language,
+                                        "需要管理员权限才能监听并粘贴到以管理员身份运行的程序（如部分游戏、终端）。保存后立即重启为管理员，还是下次启动时生效？",
+                                        "Administrator rights are required to monitor and paste into elevated apps (some games, terminals). Restart as administrator now, or apply on next launch?",
+                                    )))
+                                    .footer(
+                                        dialog_footer(cx)
+                                            .child(
+                                                Button::new("admin-cancel")
+                                                    .outline()
+                                                    .label(tr(language, "取消", "Cancel"))
+                                                    .on_click(|_, window, cx| {
+                                                        window.close_dialog(cx)
+                                                    }),
+                                            )
+                                            .child(
+                                                Button::new("admin-later")
+                                                    .outline()
+                                                    .label(tr(
+                                                        language,
+                                                        "下次启动",
+                                                        "Next launch",
+                                                    ))
+                                                    .on_click(move |_, window, cx| {
+                                                        let _ = later_owner.update(cx, |owner, cx| {
+                                                            if owner.send(
+                                                                Command::SetRunAsAdmin(true),
+                                                                cx,
+                                                            ) {
+                                                                owner.run_as_admin.pending = true;
+                                                            }
+                                                        });
+                                                        window.close_dialog(cx);
+                                                    }),
+                                            )
+                                            .child(
+                                                Button::new("admin-now")
+                                                    .primary()
+                                                    .label(tr(
+                                                        language,
+                                                        "立即重启",
+                                                        "Restart now",
+                                                    ))
+                                                    .on_click(move |_, window, cx| {
+                                                        let _ = elevate_owner.update(
+                                                            cx,
+                                                            |owner, cx| {
+                                                                owner
+                                                                    .relaunch_as_admin(cx);
+                                                            },
+                                                        );
+                                                        window.close_dialog(cx);
+                                                    }),
+                                            ),
+                                    )
+                            });
+                            return;
+                        }
+                        let _ = admin_owner.update(cx, |owner, cx| {
+                            if owner.send(Command::SetRunAsAdmin(*checked), cx) {
+                                owner.run_as_admin.pending = true;
                                 cx.notify();
                             }
                         });
                     }),
             )
-            .into_any_element()
+        };
+        panel.into_any_element()
     }
 }

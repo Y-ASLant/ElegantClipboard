@@ -7,14 +7,10 @@ impl Preferences {
         if stored.as_deref() == Some("system") {
             return Ok(CornerRadiusPreference::System);
         }
-        match stored.and_then(|value| value.parse::<u8>().ok()) {
-            Some(8) => {
-                self.repository.set(CORNER_RADIUS_KEY, "system")?;
-                Ok(CornerRadiusPreference::System)
-            }
-            Some(radius @ 0..=16) => Ok(CornerRadiusPreference::Fixed(radius)),
-            _ => Ok(CornerRadiusPreference::default()),
-        }
+        Ok(match stored.and_then(|value| value.parse::<u8>().ok()) {
+            Some(radius @ 0..=16) => CornerRadiusPreference::Fixed(radius),
+            _ => CornerRadiusPreference::default(),
+        })
     }
 
     pub fn set_corner_radius(&self, preference: CornerRadiusPreference) -> Result<()> {

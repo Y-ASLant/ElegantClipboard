@@ -14,6 +14,15 @@ pub(super) fn settings_stack() -> Div {
         .whitespace_normal()
 }
 
+/// Height, padding and label size for every settings checkbox and switch.
+pub(super) fn settings_toggle<T: Styled>(control: T) -> T {
+    control
+        .min_h(px(visual::CONTROL_HEIGHT))
+        .py(px(visual::TOGGLE_PADDING_Y))
+        .text_size(px(visual::TEXT_BODY))
+        .whitespace_normal()
+}
+
 /// Related fields share a row when each has enough room, otherwise wrap.
 pub(super) fn settings_columns() -> Div {
     settings_stack().flex_row().flex_wrap().items_start()
@@ -139,12 +148,8 @@ pub(super) fn command_checkbox(
     on_sent: fn(&mut ClipboardView),
 ) -> Checkbox {
     let owner = owner.clone();
-    Checkbox::new(id)
+    settings_toggle(Checkbox::new(id))
         .min_w_0()
-        .min_h(px(visual::CONTROL_HEIGHT))
-        .py(px(visual::SPACE_1))
-        .text_size(px(visual::TEXT_BODY))
-        .whitespace_normal()
         .label(label)
         .checked(checked)
         .disabled(disabled)

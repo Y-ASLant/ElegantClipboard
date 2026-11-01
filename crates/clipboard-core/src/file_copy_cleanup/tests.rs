@@ -294,46 +294,5 @@ fn capture_retains_paths_without_making_copies_or_requiring_source_contents() ->
     Ok(())
 }
 
-#[test]
-fn database_only_cleanup_supports_old_schemas_without_migrating_them() -> Result<()> {
-    for settings_present in [false, true] {
-        let mut connection = Connection::open_in_memory()?;
-        connection.execute_batch(
-            "CREATE TABLE clipboard_items(id INTEGER PRIMARY KEY, file_paths TEXT, updated_at TEXT);
-             INSERT INTO clipboard_items VALUES (1, '[\"original\"]', 'old timestamp');",
-        )?;
-        if settings_present {
-            connection.execute_batch(
-                "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT);
-                 INSERT INTO settings VALUES ('gpui_stage_files', 'true'), ('legacy', 'keep');",
-            )?;
-        }
-        clear_file_copy_references(&mut connection)?;
-        let row: (String, String) = connection.query_row(
-            "SELECT file_paths, updated_at FROM clipboard_items",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        assert_eq!(
-            row,
-            (r#"["original"]"#.to_owned(), "old timestamp".to_owned())
-        );
-        let columns: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('clipboard_items')",
-            [],
-            |row| row.get(0),
-        )?;
-        assert_eq!(columns, 3);
-        if settings_present {
-            let settings: Vec<(String, String)> = connection
-                .prepare("SELECT key, value FROM settings")?
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect::<Result<_, _>>()?;
-            assert_eq!(settings, vec![("legacy".into(), "keep".into())]);
-        }
-    }
-    Ok(())
-}
-
 #[cfg(any(unix, windows))]
 mod paths;

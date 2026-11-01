@@ -25,32 +25,3 @@ pub(super) fn write(path: &Path, content: &str) -> Result<()> {
     fs::File::open(directory)?.sync_all()?;
     Ok(())
 }
-
-pub(super) fn migrate(old: &Path, new: &Path, saved: &str, replacement: &str) -> Result<()> {
-    match read(new)? {
-        Some(value) if value == replacement => (),
-        Some(_) => bail!("The destination autostart entry changed during migration"),
-        None => {
-            let directory = new.parent().context("Invalid autostart directory")?;
-            fs::create_dir_all(directory)?;
-            let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-            temporary.write_all(replacement.as_bytes())?;
-            temporary.as_file().sync_all()?;
-            temporary
-                .persist_noclobber(new)
-                .context("Cannot create the new autostart entry")?;
-        }
-    }
-    if read(new)?.as_deref() != Some(replacement) {
-        bail!("The new autostart entry could not be verified");
-    }
-    #[cfg(unix)]
-    fs::File::open(new.parent().context("Invalid autostart directory")?)?.sync_all()?;
-    if read(old)?.as_deref() != Some(saved) {
-        bail!("The old autostart entry changed during migration");
-    }
-    fs::remove_file(old).context("Cannot remove the old autostart entry")?;
-    #[cfg(unix)]
-    fs::File::open(old.parent().context("Invalid autostart directory")?)?.sync_all()?;
-    Ok(())
-}

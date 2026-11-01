@@ -12,9 +12,6 @@ impl ClipboardView {
                 self.close_hover_preview("theme_color_changed", cx);
                 self.theme_color = color;
                 crate::design_system::set_theme_color(color, cx);
-                self.set_feedback_message(
-                    tr(self.language, "主题色已保存", "Theme color saved").into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {

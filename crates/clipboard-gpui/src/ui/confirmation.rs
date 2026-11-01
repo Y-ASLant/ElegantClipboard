@@ -179,15 +179,8 @@ impl ClipboardView {
         let confirm_owner = owner.clone();
         let keyboard_owner = owner.clone();
         let cancel_owner = owner.clone();
-        dialog
-            .w(px(448.))
-            .p_4()
-            .rounded(cx.theme().radius_lg)
-            .bg(cx.theme().popover)
-            .border_color(cx.theme().border)
-            .title(div().pb_3().border_b_1().border_color(cx.theme().border).text_size(px(16.)).font_semibold().child(title))
-            .close_button(false)
-            .overlay_closable(false)
+        dialog_shell(dialog, cx)
+            .title(dialog_title(title, cx))
             .on_ok(move |_, window, cx| {
                 let _ = keyboard_owner.update(cx, |view, cx| view.confirm_history_action(kind, window, cx));
                 false
@@ -196,18 +189,16 @@ impl ClipboardView {
                 cancel_owner.update(cx, |view, cx| view.cancel_confirmation(kind, cx)).unwrap_or(true)
             })
             .child(
-                div()
+                dialog_copy()
                     .flex()
                     .flex_col()
                     .gap_3()
                     .pt_1()
-                    .text_size(px(14.))
-                    .line_height(relative(1.6))
                     .child(prompt)
                     .when(matches!(kind, HistoryConfirmation::ClearHistory(_)), |body| {
                         body.child(
                             div()
-                                .text_size(px(12.))
+                                .text_size(px(visual::TEXT_SMALL))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(tr(
                                     language,
@@ -220,11 +211,7 @@ impl ClipboardView {
                         body.child(Alert::error("history-confirm-error", error).small())
                     }),
             )
-            .footer(DialogFooter::new()
-                .pt_3()
-                .gap_2()
-                .border_t_1()
-                .border_color(cx.theme().border)
+            .footer(dialog_footer(cx)
                 .child(Button::new("history-confirm-cancel")
                     .outline()
                     .label(tr(language, "取消", "Cancel"))

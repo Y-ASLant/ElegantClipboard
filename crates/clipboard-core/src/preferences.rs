@@ -43,6 +43,8 @@ const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
 const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
 const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
 const SEQUENCE_HOTKEY_KEY: &str = "gpui_sequence_paste_hotkey";
+const DIAGNOSTICS_KEY: &str = "gpui_diagnostics_enabled";
+const RUN_AS_ADMIN_KEY: &str = "gpui_run_as_admin";
 
 pub struct Preferences {
     repository: SettingsRepository,
@@ -143,9 +145,6 @@ impl Preferences {
 
     pub fn hotkey(&self) -> Result<HotkeyPreference> {
         Ok(match self.repository.get(HOTKEY_KEY)?.as_deref() {
-            Some("ctrl_shift_v") => HotkeyPreference::Shortcut("Ctrl+Shift+V".into()),
-            Some("alt_c") => HotkeyPreference::Shortcut("Alt+C".into()),
-            Some("ctrl_alt_v") => HotkeyPreference::Shortcut("Ctrl+Alt+V".into()),
             Some("disabled") => HotkeyPreference::Disabled,
             Some(value) if value.contains('+') => HotkeyPreference::Shortcut(value.to_owned()),
             _ => HotkeyPreference::default(),
@@ -404,6 +403,28 @@ impl Preferences {
 
     pub fn set_restore_clipboard(&self, enabled: bool) -> Result<()> {
         self.set_bool_pref(RESTORE_CLIPBOARD_KEY, enabled)
+    }
+
+    /// 会话日志（application.log）开关；panic.log 独立保留，默认关闭。
+    pub fn diagnostics_enabled(&self) -> Result<bool> {
+        self.bool_pref(DIAGNOSTICS_KEY, false)
+    }
+
+    pub fn set_diagnostics_enabled(&self, enabled: bool) -> Result<()> {
+        self.set_bool_pref(DIAGNOSTICS_KEY, enabled)
+    }
+
+    /// 以管理员身份启动（仅 Windows 生效；其他平台读取恒为 false）。
+    pub fn run_as_admin(&self) -> Result<bool> {
+        if cfg!(windows) {
+            self.bool_pref(RUN_AS_ADMIN_KEY, false)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn set_run_as_admin(&self, enabled: bool) -> Result<()> {
+        self.set_bool_pref(RUN_AS_ADMIN_KEY, enabled)
     }
 
     /// 序列粘贴推进键（决策 0004）；空串表示停用。默认 Ctrl+Shift+G。

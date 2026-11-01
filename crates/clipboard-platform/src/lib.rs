@@ -5,6 +5,9 @@ pub mod autostart;
 mod cf_dib;
 pub mod drag_types;
 #[cfg(windows)]
+#[path = "windows/elevation.rs"]
+pub mod elevation;
+#[cfg(windows)]
 pub mod external_drag;
 #[cfg(windows)]
 pub mod hotkey;
@@ -33,5 +36,6 @@ pub use macos::{autostart, desktop, external_drag, hotkey, outside_click, source
 mod instance;
 mod sequence;
 mod service;
+pub mod update;
 pub use sequence::clipboard_sequence;
 pub use service::*;

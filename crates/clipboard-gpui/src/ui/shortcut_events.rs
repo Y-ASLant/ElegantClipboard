@@ -10,13 +10,8 @@ impl ClipboardView {
                 "The global shortcut is disabled; open the window from the tray.",
             )
             .into()
-        } else if self.language == LanguagePreference::English {
-            format!(
-                "Shortcut saved: {}",
-                hotkey_label(self.language, &self.hotkey_choice)
-            )
         } else {
-            format!("已保存唤出快捷键：{}", self.hotkey_choice.label())
+            String::new()
         };
         self.finish_shortcut_change(
             ShortcutChangeKind::Main,
@@ -30,12 +25,7 @@ impl ClipboardView {
         self.finish_shortcut_change(
             ShortcutChangeKind::Sequence,
             result.map(|_| ()),
-            tr(
-                self.language,
-                "序列粘贴推进键已保存",
-                "Sequence paste advance key saved",
-            )
-            .into(),
+            String::new(),
             tr(
                 self.language,
                 "保存序列粘贴推进键失败",
@@ -48,12 +38,7 @@ impl ClipboardView {
         self.finish_shortcut_change(
             ShortcutChangeKind::Quick,
             result.map(|_| ()),
-            tr(
-                self.language,
-                "快速粘贴快捷键设置已保存",
-                "Quick paste shortcuts setting saved",
-            )
-            .into(),
+            String::new(),
             tr(
                 self.language,
                 "保存快速粘贴快捷键设置失败",
@@ -69,12 +54,7 @@ impl ClipboardView {
         self.finish_shortcut_change(
             ShortcutChangeKind::Slots,
             result.map(|_| ()),
-            tr(
-                self.language,
-                "快速粘贴槽位快捷键已保存",
-                "Quick paste slot shortcut saved",
-            )
-            .into(),
+            String::new(),
             tr(
                 self.language,
                 "保存快速粘贴槽位快捷键失败",

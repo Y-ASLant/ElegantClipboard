@@ -2,8 +2,8 @@ use super::*;
 use rusqlite::{Connection, params_from_iter};
 use std::sync::LazyLock;
 
-// Only consumed preferences and migration state belong in portable backups.
-// In particular, a gpui_ prefix alone does not authorize an obsolete or unknown key.
+// Only consumed preferences belong in portable backups.
+// A gpui_ prefix alone does not authorize an obsolete or unknown key.
 const BACKUP_KEYS: &[&str] = &[
     THEME_KEY,
     THEME_COLOR_KEY,
@@ -35,8 +35,8 @@ const BACKUP_KEYS: &[&str] = &[
     DEDUP_STRATEGY_KEY,
     RESTORE_CLIPBOARD_KEY,
     SEQUENCE_HOTKEY_KEY,
-    "_migration_url_content_type",
-    "_migration_backfill_semantic_hash",
+    DIAGNOSTICS_KEY,
+    RUN_AS_ADMIN_KEY,
 ];
 
 pub(crate) fn prune_non_gpui_settings(connection: &Connection) -> Result<()> {

@@ -1,4 +1,5 @@
 use crate::source_app;
+use crate::update::ReleaseInfo;
 use anyhow::Result;
 use clipboard_core::{
     ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent, TextTransform,
@@ -235,6 +236,23 @@ pub enum Command {
         deferred: bool,
     },
     SetTransientFilter(bool),
+    /// 会话日志开关；panic.log 不受影响。
+    SetDiagnosticsEnabled(bool),
+    /// 以管理员身份启动；仅 Windows 生效。
+    SetRunAsAdmin(bool),
+    /// 检查 GitHub Releases 是否有新版本。
+    CheckUpdate,
+    /// 下载 `CheckUpdate` 发现的安装包到数据目录。
+    DownloadUpdate(ReleaseInfo),
+    /// 启动已下载的安装器（仅 Windows）。
+    InstallUpdate(PathBuf),
+}
+
+/// `CheckUpdate` 的结果：已最新或发现新版本。
+#[derive(Debug, Clone)]
+pub enum UpdateStatus {
+    Current,
+    Available(ReleaseInfo),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -269,6 +287,7 @@ pub enum FailureKind {
     DataSize,
     DatabaseMaintenance,
     Pause,
+    Update,
     Other,
 }
 
@@ -312,6 +331,9 @@ impl Command {
             Self::QueryDataSize => Some(FailureKind::DataSize),
             Self::QueryDailyCounts(_) => Some(FailureKind::Other),
             Self::OptimizeDatabase => Some(FailureKind::DatabaseMaintenance),
+            Self::CheckUpdate | Self::DownloadUpdate(_) | Self::InstallUpdate(_) => {
+                Some(FailureKind::Update)
+            }
             // 其余命令（各种复制、设置项、预览、删除等）失败时统一归为 Other。
             _ => Some(FailureKind::Other),
         }
@@ -390,6 +412,11 @@ pub enum Event {
     ThemeColorSaved(Result<ThemeColor, String>),
     CornerRadiusSaved(Result<CornerRadiusPreference, String>),
     TransientFilterSaved(Result<bool, String>),
+    DiagnosticsEnabledSaved(Result<bool, String>),
+    RunAsAdminSaved(Result<bool, String>),
+    UpdateChecked(Result<UpdateStatus, String>),
+    UpdateDownloaded(Result<PathBuf, String>),
+    UpdateInstallStarted(Result<(), String>),
     LanguageSaved(Result<LanguagePreference, String>),
     HotkeySaved(Result<HotkeyPreference, String>),
     WindowSizeSaved(Result<WindowSizePreference, String>),

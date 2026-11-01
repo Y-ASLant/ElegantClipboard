@@ -1,6 +1,7 @@
 mod confirmation;
 mod content;
 mod data_import;
+mod diagnostics_events;
 mod drag;
 mod drag_visual;
 mod editor_actions;
@@ -60,6 +61,7 @@ mod startup;
 mod storage;
 mod theme_color;
 mod thumbnail_cache;
+mod update_events;
 mod view_init;
 mod window_lifecycle;
 mod window_render;
@@ -71,10 +73,14 @@ use file_cards::{
     FileCardInfo, image_file_dimensions, single_file_image_path, single_image_file_paths,
 };
 use navigation::{history_row_height, history_top_row, show_history_scroll_to_top};
-use presentation::{apply_theme, format_bytes, localize_service_message, tr, window_shell};
+use presentation::{
+    apply_theme, dialog_copy, dialog_footer, dialog_shell, dialog_title, format_bytes,
+    localize_service_message, tr, window_shell,
+};
 use shortcut_labels::{
     hotkey_label, paste_registration_summary, shortcut_from_keystroke, shortcut_kbd,
 };
+use update_events::UpdateCheck;
 use window_lifecycle::update_clipboard_window;
 
 use crate::links_core::ProjectLink;
@@ -113,12 +119,12 @@ use clipboard_platform::hotkey::{
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{
-    Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind, Service,
+    Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind, ReleaseInfo,
+    Service, UpdateStatus,
 };
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::scroll::ScrollableElement;
-use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::{
@@ -131,7 +137,7 @@ use gpui_kit::{
     },
     *,
 };
-use group_select::{GroupChoice, GroupOption, group_options};
+use group_select::GroupChoice;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{
@@ -172,11 +178,12 @@ gpui_kit::actions!(
     ]
 );
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct StartupMode {
     monitoring: bool,
     hidden: bool,
     show_onboarding: bool,
+    diagnostics: Option<std::sync::Arc<crate::diagnostics::Diagnostics>>,
 }
 
 #[derive(Clone)]
@@ -262,11 +269,12 @@ struct ClipboardView {
     file_card_info: HashMap<i64, FileCardInfo>,
     file_card_checked: HashMap<i64, String>,
     groups: Vec<Group>,
-    group_select: Entity<SelectState<Vec<GroupOption>>>,
     search: Entity<InputState>,
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
     group_rename_id: Option<i64>,
+    /// 编辑弹窗内嵌的删除确认态：true 时弹窗内容切为确认删除。
+    group_editor_confirming_delete: bool,
     group_save_pending: bool,
     group_edit_error: Option<String>,
     group_reorder_pending: bool,
@@ -372,6 +380,12 @@ struct ClipboardView {
     retention: PendingPref<clipboard_core::retention::RetentionPolicy>,
     retention_saved: bool,
     transient_filter: PendingPref<bool>,
+    diagnostics_enabled: PendingPref<bool>,
+    diagnostics: Option<std::sync::Arc<crate::diagnostics::Diagnostics>>,
+    run_as_admin: PendingPref<bool>,
+    #[cfg(windows)]
+    is_admin: bool,
+    update_check: UpdateCheck,
     monitor_types: PendingPref<MonitorTypesPreference>,
     app_filter: PendingPref<AppFilterPreference>,
     running_apps: Vec<RunningApp>,

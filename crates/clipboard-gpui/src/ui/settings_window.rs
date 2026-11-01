@@ -74,7 +74,7 @@ impl ClipboardView {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(1280.), px(720.)),
+                    size(px(800.), px(560.)),
                     cx,
                 ))),
                 titlebar: Some(TitlebarOptions {

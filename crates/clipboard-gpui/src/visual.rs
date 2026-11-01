@@ -15,14 +15,21 @@ pub const SPACE_4: f32 = 16.;
 pub const SPACE_6: f32 = 24.;
 pub const CONTROL_HEIGHT: f32 = 32.;
 pub const CONTROL_HEIGHT_LARGE: f32 = 36.;
+pub const CONTROL_HEIGHT_COMPACT: f32 = 28.;
 pub const TEXT_SMALL: f32 = 12.;
 pub const TEXT_BODY: f32 = 14.;
+pub const TEXT_DIALOG: f32 = 16.;
 pub const TEXT_TITLE: f32 = 18.;
 pub const ICON_SMALL: f32 = 14.;
 pub const ICON_SIZE: f32 = 16.;
 pub const BORDER_WIDTH: f32 = 1.;
 pub const SCROLLBAR_RAIL_WIDTH: f32 = 12.;
 pub const CHOICE_MAX_WIDTH: f32 = 640.;
+pub const TOGGLE_PADDING_Y: f32 = 6.;
+pub const DIALOG_WIDTH_COMPACT: f32 = 400.;
+pub const DIALOG_WIDTH: f32 = 448.;
+pub const DIALOG_WIDTH_EDITOR: f32 = 560.;
+pub const COPY_LINE_HEIGHT: f32 = 1.6;
 
 pub fn popover_shadow() -> Vec<BoxShadow> {
     vec![BoxShadow::new(px(0.), px(2.), hsla(0., 0., 0., 0.2)).blur_radius(px(12.))]
@@ -41,6 +48,7 @@ pub fn card_padding(density: CardDensity) -> f32 {
     }
 }
 pub const PREVIEW_LINE_HEIGHT: f32 = 20.;
+pub const HOVER_LINE_HEIGHT: f32 = 22.4;
 pub const METADATA_ROW_HEIGHT: f32 = 20.;
 pub const FILE_THUMBNAIL_WIDTH: f32 = 48.;
 pub const FILE_THUMBNAIL_HEIGHT: f32 = 36.;
@@ -119,6 +127,8 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
     }
 }
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
+/// 分组下拉触发器与弹出菜单共用的宽度。
+pub const GROUP_SELECT_WIDTH: f32 = 138.;
 pub const DRAG_MOTION_DURATION: Duration = crate::design_system::SLOW;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);

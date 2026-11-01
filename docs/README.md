@@ -11,7 +11,7 @@
 - [技术决策 0003](decisions/0003-core-paste-parity.md)：恢复剪贴板、去重策略、文本转换、按格式粘贴与条目备注。
 - [技术决策 0004](decisions/0004-sequence-paste.md)：多选记录逐条序列粘贴的设计与快捷键。
 - [跨平台正确性修复验证](evidence/cross-platform-correctness-2026-10-27.md)：平台能力、粘贴目标与请求归属、格式编码和延迟采集修复的验证范围。
-- [默认数据目录迁移验证](evidence/data-directory-migration-2026-10-27.md)：三平台统一目录、旧数据引用与自启迁移、冲突保护和清理规则。
+- [默认数据目录迁移验证](evidence/data-directory-migration-2026-10-27.md)：历史记录。当前版本不再搬迁旧数据目录或开机启动项。
 - [普通文件仅保存路径](evidence/file-paths-only-2026-10-27.md)：移除文件副本、启动清理及旧备份兼容行为。
 - [首次引导布局与动效](evidence/onboarding-motion-2026-10-27.md)：beta.9 四步动态预览的历史验证。
 - [首次使用与配置引导](evidence/onboarding-setup-2026-10-28.md)：快捷键、复制粘贴教程、初始偏好与原生窗口验证。
@@ -43,7 +43,7 @@
 | 路径（相对 `crates/clipboard-core/src`） | 职责 |
 |---|---|
 | `database/mod.rs`、`schema.rs` | 连接生命周期、初始化、维护及 schema |
-| `database/migrations.rs`、`content_migration.rs`、`data_migration.rs` | 迁移顺序与中断恢复、内容类型升级、语义哈希与排序回填 |
+| `database/migrations.rs` | 仅当表已是最新 1.x 且没有 2.0 表时补 `note`；更早的 1.x 和缺备注的 2.0 beta 拒绝打开且不改库 |
 | `database/repository.rs`、`repository/` | 记录模型与查询条件；查询、写入、保留策略分别实现 |
 | `database/groups.rs`、`settings.rs` | 分组和设置仓储 |
 | `preferences.rs`、`preferences/types.rs` | 设置键与持久化；设置值类型、默认值和校验 |
@@ -52,7 +52,7 @@
 | `backup.rs`、`backup_common.rs`、`import.rs`、`legacy_backup.rs` | GPUI 备份、共享归档校验及旧数据兼容导入 |
 | 各模块的 `tests.rs` / `tests/` | 就近维护的隔离业务测试；仓储测试按记录、查询、保留、分组及设置分类 |
 
-数据库打开时只转换旧的 UNIQUE 内容哈希索引，已完成迁移的非唯一索引不再重建。查询继续使用现有条件构造器，以 SQLite `Value` 和迭代绑定参数；媒体路径重映射借用原字段，未修改的字段保持原值。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。
+打开已有库时，只有最新 1.x（已具备当前列、没有 `note`，也没有 `native_formats`、`captured_formats`、`content_hash_aliases`）会补上备注列，随后的 schema 再创建 2.0 新表。更早的 1.x 和缺少备注的 2.0 beta 直接拒绝，不改动原文件。已有 `note` 的当前库不再做结构升级。导入到新目录时仍按备份内容重写受管图片和图标引用。查询继续使用现有条件构造器。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。
 
 ### 平台层与共享服务
 

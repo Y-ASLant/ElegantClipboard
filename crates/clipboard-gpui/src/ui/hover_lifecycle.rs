@@ -40,14 +40,6 @@ impl ClipboardView {
             Ok(preference) => {
                 self.hover_preference = preference;
                 self.close_hover_preview("preferences_saved", cx);
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "悬停预览设置已保存",
-                        "Hover preview preferences saved",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {

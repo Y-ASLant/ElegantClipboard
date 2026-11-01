@@ -34,6 +34,8 @@ pub struct PreferenceSnapshot {
     pub monitor_types: MonitorTypesPreference,
     pub app_filter: AppFilterPreference,
     pub window_effect: WindowEffectPreference,
+    pub diagnostics_enabled: bool,
+    pub run_as_admin: bool,
     pub onboarding_completed: bool,
 }
 
@@ -70,6 +72,8 @@ impl Preferences {
             monitor_types: self.monitor_types()?,
             app_filter: self.app_filter()?,
             window_effect: self.window_effect()?,
+            diagnostics_enabled: self.diagnostics_enabled()?,
+            run_as_admin: self.run_as_admin()?,
             onboarding_completed: self.onboarding_completed()?,
         })
     }

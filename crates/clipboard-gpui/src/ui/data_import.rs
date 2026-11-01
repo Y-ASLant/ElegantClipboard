@@ -109,8 +109,11 @@ impl ClipboardView {
                 this.data_import_pending = false;
                 match result {
                     Ok(Some(outcome)) => {
-                        this.set_feedback_message(outcome.description(this.language));
+                        let notify = outcome.missing != 0 || outcome.attachments.is_none();
                         this.is_error = outcome.missing != 0;
+                        if notify {
+                            this.set_feedback_message(outcome.description(this.language));
+                        }
                         this.data_import_result = Some(outcome);
                     }
                     Ok(None) => {}

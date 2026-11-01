@@ -1,7 +1,4 @@
-use std::{
-    ops::Range,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 pub(super) fn xml(value: &str) -> String {
     value
@@ -25,7 +22,6 @@ struct Node<'a> {
     tag: &'a str,
     text: String,
     children: Vec<Node<'a>>,
-    range: Range<usize>,
 }
 
 fn unescape(value: &str) -> Option<String> {
@@ -90,7 +86,6 @@ impl<'a> Reader<'a> {
             return None;
         }
         self.skip()?;
-        let start = self.offset;
         let tail = self.source[self.offset..].strip_prefix('<')?;
         let length = tail.find('>')?;
         let opening = &tail[..length];
@@ -137,14 +132,11 @@ impl<'a> Reader<'a> {
             tag,
             text,
             children,
-            range: start..self.offset,
         })
     }
 }
 
 pub(super) struct Entry {
-    label: Range<usize>,
-    arguments: Range<usize>,
     pub executable: PathBuf,
     pub enabled: bool,
 }
@@ -169,8 +161,8 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
         return None;
     }
     let mut keys = std::collections::HashSet::new();
-    let mut saved_label = None;
-    let mut saved_arguments = None;
+    let mut label_seen = false;
+    let mut arguments_seen = false;
     let mut executable = None;
     let mut disabled = false;
     for pair in dict.children.as_chunks::<2>().0 {
@@ -183,7 +175,7 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
                 if value.tag != "string" || !value.children.is_empty() || value.text != label {
                     return None;
                 }
-                saved_label = Some(value.range.clone());
+                label_seen = true;
             }
             "ProgramArguments" => {
                 if value.tag != "array"
@@ -212,7 +204,7 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
                     return None;
                 }
                 executable = Some(exe.to_path_buf());
-                saved_arguments = Some(value.range.clone());
+                arguments_seen = true;
             }
             "Program" => return None,
             "Disabled" => {
@@ -227,32 +219,11 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
             _ => (),
         }
     }
+    if !label_seen || !arguments_seen {
+        return None;
+    }
     Some(Entry {
-        label: saved_label?,
-        arguments: saved_arguments?,
         executable: executable?,
         enabled: !disabled,
     })
-}
-
-pub(super) fn relocate(
-    content: &str,
-    entry: &Entry,
-    label: &str,
-    exe: &str,
-    data_dir: &str,
-) -> String {
-    let mut replacements = [
-        (
-            entry.label.clone(),
-            format!("<string>{}</string>", xml(label)),
-        ),
-        (entry.arguments.clone(), arguments(exe, data_dir)),
-    ];
-    replacements.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
-    let mut result = content.to_owned();
-    for (range, replacement) in replacements {
-        result.replace_range(range, &replacement);
-    }
-    result
 }

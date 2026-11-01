@@ -36,7 +36,6 @@ impl ClipboardView {
                         cx.notify();
                     });
                 }));
-                self.set_feedback_message(tr(self.language, "顺序已保存", "Order saved").into());
                 self.is_error = false;
             }
             Ok(()) => {}

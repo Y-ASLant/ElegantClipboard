@@ -107,7 +107,7 @@ impl ClipboardView {
             return;
         }
         let request_id = self.paste_state.begin_copy(target);
-        if self.send(
+        if !self.send(
             Command::Copy {
                 id,
                 mode: CopyMode::Original,
@@ -115,17 +115,6 @@ impl ClipboardView {
             },
             cx,
         ) {
-            self.set_feedback_message(
-                tr(
-                    self.language,
-                    "正在复制并返回原窗口…",
-                    "Copying and returning to the previous window…",
-                )
-                .into(),
-            );
-            self.is_error = false;
-            cx.notify();
-        } else {
             self.interrupt_paste_except(None);
         }
     }
@@ -136,29 +125,11 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.copy_or_paste_generic(
-            id,
-            CopyMode::PlainText,
-            (
-                "正在复制纯文本并返回原窗口…",
-                "Copying plain text and returning to the previous window…",
-            ),
-            window,
-            cx,
-        );
+        self.copy_or_paste_generic(id, CopyMode::PlainText, window, cx);
     }
 
     pub(super) fn copy_or_paste_path(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
-        self.copy_or_paste_generic(
-            id,
-            CopyMode::Paths,
-            (
-                "正在复制路径并返回原窗口…",
-                "Copying paths and returning to the previous window…",
-            ),
-            window,
-            cx,
-        );
+        self.copy_or_paste_generic(id, CopyMode::Paths, window, cx);
     }
 
     pub(super) fn copy_or_paste_image_file(
@@ -167,16 +138,7 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.copy_or_paste_generic(
-            id,
-            CopyMode::Files,
-            (
-                "正在复制图片文件并返回原窗口…",
-                "Copying the image file and returning to the previous window…",
-            ),
-            window,
-            cx,
-        );
+        self.copy_or_paste_generic(id, CopyMode::Files, window, cx);
     }
 
     pub(super) fn copy_or_paste_format(
@@ -186,17 +148,7 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let label = match format {
-            CopyFormat::Html => (
-                "正在复制 HTML 并返回原窗口…",
-                "Copying HTML and returning to the previous window…",
-            ),
-            CopyFormat::Rtf => (
-                "正在复制 RTF 并返回原窗口…",
-                "Copying RTF and returning to the previous window…",
-            ),
-        };
-        self.copy_or_paste_generic(id, CopyMode::from(format), label, window, cx);
+        self.copy_or_paste_generic(id, CopyMode::from(format), window, cx);
     }
 
     pub(super) fn copy_or_paste_transform(
@@ -206,16 +158,7 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.copy_or_paste_generic(
-            id,
-            CopyMode::Transform(transform),
-            (
-                "正在复制转换后的文本并返回原窗口…",
-                "Copying the transformed text and returning to the previous window…",
-            ),
-            window,
-            cx,
-        );
+        self.copy_or_paste_generic(id, CopyMode::Transform(transform), window, cx);
     }
 
     /// 复制粘贴通用流程：目标窗口可用时走受控粘贴，否则直接复制。
@@ -223,7 +166,6 @@ impl ClipboardView {
         &mut self,
         id: i64,
         mode: CopyMode,
-        paste_message: (&'static str, &'static str),
         window: &Window,
         cx: &mut Context<Self>,
     ) {
@@ -247,10 +189,6 @@ impl ClipboardView {
         };
         if !self.send(Command::Copy { id, mode, purpose }, cx) {
             self.interrupt_paste_except(None);
-        } else if target.is_some() {
-            self.set_feedback_message(tr(self.language, paste_message.0, paste_message.1).into());
-            self.is_error = false;
-            cx.notify();
         }
     }
 }

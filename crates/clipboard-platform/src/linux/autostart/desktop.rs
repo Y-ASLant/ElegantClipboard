@@ -89,7 +89,6 @@ fn arguments(value: &str) -> Option<Vec<String>> {
 }
 
 pub(super) struct Entry {
-    pub exec_line: usize,
     pub executable: PathBuf,
     pub enabled: bool,
 }
@@ -99,10 +98,10 @@ pub(super) fn parse(content: &str, data_dir: &Path) -> Option<Entry> {
     let mut group_seen = false;
     let mut application = None;
     let mut name = None;
-    let mut exec_line = None;
+    let mut exec_seen = false;
     let mut executable = None;
     let mut hidden = None;
-    for (index, line) in content.lines().enumerate() {
+    for line in content.lines() {
         let line = line.trim();
         if line.starts_with('[') {
             active = line == "[Desktop Entry]";
@@ -132,7 +131,7 @@ pub(super) fn parse(content: &str, data_dir: &Path) -> Option<Entry> {
                 }
             }
             "Exec" => {
-                if exec_line.replace(index).is_some() {
+                if std::mem::replace(&mut exec_seen, true) {
                     return None;
                 }
                 let args = arguments(value)?;
@@ -160,26 +159,11 @@ pub(super) fn parse(content: &str, data_dir: &Path) -> Option<Entry> {
     if application != Some(true) || name != Some(true) {
         return None;
     }
+    if !exec_seen {
+        return None;
+    }
     Some(Entry {
-        exec_line: exec_line?,
         executable: executable?,
         enabled: !hidden.unwrap_or(false),
     })
-}
-
-pub(super) fn relocate(content: &str, entry: &Entry, exe: &Path, new_dir: &Path) -> Result<String> {
-    let replacement = exec(exe, new_dir)?;
-    Ok(content
-        .lines()
-        .enumerate()
-        .map(|(index, line)| {
-            if index == entry.exec_line {
-                replacement.as_str()
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-        + "\n")
 }

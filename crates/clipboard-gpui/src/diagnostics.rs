@@ -10,36 +10,53 @@ use std::panic::PanicHookInfo;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use directories::BaseDirs;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::reload;
 
 use storage::{LogWriter, MAX_EVENT_BYTES, RotatingFile, Session};
 
+fn log_targets() -> Targets {
+    Targets::new()
+        .with_default(LevelFilter::WARN)
+        .with_target("elegant_clipboard_gpui", LevelFilter::DEBUG)
+        .with_target("clipboard_platform", LevelFilter::DEBUG)
+        .with_target("clipboard_core", LevelFilter::DEBUG)
+        // Existing repository DEBUG messages contain user-supplied group names.
+        .with_target("clipboard_core::database::groups", LevelFilter::INFO)
+}
+
 pub(crate) struct Diagnostics {
     writer: LogWriter,
+    filter: reload::Handle<Targets, tracing_subscriber::Registry>,
+    enabled: std::sync::atomic::AtomicBool,
     // Drop the session lease only after closing the writer.
     session: Session,
 }
 
-pub(crate) fn initialize() -> Option<Diagnostics> {
+impl Diagnostics {
+    /// 会话日志开关；panic.log 独立写入不受影响。
+    pub(crate) fn set_enabled(&self, enabled: bool) {
+        self.enabled
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+        let _ = self.filter.modify(|targets| {
+            *targets = if enabled {
+                log_targets()
+            } else {
+                Targets::new().with_default(LevelFilter::OFF)
+            };
+        });
+    }
+}
+
+pub(crate) fn initialize(data_dir: &Path) -> Option<std::sync::Arc<Diagnostics>> {
     let panic_directory = Arc::new(OnceLock::new());
     install_panic_hook(panic_directory.clone());
-    let result = (|| -> anyhow::Result<Diagnostics> {
-        let base = BaseDirs::new()
-            .ok_or_else(|| io::Error::other("local application data directory is unavailable"))?;
-        start_session(
-            &base.data_local_dir().join("ElegantClipboardLogs"),
-            &panic_directory,
-        )
-    })();
+    let result = start_session(&data_dir.join("logs"), &panic_directory);
     match result {
         Ok(diagnostics) => {
-            tracing::info!(
-                session = %diagnostics.session.directory.display(),
-                "local diagnostics enabled"
-            );
+            let diagnostics = std::sync::Arc::new(diagnostics);
             match std::env::current_exe().and_then(std::fs::metadata) {
                 Ok(metadata) => tracing::info!(
                     executable_bytes = metadata.len(),
@@ -63,13 +80,8 @@ fn start_session(root: &Path, panic_directory: &OnceLock<PathBuf>) -> anyhow::Re
     let writer = LogWriter(Arc::new(Mutex::new(RotatingFile::open(
         &session.directory,
     )?)));
-    let filter = Targets::new()
-        .with_default(LevelFilter::WARN)
-        .with_target("elegant_clipboard_gpui", LevelFilter::DEBUG)
-        .with_target("clipboard_platform", LevelFilter::DEBUG)
-        .with_target("clipboard_core", LevelFilter::DEBUG)
-        // Existing repository DEBUG messages contain user-supplied group names.
-        .with_target("clipboard_core::database::groups", LevelFilter::INFO);
+    // Start with logging off; the view enables it once preferences load.
+    let (filter, filter_handle) = reload::Layer::new(Targets::new().with_default(LevelFilter::OFF));
     tracing_subscriber::registry()
         .with(filter)
         .with(
@@ -83,7 +95,12 @@ fn start_session(root: &Path, panic_directory: &OnceLock<PathBuf>) -> anyhow::Re
         )
         .try_init()
         .map_err(|error| anyhow::anyhow!("installing diagnostic subscriber: {error}"))?;
-    Ok(Diagnostics { writer, session })
+    Ok(Diagnostics {
+        writer,
+        filter: filter_handle,
+        enabled: std::sync::atomic::AtomicBool::new(false),
+        session,
+    })
 }
 
 impl Drop for Diagnostics {

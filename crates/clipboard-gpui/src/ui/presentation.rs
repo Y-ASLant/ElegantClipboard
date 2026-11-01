@@ -42,6 +42,44 @@ pub(super) fn window_shell(cx: &App) -> Div {
         .line_height(relative(1.5))
 }
 
+pub(super) fn dialog_shell(
+    dialog: gpui_kit::component::dialog::Dialog,
+    cx: &App,
+) -> gpui_kit::component::dialog::Dialog {
+    dialog
+        .w(px(visual::DIALOG_WIDTH))
+        .p_4()
+        .rounded(cx.theme().radius_lg)
+        .bg(cx.theme().popover)
+        .border_color(cx.theme().border)
+        .close_button(false)
+        .overlay_closable(false)
+}
+
+pub(super) fn dialog_title(title: impl IntoElement, cx: &App) -> Div {
+    div()
+        .pb_3()
+        .border_b_1()
+        .border_color(cx.theme().border)
+        .text_size(px(visual::TEXT_DIALOG))
+        .font_semibold()
+        .child(title)
+}
+
+pub(super) fn dialog_footer(cx: &App) -> DialogFooter {
+    DialogFooter::new()
+        .pt_3()
+        .gap_2()
+        .border_t_1()
+        .border_color(cx.theme().border)
+}
+
+pub(super) fn dialog_copy() -> Div {
+    div()
+        .text_size(px(visual::TEXT_BODY))
+        .line_height(relative(visual::COPY_LINE_HEIGHT))
+}
+
 pub(super) fn tr(
     language: LanguagePreference,
     chinese: &'static str,

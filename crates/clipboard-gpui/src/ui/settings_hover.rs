@@ -1,6 +1,6 @@
 use super::settings_common::{
     choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
-    settings_field, settings_inline,
+    settings_field, settings_inline, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -65,12 +65,8 @@ impl SettingsWindowView {
                                 .map(
                                     |(id, label, selected, set_checked)| {
                                         let owner = self.owner.clone();
-                                        Checkbox::new(id)
+                                        settings_toggle(Checkbox::new(id))
                                             .min_w_0()
-                                            .min_h(px(32.))
-                                            .py(px(6.))
-                                            .text_size(px(14.))
-                                            .whitespace_normal()
                                             .label(label)
                                             .checked(selected)
                                             .disabled(hover_pending)
@@ -87,12 +83,8 @@ impl SettingsWindowView {
                         ),
                     )
                     .child(
-                        Checkbox::new("hover-expanded-image")
+                        settings_toggle(Checkbox::new("hover-expanded-image"))
                             .min_w_0()
-                            .min_h(px(32.))
-                            .py(px(6.))
-                            .text_size(px(14.))
-                            .whitespace_normal()
                             .label(tr(
                                 language,
                                 "大图使用更大浮窗",
@@ -190,12 +182,8 @@ impl SettingsWindowView {
                             .into_iter()
                             .map(|toggle| {
                                 let owner = self.owner.clone();
-                                Checkbox::new(toggle.id)
+                                settings_toggle(Checkbox::new(toggle.id))
                                     .min_w_0()
-                                    .min_h(px(32.))
-                                    .py(px(6.))
-                                    .text_size(px(14.))
-                                    .whitespace_normal()
                                     .label(toggle.label)
                                     .checked(toggle.selected)
                                     .disabled(hover_pending)

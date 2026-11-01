@@ -1,6 +1,6 @@
 use super::settings_common::{
     choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
-    settings_description, settings_inline,
+    settings_description, settings_inline, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::{checkbox::Checkbox, input::NumberInput};
@@ -142,51 +142,43 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let display = owner_state.display;
         let display_pending = owner_state.display_pending;
-        let category_owner = self.owner.clone();
-        let drag_indicator_owner = self.owner.clone();
         settings_columns()
             .child(
-                settings_inline()
-                    .child(
-                        Checkbox::new("show-category-filter")
-                            .min_h(px(32.))
-                            .py(px(6.))
-                            .text_size(px(14.))
-                            .label(tr(language, "显示分类筛选", "Show category filters"))
-                            .checked(display.show_category_filter)
+                settings_inline().children(
+                    [
+                        (
+                            "show-category-filter",
+                            tr(language, "显示分类筛选", "Show category filters"),
+                            display.show_category_filter,
+                            (|next: &mut DisplayPreference, checked| {
+                                next.show_category_filter = checked
+                            }) as fn(&mut DisplayPreference, bool),
+                        ),
+                        (
+                            "show-drag-area-indicator",
+                            tr(language, "显示卡片拖动区域", "Show card drag areas"),
+                            display.show_drag_area_indicator,
+                            |next: &mut DisplayPreference, checked| {
+                                next.show_drag_area_indicator = checked
+                            },
+                        ),
+                    ]
+                    .into_iter()
+                    .map(|(id, label, selected, set_checked)| {
+                        let owner = self.owner.clone();
+                        settings_toggle(Checkbox::new(id))
+                            .label(label)
+                            .checked(selected)
                             .disabled(display_pending)
                             .on_change(move |checked, _, cx| {
-                                let _ = category_owner.update(cx, |owner, cx| {
-                                    owner.save_display(
-                                        DisplayPreference {
-                                            show_category_filter: *checked,
-                                            ..owner.display
-                                        },
-                                        cx,
-                                    );
+                                let _ = owner.update(cx, |owner, cx| {
+                                    let mut next = owner.display;
+                                    set_checked(&mut next, *checked);
+                                    owner.save_display(next, cx);
                                 });
-                            }),
-                    )
-                    .child(
-                        Checkbox::new("show-drag-area-indicator")
-                            .min_h(px(32.))
-                            .py(px(6.))
-                            .text_size(px(14.))
-                            .label(tr(language, "显示卡片拖动区域", "Show card drag areas"))
-                            .checked(display.show_drag_area_indicator)
-                            .disabled(display_pending)
-                            .on_change(move |checked, _, cx| {
-                                let _ = drag_indicator_owner.update(cx, |owner, cx| {
-                                    owner.save_display(
-                                        DisplayPreference {
-                                            show_drag_area_indicator: *checked,
-                                            ..owner.display
-                                        },
-                                        cx,
-                                    );
-                                });
-                            }),
-                    ),
+                            })
+                    }),
+                ),
             )
             .child(
                 settings_column_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(
@@ -220,7 +212,7 @@ impl SettingsWindowView {
                 settings_column_field(tr(language, "卡片预览行数", "Card preview lines")).child(
                     div().w(px(160.)).flex_none().child(
                         NumberInput::new(&self.preview_lines_input)
-                            .h(px(36.))
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .disabled(display_pending),
                     ),
                 ),
@@ -257,10 +249,7 @@ impl SettingsWindowView {
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
                         let owner = self.owner.clone();
-                        Checkbox::new(id)
-                            .min_h(px(32.))
-                            .py(px(6.))
-                            .text_size(px(14.))
+                        settings_toggle(Checkbox::new(id))
                             .label(label)
                             .checked(selected)
                             .disabled(display_pending)

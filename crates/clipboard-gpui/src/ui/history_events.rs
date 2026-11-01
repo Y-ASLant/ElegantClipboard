@@ -3,12 +3,7 @@ use super::*;
 impl ClipboardView {
     /// 以下 `apply_*` 为 `apply_event` 按事件域拆分的处理函数；
     /// 返回 `false` 表示该事件在此提前结束（跳过末尾的确认弹窗同步）。
-    pub(super) fn apply_groups(
-        &mut self,
-        groups: Vec<Group>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub(super) fn apply_groups(&mut self, groups: Vec<Group>, cx: &mut Context<Self>) -> bool {
         if self.history.group_id().is_some()
             && !groups
                 .iter()
@@ -20,7 +15,6 @@ impl ClipboardView {
             self.query(cx);
         }
         self.groups = groups;
-        self.refresh_group_select(window, cx);
         true
     }
 
@@ -28,9 +22,6 @@ impl ClipboardView {
         self.group_reorder_pending = false;
         match result {
             Ok(()) => {
-                self.set_feedback_message(
-                    tr(self.language, "分组顺序已保存", "Group order saved").into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {
@@ -62,7 +53,7 @@ impl ClipboardView {
         self.apply_group_saved(result, true, window, cx)
     }
 
-    /// 创建与重命名共用同一套对话框收尾流程，仅焦点处理和提示文案不同。
+    /// 创建与重命名共用同一套对话框收尾流程，仅焦点处理不同。
     fn apply_group_saved(
         &mut self,
         result: Result<Group, String>,
@@ -84,17 +75,6 @@ impl ClipboardView {
                 } else {
                     self.select_group(Some(group.id), window, cx);
                 }
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    if renamed {
-                        format!("Group renamed to: {}", group.name)
-                    } else {
-                        format!("Group created: {}", group.name)
-                    }
-                } else if renamed {
-                    format!("分组已重命名为：{}", group.name)
-                } else {
-                    format!("已创建分组：{}", group.name)
-                });
                 self.is_error = false;
             }
             Err(error) => {
@@ -126,13 +106,18 @@ impl ClipboardView {
             self.close_history_confirmation(window, cx);
         }
         match result {
-            Ok(count) => {
+            Ok(_) => {
+                // 编辑弹窗内嵌的删除确认走同一结果：成功一并收掉编辑弹窗。
+                if self.group_editor_open && self.group_editor_confirming_delete {
+                    self.group_editor_open = false;
+                    self.group_editor_confirming_delete = false;
+                    self.group_rename_id = None;
+                    self.group_edit_error = None;
+                    self.group_name_input
+                        .update(cx, |input, cx| input.set_value("", window, cx));
+                    window.close_dialog(cx);
+                }
                 window.focus(&self.list_focus, cx);
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Group deleted; {count} items moved to the default group")
-                } else {
-                    format!("已删除分组，{count} 条记录移至默认分组")
-                });
                 self.is_error = false;
             }
             Err(error) => {
@@ -141,6 +126,11 @@ impl ClipboardView {
                     tr(self.language, "删除分组失败", "Failed to delete group")
                 ));
                 self.is_error = true;
+                // 内嵌确认态保留并把错误回填到弹窗。
+                if self.group_editor_open && self.group_editor_confirming_delete {
+                    self.group_edit_error = Some(self.message.clone());
+                    window.refresh();
+                }
             }
         }
         true
@@ -161,10 +151,7 @@ impl ClipboardView {
         } else if self.history.apply_deleted(id) {
             self.reconcile_history_rows(cx);
         }
-        if outcome.cleanup_warning.is_some() {
-            self.set_feedback_message(tr(self.language, "记录已删除", "Item deleted").into());
-            self.apply_cleanup_warning(outcome.cleanup_warning);
-        }
+        self.apply_cleanup_warning(outcome.cleanup_warning);
         true
     }
 
@@ -172,8 +159,7 @@ impl ClipboardView {
         self.is_error = warning.is_some();
         if let Some(warning) = warning {
             self.set_feedback_message(format!(
-                "{}；{}: {warning}",
-                self.message,
+                "{}: {warning}",
                 tr(
                     self.language,
                     "部分附件未能回收",
@@ -198,12 +184,6 @@ impl ClipboardView {
         }
         match result {
             Ok(outcome) => {
-                let count = outcome.deleted;
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Cleared {count} unpinned, non-favorite items")
-                } else {
-                    format!("已清理 {count} 条未置顶且未收藏的记录")
-                });
                 self.apply_cleanup_warning(outcome.cleanup_warning);
             }
             Err(error) => {
@@ -226,17 +206,11 @@ impl ClipboardView {
         self.clear_all_pending = false;
         match result {
             Ok(outcome) => {
-                let count = outcome.deleted;
                 self.reset_selection();
                 self.group_move_id = None;
                 self.editor_save_pending = false;
                 self.note_save_pending = false;
                 self.close_editor(window, cx);
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Deleted all {count} items; settings and groups were kept")
-                } else {
-                    format!("已删除全部 {count} 条历史，设置和分组已保留")
-                });
                 self.apply_cleanup_warning(outcome.cleanup_warning);
                 self.clear_all_error = None;
                 if let Some(handle) = self.settings_window {
@@ -279,13 +253,7 @@ impl ClipboardView {
         }
         match result {
             Ok(outcome) => {
-                let count = outcome.deleted;
                 self.reset_selection();
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Deleted {count} selected items")
-                } else {
-                    format!("已删除 {count} 条选中记录")
-                });
                 self.apply_cleanup_warning(outcome.cleanup_warning);
             }
             Err(error) => {
@@ -308,14 +276,6 @@ impl ClipboardView {
         match result {
             Ok(()) => {
                 self.group_move_id = None;
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "已移动到目标分组",
-                        "Moved to the selected group",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {

@@ -49,42 +49,6 @@ impl ClipboardView {
         }
     }
 
-    pub(super) fn restart_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.onboarding_saving() {
-            return;
-        }
-        if self.active_overlay().is_some()
-            || self.card_drag_active(cx)
-            || self.paste_state.sequence_remaining().is_some()
-        {
-            self.set_feedback_message(
-                tr(
-                    self.language,
-                    "请先结束主窗口中的编辑、拖动或粘贴队列，再查看引导。",
-                    "Finish editing, dragging or the paste queue before reopening the guide.",
-                )
-                .into(),
-            );
-            self.is_error = true;
-            cx.notify();
-            return;
-        }
-        self.cancel_pending_row_click();
-        self.close_hover_preview("onboarding_reopened", cx);
-        self.suspend_onboarding(cx);
-        self.onboarding_shortcut = None;
-        self.onboarding_practice = None;
-        self.onboarding_step = 0;
-        self.onboarding_revision = self.onboarding_revision.wrapping_add(1);
-        self.onboarding_hotkey_used = false;
-        self.onboarding_error = None;
-        self.show_onboarding = true;
-        self.paste_state.set_target(None);
-        self.show_window(window, cx);
-        window.focus(&self.list_focus, cx);
-        cx.notify();
-    }
-
     pub(super) fn leave_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.suspend_onboarding(cx);
         self.onboarding_shortcut = None;

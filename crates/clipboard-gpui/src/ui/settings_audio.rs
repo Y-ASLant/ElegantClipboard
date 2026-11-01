@@ -1,5 +1,6 @@
 use super::settings_common::{
     choice_tabs, owner_state, settings_column_field, settings_columns, settings_inline,
+    settings_toggle,
 };
 use super::*;
 use gpui_kit::component::switch::Switch;
@@ -126,11 +127,9 @@ impl SettingsWindowView {
                                 }),
                         )
                         .child(
-                            Switch::new(switch_id)
-                                .min_h(px(visual::CONTROL_HEIGHT_LARGE))
+                            settings_toggle(Switch::new(switch_id))
                                 .flex_shrink_0()
-                                .py(px(6.))
-                                .text_size(px(14.))
+                                .min_h(px(visual::CONTROL_HEIGHT_LARGE))
                                 .label(tr(language, "启用", "Enable"))
                                 .checked(enabled)
                                 .disabled(pending)

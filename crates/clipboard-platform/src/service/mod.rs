@@ -22,13 +22,15 @@ pub(crate) mod read_html;
 mod watcher;
 mod worker;
 
+pub use crate::update::ReleaseInfo;
 pub use data::{
-    InstanceBusy, import_legacy_backup_data, import_legacy_data, restore_backup_data,
-    show_existing_instance,
+    InstanceBusy, import_legacy_backup_data, import_legacy_data, resolve_data_directory,
+    restore_backup_data, show_existing_instance,
 };
 pub use lifecycle::Service;
 pub use protocol::{
-    CapturedClipboard, Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event, FailureKind,
+    CapturedClipboard, Command, CopyFormat, CopyMode, CopyPurpose, DataSizeInfo, Event,
+    FailureKind, UpdateStatus,
 };
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use super::{
-    canonical_url_text, compute_semantic_hash, is_url, normalize_rtf_for_hash,
-    normalize_semantic_text, semantic_hash_from_text,
+    canonical_url_text, is_url, normalize_rtf_for_hash, normalize_semantic_text,
+    semantic_hash_from_text,
 };
 
 #[test]
@@ -8,17 +8,6 @@ fn normalize_text_removes_invisible_chars_and_trailing_whitespace() {
     let input = "A\u{200B}\u{00A0}B\t  \r\nline 2\t\n\n";
     let normalized = normalize_semantic_text(input);
     assert_eq!(normalized, "A B\nline 2");
-}
-
-#[test]
-fn compute_semantic_hash_accepts_uppercase_content_type() {
-    let text_hash = compute_semantic_hash("TEXT", Some("hello"), "fallback");
-    let html_hash = compute_semantic_hash("HTML", Some("hello"), "fallback");
-    let rtf_hash = compute_semantic_hash("RTF", Some("hello"), "fallback");
-
-    assert_eq!(text_hash, html_hash);
-    assert_eq!(text_hash, rtf_hash);
-    assert_ne!(text_hash, "fallback");
 }
 
 #[test]
@@ -65,18 +54,6 @@ fn semantic_hash_different_text_different_hash() {
     let h1 = semantic_hash_from_text("hello");
     let h2 = semantic_hash_from_text("world");
     assert_ne!(h1, h2);
-}
-
-#[test]
-fn compute_semantic_hash_non_text_uses_fallback() {
-    let hash = compute_semantic_hash("image", Some("hello"), "fallback_hash");
-    assert_eq!(hash, "fallback_hash");
-}
-
-#[test]
-fn compute_semantic_hash_text_without_content_uses_fallback() {
-    let hash = compute_semantic_hash("text", None, "fallback_hash");
-    assert_eq!(hash, "fallback_hash");
 }
 
 #[test]

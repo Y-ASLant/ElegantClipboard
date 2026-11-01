@@ -84,6 +84,8 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             effect: WindowEffect::Frosted,
             opacity: 45,
         },
+        diagnostics_enabled: true,
+        run_as_admin: true,
         onboarding_completed: true,
     };
     preferences.set_theme(expected.theme)?;
@@ -115,6 +117,8 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_monitor_types(expected.monitor_types)?;
     preferences.set_app_filter(&expected.app_filter)?;
     preferences.set_window_effect(expected.window_effect)?;
+    preferences.set_diagnostics_enabled(expected.diagnostics_enabled)?;
+    preferences.set_run_as_admin(expected.run_as_admin)?;
     preferences.set_onboarding_completed()?;
 
     // Both a saved size and disabling size persistence must survive a backup.
@@ -165,12 +169,5 @@ fn exported_settings_exclude_unknown_and_obsolete_keys_without_mutating_source()
     };
     assert_eq!(unknown_count(&snapshot)?, 0);
     assert_eq!(unknown_count(&history.db.read_connection().lock())?, 3);
-    let migration_count: i64 = snapshot.query_row(
-        "SELECT COUNT(*) FROM settings WHERE value = 'done'
-         AND key IN ('_migration_url_content_type', '_migration_backfill_semantic_hash')",
-        [],
-        |row| row.get(0),
-    )?;
-    assert_eq!(migration_count, 2);
     Ok(())
 }

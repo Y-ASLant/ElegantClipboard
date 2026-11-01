@@ -1,6 +1,6 @@
 use super::settings_common::{owner_state, settings_description, settings_inline, settings_stack};
 use super::*;
-use gpui_kit::component::{alert::Alert, dialog::DialogFooter};
+use gpui_kit::component::alert::Alert;
 
 impl SettingsWindowView {
     pub(super) fn settings_storage_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -173,7 +173,7 @@ impl SettingsWindowView {
             .child(
                 settings_inline().children(choices.into_iter().map(|(id, label, source)| {
                     let owner = self.owner.clone();
-                    Button::new(id).outline().h(px(32.)).label(label).disabled(pending)
+                    Button::new(id).outline().h(px(visual::CONTROL_HEIGHT)).label(label).disabled(pending)
                         .on_click(move |_, _, cx| {
                             let _ = owner.update(cx, |owner, cx| owner.start_data_import(source, cx));
                         })
@@ -187,7 +187,7 @@ impl SettingsWindowView {
                     .child(settings_description(outcome.description(language), cx))
                     .child(
                         settings_inline().child(
-                            Button::new("open-restored-data").outline().h(px(32.))
+                            Button::new("open-restored-data").outline().h(px(visual::CONTROL_HEIGHT))
                                 .label(tr(language, "打开恢复的数据", "Open restored data"))
                                 .disabled(pending)
                                 .on_click(move |_, _, cx| {
@@ -211,7 +211,7 @@ impl SettingsWindowView {
             .child(
                 Button::new("settings-window-clear-all")
                     .danger()
-                    .h(px(32.))
+                    .h(px(visual::CONTROL_HEIGHT))
                     .icon(IconName::Delete)
                     .label(tr(language, "删除全部历史", "Delete all history"))
                     .disabled(clear_all_pending)
@@ -232,11 +232,11 @@ impl SettingsWindowView {
                             let confirm_owner = dialog_owner.clone();
                             let keyboard_owner = dialog_owner.clone();
                             let cancel_owner = dialog_owner.clone();
-                            dialog
-                                .bg(cx.theme().popover)
-                                .title(tr(language, "删除全部历史", "Delete all history"))
-                                .close_button(false)
-                                .overlay_closable(false)
+                            dialog_shell(dialog, cx)
+                                .title(dialog_title(
+                                    tr(language, "删除全部历史", "Delete all history"),
+                                    cx,
+                                ))
                                 .on_ok(move |_, window, cx| {
                                     let _ = keyboard_owner.update(cx, |owner, cx| {
                                         owner.clear_all_history(cx);
@@ -250,7 +250,7 @@ impl SettingsWindowView {
                                         .is_none_or(|owner| !owner.read(cx).clear_all_pending)
                                 })
                                 .child(
-                                    div()
+                                    dialog_copy()
                                         .flex()
                                         .flex_col()
                                         .gap_2()
@@ -274,7 +274,7 @@ impl SettingsWindowView {
                                         }),
                                 )
                                 .footer(
-                                    DialogFooter::new()
+                                    dialog_footer(cx)
                                         .child(
                                             Button::new("clear-all-history-cancel")
                                                 .outline()

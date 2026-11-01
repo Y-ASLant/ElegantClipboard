@@ -200,22 +200,6 @@ impl ClipboardView {
             if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
                 self.close_history_confirmation(window, cx);
             }
-            self.set_feedback_message(
-                if target.is_some() {
-                    tr(
-                        self.language,
-                        "正在合并并返回原窗口…",
-                        "Merging and returning to the previous window…",
-                    )
-                } else {
-                    tr(
-                        self.language,
-                        "正在合并所选记录…",
-                        "Merging selected items…",
-                    )
-                }
-                .into(),
-            );
             self.is_error = false;
             cx.notify();
         } else {

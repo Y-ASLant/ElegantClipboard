@@ -1,3 +1,4 @@
+use super::update_events::UpdateCheck;
 use super::*;
 
 impl ClipboardView {
@@ -22,23 +23,6 @@ impl ClipboardView {
                 "Search clipboard history…",
             ))
         });
-        let group_select = cx.new(|cx| {
-            SelectState::new(
-                group_options(&[], language, None),
-                Some(IndexPath::default()),
-                window,
-                cx,
-            )
-        });
-        let group_subscription = cx.subscribe_in(
-            &group_select,
-            window,
-            |this, _, event: &SelectEvent<Vec<GroupOption>>, window, cx| {
-                if let SelectEvent::Confirm(Some(choice)) = event {
-                    this.choose_group(*choice, window, cx);
-                }
-            },
-        );
         let subscription = cx.subscribe_in(&search, window, |this, _, event, window, cx| {
             this.handle_search_input(event, window, cx);
         });
@@ -206,6 +190,13 @@ impl ClipboardView {
             service.initial_preferences.retention_saved,
         );
         let transient_filter = service.initial_preferences.transient_filter;
+        let diagnostics_enabled = service.initial_preferences.diagnostics_enabled;
+        if let Some(diagnostics) = &startup.diagnostics {
+            diagnostics.set_enabled(diagnostics_enabled);
+        }
+        let run_as_admin = service.initial_preferences.run_as_admin;
+        #[cfg(windows)]
+        let is_admin = clipboard_platform::elevation::is_elevated().unwrap_or(false);
         let monitor_types = service.initial_preferences.monitor_types;
         let app_filter = service.initial_preferences.app_filter.clone();
         let onboarding_completed = service.initial_preferences.onboarding_completed;
@@ -273,12 +264,12 @@ impl ClipboardView {
             file_card_checked: HashMap::new(),
             groups: Vec::new(),
             search,
-            group_select,
             group_name_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(language, "分组名称", "Group name"))
             }),
             group_editor_open: false,
             group_rename_id: None,
+            group_editor_confirming_delete: false,
             group_save_pending: false,
             group_edit_error: None,
             group_reorder_pending: false,
@@ -391,6 +382,12 @@ impl ClipboardView {
             retention: PendingPref::new(retention),
             audio: PendingPref::new(audio),
             transient_filter: PendingPref::new(transient_filter),
+            diagnostics_enabled: PendingPref::new(diagnostics_enabled),
+            diagnostics: startup.diagnostics.clone(),
+            run_as_admin: PendingPref::new(run_as_admin),
+            #[cfg(windows)]
+            is_admin,
+            update_check: UpdateCheck::Idle,
             monitor_types: PendingPref::new(monitor_types),
             app_filter: PendingPref::new(app_filter),
             running_apps: Vec::new(),
@@ -422,14 +419,7 @@ impl ClipboardView {
             },
             is_error: !startup_errors.is_empty(),
             feedback_pending: !startup_errors.is_empty(),
-            _subscriptions: vec![
-                subscription,
-                group_subscription,
-                appearance,
-                activation,
-                bounds,
-                feedback,
-            ],
+            _subscriptions: vec![subscription, appearance, activation, bounds, feedback],
             _events: event_task,
             search_task: None,
             feedback_task: None,

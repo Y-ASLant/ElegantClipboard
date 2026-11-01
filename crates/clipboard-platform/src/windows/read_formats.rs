@@ -69,17 +69,6 @@ const BLACKLISTED_STANDARD_IDS: &[u32] = &[
     17, // CF_DIBV5
 ];
 
-/// 在已打开的剪贴板会话内枚举并读取全部非黑名单格式。
-/// 五类主格式已由 BLACKLISTED_STANDARD_IDS 与名称黑名单覆盖，无需额外的
-/// consumed 名单——传入的 guard 仅用于满足枚举的「剪贴板已打开」前置条件。
-// read_extra_formats 逻辑已合并到 enum_formats_once；此函数保留以备测试调用。
-#[allow(dead_code)]
-pub(super) fn read_extra_formats(guard: &clipboard_win::Clipboard) -> Vec<NativeFormatCapture> {
-    let _ = guard;
-    let (captures, _) = enum_formats_once();
-    captures
-}
-
 fn format_name(format: u32) -> Option<String> {
     let mut buffer = [0u16; 256];
     // SAFETY: buffer 是有效的输出缓冲；格式必须已打开剪贴板后枚举。
@@ -178,7 +167,7 @@ fn read_extra_in_session() -> (Vec<NativeFormatCapture>, Vec<String>) {
     (captures, formats)
 }
 
-/// 单次枚举同时产出 captured_formats（显示名）与 read_extra_formats（载荷），
+/// 单次枚举同时产出 captured_formats（显示名）与实际载荷，
 /// 避免 EnumFormats + GetClipboardFormatNameW 各跑两遍。
 fn enum_formats_once() -> (Vec<NativeFormatCapture>, Vec<String>) {
     let mut formats = Vec::new();

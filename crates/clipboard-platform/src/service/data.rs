@@ -37,6 +37,12 @@ pub fn show_existing_instance(data_dir: Option<PathBuf>) -> Result<bool> {
     super::data_directory::show_existing(data_dir)
 }
 
+/// Default data directory for an explicit `--data-dir`, or the current default
+/// when none is given. Does not migrate, lock, or create the directory.
+pub fn resolve_data_directory(data_dir: Option<&Path>) -> Result<PathBuf> {
+    super::data_directory::resolve(data_dir)
+}
+
 pub fn import_legacy_data(
     source: &Path,
     data_dir: Option<PathBuf>,

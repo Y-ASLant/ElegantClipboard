@@ -44,20 +44,8 @@ impl ClipboardView {
         }
         self.editor_save_pending = false;
         match result {
-            Ok(changed) => {
+            Ok(_) => {
                 self.close_editor(window, cx);
-                self.set_feedback_message(
-                    if changed {
-                        tr(
-                            self.language,
-                            "内容已保存为纯文本",
-                            "Content saved as plain text",
-                        )
-                    } else {
-                        tr(self.language, "内容未修改", "Content was not changed")
-                    }
-                    .into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {
@@ -86,7 +74,6 @@ impl ClipboardView {
         match result {
             Ok(_) => {
                 self.close_editor(window, cx);
-                self.set_feedback_message(tr(self.language, "备注已保存", "Note saved").into());
                 self.is_error = false;
             }
             Err(error) => {
@@ -215,14 +202,13 @@ impl ClipboardView {
             let submit_owner = owner.clone();
             let keyboard_owner = owner.clone();
             let title = if text { tr(language, "编辑内容", "Edit content") } else { tr(language, "编辑备注", "Edit note") };
-            dialog
-                .w(px(if text { 560. } else { 400. }))
-                .p_4()
-                .rounded(cx.theme().radius_lg)
-                .bg(cx.theme().popover)
-                .title(div().pb_3().border_b_1().border_color(cx.theme().border).text_size(px(16.)).font_semibold().child(title))
-                .close_button(false)
-                .overlay_closable(false)
+            dialog_shell(dialog, cx)
+                .w(px(if text {
+                    visual::DIALOG_WIDTH_EDITOR
+                } else {
+                    visual::DIALOG_WIDTH_COMPACT
+                }))
+                .title(dialog_title(title, cx))
                 .on_ok(move |_, window, cx| {
                     let _ = keyboard_owner.update(cx, |view, cx| view.save_editor(window, cx));
                     false
@@ -237,15 +223,15 @@ impl ClipboardView {
                         .when(text, |body| {
                             body.child(Textarea::new(&input)
                                 .h((window.viewport_size().height * 0.42).clamp(px(100.), px(300.)))
-                                .text_size(px(14.)).readonly(!ready || pending)
+                                .text_size(px(visual::TEXT_BODY)).readonly(!ready || pending)
                                 .aria_label(tr(language, "编辑文本", "Edit text")))
                         })
-                        .when(!text, |body| body.child(Input::new(&note).text_size(px(14.)).disabled(pending)))
-                        .when(loading, |body| body.child(div().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(tr(language, "正在加载…", "Loading…"))))
-                        .when(rich, |body| body.child(div().text_size(px(12.)).text_color(cx.theme().muted_foreground).child(tr(language, "保存后将变为纯文本，原富文本格式不会保留", "Saving converts this to plain text and removes rich-text formatting."))))
+                        .when(!text, |body| body.child(Input::new(&note).text_size(px(visual::TEXT_BODY)).disabled(pending)))
+                        .when(loading, |body| body.child(div().text_size(px(visual::TEXT_SMALL)).text_color(cx.theme().muted_foreground).child(tr(language, "正在加载…", "Loading…"))))
+                        .when(rich, |body| body.child(div().text_size(px(visual::TEXT_SMALL)).text_color(cx.theme().muted_foreground).child(tr(language, "保存后将变为纯文本，原富文本格式不会保留", "Saving converts this to plain text and removes rich-text formatting."))))
                         .when_some(error, |body, error| body.child(Alert::error("editor-error", error).small())),
                 )
-                .footer(DialogFooter::new().pt_3().border_t_1().border_color(cx.theme().border)
+                .footer(dialog_footer(cx)
                     .child(Button::new("editor-cancel").outline().label(tr(language, "取消", "Cancel")).disabled(pending).on_click(move |_, window, cx| {
                         let _ = cancel_button_owner.update(cx, |view, cx| view.close_editor(window, cx));
                     }))

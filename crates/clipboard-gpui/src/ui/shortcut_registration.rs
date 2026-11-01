@@ -220,8 +220,17 @@ impl ClipboardView {
         match result {
             Ok(()) => {
                 let warning = self.quick_paste_registration_warning.take();
-                self.is_error = warning.is_some();
-                self.set_feedback_message(warning.unwrap_or(success));
+                if let Some(warning) = warning {
+                    self.is_error = true;
+                    self.set_feedback_message(warning);
+                } else {
+                    self.is_error = false;
+                    if !success.is_empty() {
+                        self.set_feedback_message(success);
+                    } else if kind == ShortcutChangeKind::Slots {
+                        self.paste_shortcut_status = None;
+                    }
+                }
             }
             Err(error) => {
                 self.quick_paste_registration_warning = None;
@@ -231,10 +240,10 @@ impl ClipboardView {
                     self.message.push_str(&format!("; {error}"));
                 }
                 self.is_error = true;
+                if kind == ShortcutChangeKind::Slots {
+                    self.paste_shortcut_status = Some((self.message.clone(), true));
+                }
             }
-        }
-        if kind == ShortcutChangeKind::Slots {
-            self.paste_shortcut_status = Some((self.message.clone(), self.is_error));
         }
         true
     }

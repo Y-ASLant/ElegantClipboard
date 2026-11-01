@@ -14,10 +14,16 @@ pub(super) fn fitted_size(
             px(460.).min(maximum.width),
             px(entries.len() as f32 * 58. + 12.),
         ),
-        _ => shaped_size(&view.text, maximum.width, 22.4, window, cx),
+        _ => shaped_size(
+            &view.text,
+            maximum.width,
+            visual::HOVER_LINE_HEIGHT,
+            window,
+            cx,
+        ),
     };
     let note_width = view.information.note.as_ref().map_or(px(0.), |note| {
-        shaped_size(note, maximum.width, 20., window, cx).width
+        shaped_size(note, maximum.width, visual::PREVIEW_LINE_HEIGHT, window, cx).width
     });
     let width = body.width.max(note_width).min(maximum.width);
     let note = note_height(
@@ -74,7 +80,14 @@ pub(super) fn natural_width(view: &HoverPreviewWindowView, window: &Window, cx: 
     // Use the same glyph measurement as plain-text previews to choose a stable
     // preferred width. Markdown source syntax may add some spare width; the
     // rendered document is measured separately for its final wrapped height.
-    shaped_size(&view.text, window.viewport_size().width, 22.4, window, cx).width
+    shaped_size(
+        &view.text,
+        window.viewport_size().width,
+        visual::HOVER_LINE_HEIGHT,
+        window,
+        cx,
+    )
+    .width
 }
 
 pub(super) fn html_content(
@@ -90,7 +103,7 @@ pub(super) fn html_content(
         .px(px(visual::SPACE_3))
         .py(px(visual::SPACE_2))
         .text_size(px(visual::TEXT_BODY))
-        .line_height(px(22.4))
+        .line_height(px(visual::HOVER_LINE_HEIGHT))
         .child(
             TextView::markdown("hover-preview-rich-text", view.text.clone())
                 .selectable(false)
@@ -157,7 +170,8 @@ pub(super) fn note_height(
                 .sum::<usize>()
         })
         .unwrap_or(1);
-    px(lines.clamp(1, 6) as f32 * 20. + visual::SPACE_2 * 2.).min(surface.height * 0.3)
+    px(lines.clamp(1, 6) as f32 * visual::PREVIEW_LINE_HEIGHT + visual::SPACE_2 * 2.)
+        .min(surface.height * 0.3)
 }
 
 pub(super) fn render_content(
@@ -196,7 +210,7 @@ pub(super) fn render_content(
             |this| this.px(px(visual::SPACE_3)).py(px(visual::SPACE_2)),
         )
         .text_size(px(visual::TEXT_BODY))
-        .line_height(px(22.4))
+        .line_height(px(visual::HOVER_LINE_HEIGHT))
         .whitespace_normal();
     match &view.content {
         Ok(PreviewContent::Html(_)) => body

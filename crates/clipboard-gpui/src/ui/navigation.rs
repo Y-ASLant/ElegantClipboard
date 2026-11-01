@@ -109,7 +109,6 @@ impl ClipboardView {
         } else {
             self.history.set_favorite_filter(true);
         }
-        self.refresh_group_select(window, cx);
         self.scroll_to_top();
         self.query(cx);
         window.focus(&self.list_focus, cx);

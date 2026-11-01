@@ -137,15 +137,6 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
     let source_path = dir.path().join("source.db");
     let history = History::open(source_path.clone())?;
     let id = history.capture("v1 text")?.unwrap();
-    let legacy_url_id = history.capture("https://example.com/v1")?.unwrap();
-    history.db.write_connection().lock().execute(
-        "UPDATE clipboard_items SET content_type = 'text' WHERE id = ?1",
-        params![legacy_url_id],
-    )?;
-    history.db.write_connection().lock().execute(
-        "DELETE FROM settings WHERE key = '_migration_url_content_type'",
-        [],
-    )?;
     history.db.write_connection().lock().execute(
         "INSERT INTO settings (key, value) VALUES ('secret_token', 'legacy-secret')",
         [],
@@ -164,7 +155,7 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
     let mut output = ZipWriter::new(File::create(&previous)?);
     output.start_file("manifest.json", SimpleFileOptions::default())?;
     output.write_all(
-        br#"{"format":"elegantclipboard-gpui","version":1,"total_items":2,"missing_images":0}"#,
+        br#"{"format":"elegantclipboard-gpui","version":1,"total_items":1,"missing_images":0}"#,
     )?;
     output.start_file("clipboard.db", SimpleFileOptions::default())?;
     io::copy(&mut File::open(&source_path)?, &mut output)?;
@@ -172,17 +163,11 @@ fn restores_previous_gpui_v1_backup() -> Result<()> {
     let target = dir.path().join("restored");
     fs::create_dir_all(&target)?;
     let report = restore_backup(&previous, &target)?;
-    assert_eq!(report.total_items, 2);
+    assert_eq!(report.total_items, 1);
     assert_eq!(report.restored_icons, 0);
     assert_eq!(
         History::open(target.join("clipboard.db"))?.text(id)?,
         "v1 text"
-    );
-    assert_eq!(
-        History::open(target.join("clipboard.db"))?
-            .item(legacy_url_id)?
-            .content_type,
-        "url"
     );
     let restored_db = Connection::open(target.join("clipboard.db"))?;
     let secret_count: i64 = restored_db.query_row(

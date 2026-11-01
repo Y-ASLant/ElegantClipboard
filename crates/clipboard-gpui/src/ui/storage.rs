@@ -112,12 +112,7 @@ impl ClipboardView {
         }
         self.save_as_pending = None;
         match result {
-            Ok(destination) => {
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!("Saved to {}", destination.display())
-                } else {
-                    format!("已另存到 {}", destination.display())
-                });
+            Ok(_) => {
                 self.is_error = false;
             }
             Err(error) => {
@@ -177,34 +172,26 @@ impl ClipboardView {
         self.export_pending = false;
         match result {
             Ok(report) => {
-                let included = report.included_images + report.included_icons;
                 let missing = report.missing_images + report.missing_icons;
-                self.set_feedback_message(if self.language == LanguagePreference::English {
-                    format!(
-                        "Backed up {} items and {} attachments to {}{}",
-                        report.total_items,
-                        included,
-                        report.destination.display(),
-                        if missing == 0 {
-                            String::new()
-                        } else {
-                            format!("; {missing} source attachments were not included")
-                        }
-                    )
-                } else {
-                    format!(
-                        "已备份 {} 条记录、{} 个附件到 {}{}",
-                        report.total_items,
-                        included,
-                        report.destination.display(),
-                        if missing == 0 {
-                            String::new()
-                        } else {
-                            format!("；{missing} 个源附件未包含在备份中")
-                        }
-                    )
-                });
                 self.is_error = missing != 0;
+                if missing != 0 {
+                    let included = report.included_images + report.included_icons;
+                    self.set_feedback_message(if self.language == LanguagePreference::English {
+                        format!(
+                            "Backed up {} items and {} attachments to {}; {missing} source attachments were not included",
+                            report.total_items,
+                            included,
+                            report.destination.display(),
+                        )
+                    } else {
+                        format!(
+                            "已备份 {} 条记录、{} 个附件到 {}；{missing} 个源附件未包含在备份中",
+                            report.total_items,
+                            included,
+                            report.destination.display(),
+                        )
+                    });
+                }
             }
             Err(error) => {
                 self.set_feedback_message(format!(

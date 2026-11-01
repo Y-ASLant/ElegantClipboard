@@ -1,3 +1,4 @@
+use super::update_events::UpdateCheck;
 use super::*;
 
 impl ClipboardView {
@@ -45,7 +46,7 @@ impl ClipboardView {
                 self.show_window(window, cx);
                 true
             }
-            Event::Groups(groups) => self.apply_groups(groups, window, cx),
+            Event::Groups(groups) => self.apply_groups(groups, cx),
             Event::GroupReordered { result, .. } => self.apply_group_reordered(result),
             Event::GroupCreated(result) => self.apply_group_created(result, window, cx),
             Event::GroupRenamed(result) => self.apply_group_renamed(result, window, cx),
@@ -88,9 +89,13 @@ impl ClipboardView {
                 result,
             } => self.apply_reordered(from, generation, result, cx),
             Event::Status(message) => {
-                self.set_feedback_message(localize_service_message(self.language, message));
-                self.is_error = false;
-                true
+                if visible_completion(&message) {
+                    false
+                } else {
+                    self.set_feedback_message(localize_service_message(self.language, message));
+                    self.is_error = false;
+                    true
+                }
             }
             Event::Copied {
                 id,
@@ -109,7 +114,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.corner_radius,
-                    ("圆角设置已保存", "Corner radius saved"),
                     ("圆角保存失败", "Failed to save corner radius"),
                 );
                 crate::design_system::set_corner_radius(self.corner_radius.value, cx);
@@ -126,7 +130,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.auto_reset_state,
-                    ("隐藏时重置设置已保存", "Reset-on-hide setting saved"),
                     ("保存隐藏设置失败", "Failed to save hide setting"),
                 );
                 true
@@ -135,7 +138,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.search_auto_focus,
-                    ("搜索焦点设置已保存", "Search focus setting saved"),
                     ("保存搜索焦点失败", "Failed to save search focus"),
                 );
                 true
@@ -144,7 +146,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.search_auto_clear,
-                    ("搜索清空设置已保存", "Search clearing setting saved"),
                     ("保存搜索清空失败", "Failed to save search clearing"),
                 );
                 true
@@ -153,7 +154,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.skip_clear_confirm,
-                    ("清理确认设置已保存", "Clear confirmation setting saved"),
                     (
                         "保存清理确认设置失败",
                         "Failed to save clear confirmation setting",
@@ -166,10 +166,6 @@ impl ClipboardView {
                     result,
                     |this| &mut this.paste_close_window,
                     (
-                        "粘贴后关闭窗口设置已保存",
-                        "Close-after-paste setting saved",
-                    ),
-                    (
                         "保存粘贴后窗口行为失败",
                         "Failed to save paste window behavior",
                     ),
@@ -180,7 +176,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.paste_key,
-                    ("粘贴按键设置已保存", "Paste key setting saved"),
                     ("保存粘贴按键失败", "Failed to save paste key"),
                 );
                 true
@@ -189,10 +184,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.paste_move_to_top,
-                    (
-                        "粘贴后移到首位设置已保存",
-                        "Move-to-top-after-paste setting saved",
-                    ),
                     (
                         "保存粘贴后排序设置失败",
                         "Failed to save paste sorting setting",
@@ -204,7 +195,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.dedup_strategy,
-                    ("去重策略已保存", "Dedup strategy saved"),
                     ("保存去重策略失败", "Failed to save dedup strategy"),
                 );
                 true
@@ -213,7 +203,6 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.restore_clipboard,
-                    ("恢复剪贴板设置已保存", "Clipboard restore setting saved"),
                     (
                         "保存恢复剪贴板设置失败",
                         "Failed to save clipboard restore setting",
@@ -247,6 +236,11 @@ impl ClipboardView {
             Event::DisplaySaved(result) => self.apply_display_saved(result, window, cx),
             Event::AudioSaved(result) => self.apply_audio_saved(result),
             Event::TransientFilterSaved(result) => self.apply_transient_filter_saved(result),
+            Event::DiagnosticsEnabledSaved(result) => self.apply_diagnostics_enabled_saved(result),
+            Event::RunAsAdminSaved(result) => self.apply_run_as_admin_saved(result),
+            Event::UpdateChecked(result) => self.apply_update_checked(result),
+            Event::UpdateDownloaded(result) => self.apply_update_downloaded(result),
+            Event::UpdateInstallStarted(result) => self.apply_update_install_started(result, cx),
             Event::MonitorTypesSaved(result) => self.apply_monitor_types_saved(result),
             Event::AppFilterSaved(result) => self.apply_app_filter_saved(result),
             Event::RunningApps(apps) => {
@@ -264,14 +258,6 @@ impl ClipboardView {
             Event::DatabaseOptimized(size) => {
                 self.database_maintenance_pending = false;
                 self.data_size = Some(size);
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "数据库已整理，数据占用已更新",
-                        "Database optimized and storage usage updated",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
                 true
             }
@@ -279,18 +265,6 @@ impl ClipboardView {
                 self.paused = paused;
                 self.pause_pending = false;
                 self.is_error = false;
-                self.set_feedback_message(
-                    if paused {
-                        tr(
-                            self.language,
-                            "已暂停记录，已有历史仍可使用",
-                            "Recording paused; existing history is still available",
-                        )
-                    } else {
-                        tr(self.language, "已恢复记录", "Recording resumed")
-                    }
-                    .into(),
-                );
                 let _ = self.refresh_tray_menu();
                 true
             }
@@ -396,6 +370,7 @@ impl ClipboardView {
                 self.database_maintenance_pending = false;
             }
             FailureKind::Pause => self.pause_pending = false,
+            FailureKind::Update => self.update_check = UpdateCheck::Failed,
             FailureKind::Other if self.note_save_pending => {
                 self.note_save_pending = false;
                 self.editor_error = Some(message.clone());
@@ -407,4 +382,10 @@ impl ClipboardView {
         self.is_error = true;
         true
     }
+}
+
+fn visible_completion(message: &str) -> bool {
+    message == "已打开数据目录"
+        || message == "已在资源管理器中定位"
+        || message.starts_with("已在资源管理器中定位第一项，共")
 }

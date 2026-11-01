@@ -36,15 +36,3 @@ fn startup_identity_rejects_other_arguments_and_corrupt_values() {
     saved.bytes.pop();
     assert!(!belongs_to(&saved, data_dir));
 }
-
-#[test]
-fn missing_old_directory_can_still_resolve_both_compatible_registry_names() {
-    let directory = tempfile::tempdir().unwrap();
-    let missing = directory.path().join("removed GPUI profile");
-    let names = names(&missing).unwrap();
-    let lower_case = Path::new(&missing.to_string_lossy().to_lowercase()).to_path_buf();
-    assert_eq!(names, super::names(&lower_case).unwrap());
-    assert_eq!(names[0].rsplit('-').next(), names[1].rsplit('-').next());
-    assert_ne!(names[0], names[1]);
-    assert!(!missing.exists());
-}

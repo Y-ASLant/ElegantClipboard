@@ -66,32 +66,3 @@ pub fn set_enabled(data_dir: &Path, enabled: bool) -> Result<()> {
     }
     Ok(())
 }
-
-pub(crate) fn migrate_data_dir(old_dir: &Path, new_dir: &Path) -> Result<()> {
-    migrate_at(
-        &configuration_base()?,
-        old_dir,
-        new_dir,
-        &std::env::current_exe()?,
-    )
-}
-
-fn migrate_at(base: &Path, old_dir: &Path, new_dir: &Path, exe: &Path) -> Result<()> {
-    let old = entry_path(base, old_dir)?;
-    let new = entry_path(base, new_dir)?;
-    if old == new {
-        return Ok(());
-    }
-    let Some(saved) = file::read(&old)? else {
-        return Ok(());
-    };
-    let Some(parsed) = desktop::parse(&saved, old_dir) else {
-        return Ok(());
-    };
-    let replacement = match file::read(&new)? {
-        Some(value) if desktop::parse(&value, new_dir).is_some() => value,
-        Some(_) => bail!("The destination autostart entry belongs to another application"),
-        None => desktop::relocate(&saved, &parsed, exe, new_dir)?,
-    };
-    file::migrate(&old, &new, &saved, &replacement)
-}

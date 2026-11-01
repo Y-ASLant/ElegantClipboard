@@ -37,11 +37,6 @@ impl ClipboardView {
                     ));
                     self.is_error = true;
                 } else {
-                    self.set_feedback_message(if self.language == LanguagePreference::English {
-                        format!("Retention saved; removed {} items", outcome.deleted)
-                    } else {
-                        format!("保留策略已保存，清理 {} 条记录", outcome.deleted)
-                    });
                     self.is_error = false;
                 }
                 self.refresh_data_size(cx);
@@ -83,7 +78,7 @@ impl SettingsWindowView {
                         settings_column_field(tr(language, "保留天数", "Retention days")).child(
                             div().w(px(180.)).child(
                                 NumberInput::new(&self.retention_days_input)
-                                    .h(px(36.))
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                                     .disabled(saved.pending),
                             ),
                         ),
@@ -92,7 +87,7 @@ impl SettingsWindowView {
                         settings_column_field(tr(language, "每组数量", "Items per group")).child(
                             div().w(px(180.)).child(
                                 NumberInput::new(&self.retention_count_input)
-                                    .h(px(36.))
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
                                     .disabled(saved.pending),
                             ),
                         ),
@@ -162,15 +157,17 @@ impl SettingsWindowView {
         window.open_dialog(cx, move |dialog, _, cx| {
             let owner = owner.clone();
             let submit_owner = owner.clone();
-            dialog.title(tr(language, "确认保留策略", "Confirm retention policy"))
-                .bg(cx.theme().popover)
-                .overlay_closable(false)
-                .child(if language == LanguagePreference::English {
+            dialog_shell(dialog, cx)
+                .title(dialog_title(
+                    tr(language, "确认保留策略", "Confirm retention policy"),
+                    cx,
+                ))
+                .child(dialog_copy().child(if language == LanguagePreference::English {
                     format!("Apply {} days and {} items per group to all groups, including existing custom groups (0 disables the limit)? Existing unpinned, non-favorite history beyond either limit will be deleted immediately. This cannot be undone; export a backup first if needed.", policy.days, policy.max_count)
                 } else {
                     format!("向全部分组（包括现有自定义分组）应用 {} 天、每组 {} 条（0 表示关闭）？超出任一限制的现有未置顶且未收藏记录将立即删除，无法撤销；如有需要请先导出备份。", policy.days, policy.max_count)
-                })
-                .footer(DialogFooter::new()
+                }))
+                .footer(dialog_footer(cx)
                     .child(Button::new("retention-cancel").outline()
                         .label(tr(language, "取消", "Cancel"))
                         .on_click(|_, window, cx| window.close_dialog(cx)))

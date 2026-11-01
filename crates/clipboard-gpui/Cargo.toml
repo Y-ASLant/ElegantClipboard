@@ -37,5 +37,4 @@ gtk = "0.18"
 x11rb = { version = "0.13", features = ["randr"] }
 
 [dev-dependencies]
-serde_json.workspace = true
 tempfile.workspace = true

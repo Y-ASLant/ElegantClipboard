@@ -310,7 +310,6 @@ impl ClipboardView {
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
             self.history.reset_filters();
-            self.refresh_group_select(window, cx);
             self.scroll_to_top();
             self.query(cx);
         }
@@ -388,6 +387,50 @@ impl ClipboardView {
                     self.exiting.set(true);
                     window.remove_window();
                 }
+            }
+        }
+    }
+
+    /// 「立即以管理员重启」：同步落盘偏好后发 UAC 重启，成功即退出本进程。
+    /// 设置走 worker 的异步命令在退出前可能来不及落库，因此这里直写数据库。
+    #[cfg(windows)]
+    pub(super) fn relaunch_as_admin(&mut self, cx: &mut Context<Self>) {
+        let save = || -> anyhow::Result<()> {
+            let db = clipboard_core::database::Database::new(
+                self.service.data_dir.join("clipboard.db"),
+            )?;
+            clipboard_core::preferences::Preferences::new(&db).set_run_as_admin(true)
+        };
+        if let Err(error) = save() {
+            self.set_feedback_message(format!(
+                "{}: {error}",
+                tr(
+                    self.language,
+                    "保存管理员启动设置失败",
+                    "Failed to save admin launch setting"
+                )
+            ));
+            self.is_error = true;
+            cx.notify();
+            return;
+        }
+        match clipboard_platform::elevation::relaunch_elevated(Some("--wait-for-instance")) {
+            Ok(()) => {
+                self.run_as_admin.value = true;
+                self.exiting.set(true);
+                cx.quit();
+            }
+            Err(error) => {
+                self.set_feedback_message(format!(
+                    "{}: {error}",
+                    tr(
+                        self.language,
+                        "管理员权限请求被拒绝或失败",
+                        "Administrator request denied or failed"
+                    )
+                ));
+                self.is_error = true;
+                cx.notify();
             }
         }
     }

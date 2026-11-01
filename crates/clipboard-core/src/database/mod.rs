@@ -1,5 +1,3 @@
-mod content_migration;
-mod data_migration;
 mod groups;
 mod migrations;
 mod settings;
@@ -85,15 +83,7 @@ impl Database {
         let conn = self.write_conn.lock();
 
         Self::run_migrations(&conn)?;
-
         conn.execute_batch(SCHEMA_SQL)?;
-        // Migration ran before settings existed on a new database (or an old
-        // database without settings); record its completion after schema setup.
-        Self::mark_url_content_type_migration_done(&conn)?;
-        conn.execute(
-            "INSERT OR IGNORE INTO settings (key, value) VALUES ('_migration_backfill_semantic_hash', 'done')",
-            [],
-        )?;
         info!("Database schema initialized");
 
         Ok(())
@@ -121,6 +111,3 @@ impl Database {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests;

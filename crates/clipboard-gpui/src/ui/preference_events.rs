@@ -87,21 +87,15 @@ impl ClipboardView {
             cx.notify();
         }
     }
-    /// 普通偏好仅在保存成功后替换生效值；失败也必须释放 pending。
+    /// 普通偏好仅在保存成功后替换生效值。失败通知；成功由控件本身显示，不通知。
     pub(super) fn acknowledge_save<T>(
         &mut self,
         result: Result<T, String>,
         preference: impl FnOnce(&mut Self) -> &mut PendingPref<T>,
-        saved_message: (&'static str, &'static str),
         failure_message: (&'static str, &'static str),
     ) {
         match preference(self).acknowledge(result) {
-            Ok(()) => {
-                self.set_feedback_message(
-                    tr(self.language, saved_message.0, saved_message.1).into(),
-                );
-                self.is_error = false;
-            }
+            Ok(()) => self.is_error = false,
             Err(error) => {
                 self.set_feedback_message(format!(
                     "{}: {error}",
@@ -123,14 +117,6 @@ impl ClipboardView {
                 self.close_hover_preview("theme_changed", cx);
                 self.theme = theme;
                 apply_theme(theme, window, cx);
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "外观设置已保存",
-                        "Appearance preference saved",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {
@@ -165,7 +151,6 @@ impl ClipboardView {
                 self.group_name_input.update(cx, |input, cx| {
                     input.set_placeholder(tr(language, "分组名称", "Group name"), window, cx);
                 });
-                self.refresh_group_select(window, cx);
                 let menu_result = if let Some(tray) = &self._tray {
                     tray::update_menu(tray, language, self.paused, self.monitoring).map(|_| None)
                 } else {
@@ -183,9 +168,6 @@ impl ClipboardView {
                             self._tray = Some(tray);
                             self.tray_enabled.set(true);
                         }
-                        self.set_feedback_message(
-                            tr(language, "语言设置已保存", "Language preference saved").into(),
-                        );
                         self.is_error = false;
                     }
                     Err(error) => {
@@ -246,14 +228,6 @@ impl ClipboardView {
                 if enabled {
                     self.window_bounds_changed(window, cx);
                 }
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "窗口大小设置已保存",
-                        "Window size setting saved",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {
@@ -287,9 +261,6 @@ impl ClipboardView {
                 {
                     self.select_category(Some(ContentCategory::All), window, cx);
                 }
-                self.set_feedback_message(
-                    tr(self.language, "显示设置已保存", "Display settings saved").into(),
-                );
                 self.is_error = false;
             }
             Err(error) => {
@@ -311,7 +282,6 @@ impl ClipboardView {
         self.acknowledge_save(
             result,
             |this| &mut this.audio,
-            ("音效设置已保存", "Audio settings saved"),
             ("保存音效设置失败", "Failed to save audio settings"),
         );
         true
@@ -324,7 +294,6 @@ impl ClipboardView {
         self.acknowledge_save(
             result,
             |this| &mut this.monitor_types,
-            ("监听类型已保存", "Capture types saved"),
             ("保存监听类型失败", "Failed to save capture types"),
         );
         true
@@ -337,7 +306,6 @@ impl ClipboardView {
         self.acknowledge_save(
             result.map(|preference| *preference),
             |this| &mut this.app_filter,
-            ("应用过滤设置已保存", "App filter saved"),
             ("保存应用过滤失败", "Failed to save app filter"),
         );
         true
@@ -369,14 +337,6 @@ impl ClipboardView {
                     }
                     cx.refresh_windows();
                 }
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "背景材质设置已保存",
-                        "Background material settings saved",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
                 cx.notify();
             }
@@ -405,14 +365,6 @@ impl ClipboardView {
         match result {
             Ok(()) => {
                 self.onboarding_completed = true;
-                self.set_feedback_message(
-                    tr(
-                        self.language,
-                        "欢迎使用 ElegantClipboard",
-                        "Welcome to ElegantClipboard",
-                    )
-                    .into(),
-                );
                 self.is_error = false;
                 self.leave_onboarding(window, cx);
             }
@@ -439,22 +391,15 @@ impl ClipboardView {
         self.acknowledge_save(
             result,
             |this| &mut this.window_position,
-            ("窗口唤出位置已保存", "Window position mode saved"),
             ("保存窗口位置失败", "Failed to save window position"),
         );
         true
     }
 
     pub(super) fn apply_autostart_saved(&mut self, result: Result<bool, String>) -> bool {
-        let saved_message = if matches!(result, Ok(true)) {
-            ("已开启开机启动", "Startup enabled")
-        } else {
-            ("已关闭开机启动", "Startup disabled")
-        };
         self.acknowledge_save(
             result,
             |this| &mut this.autostart,
-            saved_message,
             ("开机启动设置失败", "Failed to update startup"),
         );
         true
@@ -464,10 +409,6 @@ impl ClipboardView {
         self.acknowledge_save(
             result,
             |this| &mut this.transient_filter,
-            (
-                "瞬时内容过滤设置已保存",
-                "Transient filtering setting saved",
-            ),
             (
                 "保存瞬时内容过滤设置失败",
                 "Failed to save transient filtering setting",

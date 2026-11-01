@@ -6,6 +6,8 @@ pub struct Options {
     pub monitor: bool,
     pub smoke_test: bool,
     pub start_hidden: bool,
+    /// 提权重启携带：启动时多等一会儿让旧实例释放单实例锁。
+    pub wait_for_instance: bool,
     pub import_db: Option<PathBuf>,
     pub import_backup: Option<PathBuf>,
     pub import_legacy_backup: Option<PathBuf>,
@@ -18,6 +20,7 @@ impl Options {
             monitor: true,
             smoke_test: false,
             start_hidden: false,
+            wait_for_instance: false,
             import_db: None,
             import_backup: None,
             import_legacy_backup: None,
@@ -32,6 +35,7 @@ impl Options {
                 Some("--no-monitor") => options.monitor = false,
                 Some("--smoke-test") => options.smoke_test = true,
                 Some("--start-hidden") => options.start_hidden = true,
+                Some("--wait-for-instance") => options.wait_for_instance = true,
                 Some("--import-db") => {
                     options.import_db = Some(required_path(
                         &mut args,

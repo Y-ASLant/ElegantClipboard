@@ -34,41 +34,6 @@ fn corner_radius_persists_across_restart_and_rejects_removed_or_invalid_values()
 }
 
 #[test]
-fn legacy_radii_preserve_supported_values_and_normalize_eight_on_disk() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let path = directory.path().join("clipboard.db");
-    for radius in 0..=16 {
-        let db = Database::new(path.clone())?;
-        let stored = radius.to_string();
-        SettingsRepository::new(&db).set(CORNER_RADIUS_KEY, &stored)?;
-        let expected = if radius == 8 {
-            CornerRadiusPreference::System
-        } else {
-            CornerRadiusPreference::Fixed(radius)
-        };
-        let canonical = if radius == 8 { "system" } else { &stored };
-        assert_eq!(Preferences::new(&db).corner_radius()?, expected);
-        assert_eq!(
-            SettingsRepository::new(&db)
-                .get(CORNER_RADIUS_KEY)?
-                .as_deref(),
-            Some(canonical)
-        );
-        drop(db);
-
-        let db = Database::new(path.clone())?;
-        assert_eq!(Preferences::new(&db).corner_radius()?, expected);
-        assert_eq!(
-            SettingsRepository::new(&db)
-                .get(CORNER_RADIUS_KEY)?
-                .as_deref(),
-            Some(canonical)
-        );
-    }
-    Ok(())
-}
-
-#[test]
 fn invalid_stored_radii_fall_back_without_rewriting() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let db = Database::new(directory.path().join("clipboard.db"))?;
@@ -113,31 +78,6 @@ fn canonical_radius_reads_do_not_write_and_failed_updates_preserve_saved_value()
 }
 
 #[test]
-fn failed_radius_migration_retains_legacy_value_and_can_be_retried() -> Result<()> {
-    let directory = tempfile::tempdir()?;
-    let db = Database::new(directory.path().join("clipboard.db"))?;
-    let repository = SettingsRepository::new(&db);
-    repository.set(CORNER_RADIUS_KEY, "8")?;
-    db.write_connection()
-        .lock()
-        .execute_batch("PRAGMA query_only = ON")?;
-    assert!(Preferences::new(&db).corner_radius().is_err());
-    assert_eq!(repository.get(CORNER_RADIUS_KEY)?.as_deref(), Some("8"));
-    db.write_connection()
-        .lock()
-        .execute_batch("PRAGMA query_only = OFF")?;
-    assert_eq!(
-        Preferences::new(&db).corner_radius()?,
-        CornerRadiusPreference::System
-    );
-    assert_eq!(
-        repository.get(CORNER_RADIUS_KEY)?.as_deref(),
-        Some("system")
-    );
-    Ok(())
-}
-
-#[test]
 fn radius_read_failure_is_not_disguised_as_a_default() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let db = Database::new(directory.path().join("clipboard.db"))?;
@@ -149,8 +89,8 @@ fn radius_read_failure_is_not_disguised_as_a_default() -> Result<()> {
 }
 
 #[test]
-fn backup_restore_preserves_system_radius_and_normalizes_legacy_eight() -> Result<()> {
-    for stored in ["system", "8"] {
+fn backup_restore_preserves_saved_radius_without_rewriting() -> Result<()> {
+    for stored in ["system", "8", "12"] {
         let directory = tempfile::tempdir()?;
         let history = History::open(directory.path().join("source.db"))?;
         SettingsRepository::new(&history.db).set(CORNER_RADIUS_KEY, stored)?;
@@ -160,15 +100,17 @@ fn backup_restore_preserves_system_radius_and_normalizes_legacy_eight() -> Resul
         std::fs::create_dir(&target)?;
         restore_backup(&backup, &target)?;
         let restored = History::open(target.join("clipboard.db"))?;
-        assert_eq!(
-            Preferences::new(&restored.db).corner_radius()?,
+        let expected = if stored == "system" {
             CornerRadiusPreference::System
-        );
+        } else {
+            CornerRadiusPreference::Fixed(stored.parse().unwrap())
+        };
+        assert_eq!(Preferences::new(&restored.db).corner_radius()?, expected);
         assert_eq!(
             SettingsRepository::new(&restored.db)
                 .get(CORNER_RADIUS_KEY)?
                 .as_deref(),
-            Some("system")
+            Some(stored)
         );
         assert_eq!(
             SettingsRepository::new(&history.db)

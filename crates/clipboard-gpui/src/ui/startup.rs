@@ -5,8 +5,13 @@ gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine]);
 
 struct AppAssets;
 
+const APP_ICON: &[u8] = include_bytes!("../../../../assets/elegant-clipboard.png");
+
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> anyhow::Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        if path == "app-icon.png" {
+            return Ok(Some(std::borrow::Cow::Borrowed(APP_ICON)));
+        }
         match ActionIcons.load(path)? {
             Some(icon) => Ok(Some(icon)),
             None => gpui_kit::assets::Assets.load(path),
@@ -20,7 +25,10 @@ impl AssetSource for AppAssets {
     }
 }
 
-pub fn run(options: Options) -> anyhow::Result<()> {
+pub fn run(
+    options: Options,
+    diagnostics: Option<std::sync::Arc<crate::diagnostics::Diagnostics>>,
+) -> anyhow::Result<()> {
     tracing::info!(
         monitoring = options.monitor,
         hidden = options.start_hidden,
@@ -31,23 +39,48 @@ pub fn run(options: Options) -> anyhow::Result<()> {
         tracing::info!("Existing instance activated");
         return Ok(());
     }
-    let (service, events) = match Service::start(options.data_dir, options.monitor) {
+    let wait_for_instance = options.wait_for_instance;
+    let (service, events) = match Service::start(options.data_dir.clone(), options.monitor) {
         Ok(started) => started,
         Err(error) if error.is::<InstanceBusy>() => {
-            for _ in 0..10 {
+            // 提权重启时旧进程退出释放锁需要一点时间；多等几秒再放弃。
+            let retries = if wait_for_instance { 75 } else { 10 };
+            let mut existing_shown = false;
+            for _ in 0..retries {
                 if clipboard_platform::show_existing_instance(data_dir.clone())? {
-                    return Ok(());
+                    existing_shown = true;
+                    break;
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            if existing_shown {
+                return Ok(());
             }
             return Err(error);
         }
         Err(error) => return Err(error),
     };
+    #[cfg(windows)]
+    {
+        let run_as_admin = service.initial_preferences.run_as_admin;
+        let elevated = clipboard_platform::elevation::is_elevated().unwrap_or(false);
+        if run_as_admin && !elevated {
+            match clipboard_platform::elevation::relaunch_elevated(Some("--wait-for-instance")) {
+                Ok(()) => {
+                    tracing::info!("Relaunched elevated; exiting current process");
+                    return Ok(());
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "Elevation request denied; continuing unelevated");
+                }
+            }
+        }
+    }
     let startup = StartupMode {
         monitoring: options.monitor,
         hidden: options.start_hidden,
         show_onboarding: !options.smoke_test,
+        diagnostics,
     };
     let initial_window_size = service.initial_preferences.window_size.unwrap_or_default();
     let smoke_test = options.smoke_test;
@@ -152,7 +185,7 @@ pub fn run(options: Options) -> anyhow::Result<()> {
                         ClipboardView::new(
                             service,
                             events,
-                            startup,
+                            startup.clone(),
                             tray_enabled.clone(),
                             exiting.clone(),
                             window,

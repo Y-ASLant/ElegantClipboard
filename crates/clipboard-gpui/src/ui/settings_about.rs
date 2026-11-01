@@ -1,176 +1,207 @@
-use super::settings_common::{
-    owner_language, settings_column, settings_columns, settings_description, settings_inline,
-    settings_stack,
-};
+use super::settings_common::{owner_language, owner_state, settings_stack};
+use super::update_events::UpdateCheck;
 use super::*;
 use gpui_kit::component::alert::Alert;
 
-/// 「关于」页的简要功能介绍。
-struct FeatureGroup {
-    chinese: &'static str,
-    english: &'static str,
-    items: &'static [(&'static str, &'static str)],
-}
-
-const FEATURE_GROUPS: &[FeatureGroup] = &[
-    FeatureGroup {
-        chinese: "记录与查找",
-        english: "Capture and find",
-        items: &[(
-            "保存文本、图片和文件路径等复制记录，随时搜索与预览。",
-            "Keep copied text, images, file paths, and more, ready to search and preview.",
-        )],
-    },
-    FeatureGroup {
-        chinese: "整理与复用",
-        english: "Organize and reuse",
-        items: &[(
-            "通过收藏、置顶和分组整理常用内容，使用快捷键快速粘贴。",
-            "Organize frequently used content with favorites, pins, and groups, and paste quickly with shortcuts.",
-        )],
-    },
-    FeatureGroup {
-        chinese: "按需设置",
-        english: "Make it yours",
-        items: &[(
-            "自定义外观与采集规则，管理历史保留时间并备份数据。",
-            "Customize appearance and capture rules, manage how long history is kept, and back up your data.",
-        )],
-    },
-];
-
 impl SettingsWindowView {
-    pub(super) fn settings_about_details_content(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// 「关于」页：居中图标、名称、版本与一句话介绍，下面列出项目链接。
+    pub(super) fn settings_about_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(language) = owner_language(&self.owner, cx) else {
             return div().into_any_element();
         };
 
-        settings_inline()
-            .children(
-                [
-                    (
-                        "about-author",
-                        tr(language, "作者", "Author"),
-                        "ASLant",
-                        IconName::User,
-                        ProjectLink::Author,
+        let intro = settings_stack()
+            .items_center()
+            .gap_3()
+            .py_4()
+            .child(
+                div()
+                    .size(px(64.))
+                    .rounded_md()
+                    .overflow_hidden()
+                    .child(img("app-icon.png").size_full().object_fit(ObjectFit::Contain)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_baseline()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(px(16.))
+                            .font_semibold()
+                            .child("ElegantClipboard"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
                     ),
-                    (
-                        "about-repository",
-                        "GitHub",
-                        "ElegantClipboard",
-                        IconName::Github,
-                        ProjectLink::Repository,
-                    ),
-                    (
-                        "about-issues",
-                        tr(language, "反馈", "Feedback"),
-                        tr(language, "提交问题", "Submit issue"),
-                        IconName::TriangleAlert,
-                        ProjectLink::Issues,
-                    ),
-                ]
-                .map(|(id, caption, label, icon, link)| {
-                    settings_inline()
-                        .w_auto()
-                        .flex_basis(px(240.))
-                        .flex_grow(1.)
-                        .justify_between()
-                        .py_2()
-                        .border_b_1()
-                        .border_color(cx.theme().border)
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(tr(
+                        language,
+                        "跨平台剪贴板管理器，随时找回并复用复制的内容",
+                        "A cross-platform clipboard manager for finding and reusing what you have copied.",
+                    )),
+            );
+
+        // 「图标 + muted 标题 | 右侧控件」的行骨架，链接行和版本行共用。
+        let row = |icon: IconName, caption: SharedString, right: AnyElement| {
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .py_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .min_w_0()
+                        .child(
+                            Icon::new(icon)
+                                .small()
+                                .flex_shrink_0()
+                                .text_color(cx.theme().muted_foreground),
+                        )
                         .child(
                             div()
                                 .text_sm()
-                                .min_w_0()
-                                .whitespace_normal()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(caption),
-                        )
-                        .child(
-                            Button::new(id)
-                                .h(px(32.))
-                                .flex_shrink_0()
-                                .ghost()
-                                .icon(icon)
-                                .label(label)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.link_error =
-                                        links::open(link).err().map(|error| error.to_string());
-                                    cx.notify();
-                                })),
-                        )
-                }),
+                        ),
+                )
+                .child(right)
+                .into_any_element()
+        };
+
+        let link_row = |id: &'static str,
+                        caption: SharedString,
+                        label: SharedString,
+                        icon: IconName,
+                        link: ProjectLink| {
+            row(
+                icon,
+                caption,
+                Button::new(id)
+                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                    .flex_shrink_0()
+                    .ghost()
+                    .label(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.link_error = links::open(link).err().map(|error| error.to_string());
+                        cx.notify();
+                    }))
+                    .into_any_element(),
             )
+        };
+
+        let update_row = {
+            let state = owner_state(&self.owner, cx).map(|state| &state.update_check);
+            let status = match state {
+                Some(UpdateCheck::Checking) => Some(tr(language, "检查中…", "Checking…")),
+                Some(UpdateCheck::Downloading) => Some(tr(language, "下载中…", "Downloading…")),
+                Some(UpdateCheck::UpToDate) => Some(tr(language, "已是最新", "Up to date")),
+                _ => None,
+            };
+            let right = match (status, state) {
+                (Some(text), _) => div()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(text)
+                    .into_any_element(),
+                (None, Some(UpdateCheck::Available(release))) => {
+                    let label: SharedString = if language == LanguagePreference::English {
+                        format!("Download v{}", release.version).into()
+                    } else {
+                        format!("下载 v{}", release.version).into()
+                    };
+                    Button::new("about-update-download")
+                        .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                        .flex_shrink_0()
+                        .ghost()
+                        .label(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let _ = this.owner.update(cx, |owner, cx| {
+                                owner.start_update_download(cx);
+                            });
+                        }))
+                        .into_any_element()
+                }
+                (None, Some(UpdateCheck::Ready(_))) => Button::new("about-update-install")
+                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                    .flex_shrink_0()
+                    .primary()
+                    .label(tr(language, "立即安装", "Install now"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let _ = this.owner.update(cx, |owner, cx| {
+                            owner.start_update_install(cx);
+                        });
+                    }))
+                    .into_any_element(),
+                _ => Button::new("about-update-check")
+                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                    .flex_shrink_0()
+                    .ghost()
+                    .label(tr(language, "检查更新", "Check for updates"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        #[cfg(windows)]
+                        let _ = this.owner.update(cx, |owner, cx| {
+                            owner.start_update_check(cx);
+                        });
+                        #[cfg(not(windows))]
+                        {
+                            this.link_error = links::open(ProjectLink::Releases)
+                                .err()
+                                .map(|error| error.to_string());
+                            cx.notify();
+                        }
+                    }))
+                    .into_any_element(),
+            };
+            row(
+                IconName::RefreshCw,
+                tr(language, "版本", "Version").into(),
+                right,
+            )
+        };
+
+        let links = settings_stack().gap_0().children([
+            link_row(
+                "about-author",
+                tr(language, "作者", "Author").into(),
+                "ASLant".into(),
+                IconName::User,
+                ProjectLink::Author,
+            ),
+            link_row(
+                "about-repository",
+                "GitHub".into(),
+                "ElegantClipboard".into(),
+                IconName::Github,
+                ProjectLink::Repository,
+            ),
+            link_row(
+                "about-issues",
+                tr(language, "反馈", "Feedback").into(),
+                tr(language, "提交问题", "Submit issue").into(),
+                IconName::TriangleAlert,
+                ProjectLink::Issues,
+            ),
+            update_row,
+        ]);
+
+        settings_stack()
+            .child(intro)
+            .child(links)
             .when_some(self.link_error.clone(), |panel, error| {
                 panel.child(Alert::error("about-link-error", error).small())
             })
-            .into_any_element()
-    }
-
-    pub(super) fn settings_about_intro_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(language) = owner_language(&self.owner, cx) else {
-            return div().into_any_element();
-        };
-
-        let features = settings_column().children(FEATURE_GROUPS.iter().map(|group| {
-            settings_stack()
-                .gap_2()
-                .child(
-                    div()
-                        .min_w_0()
-                        .whitespace_normal()
-                        .text_size(px(14.))
-                        .font_semibold()
-                        .child(tr(language, group.chinese, group.english)),
-                )
-                .children(group.items.iter().map(|(chinese, english)| {
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .items_start()
-                        .gap_2()
-                        .child(
-                            Icon::new(IconName::CircleCheck)
-                                .small()
-                                .flex_shrink_0()
-                                .text_color(cx.theme().primary)
-                                .mt(px(3.)),
-                        )
-                        .child(settings_description(tr(language, chinese, english), cx).flex_1())
-                }))
-        }));
-        let intro = settings_column()
-            .child(div().text_sm().font_semibold().child(format!("v{}", env!("CARGO_PKG_VERSION"))))
-            .child(settings_description(tr(
-                language,
-                "适用于 Windows、Linux 和 macOS，随时找回并复用复制的内容。",
-                "A clipboard manager for Windows, Linux and macOS that helps you find and reuse what you have copied.",
-            ), cx))
-            .child(settings_inline().child(
-                    Button::new("about-review-onboarding")
-                        .outline()
-                        .h(px(visual::CONTROL_HEIGHT_LARGE))
-                        .label(tr(language, "重新查看快速上手", "Review quick start"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let Some(owner) = this.owner.upgrade() else { return };
-                            let main_window = owner.read(cx).main_window;
-                            if let Err(error) = main_window.update(cx, |_, window, cx| {
-                                owner.update(cx, |owner, cx| owner.restart_onboarding(window, cx));
-                            }) {
-                                this.link_error = Some(format!(
-                                    "{}: {error}",
-                                    tr(this.language, "无法打开引导", "Could not open the guide")
-                                ));
-                                cx.notify();
-                            }
-                        })),
-                ),
-            );
-        settings_columns()
-            .child(intro)
-            .child(features)
             .into_any_element()
     }
 }

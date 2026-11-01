@@ -129,7 +129,7 @@ pub(super) fn render_preview(
                                     .px(px(visual::SPACE_3))
                                     .py(px(visual::SPACE_2))
                                     .text_size(px(visual::TEXT_BODY))
-                                    .line_height(px(20.))
+                                    .line_height(px(visual::PREVIEW_LINE_HEIGHT))
                                     .whitespace_normal()
                                     .child(note),
                             ),

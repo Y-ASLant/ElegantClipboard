@@ -45,12 +45,7 @@ pub(crate) fn clear_file_copy_references(connection: &mut Connection) -> Result<
         )
         .optional()?;
     tx.execute_batch("DROP TRIGGER IF EXISTS clipboard_items_update_timestamp;")?;
-    let has_payload: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('clipboard_items') WHERE name='file_payload')",
-        [],
-        |row| row.get(0),
-    )?;
-    let payloads = if has_payload {
+    let payloads = {
         let mut query = tx.prepare(
             "SELECT id, file_payload FROM clipboard_items
              WHERE file_payload IS NOT NULL ORDER BY id",
@@ -60,8 +55,6 @@ pub(crate) fn clear_file_copy_references(connection: &mut Connection) -> Result<
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             })?
             .collect::<Result<Vec<_>, _>>()?
-    } else {
-        Vec::new()
     };
     for (id, payload) in payloads {
         if let Some(cleaned) = without_staged(&payload)
@@ -73,14 +66,7 @@ pub(crate) fn clear_file_copy_references(connection: &mut Connection) -> Result<
             )?;
         }
     }
-    let has_settings: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings')",
-        [],
-        |row| row.get(0),
-    )?;
-    if has_settings {
-        tx.execute("DELETE FROM settings WHERE key = 'gpui_stage_files'", [])?;
-    }
+    tx.execute("DELETE FROM settings WHERE key = 'gpui_stage_files'", [])?;
     if let Some(sql) = trigger {
         tx.execute_batch(&sql)?;
     }

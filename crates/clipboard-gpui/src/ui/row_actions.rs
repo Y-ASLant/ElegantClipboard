@@ -173,7 +173,7 @@ impl ClipboardView {
             .absolute()
             .top(px(card_padding))
             .right(px(card_padding))
-            .h(px(visual::SPACE_6 + visual::SPACE_1))
+            .h(px(visual::CONTROL_HEIGHT_COMPACT))
             .px(px(visual::SPACE_1 / 2.))
             .flex()
             .items_center()

@@ -230,7 +230,6 @@ pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
 
         if let Some(cmd_len) = cmd_len {
             let after_cmd = i + cmd_len;
-            // Skip optional space between control word and digits
             let digit_start = if after_cmd < len && rtf_bytes[after_cmd] == b' ' {
                 after_cmd + 1
             } else {
@@ -242,11 +241,9 @@ pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
                 j += 1;
             }
             if j > digit_start {
-                // Found digits — strip the whole thing
                 i = j;
                 continue;
             }
-            // No digits found — don't strip (e.g. \rsidtbl, \rsidroot)
         }
 
         out.push(rtf_bytes[i]);
@@ -254,25 +251,6 @@ pub(crate) fn normalize_rtf_for_hash(rtf_bytes: &[u8]) -> Vec<u8> {
     }
 
     out
-}
-
-pub(crate) fn compute_semantic_hash(
-    content_type: &str,
-    text_content: Option<&str>,
-    content_hash: &str,
-) -> String {
-    // url 刻意不在此列：URL 条目的 content_hash 已含 "url:" 前缀的规范化文本，
-    // 不参与基于正文文本的语义哈希。
-    let is_text_like = content_type.eq_ignore_ascii_case("text")
-        || content_type.eq_ignore_ascii_case("html")
-        || content_type.eq_ignore_ascii_case("rtf");
-    if is_text_like
-        && let Some(text) = text_content
-        && let Some(hash) = semantic_hash_from_text(text)
-    {
-        return hash;
-    }
-    content_hash.to_string()
 }
 
 #[cfg(test)]

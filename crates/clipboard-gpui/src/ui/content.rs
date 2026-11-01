@@ -83,20 +83,36 @@ impl ClipboardView {
                             .cleanable(true)
                             .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
                             .suffix(
-                                Button::new("history-search-info")
-                                    .text()
-                                    .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
-                                    .xsmall()
-                                    .accessibility_label(tr(
-                                        self.language,
-                                        "搜索说明",
-                                        "Search help",
-                                    ))
-                                    .tooltip(tr(
-                                        self.language,
-                                        "输入关键词搜索剪贴板历史；点击 × 清空搜索。",
-                                        "Search clipboard history by keyword; click × to clear.",
-                                    )),
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(visual::SPACE_2))
+                                    .child(
+                                        div()
+                                            .text_size(px(visual::TEXT_SMALL))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(if self.language == LanguagePreference::English {
+                                                format!("{} items", self.history.total)
+                                            } else {
+                                                format!("{} 条记录", self.history.total)
+                                            }),
+                                    )
+                                    .child(
+                                        Button::new("history-search-info")
+                                            .text()
+                                            .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
+                                            .xsmall()
+                                            .accessibility_label(tr(
+                                                self.language,
+                                                "搜索说明",
+                                                "Search help",
+                                            ))
+                                            .tooltip(tr(
+                                                self.language,
+                                                "输入关键词搜索剪贴板历史；点击 × 清空搜索。",
+                                                "Search clipboard history by keyword; click × to clear.",
+                                            )),
+                                    ),
                             ),
                     ),
             )
@@ -160,22 +176,10 @@ impl ClipboardView {
                                 )
                             })
                             .child(
-                                div().w(px(138.)).flex_none().child(
-                                    Select::new(&self.group_select)
-                                        .w_full()
-                                        .h(px(visual::CONTROL_HEIGHT))
-                                        .text_size(px(visual::TEXT_BODY))
-                                        .menu_width(px(190.))
-                                        .menu_max_h(px(300.))
-                                        .placeholder(tr(self.language, "选择分组", "Select group"))
-                                        .accessibility_label(tr(self.language, "分组", "Group"))
-                                        .disabled(
-                                            self.group_save_pending
-                                                || self.group_delete_pending
-                                                || self.clear_pending
-                                                || self.group_reorder_pending,
-                                        ),
-                                ),
+                                div()
+                                    .w(px(visual::GROUP_SELECT_WIDTH))
+                                    .flex_none()
+                                    .child(self.render_group_select(window, cx)),
                             ),
                     ),
             )
@@ -393,24 +397,6 @@ impl ClipboardView {
                         ),
                     )
                 },
-            )
-            .child(
-                div()
-                    .px(px(PAGE_PADDING))
-                    .h(px(visual::SPACE_6 + visual::SPACE_1))
-                    .flex_none()
-                    .border_t(px(visual::BORDER_WIDTH))
-                    .border_color(cx.theme().border)
-                    .flex()
-                    .items_center()
-                    .text_size(px(visual::TEXT_SMALL))
-                    .text_color(cx.theme().muted_foreground)
-                    .window_control_area(WindowControlArea::Drag)
-                    .child(if self.language == LanguagePreference::English {
-                        format!("{} items", self.history.total)
-                    } else {
-                        format!("{} 条记录", self.history.total)
-                    }),
             )
             .into_any_element()
     }

@@ -169,19 +169,11 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::About,
-        chinese: "应用简介",
-        english: "Overview",
-        description_chinese: "跨平台剪贴板管理器",
-        description_english: "Cross-platform clipboard manager",
-        content: SettingsWindowView::settings_about_intro_content,
-    },
-    Section {
-        page: SettingsPage::About,
-        chinese: "作者与项目",
-        english: "Author & project",
-        description_chinese: "在浏览器中打开项目主页或提交问题",
-        description_english: "Open the project page or report an issue in your browser",
-        content: SettingsWindowView::settings_about_details_content,
+        chinese: "",
+        english: "",
+        description_chinese: "",
+        description_english: "",
+        content: SettingsWindowView::settings_about_content,
     },
 ];
 
@@ -270,9 +262,13 @@ impl Render for SettingsWindowView {
                         section.description_english,
                     );
                     let settings = settings.clone();
-                    SettingGroup::new()
-                        .title(title)
-                        .variant(GroupBoxVariant::Normal)
+                    let group = SettingGroup::new().variant(GroupBoxVariant::Normal);
+                    let group = if title.is_empty() {
+                        group
+                    } else {
+                        group.title(title)
+                    };
+                    group
                         .text_size(px(visual::TEXT_BODY))
                         .font_semibold()
                         .py(px(visual::SPACE_2))
@@ -290,8 +286,11 @@ impl Render for SettingsWindowView {
                                         (section.content)(view, cx)
                                     })
                                     .unwrap_or_else(|_| div().into_any_element());
-                                visual::reveal(
-                                    div().w_full().min_w_0().child(
+                                // 页面内容直接渲染，切换页面不做淡入动效。
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .child(
                                         GroupBox::new()
                                             .id(("settings-card", section_ix))
                                             .outline()
@@ -305,19 +304,23 @@ impl Render for SettingsWindowView {
                                             )
                                             .child(
                                                 settings_stack()
-                                                    .child(settings_description(description, cx))
+                                                    .when(!description.is_empty(), |stack| {
+                                                        stack.child(settings_description(
+                                                            description,
+                                                            cx,
+                                                        ))
+                                                    })
                                                     .child(content),
                                             ),
-                                    ),
-                                    ("settings-section-reveal", section_ix),
-                                    cx,
-                                )
+                                    )
+                                    .into_any_element()
                             })
-                            .keywords([
-                                page.label(language),
-                                title,
-                                description,
-                            ]),
+                            .keywords(
+                                [page.label(language), title, description]
+                                    .into_iter()
+                                    .filter(|k| !k.is_empty())
+                                    .collect::<Vec<_>>(),
+                            ),
                         )
                 });
             SettingPage::new(page.label(language))

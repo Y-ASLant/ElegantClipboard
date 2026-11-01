@@ -52,15 +52,10 @@ impl Service {
         // exclusively owned by the worker thread.
         let db = Database::new(data_dir.join("clipboard.db"))?;
         let history = History::new(&db);
-        let mut initial_data_warning = data_directory.warning;
-        if let Err(error) = history.remove_file_copies(&data_dir) {
-            let warning = format!("清理旧文件副本未完成，将在下次启动重试：{error:#}");
-            if let Some(message) = initial_data_warning.as_mut() {
-                message.push_str(&format!("\n{warning}"));
-            } else {
-                initial_data_warning = Some(warning);
-            }
-        }
+        let initial_data_warning = history
+            .remove_file_copies(&data_dir)
+            .err()
+            .map(|error| format!("清理旧文件副本未完成，将在下次启动重试：{error:#}"));
         let preferences = Preferences::new(&db);
         let mut initial_preferences = preferences.snapshot()?;
         if !initial_preferences.onboarding_completed

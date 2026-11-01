@@ -1,6 +1,6 @@
 use super::settings_common::{
     owner_state, settings_column, settings_columns, settings_description, settings_field,
-    settings_inline, settings_stack,
+    settings_inline, settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
@@ -50,10 +50,7 @@ impl SettingsWindowView {
         });
         settings_stack()
             .child(
-                Checkbox::new("quick-paste-enabled")
-                    .min_h(px(visual::CONTROL_HEIGHT_LARGE))
-                    .py(px(6.))
-                    .text_size(px(14.))
+                settings_toggle(Checkbox::new("quick-paste-enabled"))
                     .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
                     .checked(quick_paste_enabled)
                     .disabled(shortcut_actions_pending || !monitoring)

@@ -192,6 +192,7 @@ fn subprocess_entry() {
     install_panic_hook(directory.clone());
     let diagnostics = start_session(Path::new(&root), &directory).unwrap();
     if mode == "write" {
+        diagnostics.set_enabled(true);
         tracing::debug!("application-debug-marker");
         tracing::warn!(target: "dependency", "dependency-warning-marker");
         tracing::debug!(target: "dependency", "dependency-debug-marker");

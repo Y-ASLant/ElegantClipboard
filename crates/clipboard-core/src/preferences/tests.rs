@@ -60,22 +60,16 @@ fn hotkey_preference_persists_independently_of_legacy_setting() -> Result<()> {
     );
     preferences.set_hotkey(HotkeyPreference::Disabled)?;
     assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
-    for (stored, expected) in [
-        (
-            "ctrl_shift_v",
-            HotkeyPreference::Shortcut("Ctrl+Shift+V".into()),
-        ),
-        ("alt_c", HotkeyPreference::Shortcut("Alt+C".into())),
-        (
-            "ctrl_alt_v",
-            HotkeyPreference::Shortcut("Ctrl+Alt+V".into()),
-        ),
-        ("disabled", HotkeyPreference::Disabled),
-        ("unknown", HotkeyPreference::default()),
-    ] {
+    for stored in ["ctrl_shift_v", "alt_c", "ctrl_alt_v", "unknown"] {
         SettingsRepository::new(&db).set(HOTKEY_KEY, stored)?;
-        assert_eq!(preferences.hotkey()?, expected);
+        assert_eq!(preferences.hotkey()?, HotkeyPreference::default());
+        assert_eq!(
+            SettingsRepository::new(&db).get(HOTKEY_KEY)?.as_deref(),
+            Some(stored)
+        );
     }
+    SettingsRepository::new(&db).set(HOTKEY_KEY, "disabled")?;
+    assert_eq!(preferences.hotkey()?, HotkeyPreference::Disabled);
     Ok(())
 }
 

@@ -20,15 +20,23 @@ mod visual;
 mod window_effect;
 
 fn main() -> anyhow::Result<()> {
-    let _diagnostics = diagnostics::initialize();
+    let Some(options) = options::Options::parse(std::env::args_os().skip(1))? else {
+        print_help();
+        return Ok(());
+    };
+    let data_dir = clipboard_platform::resolve_data_directory(options.data_dir.as_deref())?;
+    // Logs live in the same directory as the database. Argument errors and
+    // `--help` happen before this and stay on the terminal.
+    let diagnostics = diagnostics::initialize(&data_dir);
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         os = std::env::consts::OS,
         arch = std::env::consts::ARCH,
         pid = std::process::id(),
+        data_dir = %data_dir.display(),
         "application starting"
     );
-    let result = run();
+    let result = run(options, diagnostics);
     match &result {
         Ok(()) => tracing::info!("application shutdown completed"),
         Err(error) => {
@@ -38,13 +46,16 @@ fn main() -> anyhow::Result<()> {
     result
 }
 
-fn run() -> anyhow::Result<()> {
-    let Some(options) = options::Options::parse(std::env::args_os().skip(1))? else {
-        println!(
-            "ElegantClipboard\n\n  --data-dir PATH              使用独立数据目录\n  --import-db PATH             从旧版 clipboard.db 导入到空 GPUI 目录后退出\n  --import-backup PATH         将 GPUI ZIP 备份恢复到指定空数据目录后退出\n  --import-legacy-backup PATH  将旧版 ZIP 备份导入到指定空数据目录后退出\n  --no-monitor                 不监听系统剪贴板\n  --start-hidden               启动后隐藏到托盘（托盘不可用时显示窗口）\n  --smoke-test                 打开窗口后自动退出（需 --data-dir，禁用采集）\n  --help                       显示帮助"
-        );
-        return Ok(());
-    };
+fn print_help() {
+    println!(
+        "ElegantClipboard\n\n  --data-dir PATH              使用独立数据目录\n  --import-db PATH             从旧版 clipboard.db 导入到空 GPUI 目录后退出\n  --import-backup PATH         将 GPUI ZIP 备份恢复到指定空数据目录后退出\n  --import-legacy-backup PATH  将旧版 ZIP 备份导入到指定空数据目录后退出\n  --no-monitor                 不监听系统剪贴板\n  --start-hidden               启动后隐藏到托盘（托盘不可用时显示窗口）\n  --smoke-test                 打开窗口后自动退出（需 --data-dir，禁用采集）\n  --help                       显示帮助"
+    );
+}
+
+fn run(
+    options: options::Options,
+    diagnostics: Option<std::sync::Arc<diagnostics::Diagnostics>>,
+) -> anyhow::Result<()> {
     #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
     {
         if let Some(source) = &options.import_legacy_backup {
@@ -82,11 +93,11 @@ fn run() -> anyhow::Result<()> {
             );
             return Ok(());
         }
-        ui::run(options)
+        ui::run(options, diagnostics)
     }
     #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
-        let _ = options;
+        let _ = (options, diagnostics);
         anyhow::bail!("This operating system is not supported")
     }
 }
