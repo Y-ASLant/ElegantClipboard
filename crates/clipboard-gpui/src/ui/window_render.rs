@@ -83,6 +83,7 @@ impl Render for ClipboardView {
         self.drag_motion
             .update(drag_request, &self.history.items, &self.row_offsets);
         window_shell(cx)
+            .child(history_menu_dismiss_layer(cx))
             .child(
                 div()
                     .id("window-drag-handle")
@@ -116,4 +117,27 @@ impl Render for ClipboardView {
             .child(div().flex_1().min_h_0().child(self.render_content(window, cx)))
             .child(self.render_status(cx))
     }
+}
+
+fn history_menu_dismiss_layer(cx: &mut Context<ClipboardView>) -> impl IntoElement {
+    let owner = cx.entity().downgrade();
+    canvas(
+        |_, _, _| {},
+        move |_, _, window, _| {
+            let owner = owner.clone();
+            window.on_mouse_event(move |_: &MouseDownEvent, phase, _, cx| {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                let Some(owner) = owner.upgrade() else {
+                    return;
+                };
+                owner.update(cx, |this, cx| {
+                    this.close_history_menu(cx);
+                });
+            });
+        },
+    )
+    .absolute()
+    .size(px(0.))
 }

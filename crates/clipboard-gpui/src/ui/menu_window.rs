@@ -145,6 +145,7 @@ impl Render for HistoryMenuWindow {
         let reveal_after_layout = !self.shown.get();
         div()
             .size_full()
+            .occlude()
             .flex()
             .flex_col()
             .items_start()
