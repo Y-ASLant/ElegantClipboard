@@ -6,8 +6,8 @@ mod source;
 mod tests;
 
 use anyhow::{Context, Result, bail};
-pub use payload::{PreparedExternalDrag, prepare_external_drag};
 use payload::retain_dropped_image;
+pub use payload::{PreparedExternalDrag, prepare_external_drag};
 use std::{cell::Cell, rc::Rc};
 use windows::Win32::Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP};
 use windows::Win32::{

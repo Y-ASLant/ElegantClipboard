@@ -53,8 +53,7 @@ impl ImageDropFile {
             .suffix(".png")
             .tempfile()
             .context("无法创建拖放图片临时文件")?;
-        file.write_all(png)
-            .context("无法写入拖放图片临时文件")?;
+        file.write_all(png).context("无法写入拖放图片临时文件")?;
         file.flush().context("无法保存拖放图片临时文件")?;
         Ok(Self {
             path: file.into_temp_path(),

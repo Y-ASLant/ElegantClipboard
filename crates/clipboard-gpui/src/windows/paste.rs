@@ -5,10 +5,9 @@ use ::windows::Win32::{
     System::DataExchange::GetClipboardSequenceNumber,
     UI::{
         Input::KeyboardAndMouse::{
-            GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-            KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC,
-            MapVirtualKeyW, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_INSERT, VK_LWIN, VK_MENU,
-            VK_RWIN, VK_SHIFT, VK_V,
+            GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+            KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
+            VIRTUAL_KEY, VK_CONTROL, VK_INSERT, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
         },
         WindowsAndMessaging::{
             GetForegroundWindow, GetWindowThreadProcessId, IsWindow, SetForegroundWindow,
@@ -242,8 +241,8 @@ mod tests {
             let inputs = paste_inputs(preference);
             let actual = inputs.map(|input| unsafe { input.Anonymous.ki });
             assert_eq!(actual.map(|input| input.wVk), [VIRTUAL_KEY(0); 4]);
-            let scan = |key: VIRTUAL_KEY| {
-                unsafe { MapVirtualKeyW(u32::from(key.0), MAPVK_VK_TO_VSC) as u16 }
+            let scan = |key: VIRTUAL_KEY| unsafe {
+                MapVirtualKeyW(u32::from(key.0), MAPVK_VK_TO_VSC) as u16
             };
             assert_eq!(
                 actual.map(|input| input.wScan),
@@ -256,7 +255,10 @@ mod tests {
             };
             assert_eq!(actual[0].dwFlags, KEYEVENTF_SCANCODE);
             assert_eq!(actual[1].dwFlags, KEYEVENTF_SCANCODE | extended);
-            assert_eq!(actual[2].dwFlags, KEYEVENTF_SCANCODE | extended | KEYEVENTF_KEYUP);
+            assert_eq!(
+                actual[2].dwFlags,
+                KEYEVENTF_SCANCODE | extended | KEYEVENTF_KEYUP
+            );
             assert_eq!(actual[3].dwFlags, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP);
         }
     }

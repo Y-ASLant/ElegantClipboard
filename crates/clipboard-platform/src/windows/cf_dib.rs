@@ -11,8 +11,8 @@ pub(crate) fn from_png(png: &[u8]) -> Result<Vec<u8>> {
     if png.len() > MAX_IMAGE_BYTES {
         bail!("图片超过 50 MiB，无法生成位图");
     }
-    let decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(png))
-        .context("无法读取 PNG")?;
+    let decoder =
+        image::codecs::png::PngDecoder::new(std::io::Cursor::new(png)).context("无法读取 PNG")?;
     let (width, height) = decoder.dimensions();
     let pixels = u64::from(width).saturating_mul(u64::from(height));
     if width == 0 || height == 0 || pixels > MAX_IMAGE_PIXELS {
@@ -72,8 +72,8 @@ mod tests {
             2,
             2,
             vec![
-                0x11, 0x22, 0x33, 0xFF, 0x44, 0x55, 0x66, 0xFF, 0x77, 0x88, 0x99, 0xFF, 0xAA,
-                0xBB, 0xCC, 0xFF,
+                0x11, 0x22, 0x33, 0xFF, 0x44, 0x55, 0x66, 0xFF, 0x77, 0x88, 0x99, 0xFF, 0xAA, 0xBB,
+                0xCC, 0xFF,
             ],
         )
         .unwrap();

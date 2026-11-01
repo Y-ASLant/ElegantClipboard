@@ -74,11 +74,8 @@ fn write_content_locked(stash: &StashedClipboard, image_dib: Option<&[u8]>) -> R
                 .map_err(|error| anyhow!("恢复文件列表失败：{error}"))
         }
         CapturedClipboard::Image { png, .. } => {
-            clipboard_win::raw::set_without_clear(
-                8,
-                image_dib.context("恢复图片位图缺失")?,
-            )
-            .map_err(|error| anyhow!("恢复图片位图失败：{error}"))?;
+            clipboard_win::raw::set_without_clear(8, image_dib.context("恢复图片位图缺失")?)
+                .map_err(|error| anyhow!("恢复图片位图失败：{error}"))?;
             write_buffer_locked("PNG", png)
         }
     }

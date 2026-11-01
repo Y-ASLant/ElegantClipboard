@@ -200,9 +200,9 @@ fn image_drop_offers_a_retained_png_copy_before_bitmap_bytes() -> Result<()> {
     retain_dropped_image(&prepared);
     drop(prepared);
     assert_eq!(std::fs::read(&offered)?, stored);
-    let decoded = image::codecs::bmp::BmpDecoder::new_without_file_header(
-        std::io::Cursor::new(get(&object, CF_DIB.0).bytes()),
-    )?;
+    let decoded = image::codecs::bmp::BmpDecoder::new_without_file_header(std::io::Cursor::new(
+        get(&object, CF_DIB.0).bytes(),
+    ))?;
     let decoded = image::DynamicImage::from_decoder(decoded)?.to_rgba8();
     assert_eq!(decoded.dimensions(), (3, 2));
     assert_eq!(decoded.get_pixel(2, 1).0[..3], [20, 40, 60]);
