@@ -4,6 +4,7 @@ use super::*;
 #[derive(Debug)]
 pub(super) enum UpdateCheck {
     Idle,
+    #[cfg(windows)]
     Checking,
     UpToDate,
     Available(ReleaseInfo),
@@ -13,6 +14,7 @@ pub(super) enum UpdateCheck {
 }
 
 impl ClipboardView {
+    #[cfg(windows)]
     pub(super) fn start_update_check(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.update_check,
