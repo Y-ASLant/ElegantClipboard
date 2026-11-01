@@ -1,0 +1,2 @@
+# 打包、冒烟和 CI 脚本不是应用语言，不计入 GitHub 语言统计。
+*.ps1 linguist-vendored
