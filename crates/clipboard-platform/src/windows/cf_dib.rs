@@ -51,12 +51,12 @@ pub(crate) fn encode(image: &image::RgbaImage) -> Result<Vec<u8>> {
     dib.extend_from_slice(&0u32.to_le_bytes());
     dib.extend_from_slice(&image_size.to_le_bytes());
     dib.extend_from_slice(&[0; 16]);
-    for y in (0..height).rev() {
-        for x in 0..width {
-            let pixel = image.get_pixel(x, y).0;
-            dib.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+    let pixels = image.as_raw();
+    let padding = stride - width_usize * 3;
+    for row in pixels.as_chunks::<4>().0.chunks(width_usize).rev() {
+        for rgba in row {
+            dib.extend_from_slice(&[rgba[2], rgba[1], rgba[0]]);
         }
-        let padding = stride - width_usize * 3;
         dib.extend(std::iter::repeat_n(0, padding));
     }
     Ok(dib)
