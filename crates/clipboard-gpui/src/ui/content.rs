@@ -263,20 +263,6 @@ impl ClipboardView {
                                 }),
                         )
                         .child(
-                            Button::new("batch-select-loaded")
-                                .small()
-                                .ghost()
-                                .label(tr(self.language, "全选已加载", "Select loaded"))
-                                .disabled(
-                                    self.batch_pending
-                                        || self.history.loading
-                                        || self.selected_ids.len() == self.history.items.len(),
-                                )
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.select_all_loaded(window, cx)
-                                })),
-                        )
-                        .child(
                             Button::new("batch-exit")
                                 .small()
                                 .ghost()
