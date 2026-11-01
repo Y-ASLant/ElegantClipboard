@@ -85,7 +85,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             opacity: 45,
         },
         diagnostics_enabled: true,
-        run_as_admin: true,
+        run_as_admin: cfg!(windows),
         onboarding_completed: true,
     };
     preferences.set_theme(expected.theme)?;
