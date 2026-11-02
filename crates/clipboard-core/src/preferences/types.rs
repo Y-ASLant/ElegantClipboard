@@ -266,6 +266,7 @@ pub struct DisplayPreference {
     pub show_byte_size: bool,
     pub show_source_app: bool,
     pub source_app_display: SourceAppDisplay,
+    pub show_card_number: bool,
 }
 
 impl Default for DisplayPreference {
@@ -281,6 +282,7 @@ impl Default for DisplayPreference {
             show_byte_size: true,
             show_source_app: true,
             source_app_display: SourceAppDisplay::Both,
+            show_card_number: true,
         }
     }
 }

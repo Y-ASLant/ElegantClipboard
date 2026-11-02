@@ -52,7 +52,7 @@ impl ClipboardView {
             }))
     }
 
-    /// 卡片摘要行文本：时间/类型、置顶标记、字符数、大小与失效提示。
+    /// 卡片摘要行文本：时间/类型、字符数、大小与失效提示。
     pub(super) fn row_summary(
         &self,
         item: &DbClipboardItem,
@@ -93,9 +93,6 @@ impl ClipboardView {
         } else {
             kind.to_owned()
         };
-        if item.is_pinned {
-            summary.push_str(tr(self.language, " · 置顶", " · Pinned"));
-        }
         if self.display.show_time
             && !is_image
             && !matches!(item.content_type.as_str(), "text" | "url")

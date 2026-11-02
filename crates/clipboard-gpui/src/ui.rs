@@ -13,6 +13,7 @@ mod groups;
 mod history_card;
 mod history_events;
 mod history_list;
+mod history_scroll_top;
 mod hover_content;
 mod hover_curve;
 mod hover_information;
@@ -321,6 +322,7 @@ struct ClipboardView {
     list_focus: FocusHandle,
     scroll: VirtualListScrollHandle,
     scroll_to_top_task: Option<Task<()>>,
+    scroll_top_position: history_scroll_top::ScrollTopPosition,
     row_sizes: Rc<Vec<gpui_kit::Size<Pixels>>>,
     row_offsets: Vec<Pixels>,
     monitoring: bool,

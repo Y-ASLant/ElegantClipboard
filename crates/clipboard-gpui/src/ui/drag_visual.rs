@@ -7,6 +7,8 @@ use super::*;
 pub(super) struct HistoryCardSnapshot {
     pub(super) is_image: bool,
     pub(super) is_files: bool,
+    pub(super) is_pinned: bool,
+    pub(super) card_index: usize,
     pub(super) source_app_name: Option<String>,
     pub(super) source_app_icon: Option<String>,
     pub(super) display: DisplayPreference,
@@ -82,6 +84,22 @@ impl HistoryCardSnapshot {
                                     .child(self.source_app_name.clone().unwrap_or_default()),
                             )
                         }),
+                )
+            })
+            .when(self.display.show_card_number, |footer| {
+                footer.child(
+                    div()
+                        .flex_none()
+                        .min_w(px(visual::SPACE_6))
+                        .h(px(visual::SPACE_4))
+                        .px(px(visual::SPACE_1))
+                        .rounded_full()
+                        .bg(cx.theme().primary.opacity(0.12))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(cx.theme().primary)
+                        .child(format!("{}", self.card_index + 1)),
                 )
             })
     }
@@ -204,6 +222,7 @@ impl HistoryCardSnapshot {
             .group("")
             .p(px(padding))
             .rounded(cx.theme().radius_lg)
+            .overflow_hidden()
             .border(px(visual::BORDER_WIDTH))
             .border_color(if self.selected {
                 cx.theme().primary
@@ -223,7 +242,33 @@ impl HistoryCardSnapshot {
             .gap(px(spacing))
             .child(body)
             .child(self.metadata_row(cx))
+            .when(self.is_pinned, |card| card.child(pin_ribbon(cx)))
     }
+}
+
+/// 置顶封条的平行斜边连接卡片上边与右边，保留圆角处的空白。
+fn pin_ribbon(cx: &App) -> Div {
+    const INNER: f32 = 16.;
+    const OUTER: f32 = 28.;
+    let fill = cx.theme().primary;
+    div().absolute().top_0().right_0().size(px(OUTER)).child(
+        canvas(
+            |_, _, _| (),
+            move |bounds, (), window, _| {
+                let corner = point(bounds.origin.x + bounds.size.width, bounds.origin.y);
+                let mut path = PathBuilder::fill();
+                path.move_to(point(corner.x - px(OUTER), corner.y));
+                path.line_to(point(corner.x - px(INNER), corner.y));
+                path.line_to(point(corner.x, corner.y + px(INNER)));
+                path.line_to(point(corner.x, corner.y + px(OUTER)));
+                path.close();
+                if let Ok(path) = path.build() {
+                    window.paint_path(path, fill);
+                }
+            },
+        )
+        .size_full(),
+    )
 }
 
 impl HistoryDrag {

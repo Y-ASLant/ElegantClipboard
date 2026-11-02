@@ -245,6 +245,12 @@ impl SettingsWindowView {
                             display.show_source_app,
                             |next: &mut DisplayPreference, checked| next.show_source_app = checked,
                         ),
+                        (
+                            "show-card-number",
+                            tr(language, "显示卡片序号", "Show card number"),
+                            display.show_card_number,
+                            |next: &mut DisplayPreference, checked| next.show_card_number = checked,
+                        ),
                     ]
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {

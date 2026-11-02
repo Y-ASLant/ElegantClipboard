@@ -107,6 +107,7 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
         show_byte_size: false,
         show_source_app: false,
         source_app_display: SourceAppDisplay::Icon,
+        show_card_number: false,
     };
     preferences.set_display(display)?;
     assert!(

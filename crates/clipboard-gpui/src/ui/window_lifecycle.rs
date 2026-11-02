@@ -290,6 +290,7 @@ impl ClipboardView {
     }
 
     pub(super) fn prepare_to_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.scroll_top_position.finish();
         self.close_history_menu(cx);
         self.window_show_task = None;
         self.suspend_onboarding(cx);

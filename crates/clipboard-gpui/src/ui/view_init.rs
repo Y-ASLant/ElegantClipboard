@@ -321,6 +321,7 @@ impl ClipboardView {
             list_focus,
             scroll: VirtualListScrollHandle::new(),
             scroll_to_top_task: None,
+            scroll_top_position: history_scroll_top::ScrollTopPosition::default(),
             row_sizes: Rc::new(Vec::new()),
             row_offsets: vec![px(0.)],
             monitoring: startup.monitoring,

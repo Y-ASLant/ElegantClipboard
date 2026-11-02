@@ -104,6 +104,8 @@ impl ClipboardView {
         let card = drag_visual::HistoryCardSnapshot {
             is_image,
             is_files,
+            is_pinned: item.is_pinned,
+            card_index: index,
             source_app_name: item.source_app_name.clone(),
             source_app_icon: item.source_app_icon.clone(),
             display: self.display,

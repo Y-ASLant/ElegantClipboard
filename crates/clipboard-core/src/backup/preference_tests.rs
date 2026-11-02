@@ -54,6 +54,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             show_byte_size: false,
             show_source_app: false,
             source_app_display: SourceAppDisplay::Name,
+            show_card_number: false,
         },
         audio: AudioPreference {
             copy_enabled: true,
