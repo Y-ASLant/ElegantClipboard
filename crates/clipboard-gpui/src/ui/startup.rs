@@ -1,7 +1,7 @@
 use super::*;
 use clipboard_platform::InstanceBusy;
 
-gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine]);
+gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine, Pin, PinOff]);
 
 struct AppAssets;
 

@@ -239,9 +239,9 @@ impl ClipboardView {
                 "pin",
                 id,
                 if pinned {
-                    IconName::StarOff
+                    gpui_kit::assets::IconName::PinOff
                 } else {
-                    IconName::Star
+                    gpui_kit::assets::IconName::Pin
                 },
                 if pinned {
                     tr(self.language, "取消置顶", "Unpin")
@@ -253,20 +253,6 @@ impl ClipboardView {
                 cx,
                 move |this, _, _, cx| {
                     this.send(Command::TogglePin(id), cx);
-                },
-            ))
-            .child(self.action_button(
-                "move-group",
-                id,
-                IconName::Folder,
-                tr(self.language, "移动到分组", "Move to group"),
-                self.group_move_disabled(),
-                false,
-                cx,
-                move |this, _, _, cx| {
-                    this.group_move_id = Some(id);
-                    this.history.selected = Some(id);
-                    cx.notify();
                 },
             ))
             .child(self.action_button(

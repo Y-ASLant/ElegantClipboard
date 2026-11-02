@@ -21,7 +21,7 @@ pub(super) fn history_menu_item(
         HistoryMenuAction::CopyAsFile | HistoryMenuAction::SaveAs(_) => IconName::File,
         HistoryMenuAction::Reveal => IconName::ExternalLink,
         HistoryMenuAction::ToggleFavorite => IconName::Heart,
-        HistoryMenuAction::TogglePin => IconName::Star,
+        HistoryMenuAction::TogglePin => IconName::Pin,
         HistoryMenuAction::MoveToGroup => IconName::Folder,
         HistoryMenuAction::Delete => IconName::Trash,
     };
