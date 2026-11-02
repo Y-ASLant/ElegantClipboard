@@ -60,15 +60,16 @@ impl ScrollTopPosition {
             return;
         }
         let travel = Self::travel(viewport);
-        let fraction = |position: Pixels, extent: Pixels| {
-            if extent > px(0.) {
-                (f32::from(position) / f32::from(extent)).clamp(0., 1.)
-            } else {
-                0.
-            }
-        };
-        self.x = fraction(gesture.origin.x + delta.x, travel.x);
-        self.y = fraction(gesture.origin.y + delta.y, travel.y);
+        self.x = Self::fraction(gesture.origin.x + delta.x, travel.x);
+        self.y = Self::fraction(gesture.origin.y + delta.y, travel.y);
+    }
+
+    fn fraction(position: Pixels, extent: Pixels) -> f32 {
+        if extent > px(0.) {
+            (f32::from(position) / f32::from(extent)).clamp(0., 1.)
+        } else {
+            0.
+        }
     }
 
     pub(super) fn finish(&mut self) {
@@ -105,9 +106,16 @@ impl ClipboardView {
                     .ml(px(-BUTTON_SIZE * position.x))
                     .mt(px(-BUTTON_SIZE * position.y))
                     .size(px(BUTTON_SIZE))
+                    // Only the floating control blocks row hits, not its full-list positioning layer.
+                    .block_mouse_except_scroll()
                     .rounded(cx.theme().radius)
                     .bg(cx.theme().popover)
                     .shadow(visual::control_shadow())
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if *hovered {
+                            this.close_hover_preview("scroll_top_hovered", cx);
+                        }
+                    }))
                     .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
                         if event.button == MouseButton::Left
                             && let Some(viewport) = this.drag_viewport.get()

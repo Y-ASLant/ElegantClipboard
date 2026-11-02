@@ -23,6 +23,7 @@ impl HistoryMenuWindow {
         build: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
         owner.update(cx, |view, cx| {
+            view.close_hover_preview("history_menu_opening", cx);
             if let Some(existing) = view.history_menu_window.take() {
                 let _ = existing.update(cx, |_, window, _| window.remove_window());
             }

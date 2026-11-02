@@ -3,6 +3,12 @@ use super::presentation::content_type_label;
 use super::*;
 use clipboard_core::search::search_highlight_ranges;
 
+#[derive(Default)]
+struct CardHover {
+    content: bool,
+    actions: bool,
+}
+
 impl ClipboardView {
     pub(super) fn render_row(
         &self,
@@ -122,8 +128,11 @@ impl ClipboardView {
             file_icon,
             selected: selected || marked,
         };
-        let hovered = window.use_keyed_state(("history-hover", id as usize), cx, |_, _| false);
-        let is_hovered = *hovered.read(cx);
+        let hovered = window.use_keyed_state(("history-hover", id as usize), cx, |_, _| {
+            CardHover::default()
+        });
+        let action_hover = hovered.clone();
+        let is_hovered = hovered.read(cx).content || hovered.read(cx).actions;
         let background = if card.selected {
             cx.theme().list_active
         } else if is_hovered {
@@ -199,7 +208,7 @@ impl ClipboardView {
                 cx.listener(|this, _, _, _| this.cancel_pending_row_click()),
             )
             .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
-                hovered.update(cx, |hovered, _| *hovered = *is_hovered);
+                hovered.update(cx, |hovered, _| hovered.content = *is_hovered);
                 // 鼠标驱动的焦点：悬停进入即转移选中态，与键盘/点击同一目标。
                 // 拖拽与批量模式下 selection 不参与渲染与快捷键，保持不变。
                 if *is_hovered && !this.batch_mode && !cx.has_active_drag() {
@@ -209,6 +218,10 @@ impl ClipboardView {
                 cx.notify();
             }))
             .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                // Native menus can close without changing this row's cached hover state.
+                if !this.hover_source_active {
+                    this.set_hover_source(id, true, cx);
+                }
                 this.update_hover_anchor(id, event.position.y, cx);
             }))
             .on_scroll(cx.listener(move |this, event: &ScrollEvent, window, cx| {
@@ -290,18 +303,22 @@ impl ClipboardView {
                 .size_full(),
             )
             .child(surface.when(!self.batch_mode, |card| {
-                card.child(
-                    self.render_row_action_bar(id, item, card_padding, cx)
-                        .opacity(action_opacity)
-                        .when(action_opacity == 0., |bar| bar.invisible()),
-                )
-                .child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
-                .child(self.drag_handle(
-                    id,
-                    false,
-                    self.display.show_drag_area_indicator,
-                    cx,
-                ))
+                card.child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
+                    .child(self.drag_handle(id, false, self.display.show_drag_area_indicator, cx))
+                    .child(
+                        self.render_row_action_bar(id, item, card_padding, cx)
+                            .id(("history-row-actions", id as usize))
+                            .block_mouse_except_scroll()
+                            .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                                action_hover.update(cx, |hovered, _| hovered.actions = *is_hovered);
+                                if *is_hovered {
+                                    this.close_hover_preview("row_actions_hovered", cx);
+                                }
+                                cx.notify();
+                            }))
+                            .opacity(action_opacity)
+                            .when(action_opacity == 0., |bar| bar.invisible()),
+                    )
             }));
         let row = self.history_row_menu(row, item, cx);
         let row = div()

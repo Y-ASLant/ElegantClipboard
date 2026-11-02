@@ -191,6 +191,10 @@ impl ClipboardView {
                 || self.history.loading
                 || self.editor.id.is_some()
                 || self.pending_row_click.is_some()
+                || self
+                    .history_menu_window
+                    .and_then(|menu| menu.downcast::<menu_window::HistoryMenuWindow>())
+                    .is_some_and(|menu| menu.update(cx, |_, _, _| ()).is_ok())
             {
                 return;
             }

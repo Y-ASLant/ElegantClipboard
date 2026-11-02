@@ -99,7 +99,7 @@ impl HistoryCardSnapshot {
                         .items_center()
                         .justify_center()
                         .text_color(cx.theme().primary)
-                        .child(format!("{}", self.card_index + 1)),
+                        .child((self.card_index + 1).to_string()),
                 )
             })
     }
