@@ -7,6 +7,18 @@ pub enum CornerRadiusPreference {
     Fixed(u8),
 }
 
+/// 剪贴板卡片和预览卡片的圆角，相对全局圆角独立。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CardCornerPreference {
+    /// 全局圆角的一半。
+    #[default]
+    Half,
+    /// 与全局圆角相同。
+    Global,
+    /// 直角。
+    Off,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SoundTiming {

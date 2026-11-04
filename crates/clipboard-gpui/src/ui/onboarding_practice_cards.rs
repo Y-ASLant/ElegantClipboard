@@ -34,7 +34,7 @@ impl OnboardingPractice {
             .items_center()
             .gap(px(visual::SPACE_3))
             .p(px(visual::SPACE_2))
-            .rounded(cx.theme().radius_lg)
+            .rounded(crate::card_radius::card_radius(cx))
             .border(px(visual::BORDER_WIDTH))
             .border_color(crate::design_system::container_border(cx))
             .bg(cx.theme().group_box);

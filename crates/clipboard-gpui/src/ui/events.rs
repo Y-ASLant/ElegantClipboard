@@ -119,6 +119,16 @@ impl ClipboardView {
                 crate::design_system::set_corner_radius(self.corner_radius.value, cx);
                 true
             }
+            Event::CardCornerSaved(result) => {
+                self.acknowledge_save(
+                    result,
+                    |this| &mut this.card_corner,
+                    ("卡片圆角保存失败", "Failed to save card corners"),
+                );
+                crate::card_radius::set_card_corner(self.card_corner.value, cx);
+                cx.refresh_windows();
+                true
+            }
             Event::WindowEffectSaved(result) => self.apply_window_effect_saved(result, window, cx),
             Event::LanguageSaved(result) => self.apply_language_saved(result, window, cx),
             Event::HotkeySaved(result) => self.apply_hotkey_saved(result),

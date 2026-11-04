@@ -81,10 +81,12 @@ impl SettingsWindowView {
                                 .child(
                                     settings_inline()
                                         .child(div().flex_1().min_w_0().child(
-                                            Input::new(&self.app_filter_input).refine_style(
-                                                &StyleRefinement::default()
-                                                    .h(px(visual::CONTROL_HEIGHT_LARGE)),
-                                            ),
+                                            Input::new(&self.app_filter_input)
+                                                .w_full()
+                                                .refine_style(
+                                                    &StyleRefinement::default()
+                                                        .h(px(visual::CONTROL_HEIGHT_LARGE)),
+                                                ),
                                         ))
                                         .child(
                                             Button::new("app-filter-add-rule")

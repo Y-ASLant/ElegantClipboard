@@ -121,3 +121,39 @@ fn backup_restore_preserves_saved_radius_without_rewriting() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn card_corner_persists_and_leaves_invalid_text_untouched() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("clipboard.db");
+    let empty = Database::new(path.clone())?;
+    assert_eq!(
+        Preferences::new(&empty).card_corner()?,
+        CardCornerPreference::Half
+    );
+    drop(empty);
+    for preference in [
+        CardCornerPreference::Half,
+        CardCornerPreference::Global,
+        CardCornerPreference::Off,
+    ] {
+        let db = Database::new(path.clone())?;
+        Preferences::new(&db).set_card_corner(preference)?;
+        drop(db);
+        let db = Database::new(path.clone())?;
+        assert_eq!(Preferences::new(&db).card_corner()?, preference);
+    }
+    let db = Database::new(path)?;
+    SettingsRepository::new(&db).set(CARD_CORNER_KEY, "wide")?;
+    assert_eq!(
+        Preferences::new(&db).card_corner()?,
+        CardCornerPreference::Half
+    );
+    assert_eq!(
+        SettingsRepository::new(&db)
+            .get(CARD_CORNER_KEY)?
+            .as_deref(),
+        Some("wide")
+    );
+    Ok(())
+}

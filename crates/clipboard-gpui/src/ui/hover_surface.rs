@@ -102,6 +102,7 @@ pub(super) fn render_preview(
         (content_size.height - note_height).max(px(1.)),
     );
     let theme = cx.theme();
+    let radius = crate::card_radius::card_radius(cx);
     let content = div()
         .flex_none()
         .flex()
@@ -115,7 +116,7 @@ pub(super) fn render_preview(
                     .w_full()
                     .h(note_height)
                     .overflow_hidden()
-                    .rounded_t((theme.radius_lg - border).max(px(0.)))
+                    .rounded_t((radius - border).max(px(0.)))
                     .border_b(px(visual::BORDER_WIDTH))
                     .border_color(theme.border)
                     .bg(theme.group_box)
@@ -142,7 +143,7 @@ pub(super) fn render_preview(
     let surface = div()
         .size_full()
         .overflow_hidden()
-        .rounded(theme.radius_lg)
+        .rounded(radius)
         .when(!image_preview, |this| {
             this.border(px(visual::BORDER_WIDTH))
                 .border_color(theme.border)

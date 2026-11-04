@@ -229,6 +229,13 @@ impl Worker {
                     Event::CornerRadiusSaved,
                 );
             }
+            Command::SetCardCorner(corner) => {
+                return self.save_setting(
+                    corner,
+                    Preferences::set_card_corner,
+                    Event::CardCornerSaved,
+                );
+            }
             Command::SetLanguage(language) => {
                 return self.save_setting(
                     language,

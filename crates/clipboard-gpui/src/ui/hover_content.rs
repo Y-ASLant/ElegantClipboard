@@ -191,9 +191,9 @@ pub(super) fn render_content(
             .flex_none()
             .w(dimensions.width)
             .h(dimensions.height)
-            .rounded_b(cx.theme().radius_lg)
+            .rounded_b(crate::card_radius::card_radius(cx))
             .when(view.information.note.is_none(), |this| {
-                this.rounded_t(cx.theme().radius_lg)
+                this.rounded_t(crate::card_radius::card_radius(cx))
             })
             .object_fit(ObjectFit::Contain)
             .into_any_element();

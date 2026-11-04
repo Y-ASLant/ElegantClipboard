@@ -12,6 +12,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         theme: ThemePreference::Dark,
         theme_color: ThemeColor::VibrantOrange,
         corner_radius: CornerRadiusPreference::Fixed(12),
+        card_corner: CardCornerPreference::Off,
         language: LanguagePreference::English,
         hotkey: HotkeyPreference::Shortcut("Ctrl+Shift+F8".into()),
         paused: true,
@@ -92,6 +93,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_theme(expected.theme)?;
     preferences.set_theme_color(expected.theme_color)?;
     preferences.set_corner_radius(expected.corner_radius)?;
+    preferences.set_card_corner(expected.card_corner)?;
     preferences.set_language(expected.language)?;
     preferences.set_hotkey(expected.hotkey.clone())?;
     preferences.set_capture_paused(expected.paused)?;

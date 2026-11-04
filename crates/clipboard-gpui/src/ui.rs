@@ -343,6 +343,7 @@ struct ClipboardView {
     theme_color: ThemeColor,
     theme_color_pending: bool,
     corner_radius: PendingPref<CornerRadiusPreference>,
+    card_corner: PendingPref<clipboard_core::preferences::CardCornerPreference>,
     window_effect: WindowEffectPreference,
     window_effect_pending: bool,
     language: LanguagePreference,
@@ -473,8 +474,7 @@ struct SettingsWindowView {
     link_error: Option<String>,
 }
 
-/// 单值偏好及其在途保存标记：`value` 是当前生效值，
-/// `pending` 表示保存命令已发出但尚未收到确认。
+/// 单值偏好及其在途保存标记：`value` 是当前生效值，`pending` 表示保存已发出但尚未确认。
 #[derive(Debug, Clone, Copy)]
 struct PendingPref<T> {
     value: T,

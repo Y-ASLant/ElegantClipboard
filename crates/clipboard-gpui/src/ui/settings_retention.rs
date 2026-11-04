@@ -76,20 +76,18 @@ impl SettingsWindowView {
                 settings_columns()
                     .child(
                         settings_column_field(tr(language, "保留天数", "Retention days")).child(
-                            div().w(px(180.)).child(
-                                NumberInput::new(&self.retention_days_input)
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .disabled(saved.pending),
-                            ),
+                            NumberInput::new(&self.retention_days_input)
+                                .w_full()
+                                .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                .disabled(saved.pending),
                         ),
                     )
                     .child(
                         settings_column_field(tr(language, "每组数量", "Items per group")).child(
-                            div().w(px(180.)).child(
-                                NumberInput::new(&self.retention_count_input)
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .disabled(saved.pending),
-                            ),
+                            NumberInput::new(&self.retention_count_input)
+                                .w_full()
+                                .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                .disabled(saved.pending),
                         ),
                     ),
             )

@@ -1,4 +1,6 @@
-use super::{CORNER_RADIUS_KEY, CornerRadiusPreference, Preferences};
+use super::{
+    CARD_CORNER_KEY, CORNER_RADIUS_KEY, CardCornerPreference, CornerRadiusPreference, Preferences,
+};
 use anyhow::Result;
 
 impl Preferences {
@@ -27,6 +29,26 @@ impl Preferences {
                     .set(CORNER_RADIUS_KEY, &radius.to_string())?;
             }
         }
+        Ok(())
+    }
+
+    pub fn card_corner(&self) -> Result<CardCornerPreference> {
+        Ok(match self.repository.get(CARD_CORNER_KEY)?.as_deref() {
+            Some("global") => CardCornerPreference::Global,
+            Some("off") => CardCornerPreference::Off,
+            _ => CardCornerPreference::Half,
+        })
+    }
+
+    pub fn set_card_corner(&self, preference: CardCornerPreference) -> Result<()> {
+        self.repository.set(
+            CARD_CORNER_KEY,
+            match preference {
+                CardCornerPreference::Half => "half",
+                CardCornerPreference::Global => "global",
+                CardCornerPreference::Off => "off",
+            },
+        )?;
         Ok(())
     }
 }

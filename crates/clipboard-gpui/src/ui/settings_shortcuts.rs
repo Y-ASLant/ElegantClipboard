@@ -150,6 +150,7 @@ impl SettingsWindowView {
             )
             .child(
                 Input::new(self.shortcut_input.as_ref().expect("editing input exists"))
+                    .w_full()
                     .refine_style(&StyleRefinement::default().h(px(visual::CONTROL_HEIGHT_LARGE))),
             )
             .when(self.shortcut_recording, |panel| {

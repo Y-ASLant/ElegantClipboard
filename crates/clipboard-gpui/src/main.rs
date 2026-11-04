@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod capabilities;
+mod card_radius;
 mod design_system;
 mod diagnostics;
 mod links_core;

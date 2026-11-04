@@ -17,6 +17,7 @@ pub(crate) const RETENTION_KEY: &str = "gpui_retention";
 const THEME_KEY: &str = "gpui_theme_mode";
 const THEME_COLOR_KEY: &str = "gpui_theme_color";
 const CORNER_RADIUS_KEY: &str = "gpui_corner_radius";
+const CARD_CORNER_KEY: &str = "gpui_card_corner";
 const LANGUAGE_KEY: &str = "gpui_language";
 const HOTKEY_KEY: &str = "gpui_hotkey";
 const CAPTURE_PAUSED_KEY: &str = "gpui_capture_paused";

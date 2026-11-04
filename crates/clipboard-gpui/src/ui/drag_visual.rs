@@ -221,7 +221,7 @@ impl HistoryCardSnapshot {
             .h_full()
             .group("")
             .p(px(padding))
-            .rounded(cx.theme().radius_lg)
+            .rounded(crate::card_radius::card_radius(cx))
             .overflow_hidden()
             .border(px(visual::BORDER_WIDTH))
             .border_color(if self.selected {
@@ -246,21 +246,21 @@ impl HistoryCardSnapshot {
     }
 }
 
-/// 置顶封条的平行斜边连接卡片上边与右边，保留圆角处的空白。
+/// 置顶封条的平行斜边连接卡片上边与右边，留白等于卡片圆角。
 fn pin_ribbon(cx: &App) -> Div {
-    const INNER: f32 = 16.;
-    const OUTER: f32 = 28.;
+    let inner = crate::card_radius::card_radius(cx).as_f32();
+    let outer = inner + 12.;
     let fill = cx.theme().primary;
-    div().absolute().top_0().right_0().size(px(OUTER)).child(
+    div().absolute().top_0().right_0().size(px(outer)).child(
         canvas(
             |_, _, _| (),
             move |bounds, (), window, _| {
                 let corner = point(bounds.origin.x + bounds.size.width, bounds.origin.y);
                 let mut path = PathBuilder::fill();
-                path.move_to(point(corner.x - px(OUTER), corner.y));
-                path.line_to(point(corner.x - px(INNER), corner.y));
-                path.line_to(point(corner.x, corner.y + px(INNER)));
-                path.line_to(point(corner.x, corner.y + px(OUTER)));
+                path.move_to(point(corner.x - px(outer), corner.y));
+                path.line_to(point(corner.x - px(inner), corner.y));
+                path.line_to(point(corner.x, corner.y + px(inner)));
+                path.line_to(point(corner.x, corner.y + px(outer)));
                 path.close();
                 if let Ok(path) = path.build() {
                     window.paint_path(path, fill);

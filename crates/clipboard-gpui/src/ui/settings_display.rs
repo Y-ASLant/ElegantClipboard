@@ -3,6 +3,7 @@ use super::settings_common::{
     settings_description, settings_inline, settings_toggle,
 };
 use super::*;
+use clipboard_core::preferences::CardCornerPreference;
 use gpui_kit::component::{checkbox::Checkbox, input::NumberInput};
 
 impl SettingsWindowView {
@@ -17,6 +18,7 @@ impl SettingsWindowView {
         let theme_color = owner_state.theme_color;
         let theme_color_pending = owner_state.theme_color_pending;
         let corner_radius = owner_state.corner_radius;
+        let card_corner = owner_state.card_corner;
         let legacy_radius = match corner_radius.value {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
             _ => None,
@@ -131,6 +133,40 @@ impl SettingsWindowView {
                     LanguagePreference::English => format!("Keeping the saved legacy radius: {value} px. Choose an option above to update it."),
                 }, cx))
             })
+            .child(
+                settings_column_field(tr(language, "卡片圆角", "Card corners"))
+                    .child(choice_tabs(
+                        "settings-card-corner",
+                        &self.owner,
+                        [
+                            CardCornerPreference::Half,
+                            CardCornerPreference::Global,
+                            CardCornerPreference::Off,
+                        ],
+                        [
+                            tr(language, "默认", "Default"),
+                            tr(language, "跟随全局", "Global"),
+                            tr(language, "关闭", "Off"),
+                        ],
+                        card_corner.value,
+                        card_corner.pending,
+                        |owner| owner.card_corner.value,
+                        |owner, preference, cx| {
+                            if owner.send(Command::SetCardCorner(preference), cx) {
+                                owner.card_corner.pending = true;
+                                cx.notify();
+                            }
+                        },
+                    ))
+                    .child(settings_description(
+                        tr(
+                            language,
+                            "剪贴板卡片和预览卡片。默认是全局圆角的一半。",
+                            "Clipboard cards and preview cards. Default is half the global radius.",
+                        ),
+                        cx,
+                    )),
+            )
             .child(settings_column().child(self.settings_window_effect_content(cx)))
             .into_any_element()
     }
@@ -210,11 +246,10 @@ impl SettingsWindowView {
             )
             .child(
                 settings_column_field(tr(language, "卡片预览行数", "Card preview lines")).child(
-                    div().w(px(160.)).flex_none().child(
-                        NumberInput::new(&self.preview_lines_input)
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .disabled(display_pending),
-                    ),
+                    NumberInput::new(&self.preview_lines_input)
+                        .w_full()
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
+                        .disabled(display_pending),
                 ),
             )
             .child(
