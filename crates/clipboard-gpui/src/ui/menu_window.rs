@@ -20,6 +20,7 @@ impl HistoryMenuWindow {
         window: &mut Window,
         cx: &mut App,
         owner: Entity<ClipboardView>,
+        has_submenu: bool,
         build: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
         owner.update(cx, |view, cx| {
@@ -32,8 +33,14 @@ impl HistoryMenuWindow {
         let screen = window
             .display(cx)
             .map_or(window.bounds(), |display| display.visible_bounds());
-        // PopupMenu draws submenus in this same native window.
-        let width = px(MENU_SLOT * 2.).min(screen.size.width);
+        // PopupMenu draws submenus in this same native window. A flat menu
+        // occupies one slot; only a menu containing submenus needs both panes.
+        let width = px(if has_submenu {
+            MENU_SLOT * 2.
+        } else {
+            MENU_SLOT
+        })
+        .min(screen.size.width);
         let height = px(MENU_HEIGHT).min(screen.size.height);
         let origin_x = cursor
             .x

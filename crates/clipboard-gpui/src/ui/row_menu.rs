@@ -210,11 +210,15 @@ impl ClipboardView {
                 cx.stop_propagation();
                 let entity = entity.clone();
                 let save_as_name = entity.read(cx).save_as_suggested_for(id);
+                // Rich text and plain text items each get a transform/format
+                // submenu; everything else stays in a single-pane window.
+                let has_submenu = is_rich_item || is_text_item;
                 menu_window::HistoryMenuWindow::open(
                     event.position,
                     window,
                     cx,
                     entity.clone(),
+                    has_submenu,
                     move |menu, window, cx| {
                         let menu = menu
                             .min_w(px(240.))

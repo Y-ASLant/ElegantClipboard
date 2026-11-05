@@ -187,6 +187,7 @@ pub(super) fn render_content(
         .map(ImageSource::from)
         .or_else(|| image.map(ImageSource::from));
     if let Some(image) = image {
+        let loading_color = cx.theme().muted_foreground;
         return img(image)
             .flex_none()
             .w(dimensions.width)
@@ -196,6 +197,19 @@ pub(super) fn render_content(
                 this.rounded_t(crate::card_radius::card_radius(cx))
             })
             .object_fit(ObjectFit::Contain)
+            .with_loading(move || {
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui_kit::component::spinner::Spinner::new()
+                            .with_size(gpui_kit::component::Size::Medium)
+                            .color(loading_color),
+                    )
+                    .into_any_element()
+            })
             .into_any_element();
     }
     let body = div()
