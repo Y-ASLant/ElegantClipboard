@@ -111,17 +111,20 @@ pub fn media_row_height(density: CardDensity, image: bool, title_lines: u8) -> f
     card_chrome(density) + thumb.max(title)
 }
 
-/// Visible space between card surfaces. The last card uses the same inset.
-pub fn card_gap(density: CardDensity) -> f32 {
+/// One-sided inset around a card inside its row.
+pub fn card_spacing(density: CardDensity) -> f32 {
     match density {
-        CardDensity::Compact => SPACE_1,
-        CardDensity::Standard => SPACE_2,
-        CardDensity::Spacious => SPACE_3,
+        CardDensity::Compact => 2.,
+        CardDensity::Standard => 4.,
+        CardDensity::Spacious => 6.,
     }
 }
 
-pub fn card_spacing(density: CardDensity) -> f32 {
-    card_gap(density) / 2.
+/// Extra height the last row carries so its bottom inset is PAGE_PADDING
+/// instead of the usual card_spacing. Row height, padding, and the virtual
+/// list's trailing offset all derive from this single delta.
+pub fn last_row_extra(density: CardDensity) -> f32 {
+    PAGE_PADDING - card_spacing(density)
 }
 
 pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {

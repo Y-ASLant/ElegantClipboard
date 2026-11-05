@@ -198,8 +198,11 @@ impl ClipboardView {
         let last = index + 1 == self.history.items.len();
         let row_height = self.row_sizes.get(index).map_or_else(
             || {
-                let height = history_row_height(item, self.display);
-                px(if last { height + card_spacing } else { height })
+                let mut height = px(history_row_height(item, self.display));
+                if last {
+                    height += px(visual::last_row_extra(self.display.card_density));
+                }
+                height
             },
             |size| size.height,
         );
@@ -242,8 +245,10 @@ impl ClipboardView {
             .h(row_height)
             .px(px(PAGE_PADDING))
             .pt(px(card_spacing))
+            // The last card's bottom inset matches the page's side margins:
+            // card_spacing + last_row_extra = PAGE_PADDING.
             .pb(px(if last {
-                visual::card_gap(self.display.card_density)
+                card_spacing + visual::last_row_extra(self.display.card_density)
             } else {
                 card_spacing
             }))

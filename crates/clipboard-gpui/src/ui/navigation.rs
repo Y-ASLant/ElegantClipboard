@@ -31,7 +31,7 @@ pub(super) fn history_row_layout(
     let mut offsets = Vec::with_capacity(items.len() + 1);
     let mut top = px(0.);
     offsets.push(top);
-    let trailing = px(visual::card_spacing(display.card_density));
+    let trailing = px(visual::last_row_extra(display.card_density));
     for (index, item) in items.iter().enumerate() {
         let mut height = px(history_row_height(item, display));
         if index + 1 == items.len() {
