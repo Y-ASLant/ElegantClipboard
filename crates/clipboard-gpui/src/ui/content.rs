@@ -361,29 +361,6 @@ impl ClipboardView {
                 ))
             })
             .child(self.render_history_list(empty_message, cx))
-            .when(
-                (self.history.items.len() as i64) < self.history.total
-                    && self.history.limit < HISTORY_LIMIT,
-                |container| {
-                    container.child(
-                        div().px(px(PAGE_PADDING)).py(px(visual::SPACE_2)).child(
-                            Button::new("more")
-                                .ghost()
-                                .small()
-                                .label(tr(self.language, "加载更多", "Load more"))
-                                .disabled(self.history.loading)
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.history.limit =
-                                        (this.history.limit + PAGE_SIZE).min(HISTORY_LIMIT);
-                                    this.history.generation += 1;
-                                    this.history.loading = true;
-                                    this.query(cx);
-                                    cx.notify();
-                                })),
-                        ),
-                    )
-                },
-            )
             .into_any_element()
     }
 }

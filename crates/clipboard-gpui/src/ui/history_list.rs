@@ -86,6 +86,7 @@ impl ClipboardView {
             }))
             .on_action(cx.listener(|this, _: &Last, _, cx| {
                 this.select_index(usize::MAX, ScrollStrategy::Bottom, cx);
+                this.request_next_page(cx);
             }))
             .on_action(cx.listener(|this, _: &PageUp, _, cx| {
                 this.select(-this.page_step(), ScrollStrategy::Top, cx);
@@ -200,6 +201,13 @@ impl ClipboardView {
                         .on_scroll(cx.listener(|this, _, _, cx| {
                             this.scroll_to_top_task = None;
                             this.close_hover_preview("history_scrolled", cx);
+                            if super::navigation::history_scroll_should_extend(
+                                this.scroll.offset().y,
+                                this.scroll.max_offset().y,
+                                this.scroll.bounds().size.height,
+                            ) {
+                                this.request_next_page(cx);
+                            }
                             cx.notify();
                         }))
                         .when(
