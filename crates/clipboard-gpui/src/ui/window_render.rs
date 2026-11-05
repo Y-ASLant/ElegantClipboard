@@ -102,18 +102,6 @@ impl Render for ClipboardView {
                             .bg(cx.theme().border),
                     ),
             )
-            .when_some(crate::capabilities::paste_unavailable_reason(self.language), |shell, reason| {
-                let wayland_note = if crate::capabilities::wayland_session() {
-                    tr(self.language,
-                        "\nWayland：支持文件和图片拖出、窗口内排序；不支持文字/富文本拖出。关闭窗口时使用最小化。",
-                        "\nWayland: file/image export and in-app reordering work; text/rich-text export is unavailable. Hide minimizes the window.")
-                } else {
-                    ""
-                };
-                shell.child(Alert::warning("desktop-capabilities", format!(
-                    "{reason}{wayland_note}"
-                )).small())
-            })
             .child(div().flex_1().min_h_0().child(self.render_content(window, cx)))
             .child(self.render_status(cx))
     }

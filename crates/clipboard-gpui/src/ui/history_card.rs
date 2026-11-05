@@ -245,13 +245,7 @@ impl ClipboardView {
             .h(row_height)
             .px(px(PAGE_PADDING))
             .pt(px(card_spacing))
-            // The last card's bottom inset matches the page's side margins:
-            // card_spacing + last_row_extra = PAGE_PADDING.
-            .pb(px(if last {
-                card_spacing + visual::last_row_extra(self.display.card_density)
-            } else {
-                card_spacing
-            }))
+            .pb(px(if last { PAGE_PADDING } else { card_spacing }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 this.close_history_menu(cx);

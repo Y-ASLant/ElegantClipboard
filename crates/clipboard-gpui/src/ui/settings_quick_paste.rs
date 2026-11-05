@@ -60,9 +60,24 @@ impl SettingsWindowView {
                         });
                     }),
             )
-            .when_some(crate::capabilities::paste_unavailable_reason(language), |panel, reason| {
-                panel.child(Alert::warning("paste-capability", reason).small())
-            })
+            .when_some(
+                crate::capabilities::paste_unavailable_reason(language),
+                |panel, reason| {
+                    let wayland_note = if crate::capabilities::wayland_session() {
+                        tr(
+                            language,
+                            "\nWayland：支持文件和图片拖出、窗口内排序；不支持文字/富文本拖出。关闭窗口时使用最小化。",
+                            "\nWayland: file/image export and in-app reordering work; text/rich-text export is unavailable. Hide minimizes the window.",
+                        )
+                    } else {
+                        ""
+                    };
+                    panel.child(paste_capability_notice(
+                        format!("{reason}{wayland_note}"),
+                        cx,
+                    ))
+                },
+            )
             // 序列粘贴推进键（决策 0004）：录制或停用，与主热键/槽位互斥。
             .child(
                 settings_columns()
@@ -250,4 +265,28 @@ impl SettingsWindowView {
             )
             .into_any_element()
     }
+}
+
+/// The sentence wraps inside the settings column. `min_w_0` keeps the second
+/// line in the notice instead of painting over the controls below it.
+fn paste_capability_notice(message: String, cx: &App) -> impl IntoElement {
+    div()
+        .id("paste-capability")
+        .w_full()
+        .px(px(visual::SPACE_3))
+        .py(px(visual::SPACE_2))
+        .flex()
+        .items_start()
+        .gap(px(visual::SPACE_2))
+        .rounded(cx.theme().radius)
+        .text_size(px(visual::TEXT_SMALL))
+        .line_height(relative(1.4))
+        .text_color(cx.theme().warning)
+        .bg(cx.theme().warning.opacity(0.12))
+        .child(
+            Icon::new(IconName::TriangleAlert)
+                .size(px(visual::ICON_SMALL))
+                .flex_none(),
+        )
+        .child(div().flex_1().min_w_0().child(message))
 }

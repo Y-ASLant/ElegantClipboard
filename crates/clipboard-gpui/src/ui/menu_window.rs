@@ -114,6 +114,29 @@ impl HistoryMenuWindow {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn place_menu_window(native: isize, bounds: Bounds<Pixels>, _scale: f32) {
+    native_window::prepare_menu_window(native);
+    // AppKit takes logical points, including on Retina displays. Resize first
+    // because setContentSize can move the top edge of the native window.
+    let result = clipboard_platform::external_drag::resize_drag_preview(
+        native,
+        f32::from(bounds.size.width).round() as i32,
+        f32::from(bounds.size.height).round() as i32,
+    )
+    .and_then(|()| {
+        clipboard_platform::external_drag::move_drag_preview(
+            native,
+            f32::from(bounds.left()).round() as i32,
+            f32::from(bounds.top()).round() as i32,
+        )
+    });
+    if let Err(error) = result {
+        tracing::warn!(%error, "failed to position macOS menu window");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn place_menu_window(native: isize, bounds: Bounds<Pixels>, scale: f32) {
     #[cfg(windows)]
     let _ = crate::native::preview::suppress_activation(native);
@@ -141,6 +164,9 @@ fn close_menu_window(_: &MouseDownEvent, window: &mut Window, cx: &mut App) {
 
 impl Render for HistoryMenuWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // On macOS, keep the clear native background prepared before showing.
+        // GPUI's Transparent setter restores a nonzero alpha for window shadows.
+        #[cfg(not(target_os = "macos"))]
         window.set_background_appearance(WindowBackgroundAppearance::Transparent);
         if self.menu.is_none()
             && let Some(build) = self.build.take()

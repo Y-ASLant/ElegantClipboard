@@ -1,5 +1,5 @@
 use gpui_kit::Window;
-use objc2::{msg_send, runtime::AnyObject};
+use objc2::{class, msg_send, runtime::AnyObject};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 pub fn window_id(window: &Window) -> Option<isize> {
@@ -10,6 +10,21 @@ pub fn window_id(window: &Window) -> Option<isize> {
     let view = handle.ns_view.as_ptr().cast::<AnyObject>();
     let native: *mut AnyObject = unsafe { msg_send![view, window] };
     (!native.is_null()).then_some(native as isize)
+}
+
+/// Configure only the menu host, outside GPUI borrows and before it is shown.
+pub(crate) fn prepare_menu_window(native: isize) {
+    let native = native as *mut AnyObject;
+    unsafe {
+        // GPUI's titlebar: None still uses Titled | FullSizeContentView.
+        // Borderless is zero; NonactivatingPanel (1 << 7) keeps popup focus behavior.
+        const NONACTIVATING_PANEL: usize = 1 << 7;
+        let _: () = msg_send![native, setStyleMask: NONACTIVATING_PANEL];
+        let _: () = msg_send![native, setHasShadow: false];
+        let _: () = msg_send![native, setOpaque: false];
+        let clear: *mut AnyObject = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![native, setBackgroundColor: clear];
+    }
 }
 
 pub fn set_window_visible(window: &Window, visible: bool) {

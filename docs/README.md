@@ -18,6 +18,7 @@
 - [全应用主题与动效](evidence/chakra-theme-2026-10-28.md)：Chakra 风格的原生组件统一、可调圆角与Windows实机验证。
 - [项目质量与重构评估](evidence/project-quality-review-2026-10-31.md)：重构前的源码、CI 与设计取舍评估。
 - [质量重构验证](evidence/quality-refactor-2026-10-31.md)：协议、粘贴状态、偏好、测试迁移和发布门槛的实现验证。
+- [macOS 右键菜单透明宿主修复](evidence/macos-menu-transparency-2026-11-05.md)：原生窗口样式、Retina 坐标修复及待实机验收范围。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。
