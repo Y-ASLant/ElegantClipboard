@@ -303,7 +303,13 @@ impl History {
             content_type: Some(category.content_types().into()),
             favorite_only,
             group_id,
-            limit: Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT)),
+            // `limit <= 0` is the whole filtered result. A positive limit stays
+            // inside the old page bounds so existing callers keep a bounded query.
+            limit: if limit <= 0 {
+                None
+            } else {
+                Some(limit.clamp(PAGE_SIZE, HISTORY_LIMIT))
+            },
             ..Default::default()
         })?)
     }

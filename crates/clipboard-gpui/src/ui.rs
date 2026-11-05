@@ -101,7 +101,7 @@ use crate::{
     },
 };
 use clipboard_core::{
-    ContentCategory, FilePreviewEntry, HISTORY_LIMIT, PAGE_SIZE, PreviewContent, TextTransform,
+    ContentCategory, FilePreviewEntry, PreviewContent, TextTransform,
     backup::BackupReport,
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{

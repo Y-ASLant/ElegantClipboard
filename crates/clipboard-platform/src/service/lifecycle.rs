@@ -9,7 +9,7 @@ use crate::instance::InstanceSignal;
 use crate::sequence::current_sequence;
 use anyhow::Result;
 use clipboard_core::{
-    ContentCategory, History, PAGE_SIZE,
+    ContentCategory, History,
     database::Database,
     preferences::{PreferenceSnapshot, Preferences},
 };
@@ -118,7 +118,7 @@ impl Service {
                     favorite_only: false,
                     category: ContentCategory::All,
                     group_id: None,
-                    limit: PAGE_SIZE,
+                    limit: 0,
                     generation: 0,
                     snapshot_pending: false,
                     events: worker_events,

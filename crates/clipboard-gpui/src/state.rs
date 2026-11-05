@@ -1,6 +1,6 @@
 use chrono::{DateTime, Local, NaiveDateTime};
 use clipboard_core::{
-    ContentCategory, PAGE_SIZE, PreviewContent,
+    ContentCategory, PreviewContent,
     database::ClipboardItem,
     preferences::{LanguagePreference, SourceAppDisplay, TimeFormat},
 };
@@ -189,7 +189,6 @@ pub struct HistoryState {
     pub items: Vec<ClipboardItem>,
     pub total: i64,
     pub generation: u64,
-    pub limit: i64,
     pub selected: Option<i64>,
     pub loading: bool,
     filter: HistoryFilter,
@@ -202,7 +201,6 @@ impl Default for HistoryState {
             items: Vec::new(),
             total: 0,
             generation: 0,
-            limit: PAGE_SIZE,
             selected: None,
             loading: true,
             filter: HistoryFilter::All,
@@ -260,7 +258,6 @@ impl HistoryState {
 
     pub fn begin_search(&mut self) {
         self.generation += 1;
-        self.limit = PAGE_SIZE;
         self.loading = true;
         self.items.clear();
         self.selected = None;

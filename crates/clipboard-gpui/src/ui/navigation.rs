@@ -67,26 +67,13 @@ pub(super) fn show_history_scroll_to_top(
     let scrolled = -offset_y;
     viewport_height > px(0.) && max_offset_y > viewport_height && scrolled > viewport_height
 }
-/// Another page is due only once the loaded tail is inside the viewport.
-/// The first screen stays on the initial page, so opening the list does not fetch it.
-pub(super) fn history_scroll_should_extend(
-    offset_y: Pixels,
-    max_offset_y: Pixels,
-    viewport_height: Pixels,
-) -> bool {
-    if viewport_height <= px(0.) || max_offset_y <= px(0.) {
-        return false;
-    }
-    max_offset_y - (-offset_y) <= viewport_height
-}
-
 impl ClipboardView {
     pub(super) fn query(&mut self, cx: &mut Context<Self>) {
         let generation = self.history.generation;
         if !self.send(
             Command::Query {
                 search: self.search.read(cx).value().to_string(),
-                limit: self.history.limit,
+                limit: 0,
                 favorite_only: self.history.favorite_only(),
                 category: self.history.category(),
                 group_id: self.history.group_id(),
@@ -96,20 +83,6 @@ impl ClipboardView {
         ) {
             self.history.fail_query(generation);
         }
-    }
-    pub(super) fn request_next_page(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.history.loading
-            || (self.history.items.len() as i64) >= self.history.total
-            || self.history.limit >= HISTORY_LIMIT
-        {
-            return false;
-        }
-        self.history.limit = (self.history.limit + PAGE_SIZE).min(HISTORY_LIMIT);
-        self.history.generation += 1;
-        self.history.loading = true;
-        self.query(cx);
-        cx.notify();
-        true
     }
 
     pub(super) fn select_category(
@@ -241,9 +214,6 @@ impl ClipboardView {
         self.scroll_to_top_task = None;
         if let Some(index) = self.history.select_relative(direction) {
             self.scroll.scroll_to_item(index, strategy);
-            if direction > 0 && index + 1 == self.history.items.len() {
-                self.request_next_page(cx);
-            }
         }
         cx.notify();
     }
@@ -300,10 +270,7 @@ impl ClipboardView {
 }
 #[cfg(test)]
 mod history_virtual_list_tests {
-    use super::{
-        DragPlacement, history_scroll_should_extend, history_top_row, px,
-        show_history_scroll_to_top,
-    };
+    use super::{DragPlacement, history_top_row, px, show_history_scroll_to_top};
 
     #[test]
     fn scroll_to_top_stays_hidden_for_a_wheel_notch_and_a_short_list() {
@@ -314,29 +281,6 @@ mod history_virtual_list_tests {
         assert!(show_history_scroll_to_top(px(-421.), px(2000.), viewport));
         assert!(!show_history_scroll_to_top(px(-800.), px(400.), viewport));
         assert!(!show_history_scroll_to_top(px(-800.), px(2000.), px(0.)));
-    }
-
-    #[test]
-    fn another_page_loads_only_when_the_loaded_tail_enters_the_viewport() {
-        let viewport = px(420.);
-        assert!(!history_scroll_should_extend(px(0.), px(2000.), viewport));
-        assert!(!history_scroll_should_extend(
-            px(-1579.),
-            px(2000.),
-            viewport
-        ));
-        assert!(history_scroll_should_extend(
-            px(-1580.),
-            px(2000.),
-            viewport
-        ));
-        assert!(history_scroll_should_extend(
-            px(-2000.),
-            px(2000.),
-            viewport
-        ));
-        assert!(!history_scroll_should_extend(px(0.), px(0.), viewport));
-        assert!(!history_scroll_should_extend(px(-2000.), px(2000.), px(0.)));
     }
 
     #[test]

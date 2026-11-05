@@ -1,5 +1,5 @@
 use super::*;
-use clipboard_core::History;
+use clipboard_core::{History, PAGE_SIZE};
 
 #[test]
 fn missing_icon_falls_back_to_the_source_name() {
@@ -103,16 +103,14 @@ fn drag_scroll_stops_at_loaded_list_edges() {
 }
 
 #[test]
-fn filter_change_resets_paging_and_rejects_previous_results() {
+fn filter_change_rejects_previous_results() {
     let mut state = HistoryState {
-        limit: PAGE_SIZE * 3,
         selected: Some(42),
         ..Default::default()
     };
     let old = state.generation;
     state.set_favorite_filter(true);
     assert!(state.favorite_only());
-    assert_eq!(state.limit, PAGE_SIZE);
     assert_eq!(state.selected, None);
     assert!(!state.apply(vec![], 100, old));
     state.begin_search();
@@ -232,7 +230,7 @@ fn group_tabs_and_search_compose_without_leaking_rows_or_selection() -> anyhow::
     let query = |state: &mut HistoryState, search: &str, expected: &[i64]| -> anyhow::Result<()> {
         let rows = history.list_filtered_in_group(
             search,
-            state.limit,
+            0,
             state.favorite_only(),
             state.group_id(),
             state.category(),
@@ -258,9 +256,7 @@ fn group_tabs_and_search_compose_without_leaking_rows_or_selection() -> anyhow::
     query(&mut state, "needle", &ids[1..2])?;
     let stale_rows = state.items.clone();
     let stale_generation = state.generation;
-    state.limit = PAGE_SIZE * 3;
     state.set_group(Some(second));
-    assert_eq!(state.limit, PAGE_SIZE);
     assert_eq!(state.selected, None);
     assert!(state.items.is_empty());
     assert!(!state.apply(stale_rows, 1, stale_generation));
