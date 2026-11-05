@@ -102,7 +102,12 @@ impl Render for ClipboardView {
                             .bg(cx.theme().border),
                     ),
             )
-            .child(div().flex_1().min_h_0().child(self.render_content(window, cx)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.render_content(window, cx)),
+            )
             .child(self.render_status(cx))
     }
 }
