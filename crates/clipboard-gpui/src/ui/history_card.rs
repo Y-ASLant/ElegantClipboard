@@ -195,8 +195,12 @@ impl ClipboardView {
         let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
         let card_spacing = visual::card_spacing(self.display.card_density);
         let card_padding = visual::card_padding(self.display.card_density);
+        let last = index + 1 == self.history.items.len();
         let row_height = self.row_sizes.get(index).map_or_else(
-            || px(history_row_height(item, self.display)),
+            || {
+                let height = history_row_height(item, self.display);
+                px(if last { height + card_spacing } else { height })
+            },
             |size| size.height,
         );
         let entity = cx.entity();
@@ -237,7 +241,12 @@ impl ClipboardView {
             }))
             .h(row_height)
             .px(px(PAGE_PADDING))
-            .py(px(card_spacing))
+            .pt(px(card_spacing))
+            .pb(px(if last {
+                visual::card_gap(self.display.card_density)
+            } else {
+                card_spacing
+            }))
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 this.close_history_menu(cx);

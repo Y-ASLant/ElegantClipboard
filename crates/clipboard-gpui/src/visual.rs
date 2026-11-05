@@ -111,12 +111,17 @@ pub fn media_row_height(density: CardDensity, image: bool, title_lines: u8) -> f
     card_chrome(density) + thumb.max(title)
 }
 
-pub fn card_spacing(density: CardDensity) -> f32 {
+/// Visible space between card surfaces. The last card uses the same inset.
+pub fn card_gap(density: CardDensity) -> f32 {
     match density {
-        CardDensity::Compact => 2.,
-        CardDensity::Standard => 4.,
-        CardDensity::Spacious => 6.,
+        CardDensity::Compact => SPACE_1,
+        CardDensity::Standard => SPACE_2,
+        CardDensity::Spacious => SPACE_3,
     }
+}
+
+pub fn card_spacing(density: CardDensity) -> f32 {
+    card_gap(density) / 2.
 }
 
 pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
