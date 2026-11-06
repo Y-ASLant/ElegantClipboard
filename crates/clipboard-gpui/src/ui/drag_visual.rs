@@ -134,7 +134,7 @@ impl HistoryCardSnapshot {
             .w(px(thumbnail_width))
             .h(px(visual_height))
             .flex_none()
-            .rounded(cx.theme().radius)
+            .rounded(crate::card_radius::card_radius(cx))
             .overflow_hidden()
             .flex()
             .items_center()

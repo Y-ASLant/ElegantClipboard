@@ -166,12 +166,10 @@ pub fn canvas_background(cx: &App) -> Hsla {
     )
 }
 
+/// Card and inset outlines: use the theme hairline (material mode uses tonal alpha, see `apply_colors`).
+/// Do not force opacity to zero on blur/Mica shells or list rows lose their silhouette.
 pub fn container_border(cx: &App) -> Hsla {
-    if crate::window_effect::active(cx).effect == WindowEffect::Opaque {
-        cx.theme().border
-    } else {
-        cx.theme().border.opacity(0.)
-    }
+    cx.theme().border
 }
 
 fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accent: AccentColor) {
@@ -183,15 +181,8 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     let emphasized = color(if dark { 0x515b69 } else { 0xd4d4d8 });
     let secondary_text = color(if dark { 0xb5becb } else { 0x52525b });
     let has_material = effect != WindowEffect::Opaque;
-    // Containers expose the single shell tint. Control contrast is independent
-    // of shell opacity: using the remaining alpha made 85% controls disappear.
-    // Detached overlays keep a separate opaque surface.
-    let content = if has_material {
-        surface.opacity(0.)
-    } else {
-        surface
-    };
     let control_strength = 0.60;
+    let ink = color(if dark { 0xffffff } else { 0x000000 });
     let tint = |opaque: Hsla, ink: Hsla, coverage: f32| {
         if has_material {
             ink.opacity(control_strength * coverage)
@@ -199,7 +190,15 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
             opaque
         }
     };
-    let ink = color(if dark { 0xffffff } else { 0x000000 });
+    // On Frosted/Mica, the Root stays transparent so DWM blur shows through (`window_effect`).
+    // List rows and cards still need a real fill/border or they vanish (same alpha as shell).
+    // Use a light ink wash (~8% of `control_strength`) so thumbnails and text composite correctly.
+    // Detached overlays (`popover`) stay opaque.
+    let content = if has_material {
+        tint(subtle, ink, 0.13)
+    } else {
+        surface
+    };
     let control = tint(surface, surface, 0.20);
     let control_muted = tint(muted, ink, 0.16);
     let control_hover = tint(muted, ink, 0.28);
