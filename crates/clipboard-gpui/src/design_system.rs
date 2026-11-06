@@ -234,6 +234,8 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
         palette.subtle_light
     });
     let white = color(0xffffff);
+    // Foreground on bright status fills in dark mode (meets contrast vs. light fills).
+    let status_on_bright = color(0x18181b);
     let selection_surface = tint(accent_subtle, primary, 0.45);
 
     // Kit inputs (including Settings' internal search) use this surface.
@@ -351,23 +353,23 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     colors.window_border = border;
 
     colors.danger = color(if dark { 0xf87171 } else { 0xdc2626 });
-    colors.danger_foreground = white;
+    colors.danger_foreground = if dark { status_on_bright } else { white };
     colors.danger_hover = color(0xb91c1c);
     colors.danger_active = color(0x991b1b);
-    colors.button_danger = color(0xdc2626);
+    colors.button_danger = color(0xb91c1c);
     colors.button_danger_foreground = white;
-    colors.button_danger_hover = colors.danger_hover;
-    colors.button_danger_active = colors.danger_active;
+    colors.button_danger_hover = color(0x991b1b);
+    colors.button_danger_active = color(0x7f1d1d);
     colors.success = color(if dark { 0x4ade80 } else { 0x16a34a });
-    colors.success_foreground = white;
+    colors.success_foreground = if dark { status_on_bright } else { white };
     colors.success_hover = color(0x15803d);
     colors.success_active = color(0x166534);
-    colors.button_success = color(0x16a34a);
+    colors.button_success = color(0x15803d);
     colors.button_success_foreground = white;
-    colors.button_success_hover = colors.success_hover;
-    colors.button_success_active = colors.success_active;
+    colors.button_success_hover = color(0x166534);
+    colors.button_success_active = color(0x14532d);
     colors.warning = color(if dark { 0xfbbf24 } else { 0xb45309 });
-    colors.warning_foreground = white;
+    colors.warning_foreground = if dark { status_on_bright } else { white };
     colors.warning_hover = color(0x92400e);
     colors.warning_active = color(0x78350f);
     colors.button_warning = color(0xb45309);
@@ -420,7 +422,7 @@ struct AccentPalette {
 fn accent_palette(color: AccentColor) -> AccentPalette {
     match color {
         AccentColor::VibrantOrange => AccentPalette {
-            // Opaque white: fill holds white text at 5.2:1, text holds at 6.2:1.
+            // Saturated fill keeps white label above 4.5:1 on `#ffffff` (sRGB).
             primary: 0xc2410c,
             text_light: 0xae3a0f,
             text_dark: 0xfdba74,
@@ -433,7 +435,7 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
             link_hover_dark: 0xfed7aa,
         },
         AccentColor::Cyan => AccentPalette {
-            // Opaque white: fill holds white text at 5.4:1, text holds at 6.2:1.
+            // Saturated fill keeps white label above 4.5:1 on `#ffffff` (sRGB).
             primary: 0x0e7490,
             text_light: 0x116982,
             text_dark: 0x67e8f9,
@@ -446,15 +448,16 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
             link_hover_dark: 0xa5f3fc,
         },
         AccentColor::GoogleBlue => AccentPalette {
-            primary: 0x1a73e8,
-            text_light: 0x1a73e8,
+            // Primary tuned so white fill text clears ~4.5:1 on `#ffffff` (sRGB).
+            primary: 0x185abc,
+            text_light: 0x185abc,
             text_dark: 0x8ab4f8,
-            hover: 0x1967d2,
-            active: 0x174ea6,
+            hover: 0x164e96,
+            active: 0x143e78,
             subtle_light: 0xe8f0fe,
             subtle_dark: 0x1b2a4a,
             ring: 0x4285f4,
-            link_hover_light: 0x174ea6,
+            link_hover_light: 0x143e78,
             link_hover_dark: 0xd2e3fc,
         },
     }

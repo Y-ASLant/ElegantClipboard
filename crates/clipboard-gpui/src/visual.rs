@@ -47,7 +47,8 @@ pub fn card_padding(density: CardDensity) -> f32 {
         CardDensity::Spacious => SPACE_3,
     }
 }
-pub const PREVIEW_LINE_HEIGHT: f32 = 20.;
+/// Card and hover plain-text previews: match `TEXT_BODY` with a unitless body line height.
+pub const PREVIEW_LINE_HEIGHT: f32 = TEXT_BODY * COPY_LINE_HEIGHT;
 pub const HOVER_LINE_HEIGHT: f32 = 22.4;
 pub const METADATA_ROW_HEIGHT: f32 = 20.;
 pub const FILE_THUMBNAIL_WIDTH: f32 = 48.;

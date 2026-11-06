@@ -179,7 +179,7 @@ impl HistoryCardSnapshot {
         let text = div()
             .min_w_0()
             .text_size(px(visual::TEXT_BODY))
-            .line_height(px(visual::PREVIEW_LINE_HEIGHT))
+            .line_height(relative(visual::COPY_LINE_HEIGHT))
             .line_clamp(self.display.card_max_lines as usize)
             .text_ellipsis()
             .text_color(if self.file_warning {
@@ -188,7 +188,7 @@ impl HistoryCardSnapshot {
                 cx.theme().foreground
             });
         if self.is_image {
-            text.child(tr(self.language, "图片", "Image"))
+            text.font_medium().child(tr(self.language, "图片", "Image"))
         } else {
             text.child(
                 StyledText::new(self.preview_text.clone()).with_highlights(self.highlights.clone()),
@@ -206,12 +206,7 @@ impl HistoryCardSnapshot {
         let body = if media_layout {
             body.gap(px(visual::SPACE_3))
                 .child(self.media_visual(preview, cx))
-                .child(
-                    self.content_text(cx)
-                        .flex_1()
-                        .overflow_hidden()
-                        .font_medium(),
-                )
+                .child(self.content_text(cx).flex_1().overflow_hidden())
         } else {
             body.flex_1()
                 .min_h_0()
