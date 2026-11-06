@@ -4,6 +4,29 @@ use super::*;
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::link::Link;
 
+/// External project links: shared layout; expands at call sites so `cx` borrows match `Link`/`Button` rows.
+macro_rules! about_external_link {
+    ($cx:expr, $id:expr, $label:expr, $link:expr) => {{
+        let label = $label;
+        Link::new($id)
+            .text_sm()
+            .flex_shrink_0()
+            .max_w_full()
+            .child(
+                div()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .child(label),
+            )
+            .on_click($cx.listener(move |this, _, _, cx| {
+                this.link_error = links::open($link).err().map(|error| error.to_string());
+                cx.notify();
+            }))
+            .into_any_element()
+    }};
+}
+
 impl SettingsWindowView {
     /// 「关于」页：居中图标、名称、版本与一句话介绍，下面列出项目链接。
     pub(super) fn settings_about_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -89,22 +112,7 @@ impl SettingsWindowView {
             row(
                 icon,
                 caption,
-                Link::new(id)
-                    .text_sm()
-                    .flex_shrink_0()
-                    .max_w_full()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .child(label),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.link_error = links::open(link).err().map(|error| error.to_string());
-                        cx.notify();
-                    }))
-                    .into_any_element(),
+                about_external_link!(cx, id, label.into_any_element(), link),
             )
         };
 
@@ -169,17 +177,12 @@ impl SettingsWindowView {
                     }
                     #[cfg(not(windows))]
                     {
-                        Link::new("about-update-check")
-                            .text_sm()
-                            .flex_shrink_0()
-                            .child(tr(language, "检查更新", "Check for updates"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.link_error = links::open(ProjectLink::Releases)
-                                    .err()
-                                    .map(|error| error.to_string());
-                                cx.notify();
-                            }))
-                            .into_any_element()
+                        about_external_link!(
+                            cx,
+                            "about-update-check",
+                            tr(language, "检查更新", "Check for updates"),
+                            ProjectLink::Releases
+                        )
                     }
                 }
             };

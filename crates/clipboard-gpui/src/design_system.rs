@@ -45,6 +45,9 @@ pub const NORMAL: Duration = Duration::from_millis(200);
 pub const SLOW: Duration = Duration::from_millis(300);
 pub const PREVIEW_REVEAL: Duration = Duration::from_millis(190);
 
+/// List/card fill on Frosted/Mica when the Root stays transparent for DWM blur.
+const MATERIAL_CONTENT_INK_COVERAGE: f32 = 0.13;
+
 /// 在明暗主题切换后应用；Theme::update 同步控件、语义 token 与底层绘制。
 pub fn apply(cx: &mut App) {
     #[cfg(windows)]
@@ -166,8 +169,7 @@ pub fn canvas_background(cx: &App) -> Hsla {
     )
 }
 
-/// Card and inset outlines: use the theme hairline (material mode uses tonal alpha, see `apply_colors`).
-/// Do not force opacity to zero on blur/Mica shells or list rows lose their silhouette.
+/// Hairline for cards and inset outlines; same token in Opaque and material modes (`apply_colors` tones alpha).
 pub fn container_border(cx: &App) -> Hsla {
     cx.theme().border
 }
@@ -190,12 +192,8 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
             opaque
         }
     };
-    // On Frosted/Mica, the Root stays transparent so DWM blur shows through (`window_effect`).
-    // List rows and cards still need a real fill/border or they vanish (same alpha as shell).
-    // Use a light ink wash (~8% of `control_strength`) so thumbnails and text composite correctly.
-    // Detached overlays (`popover`) stay opaque.
     let content = if has_material {
-        tint(subtle, ink, 0.13)
+        tint(subtle, ink, MATERIAL_CONTENT_INK_COVERAGE)
     } else {
         surface
     };
@@ -205,6 +203,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     let control_pressed = tint(border, ink, 0.42);
     let control_selected = tint(surface, color(0xffffff), 0.55);
     let content_hover = tint(subtle, ink, 0.28);
+    // Nested row/cell strokes only (`table_row_border`); window chrome and separators use `hairline` → `colors.border`.
     let content_border = if has_material {
         border.opacity(0.)
     } else {
@@ -233,8 +232,9 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
         palette.subtle_light
     });
     let white = color(0xffffff);
-    // Foreground on bright status fills in dark mode (meets contrast vs. light fills).
+    // Foreground on bright semantic fills in dark mode (meets contrast vs. light fills).
     let status_on_bright = color(0x18181b);
+    let status_fill_foreground = if dark { status_on_bright } else { white };
     let selection_surface = tint(accent_subtle, primary, 0.45);
 
     // Kit inputs (including Settings' internal search) use this surface.
@@ -352,7 +352,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     colors.window_border = border;
 
     colors.danger = color(if dark { 0xf87171 } else { 0xdc2626 });
-    colors.danger_foreground = if dark { status_on_bright } else { white };
+    colors.danger_foreground = status_fill_foreground;
     colors.danger_hover = color(0xb91c1c);
     colors.danger_active = color(0x991b1b);
     colors.button_danger = color(0xb91c1c);
@@ -360,7 +360,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     colors.button_danger_hover = color(0x991b1b);
     colors.button_danger_active = color(0x7f1d1d);
     colors.success = color(if dark { 0x4ade80 } else { 0x16a34a });
-    colors.success_foreground = if dark { status_on_bright } else { white };
+    colors.success_foreground = status_fill_foreground;
     colors.success_hover = color(0x15803d);
     colors.success_active = color(0x166534);
     colors.button_success = color(0x15803d);
@@ -368,7 +368,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     colors.button_success_hover = color(0x166534);
     colors.button_success_active = color(0x14532d);
     colors.warning = color(if dark { 0xfbbf24 } else { 0xb45309 });
-    colors.warning_foreground = if dark { status_on_bright } else { white };
+    colors.warning_foreground = status_fill_foreground;
     colors.warning_hover = color(0x92400e);
     colors.warning_active = color(0x78350f);
     colors.button_warning = color(0xb45309);
