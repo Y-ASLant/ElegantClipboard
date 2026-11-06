@@ -2,6 +2,7 @@ use super::settings_common::{owner_language, owner_state, settings_stack};
 use super::update_events::UpdateCheck;
 use super::*;
 use gpui_kit::component::alert::Alert;
+use gpui_kit::component::link::Link;
 
 impl SettingsWindowView {
     /// 「关于」页：居中图标、名称、版本与一句话介绍，下面列出项目链接。
@@ -88,11 +89,17 @@ impl SettingsWindowView {
             row(
                 icon,
                 caption,
-                Button::new(id)
-                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                Link::new(id)
+                    .text_sm()
                     .flex_shrink_0()
-                    .ghost()
-                    .label(label)
+                    .max_w_full()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .child(label),
+                    )
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.link_error = links::open(link).err().map(|error| error.to_string());
                         cx.notify();
@@ -145,25 +152,36 @@ impl SettingsWindowView {
                         });
                     }))
                     .into_any_element(),
-                _ => Button::new("about-update-check")
-                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
-                    .flex_shrink_0()
-                    .ghost()
-                    .label(tr(language, "检查更新", "Check for updates"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        #[cfg(windows)]
-                        let _ = this.owner.update(cx, |owner, cx| {
-                            owner.start_update_check(cx);
-                        });
-                        #[cfg(not(windows))]
-                        {
-                            this.link_error = links::open(ProjectLink::Releases)
-                                .err()
-                                .map(|error| error.to_string());
-                            cx.notify();
-                        }
-                    }))
-                    .into_any_element(),
+                _ => {
+                    #[cfg(windows)]
+                    {
+                        Button::new("about-update-check")
+                            .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                            .flex_shrink_0()
+                            .ghost()
+                            .label(tr(language, "检查更新", "Check for updates"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let _ = this.owner.update(cx, |owner, cx| {
+                                    owner.start_update_check(cx);
+                                });
+                            }))
+                            .into_any_element()
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        Link::new("about-update-check")
+                            .text_sm()
+                            .flex_shrink_0()
+                            .child(tr(language, "检查更新", "Check for updates"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.link_error = links::open(ProjectLink::Releases)
+                                    .err()
+                                    .map(|error| error.to_string());
+                                cx.notify();
+                            }))
+                            .into_any_element()
+                    }
+                }
             };
             row(
                 IconName::RefreshCw,

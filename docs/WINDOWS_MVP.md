@@ -14,7 +14,7 @@ Windows 是主要验收平台，macOS 与 Linux 实现同仓构建（能力差�
 
 数据库与去重源码已经物理迁入 `clipboard-core`；核心不依赖桌面 UI 框架或 Windows API。
 
-源码模块与维护边界见[工程文档](README.md)。所有 Rust 源码、示例和测试文件上限为 500 物理行，`scripts/check-source-size.ps1` 在 `just check` 与 GPUI CI 中强制检查；拆分按职责而不是编号或文本包含进行。
+源码模块与维护边界见[工程文档](README.md)。所有 Rust 源码、示例和测试文件上限为 640 物理行，`scripts/check-source-size.ps1` 在 `just check` 与 GPUI CI 中强制检查；拆分按职责而不是编号或文本包含进行。
 
 默认目录为 `%LOCALAPPDATA%\ElegantClipboard`，目录名不再包含作者或框架名称。不自动搬迁 2.0 beta 或更早 1.x 的数据目录和开机启动项。最新 1.x 的数据库和 ZIP 可以导入到空的数据目录。自动测试使用临时目录、合成文本和仓库内 PNG 样本。
 

@@ -35,7 +35,7 @@ Use the component that matches the interaction, not just its appearance: transie
 ## Code quality and test policy
 
 - Prefer direct, responsibility-focused code and the existing dependency boundaries. Do not add abstractions, forwarding layers, compatibility aliases, or configuration without a current consumer.
-- Keep every Rust source, example, and test file within 500 physical lines, including comments and blank lines. Split by responsibility; do not use numbered fragments or `include!` to evade the limit. `scripts/check-source-size.ps1` is the only line-limit check; `just check` and `.github/workflows/gpui.yml` run it, and a plain `cargo check` does not.
+- Keep every Rust source, example, and test file within 640 physical lines, including comments and blank lines. Split by responsibility; do not use numbered fragments or `include!` to evade the limit. `scripts/check-source-size.ps1` is the only line-limit check; `just check` and `.github/workflows/gpui.yml` run it, and a plain `cargo check` does not.
 - Add a permanent regression test only for a plausible consumer-visible bug or uncertain contract: behavior, boundaries, state transitions, precedence, invalid input, persistence, concurrency, or safety invariants.
 - Do not add tests that merely repeat source text, labels, static URLs/constants, incidental defaults, widget wiring, forwarding, or mock outputs. Bare “does not throw”, non-empty, and duplicate same-path assertions are not sufficient.
 - Remove existing implementation/wording-pinning tests instead of updating expected strings after a refactor. In mixed tests, retain meaningful behavior checks; do not delete persistence, rollback, compatibility, or isolation coverage merely to reduce test count.

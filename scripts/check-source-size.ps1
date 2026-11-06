@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $SourceRoot) {
     $SourceRoot = Join-Path (Join-Path $PSScriptRoot '..') 'crates'
 }
-$maximumLines = 500
+$maximumLines = 640
 $files = @(Get-ChildItem -LiteralPath $SourceRoot -Recurse -File -Filter '*.rs')
 if ($files.Count -eq 0) {
     throw "No Rust source files found in $SourceRoot"

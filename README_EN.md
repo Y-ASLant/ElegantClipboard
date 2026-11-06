@@ -47,7 +47,7 @@ scripts/               Packaging and verification helpers
 docs/                  Architecture decisions, feature status, QA evidence
 ```
 
-Dependency direction: `clipboard-gpui -> clipboard-platform -> clipboard-core`; core never depends on GPUI or OS APIs. Every Rust source, example, and test file is limited to **500 physical lines**, enforced by `just check` and CI. See the [engineering documentation](docs/README.md) for module responsibilities.
+Dependency direction: `clipboard-gpui -> clipboard-platform -> clipboard-core`; core never depends on GPUI or OS APIs. Every Rust source, example, and test file is limited to **640 physical lines**, enforced by `just check` and CI. See the [engineering documentation](docs/README.md) for module responsibilities.
 
 ## Run from source
 

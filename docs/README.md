@@ -27,7 +27,7 @@
 
 依赖方向为 `clipboard-gpui -> clipboard-platform -> clipboard-core`，GPUI 可以直接调用核心层。业务校验、SQLite 和备份格式属于核心层；共享服务协议、剪贴板线程及各系统原生 API 属于平台层；窗口、托盘、交互状态和 GPUI Kit 组件属于界面层。
 
-- 单个 `.rs` 文件最多 **500 物理行**，空行、注释、示例与测试均计入；Cargo.lock、文档和生成的构建产物不属于源码行数限制。
+- 单个 `.rs` 文件最多 **640 物理行**，空行、注释、示例与测试均计入；Cargo.lock、文档和生成的构建产物不属于源码行数限制。
 - 同一类型可在职责明确的私有子模块中分别实现方法；跨模块可见性只开放到实际需要的父模块，不为了拆文件扩大 crate 公共 API。
 - 测试与对应业务模块就近组织，共用必要的隔离 fixture；不按行号编号分片，不用 `include!` 将大文件藏在外部文本中。
 - `scripts/check-source-size.ps1` 是唯一的行数上限检查入口，`just check` 和 `.github/workflows/gpui.yml` 都会调用。直接运行 `cargo check` 不包含该结构检查。

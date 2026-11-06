@@ -47,7 +47,7 @@ scripts/               打包与验证辅助脚本
 docs/                  架构决策、功能状态和验收证据
 ```
 
-依赖方向：`clipboard-gpui -> clipboard-platform -> clipboard-core`；核心层不依赖 GPUI 或系统 API。Rust 源文件（含示例与测试）不得超过 **500 物理行**，由 `just check` 与 CI 强制执行。模块职责见[工程文档](docs/README.md)。
+依赖方向：`clipboard-gpui -> clipboard-platform -> clipboard-core`；核心层不依赖 GPUI 或系统 API。Rust 源文件（含示例与测试）不得超过 **640 物理行**，由 `just check` 与 CI 强制执行。模块职责见[工程文档](docs/README.md)。
 
 ## 从源码运行
 
