@@ -240,6 +240,21 @@ impl Render for SettingsWindowView {
                     .update(cx, |input, cx| input.set_value(confirmed, window, cx));
             }
         }
+        let (opacity, opacity_pending, delay_ms, delay_pending, zoom_step, zoom_pending) = {
+            let owner = owner.read(cx);
+            (
+                i32::from(owner.window_effect.opacity),
+                owner.window_effect_pending,
+                i32::from(owner.hover_preference.delay_ms),
+                owner.hover_preference_pending,
+                i32::from(owner.hover_preference.zoom_step),
+                owner.hover_preference_pending,
+            )
+        };
+        self.window_opacity
+            .sync(opacity, opacity_pending, window, cx);
+        self.hover_delay.sync(delay_ms, delay_pending, window, cx);
+        self.hover_zoom.sync(zoom_step, zoom_pending, window, cx);
         let locale = match language {
             LanguagePreference::Chinese => "zh-CN",
             LanguagePreference::English => "en",

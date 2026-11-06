@@ -159,6 +159,80 @@ impl SettingsWindowView {
             cx.new(|cx| InputState::new(window, cx).default_value(retention.days.to_string()));
         let retention_count_input =
             cx.new(|cx| InputState::new(window, cx).default_value(retention.max_count.to_string()));
+        let effect = entity.read(cx).window_effect;
+        let hover = entity.read(cx).hover_preference;
+        let window_opacity = BoundedNumberInput::bind(
+            window,
+            cx,
+            i32::from(effect.opacity),
+            NumberSpec {
+                min: i32::from(MIN_WINDOW_EFFECT_OPACITY),
+                max: i32::from(MAX_WINDOW_EFFECT_OPACITY),
+                saved: |owner| {
+                    (
+                        i32::from(owner.window_effect.opacity),
+                        owner.window_effect_pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_window_effect(
+                        WindowEffectPreference {
+                            opacity: value as u8,
+                            ..owner.window_effect
+                        },
+                        cx,
+                    );
+                },
+            },
+        );
+        let hover_delay = BoundedNumberInput::bind(
+            window,
+            cx,
+            i32::from(hover.delay_ms),
+            NumberSpec {
+                min: i32::from(MIN_HOVER_DELAY_MS),
+                max: i32::from(MAX_HOVER_DELAY_MS),
+                saved: |owner| {
+                    (
+                        i32::from(owner.hover_preference.delay_ms),
+                        owner.hover_preference_pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_hover_preference(
+                        HoverPreviewPreference {
+                            delay_ms: value as u16,
+                            ..owner.hover_preference
+                        },
+                        cx,
+                    );
+                },
+            },
+        );
+        let hover_zoom = BoundedNumberInput::bind(
+            window,
+            cx,
+            i32::from(hover.zoom_step),
+            NumberSpec {
+                min: i32::from(MIN_HOVER_ZOOM_STEP),
+                max: i32::from(MAX_HOVER_ZOOM_STEP),
+                saved: |owner| {
+                    (
+                        i32::from(owner.hover_preference.zoom_step),
+                        owner.hover_preference_pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_hover_preference(
+                        HoverPreviewPreference {
+                            zoom_step: value as u8,
+                            ..owner.hover_preference
+                        },
+                        cx,
+                    );
+                },
+            },
+        );
         let preview_lines_last_value = entity.read(cx).display.card_max_lines;
         let preview_lines_input = cx.new(|cx| {
             InputState::new(window, cx).default_value(preview_lines_last_value.to_string())
@@ -249,6 +323,9 @@ impl SettingsWindowView {
             _preview_lines_step_subscription: preview_lines_step_subscription,
             preview_lines_last_value,
             preview_lines_last_pending: false,
+            window_opacity,
+            hover_delay,
+            hover_zoom,
             app_picker_open: false,
             app_filter_error: false,
             link_error: None,
@@ -308,6 +385,111 @@ impl SettingsWindowView {
         } else {
             self.app_filter_error = true;
             cx.notify();
+        }
+    }
+
+    fn commit_bounded(
+        &mut self,
+        input: &Entity<InputState>,
+        spec: NumberSpec,
+        step: Option<StepAction>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(owner) = self.owner.upgrade() else {
+            return;
+        };
+        let (current, pending) = (spec.saved)(owner.read(cx));
+        if pending {
+            return;
+        }
+        let parsed = input.read(cx).value().parse::<i32>().ok();
+        let base = parsed.unwrap_or(current);
+        let value = match step {
+            Some(StepAction::Increment) => base.saturating_add(1),
+            Some(StepAction::Decrement) => base.saturating_sub(1),
+            None => base,
+        }
+        .clamp(spec.min, spec.max);
+        if parsed != Some(value) || (step.is_some() && base != value) {
+            input.update(cx, |input, cx| {
+                input.set_value(value.to_string(), window, cx)
+            });
+        }
+        owner.update(cx, |owner, cx| (spec.commit)(owner, value, cx));
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NumberSpec {
+    min: i32,
+    max: i32,
+    saved: fn(&ClipboardView) -> (i32, bool),
+    commit: fn(&mut ClipboardView, i32, &mut Context<ClipboardView>),
+}
+
+pub(super) struct BoundedNumberInput {
+    input: Entity<InputState>,
+    _edits: Subscription,
+    _steps: Subscription,
+    last_value: i32,
+    last_pending: bool,
+}
+
+impl BoundedNumberInput {
+    fn bind(
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+        initial: i32,
+        spec: NumberSpec,
+    ) -> Self {
+        let input = cx.new(|cx| InputState::new(window, cx).default_value(initial.to_string()));
+        // Button presses emit Step events; typed values commit on blur or Enter.
+        input.update(cx, |input, cx| input.set_step(None, window, cx));
+        let edits = cx.subscribe_in(&input, window, move |this, input, event, window, cx| {
+            if !matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
+                return;
+            }
+            this.commit_bounded(input, spec, None, window, cx);
+        });
+        let steps = cx.subscribe_in(
+            &input,
+            window,
+            move |this, input, event: &NumberInputEvent, window, cx| {
+                let NumberInputEvent::Step(action) = event;
+                this.commit_bounded(input, spec, Some(*action), window, cx);
+            },
+        );
+        Self {
+            input,
+            _edits: edits,
+            _steps: steps,
+            last_value: initial,
+            last_pending: false,
+        }
+    }
+
+    pub(super) fn input(&self) -> &Entity<InputState> {
+        &self.input
+    }
+
+    pub(super) fn sync(
+        &mut self,
+        confirmed: i32,
+        pending: bool,
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+    ) {
+        let refresh = confirmed != self.last_value || (self.last_pending && !pending);
+        self.last_value = confirmed;
+        self.last_pending = pending;
+        if !refresh {
+            return;
+        }
+        let text = confirmed.to_string();
+        if self.input.read(cx).value() != text {
+            self.input
+                .update(cx, |input, cx| input.set_value(text, window, cx));
         }
     }
 }

@@ -1,9 +1,10 @@
 use super::settings_common::{
     choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
-    settings_field, settings_inline, settings_toggle,
+    settings_description, settings_field, settings_inline, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::NumberInput;
 
 impl SettingsWindowView {
     pub(super) fn settings_hover_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -106,24 +107,17 @@ impl SettingsWindowView {
                     ),
             )
             .child(
-                settings_column_field(tr(language, "停留延时", "Hover delay")).child(choice_tabs(
-                    "hover-delay",
-                    &self.owner,
-                    [250, 500, 750, 1000],
-                    ["250 ms", "500 ms", "750 ms", "1000 ms"],
-                    hover_preference.delay_ms,
-                    hover_pending,
-                    |owner| owner.hover_preference.delay_ms,
-                    |owner, delay, cx| {
-                        owner.save_hover_preference(
-                            HoverPreviewPreference {
-                                delay_ms: delay,
-                                ..owner.hover_preference
-                            },
-                            cx,
-                        );
-                    },
-                )),
+                settings_column_field(tr(language, "停留延时", "Hover delay"))
+                    .child(
+                        NumberInput::new(self.hover_delay.input())
+                            .w_full()
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .disabled(hover_pending),
+                    )
+                    .child(settings_description(
+                        tr(language, "100–2000 毫秒。", "100–2000 ms."),
+                        cx,
+                    )),
             )
             .child(
                 settings_column_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
@@ -154,26 +148,14 @@ impl SettingsWindowView {
                 )),
             )
             .child(
-                settings_column_field(tr(language, "图片缩放步进", "Image zoom step")).child(
-                    choice_tabs(
-                        "hover-zoom-step",
-                        &self.owner,
-                        [5, 10, 20, 50],
-                        ["5%", "10%", "20%", "50%"],
-                        hover_preference.zoom_step,
-                        hover_pending,
-                        |owner| owner.hover_preference.zoom_step,
-                        |owner, zoom_step, cx| {
-                            owner.save_hover_preference(
-                                HoverPreviewPreference {
-                                    zoom_step,
-                                    ..owner.hover_preference
-                                },
-                                cx,
-                            );
-                        },
-                    ),
-                ),
+                settings_column_field(tr(language, "图片缩放步进", "Image zoom step"))
+                    .child(
+                        NumberInput::new(self.hover_zoom.input())
+                            .w_full()
+                            .h(px(visual::CONTROL_HEIGHT_LARGE))
+                            .disabled(hover_pending),
+                    )
+                    .child(settings_description(tr(language, "5–50。", "5–50."), cx)),
             )
             .child(
                 settings_column_field(tr(language, "预览信息", "Preview details")).child(

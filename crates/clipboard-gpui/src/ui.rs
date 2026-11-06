@@ -107,10 +107,11 @@ use clipboard_core::{
     preferences::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, CornerRadiusPreference,
         DedupStrategy, DisplayPreference, HotkeyPreference, HoverPreviewDetails,
-        HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MonitorTypesPreference,
-        PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor,
-        ThemePreference, TimeFormat, WindowEffect, WindowEffectPreference,
-        WindowPositionPreference, WindowSizePreference,
+        HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MAX_HOVER_DELAY_MS,
+        MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS, MIN_HOVER_ZOOM_STEP,
+        MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig,
+        SoundTiming, SourceAppDisplay, ThemeColor, ThemePreference, TimeFormat, WindowEffect,
+        WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -469,6 +470,9 @@ struct SettingsWindowView {
     _preview_lines_step_subscription: Subscription,
     preview_lines_last_value: u8,
     preview_lines_last_pending: bool,
+    window_opacity: settings_window::BoundedNumberInput,
+    hover_delay: settings_window::BoundedNumberInput,
+    hover_zoom: settings_window::BoundedNumberInput,
     app_picker_open: bool,
     app_filter_error: bool,
     link_error: Option<String>,

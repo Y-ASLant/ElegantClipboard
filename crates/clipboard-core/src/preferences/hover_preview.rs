@@ -86,6 +86,12 @@ impl HoverPreviewPreference {
     }
 
     pub(super) fn valid(self) -> bool {
-        (100..=2000).contains(&self.delay_ms) && (5..=50).contains(&self.zoom_step)
+        (MIN_HOVER_DELAY_MS..=MAX_HOVER_DELAY_MS).contains(&self.delay_ms)
+            && (MIN_HOVER_ZOOM_STEP..=MAX_HOVER_ZOOM_STEP).contains(&self.zoom_step)
     }
 }
+
+pub const MIN_HOVER_DELAY_MS: u16 = 100;
+pub const MAX_HOVER_DELAY_MS: u16 = 2_000;
+pub const MIN_HOVER_ZOOM_STEP: u8 = 5;
+pub const MAX_HOVER_ZOOM_STEP: u8 = 50;
