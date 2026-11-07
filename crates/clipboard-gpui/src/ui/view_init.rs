@@ -87,9 +87,11 @@ impl ClipboardView {
         let initial_dedup_strategy = service.initial_preferences.dedup_strategy;
         let initial_restore_clipboard = service.initial_preferences.restore_clipboard;
         let initial_sequence_hotkey = service.initial_preferences.sequence_hotkey.clone();
+        let paste_delivery_mode = service.initial_preferences.paste_delivery_mode;
         let channels = Self::register_paste_hotkeys(
             startup.monitoring,
             quick_paste_enabled,
+            paste_delivery_mode == PasteDeliveryMode::Rapid,
             &paste_shortcuts,
             &initial_sequence_hotkey,
             &hotkey_choice,
@@ -180,10 +182,11 @@ impl ClipboardView {
         let search_auto_focus = service.initial_preferences.search_auto_focus;
         let search_auto_clear = service.initial_preferences.search_auto_clear;
         let skip_clear_confirm = service.initial_preferences.skip_clear_confirm;
-        let (paste_close_window, paste_key, paste_move_to_top) = (
+        let (paste_close_window, paste_key, paste_move_to_top, paste_delivery_mode) = (
             service.initial_preferences.paste_close_window,
             service.initial_preferences.paste_key,
             service.initial_preferences.paste_move_to_top,
+            service.initial_preferences.paste_delivery_mode,
         );
         let display = service.initial_preferences.display;
         let audio = service.initial_preferences.audio;
@@ -375,6 +378,7 @@ impl ClipboardView {
             skip_clear_confirm: PendingPref::new(skip_clear_confirm),
             paste_close_window: PendingPref::new(paste_close_window),
             paste_key: PendingPref::new(paste_key),
+            paste_delivery_mode: PendingPref::new(paste_delivery_mode),
             paste_move_to_top: PendingPref::new(paste_move_to_top),
             dedup_strategy: PendingPref::new(initial_dedup_strategy),
             restore_clipboard: PendingPref::new(initial_restore_clipboard),

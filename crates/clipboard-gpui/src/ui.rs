@@ -30,6 +30,7 @@ mod onboarding;
 mod paste_actions;
 mod paste_coordinator;
 mod paste_delivery;
+mod paste_policy;
 mod paste_requests;
 mod preference_events;
 mod presentation;
@@ -109,7 +110,8 @@ use clipboard_core::{
         DedupStrategy, DisplayPreference, HotkeyPreference, HoverPreviewDetails,
         HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MAX_HOVER_DELAY_MS,
         MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS, MIN_HOVER_ZOOM_STEP,
-        MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteKeyPreference, PasteShortcutConfig,
+        MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteDeliveryMode, PasteKeyPreference,
+        PasteShortcutConfig,
         SoundTiming, SourceAppDisplay, ThemeColor, ThemePreference, TimeFormat, WindowEffect,
         WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
@@ -375,6 +377,7 @@ struct ClipboardView {
     skip_clear_confirm: PendingPref<bool>,
     paste_close_window: PendingPref<bool>,
     paste_key: PendingPref<PasteKeyPreference>,
+    paste_delivery_mode: PendingPref<PasteDeliveryMode>,
     paste_move_to_top: PendingPref<bool>,
     dedup_strategy: PendingPref<DedupStrategy>,
     restore_clipboard: PendingPref<bool>,

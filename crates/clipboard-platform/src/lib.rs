@@ -20,6 +20,7 @@ pub mod macos;
 pub mod notification;
 #[cfg(windows)]
 pub mod outside_click;
+pub mod paste_delivery;
 pub mod paste_types;
 #[cfg(windows)]
 mod shortcut_parse;

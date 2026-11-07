@@ -1,5 +1,7 @@
 use super::paste_requests::PendingRequest;
-use clipboard_platform::{Command, CopyMode, CopyPurpose};
+use clipboard_platform::{
+    paste_delivery::PasteWaitPolicy, Command, CopyMode, CopyPurpose,
+};
 
 type Target = (isize, u32);
 
@@ -9,9 +11,17 @@ enum DeliveryPhase {
     Delivering,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct QuickPaste {
+    pub(super) target: Target,
+    pub(super) slot: u8,
+    pub(super) favorite: bool,
+}
+
 struct Delivery {
     target: Target,
     phase: DeliveryPhase,
+    wait: PasteWaitPolicy,
 }
 
 struct Sequence {
@@ -25,7 +35,7 @@ struct Sequence {
 pub(super) struct PasteCoordinator {
     target: Option<Target>,
     pending: PendingRequest<Delivery>,
-    quick: PendingRequest<Target>,
+    quick: PendingRequest<QuickPaste>,
     sequence: Option<Sequence>,
     merging: bool,
     handoff: bool,
@@ -69,10 +79,11 @@ impl PasteCoordinator {
         self.sequence.as_ref().map(|queue| queue.target)
     }
 
-    pub fn begin_copy(&mut self, target: Target) -> u64 {
+    pub fn begin_copy(&mut self, target: Target, wait: PasteWaitPolicy) -> u64 {
         self.pending.begin(Delivery {
             target,
             phase: DeliveryPhase::Copying,
+            wait,
         })
     }
 
@@ -84,11 +95,15 @@ impl PasteCoordinator {
         self.merging = false;
     }
 
-    pub fn begin_quick(&mut self, target: Target) -> u64 {
-        self.quick.begin(target)
+    pub fn begin_quick(&mut self, target: Target, slot: u8, favorite: bool) -> u64 {
+        self.quick.begin(QuickPaste {
+            target,
+            slot,
+            favorite,
+        })
     }
 
-    pub fn resolve_quick(&mut self, request_id: u64) -> Option<Target> {
+    pub fn resolve_quick(&mut self, request_id: u64) -> Option<QuickPaste> {
         self.quick.complete(request_id)
     }
 
@@ -102,13 +117,13 @@ impl PasteCoordinator {
     }
 
     /// A receipt moves one request into delivery exactly once; stale receipts cannot reenter.
-    pub fn receive(&mut self, request_id: u64) -> Option<Target> {
+    pub fn receive(&mut self, request_id: u64) -> Option<(Target, PasteWaitPolicy)> {
         let pending = self.pending.get_mut(request_id)?;
         if !matches!(pending.phase, DeliveryPhase::Copying) {
             return None;
         }
         pending.phase = DeliveryPhase::Delivering;
-        Some(pending.target)
+        Some((pending.target, pending.wait.clone()))
     }
 
     pub fn delivering(&self, request_id: u64) -> bool {
@@ -153,7 +168,7 @@ impl PasteCoordinator {
         true
     }
 
-    pub fn advance_sequence(&mut self) -> Option<Command> {
+    pub fn advance_sequence(&mut self, wait: PasteWaitPolicy) -> Option<Command> {
         if self.pending() || self.quick_pending() {
             return None;
         }
@@ -163,7 +178,7 @@ impl PasteCoordinator {
         }
         let id = *queue.ids.get(queue.delivered)?;
         let target = queue.target;
-        let request_id = self.begin_copy(target);
+        let request_id = self.begin_copy(target, wait);
         self.sequence.as_mut()?.request = Some((request_id, id));
         Some(Command::Copy {
             id,
@@ -195,7 +210,7 @@ impl PasteCoordinator {
                 .quick
                 .request_id()
                 .and_then(|id| self.quick.get(id))
-                .is_some_and(|pending| same_destination(*pending))
+                .is_some_and(|pending| same_destination(pending.target))
             || self.target.is_some_and(same_destination)
     }
 

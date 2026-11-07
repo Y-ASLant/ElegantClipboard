@@ -32,6 +32,7 @@ const PASTE_CLOSE_WINDOW_KEY: &str = "gpui_paste_close_window";
 const PASTE_KEY_KEY: &str = "gpui_paste_key";
 const PASTE_MOVE_TO_TOP_KEY: &str = "gpui_paste_move_to_top";
 const QUICK_PASTE_ENABLED_KEY: &str = "gpui_quick_paste_enabled";
+const PASTE_DELIVERY_MODE_KEY: &str = "gpui_paste_delivery_mode";
 const PASTE_SHORTCUTS_KEY: &str = "gpui_paste_shortcuts";
 const WINDOW_POSITION_KEY: &str = "gpui_window_position";
 const HOVER_PREVIEW_KEY: &str = "gpui_hover_preview";
@@ -287,6 +288,24 @@ impl Preferences {
 
     pub fn set_quick_paste_enabled(&self, enabled: bool) -> Result<()> {
         self.set_bool_pref(QUICK_PASTE_ENABLED_KEY, enabled)
+    }
+
+    pub fn paste_delivery_mode(&self) -> Result<PasteDeliveryMode> {
+        Ok(match self.repository.get(PASTE_DELIVERY_MODE_KEY)?.as_deref() {
+            Some("rapid") => PasteDeliveryMode::Rapid,
+            _ => PasteDeliveryMode::Controlled,
+        })
+    }
+
+    pub fn set_paste_delivery_mode(&self, mode: PasteDeliveryMode) -> Result<()> {
+        self.repository.set(
+            PASTE_DELIVERY_MODE_KEY,
+            match mode {
+                PasteDeliveryMode::Controlled => "controlled",
+                PasteDeliveryMode::Rapid => "rapid",
+            },
+        )?;
+        Ok(())
     }
 
     fn read_json<T: DeserializeOwned + Default>(

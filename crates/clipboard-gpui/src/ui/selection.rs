@@ -189,7 +189,9 @@ impl ClipboardView {
         }
         let purpose = if let Some(target) = target {
             CopyPurpose::Paste {
-                request_id: self.paste_state.begin_copy(target),
+                request_id: self
+                    .paste_state
+                    .begin_copy(target, self.paste_wait_from_history()),
             }
         } else {
             CopyPurpose::Copy

@@ -179,6 +179,22 @@ fn window_behavior_defaults_and_persists_without_restoring_disabled_size() -> Re
 }
 
 #[test]
+fn paste_delivery_mode_defaults_to_controlled_and_persists() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("clipboard.db");
+    let db = Database::new(path.clone())?;
+    let preferences = Preferences::new(&db);
+    assert_eq!(preferences.paste_delivery_mode()?, PasteDeliveryMode::Controlled);
+    preferences.set_paste_delivery_mode(PasteDeliveryMode::Rapid)?;
+    assert_eq!(preferences.paste_delivery_mode()?, PasteDeliveryMode::Rapid);
+    assert_eq!(
+        Preferences::new(&Database::new(path)?).paste_delivery_mode()?,
+        PasteDeliveryMode::Rapid
+    );
+    Ok(())
+}
+
+#[test]
 fn quick_paste_is_opt_in_and_explicit_choice_survives_restart() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("clipboard.db");

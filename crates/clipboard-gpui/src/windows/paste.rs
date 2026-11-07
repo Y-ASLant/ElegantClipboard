@@ -16,9 +16,11 @@ use ::windows::Win32::{
 };
 use anyhow::{Result, bail};
 use clipboard_core::preferences::PasteKeyPreference;
+use clipboard_platform::paste_delivery::{
+    ReadyResult, paste_shortcut_trigger_held, PasteWaitPolicy,
+};
 use gpui_kit::Window;
 
-const MODIFIER_WAIT: Duration = Duration::from_secs(2);
 pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 pub fn is_external_target(window: &Window, target: (isize, u32)) -> bool {
@@ -32,6 +34,7 @@ pub struct PendingPaste {
     target: (isize, u32),
     clipboard_sequence: u32,
     paste_key: PasteKeyPreference,
+    wait: PasteWaitPolicy,
     started: Instant,
 }
 
@@ -47,6 +50,7 @@ impl PendingPaste {
         target: (isize, u32),
         clipboard_sequence: u32,
         paste_key: PasteKeyPreference,
+        wait: PasteWaitPolicy,
     ) -> Result<Self> {
         if !is_same_window(target) || target.1 == std::process::id() {
             bail!("目标窗口已关闭，内容已复制，请手动粘贴");
@@ -72,6 +76,7 @@ impl PendingPaste {
             target,
             clipboard_sequence,
             paste_key,
+            wait,
             started: Instant::now(),
         })
     }
@@ -86,7 +91,7 @@ impl PendingPaste {
                 .into_iter()
                 .any(|key| unsafe { GetAsyncKeyState(i32::from(key.0)) } < 0),
         };
-        if !self.ready(state, self.started.elapsed())? {
+        if !self.ready(state)? {
             return Ok(false);
         }
         let inputs = paste_inputs(self.paste_key);
@@ -104,7 +109,7 @@ impl PendingPaste {
         Ok(true)
     }
 
-    fn ready(&self, state: TargetState, elapsed: Duration) -> Result<bool> {
+    fn ready(&self, state: TargetState) -> Result<bool> {
         if !state.same_window {
             bail!("目标窗口已关闭，内容已复制，请手动粘贴");
         }
@@ -114,10 +119,22 @@ impl PendingPaste {
         if self.clipboard_sequence == 0 || state.clipboard_sequence != self.clipboard_sequence {
             bail!("剪贴板内容已变化，已取消自动粘贴，请检查后手动粘贴");
         }
-        if elapsed >= MODIFIER_WAIT {
-            bail!("等待修饰键释放超时，已取消自动粘贴；请松开按键后手动粘贴");
+        let trigger_held = self
+            .wait
+            .trigger_shortcut
+            .as_deref()
+            .is_some_and(paste_shortcut_trigger_held);
+        match self.wait.ready_to_inject(
+            state.modifiers_down,
+            trigger_held,
+            self.started.elapsed(),
+        ) {
+            ReadyResult::Ready => Ok(true),
+            ReadyResult::Waiting => Ok(false),
+            ReadyResult::TimedOut => {
+                bail!("等待修饰键释放超时，已取消自动粘贴；请松开按键后手动粘贴")
+            }
         }
-        Ok(!state.modifiers_down)
     }
 }
 
@@ -174,12 +191,14 @@ fn key_input(key: VIRTUAL_KEY, up: bool) -> INPUT {
 mod tests {
     use super::*;
     use ::windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS;
+    use clipboard_platform::paste_delivery::PASTE_INJECT_WAIT;
 
     fn pending() -> PendingPaste {
         PendingPaste {
             target: (1, 1),
             clipboard_sequence: 7,
             paste_key: PasteKeyPreference::CtrlV,
+            wait: PasteWaitPolicy::controlled(),
             started: Instant::now(),
         }
     }
@@ -195,12 +214,13 @@ mod tests {
 
     #[test]
     fn waits_for_release_only_until_deadline() {
-        let paste = pending();
-        let before_deadline = MODIFIER_WAIT - Duration::from_millis(1);
-        assert!(!paste.ready(state(true), before_deadline).unwrap());
-        assert!(paste.ready(state(false), before_deadline).unwrap());
+        let mut paste = pending();
+        paste.started = Instant::now() - (PASTE_INJECT_WAIT - Duration::from_millis(1));
+        assert!(!paste.ready(state(true)).unwrap());
+        assert!(paste.ready(state(false)).unwrap());
+        paste.started = Instant::now() - PASTE_INJECT_WAIT;
         for modifiers_down in [true, false] {
-            assert!(paste.ready(state(modifiers_down), MODIFIER_WAIT).is_err());
+            assert!(paste.ready(state(modifiers_down)).is_err());
         }
     }
 
@@ -222,14 +242,14 @@ mod tests {
                     ..state(modifiers_down)
                 },
             ] {
-                assert!(paste.ready(changed, Duration::ZERO).is_err());
+                assert!(paste.ready(changed).is_err());
             }
         }
         let mut unknown_sequence = pending();
         unknown_sequence.clipboard_sequence = 0;
         let mut snapshot = state(false);
         snapshot.clipboard_sequence = 0;
-        assert!(unknown_sequence.ready(snapshot, Duration::ZERO).is_err());
+        assert!(unknown_sequence.ready(snapshot).is_err());
     }
 
     #[test]

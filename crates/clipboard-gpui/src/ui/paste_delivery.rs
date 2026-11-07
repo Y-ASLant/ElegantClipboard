@@ -26,6 +26,7 @@ impl ClipboardView {
         clipboard_sequence: u32,
         pasted_id: Option<i64>,
         request_id: u64,
+        wait: clipboard_platform::paste_delivery::PasteWaitPolicy,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -45,7 +46,12 @@ impl ClipboardView {
         }
         self.paste_state.set_handoff(true);
         let pending =
-            match paste::PendingPaste::begin(target, clipboard_sequence, self.paste_key.value) {
+            match paste::PendingPaste::begin(
+                target,
+                clipboard_sequence,
+                self.paste_key.value,
+                wait,
+            ) {
                 Ok(pending) => pending,
                 Err(error) => {
                     self.paste_state.set_handoff(false);

@@ -7,6 +7,7 @@ use std::ffi::c_void;
 unsafe extern "C" {
     fn AXIsProcessTrusted() -> u8;
     fn CGEventSourceFlagsState(state: i32) -> u64;
+    fn CGEventSourceKeyState(state: i32, key: u16) -> bool;
     fn CGEventCreateKeyboardEvent(source: *const c_void, key: u16, down: bool) -> *mut c_void;
     fn CGEventSetFlags(event: *mut c_void, flags: u64);
     fn CGEventPost(tap: u32, event: *mut c_void);
@@ -35,16 +36,44 @@ pub fn modifiers_pressed() -> bool {
     unsafe { CGEventSourceFlagsState(1) & ((1 << 17) | (1 << 18) | (1 << 19) | (1 << 20)) != 0 }
 }
 
+pub fn shortcut_trigger_held(shortcut: &str) -> bool {
+    let Some(code) = shortcut_main_key_code(shortcut) else {
+        return false;
+    };
+    unsafe { CGEventSourceKeyState(0, code) }
+}
+
+fn shortcut_main_key_code(shortcut: &str) -> Option<u16> {
+    let last = shortcut.rsplit('+').next()?.trim();
+    if last.len() == 1 {
+        let byte = last.as_bytes()[0];
+        if byte.is_ascii_digit() {
+            return Some(if byte == b'0' {
+                0x1d
+            } else {
+                0x11 + u16::from(byte - b'0')
+            });
+        }
+        if byte.is_ascii_alphabetic() {
+            return Some(0x00 + u16::from(byte.to_ascii_lowercase() - b'a'));
+        }
+    }
+    if let Some(number) = last.strip_prefix('F').and_then(|v| v.parse::<u8>().ok()) {
+        return (1..=20).contains(&number).then(|| 0x7a + u16::from(number));
+    }
+    None
+}
+
 pub fn shift_pressed() -> bool {
     unsafe { CGEventSourceFlagsState(1) & (1 << 17) != 0 }
 }
 
-pub fn send_paste(preference: PasteKeyPreference) -> Result<()> {
+pub fn send_paste(preference: PasteKeyPreference, allow_modifiers: bool) -> Result<()> {
     require_accessibility()?;
     if preference == PasteKeyPreference::ShiftInsert {
         bail!("macOS 不支持 Shift+Insert 自动粘贴，请选择 Command+V");
     }
-    if modifiers_pressed() {
+    if !allow_modifiers && modifiers_pressed() {
         bail!("请松开修饰键后再粘贴")
     }
     // Explicit flags on V synthesize Command+V without releasing user-owned keys.

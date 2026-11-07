@@ -8,7 +8,7 @@ use windows::Win32::{
     System::Threading::GetCurrentThreadId,
     UI::{
         Input::KeyboardAndMouse::{
-            HOT_KEY_MODIFIERS, MOD_NOREPEAT, RegisterHotKey, UnregisterHotKey,
+            GetAsyncKeyState, HOT_KEY_MODIFIERS, MOD_NOREPEAT, RegisterHotKey, UnregisterHotKey,
         },
         WindowsAndMessaging::{
             GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, MSG, PM_NOREMOVE,
@@ -165,6 +165,7 @@ impl PasteHotkeys {
         shortcuts: &PasteShortcutConfig,
         sequence_shortcut: &str,
         slots_enabled: bool,
+        allow_slot_repeat: bool,
         main_hotkey: &HotkeyPreference,
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main_hotkey)?;
@@ -220,8 +221,13 @@ impl PasteHotkeys {
                                     continue;
                                 }
                                 let id = id_base + offset + i32::from(slot);
+                                let modifiers = if allow_slot_repeat {
+                                    parsed.modifiers
+                                } else {
+                                    parsed.modifiers | MOD_NOREPEAT
+                                };
                                 match unsafe {
-                                    RegisterHotKey(None, id, parsed.modifiers | MOD_NOREPEAT, key)
+                                    RegisterHotKey(None, id, modifiers, key)
                                 } {
                                     Ok(()) => registered.push(id),
                                     Err(error) => failures.push(PasteRegistrationWarning {
@@ -281,6 +287,20 @@ impl Drop for PasteHotkeys {
     fn drop(&mut self) {
         self.thread.stop();
     }
+}
+
+/// Returns whether the primary key of a paste shortcut is still held down.
+pub fn paste_shortcut_trigger_held(shortcut: &str) -> bool {
+    let Ok(parsed) = super::shortcut_parse::parse_paste_shortcut(shortcut) else {
+        return false;
+    };
+    let keys = [
+        parsed.key,
+        parsed.numpad_key.unwrap_or(0),
+    ];
+    keys.into_iter()
+        .filter(|vk| *vk != 0)
+        .any(|vk| unsafe { GetAsyncKeyState(i32::try_from(vk).unwrap_or(i32::MAX)) } < 0)
 }
 
 fn paste_slot_for_id(id: i32) -> Option<(u8, bool)> {

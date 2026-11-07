@@ -197,6 +197,16 @@ pub enum PasteKeyPreference {
     ShiftInsert,
 }
 
+/// Controls hotkey repeat and when automatic paste injects after a shortcut.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PasteDeliveryMode {
+    /// Wait for every modifier to release before sending the paste key (default).
+    #[default]
+    Controlled,
+    /// Quick-paste slots: allow chord repeat and inject after the slot key releases (Alt may stay down).
+    Rapid,
+}
+
 impl Default for PasteShortcutConfig {
     fn default() -> Self {
         Self {

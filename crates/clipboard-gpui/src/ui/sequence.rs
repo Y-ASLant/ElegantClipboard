@@ -68,7 +68,9 @@ impl ClipboardView {
         if !paste::is_external_target(window, target) {
             return false;
         }
-        let Some(command) = self.paste_state.advance_sequence() else {
+        let Some(command) = self
+            .paste_state
+            .advance_sequence(self.paste_wait_for_sequence()) else {
             return false;
         };
         // 发送前记录请求归属，首条复制不会把自己的序列当作用户打断。

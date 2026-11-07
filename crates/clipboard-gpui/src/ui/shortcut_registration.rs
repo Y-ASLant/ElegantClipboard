@@ -88,6 +88,7 @@ impl ClipboardView {
             &next.slots,
             &next.sequence,
             next.quick,
+            self.paste_slots_allow_repeat(),
             &next.main,
         )?;
         // 推进键失败不能被可用的槽位掩盖；修改槽位失败也必须拒绝保存。

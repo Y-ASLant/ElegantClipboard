@@ -194,6 +194,7 @@ impl PasteHotkeys {
         shortcuts: &PasteShortcutConfig,
         sequence_shortcut: &str,
         slots_enabled: bool,
+        _allow_slot_repeat: bool,
         main: &HotkeyPreference,
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main)?;
@@ -269,6 +270,10 @@ impl PasteHotkeys {
     pub fn take_error(&self) -> Option<String> {
         self.worker.errors.try_recv().ok()
     }
+}
+
+pub fn paste_shortcut_trigger_held(shortcut: &str) -> bool {
+    super::desktop::shortcut_trigger_held(shortcut)
 }
 
 #[cfg(test)]

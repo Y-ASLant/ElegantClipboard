@@ -10,9 +10,51 @@ pub(super) struct PasteHotkeyChannels {
 }
 
 impl ClipboardView {
+    pub(super) fn refresh_paste_hotkey_registration(&mut self) {
+        if !self.monitoring {
+            self.paste_hotkeys = None;
+            return;
+        }
+        self.paste_hotkeys = None;
+        match PasteHotkeys::start(
+            self.paste_hotkey_sender.clone(),
+            self.sequence_hotkey_sender.clone(),
+            &self.paste_shortcuts,
+            &self.sequence_hotkey,
+            self.quick_paste_enabled,
+            self.paste_slots_allow_repeat(),
+            &self.hotkey_choice,
+        ) {
+            Ok((hotkeys, warnings)) => {
+                self.paste_hotkeys = Some(hotkeys);
+                self.quick_paste_registration_warning =
+                    paste_registration_summary(self.language, &warnings);
+            }
+            Err(error) => {
+                self.quick_paste_registration_warning = Some(error.to_string());
+                self.is_error = true;
+            }
+        }
+    }
+
+    pub(super) fn select_paste_delivery_mode(
+        &mut self,
+        mode: PasteDeliveryMode,
+        cx: &mut Context<Self>,
+    ) {
+        if self.paste_delivery_mode.pending || self.paste_delivery_mode.value == mode {
+            return;
+        }
+        if self.send(Command::SetPasteDeliveryMode(mode), cx) {
+            self.paste_delivery_mode.pending = true;
+            cx.notify();
+        }
+    }
+
     pub(super) fn register_paste_hotkeys(
         monitoring: bool,
         slots_enabled: bool,
+        allow_slot_repeat: bool,
         shortcuts: &PasteShortcutConfig,
         sequence_hotkey: &str,
         main_hotkey: &HotkeyPreference,
@@ -26,6 +68,7 @@ impl ClipboardView {
                 shortcuts,
                 sequence_hotkey,
                 slots_enabled,
+                allow_slot_repeat,
                 main_hotkey,
             )
             .map(Some)
@@ -158,7 +201,9 @@ impl ClipboardView {
         {
             return;
         }
-        let request_id = self.paste_state.begin_quick(event.target);
+        let request_id =
+            self.paste_state
+                .begin_quick(event.target, event.slot, event.favorite);
         if !self.send(
             Command::ResolveQuickPaste {
                 request_id,

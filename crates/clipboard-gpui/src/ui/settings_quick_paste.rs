@@ -14,6 +14,8 @@ impl SettingsWindowView {
         let quick_paste_enabled = state.quick_paste_enabled;
         let paste_key = state.paste_key.value;
         let paste_key_pending = state.paste_key.pending;
+        let paste_delivery_mode = state.paste_delivery_mode.value;
+        let paste_delivery_mode_pending = state.paste_delivery_mode.pending;
         let paste_shortcuts = state.paste_shortcuts.clone();
         let shortcut_actions_pending = state.shortcut_change_pending()
             || crate::capabilities::paste_unavailable_reason(language).is_some();
@@ -59,6 +61,65 @@ impl SettingsWindowView {
                             owner.select_quick_paste_enabled(*checked, cx);
                         });
                     }),
+            )
+            .child(
+                settings_field(tr(
+                    language,
+                    "自动粘贴投递节奏",
+                    "Automatic paste delivery",
+                ))
+                .child({
+                    let choices = [
+                        (
+                            tr(language, "受控（默认）", "Controlled (default)"),
+                            PasteDeliveryMode::Controlled,
+                        ),
+                        (
+                            tr(language, "连贴（槽位）", "Rapid slots"),
+                            PasteDeliveryMode::Rapid,
+                        ),
+                    ];
+                    let selected_index = choices
+                        .iter()
+                        .position(|(_, mode)| *mode == paste_delivery_mode)
+                        .unwrap_or(0);
+                    let click_choices = choices;
+                    let owner = self.owner.clone();
+                    TabBar::new("settings-paste-delivery-tabs")
+                        .w_full()
+                        .min_w_0()
+                        .large()
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
+                        .segmented()
+                        .last_empty_space(div().w_0())
+                        .selected_index(selected_index)
+                        .on_click(move |index: &usize, _, cx| {
+                            if let Some(&(_, mode)) = click_choices.get(*index) {
+                                if paste_delivery_mode_pending {
+                                    return;
+                                }
+                                let _ = owner.update(cx, |owner, cx| {
+                                    owner.select_paste_delivery_mode(mode, cx);
+                                });
+                            }
+                        })
+                        .children(choices.map(|(label, _)| {
+                            Tab::new()
+                                .text_size(px(visual::TEXT_BODY))
+                                .aria_label(label)
+                                .child(div().child(label))
+                                .flex_1()
+                                .disabled(paste_delivery_mode_pending)
+                        }))
+                })
+                .child(settings_description(
+                    tr(
+                        language,
+                        "受控：松齐修饰键后再粘贴，兼容面更广。连贴：按住 Alt 连按数字时允许槽位重复触发，并在槽位键松开后粘贴（部分应用可能需改回受控）。",
+                        "Controlled: wait until modifiers release—best compatibility. Rapid: repeat slot hotkeys while modifiers stay down and paste after the slot key releases (some apps may need Controlled).",
+                    ),
+                    cx,
+                )),
             )
             .when_some(
                 crate::capabilities::paste_unavailable_reason(language),

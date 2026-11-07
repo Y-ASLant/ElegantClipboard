@@ -269,6 +269,7 @@ impl PasteHotkeys {
         shortcuts: &PasteShortcutConfig,
         sequence_shortcut: &str,
         slots_enabled: bool,
+        _allow_slot_repeat: bool,
         main: &HotkeyPreference,
     ) -> Result<(Self, Vec<PasteRegistrationWarning>)> {
         validate_paste_shortcuts(shortcuts, main)?;
@@ -318,6 +319,10 @@ impl PasteHotkeys {
             warnings,
         ))
     }
+}
+
+pub fn paste_shortcut_trigger_held(shortcut: &str) -> bool {
+    super::desktop::shortcut_trigger_held(shortcut)
 }
 
 #[cfg(test)]

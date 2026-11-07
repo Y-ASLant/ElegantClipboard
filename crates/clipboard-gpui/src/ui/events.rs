@@ -190,6 +190,21 @@ impl ClipboardView {
                 );
                 true
             }
+            Event::PasteDeliveryModeSaved(result) => {
+                let refresh = result.is_ok();
+                self.acknowledge_save(
+                    result,
+                    |this| &mut this.paste_delivery_mode,
+                    (
+                        "保存粘贴投递模式失败",
+                        "Failed to save paste delivery mode",
+                    ),
+                );
+                if refresh {
+                    self.refresh_paste_hotkey_registration();
+                }
+                true
+            }
             Event::PasteMoveToTopSaved(result) => {
                 self.acknowledge_save(
                     result,

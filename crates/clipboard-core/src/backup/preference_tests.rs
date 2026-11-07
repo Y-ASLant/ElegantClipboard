@@ -29,6 +29,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         restore_clipboard: true,
         sequence_hotkey: "Ctrl+Alt+F9".into(),
         quick_paste_enabled: true,
+        paste_delivery_mode: PasteDeliveryMode::Controlled,
         paste_shortcuts: PasteShortcutConfig {
             recent: std::array::from_fn(|index| format!("Ctrl+Shift+F{}", index + 1)),
             favorites: std::array::from_fn(|index| format!("Ctrl+Alt+F{}", index + 1)),
@@ -110,6 +111,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_restore_clipboard(expected.restore_clipboard)?;
     preferences.set_sequence_paste_hotkey(&expected.sequence_hotkey)?;
     preferences.set_quick_paste_enabled(expected.quick_paste_enabled)?;
+    preferences.set_paste_delivery_mode(expected.paste_delivery_mode)?;
     preferences.set_paste_shortcuts(&expected.paste_shortcuts)?;
     preferences.set_window_position(expected.window_position)?;
     preferences.set_hover_preview(expected.hover_preview)?;

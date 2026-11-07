@@ -47,10 +47,10 @@ pub fn activate_target(target: (isize, u32)) -> Result<()> {
     bail!("The window manager refused to activate the paste target")
 }
 
-pub fn send_paste(preference: PasteKeyPreference) -> Result<()> {
+pub fn send_paste(preference: PasteKeyPreference, allow_modifiers: bool) -> Result<()> {
     let x = X11::connect()?;
     x.connection.xtest_get_version(2, 2)?.reply()?;
-    if modifiers(&x)? & 0xcd != 0 {
+    if !allow_modifiers && modifiers(&x)? & 0xcd != 0 {
         bail!("Release shortcut modifiers before pasting");
     }
     let (modifier, key) = match preference {
@@ -98,4 +98,32 @@ pub fn shift_pressed() -> bool {
     X11::connect()
         .and_then(|x| modifiers(&x))
         .is_ok_and(|mask| mask & 1 != 0)
+}
+
+pub fn shortcut_trigger_held(shortcut: &str) -> bool {
+    let Ok(parsed) = super::shortcut::parse(shortcut, false) else {
+        return false;
+    };
+    let Ok(x) = X11::connect() else {
+        return false;
+    };
+    let symbols = [parsed.key, parsed.numpad.unwrap_or(0)];
+    symbols.iter().filter(|symbol| **symbol != 0).any(|symbol| {
+        x.keycode(*symbol)
+            .ok()
+            .is_some_and(|keycode| key_down(&x, keycode))
+    })
+}
+
+fn key_down(x: &X11, keycode: u8) -> bool {
+    x.connection
+        .query_keymap()
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .and_then(|map| {
+            let byte = usize::from(keycode / 8);
+            let bit = keycode % 8;
+            map.keys.get(byte).map(|value| value & (1 << bit) != 0)
+        })
+        .unwrap_or(false)
 }

@@ -11,12 +11,12 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         let request_id = purpose.request_id();
-        let target = if let Some(request_id) = request_id {
-            let Some(target) = self.paste_state.receive(request_id) else {
+        let delivery = if let Some(request_id) = request_id {
+            let Some(delivery) = self.paste_state.receive(request_id) else {
                 let _ = self.service.send(Command::CancelPaste { request_id });
                 return false;
             };
-            Some(target)
+            Some((delivery, request_id))
         } else {
             None
         };
@@ -25,12 +25,13 @@ impl ClipboardView {
         if sound::enabled(self.audio.value, Sound::Copy, SoundTiming::AfterSuccess) {
             sound::play(Sound::Copy);
         }
-        if let Some((target, request_id)) = target.zip(request_id) {
+        if let Some(((target, wait), request_id)) = delivery {
             self.return_to_paste_target(
                 target,
                 clipboard_sequence,
                 Some(id),
                 request_id,
+                wait,
                 window,
                 cx,
             );
@@ -47,11 +48,11 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> bool {
         let target = if let Some(request_id) = purpose.request_id() {
-            let Some(target) = self.paste_state.receive(request_id) else {
+            let Some(delivery) = self.paste_state.receive(request_id) else {
                 let _ = self.service.send(Command::CancelPaste { request_id });
                 return false;
             };
-            Some((target, request_id))
+            Some((delivery, request_id))
         } else {
             None
         };
@@ -64,8 +65,16 @@ impl ClipboardView {
             sound::play(Sound::Copy);
         }
         self.paste_state.finish_merge();
-        if let Some((target, request_id)) = target {
-            self.return_to_paste_target(target, clipboard_sequence, None, request_id, window, cx);
+        if let Some(((target, wait), request_id)) = target {
+            self.return_to_paste_target(
+                target,
+                clipboard_sequence,
+                None,
+                request_id,
+                wait,
+                window,
+                cx,
+            );
         } else {
             self.set_feedback_message(if self.language == LanguagePreference::English {
                 format!("Merged and copied {item_count} items")
@@ -106,7 +115,9 @@ impl ClipboardView {
         if self.paste_state.pending() {
             return;
         }
-        let request_id = self.paste_state.begin_copy(target);
+        let request_id = self
+            .paste_state
+            .begin_copy(target, self.paste_wait_from_history());
         if !self.send(
             Command::Copy {
                 id,
@@ -182,7 +193,9 @@ impl ClipboardView {
         }
         let purpose = if let Some(target) = target {
             CopyPurpose::Paste {
-                request_id: self.paste_state.begin_copy(target),
+                request_id: self
+                    .paste_state
+                    .begin_copy(target, self.paste_wait_from_history()),
             }
         } else {
             CopyPurpose::Copy

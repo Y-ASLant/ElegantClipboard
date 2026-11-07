@@ -70,12 +70,13 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(target) = self.paste_state.resolve_quick(request_id) else {
+        let Some(quick) = self.paste_state.resolve_quick(request_id) else {
             return false;
         };
         match result {
-            Ok(id) if paste::is_external_target(window, target) => {
-                let request_id = self.paste_state.begin_copy(target);
+            Ok(id) if paste::is_external_target(window, quick.target) => {
+                let wait = self.paste_wait_for_slot(quick.slot, quick.favorite);
+                let request_id = self.paste_state.begin_copy(quick.target, wait);
                 if !self.send(
                     Command::Copy {
                         id,

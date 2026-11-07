@@ -296,6 +296,13 @@ impl Worker {
             Command::SetPasteKey(key) => {
                 return self.save_setting(key, Preferences::set_paste_key, Event::PasteKeySaved);
             }
+            Command::SetPasteDeliveryMode(mode) => {
+                return self.save_setting(
+                    mode,
+                    Preferences::set_paste_delivery_mode,
+                    Event::PasteDeliveryModeSaved,
+                );
+            }
             Command::SetPasteMoveToTop(enabled) => {
                 return self.save_setting(
                     enabled,
