@@ -123,8 +123,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "隐私清理",
         english: "Privacy",
-        description_chinese: "永久删除全部剪贴板历史",
-        description_english: "Permanently delete all clipboard history",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_privacy_content,
     },
     Section {

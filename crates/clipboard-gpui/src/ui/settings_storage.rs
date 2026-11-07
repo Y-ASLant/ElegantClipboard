@@ -208,6 +208,21 @@ impl SettingsWindowView {
         let privacy_owner = self.owner.clone();
 
         settings_inline()
+            .justify_between()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(visual::TEXT_BODY))
+                    .line_height(relative(1.5))
+                    .text_color(cx.theme().muted_foreground)
+                    .whitespace_normal()
+                    .child(tr(
+                        language,
+                        "永久删除全部剪贴板历史",
+                        "Permanently delete all clipboard history",
+                    )),
+            )
             .child(
                 Button::new("settings-window-clear-all")
                     .danger()
