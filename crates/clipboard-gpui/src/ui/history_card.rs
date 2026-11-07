@@ -214,20 +214,20 @@ impl ClipboardView {
                 MouseButton::Right,
                 cx.listener(|this, _, _, _| this.cancel_pending_row_click()),
             )
-            .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+            .on_hover(cx.listener(move |this, is_hovered: &bool, window, cx| {
                 hovered.update(cx, |hovered, _| hovered.content = *is_hovered);
                 // 鼠标驱动的焦点：悬停进入即转移选中态，与键盘/点击同一目标。
                 // 拖拽与批量模式下 selection 不参与渲染与快捷键，保持不变。
                 if *is_hovered && !this.batch_mode && !cx.has_active_drag() {
                     this.history.selected = Some(id);
                 }
-                this.set_hover_source(id, *is_hovered, cx);
+                this.set_hover_source(id, *is_hovered, window, cx);
                 cx.notify();
             }))
-            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
                 // Native menus can close without changing this row's cached hover state.
                 if !this.hover_source_active {
-                    this.set_hover_source(id, true, cx);
+                    this.set_hover_source(id, true, window, cx);
                 }
                 this.update_hover_anchor(id, event.position.y, cx);
             }))

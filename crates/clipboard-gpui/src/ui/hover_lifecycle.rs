@@ -24,6 +24,7 @@ impl ClipboardView {
         if self.hover_preview.apply(id, generation, result)
             && self.hover_source_active
             && self.editor.id.is_none()
+            && self.hover_source_allowed(window)
         {
             self.open_hover_popup(window, cx);
         }
@@ -106,6 +107,26 @@ impl ClipboardView {
                         if (this.hover_preview.id, this.hover_preview.generation) != request {
                             return false;
                         }
+                        if !this.hover_overlay_stack_allows_tracking(cx) {
+                            this.close_hover_preview("overlay_stack_active", cx);
+                            return false;
+                        }
+                        let preview_hwnd = this
+                            .hover_popup
+                            .as_ref()
+                            .and_then(|handle| {
+                                handle
+                                    .update(cx, |_, window, _| native_window::window_id(window))
+                                    .ok()
+                                    .flatten()
+                            });
+                        let over_main = native::pointer_targets_window(main, pointer);
+                        let over_preview = preview_hwnd
+                            .is_some_and(|hwnd| native::pointer_targets_window(hwnd, pointer));
+                        if !over_main && !over_preview {
+                            this.close_hover_preview("pointer_left_main", cx);
+                            return false;
+                        }
                         let source = this.drag_viewport.get().is_some_and(|viewport| {
                             if !viewport.contains(&point(px(x), px(y))) {
                                 return false;
@@ -176,7 +197,52 @@ impl ClipboardView {
             .unwrap_or(false)
     }
 
-    pub(super) fn set_hover_source(&mut self, id: i64, entered: bool, cx: &mut Context<Self>) {
+    pub(super) fn hover_source_allowed(&self, window: &Window) -> bool {
+        if self.hover_overlay_stack_blocks_source() {
+            return false;
+        }
+        if !window.is_window_active() {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            use clipboard_platform::external_drag as native;
+            let Some(main) = native_window::window_id(window) else {
+                return false;
+            };
+            let Ok(pointer) = native::poll_drag_pointer() else {
+                return true;
+            };
+            native::pointer_targets_window(main, pointer)
+        }
+        #[cfg(not(windows))]
+        {
+            true
+        }
+    }
+
+    fn hover_overlay_stack_blocks_source(&self) -> bool {
+        self.settings_window.is_some()
+            || self.settings_window_opening
+            || self.onboarding_visible()
+            || self.confirmation.is_some()
+    }
+
+    fn hover_overlay_stack_allows_tracking(&self, cx: &mut App) -> bool {
+        !self.hover_overlay_stack_blocks_source()
+            && self
+                .history_menu_window
+                .and_then(|menu| menu.downcast::<menu_window::HistoryMenuWindow>())
+                .is_none_or(|menu| menu.update(cx, |_, _, _| ()).is_err())
+    }
+
+    pub(super) fn set_hover_source(
+        &mut self,
+        id: i64,
+        entered: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         tracing::debug!(
             id, entered, current_id = ?self.hover_preview.id,
             generation = self.hover_preview.generation, "Hover source transition"
@@ -185,6 +251,12 @@ impl ClipboardView {
             return;
         }
         if entered {
+            if !self.hover_source_allowed(window) {
+                if self.hover_preview.id.is_some() {
+                    self.close_hover_preview("hover_source_blocked", cx);
+                }
+                return;
+            }
             if self.batch_mode
                 || cx.has_active_drag()
                 || self.external_drag.is_some()
@@ -236,6 +308,7 @@ impl ClipboardView {
                         if this.hover_preview.id == Some(id)
                             && this.hover_preview.generation == generation
                             && this.hover_source_active
+                            && !this.hover_overlay_stack_blocks_source()
                         {
                             tracing::debug!(id, generation, "Sending hover preview request");
                             this.send(Command::HoverPreview { id, generation }, cx);

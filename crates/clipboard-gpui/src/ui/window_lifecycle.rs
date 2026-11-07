@@ -233,6 +233,9 @@ impl ClipboardView {
     pub(super) fn handle_window_deactivated(&mut self, cx: &mut Context<Self>) {
         self.close_history_menu(cx);
         if crate::native::foreground_window_is_ours() {
+            if self.settings_window.is_some() || self.settings_window_opening {
+                self.close_hover_preview("settings_focused", cx);
+            }
             return;
         }
         self.close_hover_preview("main_deactivated", cx);

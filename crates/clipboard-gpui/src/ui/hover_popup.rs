@@ -5,6 +5,7 @@ impl ClipboardView {
         if self.hover_popup.is_some()
             || self.hover_popup_opening.is_some()
             || !self.hover_source_active
+            || !self.hover_source_allowed(window)
         {
             return;
         }

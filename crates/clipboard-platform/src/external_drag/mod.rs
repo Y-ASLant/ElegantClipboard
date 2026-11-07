@@ -29,11 +29,11 @@ use windows::Win32::{
             GetAsyncKeyState, GetCapture, ReleaseCapture, SetCapture, VK_ESCAPE, VK_LBUTTON,
         },
         WindowsAndMessaging::{
-            GWL_EXSTYLE, GetClientRect, GetCursorPos, GetWindowLongPtrW, GetWindowRect,
+            GWL_EXSTYLE, GetClientRect, GetCursorPos, GetParent, GetWindowLongPtrW, GetWindowRect,
             GetWindowThreadProcessId, HWND_TOPMOST, IsWindow, LWA_ALPHA, SWP_HIDEWINDOW,
             SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetLayeredWindowAttributes,
-            SetWindowLongPtrW, SetWindowPos, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-            WS_EX_TRANSPARENT,
+            SetWindowLongPtrW, SetWindowPos, WindowFromPoint, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
         },
     },
 };
@@ -76,6 +76,27 @@ pub fn drag_pointer_in_client(
 
 pub fn pointer_outside_source(hwnd: isize, pointer: DragPointerState) -> Result<bool> {
     Ok(!contains(source_rect(hwnd)?, pointer))
+}
+
+/// Whether the deepest window under `pointer` belongs to `hwnd` (itself or a child).
+pub fn pointer_targets_window(hwnd: isize, pointer: DragPointerState) -> bool {
+    let target = HWND(hwnd as *mut _);
+    let mut current = unsafe {
+        WindowFromPoint(POINT {
+            x: pointer.x,
+            y: pointer.y,
+        })
+    };
+    while !current.0.is_null() {
+        if current == target {
+            return true;
+        }
+        current = match unsafe { GetParent(current) } {
+            Ok(parent) if !parent.0.is_null() => parent,
+            _ => HWND::default(),
+        };
+    }
+    false
 }
 
 fn source_rect(hwnd: isize) -> Result<RECT> {
