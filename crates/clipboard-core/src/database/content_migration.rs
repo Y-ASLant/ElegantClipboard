@@ -43,16 +43,8 @@ impl Database {
     }
 
     pub(super) fn migrate_url_content_type(conn: &Connection) -> Result<(), rusqlite::Error> {
-        // 旧库：迁移 10 曾通过重建表把 'url' 写进 CHECK 约束
-        let legacy_done: bool = conn
-            .query_row(
-                "SELECT COALESCE((SELECT sql FROM sqlite_master WHERE type='table' AND name='clipboard_items'), '') LIKE '%''url''%'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        if legacy_done || Self::url_content_type_migration_done(conn)? {
-            Self::mark_url_content_type_migration_done(conn)?;
+        // 仅以 settings 标记为准；CHECK 里含 `url` 不代表已完成「文本→url」回填。
+        if Self::url_content_type_migration_done(conn)? {
             return Ok(());
         }
 
@@ -90,11 +82,19 @@ impl Database {
                 |row| row.get(0),
             )
             .unwrap_or(false);
+        let has_note: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'note'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        let note_select = if has_note { "note" } else { "NULL" };
 
         info!("Migrating database: removing content_type CHECK constraint");
         let tx = conn.unchecked_transaction()?;
         if has_file_payload {
-            tx.execute_batch(
+            let sql = format!(
                 "CREATE TABLE clipboard_items_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     content_type TEXT NOT NULL,
@@ -121,6 +121,7 @@ impl Database {
                     char_count INTEGER,
                     source_app_name TEXT,
                     source_app_icon TEXT,
+                    note TEXT,
                     group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
                 );
                 INSERT INTO clipboard_items_new
@@ -130,13 +131,15 @@ impl Database {
                        preview, byte_size, image_width, image_height,
                        is_pinned, is_favorite, favorite_order, sort_order,
                        created_at, updated_at, access_count, last_accessed_at,
-                       char_count, source_app_name, source_app_icon, group_id
+                       char_count, source_app_name, source_app_icon, {note_select}, group_id
                 FROM clipboard_items;
                 DROP TABLE clipboard_items;
                 ALTER TABLE clipboard_items_new RENAME TO clipboard_items;",
-            )?;
+                note_select = note_select
+            );
+            tx.execute_batch(&sql)?;
         } else {
-            tx.execute_batch(
+            let sql = format!(
                 "CREATE TABLE clipboard_items_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     content_type TEXT NOT NULL,
@@ -162,6 +165,7 @@ impl Database {
                     char_count INTEGER,
                     source_app_name TEXT,
                     source_app_icon TEXT,
+                    note TEXT,
                     group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
                 );
                 INSERT INTO clipboard_items_new
@@ -171,11 +175,13 @@ impl Database {
                        preview, byte_size, image_width, image_height,
                        is_pinned, is_favorite, favorite_order, sort_order,
                        created_at, updated_at, access_count, last_accessed_at,
-                       char_count, source_app_name, source_app_icon, group_id
+                       char_count, source_app_name, source_app_icon, {note_select}, group_id
                 FROM clipboard_items;
                 DROP TABLE clipboard_items;
                 ALTER TABLE clipboard_items_new RENAME TO clipboard_items;",
-            )?;
+                note_select = note_select
+            );
+            tx.execute_batch(&sql)?;
         }
         tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_at DESC);

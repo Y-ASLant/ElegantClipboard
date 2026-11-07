@@ -42,7 +42,9 @@ const BACKUP_KEYS: &[&str] = &[
 
 pub(crate) fn prune_non_gpui_settings(connection: &Connection) -> Result<()> {
     static SQL: LazyLock<String> = LazyLock::new(|| {
-        let mut sql = String::from("DELETE FROM settings WHERE key NOT IN (");
+        // Keep one-shot data-migration markers (`_migration_*`) so restores/imports do not replay them.
+        let mut sql =
+            String::from("DELETE FROM settings WHERE key NOT LIKE '\\_migration%' ESCAPE '\\' AND key NOT IN (");
         for index in 0..BACKUP_KEYS.len() {
             if index > 0 {
                 sql.push(',');

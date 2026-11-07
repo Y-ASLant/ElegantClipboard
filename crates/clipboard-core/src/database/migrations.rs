@@ -176,4 +176,83 @@ mod tests {
         assert!(!columns(&beta).contains(&"note".to_string()));
         assert!(!has_table(&beta, "captured_formats"));
     }
+
+    /// Latest 1.x: CHECK 不含 `url`，`semantic_hash` 可为空；升上来后应回填 URL 与语义哈希。
+    #[test]
+    fn latest_1x_check_constraint_gets_url_and_semantic_backfill() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("latest_check.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE clipboard_items (
+                    id INTEGER PRIMARY KEY,
+                    content_type TEXT NOT NULL CHECK(content_type IN ('text', 'image', 'html', 'rtf', 'files', 'url')),
+                    text_content TEXT,
+                    html_content TEXT,
+                    rtf_content TEXT,
+                    image_path TEXT,
+                    file_paths TEXT,
+                    file_payload TEXT,
+                    content_hash TEXT,
+                    semantic_hash TEXT,
+                    preview TEXT,
+                    byte_size INTEGER,
+                    image_width INTEGER,
+                    image_height INTEGER,
+                    is_pinned INTEGER,
+                    is_favorite INTEGER,
+                    favorite_order INTEGER,
+                    sort_order INTEGER,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    access_count INTEGER,
+                    last_accessed_at TEXT,
+                    char_count INTEGER,
+                    source_app_name TEXT,
+                    source_app_icon TEXT,
+                    group_id INTEGER
+                );
+                INSERT INTO clipboard_items (
+                    content_type, text_content, content_hash, semantic_hash, preview
+                ) VALUES
+                    ('text', 'https://example.com/page', 'hash_u', NULL, 'x'),
+                    ('text', 'hello', 'hash_t', NULL, 'y');",
+            )
+            .unwrap();
+        Database::new(path.clone()).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        let url_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE content_type = 'url'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(url_rows, 1);
+        let sem: String = conn
+            .query_row(
+                "SELECT semantic_hash FROM clipboard_items WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sem, "hash_u");
+        let marker: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = '_migration_url_content_type'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, "done");
+        let backfill: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = '_migration_backfill_semantic_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(backfill, "done");
+    }
 }

@@ -46,6 +46,31 @@ pub(crate) fn semantic_hash_from_text(text: &str) -> Option<String> {
     Some(hash_with_prefix(b"text:", normalized.as_bytes()))
 }
 
+/// Semantic hash for migration backfill (`text`/`url`/rich) when 1.x left `semantic_hash` empty or equal to `content_hash`.
+pub(crate) fn compute_semantic_hash(
+    content_type: &str,
+    text_content: Option<&str>,
+    content_hash: &str,
+) -> String {
+    match content_type {
+        "url" => {
+            if let Some(text) = text_content {
+                if let Some(canonical) = canonical_url_text(text) {
+                    return hash_with_prefix(b"url:", canonical.as_bytes());
+                }
+                if let Some(h) = semantic_hash_from_text(text) {
+                    return h;
+                }
+            }
+            content_hash.to_string()
+        }
+        "text" | "html" | "rtf" => text_content
+            .and_then(semantic_hash_from_text)
+            .unwrap_or_else(|| content_hash.to_string()),
+        _ => content_hash.to_string(),
+    }
+}
+
 fn starts_with_ignore_ascii_case(text: &str, prefix: &str) -> bool {
     text.get(..prefix.len())
         .is_some_and(|head| head.eq_ignore_ascii_case(prefix))

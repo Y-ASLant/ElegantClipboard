@@ -1,3 +1,5 @@
+mod content_migration;
+mod data_migration;
 mod groups;
 mod migrations;
 mod settings;
@@ -84,8 +86,17 @@ impl Database {
 
         Self::run_migrations(&conn)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        Self::run_post_schema_migrations(&conn)?;
         info!("Database schema initialized");
 
+        Ok(())
+    }
+
+    /// URL 类型、语义哈希与收藏顺序等数据迁移；在 `SCHEMA_SQL` 之后运行以便 `settings` 等表已存在。
+    fn run_post_schema_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
+        Self::migrate_url_content_type(conn)?;
+        Self::backfill_semantic_hashes(conn)?;
+        Self::normalize_favorite_order(conn)?;
         Ok(())
     }
 
