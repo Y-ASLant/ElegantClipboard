@@ -47,6 +47,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         },
         display: DisplayPreference {
             show_category_filter: false,
+            category_tabs: CategoryTabVisibility::default(),
             show_drag_area_indicator: false,
             card_density: CardDensity::Spacious,
             card_max_lines: 5,

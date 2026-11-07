@@ -66,13 +66,16 @@ fn shaped_size(
             (width, count)
         })
         .unwrap_or((px(0.), 1));
+    let text_height = (count.max(1) as f32 * line_height).ceil();
     size(
         // Text layout rounds its measured width up; keep the fitted surface at
         // least that wide so its final glyph cannot wrap after pixel snapping.
         (width.ceil() + px(visual::SPACE_3 * 2.))
             .max(px(48.))
             .min(maximum_width),
-        px(count.max(1) as f32 * line_height + visual::SPACE_2 * 2.).max(px(46.)),
+        // Height must match the padded body exactly; an inflated minimum leaves
+        // slack inside the scroll container and reads as extra bottom padding.
+        px(text_height + visual::SPACE_2 * 2.),
     )
 }
 
@@ -212,6 +215,7 @@ pub(super) fn render_content(
             })
             .into_any_element();
     }
+    let plain_text = !matches!(view.content, Ok(PreviewContent::Html(_)));
     let body = div()
         .id("hover-preview-content")
         .flex_none()
@@ -219,18 +223,23 @@ pub(super) fn render_content(
         .h(dimensions.height)
         .overflow_y_scroll()
         .track_scroll(&view.scroll)
-        .when(
-            !matches!(view.content, Ok(PreviewContent::Html(_))),
-            |this| this.px(px(visual::SPACE_3)).py(px(visual::SPACE_2)),
-        )
+        .when(plain_text, |this| this.px(px(visual::SPACE_3)));
+    let body = body
         .text_size(px(visual::TEXT_BODY))
         .line_height(px(visual::HOVER_LINE_HEIGHT))
         .whitespace_normal();
+    let text_body = |this: Div| {
+        this.py(px(visual::SPACE_2))
+            .text_size(px(visual::TEXT_BODY))
+            .line_height(px(visual::HOVER_LINE_HEIGHT))
+            .whitespace_normal()
+    };
     match &view.content {
         Ok(PreviewContent::Html(_)) => body
             .child(html_content(view, preferred.width, cx))
             .into_any_element(),
         Ok(PreviewContent::Files(entries)) => body
+            .py(px(visual::SPACE_2))
             .flex()
             .flex_col()
             .gap(px(visual::SPACE_1))
@@ -241,10 +250,11 @@ pub(super) fn render_content(
             )
             .into_any_element(),
         _ => body
-            .when(view.content.is_err(), |this| {
-                this.text_color(cx.theme().danger)
-            })
-            .child(view.text.clone())
+            .child(
+                text_body(div()).when(view.content.is_err(), |this| {
+                    this.text_color(cx.theme().danger)
+                }).child(view.text.clone()),
+            )
             .into_any_element(),
     }
 }

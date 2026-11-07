@@ -9,10 +9,11 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
+        let category_tab_count = self.category_tab_entries().len().max(1) as f32;
         // Deduct the group selector, row gap, and the Kit segmented-tab insets.
         let category_width = (window.viewport_size().width
             - px(PAGE_PADDING * 2. + 138. + visual::SPACE_2 * 2. + 6.))
-            / 4.;
+            / category_tab_count;
         let empty_message = if self.history.loading {
             tr(self.language, "正在加载…", "Loading…")
         } else if self.search.read(cx).value().is_empty() {
@@ -144,34 +145,28 @@ impl ClipboardView {
                                             .selected_index(self.category_tab_index())
                                             .on_click(cx.listener(
                                                 |this, index: &usize, window, cx| {
-                                                    if let Some(&category) =
-                                                        CATEGORY_FILTERS.get(*index)
+                                                    if let Some(entry) =
+                                                        this.category_tab_entries().get(*index)
                                                     {
-                                                        this.select_category(category, window, cx);
+                                                        this.select_category(
+                                                            entry.filter,
+                                                            window,
+                                                            cx,
+                                                        );
                                                     }
                                                 },
                                             ))
-                                            .children(
-                                                [
-                                                    ("全部", "All", "All"),
-                                                    ("收藏", "Favs", "Favorites"),
-                                                    ("文本", "Text", "Text"),
-                                                    ("其他", "Other", "Other"),
-                                                ]
-                                                .map(|(chinese, english, accessible)| {
+                                            .children(self.category_tab_entries().into_iter().map(
+                                                |entry| {
                                                     Tab::new()
                                                         .text_size(px(visual::TEXT_BODY))
                                                         .min_w_0()
                                                         .w(category_width)
-                                                        .label(tr(self.language, chinese, english))
-                                                        .aria_label(tr(
-                                                            self.language,
-                                                            chinese,
-                                                            accessible,
-                                                        ))
+                                                        .label(entry.label)
+                                                        .aria_label(entry.accessible)
                                                         .flex_1()
-                                                }),
-                                            ),
+                                                },
+                                            )),
                                     ),
                                 )
                             })

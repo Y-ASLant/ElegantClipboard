@@ -1,4 +1,5 @@
 mod confirmation;
+mod category_tabs;
 mod content;
 mod data_import;
 mod diagnostics_events;
@@ -150,13 +151,6 @@ use std::{
     rc::Rc,
 };
 use tray_icon::TrayIcon;
-
-const CATEGORY_FILTERS: [Option<ContentCategory>; 4] = [
-    Some(ContentCategory::All),
-    None,
-    Some(ContentCategory::Text),
-    Some(ContentCategory::Other),
-];
 
 gpui_kit::actions!(
     history,

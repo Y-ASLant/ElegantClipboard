@@ -277,8 +277,43 @@ pub enum SourceAppDisplay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+pub struct CategoryTabVisibility {
+    pub all: bool,
+    pub favorites: bool,
+    pub text: bool,
+    pub other: bool,
+}
+
+impl Default for CategoryTabVisibility {
+    fn default() -> Self {
+        Self {
+            all: true,
+            favorites: true,
+            text: true,
+            other: true,
+        }
+    }
+}
+
+impl CategoryTabVisibility {
+    pub fn enabled_count(self) -> u8 {
+        [self.all, self.favorites, self.text, self.other]
+            .into_iter()
+            .filter(|enabled| *enabled)
+            .count() as u8
+    }
+
+    /// When the category filter bar is shown,「全部」must stay on and at least two tabs stay visible.
+    pub fn valid_for_filter_bar(self) -> bool {
+        self.all && self.enabled_count() >= 2
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DisplayPreference {
     pub show_category_filter: bool,
+    pub category_tabs: CategoryTabVisibility,
     pub show_drag_area_indicator: bool,
     pub card_density: CardDensity,
     pub card_max_lines: u8,
@@ -295,6 +330,7 @@ impl Default for DisplayPreference {
     fn default() -> Self {
         Self {
             show_category_filter: true,
+            category_tabs: CategoryTabVisibility::default(),
             show_drag_area_indicator: true,
             card_density: CardDensity::Standard,
             card_max_lines: 2,
@@ -312,6 +348,7 @@ impl Default for DisplayPreference {
 impl DisplayPreference {
     pub fn valid(self) -> bool {
         (1..=10).contains(&self.card_max_lines)
+            && (!self.show_category_filter || self.category_tabs.valid_for_filter_bar())
     }
 }
 

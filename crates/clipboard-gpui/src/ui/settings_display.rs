@@ -1,6 +1,6 @@
 use super::settings_common::{
     choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
-    settings_description, settings_inline, settings_toggle,
+    settings_description, settings_field, settings_inline, settings_toggle,
 };
 use super::*;
 use clipboard_core::preferences::CardCornerPreference;
@@ -215,6 +215,81 @@ impl SettingsWindowView {
                             })
                     }),
                 ),
+            )
+            .child(
+                settings_field(tr(language, "分类筛选标签", "Category filter tabs"))
+                    .child(settings_inline().children(
+                        [
+                            (
+                                "category-tab-all",
+                                tr(language, "全部", "All"),
+                                display.category_tabs.all,
+                                (|next: &mut DisplayPreference, checked| {
+                                    next.category_tabs.all = checked;
+                                }) as fn(&mut DisplayPreference, bool),
+                            ),
+                            (
+                                "category-tab-favorites",
+                                tr(language, "收藏", "Favorites"),
+                                display.category_tabs.favorites,
+                                (|next: &mut DisplayPreference, checked| {
+                                    next.category_tabs.favorites = checked;
+                                }) as fn(&mut DisplayPreference, bool),
+                            ),
+                            (
+                                "category-tab-text",
+                                tr(language, "文本", "Text"),
+                                display.category_tabs.text,
+                                (|next: &mut DisplayPreference, checked| {
+                                    next.category_tabs.text = checked;
+                                }) as fn(&mut DisplayPreference, bool),
+                            ),
+                            (
+                                "category-tab-other",
+                                tr(language, "其他", "Other"),
+                                display.category_tabs.other,
+                                (|next: &mut DisplayPreference, checked| {
+                                    next.category_tabs.other = checked;
+                                }) as fn(&mut DisplayPreference, bool),
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(id, label, selected, set_checked)| {
+                            let owner = self.owner.clone();
+                            let tabs_enabled = display.show_category_filter && !display_pending;
+                            let is_all_tab = id == "category-tab-all";
+                            let at_minimum_tabs =
+                                display.category_tabs.enabled_count() <= 2 && selected;
+                            let checkbox_disabled = !tabs_enabled
+                                || is_all_tab
+                                || at_minimum_tabs;
+                            settings_toggle(Checkbox::new(id))
+                                .label(label)
+                                .checked(selected)
+                                .disabled(checkbox_disabled)
+                                .on_change(move |checked, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        let mut next = owner.display;
+                                        set_checked(&mut next, *checked);
+                                        if next.show_category_filter {
+                                            next.category_tabs.all = true;
+                                            if !next.category_tabs.valid_for_filter_bar() {
+                                                return;
+                                            }
+                                        }
+                                        owner.save_display(next, cx);
+                                    });
+                                })
+                        }),
+                    ))
+                    .child(settings_description(
+                        tr(
+                            language,
+                            "与主窗口工具栏分段一致；「全部」始终显示，且至少保留两个标签。关闭上方“显示分类筛选”时隐藏整条分段。",
+                            "Matches the history toolbar tabs; “All” is always shown and at least two tabs stay visible. Turn off “Show category filters” above to hide the whole bar.",
+                        ),
+                        cx,
+                    )),
             )
             .child(
                 settings_column_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(

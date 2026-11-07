@@ -119,18 +119,6 @@ impl ClipboardView {
         cx.notify();
     }
 
-    pub(super) fn category_tab_index(&self) -> usize {
-        if self.history.favorite_only() {
-            1
-        } else {
-            match self.history.category() {
-                ContentCategory::All => 0,
-                ContentCategory::Text => 2,
-                ContentCategory::Other => 3,
-            }
-        }
-    }
-
     pub(super) fn select_adjacent_category(
         &mut self,
         direction: isize,
@@ -140,10 +128,11 @@ impl ClipboardView {
         if !self.display.show_category_filter {
             return;
         }
+        let entries = self.category_tab_entries();
         if let Some(next) = self.category_tab_index().checked_add_signed(direction)
-            && let Some(&category) = CATEGORY_FILTERS.get(next)
+            && let Some(entry) = entries.get(next)
         {
-            self.select_category(category, window, cx);
+            self.select_category(entry.filter, window, cx);
         }
     }
     pub(super) fn scroll_to_top(&mut self) {

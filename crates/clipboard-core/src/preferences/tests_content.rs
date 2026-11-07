@@ -98,6 +98,12 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
     assert_eq!(preferences.display()?, DisplayPreference::default());
     let display = DisplayPreference {
         show_category_filter: false,
+        category_tabs: CategoryTabVisibility {
+            all: true,
+            favorites: false,
+            text: true,
+            other: false,
+        },
         show_drag_area_indicator: false,
         card_density: CardDensity::Compact,
         card_max_lines: 5,
@@ -138,6 +144,65 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
             ..DisplayPreference::default()
         }
     );
+    Ok(())
+}
+
+#[test]
+fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let db = Database::new(directory.path().join("clipboard.db"))?;
+    let preferences = Preferences::new(&db);
+    let none = DisplayPreference {
+        show_category_filter: true,
+        category_tabs: CategoryTabVisibility {
+            all: false,
+            favorites: false,
+            text: false,
+            other: false,
+        },
+        ..DisplayPreference::default()
+    };
+    assert!(!none.valid());
+    assert!(preferences.set_display(none).is_err());
+
+    let only_all = DisplayPreference {
+        show_category_filter: true,
+        category_tabs: CategoryTabVisibility {
+            all: true,
+            favorites: false,
+            text: false,
+            other: false,
+        },
+        ..DisplayPreference::default()
+    };
+    assert!(!only_all.valid());
+    assert!(preferences.set_display(only_all).is_err());
+
+    let all_disabled = DisplayPreference {
+        show_category_filter: true,
+        category_tabs: CategoryTabVisibility {
+            all: false,
+            favorites: true,
+            text: true,
+            other: false,
+        },
+        ..DisplayPreference::default()
+    };
+    assert!(!all_disabled.valid());
+    assert!(preferences.set_display(all_disabled).is_err());
+
+    let minimal = DisplayPreference {
+        show_category_filter: true,
+        category_tabs: CategoryTabVisibility {
+            all: true,
+            favorites: true,
+            text: false,
+            other: false,
+        },
+        ..DisplayPreference::default()
+    };
+    assert!(minimal.valid());
+    preferences.set_display(minimal)?;
     Ok(())
 }
 

@@ -258,6 +258,7 @@ impl ClipboardView {
                 if self
                     .history
                     .should_reset_category_filter(display.show_category_filter)
+                    || !self.active_category_tab_visible()
                 {
                     self.select_category(Some(ContentCategory::All), window, cx);
                 }
