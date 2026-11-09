@@ -281,6 +281,8 @@ pub struct CategoryTabVisibility {
     pub all: bool,
     pub favorites: bool,
     pub text: bool,
+    pub image: bool,
+    pub url: bool,
     pub other: bool,
 }
 
@@ -290,6 +292,8 @@ impl Default for CategoryTabVisibility {
             all: true,
             favorites: true,
             text: true,
+            image: true,
+            url: true,
             other: true,
         }
     }
@@ -297,10 +301,17 @@ impl Default for CategoryTabVisibility {
 
 impl CategoryTabVisibility {
     pub fn enabled_count(self) -> u8 {
-        [self.all, self.favorites, self.text, self.other]
-            .into_iter()
-            .filter(|enabled| *enabled)
-            .count() as u8
+        [
+            self.all,
+            self.favorites,
+            self.text,
+            self.image,
+            self.url,
+            self.other,
+        ]
+        .into_iter()
+        .filter(|enabled| *enabled)
+        .count() as u8
     }
 
     /// When the category filter bar is shown,「全部」must stay on and at least two tabs stay visible.

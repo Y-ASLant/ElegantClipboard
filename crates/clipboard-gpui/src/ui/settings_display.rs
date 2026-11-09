@@ -1,4 +1,4 @@
-use super::category_tabs::{CATEGORY_TAB_SPECS, category_tab_flags};
+use super::category_tabs::{CATEGORY_TAB_SPECS, category_tab_flags, set_category_tab_visible};
 use super::settings_common::{
     choice_tabs, owner_state, settings_column, settings_column_field, settings_column_field_help,
     settings_columns, settings_description, settings_field, settings_field_help, settings_inline,
@@ -257,12 +257,11 @@ impl SettingsWindowView {
                                     .on_change(move |checked, _, cx| {
                                         let _ = owner.update(cx, |owner, cx| {
                                             let mut next = owner.display;
-                                            match index {
-                                                0 => next.category_tabs.all = *checked,
-                                                1 => next.category_tabs.favorites = *checked,
-                                                2 => next.category_tabs.text = *checked,
-                                                _ => next.category_tabs.other = *checked,
-                                            }
+                                            set_category_tab_visible(
+                                                &mut next.category_tabs,
+                                                index,
+                                                *checked,
+                                            );
                                             // 开启分类栏时「全部」必须保留；disabled 已阻止
                                             // 关闭「全部」或缩减到两标签以下，故不再二次校验。
                                             if next.show_category_filter {

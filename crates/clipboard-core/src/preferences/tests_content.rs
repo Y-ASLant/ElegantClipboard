@@ -102,6 +102,8 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
             all: true,
             favorites: false,
             text: true,
+            image: true,
+            url: false,
             other: false,
         },
         show_drag_area_indicator: false,
@@ -148,6 +150,14 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
 }
 
 #[test]
+fn saved_category_tabs_without_image_and_link_stay_visible() {
+    let parsed: CategoryTabVisibility =
+        serde_json::from_str(r#"{"all":true,"favorites":false,"text":true,"other":true}"#).unwrap();
+    assert!(parsed.image && parsed.url);
+    assert!(!parsed.favorites && parsed.other);
+}
+
+#[test]
 fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let db = Database::new(directory.path().join("clipboard.db"))?;
@@ -158,6 +168,8 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
             all: false,
             favorites: false,
             text: false,
+            image: false,
+            url: false,
             other: false,
         },
         ..DisplayPreference::default()
@@ -171,6 +183,8 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
             all: true,
             favorites: false,
             text: false,
+            image: false,
+            url: false,
             other: false,
         },
         ..DisplayPreference::default()
@@ -184,6 +198,8 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
             all: false,
             favorites: true,
             text: true,
+            image: false,
+            url: false,
             other: false,
         },
         ..DisplayPreference::default()
@@ -197,6 +213,8 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
             all: true,
             favorites: true,
             text: false,
+            image: false,
+            url: false,
             other: false,
         },
         ..DisplayPreference::default()

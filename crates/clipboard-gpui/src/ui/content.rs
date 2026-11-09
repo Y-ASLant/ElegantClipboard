@@ -31,6 +31,10 @@ impl ClipboardView {
                 )
             } else if self.history.category() == ContentCategory::Text {
                 tr(self.language, "还没有文本记录", "No text items yet.")
+            } else if self.history.category() == ContentCategory::Image {
+                tr(self.language, "还没有图片记录", "No image items yet.")
+            } else if self.history.category() == ContentCategory::Url {
+                tr(self.language, "还没有链接记录", "No link items yet.")
             } else if self.history.category() == ContentCategory::Other {
                 tr(self.language, "还没有其他类型记录", "No other items yet.")
             } else {

@@ -56,6 +56,8 @@ pub enum ContentCategory {
     #[default]
     All,
     Text,
+    Image,
+    Url,
     Other,
 }
 
@@ -64,6 +66,8 @@ impl ContentCategory {
         match self {
             Self::All => "text,url,html,rtf,image,files",
             Self::Text => "text,html,rtf",
+            Self::Image => "image",
+            Self::Url => "url",
             Self::Other => "image,files,url",
         }
     }

@@ -242,6 +242,14 @@ fn category_queries_filter_search_count_and_group() -> Result<()> {
             .len(),
         3
     );
+    assert_eq!(
+        history.count_filtered_in_group("", false, None, ContentCategory::Image)?,
+        1
+    );
+    assert_eq!(
+        history.count_filtered_in_group("", false, None, ContentCategory::Url)?,
+        1
+    );
     history.toggle_favorite(ids[1])?;
     assert_eq!(
         history.count_filtered_in_group("", true, None, ContentCategory::Text)?,

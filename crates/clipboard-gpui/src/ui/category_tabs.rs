@@ -9,12 +9,37 @@ pub(super) const CATEGORY_TAB_SPECS: &[(Option<ContentCategory>, &str, &str, &st
     (Some(ContentCategory::All), "全部", "All", "All"),
     (None, "收藏", "Favs", "Favorites"),
     (Some(ContentCategory::Text), "文本", "Text", "Text"),
+    (Some(ContentCategory::Image), "图片", "Image", "Image"),
+    (Some(ContentCategory::Url), "链接", "Link", "Link"),
     (Some(ContentCategory::Other), "其他", "Other", "Other"),
 ];
 
-/// `CATEGORY_TAB_SPECS` 与 `CategoryTabVisibility` 字段的固定配对（all/favorites/text/other）。
-pub(super) fn category_tab_flags(tabs: &CategoryTabVisibility) -> [bool; 4] {
-    [tabs.all, tabs.favorites, tabs.text, tabs.other]
+/// `CATEGORY_TAB_SPECS` 与 `CategoryTabVisibility` 字段的固定配对。
+pub(super) fn category_tab_flags(tabs: &CategoryTabVisibility) -> [bool; 6] {
+    [
+        tabs.all,
+        tabs.favorites,
+        tabs.text,
+        tabs.image,
+        tabs.url,
+        tabs.other,
+    ]
+}
+
+pub(super) fn set_category_tab_visible(
+    tabs: &mut CategoryTabVisibility,
+    index: usize,
+    visible: bool,
+) {
+    match index {
+        0 => tabs.all = visible,
+        1 => tabs.favorites = visible,
+        2 => tabs.text = visible,
+        3 => tabs.image = visible,
+        4 => tabs.url = visible,
+        5 => tabs.other = visible,
+        _ => {}
+    }
 }
 
 pub(super) struct CategoryTabEntry {
@@ -70,6 +95,8 @@ impl ClipboardView {
         match self.history.category() {
             ContentCategory::All => tabs.all,
             ContentCategory::Text => tabs.text,
+            ContentCategory::Image => tabs.image,
+            ContentCategory::Url => tabs.url,
             ContentCategory::Other => tabs.other,
         }
     }
