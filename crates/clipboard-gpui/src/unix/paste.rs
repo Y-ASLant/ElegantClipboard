@@ -2,9 +2,7 @@ use anyhow::{Result, bail};
 use clipboard_core::preferences::PasteKeyPreference;
 use clipboard_platform::{
     clipboard_sequence, desktop,
-    paste_delivery::{
-        PasteWaitPolicy, ReadyResult, paste_shortcut_trigger_held,
-    },
+    paste_delivery::{PasteWaitPolicy, ReadyResult, paste_shortcut_trigger_held},
 };
 use gpui_kit::Window;
 use std::time::{Duration, Instant};
