@@ -291,9 +291,9 @@ impl Default for CategoryTabVisibility {
         Self {
             all: true,
             favorites: true,
-            text: true,
-            image: true,
-            url: true,
+            text: false,
+            image: false,
+            url: false,
             other: true,
         }
     }

@@ -150,11 +150,22 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
 }
 
 #[test]
-fn saved_category_tabs_without_image_and_link_stay_visible() {
+fn missing_category_tabs_use_all_favorites_and_other() {
+    assert_eq!(
+        CategoryTabVisibility::default(),
+        CategoryTabVisibility {
+            all: true,
+            favorites: true,
+            text: false,
+            image: false,
+            url: false,
+            other: true,
+        }
+    );
     let parsed: CategoryTabVisibility =
         serde_json::from_str(r#"{"all":true,"favorites":false,"text":true,"other":true}"#).unwrap();
-    assert!(parsed.image && parsed.url);
-    assert!(!parsed.favorites && parsed.other);
+    assert!(parsed.text && parsed.other);
+    assert!(!parsed.favorites && !parsed.image && !parsed.url);
 }
 
 #[test]
