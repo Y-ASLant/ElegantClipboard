@@ -37,6 +37,11 @@ fn notes_persist_search_and_reject_oversize() -> Result<()> {
     assert!(history.item(id)?.note.is_none());
     history.set_note(id, "  发布说明草稿  ")?;
     assert_eq!(history.item(id)?.note.as_deref(), Some("发布说明草稿"));
+    // 普通列表也要带上备注，悬停预览和再次编辑都读这份结果。
+    assert_eq!(
+        history.list("", 10, false)?[0].note.as_deref(),
+        Some("发布说明草稿")
+    );
     // 备注参与关键词搜索。
     assert_eq!(history.count("发布说明", false)?, 1);
     assert_eq!(history.count("不存在的备注", false)?, 0);

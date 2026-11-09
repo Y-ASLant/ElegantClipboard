@@ -233,6 +233,7 @@ impl ClipboardView {
             .is_some_and(|menu| menu.update(cx, |_, _, _| ()).is_ok())
     }
 
+    #[cfg(windows)]
     fn hover_overlay_stack_allows_tracking(&self, cx: &mut App) -> bool {
         !self.hover_overlay_stack_blocks_source() && !self.history_menu_open(cx)
     }

@@ -3,7 +3,7 @@ use clipboard_core::preferences::PasteKeyPreference;
 use clipboard_platform::{
     clipboard_sequence, desktop,
     paste_delivery::{
-        PASTE_INJECT_WAIT, PasteWaitPolicy, ReadyResult, paste_shortcut_trigger_held,
+        PasteWaitPolicy, ReadyResult, paste_shortcut_trigger_held,
     },
 };
 use gpui_kit::Window;
