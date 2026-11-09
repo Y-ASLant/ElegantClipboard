@@ -1,10 +1,9 @@
 use anyhow::{Result, bail};
 use clipboard_core::preferences::PasteKeyPreference;
 use clipboard_platform::{
-    clipboard_sequence,
-    desktop,
+    clipboard_sequence, desktop,
     paste_delivery::{
-        paste_shortcut_trigger_held, PasteWaitPolicy, PASTE_INJECT_WAIT, ReadyResult,
+        PASTE_INJECT_WAIT, PasteWaitPolicy, ReadyResult, paste_shortcut_trigger_held,
     },
 };
 use gpui_kit::Window;
@@ -81,11 +80,7 @@ impl PendingPaste {
             ReadyResult::Waiting => return Ok(false),
             ReadyResult::Ready => {}
         }
-        let allow_modifiers = matches!(
-            (&self.wait.mode, self.wait.trigger_shortcut.as_ref()),
-            (clipboard_core::preferences::PasteDeliveryMode::Rapid, Some(_))
-        );
-        desktop::send_paste(self.paste_key, allow_modifiers)?;
+        desktop::send_paste(self.paste_key, self.wait.allows_held_modifiers())?;
         Ok(true)
     }
 }

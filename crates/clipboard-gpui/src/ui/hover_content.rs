@@ -2,6 +2,14 @@ use super::*;
 use gpui_kit::Size;
 use gpui_kit::component::text::TextView;
 
+fn preview_font(_window: &Window, cx: &App) -> (SharedString, Pixels) {
+    let fonts = crate::design_system::active_fonts(cx);
+    (
+        crate::fonts::resolve_preview_family(&fonts),
+        px(f32::from(fonts.preview_font_size)),
+    )
+}
+
 pub(super) fn fitted_size(
     view: &HoverPreviewWindowView,
     maximum: Size<Pixels>,
@@ -42,14 +50,15 @@ fn shaped_size(
     window: &Window,
     cx: &App,
 ) -> Size<Pixels> {
+    let (family, font_size) = preview_font(window, cx);
     let mut style = window.text_style();
-    style.font_family = cx.theme().font_family.clone();
+    style.font_family = family;
     let runs = [style.to_run(text.len())];
     let (width, count) = window
         .text_system()
         .shape_text(
             text.clone(),
-            px(visual::TEXT_BODY),
+            font_size,
             &runs,
             Some((maximum_width - px(visual::SPACE_3 * 2.)).max(px(1.))),
             None,
@@ -105,7 +114,12 @@ pub(super) fn html_content(
         .flex_none()
         .px(px(visual::SPACE_3))
         .py(px(visual::SPACE_2))
-        .text_size(px(visual::TEXT_BODY))
+        .font_family(crate::fonts::resolve_preview_family(
+            &crate::design_system::active_fonts(cx),
+        ))
+        .text_size(px(f32::from(
+            crate::design_system::active_fonts(cx).preview_font_size,
+        )))
         .line_height(px(visual::HOVER_LINE_HEIGHT))
         .child(
             TextView::markdown("hover-preview-rich-text", view.text.clone())
@@ -154,14 +168,15 @@ pub(super) fn note_height(
     let Some(note) = note.filter(|note| !note.is_empty()) else {
         return px(0.);
     };
+    let (family, font_size) = preview_font(window, cx);
     let mut style = window.text_style();
-    style.font_family = cx.theme().font_family.clone();
+    style.font_family = family;
     let runs = [style.to_run(note.len())];
     let lines = window
         .text_system()
         .shape_text(
             note.clone(),
-            px(visual::TEXT_BODY),
+            font_size,
             &runs,
             Some((surface.width - px(visual::SPACE_3 * 2.)).max(px(1.))),
             None,
@@ -215,6 +230,9 @@ pub(super) fn render_content(
             })
             .into_any_element();
     }
+    let fonts = crate::design_system::active_fonts(cx);
+    let preview_size = px(f32::from(fonts.preview_font_size));
+    let preview_family = crate::fonts::resolve_preview_family(&fonts);
     let plain_text = !matches!(view.content, Ok(PreviewContent::Html(_)));
     let body = div()
         .id("hover-preview-content")
@@ -225,12 +243,14 @@ pub(super) fn render_content(
         .track_scroll(&view.scroll)
         .when(plain_text, |this| this.px(px(visual::SPACE_3)));
     let body = body
-        .text_size(px(visual::TEXT_BODY))
+        .font_family(preview_family.clone())
+        .text_size(preview_size)
         .line_height(px(visual::HOVER_LINE_HEIGHT))
         .whitespace_normal();
     let text_body = |this: Div| {
         this.py(px(visual::SPACE_2))
-            .text_size(px(visual::TEXT_BODY))
+            .font_family(preview_family.clone())
+            .text_size(preview_size)
             .line_height(px(visual::HOVER_LINE_HEIGHT))
             .whitespace_normal()
     };
@@ -251,9 +271,11 @@ pub(super) fn render_content(
             .into_any_element(),
         _ => body
             .child(
-                text_body(div()).when(view.content.is_err(), |this| {
-                    this.text_color(cx.theme().danger)
-                }).child(view.text.clone()),
+                text_body(div())
+                    .when(view.content.is_err(), |this| {
+                        this.text_color(cx.theme().danger)
+                    })
+                    .child(view.text.clone()),
             )
             .into_any_element(),
     }

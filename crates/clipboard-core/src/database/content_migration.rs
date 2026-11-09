@@ -93,96 +93,58 @@ impl Database {
 
         info!("Migrating database: removing content_type CHECK constraint");
         let tx = conn.unchecked_transaction()?;
-        if has_file_payload {
-            let sql = format!(
-                "CREATE TABLE clipboard_items_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content_type TEXT NOT NULL,
-                    text_content TEXT,
-                    html_content TEXT,
-                    rtf_content TEXT,
-                    image_path TEXT,
-                    file_paths TEXT,
-                    file_payload TEXT,
-                    content_hash TEXT NOT NULL,
-                    semantic_hash TEXT NOT NULL,
-                    preview TEXT,
-                    byte_size INTEGER DEFAULT 0,
-                    image_width INTEGER,
-                    image_height INTEGER,
-                    is_pinned INTEGER DEFAULT 0,
-                    is_favorite INTEGER DEFAULT 0,
-                    favorite_order INTEGER DEFAULT 0,
-                    sort_order INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
-                    updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-                    access_count INTEGER DEFAULT 0,
-                    last_accessed_at TEXT,
-                    char_count INTEGER,
-                    source_app_name TEXT,
-                    source_app_icon TEXT,
-                    note TEXT,
-                    group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
-                );
-                INSERT INTO clipboard_items_new
-                SELECT id, content_type, text_content, html_content, rtf_content,
-                       image_path, file_paths, file_payload, content_hash,
-                       COALESCE(NULLIF(semantic_hash, ''), content_hash),
-                       preview, byte_size, image_width, image_height,
-                       is_pinned, is_favorite, favorite_order, sort_order,
-                       created_at, updated_at, access_count, last_accessed_at,
-                       char_count, source_app_name, source_app_icon, {note_select}, group_id
-                FROM clipboard_items;
-                DROP TABLE clipboard_items;
-                ALTER TABLE clipboard_items_new RENAME TO clipboard_items;",
-                note_select = note_select
-            );
-            tx.execute_batch(&sql)?;
+        // 旧库是否带 file_payload 列：重建表时按此保留，其余结构与列序完全一致。
+        let (payload_column, payload_select) = if has_file_payload {
+            ("file_payload TEXT,", "file_payload, ")
         } else {
-            let sql = format!(
-                "CREATE TABLE clipboard_items_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content_type TEXT NOT NULL,
-                    text_content TEXT,
-                    html_content TEXT,
-                    rtf_content TEXT,
-                    image_path TEXT,
-                    file_paths TEXT,
-                    content_hash TEXT NOT NULL,
-                    semantic_hash TEXT NOT NULL,
-                    preview TEXT,
-                    byte_size INTEGER DEFAULT 0,
-                    image_width INTEGER,
-                    image_height INTEGER,
-                    is_pinned INTEGER DEFAULT 0,
-                    is_favorite INTEGER DEFAULT 0,
-                    favorite_order INTEGER DEFAULT 0,
-                    sort_order INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
-                    updated_at TEXT DEFAULT (datetime('now', 'localtime')),
-                    access_count INTEGER DEFAULT 0,
-                    last_accessed_at TEXT,
-                    char_count INTEGER,
-                    source_app_name TEXT,
-                    source_app_icon TEXT,
-                    note TEXT,
-                    group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
-                );
-                INSERT INTO clipboard_items_new
-                SELECT id, content_type, text_content, html_content, rtf_content,
-                       image_path, file_paths, content_hash,
-                       COALESCE(NULLIF(semantic_hash, ''), content_hash),
-                       preview, byte_size, image_width, image_height,
-                       is_pinned, is_favorite, favorite_order, sort_order,
-                       created_at, updated_at, access_count, last_accessed_at,
-                       char_count, source_app_name, source_app_icon, {note_select}, group_id
-                FROM clipboard_items;
-                DROP TABLE clipboard_items;
-                ALTER TABLE clipboard_items_new RENAME TO clipboard_items;",
-                note_select = note_select
+            ("", "")
+        };
+        let sql = format!(
+            "CREATE TABLE clipboard_items_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content_type TEXT NOT NULL,
+                text_content TEXT,
+                html_content TEXT,
+                rtf_content TEXT,
+                image_path TEXT,
+                file_paths TEXT,
+                {payload_column}
+                content_hash TEXT NOT NULL,
+                semantic_hash TEXT NOT NULL,
+                preview TEXT,
+                byte_size INTEGER DEFAULT 0,
+                image_width INTEGER,
+                image_height INTEGER,
+                is_pinned INTEGER DEFAULT 0,
+                is_favorite INTEGER DEFAULT 0,
+                favorite_order INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+                access_count INTEGER DEFAULT 0,
+                last_accessed_at TEXT,
+                char_count INTEGER,
+                source_app_name TEXT,
+                source_app_icon TEXT,
+                note TEXT,
+                group_id INTEGER REFERENCES groups(id) ON DELETE CASCADE
             );
-            tx.execute_batch(&sql)?;
-        }
+            INSERT INTO clipboard_items_new
+            SELECT id, content_type, text_content, html_content, rtf_content,
+                   image_path, file_paths, {payload_select}content_hash,
+                   COALESCE(NULLIF(semantic_hash, ''), content_hash),
+                   preview, byte_size, image_width, image_height,
+                   is_pinned, is_favorite, favorite_order, sort_order,
+                   created_at, updated_at, access_count, last_accessed_at,
+                   char_count, source_app_name, source_app_icon, {note_select}, group_id
+            FROM clipboard_items;
+            DROP TABLE clipboard_items;
+            ALTER TABLE clipboard_items_new RENAME TO clipboard_items;",
+            payload_column = payload_column,
+            payload_select = payload_select,
+            note_select = note_select
+        );
+        tx.execute_batch(&sql)?;
         tx.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_items(created_at DESC);
              CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(is_pinned) WHERE is_pinned = 1;

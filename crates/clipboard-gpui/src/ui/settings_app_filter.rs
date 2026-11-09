@@ -1,6 +1,6 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column, settings_columns, settings_description,
-    settings_field, settings_inline, settings_stack, settings_toggle,
+    choice_tabs, owner_state, settings_description, settings_field, settings_inline,
+    settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
@@ -28,7 +28,7 @@ impl SettingsWindowView {
 
         settings_stack()
             .child(
-                settings_toggle(Checkbox::new("app-filter-enabled"))
+                settings_toggle(cx, Checkbox::new("app-filter-enabled"))
                     .w_full()
                     .label(tr(language, "启用应用过滤", "Enable app filter"))
                     .checked(app_filter.enabled)
@@ -42,65 +42,58 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                settings_columns()
+                settings_field(tr(language, "过滤模式", "Filter mode")).child(
+                    choice_tabs(
+                        "app-filter-mode",
+                        &self.owner,
+                        [AppFilterMode::Blacklist, AppFilterMode::Whitelist],
+                        [
+                            tr(language, "黑名单", "Blocklist"),
+                            tr(language, "白名单", "Allowlist"),
+                        ],
+                        app_filter.mode,
+                        app_filter_pending,
+                        |owner| owner.app_filter.value.mode,
+                        |owner, mode, cx| {
+                            let mut next = owner.app_filter.value.clone();
+                            next.mode = mode;
+                            owner.save_app_filter(next, cx);
+                        },
+                        cx,
+                    ),
+                ),
+            )
+            .child(settings_description(
+                if app_filter.mode == AppFilterMode::Blacklist {
+                    tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
+                } else {
+                    tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
+                },
+                cx,
+            ))
+            .child(
+                settings_field(tr(language, "进程名或规则", "Process name or pattern"))
                     .child(
-                        settings_column()
-                            .child(
-                                settings_field(tr(language, "过滤模式", "Filter mode")).child(
-                                    choice_tabs(
-                                        "app-filter-mode",
-                                        &self.owner,
-                                        [AppFilterMode::Blacklist, AppFilterMode::Whitelist],
-                                        [
-                                            tr(language, "黑名单", "Blocklist"),
-                                            tr(language, "白名单", "Allowlist"),
-                                        ],
-                                        app_filter.mode,
-                                        app_filter_pending,
-                                        |owner| owner.app_filter.value.mode,
-                                        |owner, mode, cx| {
-                                            let mut next = owner.app_filter.value.clone();
-                                            next.mode = mode;
-                                            owner.save_app_filter(next, cx);
-                                        },
+                        settings_inline()
+                            .child(div().flex_1().min_w_0().child(
+                                Input::new(&self.app_filter_input)
+                                    .w_full()
+                                    .refine_style(
+                                        &StyleRefinement::default()
+                                            .h(px(visual::CONTROL_HEIGHT_LARGE)),
                                     ),
-                                ),
-                            )
-                            .child(settings_description(
-                                if app_filter.mode == AppFilterMode::Blacklist {
-                                    tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
-                                } else {
-                                    tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
-                                },
-                                cx,
-                            )),
-                    )
-                    .child(
-                        settings_column().child(
-                            settings_field(tr(language, "进程名或规则", "Process name or pattern"))
-                                .child(
-                                    settings_inline()
-                                        .child(div().flex_1().min_w_0().child(
-                                            Input::new(&self.app_filter_input)
-                                                .w_full()
-                                                .refine_style(
-                                                    &StyleRefinement::default()
-                                                        .h(px(visual::CONTROL_HEIGHT_LARGE)),
-                                                ),
-                                        ))
-                                        .child(
-                                            Button::new("app-filter-add-rule")
-                                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                                .flex_shrink_0()
-                                                .outline()
-                                                .label(tr(language, "添加", "Add"))
-                                                .disabled(app_filter_pending)
-                                                .on_click(cx.listener(|this, _, window, cx| {
-                                                    this.add_app_filter_rule(window, cx);
-                                                })),
-                                        ),
-                                ),
-                        ),
+                            ))
+                            .child(
+                                Button::new("app-filter-add-rule")
+                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                                    .flex_shrink_0()
+                                    .outline()
+                                    .label(tr(language, "添加", "Add"))
+                                    .disabled(app_filter_pending)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.add_app_filter_rule(window, cx);
+                                    })),
+                            ),
                     ),
             )
             .when(self.app_filter_error, |panel| {
@@ -182,10 +175,16 @@ impl SettingsWindowView {
                                 .gap_1()
                                 .when(self.app_picker_open, |list| {
                                     list.when(running_apps_pending, |list| {
-                                        list.child(tr(language, "正在读取运行中应用…", "Loading running apps…"))
+                                        list.child(settings_description(
+                                            tr(language, "正在读取运行中应用…", "Loading running apps…"),
+                                            cx,
+                                        ))
                                     })
                                     .when(!running_apps_pending && running_apps.is_empty(), |list| {
-                                        list.child(tr(language, "没有找到可选应用", "No running apps found"))
+                                        list.child(settings_description(
+                                            tr(language, "没有找到可选应用", "No running apps found"),
+                                            cx,
+                                        ))
                                     })
                                     .children(running_apps.into_iter().enumerate().map(|(index, app)| {
                                         let owner = self.owner.clone();

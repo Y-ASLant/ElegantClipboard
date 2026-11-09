@@ -52,8 +52,8 @@ impl SettingsWindowView {
                     .gap_2()
                     .child(
                         div()
-                            .text_size(px(16.))
-                            .font_semibold()
+                            .text_size(px(visual::TEXT_DIALOG))
+                            .font_medium()
                             .child("ElegantClipboard"),
                     )
                     .child(
@@ -116,6 +116,17 @@ impl SettingsWindowView {
             )
         };
 
+        let update_action = |content: AnyElement| {
+            div()
+                .flex_shrink_0()
+                .min_h(px(visual::CONTROL_HEIGHT_COMPACT))
+                .flex()
+                .items_center()
+                .justify_end()
+                .child(content)
+                .into_any_element()
+        };
+
         let update_row = {
             let state = owner_state(&self.owner, cx).map(|state| &state.update_check);
             let status = match state {
@@ -126,63 +137,71 @@ impl SettingsWindowView {
                 _ => None,
             };
             let right = match (status, state) {
-                (Some(text), _) => div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(text)
-                    .into_any_element(),
+                (Some(text), _) => update_action(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(text)
+                        .into_any_element(),
+                ),
                 (None, Some(UpdateCheck::Available(release))) => {
                     let label: SharedString = if language == LanguagePreference::English {
                         format!("Download v{}", release.version).into()
                     } else {
                         format!("下载 v{}", release.version).into()
                     };
-                    Button::new("about-update-download")
-                        .h(px(visual::CONTROL_HEIGHT_COMPACT))
-                        .flex_shrink_0()
-                        .ghost()
-                        .label(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let _ = this.owner.update(cx, |owner, cx| {
-                                owner.start_update_download(cx);
-                            });
-                        }))
-                        .into_any_element()
-                }
-                (None, Some(UpdateCheck::Ready(_))) => Button::new("about-update-install")
-                    .h(px(visual::CONTROL_HEIGHT_COMPACT))
-                    .flex_shrink_0()
-                    .primary()
-                    .label(tr(language, "立即安装", "Install now"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let _ = this.owner.update(cx, |owner, cx| {
-                            owner.start_update_install(cx);
-                        });
-                    }))
-                    .into_any_element(),
-                _ => {
-                    #[cfg(windows)]
-                    {
-                        Button::new("about-update-check")
+                    update_action(
+                        Button::new("about-update-download")
                             .h(px(visual::CONTROL_HEIGHT_COMPACT))
                             .flex_shrink_0()
                             .ghost()
-                            .label(tr(language, "检查更新", "Check for updates"))
+                            .label(label)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let _ = this.owner.update(cx, |owner, cx| {
-                                    owner.start_update_check(cx);
+                                    owner.start_update_download(cx);
                                 });
                             }))
-                            .into_any_element()
+                            .into_any_element(),
+                    )
+                }
+                (None, Some(UpdateCheck::Ready(_))) => update_action(
+                    Button::new("about-update-install")
+                        .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                        .flex_shrink_0()
+                        .primary()
+                        .label(tr(language, "立即安装", "Install now"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let _ = this.owner.update(cx, |owner, cx| {
+                                owner.start_update_install(cx);
+                            });
+                        }))
+                        .into_any_element(),
+                ),
+                _ => {
+                    #[cfg(windows)]
+                    {
+                        update_action(
+                            Button::new("about-update-check")
+                                .h(px(visual::CONTROL_HEIGHT_COMPACT))
+                                .flex_shrink_0()
+                                .ghost()
+                                .label(tr(language, "检查更新", "Check for updates"))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let _ = this.owner.update(cx, |owner, cx| {
+                                        owner.start_update_check(cx);
+                                    });
+                                }))
+                                .into_any_element(),
+                        )
                     }
                     #[cfg(not(windows))]
                     {
-                        about_external_link!(
+                        update_action(about_external_link!(
                             cx,
                             "about-update-check",
                             tr(language, "检查更新", "Check for updates"),
                             ProjectLink::Releases
-                        )
+                        ))
                     }
                 }
             };

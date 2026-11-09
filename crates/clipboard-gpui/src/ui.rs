@@ -1,5 +1,5 @@
-mod confirmation;
 mod category_tabs;
+mod confirmation;
 mod content;
 mod data_import;
 mod diagnostics_events;
@@ -46,6 +46,7 @@ mod settings_audio;
 mod settings_common;
 mod settings_data;
 mod settings_display;
+mod settings_fonts;
 mod settings_general;
 mod settings_hover;
 mod settings_layout;
@@ -81,7 +82,8 @@ use presentation::{
     localize_service_message, tr, window_shell,
 };
 use shortcut_labels::{
-    hotkey_label, paste_registration_summary, shortcut_from_keystroke, shortcut_kbd,
+    hotkey_label, paste_registration_summary, shortcut_binding_display, shortcut_from_keystroke,
+    shortcut_kbd,
 };
 use update_events::UpdateCheck;
 use window_lifecycle::update_clipboard_window;
@@ -108,13 +110,13 @@ use clipboard_core::{
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{
         AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, CornerRadiusPreference,
-        DedupStrategy, DisplayPreference, HotkeyPreference, HoverPreviewDetails,
+        DedupStrategy, DisplayPreference, FontPreference, HotkeyPreference, HoverPreviewDetails,
         HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MAX_HOVER_DELAY_MS,
         MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS, MIN_HOVER_ZOOM_STEP,
         MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteDeliveryMode, PasteKeyPreference,
-        PasteShortcutConfig,
-        SoundTiming, SourceAppDisplay, ThemeColor, ThemePreference, TimeFormat, WindowEffect,
-        WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
+        PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor, ThemePreference,
+        TimeFormat, WindowEffect, WindowEffectPreference, WindowPositionPreference,
+        WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -341,6 +343,7 @@ struct ClipboardView {
     theme_color_pending: bool,
     corner_radius: PendingPref<CornerRadiusPreference>,
     card_corner: PendingPref<clipboard_core::preferences::CardCornerPreference>,
+    fonts: PendingPref<clipboard_core::preferences::FontPreference>,
     window_effect: WindowEffectPreference,
     window_effect_pending: bool,
     language: LanguagePreference,
@@ -468,6 +471,13 @@ struct SettingsWindowView {
     preview_lines_last_value: u8,
     preview_lines_last_pending: bool,
     window_opacity: settings_window::BoundedNumberInput,
+    ui_font_size: settings_window::BoundedNumberInput,
+    card_font_size: settings_window::BoundedNumberInput,
+    preview_font_size: settings_window::BoundedNumberInput,
+    ui_font_select: Entity<settings_fonts::FontSelectState>,
+    card_font_select: Entity<settings_fonts::FontSelectState>,
+    preview_font_select: Entity<settings_fonts::FontSelectState>,
+    _font_select_subscriptions: (Subscription, Subscription, Subscription),
     hover_delay: settings_window::BoundedNumberInput,
     hover_zoom: settings_window::BoundedNumberInput,
     app_picker_open: bool,

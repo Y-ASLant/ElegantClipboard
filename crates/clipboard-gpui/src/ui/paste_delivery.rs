@@ -20,6 +20,7 @@ impl ClipboardView {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn return_to_paste_target(
         &mut self,
         target: (isize, u32),
@@ -45,25 +46,24 @@ impl ClipboardView {
             return;
         }
         self.paste_state.set_handoff(true);
-        let pending =
-            match paste::PendingPaste::begin(
-                target,
-                clipboard_sequence,
-                self.paste_key.value,
-                wait,
-            ) {
-                Ok(pending) => pending,
-                Err(error) => {
-                    self.paste_state.set_handoff(false);
-                    self.interrupt_paste_except(None);
-                    self.set_feedback_message(localize_service_message(
-                        self.language,
-                        error.to_string(),
-                    ));
-                    self.is_error = true;
-                    return;
-                }
-            };
+        let pending = match paste::PendingPaste::begin(
+            target,
+            clipboard_sequence,
+            self.paste_key.value,
+            wait,
+        ) {
+            Ok(pending) => pending,
+            Err(error) => {
+                self.paste_state.set_handoff(false);
+                self.interrupt_paste_except(None);
+                self.set_feedback_message(localize_service_message(
+                    self.language,
+                    error.to_string(),
+                ));
+                self.is_error = true;
+                return;
+            }
+        };
         let hide_window = self.paste_close_window.value && native_window::is_window_shown(window);
         if hide_window {
             self.hide_window(window, cx);

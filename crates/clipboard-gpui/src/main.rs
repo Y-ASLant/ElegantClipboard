@@ -4,6 +4,7 @@ mod capabilities;
 mod card_radius;
 mod design_system;
 mod diagnostics;
+mod fonts;
 mod links_core;
 #[cfg(windows)]
 #[path = "windows/mod.rs"]

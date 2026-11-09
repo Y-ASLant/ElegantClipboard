@@ -1,6 +1,6 @@
 use super::settings_common::{
-    owner_state, settings_column, settings_columns, settings_description, settings_field,
-    settings_inline, settings_stack, settings_toggle,
+    choice_tabs, owner_state, settings_field, settings_field_help, settings_shortcut_row,
+    settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
@@ -52,7 +52,7 @@ impl SettingsWindowView {
         });
         settings_stack()
             .child(
-                settings_toggle(Checkbox::new("quick-paste-enabled"))
+                settings_toggle(cx, Checkbox::new("quick-paste-enabled"))
                     .label(tr(language, "启用快速粘贴快捷键", "Enable quick paste shortcuts"))
                     .checked(quick_paste_enabled)
                     .disabled(shortcut_actions_pending || !monitoring)
@@ -63,61 +63,27 @@ impl SettingsWindowView {
                     }),
             )
             .child(
-                settings_field(tr(
-                    language,
-                    "自动粘贴投递节奏",
-                    "Automatic paste delivery",
-                ))
-                .child({
-                    let choices = [
-                        (
-                            tr(language, "受控（默认）", "Controlled (default)"),
-                            PasteDeliveryMode::Controlled,
-                        ),
-                        (
-                            tr(language, "连贴（槽位）", "Rapid slots"),
-                            PasteDeliveryMode::Rapid,
-                        ),
-                    ];
-                    let selected_index = choices
-                        .iter()
-                        .position(|(_, mode)| *mode == paste_delivery_mode)
-                        .unwrap_or(0);
-                    let click_choices = choices;
-                    let owner = self.owner.clone();
-                    TabBar::new("settings-paste-delivery-tabs")
-                        .w_full()
-                        .min_w_0()
-                        .large()
-                        .h(px(visual::CONTROL_HEIGHT_LARGE))
-                        .segmented()
-                        .last_empty_space(div().w_0())
-                        .selected_index(selected_index)
-                        .on_click(move |index: &usize, _, cx| {
-                            if let Some(&(_, mode)) = click_choices.get(*index) {
-                                if paste_delivery_mode_pending {
-                                    return;
-                                }
-                                let _ = owner.update(cx, |owner, cx| {
-                                    owner.select_paste_delivery_mode(mode, cx);
-                                });
-                            }
-                        })
-                        .children(choices.map(|(label, _)| {
-                            Tab::new()
-                                .text_size(px(visual::TEXT_BODY))
-                                .aria_label(label)
-                                .child(div().child(label))
-                                .flex_1()
-                                .disabled(paste_delivery_mode_pending)
-                        }))
-                })
-                .child(settings_description(
+                settings_field_help(
+                    tr(language, "自动粘贴投递节奏", "Automatic paste delivery"),
                     tr(
                         language,
                         "受控：松齐修饰键后再粘贴，兼容面更广。连贴：按住 Alt 连按数字时允许槽位重复触发，并在槽位键松开后粘贴（部分应用可能需改回受控）。",
                         "Controlled: wait until modifiers release—best compatibility. Rapid: repeat slot hotkeys while modifiers stay down and paste after the slot key releases (some apps may need Controlled).",
                     ),
+                    "paste-delivery-help",
+                )
+                .child(choice_tabs(
+                    "settings-paste-delivery-tabs",
+                    &self.owner,
+                    [PasteDeliveryMode::Controlled, PasteDeliveryMode::Rapid],
+                    [
+                        tr(language, "受控（默认）", "Controlled (default)"),
+                        tr(language, "连贴（槽位）", "Rapid slots"),
+                    ],
+                    paste_delivery_mode,
+                    paste_delivery_mode_pending,
+                    |state| state.paste_delivery_mode.value,
+                    |owner, mode, cx| owner.select_paste_delivery_mode(mode, cx),
                     cx,
                 )),
             )
@@ -141,122 +107,109 @@ impl SettingsWindowView {
             )
             // 序列粘贴推进键（决策 0004）：录制或停用，与主热键/槽位互斥。
             .child(
-                settings_columns()
-                    .child(settings_column().child(settings_field(tr(
-                        language,
-                        "序列粘贴推进键（多选后在目标应用中逐条粘贴）",
-                        "Sequence paste advance key (paste selected items one by one)",
-                    ))
-                    .child(
-                        settings_inline()
-                            .child(if sequence_hotkey.trim().is_empty() {
-                                div().child(sequence_label).into_any_element()
-                            } else {
-                                shortcut_kbd(&sequence_label).map_or_else(
-                                    || div().child(sequence_label).into_any_element(),
-                                    |kbd| kbd.into_any_element(),
-                                )
-                            })
-                            .child(
-                                Button::new("sequence-shortcut-edit")
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .outline()
-                                    .label(tr(language, "修改", "Edit"))
-                                    .disabled(sequence_pending)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.begin_shortcut_edit(
-                                            ShortcutTarget::Sequence,
-                                            window,
-                                            cx,
-                                        );
-                                    })),
-                            )
-                            .child(
-                                Button::new("sequence-shortcut-disable")
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .ghost()
-                                    .label(tr(language, "停用", "Disable"))
-                                    .disabled(sequence_pending || sequence_hotkey.trim().is_empty())
-                                    .on_click(move |_, _, cx| {
-                                        let _ = sequence_owner.update(cx, |owner, cx| {
-                                            owner.select_sequence_hotkey(String::new(), cx);
-                                        });
-                                    }),
-                            ),
-                    )
-                    .when(
-                        self.shortcut_editing == Some(ShortcutTarget::Sequence),
-                        |panel| {
-                            panel.child(self.sequence_shortcut_editor(language, cx))
-                        },
-                    )))
-                    .child(settings_column()
-                        .when(cfg!(target_os = "macos"), |panel| {
-                            panel.child(Alert::info("mac-paste-key", tr(language,
-                                "macOS 自动粘贴使用 Command+V，不支持 Shift+Insert。请在系统设置中授予辅助功能权限。",
-                                "macOS uses Command+V; Shift+Insert is unavailable. Grant Accessibility permission in System Settings.")).small())
-                        })
+                settings_field(tr(
+                    language,
+                    "序列粘贴推进键（多选后在目标应用中逐条粘贴）",
+                    "Sequence paste advance key (paste selected items one by one)",
+                ))
+                .child(
+                    settings_shortcut_row()
+                        .child(shortcut_binding_display(
+                            sequence_hotkey.trim(),
+                            sequence_label,
+                        ))
                         .child(
-                            settings_field(tr(
-                                language,
-                                "自动粘贴使用按键",
-                                "Key sent for automatic paste",
-                            ))
-                            .child({
-                                let choices = [
-                                    (crate::capabilities::paste_key_label(), PasteKeyPreference::CtrlV),
-                                    ("Shift+Insert", PasteKeyPreference::ShiftInsert),
-                                ];
-                                let selected_index = choices
-                                    .iter()
-                                    .position(|(_, key)| *key == paste_key)
-                                    .expect("built-in paste key");
-                                let click_choices = choices;
-                                let owner = self.owner.clone();
-                                TabBar::new("settings-paste-key-tabs")
-                                    .w_full()
-                                    .min_w_0()
-                                    .large()
-                                    .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                    .segmented()
-                                    .last_empty_space(div().w_0())
-                                    .selected_index(selected_index)
-                                    .on_click(move |index: &usize, _, cx| {
-                                        if let Some(&(_, key)) = click_choices.get(*index) {
-                                            if paste_key_pending || !crate::capabilities::paste_key_supported(key) {
-                                                return;
-                                            }
-                                            let _ = owner.update(cx, |owner, cx| {
-                                                if owner.paste_key.value != key
-                                                    && owner.send(Command::SetPasteKey(key), cx)
-                                                {
-                                                    owner.paste_key.pending = true;
-                                                    cx.notify();
-                                                }
-                                            });
-                                        }
-                                    })
-                                    .children(choices.map(|(label, key)| {
-                                        Tab::new()
-                                            .text_size(px(visual::TEXT_BODY))
-                                            .aria_label(label)
-                                            .child(
-                                                shortcut_kbd(label)
-                                                    .expect("built-in paste key")
-                                                    .appearance(false),
-                                            )
-                                            .flex_1()
-                                            .disabled(paste_key_pending || !crate::capabilities::paste_key_supported(key))
-                                    }))
-                            }),
-                        )),
+                            Button::new("sequence-shortcut-edit")
+                                .outline()
+                                .small()
+                                .label(tr(language, "修改", "Edit"))
+                                .disabled(sequence_pending)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin_shortcut_edit(
+                                        ShortcutTarget::Sequence,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        )
+                        .child(
+                            Button::new("sequence-shortcut-disable")
+                                .ghost()
+                                .small()
+                                .label(tr(language, "停用", "Disable"))
+                                .disabled(sequence_pending || sequence_hotkey.trim().is_empty())
+                                .on_click(move |_, _, cx| {
+                                    let _ = sequence_owner.update(cx, |owner, cx| {
+                                        owner.select_sequence_hotkey(String::new(), cx);
+                                    });
+                                }),
+                        ),
+                ),
+            )
+            .when(
+                self.shortcut_editing == Some(ShortcutTarget::Sequence),
+                |panel| {
+                    panel.child(self.sequence_shortcut_editor(language, cx))
+                },
             )
             .child(
-                settings_description(tr(
+                settings_field(tr(
                     language,
-                    "可逐项修改、停用或恢复默认快捷键；数字键自动支持数字小键盘",
-                    "Edit, disable, or restore each shortcut; digit keys also work on the numpad",
-                ), cx),
+                    "自动粘贴使用按键",
+                    "Key sent for automatic paste",
+                ))
+                .when(cfg!(target_os = "macos"), |field| {
+                    field.child(Alert::info("mac-paste-key", tr(language,
+                        "macOS 自动粘贴使用 Command+V，不支持 Shift+Insert。请在系统设置中授予辅助功能权限。",
+                        "macOS uses Command+V; Shift+Insert is unavailable. Grant Accessibility permission in System Settings.")).small())
+                })
+                .child({
+                    let choices = [
+                        (crate::capabilities::paste_key_label(), PasteKeyPreference::CtrlV),
+                        ("Shift+Insert", PasteKeyPreference::ShiftInsert),
+                    ];
+                    let selected_index = choices
+                        .iter()
+                        .position(|(_, key)| *key == paste_key)
+                        .expect("built-in paste key");
+                    let click_choices = choices;
+                    let owner = self.owner.clone();
+                    TabBar::new("settings-paste-key-tabs")
+                        .w_full()
+                        .min_w_0()
+                        .large()
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
+                        .segmented()
+                        .last_empty_space(div().w_0())
+                        .selected_index(selected_index)
+                        .on_click(move |index: &usize, _, cx| {
+                            if let Some(&(_, key)) = click_choices.get(*index) {
+                                if paste_key_pending || !crate::capabilities::paste_key_supported(key) {
+                                    return;
+                                }
+                                let _ = owner.update(cx, |owner, cx| {
+                                    if owner.paste_key.value != key
+                                        && owner.send(Command::SetPasteKey(key), cx)
+                                    {
+                                        owner.paste_key.pending = true;
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        })
+                        .children(choices.map(|(label, key)| {
+                            Tab::new()
+                                .text_size(px(visual::TEXT_BODY))
+                                .aria_label(label)
+                                .child(
+                                    shortcut_kbd(label)
+                                        .expect("built-in paste key")
+                                        .appearance(false),
+                                )
+                                .flex_1()
+                                .disabled(paste_key_pending || !crate::capabilities::paste_key_supported(key))
+                        }))
+                }),
             )
             .when_some(paste_shortcut_status, |panel, (message, is_error)| {
                 panel.child(if is_error {

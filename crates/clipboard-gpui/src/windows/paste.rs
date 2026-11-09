@@ -17,7 +17,7 @@ use ::windows::Win32::{
 use anyhow::{Result, bail};
 use clipboard_core::preferences::PasteKeyPreference;
 use clipboard_platform::paste_delivery::{
-    ReadyResult, paste_shortcut_trigger_held, PasteWaitPolicy,
+    PasteWaitPolicy, ReadyResult, paste_shortcut_trigger_held,
 };
 use gpui_kit::Window;
 
@@ -124,11 +124,10 @@ impl PendingPaste {
             .trigger_shortcut
             .as_deref()
             .is_some_and(paste_shortcut_trigger_held);
-        match self.wait.ready_to_inject(
-            state.modifiers_down,
-            trigger_held,
-            self.started.elapsed(),
-        ) {
+        match self
+            .wait
+            .ready_to_inject(state.modifiers_down, trigger_held, self.started.elapsed())
+        {
             ReadyResult::Ready => Ok(true),
             ReadyResult::Waiting => Ok(false),
             ReadyResult::TimedOut => {

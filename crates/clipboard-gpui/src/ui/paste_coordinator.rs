@@ -1,7 +1,5 @@
 use super::paste_requests::PendingRequest;
-use clipboard_platform::{
-    paste_delivery::PasteWaitPolicy, Command, CopyMode, CopyPurpose,
-};
+use clipboard_platform::{Command, CopyMode, CopyPurpose, paste_delivery::PasteWaitPolicy};
 
 type Target = (isize, u32);
 
@@ -21,7 +19,7 @@ pub(super) struct QuickPaste {
 struct Delivery {
     target: Target,
     phase: DeliveryPhase,
-    wait: PasteWaitPolicy,
+    wait: Option<PasteWaitPolicy>,
 }
 
 struct Sequence {
@@ -83,7 +81,7 @@ impl PasteCoordinator {
         self.pending.begin(Delivery {
             target,
             phase: DeliveryPhase::Copying,
-            wait,
+            wait: Some(wait),
         })
     }
 
@@ -117,13 +115,14 @@ impl PasteCoordinator {
     }
 
     /// A receipt moves one request into delivery exactly once; stale receipts cannot reenter.
+    /// `wait` 被取走而非克隆：回执只会把请求推进一次，第二次到来只能拿到 None。
     pub fn receive(&mut self, request_id: u64) -> Option<(Target, PasteWaitPolicy)> {
         let pending = self.pending.get_mut(request_id)?;
         if !matches!(pending.phase, DeliveryPhase::Copying) {
             return None;
         }
         pending.phase = DeliveryPhase::Delivering;
-        Some((pending.target, pending.wait.clone()))
+        Some((pending.target, pending.wait.take()?))
     }
 
     pub fn delivering(&self, request_id: u64) -> bool {

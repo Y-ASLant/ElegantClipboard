@@ -25,6 +25,26 @@ pub(super) fn hotkey_label(language: LanguagePreference, choice: &HotkeyPreferen
     }
 }
 
+/// Renders a Kit `Kbd` chip when the string parses; otherwise plain fallback text.
+pub(super) fn shortcut_binding_display(
+    shortcut: &str,
+    fallback: impl Into<SharedString>,
+) -> AnyElement {
+    let fallback = fallback.into();
+    if shortcut.trim().is_empty() {
+        return div().flex_none().child(fallback).into_any_element();
+    }
+    shortcut_kbd(shortcut).map_or_else(
+        || {
+            div()
+                .flex_none()
+                .child(shortcut.to_owned())
+                .into_any_element()
+        },
+        |kbd| kbd.into_any_element(),
+    )
+}
+
 pub(super) fn shortcut_kbd(shortcut: &str) -> Option<Kbd> {
     let mut parts = shortcut.split('+');
     let key = parts.next_back()?.trim();

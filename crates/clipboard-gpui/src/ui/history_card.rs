@@ -224,13 +224,15 @@ impl ClipboardView {
                 this.set_hover_source(id, *is_hovered, window, cx);
                 cx.notify();
             }))
-            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
-                // Native menus can close without changing this row's cached hover state.
-                if !this.hover_source_active {
-                    this.set_hover_source(id, true, window, cx);
-                }
-                this.update_hover_anchor(id, event.position.y, cx);
-            }))
+            .on_mouse_move(
+                cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
+                    // Native menus can close without changing this row's cached hover state.
+                    if !this.hover_source_active {
+                        this.set_hover_source(id, true, window, cx);
+                    }
+                    this.update_hover_anchor(id, event.position.y, cx);
+                }),
+            )
             .on_scroll(cx.listener(move |this, event: &ScrollEvent, window, cx| {
                 if event.modifiers.control
                     && this.zoom_hover_from_card(

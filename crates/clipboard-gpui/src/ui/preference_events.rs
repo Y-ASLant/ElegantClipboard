@@ -16,6 +16,34 @@ impl<T> PendingPref<T> {
 }
 
 impl ClipboardView {
+    pub(super) fn save_fonts(&mut self, fonts: FontPreference, cx: &mut Context<Self>) {
+        if !self.fonts.pending
+            && fonts.valid()
+            && fonts != self.fonts.value
+            && self.send(Command::SetFonts(fonts), cx)
+        {
+            self.fonts.pending = true;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn apply_fonts_saved(
+        &mut self,
+        result: Result<FontPreference, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.acknowledge_save(
+            result,
+            |this| &mut this.fonts,
+            ("字体保存失败", "Failed to save fonts"),
+        );
+        crate::design_system::set_fonts(self.fonts.value.clone(), cx);
+        apply_theme(self.theme, window, cx);
+        cx.refresh_windows();
+        true
+    }
+
     pub(super) fn save_display(&mut self, display: DisplayPreference, cx: &mut Context<Self>) {
         if !self.display_pending
             && display != self.display

@@ -65,9 +65,7 @@ impl Worker {
                         }
                         if !pressed.is_empty() {
                             let state = x.connection.query_keymap()?.reply()?.keys;
-                            pressed.retain(|key| {
-                                state[usize::from(*key / 8)] & (1 << (*key % 8)) != 0
-                            });
+                            pressed.retain(|key| super::desktop::keymap_key_down(&state, *key));
                         }
                         thread::sleep(Duration::from_millis(8));
                     }

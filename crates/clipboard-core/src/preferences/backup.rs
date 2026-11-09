@@ -28,6 +28,7 @@ const BACKUP_KEYS: &[&str] = &[
     WINDOW_POSITION_KEY,
     HOVER_PREVIEW_KEY,
     DISPLAY_KEY,
+    FONT_KEY,
     MONITOR_TYPES_KEY,
     APP_FILTER_KEY,
     ONBOARDING_COMPLETED_KEY,
@@ -44,8 +45,9 @@ const BACKUP_KEYS: &[&str] = &[
 pub(crate) fn prune_non_gpui_settings(connection: &Connection) -> Result<()> {
     static SQL: LazyLock<String> = LazyLock::new(|| {
         // Keep one-shot data-migration markers (`_migration_*`) so restores/imports do not replay them.
-        let mut sql =
-            String::from("DELETE FROM settings WHERE key NOT LIKE '\\_migration%' ESCAPE '\\' AND key NOT IN (");
+        let mut sql = String::from(
+            "DELETE FROM settings WHERE key NOT LIKE '\\_migration%' ESCAPE '\\' AND key NOT IN (",
+        );
         for index in 0..BACKUP_KEYS.len() {
             if index > 0 {
                 sql.push(',');

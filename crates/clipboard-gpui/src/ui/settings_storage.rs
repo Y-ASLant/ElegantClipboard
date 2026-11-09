@@ -1,4 +1,7 @@
-use super::settings_common::{owner_state, settings_description, settings_inline, settings_stack};
+use super::settings_common::{
+    owner_state, settings_columns, settings_description, settings_description_body,
+    settings_inline, settings_stack,
+};
 use super::*;
 use gpui_kit::component::alert::Alert;
 
@@ -77,7 +80,6 @@ impl SettingsWindowView {
                             .icon(IconName::RotateCw)
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .label(tr(language, "刷新", "Refresh"))
-                            .tooltip(tr(language, "刷新占用", "Refresh usage"))
                             .accessibility_label(tr(language, "刷新占用", "Refresh usage"))
                             .disabled(data_size_pending || maintenance_pending)
                             .on_click(move |_, _, cx| {
@@ -93,7 +95,6 @@ impl SettingsWindowView {
                             .icon(IconName::HardDrive)
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .label(tr(language, "整理", "Optimize"))
-                            .tooltip(tr(language, "整理数据库", "Optimize database"))
                             .accessibility_label(tr(language, "整理数据库", "Optimize database"))
                             .disabled(data_size_pending || maintenance_pending)
                             .on_click(move |_, _, cx| {
@@ -111,7 +112,6 @@ impl SettingsWindowView {
                             .icon(IconName::FolderOpen)
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .label(tr(language, "打开目录", "Open folder"))
-                            .tooltip(tr(language, "打开数据目录", "Open data folder"))
                             .accessibility_label(tr(language, "打开数据目录", "Open data folder"))
                             .on_click(move |_, _, cx| {
                                 let _ = folder_owner.update(cx, |owner, cx| {
@@ -124,8 +124,7 @@ impl SettingsWindowView {
                             .outline()
                             .icon(IconName::ExternalLink)
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .label(tr(language, "导出备份", "Export backup"))
-                            .tooltip(tr(language, "导出备份", "Export backup"))
+                            .label(tr(language, "导出备份…", "Export backup…"))
                             .accessibility_label(tr(language, "导出备份", "Export backup"))
                             .disabled(export_pending)
                             .on_click(move |_, _, cx| {
@@ -150,17 +149,17 @@ impl SettingsWindowView {
         let choices = [
             (
                 "import-legacy-db",
-                tr(language, "导入旧版数据库", "Import legacy database"),
+                tr(language, "导入旧版数据库…", "Import legacy database…"),
                 ImportSource::LegacyDatabase,
             ),
             (
                 "import-legacy-zip",
-                tr(language, "导入旧版 ZIP", "Import legacy ZIP"),
+                tr(language, "导入旧版 ZIP…", "Import legacy ZIP…"),
                 ImportSource::LegacyBackup,
             ),
             (
                 "restore-backup",
-                tr(language, "恢复备份", "Restore backup"),
+                tr(language, "恢复备份…", "Restore backup…"),
                 ImportSource::Backup,
             ),
         ];
@@ -207,20 +206,19 @@ impl SettingsWindowView {
         let clear_all_pending = owner_state.clear_all_pending;
         let privacy_owner = self.owner.clone();
 
-        settings_inline()
-            .justify_between()
+        settings_columns()
+            .items_center()
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .text_size(px(visual::TEXT_BODY))
-                    .line_height(relative(1.5))
-                    .text_color(cx.theme().muted_foreground)
-                    .whitespace_normal()
-                    .child(tr(
-                        language,
-                        "永久删除全部剪贴板历史",
-                        "Permanently delete all clipboard history",
+                    .child(settings_description_body(
+                        tr(
+                            language,
+                            "永久删除全部剪贴板历史",
+                            "Permanently delete all clipboard history",
+                        ),
+                        cx,
                     )),
             )
             .child(
@@ -249,7 +247,7 @@ impl SettingsWindowView {
                             let cancel_owner = dialog_owner.clone();
                             dialog_shell(dialog, cx)
                                 .title(dialog_title(
-                                    tr(language, "删除全部历史", "Delete all history"),
+                                    tr(language, "删除全部历史？", "Delete all history?"),
                                     cx,
                                 ))
                                 .on_ok(move |_, window, cx| {
@@ -271,8 +269,8 @@ impl SettingsWindowView {
                                         .gap_2()
                                         .child(tr(
                                             language,
-                                            "删除所有分组中的全部历史？置顶和收藏也会删除。",
-                                            "Delete all history from every group? Pinned and favorite items will also be deleted.",
+                                            "所有分组中的记录都会被删除，包括置顶和收藏。",
+                                            "All history in every group is deleted, including pinned and favorite items.",
                                         ))
                                         .child(
                                             div()
@@ -303,7 +301,7 @@ impl SettingsWindowView {
                                                 .label(if pending {
                                                     tr(language, "正在删除…", "Deleting…")
                                                 } else {
-                                                    tr(language, "确认删除全部历史", "Delete all history")
+                                                    tr(language, "删除", "Delete")
                                                 })
                                                 .disabled(pending)
                                                 .on_click(move |_, window, cx| {

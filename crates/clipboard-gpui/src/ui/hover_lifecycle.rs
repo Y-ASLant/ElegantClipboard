@@ -111,15 +111,12 @@ impl ClipboardView {
                             this.close_hover_preview("overlay_stack_active", cx);
                             return false;
                         }
-                        let preview_hwnd = this
-                            .hover_popup
-                            .as_ref()
-                            .and_then(|handle| {
-                                handle
-                                    .update(cx, |_, window, _| native_window::window_id(window))
-                                    .ok()
-                                    .flatten()
-                            });
+                        let preview_hwnd = this.hover_popup.as_ref().and_then(|handle| {
+                            handle
+                                .update(cx, |_, window, _| native_window::window_id(window))
+                                .ok()
+                                .flatten()
+                        });
                         let over_main = native::pointer_targets_window(main, pointer);
                         let over_preview = preview_hwnd
                             .is_some_and(|hwnd| native::pointer_targets_window(hwnd, pointer));
@@ -228,12 +225,16 @@ impl ClipboardView {
             || self.confirmation.is_some()
     }
 
+    /// 历史右键菜单当前是否活着；`update` 失败说明窗口已被移除。
+    /// set_hover_source 的进入守卫与悬停跟踪共用同一判定，避免两处反向编码漂移。
+    fn history_menu_open(&self, cx: &mut App) -> bool {
+        self.history_menu_window
+            .and_then(|menu| menu.downcast::<menu_window::HistoryMenuWindow>())
+            .is_some_and(|menu| menu.update(cx, |_, _, _| ()).is_ok())
+    }
+
     fn hover_overlay_stack_allows_tracking(&self, cx: &mut App) -> bool {
-        !self.hover_overlay_stack_blocks_source()
-            && self
-                .history_menu_window
-                .and_then(|menu| menu.downcast::<menu_window::HistoryMenuWindow>())
-                .is_none_or(|menu| menu.update(cx, |_, _, _| ()).is_err())
+        !self.hover_overlay_stack_blocks_source() && !self.history_menu_open(cx)
     }
 
     pub(super) fn set_hover_source(
@@ -251,23 +252,22 @@ impl ClipboardView {
             return;
         }
         if entered {
-            if !self.hover_source_allowed(window) {
-                if self.hover_preview.id.is_some() {
-                    self.close_hover_preview("hover_source_blocked", cx);
-                }
-                return;
-            }
+            // 先跑零开销的纯状态守卫；hover_source_allowed 里的指针/窗口命中是 Win32
+            // 调用，on_mouse_move 会在这些守卫已拦截的情况下每像素触发一次。
             if self.batch_mode
                 || cx.has_active_drag()
                 || self.external_drag.is_some()
                 || self.history.loading
                 || self.editor.id.is_some()
                 || self.pending_row_click.is_some()
-                || self
-                    .history_menu_window
-                    .and_then(|menu| menu.downcast::<menu_window::HistoryMenuWindow>())
-                    .is_some_and(|menu| menu.update(cx, |_, _, _| ()).is_ok())
+                || self.history_menu_open(cx)
             {
+                return;
+            }
+            if !self.hover_source_allowed(window) {
+                if self.hover_preview.id.is_some() {
+                    self.close_hover_preview("hover_source_blocked", cx);
+                }
                 return;
             }
             let Some(item) = self.history.items.iter().find(|item| item.id == id) else {

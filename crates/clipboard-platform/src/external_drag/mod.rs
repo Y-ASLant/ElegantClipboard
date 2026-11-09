@@ -32,8 +32,8 @@ use windows::Win32::{
             GWL_EXSTYLE, GetClientRect, GetCursorPos, GetParent, GetWindowLongPtrW, GetWindowRect,
             GetWindowThreadProcessId, HWND_TOPMOST, IsWindow, LWA_ALPHA, SWP_HIDEWINDOW,
             SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetLayeredWindowAttributes,
-            SetWindowLongPtrW, SetWindowPos, WindowFromPoint, WS_EX_LAYERED, WS_EX_NOACTIVATE,
-            WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+            SetWindowLongPtrW, SetWindowPos, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            WS_EX_TRANSPARENT, WindowFromPoint,
         },
     },
 };

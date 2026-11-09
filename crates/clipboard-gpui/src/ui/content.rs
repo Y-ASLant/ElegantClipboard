@@ -9,7 +9,7 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
-        let category_tab_count = self.category_tab_entries().len().max(1) as f32;
+        let category_tab_count = self.display.category_tabs.enabled_count().max(1) as f32;
         // Deduct the group selector, row gap, and the Kit segmented-tab insets.
         let category_width = (window.viewport_size().width
             - px(PAGE_PADDING * 2. + 138. + visual::SPACE_2 * 2. + 6.))

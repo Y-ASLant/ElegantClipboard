@@ -184,7 +184,10 @@ fn paste_delivery_mode_defaults_to_controlled_and_persists() -> Result<()> {
     let path = directory.path().join("clipboard.db");
     let db = Database::new(path.clone())?;
     let preferences = Preferences::new(&db);
-    assert_eq!(preferences.paste_delivery_mode()?, PasteDeliveryMode::Controlled);
+    assert_eq!(
+        preferences.paste_delivery_mode()?,
+        PasteDeliveryMode::Controlled
+    );
     preferences.set_paste_delivery_mode(PasteDeliveryMode::Rapid)?;
     assert_eq!(preferences.paste_delivery_mode()?, PasteDeliveryMode::Rapid);
     assert_eq!(

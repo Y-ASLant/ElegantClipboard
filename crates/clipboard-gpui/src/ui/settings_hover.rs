@@ -1,6 +1,6 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
-    settings_description, settings_field, settings_inline, settings_toggle,
+    choice_tabs, owner_state, settings_field, settings_field_help, settings_inline, settings_stack,
+    settings_toggle,
 };
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
@@ -30,97 +30,86 @@ impl SettingsWindowView {
         let hover_preference = owner_state.hover_preference;
         let hover_pending = owner_state.hover_preference_pending;
         let expanded_hover_owner = self.owner.clone();
-        settings_columns()
+        settings_stack()
             .child(
-                settings_column()
-                    .child(
-                        settings_field(tr(language, "预览内容", "Preview content")).child(
-                            settings_inline().children(
-                                [
-                                    (
-                                        "hover-image",
-                                        tr(language, "图片", "Images"),
-                                        hover_preference.image,
-                                        (|next: &mut HoverPreviewPreference, checked| {
-                                            next.image = checked
-                                        })
-                                            as fn(&mut HoverPreviewPreference, bool),
-                                    ),
-                                    (
-                                        "hover-text",
-                                        tr(language, "文本", "Text"),
-                                        hover_preference.text,
-                                        |next: &mut HoverPreviewPreference, checked| {
-                                            next.text = checked
-                                        },
-                                    ),
-                                    (
-                                        "hover-files",
-                                        tr(language, "文件", "Files"),
-                                        hover_preference.files,
-                                        |next: &mut HoverPreviewPreference, checked| {
-                                            next.files = checked
-                                        },
-                                    ),
-                                ]
-                                .map(
-                                    |(id, label, selected, set_checked)| {
-                                        let owner = self.owner.clone();
-                                        settings_toggle(Checkbox::new(id))
-                                            .min_w_0()
-                                            .label(label)
-                                            .checked(selected)
-                                            .disabled(hover_pending)
-                                            .on_change(move |checked, _, cx| {
-                                                let _ = owner.update(cx, |owner, cx| {
-                                                    let mut next = owner.hover_preference;
-                                                    set_checked(&mut next, *checked);
-                                                    owner.save_hover_preference(next, cx);
-                                                });
-                                            })
-                                    },
-                                ),
+                settings_field(tr(language, "预览内容", "Preview content")).child(
+                    settings_inline().children(
+                        [
+                            (
+                                "hover-image",
+                                tr(language, "图片", "Images"),
+                                hover_preference.image,
+                                (|next: &mut HoverPreviewPreference, checked| next.image = checked)
+                                    as fn(&mut HoverPreviewPreference, bool),
                             ),
-                        ),
-                    )
-                    .child(
-                        settings_toggle(Checkbox::new("hover-expanded-image"))
-                            .min_w_0()
-                            .label(tr(
-                                language,
-                                "大图使用更大浮窗",
-                                "Expand image hover window",
-                            ))
-                            .checked(hover_preference.expanded_image)
-                            .disabled(hover_pending || !hover_preference.image)
-                            .on_change(move |checked, _, cx| {
-                                let _ = expanded_hover_owner.update(cx, |owner, cx| {
-                                    owner.save_hover_preference(
-                                        HoverPreviewPreference {
-                                            expanded_image: *checked,
-                                            ..owner.hover_preference
-                                        },
-                                        cx,
-                                    );
-                                });
-                            }),
+                            (
+                                "hover-text",
+                                tr(language, "文本", "Text"),
+                                hover_preference.text,
+                                |next: &mut HoverPreviewPreference, checked| next.text = checked,
+                            ),
+                            (
+                                "hover-files",
+                                tr(language, "文件", "Files"),
+                                hover_preference.files,
+                                |next: &mut HoverPreviewPreference, checked| next.files = checked,
+                            ),
+                        ]
+                        .map(|(id, label, selected, set_checked)| {
+                            let owner = self.owner.clone();
+                            settings_toggle(cx, Checkbox::new(id))
+                                .min_w_0()
+                                .label(label)
+                                .checked(selected)
+                                .disabled(hover_pending)
+                                .on_change(move |checked, _, cx| {
+                                    let _ = owner.update(cx, |owner, cx| {
+                                        let mut next = owner.hover_preference;
+                                        set_checked(&mut next, *checked);
+                                        owner.save_hover_preference(next, cx);
+                                    });
+                                })
+                        }),
                     ),
+                ),
             )
             .child(
-                settings_column_field(tr(language, "停留延时", "Hover delay"))
-                    .child(
-                        NumberInput::new(self.hover_delay.input())
-                            .w_full()
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .disabled(hover_pending),
-                    )
-                    .child(settings_description(
-                        tr(language, "100–2000 毫秒。", "100–2000 ms."),
-                        cx,
-                    )),
+                settings_toggle(cx, Checkbox::new("hover-expanded-image"))
+                    .min_w_0()
+                    .label(tr(
+                        language,
+                        "大图使用更大浮窗",
+                        "Expand image hover window",
+                    ))
+                    .checked(hover_preference.expanded_image)
+                    .disabled(hover_pending || !hover_preference.image)
+                    .on_change(move |checked, _, cx| {
+                        let _ = expanded_hover_owner.update(cx, |owner, cx| {
+                            owner.save_hover_preference(
+                                HoverPreviewPreference {
+                                    expanded_image: *checked,
+                                    ..owner.hover_preference
+                                },
+                                cx,
+                            );
+                        });
+                    }),
             )
             .child(
-                settings_column_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
+                settings_field_help(
+                    tr(language, "停留延时", "Hover delay"),
+                    tr(language, "100–2000 毫秒。", "100–2000 ms."),
+                    "hover-delay-help",
+                )
+                .child(
+                    NumberInput::new(self.hover_delay.input())
+                        .w_full()
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
+                        .disabled(hover_pending),
+                ),
+            )
+            .child(
+                settings_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
                     "hover-position",
                     &self.owner,
                     [
@@ -145,26 +134,30 @@ impl SettingsWindowView {
                             cx,
                         );
                     },
+                    cx,
                 )),
             )
             .child(
-                settings_column_field(tr(language, "图片缩放步进", "Image zoom step"))
-                    .child(
-                        NumberInput::new(self.hover_zoom.input())
-                            .w_full()
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .disabled(hover_pending),
-                    )
-                    .child(settings_description(tr(language, "5–50。", "5–50."), cx)),
+                settings_field_help(
+                    tr(language, "图片缩放步进", "Image zoom step"),
+                    tr(language, "5–50。", "5–50."),
+                    "hover-zoom-help",
+                )
+                .child(
+                    NumberInput::new(self.hover_zoom.input())
+                        .w_full()
+                        .h(px(visual::CONTROL_HEIGHT_LARGE))
+                        .disabled(hover_pending),
+                ),
             )
             .child(
-                settings_column_field(tr(language, "预览信息", "Preview details")).child(
+                settings_field(tr(language, "预览信息", "Preview details")).child(
                     settings_inline().children(
                         detail_toggles(language, hover_preference.details)
                             .into_iter()
                             .map(|toggle| {
                                 let owner = self.owner.clone();
-                                settings_toggle(Checkbox::new(toggle.id))
+                                settings_toggle(cx, Checkbox::new(toggle.id))
                                     .min_w_0()
                                     .label(toggle.label)
                                     .checked(toggle.selected)

@@ -28,6 +28,12 @@ impl PasteWaitPolicy {
         }
     }
 
+    /// 连贴模式按住修饰键连按槽位时，注入粘贴键允许修饰键仍处于按下状态。
+    /// 由策略统一回答，避免调用侧重复拼 (Rapid, Some(_)) 判定。
+    pub fn allows_held_modifiers(&self) -> bool {
+        self.mode == PasteDeliveryMode::Rapid && self.trigger_shortcut.is_some()
+    }
+
     pub fn ready_to_inject(
         &self,
         modifiers_held: bool,
@@ -62,8 +68,6 @@ pub use crate::hotkey::paste_shortcut_trigger_held;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clipboard_core::preferences::PasteDeliveryMode;
-    use std::time::Duration;
 
     #[test]
     fn controlled_mode_waits_for_modifiers() {
@@ -80,10 +84,7 @@ mod tests {
 
     #[test]
     fn rapid_hotkey_waits_for_trigger_not_modifiers() {
-        let policy = PasteWaitPolicy::for_hotkey(
-            PasteDeliveryMode::Rapid,
-            Some("Alt+1".into()),
-        );
+        let policy = PasteWaitPolicy::for_hotkey(PasteDeliveryMode::Rapid, Some("Alt+1".into()));
         assert_eq!(
             policy.ready_to_inject(true, true, Duration::ZERO),
             ReadyResult::Waiting

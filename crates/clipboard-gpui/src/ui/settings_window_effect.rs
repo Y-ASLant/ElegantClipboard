@@ -1,4 +1,6 @@
-use super::settings_common::{owner_state, settings_description, settings_field, settings_stack};
+use super::settings_common::{
+    owner_state, settings_description, settings_field, settings_field_help, settings_stack,
+};
 use super::*;
 use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
 use gpui_kit::component::input::NumberInput;
@@ -61,18 +63,21 @@ impl SettingsWindowView {
         settings_stack()
             .child(settings_field(tr(language, "背景材质", "Background material")).child(tabs))
             .when(backend != WindowEffectBackend::Opaque, |content| {
-                content.child(settings_field(tr(language, "背景浓度", "Background density"))
+                content.child(settings_field_help(
+                    tr(language, "背景浓度", "Background density"),
+                    tr(
+                        language,
+                        "输入 0–100，数值越高背景越实。窗口、侧栏与内容卡片共享材质层次；文字、控件和浮层保持清晰，不改变系统模糊半径。",
+                        "Enter 0–100. Higher density makes the background more solid. The window, sidebar and content cards share material surfaces; text, controls and overlays stay clear. The system blur radius is unchanged.",
+                    ),
+                    "window-density-help",
+                )
                     .child(
                         NumberInput::new(self.window_opacity.input())
                             .w_full()
                             .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .disabled(pending),
                     ))
-                    .child(settings_description(tr(
-                        language,
-                        "输入 0–100，数值越高背景越实。窗口、侧栏与内容卡片共享材质层次；文字、控件和浮层保持清晰，不改变系统模糊半径。",
-                        "Enter 0–100. Higher density makes the background more solid. The window, sidebar and content cards share material surfaces; text, controls and overlays stay clear. The system blur radius is unchanged.",
-                    ), cx))
             })
             .when(!supported, |content| {
                 let saved = effect_label(language, preference.effect);

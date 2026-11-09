@@ -1,6 +1,5 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column_field, settings_columns, settings_inline,
-    settings_toggle,
+    choice_tabs, owner_state, settings_field, settings_inline, settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::switch::Switch;
@@ -78,70 +77,68 @@ impl SettingsWindowView {
         let timing = channel.timing(audio);
         let toggle_owner = self.owner.clone();
         let preview_owner = self.owner.clone();
-        settings_columns()
+        settings_stack()
             .child(
-                settings_column_field(tr(language, "播放时机", "Timing")).child(choice_tabs(
-                        timing_id,
-                        &self.owner,
-                        [SoundTiming::Immediate, SoundTiming::AfterSuccess],
-                        [
-                            tr(language, "立即", "Immediate"),
-                            tr(language, "成功后", "After success"),
-                        ],
-                        timing,
-                        pending || !enabled,
-                        move |owner: &ClipboardView| channel.timing(owner.audio.value),
-                        move |owner, timing, cx| {
-                            let mut next = owner.audio.value;
-                            channel.set_timing(&mut next, timing);
-                            owner.save_audio(next, cx);
-                        },
-                    )),
+                settings_inline()
+                    .child(
+                        settings_toggle(cx, Switch::new(switch_id))
+                            .label(tr(language, "启用", "Enable"))
+                            .checked(enabled)
+                            .disabled(pending)
+                            .on_change(move |checked, _, cx| {
+                                let _ = toggle_owner.update(cx, |owner, cx| {
+                                    let mut next = owner.audio.value;
+                                    channel.set_enabled(&mut next, *checked);
+                                    owner.save_audio(next, cx);
+                                });
+                            }),
+                    )
+                    .child(
+                        Button::new(preview_id)
+                            .outline()
+                            .small()
+                            .icon(IconName::Play)
+                            .label(tr(language, "试听", "Preview"))
+                            .disabled(pending || !enabled)
+                            .on_click(move |_, _, cx| {
+                                let played = sound::play(channel.sound());
+                                if !played {
+                                    let _ = preview_owner.update(cx, |owner, cx| {
+                                        owner.set_feedback_message(
+                                            tr(
+                                                owner.language,
+                                                "音频设备不可用，无法试听",
+                                                "Audio device unavailable; preview could not play",
+                                            )
+                                            .into(),
+                                        );
+                                        owner.is_error = true;
+                                        cx.notify();
+                                    });
+                                }
+                            }),
+                    ),
             )
             .child(
-                settings_column_field(tr(language, "声音", "Sound")).child(
-                    settings_inline()
-                        .justify_between()
-                        .child(
-                            Button::new(preview_id)
-                                .outline()
-                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .flex_shrink_0()
-                                .label(tr(language, "试听", "Preview"))
-                                .on_click(move |_, _, cx| {
-                                    let played = sound::play(channel.sound());
-                                    if !played {
-                                        let _ = preview_owner.update(cx, |owner, cx| {
-                                            owner.set_feedback_message(
-                                                tr(
-                                                    owner.language,
-                                                    "音频设备不可用，无法试听",
-                                                    "Audio device unavailable; preview could not play",
-                                                )
-                                                .into(),
-                                            );
-                                            owner.is_error = true;
-                                            cx.notify();
-                                        });
-                                    }
-                                }),
-                        )
-                        .child(
-                            settings_toggle(Switch::new(switch_id))
-                                .flex_shrink_0()
-                                .min_h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .label(tr(language, "启用", "Enable"))
-                                .checked(enabled)
-                                .disabled(pending)
-                                .on_change(move |checked, _, cx| {
-                                    let _ = toggle_owner.update(cx, |owner, cx| {
-                                        let mut next = owner.audio.value;
-                                        channel.set_enabled(&mut next, *checked);
-                                        owner.save_audio(next, cx);
-                                    });
-                                }),
-                        ),
-            ))
+                settings_field(tr(language, "播放时机", "Timing")).child(choice_tabs(
+                    timing_id,
+                    &self.owner,
+                    [SoundTiming::Immediate, SoundTiming::AfterSuccess],
+                    [
+                        tr(language, "立即", "Immediate"),
+                        tr(language, "成功后", "After success"),
+                    ],
+                    timing,
+                    pending || !enabled,
+                    move |owner: &ClipboardView| channel.timing(owner.audio.value),
+                    move |owner, timing, cx| {
+                        let mut next = owner.audio.value;
+                        channel.set_timing(&mut next, timing);
+                        owner.save_audio(next, cx);
+                    },
+                    cx,
+                )),
+            )
             .into_any_element()
     }
 }

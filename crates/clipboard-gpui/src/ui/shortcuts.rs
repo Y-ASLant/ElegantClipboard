@@ -201,9 +201,9 @@ impl ClipboardView {
         {
             return;
         }
-        let request_id =
-            self.paste_state
-                .begin_quick(event.target, event.slot, event.favorite);
+        let request_id = self
+            .paste_state
+            .begin_quick(event.target, event.slot, event.favorite);
         if !self.send(
             Command::ResolveQuickPaste {
                 request_id,

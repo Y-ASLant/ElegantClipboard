@@ -226,9 +226,7 @@ impl PasteHotkeys {
                                 } else {
                                     parsed.modifiers | MOD_NOREPEAT
                                 };
-                                match unsafe {
-                                    RegisterHotKey(None, id, modifiers, key)
-                                } {
+                                match unsafe { RegisterHotKey(None, id, modifiers, key) } {
                                     Ok(()) => registered.push(id),
                                     Err(error) => failures.push(PasteRegistrationWarning {
                                         slot,
@@ -294,10 +292,7 @@ pub fn paste_shortcut_trigger_held(shortcut: &str) -> bool {
     let Ok(parsed) = super::shortcut_parse::parse_paste_shortcut(shortcut) else {
         return false;
     };
-    let keys = [
-        parsed.key,
-        parsed.numpad_key.unwrap_or(0),
-    ];
+    let keys = [parsed.key, parsed.numpad_key.unwrap_or(0)];
     keys.into_iter()
         .filter(|vk| *vk != 0)
         .any(|vk| unsafe { GetAsyncKeyState(i32::try_from(vk).unwrap_or(i32::MAX)) } < 0)

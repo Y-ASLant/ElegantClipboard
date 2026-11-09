@@ -13,6 +13,14 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         theme_color: ThemeColor::VibrantOrange,
         corner_radius: CornerRadiusPreference::Fixed(12),
         card_corner: CardCornerPreference::Off,
+        fonts: FontPreference {
+            ui_font: "Segoe UI".into(),
+            ui_font_size: 16,
+            card_font: "Consolas".into(),
+            card_font_size: 15,
+            preview_font: String::new(),
+            preview_font_size: 13,
+        },
         language: LanguagePreference::English,
         hotkey: HotkeyPreference::Shortcut("Ctrl+Shift+F8".into()),
         paused: true,
@@ -96,6 +104,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_theme_color(expected.theme_color)?;
     preferences.set_corner_radius(expected.corner_radius)?;
     preferences.set_card_corner(expected.card_corner)?;
+    preferences.set_fonts(expected.fonts.clone())?;
     preferences.set_language(expected.language)?;
     preferences.set_hotkey(expected.hotkey.clone())?;
     preferences.set_capture_paused(expected.paused)?;

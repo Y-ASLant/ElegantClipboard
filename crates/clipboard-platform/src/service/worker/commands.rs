@@ -236,6 +236,7 @@ impl Worker {
                     Event::CardCornerSaved,
                 );
             }
+            Command::SetFonts(fonts) => return self.handle_set_fonts(fonts),
             Command::SetLanguage(language) => {
                 return self.save_setting(
                     language,

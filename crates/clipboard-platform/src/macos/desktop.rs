@@ -16,6 +16,7 @@ unsafe extern "C" {
 
 #[path = "desktop_target.rs"]
 mod target;
+mod virtual_key;
 pub use target::{activate_target, foreground_target, target_alive};
 
 pub fn require_accessibility() -> Result<()> {
@@ -37,31 +38,19 @@ pub fn modifiers_pressed() -> bool {
 }
 
 pub fn shortcut_trigger_held(shortcut: &str) -> bool {
-    let Some(code) = shortcut_main_key_code(shortcut) else {
+    let Some(codes) = shortcut_main_key_code(shortcut) else {
         return false;
     };
-    unsafe { CGEventSourceKeyState(0, code) }
+    // 与 Windows/Linux 一致：数字键同时轮询主键区与小键盘别名。
+    [codes.0, codes.1]
+        .into_iter()
+        .filter(|code| *code != 0)
+        .any(|code| unsafe { CGEventSourceKeyState(0, code) })
 }
 
-fn shortcut_main_key_code(shortcut: &str) -> Option<u16> {
+fn shortcut_main_key_code(shortcut: &str) -> Option<(u16, u16)> {
     let last = shortcut.rsplit('+').next()?.trim();
-    if last.len() == 1 {
-        let byte = last.as_bytes()[0];
-        if byte.is_ascii_digit() {
-            return Some(if byte == b'0' {
-                0x1d
-            } else {
-                0x11 + u16::from(byte - b'0')
-            });
-        }
-        if byte.is_ascii_alphabetic() {
-            return Some(0x00 + u16::from(byte.to_ascii_lowercase() - b'a'));
-        }
-    }
-    if let Some(number) = last.strip_prefix('F').and_then(|v| v.parse::<u8>().ok()) {
-        return (1..=20).contains(&number).then(|| 0x7a + u16::from(number));
-    }
-    None
+    virtual_key::code_for_shortcut_key(last)
 }
 
 pub fn shift_pressed() -> bool {

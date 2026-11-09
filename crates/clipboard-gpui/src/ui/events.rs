@@ -129,6 +129,7 @@ impl ClipboardView {
                 cx.refresh_windows();
                 true
             }
+            Event::FontsSaved(result) => self.apply_fonts_saved(result, window, cx),
             Event::WindowEffectSaved(result) => self.apply_window_effect_saved(result, window, cx),
             Event::LanguageSaved(result) => self.apply_language_saved(result, window, cx),
             Event::HotkeySaved(result) => self.apply_hotkey_saved(result),
@@ -195,10 +196,7 @@ impl ClipboardView {
                 self.acknowledge_save(
                     result,
                     |this| &mut this.paste_delivery_mode,
-                    (
-                        "保存粘贴投递模式失败",
-                        "Failed to save paste delivery mode",
-                    ),
+                    ("保存粘贴投递模式失败", "Failed to save paste delivery mode"),
                 );
                 if refresh {
                     self.refresh_paste_hotkey_registration();

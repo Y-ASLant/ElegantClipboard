@@ -16,6 +16,8 @@ pub const SPACE_6: f32 = 24.;
 pub const CONTROL_HEIGHT: f32 = 32.;
 pub const CONTROL_HEIGHT_LARGE: f32 = 36.;
 pub const CONTROL_HEIGHT_COMPACT: f32 = 28.;
+/// Font-size spinbutton: `[-]` + three digits + `px` + `[+]`.
+pub const FONT_SIZE_STEPPER_WIDTH: f32 = 128.;
 pub const TEXT_SMALL: f32 = 12.;
 pub const TEXT_BODY: f32 = 14.;
 pub const TEXT_DIALOG: f32 = 16.;
@@ -53,6 +55,8 @@ pub const HOVER_LINE_HEIGHT: f32 = 22.4;
 pub const METADATA_ROW_HEIGHT: f32 = 20.;
 pub const FILE_THUMBNAIL_WIDTH: f32 = 48.;
 pub const FILE_THUMBNAIL_HEIGHT: f32 = 36.;
+/// Height of the 7-day history bar chart on the Data settings page.
+pub const DAILY_CHART_HEIGHT: f32 = 152.;
 /// Narrow columns across a text card. 14px UI text fits about 44 ASCII
 /// characters, or 22 full-width characters, before it wraps.
 pub const TEXT_COLUMNS_PER_LINE: usize = 44;

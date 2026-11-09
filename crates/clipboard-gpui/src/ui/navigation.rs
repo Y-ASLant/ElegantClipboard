@@ -128,11 +128,11 @@ impl ClipboardView {
         if !self.display.show_category_filter {
             return;
         }
-        let entries = self.category_tab_entries();
-        if let Some(next) = self.category_tab_index().checked_add_signed(direction)
-            && let Some(entry) = entries.get(next)
-        {
-            self.select_category(entry.filter, window, cx);
+        if let Some(next) = self.category_tab_index().checked_add_signed(direction) {
+            let filter = self.visible_tab_filters().nth(next);
+            if let Some(filter) = filter {
+                self.select_category(filter, window, cx);
+            }
         }
     }
     pub(super) fn scroll_to_top(&mut self) {

@@ -107,23 +107,27 @@ pub fn shortcut_trigger_held(shortcut: &str) -> bool {
     let Ok(x) = X11::connect() else {
         return false;
     };
-    let symbols = [parsed.key, parsed.numpad.unwrap_or(0)];
-    symbols.iter().filter(|symbol| **symbol != 0).any(|symbol| {
-        x.keycode(*symbol)
-            .ok()
-            .is_some_and(|keycode| key_down(&x, keycode))
-    })
+    // 一次 query_keymap 覆盖主键与小键盘别名两个 symbol，避免每 tick 两次 X 往返。
+    let Ok(keys) = x
+        .connection
+        .query_keymap()
+        .and_then(|cookie| cookie.reply())
+    else {
+        return false;
+    };
+    [parsed.key, parsed.numpad.unwrap_or(0)]
+        .into_iter()
+        .filter(|symbol| *symbol != 0)
+        .any(|symbol| {
+            x.keycode(symbol)
+                .ok()
+                .is_some_and(|keycode| keymap_key_down(&keys.keys, keycode))
+        })
 }
 
-fn key_down(x: &X11, keycode: u8) -> bool {
-    x.connection
-        .query_keymap()
-        .ok()
-        .and_then(|cookie| cookie.reply().ok())
-        .and_then(|map| {
-            let byte = usize::from(keycode / 8);
-            let bit = keycode % 8;
-            map.keys.get(byte).map(|value| value & (1 << bit) != 0)
-        })
-        .unwrap_or(false)
+/// `query_keymap` 返回的 32 字节位图里读一个 keycode：byte = keycode/8，bit = keycode%8。
+/// external_drag.rs 的 Esc 检测同用此布局。
+pub(super) fn keymap_key_down(keys: &[u8], keycode: u8) -> bool {
+    keys.get(usize::from(keycode / 8))
+        .is_some_and(|value| value & (1 << (keycode % 8)) != 0)
 }

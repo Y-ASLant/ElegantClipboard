@@ -39,6 +39,7 @@ impl ClipboardView {
                                 cx.notify();
                             }
                         },
+                        cx,
                     )),
             )
             .child(
@@ -75,7 +76,7 @@ impl ClipboardView {
                             ),
                     )
                     .child(
-                        settings_common::settings_toggle(Switch::new("onboarding-autostart"))
+                        settings_common::settings_toggle(cx, Switch::new("onboarding-autostart"))
                             .accessibility_label(tr(language, "登录后自动启动", "Launch at login"))
                             .checked(self.autostart.value)
                             .disabled(pending)
@@ -119,7 +120,7 @@ impl ClipboardView {
                             ),
                     )
                     .child(
-                        settings_common::settings_toggle(Switch::new("onboarding-search-focus"))
+                        settings_common::settings_toggle(cx, Switch::new("onboarding-search-focus"))
                             .accessibility_label(tr(
                                 language,
                                 "唤出后直接搜索",

@@ -32,7 +32,7 @@ pub fn drag_escape_pressed() -> bool {
 pub(super) fn escape(x: &X11) -> Result<bool> {
     let key = x.keycode(0xff1b)?;
     let keys = x.connection.query_keymap()?.reply()?.keys;
-    Ok(keys[usize::from(key / 8)] & (1 << (key % 8)) != 0)
+    Ok(super::desktop::keymap_key_down(&keys, key))
 }
 
 pub fn drag_pointer_in_client(

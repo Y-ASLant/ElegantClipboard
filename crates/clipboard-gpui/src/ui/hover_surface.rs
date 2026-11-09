@@ -60,7 +60,9 @@ pub(super) fn render_preview(
         let Some(content) = hover_content::fitted_size(view, maximum, window, cx) else {
             return div()
                 .size_full()
-                .font_family(cx.theme().font_family.clone())
+                .font_family(crate::fonts::resolve_preview_family(
+                    &crate::design_system::active_fonts(cx),
+                ))
                 .child(
                     div()
                         .id("hover-preview-measure")
@@ -216,7 +218,9 @@ pub(super) fn render_preview(
     let preview = div()
         .relative()
         .size_full()
-        .font_family(cx.theme().font_family.clone())
+        .font_family(crate::fonts::resolve_preview_family(
+            &crate::design_system::active_fonts(cx),
+        ))
         .text_color(cx.theme().popover_foreground)
         .bg(transparent_black())
         .child(surface)

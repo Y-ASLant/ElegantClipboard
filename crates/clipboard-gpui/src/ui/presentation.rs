@@ -37,8 +37,8 @@ pub(super) fn window_shell(cx: &App) -> Div {
         .flex_col()
         .bg(background)
         .text_color(cx.theme().foreground)
-        .font_family(UI_FONT_FAMILY)
-        .text_size(px(visual::TEXT_BODY))
+        .font_family(cx.theme().font_family.clone())
+        .text_size(cx.theme().font_size)
         .line_height(relative(1.5))
 }
 

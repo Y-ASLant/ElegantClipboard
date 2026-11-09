@@ -1,20 +1,36 @@
 //! Chakra 风格的原生主题：语义颜色与动效统一投影到 GPUI Kit。
 
 use clipboard_core::preferences::{
-    CornerRadiusPreference, ThemeColor as AccentColor, WindowEffect,
+    CornerRadiusPreference, FontPreference, ThemeColor as AccentColor, WindowEffect,
 };
 use gpui_kit::{
-    App, Global, Hsla, Pixels,
+    App, Global, Hsla, Pixels, SharedString,
     base::{Easing, Spring},
     component::{ActiveTheme, Theme, ThemeColor},
     px, rgb,
 };
 use std::time::Duration;
 
-#[cfg(windows)]
-pub const UI_FONT_FAMILY: &str = "Microsoft YaHei UI";
-#[cfg(not(windows))]
-pub const UI_FONT_FAMILY: &str = ".SystemUIFont";
+pub use crate::fonts::DEFAULT_UI_FONT_FAMILY as UI_FONT_FAMILY;
+
+#[derive(Clone)]
+struct FontSettings(FontPreference);
+impl Global for FontSettings {}
+
+pub fn set_fonts(preference: FontPreference, cx: &mut App) {
+    cx.set_global(FontSettings(preference.clone()));
+    apply(cx);
+}
+
+pub fn active_fonts(cx: &App) -> FontPreference {
+    cx.try_global::<FontSettings>()
+        .map(|value| value.0.clone())
+        .unwrap_or_default()
+}
+
+pub fn ui_font_family(cx: &App) -> SharedString {
+    crate::fonts::resolve_ui_family(&active_fonts(cx))
+}
 
 #[derive(Clone, Copy)]
 struct CornerRadius(CornerRadiusPreference);
@@ -88,6 +104,7 @@ pub fn apply(cx: &mut App) {
     let accent = cx
         .try_global::<AccentChoice>()
         .map_or(AccentColor::GoogleBlue, |value| value.0);
+    let fonts = active_fonts(cx);
     Theme::update(cx, |theme| {
         apply_colors(&mut theme.colors, dark, material.effect, accent);
         // Kit's segmented selection always paints a raised shadow beneath its
@@ -98,8 +115,8 @@ pub fn apply(cx: &mut App) {
             theme.tokens.background.background =
                 color(if dark { 0x414752 } else { 0xf2f3f5 }).into();
         }
-        theme.font_family = UI_FONT_FAMILY.into();
-        theme.font_size = px(16.);
+        theme.font_family = crate::fonts::resolve_ui_family(&fonts);
+        theme.font_size = px(f32::from(fonts.ui_font_size));
         theme.radius = radius;
         theme.radius_lg = large;
         theme.shadow = false;

@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::tooltip::Tooltip;
 
 pub(super) fn settings_stack() -> Div {
     div()
@@ -14,23 +15,47 @@ pub(super) fn settings_stack() -> Div {
         .whitespace_normal()
 }
 
+/// Section blurbs longer than this stay in the card body; shorter ones use the title info icon.
+const SECTION_TOOLTIP_MAX_CHARS: usize = 40;
+/// CJK help copy has no spaces; without a max width the tooltip stays one line and is clipped.
+const HELP_TOOLTIP_MAX_WIDTH: f32 = 320.;
+
 /// Height, padding and label size for every settings checkbox and switch.
-pub(super) fn settings_toggle<T: Styled>(control: T) -> T {
+pub(super) fn settings_toggle<T: Styled>(cx: &App, control: T) -> T {
     control
         .min_h(px(visual::CONTROL_HEIGHT))
         .py(px(visual::TOGGLE_PADDING_Y))
         .text_size(px(visual::TEXT_BODY))
+        .font_family(crate::design_system::ui_font_family(cx))
+        .font_normal()
+        .line_height(relative(1.5))
         .whitespace_normal()
 }
 
-/// Related fields share a row when each has enough room, otherwise wrap.
+/// Horizontal layout for groups of **homogeneous** controls (typically checkboxes
+/// or identical components) that benefit from two-column presentation.
+/// Do not use for mixing controls with different intrinsic heights
+/// (e.g. TabBar + NumberInput). Use `settings_stack` + `settings_field` instead.
 pub(super) fn settings_columns() -> Div {
     settings_stack().flex_row().flex_wrap().items_start()
 }
 
-/// Use only as a direct child of `settings_columns`.
+/// Use only as a direct child of `settings_columns` for same-height siblings.
 pub(super) fn settings_column() -> Div {
-    settings_stack().flex_basis(px(360.)).flex_grow(1.)
+    settings_stack().flex_basis(px(280.)).flex_grow(1.)
+}
+
+/// Shortcut badge + Kit `Button` actions on one baseline (see `Kbd`, `Button::small`).
+pub(super) fn settings_shortcut_row() -> Div {
+    h_flex()
+        .w_full()
+        .min_w_0()
+        .flex_wrap()
+        .items_center()
+        .gap(px(visual::SPACE_2))
+        .text_size(px(visual::TEXT_BODY))
+        .font_normal()
+        .line_height(relative(1.))
 }
 
 /// Natural-width choices and actions; never stretch individual checkboxes.
@@ -43,28 +68,126 @@ pub(super) fn settings_inline() -> Div {
         .items_center()
         .gap_x(px(visual::SPACE_4))
         .gap_y(px(visual::SPACE_2))
+        .text_size(px(visual::TEXT_BODY))
+        .font_normal()
+        .line_height(relative(1.5))
 }
 
 pub(super) fn settings_field(label: &'static str) -> Div {
     settings_stack()
         .gap(px(visual::SPACE_2))
-        .child(div().font_medium().child(label))
+        .child(settings_label(label))
+}
+
+fn settings_label(label: impl Into<SharedString>) -> Div {
+    div().font_normal().child(label.into())
 }
 
 pub(super) fn settings_column_field(label: &'static str) -> Div {
-    settings_field(label).flex_basis(px(360.)).flex_grow(1.)
+    settings_field(label).flex_basis(px(280.)).flex_grow(1.)
+}
+
+/// 字段/分区标题旁的「说明」入口：悬停图标展示解释文本，不再常驻占行。
+pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Button {
+    let text: SharedString = text.into();
+    let mut button = Button::new(id)
+        .ghost()
+        .xsmall()
+        .icon(IconName::Info)
+        .flex_none()
+        .accessibility_label(text.clone());
+    // Kit `Button::tooltip(str)` lays out as a single nowrap flex row, so long
+    // CJK help is clipped by the window. GPUI's tooltip builder can wrap.
+    button.interactivity().hoverable_tooltip(move |window, cx| {
+        Tooltip::new(text.clone())
+            .flex()
+            .flex_col()
+            .max_w(px(HELP_TOOLTIP_MAX_WIDTH))
+            .min_w(px(0.))
+            .whitespace_normal()
+            .line_height(relative(1.5))
+            .build(window, cx)
+    });
+    button
+}
+
+/// 「标签 + 说明图标」行：字段标题和分区卡片标题共用。
+pub(super) fn label_with_help(
+    label: &'static str,
+    help: impl Into<SharedString>,
+    id: impl Into<ElementId>,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(visual::SPACE_1))
+        // Match the icon button's `line_height(1)` so the glyph and CJK label
+        // share one center line instead of inheriting the stack's 1.5 leading.
+        .line_height(relative(1.))
+        .child(settings_label(label))
+        .child(help_tooltip(id, help))
+}
+
+/// 带说明图标的字段标签行，替代 `settings_field` + 尾部描述行的组合。
+pub(super) fn settings_field_help(
+    label: &'static str,
+    help: impl Into<SharedString>,
+    id: impl Into<ElementId>,
+) -> Div {
+    settings_stack()
+        .gap(px(visual::SPACE_2))
+        .child(label_with_help(label, help, id))
+}
+
+/// `settings_column_field` 的带说明版本，与 `settings_field_help` 配套。
+pub(super) fn settings_column_field_help(
+    label: &'static str,
+    help: impl Into<SharedString>,
+    id: impl Into<ElementId>,
+) -> Div {
+    settings_field_help(label, help, id)
+        .flex_basis(px(280.))
+        .flex_grow(1.)
 }
 
 pub(super) fn settings_description(text: impl Into<SharedString>, cx: &App) -> Div {
+    settings_description_sized(text, visual::TEXT_SMALL, cx)
+}
+
+/// `settings_description` 的正文（TEXT_BODY）字号版本，用于与操作按钮同行的说明。
+pub(super) fn settings_description_body(text: impl Into<SharedString>, cx: &App) -> Div {
+    settings_description_sized(text, visual::TEXT_BODY, cx)
+}
+
+fn settings_description_sized(text: impl Into<SharedString>, size: f32, cx: &App) -> Div {
     div()
         .w_full()
         .min_w_0()
-        .text_size(px(visual::TEXT_SMALL))
+        .text_size(px(size))
         .font_normal()
         .line_height(relative(1.5))
         .text_color(cx.theme().muted_foreground)
         .whitespace_normal()
         .child(text.into())
+}
+
+/// 分区说明的承载位置：短说明收进标题信息图标，长说明留在卡片正文首行。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SectionDescription {
+    Hidden,
+    Tooltip,
+    Body,
+}
+
+pub(super) fn section_description_layout(description: &str) -> SectionDescription {
+    let chars = description.chars().count();
+    if chars == 0 {
+        SectionDescription::Hidden
+    } else if chars <= SECTION_TOOLTIP_MAX_CHARS {
+        SectionDescription::Tooltip
+    } else {
+        SectionDescription::Body
+    }
 }
 
 /// 设置各 section 共用的开场：升级 owner 弱引用并读取主窗口状态。
@@ -96,10 +219,12 @@ pub(super) fn choice_tabs<T, const N: usize>(
     disabled: bool,
     current_of: impl Fn(&ClipboardView) -> T + 'static,
     apply: impl Fn(&mut ClipboardView, T, &mut Context<ClipboardView>) + 'static,
+    cx: &App,
 ) -> TabBar
 where
     T: Copy + PartialEq + 'static,
 {
+    let font_family = crate::design_system::ui_font_family(cx);
     let owner = owner.clone();
     TabBar::new(id)
         .w_full()
@@ -131,6 +256,8 @@ where
             Tab::new()
                 .label(label)
                 .text_size(px(visual::TEXT_BODY))
+                .font_family(font_family.clone())
+                .aria_label(label)
                 .disabled(disabled)
                 .flex_1()
         }))
@@ -138,7 +265,9 @@ where
 
 /// 行为开关复选框的统一构建：命令发送成功后执行 `on_sent`（置 pending
 /// 标记，必要时做额外清理）并刷新界面。
+#[allow(clippy::too_many_arguments)]
 pub(super) fn command_checkbox(
+    cx: &App,
     id: &'static str,
     label: &'static str,
     checked: bool,
@@ -147,21 +276,51 @@ pub(super) fn command_checkbox(
     command: fn(bool) -> Command,
     on_sent: fn(&mut ClipboardView),
 ) -> Checkbox {
+    command_checkbox_help(
+        cx,
+        id,
+        label,
+        checked,
+        disabled,
+        owner,
+        command,
+        on_sent,
+        None::<&'static str>,
+    )
+}
+
+/// `command_checkbox` 的带悬停说明版本；`tooltip` 传入 `Some` 时挂到复选框上。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn command_checkbox_help(
+    cx: &App,
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    disabled: bool,
+    owner: &WeakEntity<ClipboardView>,
+    command: fn(bool) -> Command,
+    on_sent: fn(&mut ClipboardView),
+    tooltip: Option<impl Into<SharedString>>,
+) -> Checkbox {
     let owner = owner.clone();
-    settings_toggle(Checkbox::new(id))
+    let checkbox = settings_toggle(cx, Checkbox::new(id))
         .min_w_0()
         .label(label)
         .checked(checked)
-        .disabled(disabled)
-        .on_change(move |checked, _, cx| {
-            if disabled {
-                return;
+        .disabled(disabled);
+    let checkbox = match tooltip {
+        Some(tooltip) => checkbox.tooltip(tooltip.into()),
+        None => checkbox,
+    };
+    checkbox.on_change(move |checked, _, cx| {
+        if disabled {
+            return;
+        }
+        let _ = owner.update(cx, |owner, cx| {
+            if owner.send(command(*checked), cx) {
+                on_sent(owner);
+                cx.notify();
             }
-            let _ = owner.update(cx, |owner, cx| {
-                if owner.send(command(*checked), cx) {
-                    on_sent(owner);
-                    cx.notify();
-                }
-            });
-        })
+        });
+    })
 }

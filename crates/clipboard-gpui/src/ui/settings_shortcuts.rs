@@ -1,4 +1,4 @@
-use super::settings_common::{settings_inline, settings_stack};
+use super::settings_common::{settings_inline, settings_shortcut_row, settings_stack};
 use super::*;
 
 impl SettingsWindowView {
@@ -177,11 +177,11 @@ impl SettingsWindowView {
                 panel.child(Alert::error("shortcut-capture-error", error).small())
             })
             .child(
-                settings_inline()
+                settings_shortcut_row()
                     .child(
                         Button::new("paste-shortcut-record")
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .outline()
+                            .small()
                             .label(if self.shortcut_recording {
                                 tr(language, "录制中", "Recording")
                             } else {
@@ -194,8 +194,8 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("paste-shortcut-save")
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .primary()
+                            .small()
                             .label(tr(language, "保存", "Save"))
                             .disabled(pending)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -204,8 +204,8 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("paste-shortcut-cancel")
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .ghost()
+                            .small()
                             .label(tr(language, "取消", "Cancel"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.shortcut_editing = None;
@@ -228,84 +228,61 @@ impl SettingsWindowView {
         let defaults = PasteShortcutConfig::default();
         settings_stack().gap_1().children((1..=10u8).map(|slot| {
             let shortcut = shortcuts.slot(favorite, slot).unwrap_or_default();
-            let shortcut_content = shortcut_kbd(shortcut).map_or_else(
-                || {
-                    div()
-                        .text_sm()
-                        .child(if shortcut.is_empty() {
-                            tr(language, "未设置", "Not set").to_owned()
-                        } else {
-                            shortcut.to_owned()
-                        })
-                        .into_any_element()
-                },
-                |kbd| kbd.into_any_element(),
-            );
+            let not_set = tr(language, "未设置", "Not set").to_owned();
             let default = defaults.slot(favorite, slot).unwrap_or_default().to_owned();
             let owner_disable = self.owner.clone();
             let owner_reset = self.owner.clone();
-            settings_inline()
+            settings_shortcut_row()
                 .py_2()
-                .border_b_1()
-                .border_color(cx.theme().border)
+                .when(slot < 10, |row| {
+                    row.border_b_1().border_color(cx.theme().border)
+                })
+                .child(div().flex_none().min_w(px(92.)).child(format!(
+                    "{} {slot}",
+                    tr(
+                        language,
+                        if favorite { "收藏" } else { "普通" },
+                        if favorite { "Favorite" } else { "Recent" }
+                    )
+                )))
+                .child(shortcut_binding_display(shortcut, not_set))
                 .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .min_w_0()
-                        .gap_2()
-                        .child(div().min_w(px(80.)).text_size(px(14.)).child(format!(
-                            "{} {slot}",
-                            tr(
-                                language,
-                                if favorite { "收藏" } else { "普通" },
-                                if favorite { "Favorite" } else { "Recent" }
-                            )
-                        )))
-                        .child(shortcut_content),
+                    Button::new(format!("paste-slot-edit-{favorite}-{slot}"))
+                        .outline()
+                        .small()
+                        .label(tr(language, "修改", "Edit"))
+                        .disabled(pending)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.begin_shortcut_edit(
+                                ShortcutTarget::Paste(favorite, slot),
+                                window,
+                                cx,
+                            );
+                        })),
                 )
                 .child(
-                    settings_inline()
-                        .w_auto()
-                        .child(
-                            Button::new(format!("paste-slot-edit-{favorite}-{slot}"))
-                                .outline()
-                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .label(tr(language, "修改", "Edit"))
-                                .disabled(pending)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    this.begin_shortcut_edit(
-                                        ShortcutTarget::Paste(favorite, slot),
-                                        window,
-                                        cx,
-                                    );
-                                })),
-                        )
-                        .child(
-                            Button::new(format!("paste-slot-disable-{favorite}-{slot}"))
-                                .ghost()
-                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .label(tr(language, "停用", "Disable"))
-                                .disabled(pending || shortcut.is_empty())
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner_disable.update(cx, |owner, cx| {
-                                        owner.save_paste_shortcut(favorite, slot, "", cx);
-                                    });
-                                }),
-                        )
-                        .child(
-                            Button::new(format!("paste-slot-reset-{favorite}-{slot}"))
-                                .ghost()
-                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .label(tr(language, "默认", "Default"))
-                                .disabled(pending || shortcut == default)
-                                .on_click(move |_, _, cx| {
-                                    let _ = owner_reset.update(cx, |owner, cx| {
-                                        owner.save_paste_shortcut(favorite, slot, &default, cx);
-                                    });
-                                }),
-                        ),
+                    Button::new(format!("paste-slot-disable-{favorite}-{slot}"))
+                        .ghost()
+                        .small()
+                        .label(tr(language, "停用", "Disable"))
+                        .disabled(pending || shortcut.is_empty())
+                        .on_click(move |_, _, cx| {
+                            let _ = owner_disable.update(cx, |owner, cx| {
+                                owner.save_paste_shortcut(favorite, slot, "", cx);
+                            });
+                        }),
+                )
+                .child(
+                    Button::new(format!("paste-slot-reset-{favorite}-{slot}"))
+                        .ghost()
+                        .small()
+                        .label(tr(language, "默认", "Default"))
+                        .disabled(pending || shortcut == default)
+                        .on_click(move |_, _, cx| {
+                            let _ = owner_reset.update(cx, |owner, cx| {
+                                owner.save_paste_shortcut(favorite, slot, &default, cx);
+                            });
+                        }),
                 )
                 .when(
                     self.shortcut_editing == Some(ShortcutTarget::Paste(favorite, slot)),
@@ -329,11 +306,11 @@ impl SettingsWindowView {
         };
         let reset_owner = self.owner.clone();
         let disable_owner = self.owner.clone();
-        settings_inline()
+        settings_shortcut_row()
             .child(
                 Button::new(format!("paste-{favorite}-reset-all"))
                     .outline()
-                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                    .small()
                     .label(tr(language, "全部恢复默认", "Restore all defaults"))
                     .disabled(pending || current == defaults)
                     .on_click(move |_, _, cx| {
@@ -345,7 +322,7 @@ impl SettingsWindowView {
             .child(
                 Button::new(format!("paste-{favorite}-disable-all"))
                     .outline()
-                    .h(px(visual::CONTROL_HEIGHT_LARGE))
+                    .small()
                     .label(tr(language, "全部停用", "Disable all"))
                     .disabled(pending || current.iter().all(String::is_empty))
                     .on_click(move |_, _, cx| {

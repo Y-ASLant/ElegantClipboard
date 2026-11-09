@@ -1529,6 +1529,7 @@ dependencies = [
  "clipboard-platform",
  "directories",
  "embed-resource",
+ "fontdb",
  "gpui-kit",
  "gtk",
  "htmd",

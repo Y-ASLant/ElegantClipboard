@@ -255,4 +255,66 @@ mod tests {
             .unwrap();
         assert_eq!(backfill, "done");
     }
+
+    /// 重建表的两条路径：无 `file_payload` 列的旧库同样要保数据、不引入该列。
+    #[test]
+    fn check_constraint_without_file_payload_rebuilds_without_adding_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("no_payload_check.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE clipboard_items (
+                    id INTEGER PRIMARY KEY,
+                    content_type TEXT NOT NULL CHECK(content_type IN ('text', 'image', 'html', 'rtf', 'files')),
+                    text_content TEXT,
+                    html_content TEXT,
+                    rtf_content TEXT,
+                    image_path TEXT,
+                    file_paths TEXT,
+                    content_hash TEXT,
+                    semantic_hash TEXT,
+                    preview TEXT,
+                    byte_size INTEGER,
+                    image_width INTEGER,
+                    image_height INTEGER,
+                    is_pinned INTEGER,
+                    is_favorite INTEGER,
+                    favorite_order INTEGER,
+                    sort_order INTEGER,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    access_count INTEGER,
+                    last_accessed_at TEXT,
+                    char_count INTEGER,
+                    source_app_name TEXT,
+                    source_app_icon TEXT,
+                    note TEXT,
+                    group_id INTEGER
+                );
+                INSERT INTO clipboard_items (
+                    content_type, text_content, content_hash, semantic_hash, preview
+                ) VALUES ('text', 'https://example.com/plain', 'hash_p', NULL, 'x');",
+            )
+            .unwrap();
+        Database::new(path.clone()).unwrap();
+        let conn = Connection::open(&path).unwrap();
+        let url_rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE content_type = 'url'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(url_rows, 1);
+        assert!(!columns(&path).contains(&"file_payload".to_string()));
+        let text: String = conn
+            .query_row(
+                "SELECT text_content FROM clipboard_items WHERE content_type = 'url'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(text, "https://example.com/plain");
+    }
 }

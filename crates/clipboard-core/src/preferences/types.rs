@@ -352,6 +352,50 @@ impl DisplayPreference {
     }
 }
 
+pub const MIN_UI_FONT_SIZE: u8 = 12;
+pub const MAX_UI_FONT_SIZE: u8 = 18;
+pub const MIN_CARD_FONT_SIZE: u8 = 12;
+pub const MAX_CARD_FONT_SIZE: u8 = 18;
+pub const MIN_PREVIEW_FONT_SIZE: u8 = 11;
+pub const MAX_PREVIEW_FONT_SIZE: u8 = 18;
+pub const MAX_FONT_FAMILY_LEN: usize = 128;
+
+/// 界面、历史卡片正文与悬停预览的字体；空字符串表示沿用上级的默认字体。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FontPreference {
+    pub ui_font: String,
+    pub ui_font_size: u8,
+    pub card_font: String,
+    pub card_font_size: u8,
+    pub preview_font: String,
+    pub preview_font_size: u8,
+}
+
+impl Default for FontPreference {
+    fn default() -> Self {
+        Self {
+            ui_font: String::new(),
+            ui_font_size: 14,
+            card_font: String::new(),
+            card_font_size: 14,
+            preview_font: String::new(),
+            preview_font_size: 13,
+        }
+    }
+}
+
+impl FontPreference {
+    pub fn valid(&self) -> bool {
+        self.ui_font.chars().count() <= MAX_FONT_FAMILY_LEN
+            && self.card_font.chars().count() <= MAX_FONT_FAMILY_LEN
+            && self.preview_font.chars().count() <= MAX_FONT_FAMILY_LEN
+            && (MIN_UI_FONT_SIZE..=MAX_UI_FONT_SIZE).contains(&self.ui_font_size)
+            && (MIN_CARD_FONT_SIZE..=MAX_CARD_FONT_SIZE).contains(&self.card_font_size)
+            && (MIN_PREVIEW_FONT_SIZE..=MAX_PREVIEW_FONT_SIZE).contains(&self.preview_font_size)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WindowPositionPreference {
     #[default]

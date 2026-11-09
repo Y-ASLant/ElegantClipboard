@@ -176,9 +176,11 @@ impl HistoryCardSnapshot {
     }
 
     fn content_text(&self, cx: &App) -> Div {
+        let fonts = crate::design_system::active_fonts(cx);
         let text = div()
             .min_w_0()
-            .text_size(px(visual::TEXT_BODY))
+            .font_family(crate::fonts::resolve_card_family(&fonts))
+            .text_size(px(f32::from(fonts.card_font_size)))
             .line_height(relative(visual::COPY_LINE_HEIGHT))
             .line_clamp(self.display.card_max_lines as usize)
             .text_ellipsis()

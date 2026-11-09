@@ -4,6 +4,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 mod backup;
 mod corner_radius;
+mod fonts;
 mod hover_preview;
 mod snapshot;
 mod types;
@@ -37,6 +38,7 @@ const PASTE_SHORTCUTS_KEY: &str = "gpui_paste_shortcuts";
 const WINDOW_POSITION_KEY: &str = "gpui_window_position";
 const HOVER_PREVIEW_KEY: &str = "gpui_hover_preview";
 const DISPLAY_KEY: &str = "gpui_display";
+const FONT_KEY: &str = "gpui_fonts";
 const MONITOR_TYPES_KEY: &str = "gpui_monitor_types";
 const APP_FILTER_KEY: &str = "gpui_app_filter";
 const ONBOARDING_COMPLETED_KEY: &str = "gpui_onboarding_completed";
@@ -291,10 +293,12 @@ impl Preferences {
     }
 
     pub fn paste_delivery_mode(&self) -> Result<PasteDeliveryMode> {
-        Ok(match self.repository.get(PASTE_DELIVERY_MODE_KEY)?.as_deref() {
-            Some("rapid") => PasteDeliveryMode::Rapid,
-            _ => PasteDeliveryMode::Controlled,
-        })
+        Ok(
+            match self.repository.get(PASTE_DELIVERY_MODE_KEY)?.as_deref() {
+                Some("rapid") => PasteDeliveryMode::Rapid,
+                _ => PasteDeliveryMode::Controlled,
+            },
+        )
     }
 
     pub fn set_paste_delivery_mode(&self, mode: PasteDeliveryMode) -> Result<()> {
@@ -480,5 +484,7 @@ mod tests;
 mod tests_content;
 #[cfg(test)]
 mod tests_corner_radius;
+#[cfg(test)]
+mod tests_font;
 #[cfg(test)]
 mod tests_window_effect;

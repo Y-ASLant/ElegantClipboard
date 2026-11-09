@@ -1,5 +1,6 @@
 use super::settings_common::{
-    command_checkbox, owner_state, settings_inline, settings_stack, settings_toggle,
+    command_checkbox, command_checkbox_help, owner_state, settings_column, settings_columns,
+    settings_inline, settings_shortcut_row, settings_stack, settings_toggle,
 };
 use super::*;
 use gpui_kit::component::{alert::Alert, switch::Switch};
@@ -14,22 +15,20 @@ impl SettingsWindowView {
             || crate::capabilities::global_shortcut_unavailable_reason(language).is_some();
         let disabled = state.hotkey_choice == HotkeyPreference::Disabled;
         let label = hotkey_label(language, &state.hotkey_choice).to_owned();
+        let shortcut = if disabled {
+            String::new()
+        } else {
+            label.clone()
+        };
         let owner = self.owner.clone();
         settings_stack()
             .child(
-                settings_inline()
-                    .child(if disabled {
-                        div().child(label).into_any_element()
-                    } else {
-                        shortcut_kbd(&label).map_or_else(
-                            || div().child(label).into_any_element(),
-                            |kbd| kbd.into_any_element(),
-                        )
-                    })
+                settings_shortcut_row()
+                    .child(shortcut_binding_display(shortcut.as_str(), label))
                     .child(
                         Button::new("main-shortcut-edit")
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .outline()
+                            .small()
                             .label(tr(language, "修改", "Edit"))
                             .disabled(pending)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -38,8 +37,8 @@ impl SettingsWindowView {
                     )
                     .child(
                         Button::new("main-shortcut-disable")
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
                             .ghost()
+                            .small()
                             .label(tr(language, "关闭", "Disable"))
                             .disabled(pending || disabled)
                             .on_click(move |_, _, cx| {
@@ -67,7 +66,7 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner_state.language;
-        // (id, 中文标签, 英文标签, 命令, (选中值, pending) 读取器, 发送成功后的回调)
+        // (id, 中文标签, 英文标签, 命令, (选中值, pending) 读取器, 发送成功后的回调, 可选悬停说明)
         type BehaviorToggle = (
             &'static str,
             &'static str,
@@ -75,8 +74,9 @@ impl SettingsWindowView {
             fn(bool) -> Command,
             fn(&ClipboardView) -> (bool, bool),
             fn(&mut ClipboardView),
+            Option<(&'static str, &'static str)>,
         );
-        let behavior_toggles: [BehaviorToggle; 8] = [
+        let behavior_toggles: [BehaviorToggle; 7] = [
             (
                 "persist-window-size",
                 "记住窗口大小",
@@ -87,6 +87,7 @@ impl SettingsWindowView {
                     owner.persist_window_size_pending = true;
                     owner.window_size_task = None;
                 },
+                None,
             ),
             (
                 "auto-reset-state",
@@ -95,6 +96,10 @@ impl SettingsWindowView {
                 Command::SetAutoResetState,
                 |state| (state.auto_reset_state.value, state.auto_reset_state.pending),
                 |owner| owner.auto_reset_state.pending = true,
+                Some((
+                    "窗口隐藏时一并清空搜索词、分类筛选并滚回顶部；覆盖「唤出时清空搜索」的唤出场景。",
+                    "Hiding the window also clears the search, category filter and scroll position; it already covers the \"Clear search when shown\" case.",
+                )),
             ),
             (
                 "search-auto-focus",
@@ -108,6 +113,10 @@ impl SettingsWindowView {
                     )
                 },
                 |owner| owner.search_auto_focus.pending = true,
+                Some((
+                    "开启后唤出窗口时焦点落在搜索框，直接输入即可搜索；关闭则聚焦列表便于键盘选择。",
+                    "When enabled, showing the window focuses the search box so typing filters immediately; when off, focus stays on the list for keyboard selection.",
+                )),
             ),
             (
                 "search-auto-clear",
@@ -121,6 +130,10 @@ impl SettingsWindowView {
                     )
                 },
                 |owner| owner.search_auto_clear.pending = true,
+                Some((
+                    "只清空搜索词、不动筛选与滚动；窗口未隐藏、只是唤回前台时也生效，适合长时间保持窗口显示的场景。",
+                    "Clears only the search text, leaving the filter and scroll position; also applies when the visible window is merely brought back to front, which suits users who keep the window open.",
+                )),
             ),
             (
                 "skip-clear-confirm",
@@ -134,6 +147,7 @@ impl SettingsWindowView {
                     )
                 },
                 |owner| owner.skip_clear_confirm.pending = true,
+                None,
             ),
             (
                 "paste-close-window",
@@ -147,6 +161,7 @@ impl SettingsWindowView {
                     )
                 },
                 |owner| owner.paste_close_window.pending = true,
+                None,
             ),
             (
                 "paste-move-to-top",
@@ -160,36 +175,72 @@ impl SettingsWindowView {
                     )
                 },
                 |owner| owner.paste_move_to_top.pending = true,
-            ),
-            (
-                "diagnostics-enabled",
-                "记录诊断日志",
-                "Enable diagnostic logs",
-                Command::SetDiagnosticsEnabled,
-                |state| {
-                    (
-                        state.diagnostics_enabled.value,
-                        state.diagnostics_enabled.pending,
-                    )
-                },
-                |owner| owner.diagnostics_enabled.pending = true,
+                None,
             ),
         ];
-        settings_inline()
-            .children(
-                behavior_toggles.map(|(id, chinese, english, command, state_of, on_sent)| {
-                    let (checked, pending) = state_of(owner_state);
-                    command_checkbox(
-                        id,
-                        tr(language, chinese, english),
-                        checked,
-                        pending,
-                        &self.owner,
-                        command,
-                        on_sent,
-                    )
-                    .w_auto()
-                }),
+        let make_checkbox =
+            |(id, chinese, english, command, state_of, on_sent, help): BehaviorToggle| {
+                let (checked, pending) = state_of(owner_state);
+                command_checkbox_help(
+                    cx,
+                    id,
+                    tr(language, chinese, english),
+                    checked,
+                    pending,
+                    &self.owner,
+                    command,
+                    on_sent,
+                    help.map(|(chinese, english)| tr(language, chinese, english)),
+                )
+                .w_full()
+                .min_w_0()
+            };
+        // 复选框行高 32px，列宽收窄到两列可并排，行距收紧避免卡片空高。
+        let split_at = behavior_toggles.len().div_ceil(2);
+        let behavior_column = || {
+            settings_column()
+                .flex_basis(px(280.))
+                .gap(px(visual::SPACE_2))
+        };
+        settings_columns()
+            .child(
+                behavior_column().children(
+                    behavior_toggles[..split_at]
+                        .iter()
+                        .copied()
+                        .map(make_checkbox),
+                ),
+            )
+            .child(
+                behavior_column().children(
+                    behavior_toggles[split_at..]
+                        .iter()
+                        .copied()
+                        .map(make_checkbox),
+                ),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn settings_diagnostics_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(state) = owner_state(&self.owner, cx) else {
+            return div().into_any_element();
+        };
+        let language = state.language;
+        settings_stack()
+            .child(
+                command_checkbox(
+                    cx,
+                    "diagnostics-enabled",
+                    tr(language, "记录诊断日志", "Enable diagnostic logs"),
+                    state.diagnostics_enabled.value,
+                    state.diagnostics_enabled.pending,
+                    &self.owner,
+                    Command::SetDiagnosticsEnabled,
+                    |owner| owner.diagnostics_enabled.pending = true,
+                )
+                .w_full()
+                .min_w_0(),
             )
             .into_any_element()
     }
@@ -217,7 +268,7 @@ impl SettingsWindowView {
         let autostart_pending = state.autostart.pending;
         let startup_owner = self.owner.clone();
         let panel = settings_inline().child(
-            settings_toggle(Switch::new("settings-window-autostart"))
+            settings_toggle(cx, Switch::new("settings-window-autostart"))
                 .label(tr(language, "开机自启", "Start on login"))
                 .checked(autostart)
                 .disabled(autostart_pending)
@@ -237,7 +288,7 @@ impl SettingsWindowView {
             let is_admin = state.is_admin;
             let admin_owner = self.owner.clone();
             panel.child(
-                settings_toggle(Switch::new("settings-window-run-as-admin"))
+                settings_toggle(cx, Switch::new("settings-window-run-as-admin"))
                     .label(tr(
                         language,
                         "以管理员身份启动",

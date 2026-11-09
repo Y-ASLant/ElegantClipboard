@@ -74,7 +74,7 @@ impl ClipboardView {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
-                    size(px(800.), px(560.)),
+                    size(px(800.), px(540.)),
                     cx,
                 ))),
                 titlebar: Some(TitlebarOptions {
@@ -137,9 +137,13 @@ impl SettingsWindowView {
             .upgrade()
             .expect("settings window requires its owner view");
         let language = entity.read(cx).language;
-        let subscription = cx.observe_in(&entity, window, |this, owner, _, cx| {
+        let subscription = cx.observe_in(&entity, window, |this, owner, window, cx| {
             let owner = owner.read(cx);
-            this.language = owner.language;
+            let fonts = owner.fonts.value.clone();
+            let language = owner.language;
+            let language_changed = language != this.language;
+            this.language = language;
+            this.sync_font_selects(&fonts, language, language_changed, window, cx);
             cx.notify();
         });
         let release_subscription = cx.observe_release(&entity, |this, owner, cx| {
@@ -270,6 +274,34 @@ impl SettingsWindowView {
                 this.save_preview_lines(lines, cx);
             },
         );
+        let fonts = entity.read(cx).fonts.value.clone();
+        let (ui_font_size, card_font_size, preview_font_size) =
+            Self::bind_font_size_inputs(window, cx, fonts.clone());
+        let font_default_label = tr(language, "系统默认", "System default");
+        let (ui_font_select, ui_font_select_subscription) = Self::bind_font_select(
+            &owner,
+            &fonts,
+            font_default_label,
+            settings_fonts::FontPickerTarget::Ui,
+            window,
+            cx,
+        );
+        let (card_font_select, card_font_select_subscription) = Self::bind_font_select(
+            &owner,
+            &fonts,
+            font_default_label,
+            settings_fonts::FontPickerTarget::Card,
+            window,
+            cx,
+        );
+        let (preview_font_select, preview_font_select_subscription) = Self::bind_font_select(
+            &owner,
+            &fonts,
+            font_default_label,
+            settings_fonts::FontPickerTarget::Preview,
+            window,
+            cx,
+        );
         let preview_lines_step_subscription = cx.subscribe_in(
             &preview_lines_input,
             window,
@@ -324,6 +356,17 @@ impl SettingsWindowView {
             preview_lines_last_value,
             preview_lines_last_pending: false,
             window_opacity,
+            ui_font_size,
+            card_font_size,
+            preview_font_size,
+            ui_font_select,
+            card_font_select,
+            preview_font_select,
+            _font_select_subscriptions: (
+                ui_font_select_subscription,
+                card_font_select_subscription,
+                preview_font_select_subscription,
+            ),
             hover_delay,
             hover_zoom,
             app_picker_open: false,
@@ -421,7 +464,7 @@ impl SettingsWindowView {
 }
 
 #[derive(Clone, Copy)]
-struct NumberSpec {
+pub(super) struct NumberSpec {
     min: i32,
     max: i32,
     saved: fn(&ClipboardView) -> (i32, bool),
@@ -437,7 +480,7 @@ pub(super) struct BoundedNumberInput {
 }
 
 impl BoundedNumberInput {
-    fn bind(
+    pub(super) fn bind(
         window: &mut Window,
         cx: &mut Context<SettingsWindowView>,
         initial: i32,
@@ -491,5 +534,91 @@ impl BoundedNumberInput {
             self.input
                 .update(cx, |input, cx| input.set_value(text, window, cx));
         }
+    }
+}
+
+impl SettingsWindowView {
+    pub(super) fn bind_font_size_inputs(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        fonts: FontPreference,
+    ) -> (BoundedNumberInput, BoundedNumberInput, BoundedNumberInput) {
+        use clipboard_core::preferences::{
+            MAX_CARD_FONT_SIZE, MAX_PREVIEW_FONT_SIZE, MAX_UI_FONT_SIZE, MIN_CARD_FONT_SIZE,
+            MIN_PREVIEW_FONT_SIZE, MIN_UI_FONT_SIZE,
+        };
+        let ui_font_size = BoundedNumberInput::bind(
+            window,
+            cx,
+            i32::from(fonts.ui_font_size),
+            NumberSpec {
+                min: i32::from(MIN_UI_FONT_SIZE),
+                max: i32::from(MAX_UI_FONT_SIZE),
+                saved: |owner| {
+                    (
+                        i32::from(owner.fonts.value.ui_font_size),
+                        owner.fonts.pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_fonts(
+                        FontPreference {
+                            ui_font_size: value as u8,
+                            ..owner.fonts.value.clone()
+                        },
+                        cx,
+                    );
+                },
+            },
+        );
+        let card_font_size = BoundedNumberInput::bind(
+            window,
+            cx,
+            i32::from(fonts.card_font_size),
+            NumberSpec {
+                min: i32::from(MIN_CARD_FONT_SIZE),
+                max: i32::from(MAX_CARD_FONT_SIZE),
+                saved: |owner| {
+                    (
+                        i32::from(owner.fonts.value.card_font_size),
+                        owner.fonts.pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_fonts(
+                        FontPreference {
+                            card_font_size: value as u8,
+                            ..owner.fonts.value.clone()
+                        },
+                        cx,
+                    );
+                },
+            },
+        );
+        let preview_font_size = BoundedNumberInput::bind(
+            window,
+            cx,
+            i32::from(fonts.preview_font_size),
+            NumberSpec {
+                min: i32::from(MIN_PREVIEW_FONT_SIZE),
+                max: i32::from(MAX_PREVIEW_FONT_SIZE),
+                saved: |owner| {
+                    (
+                        i32::from(owner.fonts.value.preview_font_size),
+                        owner.fonts.pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_fonts(
+                        FontPreference {
+                            preview_font_size: value as u8,
+                            ..owner.fonts.value.clone()
+                        },
+                        cx,
+                    );
+                },
+            },
+        );
+        (ui_font_size, card_font_size, preview_font_size)
     }
 }

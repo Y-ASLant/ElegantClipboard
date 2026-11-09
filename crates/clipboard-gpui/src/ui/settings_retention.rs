@@ -67,11 +67,6 @@ impl SettingsWindowView {
         let explicitly_saved = owner.read(cx).retention_saved;
         let language = self.language;
         settings_stack()
-            .child(settings_description(tr(
-                language,
-                "每个分组独立限制，置顶和收藏不计入数量且不会自动删除。0 表示关闭对应限制。",
-                "Limits apply per group. Pinned and favorite items are excluded and protected. 0 disables a limit.",
-            ), cx))
             .child(
                 settings_columns()
                     .child(
@@ -157,7 +152,7 @@ impl SettingsWindowView {
             let submit_owner = owner.clone();
             dialog_shell(dialog, cx)
                 .title(dialog_title(
-                    tr(language, "确认保留策略", "Confirm retention policy"),
+                    tr(language, "保存保留策略？", "Save retention policy?"),
                     cx,
                 ))
                 .child(dialog_copy().child(if language == LanguagePreference::English {
@@ -170,7 +165,7 @@ impl SettingsWindowView {
                         .label(tr(language, "取消", "Cancel"))
                         .on_click(|_, window, cx| window.close_dialog(cx)))
                     .child(Button::new("retention-confirm").danger()
-                        .label(tr(language, "确认保存并清理", "Save and remove items"))
+                        .label(tr(language, "保存并删除记录", "Save and delete items"))
                         .on_click(move |_, window, cx| {
                             let _ = submit_owner.update(cx, |owner, cx| owner.save_retention(policy, true, cx));
                             window.close_dialog(cx);

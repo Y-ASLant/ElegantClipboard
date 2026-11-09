@@ -1,4 +1,7 @@
-use super::settings_common::{settings_description, settings_stack};
+use super::settings_common::{
+    SectionDescription, label_with_help, section_description_layout, settings_description,
+    settings_stack,
+};
 use super::*;
 use gpui_kit::component::{
     group_box::{GroupBox, GroupBoxVariant, GroupBoxVariants},
@@ -19,48 +22,56 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::General,
         chinese: "窗口位置",
         english: "Window position",
-        description_chinese: "选择每次唤出历史窗口时的位置",
-        description_english: "Choose where the history window opens",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_positioning_content,
     },
     Section {
         page: SettingsPage::General,
         chinese: "窗口行为",
         english: "Window behavior",
-        description_chinese: "控制窗口大小记忆及搜索和隐藏行为",
-        description_english: "Control size memory, search and hide behavior",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_behavior_content,
     },
     Section {
         page: SettingsPage::General,
         chinese: "开机启动",
         english: "Startup",
-        description_chinese: "登录系统后自动启动",
-        description_english: "Launch automatically after signing in",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_startup_content,
+    },
+    Section {
+        page: SettingsPage::General,
+        chinese: "诊断",
+        english: "Diagnostics",
+        description_chinese: "记录应用运行与粘贴过程日志，便于排查问题",
+        description_english: "Log app and paste activity to help diagnose issues",
+        content: SettingsWindowView::settings_diagnostics_content,
     },
     Section {
         page: SettingsPage::Display,
         chinese: "列表显示",
         english: "List display",
-        description_chinese: "调整分类栏和卡片间距",
-        description_english: "Adjust filters and card spacing",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_display_content,
     },
     Section {
         page: SettingsPage::Display,
         chinese: "悬停预览",
         english: "Hover preview",
-        description_chinese: "分别控制内容类型、信息标签、延时、位置和图片缩放",
-        description_english: "Choose content types, detail chips, delay, position and image zoom",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_hover_content,
     },
     Section {
         page: SettingsPage::Theme,
         chinese: "外观与语言",
         english: "Appearance & language",
-        description_chinese: "选择界面语言、明暗主题和主题色",
-        description_english: "Choose the interface language, theme, and theme color",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_appearance_content,
     },
     Section {
@@ -75,24 +86,24 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "瞬时内容过滤",
         english: "Transient filtering",
-        description_chinese: "过滤 300ms 内被撤销或覆盖的瞬时复制",
-        description_english: "Filter copies undone or replaced within 300ms",
+        description_chinese: "复制后 300ms 内被撤销或覆盖的内容（划词工具临时复制、表格单元格碎片）不再进入历史。复制后立即从本应用粘贴不受影响。",
+        description_english: "Content undone or replaced within 300ms of copying (selection-tool flashes, spreadsheet fragments) no longer enters history. Pasting from this app right after copying is unaffected.",
         content: SettingsWindowView::settings_transient_filter_content,
     },
     Section {
         page: SettingsPage::Data,
         chinese: "去重与剪贴板",
         english: "Deduplication",
-        description_chinese: "选择相同内容的去重策略，以及粘贴后是否恢复原剪贴板",
-        description_english: "Choose how duplicate copies are merged and whether pasting restores the clipboard",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_dedup_content,
     },
     Section {
         page: SettingsPage::Data,
         chinese: "保留策略",
         english: "Retention",
-        description_chinese: "按分组限制普通历史数量和天数；收藏与置顶保留",
-        description_english: "Limit ordinary history by group, count and age; keep favorites and pinned items",
+        description_chinese: "每个分组独立限制，置顶和收藏不计入数量且不会自动删除。0 表示关闭对应限制。",
+        description_english: "Limits apply per group. Pinned and favorite items are excluded and protected. 0 disables a limit.",
         content: SettingsWindowView::settings_retention_content,
     },
     Section {
@@ -107,16 +118,16 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Data,
         chinese: "本地数据",
         english: "Storage",
-        description_chinese: "查看和管理历史记录与图片的存储空间",
-        description_english: "View and manage storage for history and images",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_storage_content,
     },
     Section {
         page: SettingsPage::Data,
         chinese: "导入与恢复",
         english: "Import & restore",
-        description_chinese: "将旧版数据或备份恢复到独立空目录",
-        description_english: "Restore legacy data or a backup to a separate empty folder",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_import_content,
     },
     Section {
@@ -131,8 +142,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::AppFilter,
         chinese: "来源应用过滤",
         english: "Source app filter",
-        description_chinese: "按来源应用决定是否保存新复制的内容",
-        description_english: "Choose which source apps can add new history",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_app_filter_content,
     },
     Section {
@@ -155,16 +166,16 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Shortcuts,
         chinese: "唤出快捷键",
         english: "Shortcut",
-        description_chinese: "用于打开剪贴板窗口的全局快捷键",
-        description_english: "Global shortcut used to open the clipboard",
+        description_chinese: "",
+        description_english: "",
         content: SettingsWindowView::settings_shortcut_content,
     },
     Section {
         page: SettingsPage::Shortcuts,
         chinese: "快速粘贴",
         english: "Quick paste",
-        description_chinese: "默认关闭；启用后可从其他应用直接粘贴当前分组排在前面的记录",
-        description_english: "Off by default; enable to paste top items in the selected group from another app",
+        description_chinese: "默认关闭；启用后可从其他应用直接粘贴当前分组排在前面的记录。数字键自动支持数字小键盘。",
+        description_english: "Off by default; enable to paste top items in the selected group from another app. Digit keys also work on the numpad.",
         content: SettingsWindowView::settings_quick_paste_content,
     },
     Section {
@@ -194,8 +205,9 @@ fn paste_audio_content(
 fn settings_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
     TitleBar::new().bg(cx.theme().sidebar).child(
         div()
-            .text_size(px(visual::TEXT_BODY))
-            .font_semibold()
+            .text_size(cx.theme().font_size)
+            .font_family(cx.theme().font_family.clone())
+            .font_medium()
             .child(tr(language, "设置", "Settings")),
     )
 }
@@ -255,6 +267,20 @@ impl Render for SettingsWindowView {
             .sync(opacity, opacity_pending, window, cx);
         self.hover_delay.sync(delay_ms, delay_pending, window, cx);
         self.hover_zoom.sync(zoom_step, zoom_pending, window, cx);
+        let (ui_size, card_size, preview_size, fonts_pending) = {
+            let owner = owner.read(cx);
+            (
+                i32::from(owner.fonts.value.ui_font_size),
+                i32::from(owner.fonts.value.card_font_size),
+                i32::from(owner.fonts.value.preview_font_size),
+                owner.fonts.pending,
+            )
+        };
+        self.ui_font_size.sync(ui_size, fonts_pending, window, cx);
+        self.card_font_size
+            .sync(card_size, fonts_pending, window, cx);
+        self.preview_font_size
+            .sync(preview_size, fonts_pending, window, cx);
         let locale = match language {
             LanguagePreference::Chinese => "zh-CN",
             LanguagePreference::English => "en",
@@ -278,11 +304,6 @@ impl Render for SettingsWindowView {
                     );
                     let settings = settings.clone();
                     let group = SettingGroup::new().variant(GroupBoxVariant::Normal);
-                    let group = if title.is_empty() {
-                        group
-                    } else {
-                        group.title(title)
-                    };
                     group
                         .text_size(px(visual::TEXT_BODY))
                         .font_semibold()
@@ -301,6 +322,15 @@ impl Render for SettingsWindowView {
                                         (section.content)(view, cx)
                                     })
                                     .unwrap_or_else(|_| div().into_any_element());
+                                let layout = section_description_layout(description);
+                                let body = if layout == SectionDescription::Body {
+                                    settings_stack()
+                                        .child(settings_description(description, cx))
+                                        .child(content)
+                                        .into_any_element()
+                                } else {
+                                    content
+                                };
                                 // 页面内容直接渲染，切换页面不做淡入动效。
                                 div()
                                     .w_full()
@@ -309,6 +339,19 @@ impl Render for SettingsWindowView {
                                         GroupBox::new()
                                             .id(("settings-card", section_ix))
                                             .outline()
+                                            .when(!title.is_empty(), |card| {
+                                                card.title(
+                                                    if layout == SectionDescription::Tooltip {
+                                                        label_with_help(
+                                                            title,
+                                                            description,
+                                                            ("section-help", section_ix),
+                                                        )
+                                                    } else {
+                                                        div().child(title)
+                                                    },
+                                                )
+                                            })
                                             .content_style(
                                                 StyleRefinement::default()
                                                     .bg(cx.theme().group_box)
@@ -317,16 +360,7 @@ impl Render for SettingsWindowView {
                                                     )
                                                     .min_w_0(),
                                             )
-                                            .child(
-                                                settings_stack()
-                                                    .when(!description.is_empty(), |stack| {
-                                                        stack.child(settings_description(
-                                                            description,
-                                                            cx,
-                                                        ))
-                                                    })
-                                                    .child(content),
-                                            ),
+                                            .child(body),
                                     )
                                     .into_any_element()
                             })
@@ -354,27 +388,22 @@ impl Render for SettingsWindowView {
         window_shell(cx)
             .child(settings_title_bar(language, cx))
             .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .text_size(px(visual::TEXT_BODY))
-                    .child(
-                        Settings::new(if language == LanguagePreference::Chinese {
-                            "clipboard-settings-zh"
-                        } else {
-                            "clipboard-settings-en"
-                        })
-                        .default_selected_index(SelectIndex {
-                            page_ix: self.page as usize,
-                            group_ix: None,
-                        })
-                        .sidebar_width(px(200.))
-                        .sidebar_size_range(px(184.)..px(224.))
-                        .sidebar_style(&StyleRefinement::default().bg(cx.theme().sidebar))
-                        .with_group_variant(GroupBoxVariant::Outline)
-                        .pages(pages),
-                    ),
+                div().flex_1().min_h_0().min_w_0().child(
+                    Settings::new(if language == LanguagePreference::Chinese {
+                        "clipboard-settings-zh"
+                    } else {
+                        "clipboard-settings-en"
+                    })
+                    .default_selected_index(SelectIndex {
+                        page_ix: self.page as usize,
+                        group_ix: None,
+                    })
+                    .sidebar_width(px(200.))
+                    .sidebar_size_range(px(184.)..px(224.))
+                    .sidebar_style(&StyleRefinement::default().bg(cx.theme().sidebar))
+                    .with_group_variant(GroupBoxVariant::Outline)
+                    .pages(pages),
+                ),
             )
     }
 }

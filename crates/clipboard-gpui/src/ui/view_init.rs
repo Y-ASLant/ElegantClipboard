@@ -172,6 +172,8 @@ impl ClipboardView {
         crate::design_system::set_corner_radius(corner_radius, cx);
         let card_corner = service.initial_preferences.card_corner;
         crate::card_radius::set_card_corner(card_corner, cx);
+        let fonts = service.initial_preferences.fonts.clone();
+        crate::design_system::set_fonts(fonts.clone(), cx);
         let window_effect = service.initial_preferences.window_effect;
         let paused = service.initial_preferences.paused;
         let (initial_window_size, persist_window_size) = (
@@ -348,6 +350,7 @@ impl ClipboardView {
             theme_color_pending: false,
             corner_radius: PendingPref::new(corner_radius),
             card_corner: PendingPref::new(card_corner),
+            fonts: PendingPref::new(fonts),
             window_effect,
             window_effect_pending: false,
             language,

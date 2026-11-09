@@ -1,6 +1,8 @@
+use super::category_tabs::{CATEGORY_TAB_SPECS, category_tab_flags};
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column, settings_column_field, settings_columns,
-    settings_description, settings_field, settings_inline, settings_toggle,
+    choice_tabs, owner_state, settings_column, settings_column_field, settings_column_field_help,
+    settings_columns, settings_description, settings_field, settings_field_help, settings_inline,
+    settings_stack, settings_toggle,
 };
 use super::*;
 use clipboard_core::preferences::CardCornerPreference;
@@ -39,6 +41,7 @@ impl SettingsWindowView {
                             cx.notify();
                         }
                     },
+                    cx,
                 )),
             )
             .child(
@@ -64,10 +67,19 @@ impl SettingsWindowView {
                             cx.notify();
                         }
                     },
+                    cx,
                 )),
             )
             .child(
-                settings_column_field(tr(language, "主题色", "Theme color"))
+                settings_column_field_help(
+                    tr(language, "主题色", "Theme color"),
+                    tr(
+                        language,
+                        "主按钮、链接和悬停连线使用的颜色",
+                        "Color used by primary buttons, links, and the hover connector",
+                    ),
+                    "theme-color-help",
+                )
                     .child(choice_tabs(
                         "settings-theme-color",
                         &self.owner,
@@ -90,13 +102,6 @@ impl SettingsWindowView {
                                 cx.notify();
                             }
                         },
-                    ))
-                    .child(settings_description(
-                        tr(
-                            language,
-                            "主按钮、链接和悬停连线使用的颜色",
-                            "Color used by primary buttons, links, and the hover connector",
-                        ),
                         cx,
                     )),
             )
@@ -125,6 +130,7 @@ impl SettingsWindowView {
                             cx.notify();
                         }
                     },
+                    cx,
                 ).when(legacy_radius.is_some(), |tabs| tabs.selected_index(usize::MAX))),
             )
             .when_some(legacy_radius, |content, value| {
@@ -134,7 +140,15 @@ impl SettingsWindowView {
                 }, cx))
             })
             .child(
-                settings_column_field(tr(language, "卡片圆角", "Card corners"))
+                settings_column_field_help(
+                    tr(language, "卡片圆角", "Card corners"),
+                    tr(
+                        language,
+                        "剪贴板卡片和预览卡片。默认是全局圆角的一半。",
+                        "Clipboard cards and preview cards. Default is half the global radius.",
+                    ),
+                    "card-corner-help",
+                )
                     .child(choice_tabs(
                         "settings-card-corner",
                         &self.owner,
@@ -157,17 +171,11 @@ impl SettingsWindowView {
                                 cx.notify();
                             }
                         },
-                    ))
-                    .child(settings_description(
-                        tr(
-                            language,
-                            "剪贴板卡片和预览卡片。默认是全局圆角的一半。",
-                            "Clipboard cards and preview cards. Default is half the global radius.",
-                        ),
                         cx,
                     )),
             )
             .child(settings_column().child(self.settings_window_effect_content(cx)))
+            .child(self.settings_fonts_content(cx))
             .into_any_element()
     }
 
@@ -178,7 +186,8 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let display = owner_state.display;
         let display_pending = owner_state.display_pending;
-        settings_columns()
+        // 分段条、数字框和复选框高度不同，各占一行；同一行只放同类复选框。
+        settings_stack()
             .child(
                 settings_inline().children(
                     [
@@ -202,7 +211,7 @@ impl SettingsWindowView {
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
                         let owner = self.owner.clone();
-                        settings_toggle(Checkbox::new(id))
+                        settings_toggle(cx, Checkbox::new(id))
                             .label(label)
                             .checked(selected)
                             .disabled(display_pending)
@@ -217,82 +226,56 @@ impl SettingsWindowView {
                 ),
             )
             .child(
-                settings_field(tr(language, "分类筛选标签", "Category filter tabs"))
+                settings_field_help(
+                    tr(language, "分类筛选标签", "Category filter tabs"),
+                    tr(
+                        language,
+                        "与主窗口工具栏分段一致；「全部」始终显示，且至少保留两个标签。关闭上方“显示分类筛选”时隐藏整条分段。",
+                        "Matches the history toolbar tabs; “All” is always shown and at least two tabs stay visible. Turn off “Show category filters” above to hide the whole bar.",
+                    ),
+                    "category-tabs-help",
+                )
                     .child(settings_inline().children(
-                        [
-                            (
-                                "category-tab-all",
-                                tr(language, "全部", "All"),
-                                display.category_tabs.all,
-                                (|next: &mut DisplayPreference, checked| {
-                                    next.category_tabs.all = checked;
-                                }) as fn(&mut DisplayPreference, bool),
-                            ),
-                            (
-                                "category-tab-favorites",
-                                tr(language, "收藏", "Favorites"),
-                                display.category_tabs.favorites,
-                                (|next: &mut DisplayPreference, checked| {
-                                    next.category_tabs.favorites = checked;
-                                }) as fn(&mut DisplayPreference, bool),
-                            ),
-                            (
-                                "category-tab-text",
-                                tr(language, "文本", "Text"),
-                                display.category_tabs.text,
-                                (|next: &mut DisplayPreference, checked| {
-                                    next.category_tabs.text = checked;
-                                }) as fn(&mut DisplayPreference, bool),
-                            ),
-                            (
-                                "category-tab-other",
-                                tr(language, "其他", "Other"),
-                                display.category_tabs.other,
-                                (|next: &mut DisplayPreference, checked| {
-                                    next.category_tabs.other = checked;
-                                }) as fn(&mut DisplayPreference, bool),
-                            ),
-                        ]
-                        .into_iter()
-                        .map(|(id, label, selected, set_checked)| {
-                            let owner = self.owner.clone();
-                            let tabs_enabled = display.show_category_filter && !display_pending;
-                            let is_all_tab = id == "category-tab-all";
-                            let at_minimum_tabs =
-                                display.category_tabs.enabled_count() <= 2 && selected;
-                            let checkbox_disabled = !tabs_enabled
-                                || is_all_tab
-                                || at_minimum_tabs;
-                            settings_toggle(Checkbox::new(id))
-                                .label(label)
-                                .checked(selected)
-                                .disabled(checkbox_disabled)
-                                .on_change(move |checked, _, cx| {
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        let mut next = owner.display;
-                                        set_checked(&mut next, *checked);
-                                        if next.show_category_filter {
-                                            next.category_tabs.all = true;
-                                            if !next.category_tabs.valid_for_filter_bar() {
-                                                return;
+                        category_tab_flags(&display.category_tabs)
+                            .into_iter()
+                            .zip(CATEGORY_TAB_SPECS)
+                            .enumerate()
+                            .map(|(index, (selected, (_, chinese, english, _)))| {
+                                let owner = self.owner.clone();
+                                let tabs_enabled =
+                                    display.show_category_filter && !display_pending;
+                                // 首项即「全部」：锁定开启，不受关闭影响。
+                                let is_all_tab = index == 0;
+                                let at_minimum_tabs =
+                                    display.category_tabs.enabled_count() <= 2 && selected;
+                                let checkbox_disabled =
+                                    !tabs_enabled || is_all_tab || at_minimum_tabs;
+                                settings_toggle(cx, Checkbox::new(("category-tab", index)))
+                                    .label(tr(language, chinese, english))
+                                    .checked(selected)
+                                    .disabled(checkbox_disabled)
+                                    .on_change(move |checked, _, cx| {
+                                        let _ = owner.update(cx, |owner, cx| {
+                                            let mut next = owner.display;
+                                            match index {
+                                                0 => next.category_tabs.all = *checked,
+                                                1 => next.category_tabs.favorites = *checked,
+                                                2 => next.category_tabs.text = *checked,
+                                                _ => next.category_tabs.other = *checked,
                                             }
-                                        }
-                                        owner.save_display(next, cx);
-                                    });
-                                })
-                        }),
-                    ))
-                    .child(settings_description(
-                        tr(
-                            language,
-                            "与主窗口工具栏分段一致；「全部」始终显示，且至少保留两个标签。关闭上方“显示分类筛选”时隐藏整条分段。",
-                            "Matches the history toolbar tabs; “All” is always shown and at least two tabs stay visible. Turn off “Show category filters” above to hide the whole bar.",
-                        ),
-                        cx,
+                                            // 开启分类栏时「全部」必须保留；disabled 已阻止
+                                            // 关闭「全部」或缩减到两标签以下，故不再二次校验。
+                                            if next.show_category_filter {
+                                                next.category_tabs.all = true;
+                                            }
+                                            owner.save_display(next, cx);
+                                        });
+                                    })
+                            }),
                     )),
             )
             .child(
-                settings_column_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(
+                settings_field(tr(language, "卡片密度", "Card density")).child(choice_tabs(
                     "card-density",
                     &self.owner,
                     [
@@ -317,10 +300,11 @@ impl SettingsWindowView {
                             cx,
                         );
                     },
+                    cx,
                 )),
             )
             .child(
-                settings_column_field(tr(language, "卡片预览行数", "Card preview lines")).child(
+                settings_field(tr(language, "卡片预览行数", "Card preview lines")).child(
                     NumberInput::new(&self.preview_lines_input)
                         .w_full()
                         .h(px(visual::CONTROL_HEIGHT_LARGE))
@@ -365,7 +349,7 @@ impl SettingsWindowView {
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
                         let owner = self.owner.clone();
-                        settings_toggle(Checkbox::new(id))
+                        settings_toggle(cx, Checkbox::new(id))
                             .label(label)
                             .checked(selected)
                             .disabled(display_pending)
@@ -380,7 +364,7 @@ impl SettingsWindowView {
                 ),
             )
             .child(
-                settings_column_field(tr(language, "时间格式", "Time format")).child(choice_tabs(
+                settings_field(tr(language, "时间格式", "Time format")).child(choice_tabs(
                     "time-format",
                     &self.owner,
                     [TimeFormat::Absolute, TimeFormat::Relative],
@@ -400,10 +384,11 @@ impl SettingsWindowView {
                             cx,
                         );
                     },
+                    cx,
                 )),
             )
             .child(
-                settings_column_field(tr(language, "来源显示", "Source display")).child(
+                settings_field(tr(language, "来源显示", "Source display")).child(
                     choice_tabs(
                         "source-app-display",
                         &self.owner,
@@ -429,6 +414,7 @@ impl SettingsWindowView {
                                 cx,
                             );
                         },
+                        cx,
                     ),
                 ),
             )

@@ -3,7 +3,8 @@ use super::{Event, Worker};
 use crate::sequence::current_sequence;
 use anyhow::{Context, Result};
 use clipboard_core::preferences::{
-    AppFilterPreference, HotkeyPreference, MonitorTypesPreference, PasteShortcutConfig, Preferences,
+    AppFilterPreference, FontPreference, HotkeyPreference, MonitorTypesPreference,
+    PasteShortcutConfig, Preferences,
 };
 
 fn save_hotkey(preferences: &Preferences, hotkey: HotkeyPreference) -> Result<HotkeyPreference> {
@@ -56,6 +57,15 @@ impl Worker {
             .map(|_| value)
             .map_err(|error| error.to_string());
         self.send_event(event(result))
+    }
+
+    pub(super) fn handle_set_fonts(&mut self, fonts: FontPreference) -> Result<()> {
+        let result = self
+            .preferences
+            .set_fonts(fonts.clone())
+            .map(|()| fonts)
+            .map_err(|error| error.to_string());
+        self.send_event(Event::FontsSaved(result))
     }
 
     pub(super) fn handle_set_hotkey(&mut self, hotkey: HotkeyPreference) -> Result<()> {
