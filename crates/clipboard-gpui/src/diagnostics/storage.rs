@@ -22,7 +22,7 @@ impl Session {
     pub(super) fn create(root: &Path) -> io::Result<Self> {
         fs::create_dir_all(root)?;
         let _guard = retention_lock(root)?;
-        prune(root)?;
+        prune(root, None)?;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(io::Error::other)?
@@ -56,8 +56,13 @@ impl Drop for Session {
     fn drop(&mut self) {
         let result = (|| {
             let _guard = retention_lock(&self.root)?;
-            drop(self.lease.take());
-            prune(&self.root)
+            // Linux flock 在关闭描述符后，同一进程立刻重新打开并 try_lock
+            // 仍可能返回 WouldBlock。先显式解锁，并把这次会话标成已释放。
+            if let Some(lease) = self.lease.take() {
+                let _ = lease.unlock();
+                drop(lease);
+            }
+            prune(&self.root, Some(self.directory.as_path()))
         })();
         if let Err(error) = result {
             eprintln!("ElegantClipboard diagnostic retention failed: {error}");
@@ -76,13 +81,18 @@ fn retention_lock(root: &Path) -> io::Result<File> {
 }
 
 // Caller holds retention.lock across creation, lease release, and cleanup.
-fn prune(root: &Path) -> io::Result<()> {
+// `released` is the session whose lease this process just dropped. On Linux that
+// lock can still look held to a new descriptor, so it must count as inactive.
+fn prune(root: &Path, released: Option<&Path>) -> io::Result<()> {
     let mut inactive = Vec::new();
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() || !is_session_name(&entry.file_name()) {
             continue;
         }
+        let just_released = released
+            .and_then(|path| path.file_name())
+            .is_some_and(|name| name == entry.file_name());
         let lease = match OpenOptions::new()
             .write(true)
             .open(entry.path().join("active.lock"))
@@ -96,6 +106,9 @@ fn prune(root: &Path) -> io::Result<()> {
         };
         match lease.try_lock() {
             Ok(()) => inactive.push((entry.file_name(), entry.path(), lease)),
+            Err(TryLockError::WouldBlock) if just_released => {
+                inactive.push((entry.file_name(), entry.path(), lease));
+            }
             Err(TryLockError::WouldBlock) => {}
             Err(TryLockError::Error(error)) => return Err(error),
         }
