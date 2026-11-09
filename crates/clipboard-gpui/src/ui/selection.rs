@@ -63,6 +63,7 @@ impl ClipboardView {
             || self.history.loading
             || self.batch_pending
             || self.paste_state.pending()
+            || self.editor.id.is_some()
             || !self.history.items.iter().any(|item| item.id == id)
         {
             return;
@@ -124,6 +125,7 @@ impl ClipboardView {
             || self.history.loading
             || self.batch_pending
             || self.paste_state.pending()
+            || self.editor.id.is_some()
             || !self.history.items.iter().any(|item| item.id == id)
         {
             return;

@@ -30,7 +30,6 @@ pub const CHOICE_MAX_WIDTH: f32 = 640.;
 pub const TOGGLE_PADDING_Y: f32 = 6.;
 pub const DIALOG_WIDTH_COMPACT: f32 = 400.;
 pub const DIALOG_WIDTH: f32 = 448.;
-pub const DIALOG_WIDTH_EDITOR: f32 = 560.;
 pub const COPY_LINE_HEIGHT: f32 = 1.6;
 
 pub fn popover_shadow() -> Vec<BoxShadow> {

@@ -1,8 +1,15 @@
 use super::*;
 
 impl ClipboardView {
-    fn editor_pending(&self) -> bool {
+    pub(super) fn editor_pending(&self) -> bool {
         self.editor_save_pending || self.note_save_pending
+    }
+
+    /// 结束当前编辑会话。调用方仍负责关窗口或对话框，并决定焦点回到哪里。
+    pub(super) fn release_editor_session(&mut self) {
+        self.editor.close();
+        self.editor_source_hash = None;
+        self.editor_error = None;
     }
 
     pub(super) fn apply_editor_content(
@@ -16,14 +23,7 @@ impl ClipboardView {
         if self.editor_source_hash.is_none() || !self.editor.apply(id, generation, result) {
             return false;
         }
-        if let Some(Ok(PreviewContent::Text(text) | PreviewContent::RichText(text))) =
-            &self.editor.result
-        {
-            self.editor_input.update(cx, |input, cx| {
-                input.set_value(text.clone(), window, cx);
-                input.focus(window, cx);
-            });
-        }
+        cx.notify();
         window.refresh();
         true
     }
@@ -56,6 +56,7 @@ impl ClipboardView {
                 ));
                 self.is_error = true;
                 window.refresh();
+                cx.notify();
             }
         }
         true
@@ -94,58 +95,78 @@ impl ClipboardView {
             return false;
         }
         if self.editor.id.take().is_some() {
-            self.editor.close();
-            self.editor_source_hash = None;
-            self.editor_error = None;
-            self.editor_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            self.note_input
-                .update(cx, |input, cx| input.set_value("", window, cx));
-            window.close_dialog(cx);
-            window.focus(&self.list_focus, cx);
+            let content_editor = self.editor_source_hash.is_some();
+            self.release_editor_session();
+            if let Some(handle) = self.editor_window.take() {
+                window.focus(&self.list_focus, cx);
+                cx.defer(move |cx| {
+                    let _ = handle.update(cx, |_, editor_window, _| editor_window.remove_window());
+                });
+            } else if content_editor {
+                // 独立窗口可能还没创建；不要顺手关掉主窗口上的其他对话框。
+                window.focus(&self.list_focus, cx);
+            } else {
+                self.note_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                window.close_dialog(cx);
+                window.focus(&self.list_focus, cx);
+            }
             cx.notify();
         }
         true
     }
 
-    fn save_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn save_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.editor_pending() {
             return;
         }
         let Some(id) = self.editor.id else {
             return;
         };
+        if self.editor_source_hash.is_some() {
+            return;
+        }
         self.editor_error = None;
-        if let Some(expected_hash) = self.editor_source_hash.clone() {
-            if !matches!(
-                self.editor.result,
-                Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
-            ) {
-                return;
-            }
-            let new_text = self.editor_input.read(cx).value().to_string();
-            if self.send(
-                Command::EditText {
-                    id,
-                    expected_hash,
-                    new_text,
-                    generation: self.editor.generation,
-                },
-                cx,
-            ) {
-                self.editor_save_pending = true;
-            } else {
-                self.editor_error = Some(self.message.clone());
-            }
+        let note = self.note_input.read(cx).value().to_string();
+        if self.send(Command::SetNote { id, note }, cx) {
+            self.note_save_pending = true;
         } else {
-            let note = self.note_input.read(cx).value().to_string();
-            if self.send(Command::SetNote { id, note }, cx) {
-                self.note_save_pending = true;
-            } else {
-                self.editor_error = Some(self.message.clone());
-            }
+            self.editor_error = Some(self.message.clone());
         }
         window.refresh();
+        cx.notify();
+    }
+
+    pub(super) fn save_content_editor(&mut self, new_text: String, cx: &mut Context<Self>) {
+        if self.editor_pending() {
+            return;
+        }
+        let Some(id) = self.editor.id else {
+            return;
+        };
+        let Some(expected_hash) = self.editor_source_hash.clone() else {
+            return;
+        };
+        if !matches!(
+            self.editor.result,
+            Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
+        ) {
+            return;
+        }
+        self.editor_error = None;
+        if self.send(
+            Command::EditText {
+                id,
+                expected_hash,
+                new_text,
+                generation: self.editor.generation,
+            },
+            cx,
+        ) {
+            self.editor_save_pending = true;
+        } else {
+            self.editor_error = Some(self.message.clone());
+        }
         cx.notify();
     }
 
@@ -178,39 +199,37 @@ impl ClipboardView {
         self.editor_source_hash = hash;
         self.editor_error = None;
         let generation = self.editor.open(id);
-        self.editor_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.note_input
-            .update(cx, |input, cx| input.set_value(note, window, cx));
-        if text && !self.send(Command::EditContent { id, generation }, cx) {
-            self.editor.apply(id, generation, Err(self.message.clone()));
+        if text {
+            if !self.send(Command::EditContent { id, generation }, cx) {
+                self.editor.apply(id, generation, Err(self.message.clone()));
+            }
+            self.open_content_editor(id, window, cx);
+        } else {
+            self.note_input
+                .update(cx, |input, cx| input.set_value(note, window, cx));
+            self.open_note_dialog(window, cx);
         }
+        cx.notify();
+    }
+
+    fn open_note_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let owner = cx.weak_entity();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let entity = owner.upgrade().expect("editor dialog requires its owner");
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let entity = owner.upgrade().expect("note dialog requires its owner");
             let view = entity.read(cx);
             let pending = view.editor_pending();
             let language = view.language;
-            let input = view.editor_input.clone();
             let note = view.note_input.clone();
-            let ready = !text || matches!(view.editor.result, Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_))));
-            let loading = text && view.editor.result.is_none();
-            let rich = matches!(view.editor.result, Some(Ok(PreviewContent::RichText(_))));
-            let error = view.editor_error.clone().or_else(|| view.editor.result.as_ref().and_then(|result| result.as_ref().err().cloned()));
+            let error = view.editor_error.clone();
             let cancel_owner = owner.clone();
             let cancel_button_owner = owner.clone();
             let submit_owner = owner.clone();
             let keyboard_owner = owner.clone();
-            let title = if text { tr(language, "编辑内容", "Edit content") } else { tr(language, "编辑备注", "Edit note") };
             dialog_shell(dialog, cx)
-                .w(px(if text {
-                    visual::DIALOG_WIDTH_EDITOR
-                } else {
-                    visual::DIALOG_WIDTH_COMPACT
-                }))
-                .title(dialog_title(title, cx))
+                .w(px(visual::DIALOG_WIDTH_COMPACT))
+                .title(dialog_title(tr(language, "编辑备注", "Edit note"), cx))
                 .on_ok(move |_, window, cx| {
-                    let _ = keyboard_owner.update(cx, |view, cx| view.save_editor(window, cx));
+                    let _ = keyboard_owner.update(cx, |view, cx| view.save_note(window, cx));
                     false
                 })
                 .on_cancel(move |_, window, cx| {
@@ -219,32 +238,50 @@ impl ClipboardView {
                     false
                 })
                 .child(
-                    div().flex().flex_col().gap_3()
-                        .when(text, |body| {
-                            body.child(Textarea::new(&input)
-                                .h((window.viewport_size().height * 0.42).clamp(px(100.), px(300.)))
-                                .text_size(px(visual::TEXT_BODY)).readonly(!ready || pending)
-                                .aria_label(tr(language, "编辑文本", "Edit text")))
-                        })
-                        .when(!text, |body| body.child(Input::new(&note).text_size(px(visual::TEXT_BODY)).disabled(pending)))
-                        .when(loading, |body| body.child(div().text_size(px(visual::TEXT_SMALL)).text_color(cx.theme().muted_foreground).child(tr(language, "正在加载…", "Loading…"))))
-                        .when(rich, |body| body.child(div().text_size(px(visual::TEXT_SMALL)).text_color(cx.theme().muted_foreground).child(tr(language, "保存后将变为纯文本，原富文本格式不会保留", "Saving converts this to plain text and removes rich-text formatting."))))
-                        .when_some(error, |body, error| body.child(Alert::error("editor-error", error).small())),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .child(
+                            Input::new(&note)
+                                .text_size(px(visual::TEXT_BODY))
+                                .disabled(pending),
+                        )
+                        .when_some(error, |body, error| {
+                            body.child(Alert::error("editor-error", error).small())
+                        }),
                 )
-                .footer(dialog_footer(cx)
-                    .child(Button::new("editor-cancel").outline().label(tr(language, "取消", "Cancel")).disabled(pending).on_click(move |_, window, cx| {
-                        let _ = cancel_button_owner.update(cx, |view, cx| view.close_editor(window, cx));
-                    }))
-                    .child(Button::new("editor-save").primary().label(if pending { tr(language, "保存中…", "Saving…") } else { tr(language, "保存", "Save") }).disabled(!ready || pending).on_click(move |_, window, cx| {
-                        let _ = submit_owner.update(cx, |view, cx| view.save_editor(window, cx));
-                    })))
+                .footer(
+                    dialog_footer(cx)
+                        .child(
+                            Button::new("editor-cancel")
+                                .outline()
+                                .label(tr(language, "取消", "Cancel"))
+                                .disabled(pending)
+                                .on_click(move |_, window, cx| {
+                                    let _ = cancel_button_owner
+                                        .update(cx, |view, cx| view.close_editor(window, cx));
+                                }),
+                        )
+                        .child(
+                            Button::new("editor-save")
+                                .primary()
+                                .label(if pending {
+                                    tr(language, "保存中…", "Saving…")
+                                } else {
+                                    tr(language, "保存", "Save")
+                                })
+                                .disabled(pending)
+                                .on_click(move |_, window, cx| {
+                                    let _ = submit_owner
+                                        .update(cx, |view, cx| view.save_note(window, cx));
+                                }),
+                        ),
+                )
         });
-        if !text {
-            cx.defer_in(window, |view, window, cx| {
-                view.note_input
-                    .update(cx, |input, cx| input.focus(window, cx))
-            });
-        }
-        cx.notify();
+        cx.defer_in(window, |view, window, cx| {
+            view.note_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        });
     }
 }

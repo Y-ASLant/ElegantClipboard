@@ -6,6 +6,7 @@ mod diagnostics_events;
 mod drag;
 mod drag_visual;
 mod editor_actions;
+mod editor_window;
 mod events;
 mod external_drag;
 mod file_cards;
@@ -291,7 +292,8 @@ struct ClipboardView {
     group_move_id: Option<i64>,
     group_move_pending: bool,
     editor: PreviewState,
-    editor_input: Entity<TextareaState>,
+    /// 正文编辑的独立窗口。备注仍用主窗口对话框。
+    editor_window: Option<AnyWindowHandle>,
     note_input: Entity<InputState>,
     note_save_pending: bool,
     editor_source_hash: Option<String>,

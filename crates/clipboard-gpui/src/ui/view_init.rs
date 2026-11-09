@@ -293,7 +293,7 @@ impl ClipboardView {
             group_move_id: None,
             group_move_pending: false,
             editor: PreviewState::default(),
-            editor_input: cx.new(|cx| TextareaState::new(window, cx)),
+            editor_window: None,
             note_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(
                     language,

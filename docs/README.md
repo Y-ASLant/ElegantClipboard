@@ -93,7 +93,7 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `events`、`history_events`、`preference_events`、`shortcut_events` | 平台事件路由和各领域状态更新 |
 | `navigation`、`history_list`、`history_card`、`row_actions`、`row_menu` | 列表导航、虚拟列表、卡片、按钮及上下文菜单 |
 | `drag`、`drag_visual`、`selection`、`groups`、`confirmation` | 拖拽状态与动效、批量选择、分组及确认交互 |
-| `editor_actions`、`file_cards` | 按需加载文本编辑、备注保存及文件卡片信息；主窗口无整页预览 |
+| `editor_actions`、`editor_window`、`file_cards` | 按需加载文本编辑、独立编辑窗口、备注保存及文件卡片信息；主窗口无整页预览 |
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
