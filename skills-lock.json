@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "gpui-kit": {
+      "source": "longbridge/gpui-kit",
+      "sourceType": "github",
+      "skillPath": "skills/gpui-kit/SKILL.md",
+      "computedHash": "d941aafe95226b546f4498bc21be3376284f071fe0ab96b38aa770ae71497b9c"
+    },
+    "gpui-kit-design-guides": {
+      "source": "longbridge/gpui-kit",
+      "sourceType": "github",
+      "skillPath": "skills/gpui-kit-design-guides/SKILL.md",
+      "computedHash": "fecbcb47582334b91db63fd7b76c9a05b562dddfc9228fe052c5210efe78fc98"
+    }
+  }
+}
