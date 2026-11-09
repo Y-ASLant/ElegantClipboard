@@ -79,7 +79,7 @@ just run    # 或 cargo run -p elegant-clipboard-gpui --locked
 | macOS | `~/Library/Application Support/ElegantClipboard` |
 | Linux | `$XDG_DATA_HOME/elegantclipboard`（默认 `~/.local/share/elegantclipboard`） |
 
-旧版本数据目录和开机启动项不自动搬迁；最新 1.x 的历史可导入旧数据库或旧版 ZIP。启动时清理历史 `staged` 文件副本及其数据库引用，保留原始路径。`--data-dir` 显式指定后原样使用：
+旧版本数据目录和开机启动项不自动搬迁；1.2.10 的历史可导入旧数据库或旧版 ZIP。启动时清理历史 `staged` 文件副本及其数据库引用，保留原始路径。`--data-dir` 显式指定后原样使用：
 
 ```powershell
 cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check

@@ -44,7 +44,7 @@
 | 路径（相对 `crates/clipboard-core/src`） | 职责 |
 |---|---|
 | `database/mod.rs`、`schema.rs` | 连接生命周期、初始化、维护及 schema |
-| `database/migrations.rs` | 仅当表已是最新 1.x 且没有 2.0 表时补 `note`；更早的 1.x 和缺备注的 2.0 beta 拒绝打开且不改库 |
+| `database/migrations.rs` | 仅当表已是 1.2.10 且没有 2.0 表时补 `note`；更早的 1.x 和其他 2.0 beta 拒绝打开且不改库 |
 | `database/repository.rs`、`repository/` | 记录模型与查询条件；查询、写入、保留策略分别实现 |
 | `database/groups.rs`、`settings.rs` | 分组和设置仓储 |
 | `preferences.rs`、`preferences/types.rs` | 设置键与持久化；设置值类型、默认值和校验 |
@@ -53,7 +53,7 @@
 | `backup.rs`、`backup_common.rs`、`import.rs`、`legacy_backup.rs` | GPUI 备份、共享归档校验及旧数据兼容导入 |
 | 各模块的 `tests.rs` / `tests/` | 就近维护的隔离业务测试；仓储测试按记录、查询、保留、分组及设置分类 |
 
-打开已有库时，只有最新 1.x（已具备当前列、没有 `note`，也没有 `native_formats`、`captured_formats`、`content_hash_aliases`）会补上备注列，随后的 schema 再创建 2.0 新表。更早的 1.x 和缺少备注的 2.0 beta 直接拒绝，不改动原文件。已有 `note` 的当前库不再做结构升级。导入到新目录时仍按备份内容重写受管图片和图标引用。查询继续使用现有条件构造器。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。
+打开已有库时，只有 1.2.10（已具备当前列、没有 `note`，也没有 `native_formats`、`captured_formats`、`content_hash_aliases`）会补上备注列，随后的 schema 再创建 2.0 新表。更早的 1.x，以及已有 `note` 但缺这些列的 2.0 beta，直接拒绝，不改动原文件。已有 `note` 和这些列的当前库不再做结构升级。导入到新目录时仍按备份内容重写受管图片和图标引用。查询继续使用现有条件构造器。数据库测试通过 `TempDir` 管理临时目录，连接与仓库须先于目录释放。
 
 ### 平台层与共享服务
 

@@ -2,7 +2,7 @@ use super::Database;
 use rusqlite::Connection;
 use tracing::info;
 
-const LATEST_1X_COLUMNS: &[&str] = &[
+const V1_2_10_COLUMNS: &[&str] = &[
     "content_type",
     "text_content",
     "html_content",
@@ -33,27 +33,27 @@ const LATEST_1X_COLUMNS: &[&str] = &[
 const V2_TABLES: &[&str] = &["native_formats", "captured_formats", "content_hash_aliases"];
 
 impl Database {
-    /// 只给最新 1.x 补 `note`。那一版已有当前列，且没有 2.0 的表。
-    /// 更早的 1.x、以及已带 2.0 表但缺备注的 beta 库，拒绝打开且不改文件。
-    /// 已有 `note` 的当前库不再做结构升级。
+    /// 只给 1.2.10 补 `note`。那一版已有当前列，且没有 2.0 的表。
+    /// 更早的 1.x、其他 2.0 beta，以及已有 `note` 但缺这些列的库，拒绝打开且不改文件。
+    /// 已有 `note` 和这些列的当前库不再做结构升级；缺 2.0 表时由后续 schema 补上。
     pub(super) fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         if !table_exists(conn, "clipboard_items")? {
             return Ok(());
         }
-        if column_exists(conn, "note")? {
-            return Ok(());
-        }
-        for name in LATEST_1X_COLUMNS {
+        for name in V1_2_10_COLUMNS {
             if !column_exists(conn, name)? {
                 return Err(unsupported_database());
             }
+        }
+        if column_exists(conn, "note")? {
+            return Ok(());
         }
         for name in V2_TABLES {
             if table_exists(conn, name)? {
                 return Err(unsupported_database());
             }
         }
-        info!("Migrating latest 1.x database: adding note column");
+        info!("Migrating 1.2.10 database: adding note column");
         conn.execute_batch("ALTER TABLE clipboard_items ADD COLUMN note TEXT;")?;
         Ok(())
     }
@@ -78,7 +78,7 @@ fn column_exists(conn: &Connection, name: &str) -> Result<bool, rusqlite::Error>
 fn unsupported_database() -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-        Some("数据库不是受支持的最新 1.x，当前版本不会升级".into()),
+        Some("数据库不是 1.2.10 或当前版本，不会升级".into()),
     )
 }
 
@@ -87,7 +87,7 @@ mod tests {
     use super::Database;
     use rusqlite::Connection;
 
-    const LATEST_1X: &str = "
+    const V1_2_10: &str = "
         CREATE TABLE clipboard_items (
             id INTEGER PRIMARY KEY,
             content_type TEXT,
@@ -145,11 +145,12 @@ mod tests {
         let latest = directory.path().join("latest.db");
         Connection::open(&latest)
             .unwrap()
-            .execute_batch(LATEST_1X)
+            .execute_batch(V1_2_10)
             .unwrap();
         Database::new(latest.clone()).unwrap();
         assert!(columns(&latest).contains(&"note".to_string()));
         assert!(has_table(&latest, "native_formats"));
+        Database::new(latest.clone()).unwrap();
 
         let older = directory.path().join("older.db");
         Connection::open(&older)
@@ -167,7 +168,7 @@ mod tests {
 
         let beta = directory.path().join("beta.db");
         let connection = Connection::open(&beta).unwrap();
-        connection.execute_batch(LATEST_1X).unwrap();
+        connection.execute_batch(V1_2_10).unwrap();
         connection
             .execute_batch("CREATE TABLE native_formats (item_id INTEGER, format_name TEXT);")
             .unwrap();
@@ -177,7 +178,7 @@ mod tests {
         assert!(!has_table(&beta, "captured_formats"));
     }
 
-    /// Latest 1.x: CHECK 不含 `url`，`semantic_hash` 可为空；升上来后应回填 URL 与语义哈希。
+    /// 1.2.10 升上来后仍可能留着 content_type CHECK；回填 URL 前要先去掉它。
     #[test]
     fn latest_1x_check_constraint_gets_url_and_semantic_backfill() {
         let directory = tempfile::tempdir().unwrap();
@@ -230,6 +231,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(url_rows, 1);
+        assert!(columns(&path).contains(&"file_payload".to_string()));
+        assert!(columns(&path).contains(&"note".to_string()));
         let sem: String = conn
             .query_row(
                 "SELECT semantic_hash FROM clipboard_items WHERE id = 1",
@@ -256,11 +259,11 @@ mod tests {
         assert_eq!(backfill, "done");
     }
 
-    /// 重建表的两条路径：无 `file_payload` 列的旧库同样要保数据、不引入该列。
+    /// 已有备注但缺 `file_payload` 的 2.0 beta 不是当前库，也不能当作 1.2.10。
     #[test]
-    fn check_constraint_without_file_payload_rebuilds_without_adding_it() {
+    fn note_without_file_payload_is_rejected_unchanged() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("no_payload_check.db");
+        let path = directory.path().join("note_without_payload.db");
         Connection::open(&path)
             .unwrap()
             .execute_batch(
@@ -293,28 +296,21 @@ mod tests {
                     group_id INTEGER
                 );
                 INSERT INTO clipboard_items (
-                    content_type, text_content, content_hash, semantic_hash, preview
-                ) VALUES ('text', 'https://example.com/plain', 'hash_p', NULL, 'x');",
+                    content_type, text_content, content_hash, semantic_hash, preview, note
+                ) VALUES ('text', 'https://example.com/plain', 'hash_p', NULL, 'x', 'keep');",
             )
             .unwrap();
-        Database::new(path.clone()).unwrap();
-        let conn = Connection::open(&path).unwrap();
-        let url_rows: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM clipboard_items WHERE content_type = 'url'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(url_rows, 1);
+        assert!(Database::new(path.clone()).is_err());
         assert!(!columns(&path).contains(&"file_payload".to_string()));
-        let text: String = conn
+        assert!(!has_table(&path, "native_formats"));
+        let conn = Connection::open(&path).unwrap();
+        let row: (String, String) = conn
             .query_row(
-                "SELECT text_content FROM clipboard_items WHERE content_type = 'url'",
+                "SELECT content_type, note FROM clipboard_items",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(text, "https://example.com/plain");
+        assert_eq!(row, ("text".to_string(), "keep".to_string()));
     }
 }

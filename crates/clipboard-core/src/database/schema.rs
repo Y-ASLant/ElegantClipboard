@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_native_formats_blob
     ON native_formats(blob_hash) WHERE blob_hash IS NOT NULL;
 
 -- Authoritative names from the latest observed clipboard snapshot, not payloads.
--- A latest 1.x database has no names to recover, so this empty table is created as-is.
+-- A 1.2.10 database has no names to recover, so this empty table is created as-is.
 CREATE TABLE IF NOT EXISTS captured_formats (
     item_id INTEGER NOT NULL REFERENCES clipboard_items(id) ON DELETE CASCADE,
     format_name TEXT NOT NULL,
