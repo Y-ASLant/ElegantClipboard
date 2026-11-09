@@ -270,6 +270,9 @@ impl Render for ContentEditorWindow {
                                 .h_full()
                                 // 输入框默认圆角偏大；编辑区跟随卡片和预览的圆角设置。
                                 .rounded(crate::card_radius::card_radius(cx))
+                                // 编辑器默认等宽字体。剪贴板正文跟随界面字体和字号。
+                                .font_family(cx.theme().font_family.clone())
+                                .text_size(cx.theme().font_size)
                                 .readonly(!editable)
                                 .aria_label(tr(language, "编辑文本", "Edit text")),
                         ),
