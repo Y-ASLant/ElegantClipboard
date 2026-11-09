@@ -16,6 +16,7 @@ unsafe extern "C" {
 
 #[path = "desktop_target.rs"]
 mod target;
+#[path = "virtual_key.rs"]
 mod virtual_key;
 pub use target::{activate_target, foreground_target, target_alive};
 

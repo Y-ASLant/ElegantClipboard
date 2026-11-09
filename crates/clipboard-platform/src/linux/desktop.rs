@@ -108,11 +108,11 @@ pub fn shortcut_trigger_held(shortcut: &str) -> bool {
         return false;
     };
     // 一次 query_keymap 覆盖主键与小键盘别名两个 symbol，避免每 tick 两次 X 往返。
-    let Ok(keys) = x
-        .connection
-        .query_keymap()
-        .and_then(|cookie| cookie.reply())
-    else {
+    // query_keymap 的连接错误和 reply 的协议错误不是同一类型，不能 and_then。
+    let Ok(cookie) = x.connection.query_keymap() else {
+        return false;
+    };
+    let Ok(keys) = cookie.reply() else {
         return false;
     };
     [parsed.key, parsed.numpad.unwrap_or(0)]

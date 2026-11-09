@@ -16,6 +16,7 @@ impl ClipboardView {
         self.onboarding_pending
             || self.shortcut_change_pending()
             || self.theme_pending
+            || self.corner_radius.pending
             || self.language_pending
             || self.autostart.pending
             || self.search_auto_focus.pending

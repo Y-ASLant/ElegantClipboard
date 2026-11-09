@@ -6,6 +6,10 @@ impl ClipboardView {
         let language = self.language;
         let pending = self.onboarding_saving();
         let owner = cx.weak_entity();
+        let legacy_radius = match self.corner_radius.value {
+            CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
+            _ => None,
+        };
         settings_common::settings_stack()
             .child(
                 div()
@@ -40,7 +44,50 @@ impl ClipboardView {
                             }
                         },
                         cx,
-                    )),
+                    ))
+                    .child(div().child(tr(language, "圆角", "Corner radius")))
+                    .child(
+                        settings_common::choice_tabs(
+                            "onboarding-corner-radius",
+                            &owner,
+                            [
+                                CornerRadiusPreference::System,
+                                CornerRadiusPreference::Fixed(0),
+                                CornerRadiusPreference::Fixed(4),
+                                CornerRadiusPreference::Fixed(16),
+                            ],
+                            [
+                                tr(language, "跟随系统", "System"),
+                                tr(language, "关闭", "Off"),
+                                "4 px",
+                                "16 px",
+                            ],
+                            self.corner_radius.value,
+                            pending,
+                            |owner| owner.corner_radius.value,
+                            |owner, radius, cx| {
+                                if owner.send(Command::SetCornerRadius(radius), cx) {
+                                    owner.corner_radius.pending = true;
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        )
+                        .when(legacy_radius.is_some(), |tabs| tabs.selected_index(usize::MAX)),
+                    )
+                    .when_some(legacy_radius, |content, value| {
+                        content.child(settings_common::settings_description(
+                            match language {
+                                LanguagePreference::Chinese => {
+                                    format!("当前保留旧设置：{value} px。选择上方选项后更新。")
+                                }
+                                LanguagePreference::English => format!(
+                                    "Keeping the saved legacy radius: {value} px. Choose an option above to update it."
+                                ),
+                            },
+                            cx,
+                        ))
+                    }),
             )
             .child(
                 div()
