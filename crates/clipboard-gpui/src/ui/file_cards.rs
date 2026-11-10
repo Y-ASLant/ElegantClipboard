@@ -57,13 +57,9 @@ fn supported_image_file(path: &str) -> bool {
         .any(|supported| extension.eq_ignore_ascii_case(supported))
 }
 
-/// `files` 记录是否恰好是一张受支持的图片文件。
-///
-/// 复制截图工具（PixPin 等）产出的 JPG 会以「文件」形式进入历史，用户在悬停设置里
-/// 看到的却是「图片」开关，所以这类记录要按图片对待。
-pub(super) fn single_image_file_paths(raw: Option<&str>) -> bool {
-    let paths = clipboard_core::parse_file_paths_for_display(raw);
-    matches!(paths.as_slice(), [path] if supported_image_file(path))
+/// 文件记录是否全部由图片格式组成。这类记录既是文件，也按图片对待。
+pub(super) fn image_file_record(raw: Option<&str>) -> bool {
+    clipboard_core::image_file_paths(&clipboard_core::parse_file_paths_for_display(raw))
 }
 
 /// 读本地图片文件的尺寸。只解析文件头，不解码像素，开销极小。

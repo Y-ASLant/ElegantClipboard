@@ -239,7 +239,7 @@ fn category_queries_filter_search_count_and_group() -> Result<()> {
     let history = History::new(&db);
     assert_eq!(
         history.count_filtered_in_group("needle", false, None, ContentCategory::Text)?,
-        3
+        4
     );
     assert_eq!(
         history
@@ -251,8 +251,46 @@ fn category_queries_filter_search_count_and_group() -> Result<()> {
         history.count_filtered_in_group("", false, None, ContentCategory::Image)?,
         1
     );
+    repo.insert(NewClipboardItem {
+        content_type: ContentType::Files,
+        file_paths: Some(vec![
+            r"C:\Temp\Snipaste_20261110_125024_ElegantClipboard.png".into(),
+        ]),
+        content_hash: "category-snipaste".into(),
+        semantic_hash: "category-snipaste".into(),
+        ..Default::default()
+    })?;
+    repo.insert(NewClipboardItem {
+        content_type: ContentType::Files,
+        file_paths: Some(vec![r"C:\notes.txt".into(), r"C:\photo.png".into()]),
+        content_hash: "category-mixed-files".into(),
+        semantic_hash: "category-mixed-files".into(),
+        ..Default::default()
+    })?;
+    repo.insert(NewClipboardItem {
+        content_type: ContentType::Files,
+        file_paths: Some(vec![r"C:\a.PNG".into(), r"C:\b.tiff".into()]),
+        content_hash: "category-image-files".into(),
+        semantic_hash: "category-image-files".into(),
+        ..Default::default()
+    })?;
+    assert_eq!(
+        history.count_filtered_in_group("", false, None, ContentCategory::Image)?,
+        3
+    );
+    repo.insert(NewClipboardItem {
+        content_type: ContentType::Html,
+        text_content: Some("https://example.com".into()),
+        content_hash: "category-html-url".into(),
+        semantic_hash: "category-html-url".into(),
+        ..Default::default()
+    })?;
     assert_eq!(
         history.count_filtered_in_group("", false, None, ContentCategory::Url)?,
+        2
+    );
+    assert_eq!(
+        history.count_filtered_in_group("example.com", false, None, ContentCategory::Text)?,
         1
     );
     history.toggle_favorite(ids[1])?;
@@ -264,7 +302,7 @@ fn category_queries_filter_search_count_and_group() -> Result<()> {
     history.move_to_group(ids[5], None, Some(group.id))?;
     assert_eq!(
         history.count_filtered_in_group("", false, None, ContentCategory::Other)?,
-        2
+        5
     );
     assert_eq!(
         history.list_filtered_in_group(

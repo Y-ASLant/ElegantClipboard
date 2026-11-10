@@ -13,6 +13,41 @@ use std::{
 pub const MAX_FILE_PATHS: usize = 256;
 pub const MAX_PATH_LIST_BYTES: usize = 1024 * 1024;
 
+/// 图片格式。这类文件既是文件，也是图片。
+pub const IMAGE_FILE_EXTENSIONS: &[&str] = &[
+    "avif", "bmp", "dib", "gif", "heic", "heif", "ico", "jfif", "jpe", "jpeg", "jpg", "png", "tif",
+    "tiff", "webp",
+];
+
+pub fn is_image_file_path(path: &str) -> bool {
+    let Some(extension) = Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+    else {
+        return false;
+    };
+    IMAGE_FILE_EXTENSIONS
+        .iter()
+        .any(|image| extension.eq_ignore_ascii_case(image))
+}
+
+/// 文件记录是否全部由图片格式组成。空列表不是图片。
+pub fn image_file_paths(paths: &[String]) -> bool {
+    !paths.is_empty() && paths.iter().all(|path| is_image_file_path(path))
+}
+
+pub(crate) fn image_file_record_sql() -> String {
+    let extension = IMAGE_FILE_EXTENSIONS
+        .iter()
+        .map(|extension| format!("lower(json_each.value) LIKE '%.{extension}'"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    format!(
+        "json_valid(file_paths) AND json_array_length(file_paths) >= 1 AND NOT EXISTS (\
+         SELECT 1 FROM json_each(file_paths) WHERE NOT ({extension}))"
+    )
+}
+
 pub(crate) fn parse_file_paths(raw: Option<&str>) -> Result<Vec<String>> {
     let paths: Vec<String> =
         serde_json::from_str(raw.ok_or_else(|| anyhow::anyhow!("文件路径缺失"))?)?;

@@ -274,16 +274,13 @@ impl ClipboardView {
             let Some(item) = self.history.items.iter().find(|item| item.id == id) else {
                 return;
             };
-            // 「文件」记录若恰好是一张图片文件，按「图片」开关判定。复制截图（PixPin 等
-            // 工具）时剪贴板里放的是图片**文件**而不是 image 记录，若按「文件」开关判定，
-            // 用户明明开了「图片」却看不到任何预览。
-            let content_kind = if item.content_type == "files"
-                && single_image_file_paths(item.file_paths.as_deref())
-            {
-                "image"
-            } else {
-                item.content_type.as_str()
-            };
+            // 图片格式的文件同时属于图片，悬停开关跟图片页用同一口径。
+            let content_kind =
+                if item.content_type == "files" && image_file_record(item.file_paths.as_deref()) {
+                    "image"
+                } else {
+                    item.content_type.as_str()
+                };
             let allowed = self.hover_preference.allows(content_kind);
             if !allowed {
                 if self.hover_preview.id.is_some() {

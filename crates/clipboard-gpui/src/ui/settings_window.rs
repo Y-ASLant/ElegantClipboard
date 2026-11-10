@@ -1,45 +1,4 @@
 use super::*;
-impl SettingsPage {
-    pub(super) const ALL: [Self; 9] = [
-        Self::General,
-        Self::Display,
-        Self::Todos,
-        Self::Theme,
-        Self::Data,
-        Self::AppFilter,
-        Self::Audio,
-        Self::Shortcuts,
-        Self::About,
-    ];
-
-    pub(super) fn label(self, language: LanguagePreference) -> &'static str {
-        match self {
-            Self::General => tr(language, "常规", "General"),
-            Self::Display => tr(language, "显示", "Display"),
-            Self::Todos => tr(language, "待办", "To-dos"),
-            Self::Theme => tr(language, "外观", "Appearance"),
-            Self::Data => tr(language, "数据", "Data"),
-            Self::AppFilter => tr(language, "应用过滤", "App filter"),
-            Self::Audio => tr(language, "音效", "Audio"),
-            Self::Shortcuts => tr(language, "快捷键", "Shortcuts"),
-            Self::About => tr(language, "关于", "About"),
-        }
-    }
-
-    pub(super) fn icon(self) -> IconName {
-        match self {
-            Self::General => IconName::Settings,
-            Self::Display => IconName::Eye,
-            Self::Todos => IconName::CircleCheck,
-            Self::Theme => IconName::Palette,
-            Self::Data => IconName::HardDrive,
-            Self::AppFilter => IconName::Search,
-            Self::Audio => IconName::Bell,
-            Self::Shortcuts => IconName::SquareTerminal,
-            Self::About => IconName::Info,
-        }
-    }
-}
 
 impl ClipboardView {
     pub(super) fn open_settings_window(&mut self, page: SettingsPage, cx: &mut Context<Self>) {

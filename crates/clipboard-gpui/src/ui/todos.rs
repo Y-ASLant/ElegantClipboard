@@ -251,6 +251,7 @@ fn todo_card(view: &ClipboardView, todo: &Todo, cx: &App) -> Div {
                 } else {
                     cx.theme().foreground
                 })
+                .when(todo.completed, |title| title.line_through())
                 .child(if excerpt.is_empty() {
                     tr(view.language, "空白待办", "Empty to-do").to_owned()
                 } else {
@@ -287,7 +288,7 @@ fn todo_row(
         .min_w_0()
         .flex()
         .items_start()
-        .gap(px(visual::SPACE_2))
+        .gap(px(visual::SPACE_3))
         .p(px(visual::card_padding(
             view.todo_preference
                 .value
@@ -298,62 +299,75 @@ fn todo_row(
         .border_color(crate::design_system::container_border(cx))
         .bg(cx.theme().colors.list)
         .child(
-            Checkbox::new(("todo", id as u64))
-                .checked(completed)
-                .disabled(pending)
-                .accessibility_label(text.clone())
-                .on_change(move |checked, _, cx| {
-                    let _ = owner.update(cx, |view, cx| {
-                        if !view.todos_pending
-                            && view.send(
-                                Command::SetTodoCompleted {
-                                    id,
-                                    completed: *checked,
-                                },
-                                cx,
-                            )
-                        {
-                            view.todo_notice = checked.then_some(TodoNotice::Completed(id));
-                            view.todos_pending = true;
-                            cx.notify();
-                        }
-                    });
-                }),
+            div()
+                .flex_shrink_0()
+                .h(px(visual::PREVIEW_LINE_HEIGHT))
+                .flex()
+                .items_center()
+                .child(
+                    Checkbox::new(("todo", id as u64))
+                        .checked(completed)
+                        .disabled(pending)
+                        .accessibility_label(text.clone())
+                        .on_change(move |checked, _, cx| {
+                            let _ = owner.update(cx, |view, cx| {
+                                if !view.todos_pending
+                                    && view.send(
+                                        Command::SetTodoCompleted {
+                                            id,
+                                            completed: *checked,
+                                        },
+                                        cx,
+                                    )
+                                {
+                                    view.todo_notice = checked.then_some(TodoNotice::Completed(id));
+                                    view.todos_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                ),
         )
         .child(todo_card(view, &todo, cx))
         .child(
-            Button::new(format!("todo-edit-{id}"))
-                .ghost()
-                .small()
+            div()
                 .flex_shrink_0()
-                .label(tr(view.language, "编辑", "Edit"))
-                .disabled(pending)
-                .on_click({
-                    let edit_owner = remove_owner.clone();
-                    let source = text;
-                    move |_, window, cx| {
-                        let _ = edit_owner.update(cx, |view, cx| {
-                            view.open_todo_editor(Some(id), source.clone(), window, cx);
-                        });
-                    }
-                }),
-        )
-        .child(
-            Button::new(format!("todo-remove-{id}"))
-                .ghost()
-                .small()
-                .flex_shrink_0()
-                .label(tr(view.language, "移除", "Remove"))
-                .disabled(pending)
-                .on_click(move |_, _, cx| {
-                    let _ = remove_owner.update(cx, |view, cx| {
-                        if !view.todos_pending && view.send(Command::DeleteTodo(id), cx) {
-                            view.todo_notice = None;
-                            view.todos_pending = true;
-                            cx.notify();
-                        }
-                    });
-                }),
+                .h(px(visual::PREVIEW_LINE_HEIGHT))
+                .flex()
+                .items_center()
+                .gap(px(visual::SPACE_1))
+                .child(
+                    Button::new(format!("todo-edit-{id}"))
+                        .ghost()
+                        .small()
+                        .label(tr(view.language, "编辑", "Edit"))
+                        .disabled(pending)
+                        .on_click({
+                            let edit_owner = remove_owner.clone();
+                            let source = text;
+                            move |_, window, cx| {
+                                let _ = edit_owner.update(cx, |view, cx| {
+                                    view.open_todo_editor(Some(id), source.clone(), window, cx);
+                                });
+                            }
+                        }),
+                )
+                .child(
+                    Button::new(format!("todo-remove-{id}"))
+                        .ghost()
+                        .small()
+                        .label(tr(view.language, "移除", "Remove"))
+                        .disabled(pending)
+                        .on_click(move |_, _, cx| {
+                            let _ = remove_owner.update(cx, |view, cx| {
+                                if !view.todos_pending && view.send(Command::DeleteTodo(id), cx) {
+                                    view.todo_notice = None;
+                                    view.todos_pending = true;
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                ),
         )
 }
 

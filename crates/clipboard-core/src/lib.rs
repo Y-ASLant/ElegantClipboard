@@ -25,7 +25,10 @@ pub mod search;
 pub mod text_transform;
 mod todos;
 pub use blob_store::sweep_pending_at;
-pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES, parse_file_paths_for_display};
+pub use files::{
+    IMAGE_FILE_EXTENSIONS, MAX_FILE_PATHS, MAX_PATH_LIST_BYTES, image_file_paths,
+    is_image_file_path, parse_file_paths_for_display,
+};
 pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, SavedImage, save_png};
 pub use merge::MergedContent;
 pub use native_format::{
@@ -67,7 +70,7 @@ impl ContentCategory {
     fn content_types(self) -> &'static str {
         match self {
             Self::All => "text,url,html,rtf,image,files",
-            Self::Text => "text,html,rtf",
+            Self::Text => "text,html,rtf,url",
             Self::Image => "image",
             Self::Url => "url",
             Self::Other => "image,files,url",
