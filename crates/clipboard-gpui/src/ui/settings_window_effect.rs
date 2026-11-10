@@ -11,8 +11,8 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner_state.language;
-        let preference = owner_state.window_effect;
-        let pending = owner_state.window_effect_pending;
+        let preference = owner_state.window_effect.value;
+        let pending = owner_state.window_effect.pending;
         let capabilities = WindowEffectCapabilities::current();
         let backend = capabilities.resolve(preference.effect);
         let supported = capabilities.supports(preference.effect);
@@ -49,11 +49,11 @@ impl SettingsWindowView {
                     return;
                 };
                 let _ = owner.update(cx, |owner, cx| {
-                    if !owner.window_effect_pending && owner.window_effect.effect != effect {
+                    if !owner.window_effect.pending && owner.window_effect.value.effect != effect {
                         owner.save_window_effect(
                             WindowEffectPreference {
                                 effect,
-                                ..owner.window_effect
+                                ..owner.window_effect.value
                             },
                             cx,
                         );

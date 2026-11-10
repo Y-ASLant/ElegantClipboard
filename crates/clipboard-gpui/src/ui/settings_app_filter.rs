@@ -1,9 +1,9 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_description, settings_field, settings_inline,
-    settings_stack, settings_toggle,
+    choice_tabs, owner_state, pref_checkbox, settings_description, settings_field, settings_inline,
+    settings_stack,
 };
 use super::*;
-use gpui_kit::component::{accordion::Accordion, alert::Alert, checkbox::Checkbox};
+use gpui_kit::component::{accordion::Accordion, alert::Alert};
 
 impl SettingsWindowView {
     pub(super) fn settings_app_filter_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -24,22 +24,21 @@ impl SettingsWindowView {
             Vec::new()
         };
         let running_apps_pending = owner_state.running_apps_pending;
-        let filter_enable_owner = self.owner.clone();
 
         settings_stack()
             .child(
-                settings_toggle(cx, Checkbox::new("app-filter-enabled"))
-                    .w_full()
-                    .label(tr(language, "启用应用过滤", "Enable app filter"))
-                    .checked(app_filter.enabled)
-                    .disabled(app_filter_pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = filter_enable_owner.update(cx, |owner, cx| {
-                            let mut next = owner.app_filter.value.clone();
-                            next.enabled = *checked;
-                            owner.save_app_filter(next, cx);
-                        });
-                    }),
+                pref_checkbox(
+                    cx,
+                    "app-filter-enabled",
+                    tr(language, "启用应用过滤", "Enable app filter"),
+                    app_filter.enabled,
+                    app_filter_pending,
+                    &self.owner,
+                    |owner| owner.app_filter.value.clone(),
+                    |next, checked| next.enabled = checked,
+                    ClipboardView::save_app_filter,
+                )
+                .w_full(),
             )
             .child(
                 settings_field(tr(language, "过滤模式", "Filter mode")).child(

@@ -1,9 +1,8 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_field, settings_inline, settings_stack, settings_toggle,
+    choice_tabs, owner_state, pref_checkbox, pref_switch, settings_field, settings_inline,
+    settings_stack,
 };
 use super::*;
-use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::switch::Switch;
 
 impl SettingsWindowView {
     pub(super) fn settings_todo_list_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -70,18 +69,17 @@ impl SettingsWindowView {
                     ]
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
-                        let owner = self.owner.clone();
-                        settings_toggle(cx, Checkbox::new(id))
-                            .label(label)
-                            .checked(selected)
-                            .disabled(pending)
-                            .on_change(move |checked, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    let mut next = owner.todo_preference.value;
-                                    set_checked(&mut next, *checked);
-                                    owner.save_todo_preference(next, cx);
-                                });
-                            })
+                        pref_checkbox(
+                            cx,
+                            id,
+                            label,
+                            selected,
+                            pending,
+                            &self.owner,
+                            |owner| owner.todo_preference.value,
+                            set_checked,
+                            ClipboardView::save_todo_preference,
+                        )
                     }),
                 ),
             )
@@ -95,25 +93,18 @@ impl SettingsWindowView {
         let language = owner_state.language;
         let enabled = owner_state.todo_preference.value.toast;
         let pending = owner_state.todo_preference.pending;
-        let owner = self.owner.clone();
         settings_inline()
-            .child(
-                settings_toggle(cx, Switch::new("todo-toast"))
-                    .label(tr(language, "启用", "Enable"))
-                    .checked(enabled)
-                    .disabled(pending)
-                    .on_change(move |checked, _, cx| {
-                        let _ = owner.update(cx, |owner, cx| {
-                            owner.save_todo_preference(
-                                TodoPreference {
-                                    toast: *checked,
-                                    ..owner.todo_preference.value
-                                },
-                                cx,
-                            );
-                        });
-                    }),
-            )
+            .child(pref_switch(
+                cx,
+                "todo-toast",
+                tr(language, "启用", "Enable"),
+                enabled,
+                pending,
+                &self.owner,
+                |owner| owner.todo_preference.value,
+                |next, checked| next.toast = checked,
+                ClipboardView::save_todo_preference,
+            ))
             .into_any_element()
     }
 }

@@ -131,7 +131,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.display.show_category_filter {
+        if !self.display.value.show_category_filter {
             return;
         }
         let tabs = self.toolbar_tabs();
@@ -197,7 +197,8 @@ impl ClipboardView {
     }
 
     pub(super) fn rebuild_row_layout(&mut self) {
-        (self.row_sizes, self.row_offsets) = history_row_layout(&self.history.items, self.display);
+        (self.row_sizes, self.row_offsets) =
+            history_row_layout(&self.history.items, self.display.value);
         self.drag_motion = DragMotionState::default();
     }
 

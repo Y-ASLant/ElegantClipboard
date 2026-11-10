@@ -55,7 +55,7 @@ impl ClipboardView {
     /// Keep a small margin for reverse scrolling, plus resources shared by open previews.
     pub(super) fn sync_image_assets(&mut self, cx: &mut App) {
         let range = image_cache_range(self.image_visible_range.clone(), self.history.items.len());
-        let image_dimensions = visual::thumbnail_size(self.display.card_density);
+        let image_dimensions = visual::thumbnail_size(self.display.value.card_density);
         let scale = self.thumbnail_scale;
         let file_card_info = &self.file_card_info;
         let wanted = self.history.items[range.clone()].iter().filter_map(|item| {
@@ -129,7 +129,7 @@ impl ClipboardView {
         path: PathBuf,
     ) -> thumbnail_cache::ThumbnailKey {
         let dimensions = if item.content_type == "image" {
-            visual::thumbnail_size(self.display.card_density)
+            visual::thumbnail_size(self.display.value.card_density)
         } else {
             (48., 36.)
         };

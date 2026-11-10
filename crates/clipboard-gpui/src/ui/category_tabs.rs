@@ -52,10 +52,11 @@ impl ClipboardView {
     /// 分类标签可见时的工具栏顺序。待办固定插在收藏槽位之后，不受分类显隐开关影响。
     pub(super) fn toolbar_tabs(&self) -> Vec<ToolbarTab> {
         let mut tabs = Vec::new();
-        for (index, (visible, (filter, ..))) in category_tab_flags(&self.display.category_tabs)
-            .into_iter()
-            .zip(CATEGORY_TAB_SPECS)
-            .enumerate()
+        for (index, (visible, (filter, ..))) in
+            category_tab_flags(&self.display.value.category_tabs)
+                .into_iter()
+                .zip(CATEGORY_TAB_SPECS)
+                .enumerate()
         {
             if visible {
                 tabs.push(ToolbarTab::Category(*filter));
@@ -101,10 +102,10 @@ impl ClipboardView {
     }
 
     pub(super) fn active_category_tab_visible(&self) -> bool {
-        if !self.display.show_category_filter {
+        if !self.display.value.show_category_filter {
             return true;
         }
-        let tabs = &self.display.category_tabs;
+        let tabs = &self.display.value.category_tabs;
         if self.history.favorite_only() {
             return tabs.favorites;
         }

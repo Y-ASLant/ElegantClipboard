@@ -1,9 +1,8 @@
 use super::settings_common::{
-    choice_tabs, owner_state, settings_field, settings_field_help, settings_inline, settings_stack,
-    settings_toggle,
+    choice_tabs, owner_state, pref_checkbox, settings_field, settings_field_help, settings_inline,
+    settings_stack,
 };
 use super::*;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::NumberInput;
 
 impl SettingsWindowView {
@@ -27,9 +26,8 @@ impl SettingsWindowView {
             .small()
             .into_any_element();
         }
-        let hover_preference = owner_state.hover_preference;
-        let hover_pending = owner_state.hover_preference_pending;
-        let expanded_hover_owner = self.owner.clone();
+        let hover_preference = owner_state.hover_preference.value;
+        let hover_pending = owner_state.hover_preference.pending;
         settings_stack()
             .child(
                 settings_field(tr(language, "预览内容", "Preview content")).child(
@@ -56,44 +54,35 @@ impl SettingsWindowView {
                             ),
                         ]
                         .map(|(id, label, selected, set_checked)| {
-                            let owner = self.owner.clone();
-                            settings_toggle(cx, Checkbox::new(id))
-                                .min_w_0()
-                                .label(label)
-                                .checked(selected)
-                                .disabled(hover_pending)
-                                .on_change(move |checked, _, cx| {
-                                    let _ = owner.update(cx, |owner, cx| {
-                                        let mut next = owner.hover_preference;
-                                        set_checked(&mut next, *checked);
-                                        owner.save_hover_preference(next, cx);
-                                    });
-                                })
+                            pref_checkbox(
+                                cx,
+                                id,
+                                label,
+                                selected,
+                                hover_pending,
+                                &self.owner,
+                                |owner| owner.hover_preference.value,
+                                set_checked,
+                                ClipboardView::save_hover_preference,
+                            )
+                            .min_w_0()
                         }),
                     ),
                 ),
             )
             .child(
-                settings_toggle(cx, Checkbox::new("hover-expanded-image"))
-                    .min_w_0()
-                    .label(tr(
-                        language,
-                        "大图使用更大浮窗",
-                        "Expand image hover window",
-                    ))
-                    .checked(hover_preference.expanded_image)
-                    .disabled(hover_pending || !hover_preference.image)
-                    .on_change(move |checked, _, cx| {
-                        let _ = expanded_hover_owner.update(cx, |owner, cx| {
-                            owner.save_hover_preference(
-                                HoverPreviewPreference {
-                                    expanded_image: *checked,
-                                    ..owner.hover_preference
-                                },
-                                cx,
-                            );
-                        });
-                    }),
+                pref_checkbox(
+                    cx,
+                    "hover-expanded-image",
+                    tr(language, "大图使用更大浮窗", "Expand image hover window"),
+                    hover_preference.expanded_image,
+                    hover_pending || !hover_preference.image,
+                    &self.owner,
+                    |owner| owner.hover_preference.value,
+                    |next, checked| next.expanded_image = checked,
+                    ClipboardView::save_hover_preference,
+                )
+                .min_w_0(),
             )
             .child(
                 settings_field_help(
@@ -124,12 +113,12 @@ impl SettingsWindowView {
                     ],
                     hover_preference.position,
                     hover_pending,
-                    |owner| owner.hover_preference.position,
+                    |owner| owner.hover_preference.value.position,
                     |owner, position, cx| {
                         owner.save_hover_preference(
                             HoverPreviewPreference {
                                 position,
-                                ..owner.hover_preference
+                                ..owner.hover_preference.value
                             },
                             cx,
                         );
@@ -156,25 +145,18 @@ impl SettingsWindowView {
                         detail_toggles(language, hover_preference.details)
                             .into_iter()
                             .map(|toggle| {
-                                let owner = self.owner.clone();
-                                settings_toggle(cx, Checkbox::new(toggle.id))
-                                    .min_w_0()
-                                    .label(toggle.label)
-                                    .checked(toggle.selected)
-                                    .disabled(hover_pending)
-                                    .on_change(move |checked, _, cx| {
-                                        let _ = owner.update(cx, |owner, cx| {
-                                            let mut details = owner.hover_preference.details;
-                                            (toggle.set)(&mut details, *checked);
-                                            owner.save_hover_preference(
-                                                HoverPreviewPreference {
-                                                    details,
-                                                    ..owner.hover_preference
-                                                },
-                                                cx,
-                                            );
-                                        });
-                                    })
+                                pref_checkbox(
+                                    cx,
+                                    toggle.id,
+                                    toggle.label,
+                                    toggle.selected,
+                                    hover_pending,
+                                    &self.owner,
+                                    |owner| owner.hover_preference.value,
+                                    move |next, checked| (toggle.set)(&mut next.details, checked),
+                                    ClipboardView::save_hover_preference,
+                                )
+                                .min_w_0()
                             }),
                     ),
                 ),

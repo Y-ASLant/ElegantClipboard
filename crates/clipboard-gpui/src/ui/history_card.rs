@@ -114,7 +114,7 @@ impl ClipboardView {
             card_index: index,
             source_app_name: item.source_app_name.clone(),
             source_app_icon: item.source_app_icon.clone(),
-            display: self.display,
+            display: self.display.value,
             language: self.language,
             summary,
             preview_text,
@@ -193,14 +193,14 @@ impl ClipboardView {
         let measured_size = Rc::new(Cell::new(size(px(0.), px(0.))));
         let drag_enabled = !self.reorder_pending && !self.history.loading && !self.batch_mode;
         let live_drag_source = self.card_drag_active(cx) && self.drag_source_id() == Some(id);
-        let card_spacing = visual::card_spacing(self.display.card_density);
-        let card_padding = visual::card_padding(self.display.card_density);
+        let card_spacing = visual::card_spacing(self.display.value.card_density);
+        let card_padding = visual::card_padding(self.display.value.card_density);
         let last = index + 1 == self.history.items.len();
         let row_height = self.row_sizes.get(index).map_or_else(
             || {
-                let mut height = px(history_row_height(item, self.display));
+                let mut height = px(history_row_height(item, self.display.value));
                 if last {
-                    height += px(visual::last_row_extra(self.display.card_density));
+                    height += px(visual::last_row_extra(self.display.value.card_density));
                 }
                 height
             },
@@ -313,22 +313,27 @@ impl ClipboardView {
                 .size_full(),
             )
             .child(surface.when(!self.batch_mode, |card| {
-                card.child(self.drag_handle(id, true, self.display.show_drag_area_indicator, cx))
-                    .child(self.drag_handle(id, false, self.display.show_drag_area_indicator, cx))
-                    .child(
-                        self.render_row_action_bar(id, item, card_padding, cx)
-                            .id(("history-row-actions", id as usize))
-                            .block_mouse_except_scroll()
-                            .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
-                                action_hover.update(cx, |hovered, _| hovered.actions = *is_hovered);
-                                if *is_hovered {
-                                    this.close_hover_preview("row_actions_hovered", cx);
-                                }
-                                cx.notify();
-                            }))
-                            .opacity(action_opacity)
-                            .when(action_opacity == 0., |bar| bar.invisible()),
-                    )
+                card.child(self.drag_handle(
+                    id,
+                    true,
+                    self.display.value.show_drag_area_indicator,
+                    cx,
+                ))
+                .child(self.drag_handle(id, false, self.display.value.show_drag_area_indicator, cx))
+                .child(
+                    self.render_row_action_bar(id, item, card_padding, cx)
+                        .id(("history-row-actions", id as usize))
+                        .block_mouse_except_scroll()
+                        .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                            action_hover.update(cx, |hovered, _| hovered.actions = *is_hovered);
+                            if *is_hovered {
+                                this.close_hover_preview("row_actions_hovered", cx);
+                            }
+                            cx.notify();
+                        }))
+                        .opacity(action_opacity)
+                        .when(action_opacity == 0., |bar| bar.invisible()),
+                )
             }));
         let row = self.history_row_menu(row, item, cx);
         let row = div()

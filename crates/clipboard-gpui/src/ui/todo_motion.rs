@@ -61,7 +61,7 @@ fn todo_row_fallback(view: &ClipboardView) -> f32 {
     let density = view
         .todo_preference
         .value
-        .density(view.display.card_density);
+        .density(view.display.value.card_density);
     let preference = view.todo_preference.value;
     let body = visual::PREVIEW_LINE_HEIGHT
         + if preference.show_created || preference.show_edited {

@@ -300,30 +300,21 @@ impl Render for SettingsWindowView {
             let owner = owner.read(cx);
             (
                 owner.language,
-                owner.display.card_max_lines,
-                owner.display_pending,
+                owner.display.value.card_max_lines,
+                owner.display.pending,
             )
         };
-        let sync_preview_lines = preview_lines != self.preview_lines_last_value
-            || (self.preview_lines_last_pending && !display_pending);
-        self.preview_lines_last_value = preview_lines;
-        self.preview_lines_last_pending = display_pending;
-        if sync_preview_lines {
-            let confirmed = preview_lines.to_string();
-            if self.preview_lines_input.read(cx).value() != confirmed {
-                self.preview_lines_input
-                    .update(cx, |input, cx| input.set_value(confirmed, window, cx));
-            }
-        }
+        self.preview_lines
+            .sync(i32::from(preview_lines), display_pending, window, cx);
         let (opacity, opacity_pending, delay_ms, delay_pending, zoom_step, zoom_pending) = {
             let owner = owner.read(cx);
             (
-                i32::from(owner.window_effect.opacity),
-                owner.window_effect_pending,
-                i32::from(owner.hover_preference.delay_ms),
-                owner.hover_preference_pending,
-                i32::from(owner.hover_preference.zoom_step),
-                owner.hover_preference_pending,
+                i32::from(owner.window_effect.value.opacity),
+                owner.window_effect.pending,
+                i32::from(owner.hover_preference.value.delay_ms),
+                owner.hover_preference.pending,
+                i32::from(owner.hover_preference.value.zoom_step),
+                owner.hover_preference.pending,
             )
         };
         self.window_opacity

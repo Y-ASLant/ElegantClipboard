@@ -20,7 +20,7 @@ impl ClipboardView {
                         .history
                         .items
                         .iter()
-                        .map(|item| (item.id, history_row_height(item, self.display)))
+                        .map(|item| (item.id, history_row_height(item, self.display.value)))
                         .collect();
                     self.reorder_offsets = reorder_pixel_offsets(&before, &after);
                 }

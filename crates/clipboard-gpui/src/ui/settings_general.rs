@@ -195,11 +195,11 @@ impl SettingsWindowView {
                 .w_full()
                 .min_w_0()
             };
-        // 复选框行高 32px，列宽收窄到两列可并排，行距收紧避免卡片空高。
+        // 复选框行高 32px，列基宽 240：内容区 ≥512px（2×240+间距）即可两列并排。
         let split_at = behavior_toggles.len().div_ceil(2);
         let behavior_column = || {
             settings_column()
-                .flex_basis(px(280.))
+                .flex_basis(px(240.))
                 .gap(px(visual::SPACE_2))
         };
         settings_columns()

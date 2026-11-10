@@ -16,15 +16,31 @@ impl<T> PendingPref<T> {
 }
 
 impl ClipboardView {
-    pub(super) fn save_fonts(&mut self, fonts: FontPreference, cx: &mut Context<Self>) {
-        if !self.fonts.pending
-            && fonts.valid()
-            && fonts != self.fonts.value
-            && self.send(Command::SetFonts(fonts), cx)
-        {
-            self.fonts.pending = true;
+    /// 偏好发送统一入口：空闲、有效且与当前值不同才发送，成功后置 pending。
+    pub(super) fn save_pending<T: PartialEq>(
+        &mut self,
+        preference: impl Fn(&mut Self) -> &mut PendingPref<T>,
+        valid: bool,
+        value: T,
+        command: impl FnOnce(T) -> Command,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = &mut preference(self);
+        let idle_and_changed = !pending.pending && valid && value != pending.value;
+        if idle_and_changed && self.send(command(value), cx) {
+            preference(self).pending = true;
             cx.notify();
         }
+    }
+
+    pub(super) fn save_fonts(&mut self, fonts: FontPreference, cx: &mut Context<Self>) {
+        self.save_pending(
+            |this| &mut this.fonts,
+            fonts.valid(),
+            fonts,
+            Command::SetFonts,
+            cx,
+        );
     }
 
     pub(super) fn apply_fonts_saved(
@@ -45,13 +61,13 @@ impl ClipboardView {
     }
 
     pub(super) fn save_display(&mut self, display: DisplayPreference, cx: &mut Context<Self>) {
-        if !self.display_pending
-            && display != self.display
-            && self.send(Command::SetDisplay(display), cx)
-        {
-            self.display_pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.display,
+            true,
+            display,
+            Command::SetDisplay,
+            cx,
+        );
     }
 
     pub(super) fn save_todo_preference(
@@ -59,23 +75,17 @@ impl ClipboardView {
         preference: TodoPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.todo_preference.pending
-            && preference != self.todo_preference.value
-            && self.send(Command::SetTodoPreference(preference), cx)
-        {
-            self.todo_preference.pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.todo_preference,
+            true,
+            preference,
+            Command::SetTodoPreference,
+            cx,
+        );
     }
 
     pub(super) fn save_audio(&mut self, audio: AudioPreference, cx: &mut Context<Self>) {
-        if !self.audio.pending
-            && audio != self.audio.value
-            && self.send(Command::SetAudio(audio), cx)
-        {
-            self.audio.pending = true;
-            cx.notify();
-        }
+        self.save_pending(|this| &mut this.audio, true, audio, Command::SetAudio, cx);
     }
 
     pub(super) fn save_monitor_types(
@@ -83,14 +93,13 @@ impl ClipboardView {
         monitor_types: MonitorTypesPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.monitor_types.pending
-            && monitor_types.valid()
-            && monitor_types != self.monitor_types.value
-            && self.send(Command::SetMonitorTypes(monitor_types), cx)
-        {
-            self.monitor_types.pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.monitor_types,
+            monitor_types.valid(),
+            monitor_types,
+            Command::SetMonitorTypes,
+            cx,
+        );
     }
 
     pub(super) fn save_capture_formats(
@@ -99,14 +108,13 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         let preference = preference.normalized();
-        if !self.capture_formats.pending
-            && preference.valid()
-            && preference != self.capture_formats.value
-            && self.send(Command::SetCaptureFormats(preference), cx)
-        {
-            self.capture_formats.pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.capture_formats,
+            preference.valid(),
+            preference,
+            Command::SetCaptureFormats,
+            cx,
+        );
     }
 
     pub(super) fn save_app_filter(
@@ -114,14 +122,13 @@ impl ClipboardView {
         preference: AppFilterPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.app_filter.pending
-            && preference.valid()
-            && preference != self.app_filter.value
-            && self.send(Command::SetAppFilter(Box::new(preference)), cx)
-        {
-            self.app_filter.pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.app_filter,
+            preference.valid(),
+            preference,
+            |preference| Command::SetAppFilter(Box::new(preference)),
+            cx,
+        );
     }
 
     pub(super) fn save_window_effect(
@@ -129,14 +136,13 @@ impl ClipboardView {
         preference: WindowEffectPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.window_effect_pending
-            && preference.valid()
-            && preference != self.window_effect
-            && self.send(Command::SetWindowEffect(preference), cx)
-        {
-            self.window_effect_pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.window_effect,
+            preference.valid(),
+            preference,
+            Command::SetWindowEffect,
+            cx,
+        );
     }
 
     pub(super) fn load_running_apps(&mut self, cx: &mut Context<Self>) {
@@ -308,10 +314,10 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.display_pending = false;
+        self.display.pending = false;
         match result {
             Ok(display) => {
-                self.display = display;
+                self.display.value = display;
                 self.rebuild_rows_keeping_scroll();
                 if self
                     .history
@@ -400,15 +406,15 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.window_effect_pending = false;
+        self.window_effect.pending = false;
         match result {
             Ok(preference) => {
-                if preference != self.window_effect {
+                if preference != self.window_effect.value {
                     let capabilities =
                         clipboard_platform::window_effect::WindowEffectCapabilities::current();
                     let material_changed = capabilities.resolve(preference.effect)
-                        != capabilities.resolve(self.window_effect.effect);
-                    self.window_effect = preference;
+                        != capabilities.resolve(self.window_effect.value.effect);
+                    self.window_effect.value = preference;
                     window_effect::record(
                         preference,
                         capabilities.resolve(preference.effect).effect(),

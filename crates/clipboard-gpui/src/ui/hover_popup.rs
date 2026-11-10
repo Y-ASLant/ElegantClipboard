@@ -56,9 +56,9 @@ impl ClipboardView {
         else {
             return;
         };
-        let spacing = px(visual::card_spacing(self.display.card_density));
+        let spacing = px(visual::card_spacing(self.display.value.card_density));
         let top = viewport.top() + *row_offset + self.scroll.offset().y + spacing;
-        let bottom = top + px(history_row_height(item, self.display)) - spacing * 2.;
+        let bottom = top + px(history_row_height(item, self.display.value)) - spacing * 2.;
         let visible_top = top.max(viewport.top());
         let visible_bottom = bottom.min(viewport.bottom());
         if visible_bottom <= visible_top {
@@ -78,9 +78,9 @@ impl ClipboardView {
         let Some(bounds) = crate::popup_geometry::hover_popup_bounds(
             owner_bounds,
             screen,
-            self.hover_preference.position,
+            self.hover_preference.value.position,
             image_dimensions,
-            self.hover_preference.expanded_image,
+            self.hover_preference.value.expanded_image,
             anchor_y,
         ) else {
             return;
@@ -99,11 +99,11 @@ impl ClipboardView {
             information: hover_information::HoverInformation::new(
                 item,
                 image_dimensions,
-                self.hover_preference.details,
+                self.hover_preference.value.details,
             ),
         };
         let language = self.language;
-        let zoom_step = self.hover_preference.zoom_step;
+        let zoom_step = self.hover_preference.value.zoom_step;
         #[cfg(windows)]
         let main_native = native_window::window_id(window);
         tracing::debug!(

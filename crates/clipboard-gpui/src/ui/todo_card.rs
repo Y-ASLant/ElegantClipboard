@@ -54,7 +54,7 @@ fn todo_card(view: &ClipboardView, todo: &Todo, cx: &App) -> Div {
     let density = view
         .todo_preference
         .value
-        .density(view.display.card_density);
+        .density(view.display.value.card_density);
     let excerpt = card_excerpt(&todo.text);
     div()
         .min_w_0()
@@ -68,7 +68,7 @@ fn todo_card(view: &ClipboardView, todo: &Todo, cx: &App) -> Div {
                 .font_family(crate::fonts::resolve_card_family(&fonts))
                 .text_size(px(f32::from(fonts.card_font_size)))
                 .line_height(relative(visual::COPY_LINE_HEIGHT))
-                .line_clamp(view.display.card_max_lines as usize)
+                .line_clamp(view.display.value.card_max_lines as usize)
                 .text_ellipsis()
                 .text_color(if todo.completed {
                     cx.theme().muted_foreground
@@ -119,7 +119,7 @@ pub(super) fn todo_row(
         .p(px(visual::card_padding(
             view.todo_preference
                 .value
-                .density(view.display.card_density),
+                .density(view.display.value.card_density),
         )))
         .rounded(crate::card_radius::card_radius(cx))
         .border(px(visual::BORDER_WIDTH))
@@ -183,7 +183,7 @@ fn todo_actions(
     let padding = visual::card_padding(
         view.todo_preference
             .value
-            .density(view.display.card_density),
+            .density(view.display.value.card_density),
     );
     let edit_owner = owner.clone();
     let source = text.to_owned();
@@ -263,7 +263,7 @@ fn todo_times(view: &ClipboardView, todo: &Todo) -> Option<String> {
     let created = preference.show_created.then(|| {
         format_card_time(
             &todo.created_at,
-            view.display.time_format,
+            view.display.value.time_format,
             view.language,
             now,
         )
@@ -271,7 +271,7 @@ fn todo_times(view: &ClipboardView, todo: &Todo) -> Option<String> {
     let edited = preference.show_edited.then(|| {
         format_card_time(
             &todo.updated_at,
-            view.display.time_format,
+            view.display.value.time_format,
             view.language,
             now,
         )

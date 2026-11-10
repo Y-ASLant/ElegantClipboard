@@ -9,7 +9,8 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
-        let category_tab_count = (self.display.category_tabs.enabled_count() + 1).max(1) as f32;
+        let category_tab_count =
+            (self.display.value.category_tabs.enabled_count() + 1).max(1) as f32;
         // Deduct the group selector, row gap, and the Kit segmented-tab insets.
         let category_width = (window.viewport_size().width
             - px(PAGE_PADDING * 2. + 138. + visual::SPACE_2 * 2. + 6.))
@@ -137,7 +138,7 @@ impl ClipboardView {
                             .flex()
                             .items_center()
                             .gap(px(visual::SPACE_2))
-                            .when(self.display.show_category_filter, |row| {
+                            .when(self.display.value.show_category_filter, |row| {
                                 row.child(
                                     div().flex_1().min_w_0().child(
                                         TabBar::new("history-category-tabs")
@@ -165,7 +166,7 @@ impl ClipboardView {
                                     ),
                                 )
                             })
-                            .when(!self.display.show_category_filter, |row| {
+                            .when(!self.display.value.show_category_filter, |row| {
                                 row.child(
                                     Button::new("open-todos")
                                         .h(px(visual::CONTROL_HEIGHT))

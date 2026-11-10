@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tooltip::Tooltip;
 
 pub(super) fn settings_stack() -> Div {
@@ -167,6 +168,63 @@ fn settings_description_sized(text: impl Into<SharedString>, size: f32, cx: &App
         .text_color(cx.theme().muted_foreground)
         .whitespace_normal()
         .child(text.into())
+}
+
+/// 偏好布尔开关的 `on_change` 闭包：`read` 取当前偏好副本，`set` 改写一个字段，`save` 提交。
+pub(super) fn pref_change<P: Clone + 'static>(
+    owner: &WeakEntity<ClipboardView>,
+    read: fn(&ClipboardView) -> P,
+    set: impl Fn(&mut P, bool) + 'static,
+    save: fn(&mut ClipboardView, P, &mut Context<ClipboardView>),
+) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
+    let owner = owner.clone();
+    move |checked, _, cx| {
+        let _ = owner.update(cx, |owner, cx| {
+            let mut next = read(owner);
+            set(&mut next, *checked);
+            save(owner, next, cx);
+        });
+    }
+}
+
+/// 偏好布尔 Checkbox 的统一构建；disabled 与每行条件逻辑留在调用点。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn pref_checkbox<P: Clone + 'static>(
+    cx: &App,
+    id: impl Into<ElementId>,
+    label: &'static str,
+    checked: bool,
+    disabled: bool,
+    owner: &WeakEntity<ClipboardView>,
+    read: fn(&ClipboardView) -> P,
+    set: impl Fn(&mut P, bool) + 'static,
+    save: fn(&mut ClipboardView, P, &mut Context<ClipboardView>),
+) -> Checkbox {
+    settings_toggle(cx, Checkbox::new(id))
+        .label(label)
+        .checked(checked)
+        .disabled(disabled)
+        .on_change(pref_change(owner, read, set, save))
+}
+
+/// `pref_checkbox` 的 `Switch` 版本。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn pref_switch<P: Clone + 'static>(
+    cx: &App,
+    id: impl Into<ElementId>,
+    label: &'static str,
+    checked: bool,
+    disabled: bool,
+    owner: &WeakEntity<ClipboardView>,
+    read: fn(&ClipboardView) -> P,
+    set: impl Fn(&mut P, bool) + 'static,
+    save: fn(&mut ClipboardView, P, &mut Context<ClipboardView>),
+) -> Switch {
+    settings_toggle(cx, Switch::new(id))
+        .label(label)
+        .checked(checked)
+        .disabled(disabled)
+        .on_change(pref_change(owner, read, set, save))
 }
 
 /// 设置各 section 共用的开场：升级 owner 弱引用并读取主窗口状态。

@@ -1,8 +1,8 @@
 use super::category_tabs::{CATEGORY_TAB_SPECS, category_tab_flags, set_category_tab_visible};
 use super::settings_common::{
-    choice_tabs, owner_state, settings_column, settings_column_field, settings_column_field_help,
-    settings_columns, settings_description, settings_field, settings_field_help, settings_inline,
-    settings_stack, settings_toggle,
+    choice_tabs, owner_state, pref_checkbox, settings_column, settings_column_field,
+    settings_column_field_help, settings_columns, settings_description, settings_field,
+    settings_field_help, settings_inline, settings_stack, settings_toggle,
 };
 use super::*;
 use clipboard_core::preferences::CardCornerPreference;
@@ -184,8 +184,8 @@ impl SettingsWindowView {
             return div().into_any_element();
         };
         let language = owner_state.language;
-        let display = owner_state.display;
-        let display_pending = owner_state.display_pending;
+        let display = owner_state.display.value;
+        let display_pending = owner_state.display.pending;
         // 分段条、数字框和复选框高度不同，各占一行；同一行只放同类复选框。
         settings_stack()
             .child(
@@ -210,18 +210,17 @@ impl SettingsWindowView {
                     ]
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
-                        let owner = self.owner.clone();
-                        settings_toggle(cx, Checkbox::new(id))
-                            .label(label)
-                            .checked(selected)
-                            .disabled(display_pending)
-                            .on_change(move |checked, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    let mut next = owner.display;
-                                    set_checked(&mut next, *checked);
-                                    owner.save_display(next, cx);
-                                });
-                            })
+                        pref_checkbox(
+                            cx,
+                            id,
+                            label,
+                            selected,
+                            display_pending,
+                            &self.owner,
+                            |owner| owner.display.value,
+                            set_checked,
+                            ClipboardView::save_display,
+                        )
                     }),
                 ),
             )
@@ -256,7 +255,7 @@ impl SettingsWindowView {
                                     .disabled(checkbox_disabled)
                                     .on_change(move |checked, _, cx| {
                                         let _ = owner.update(cx, |owner, cx| {
-                                            let mut next = owner.display;
+                                            let mut next = owner.display.value;
                                             set_category_tab_visible(
                                                 &mut next.category_tabs,
                                                 index,
@@ -289,12 +288,12 @@ impl SettingsWindowView {
                     ],
                     display.card_density,
                     display_pending,
-                    |owner| owner.display.card_density,
+                    |owner| owner.display.value.card_density,
                     |owner, density, cx| {
                         owner.save_display(
                             DisplayPreference {
                                 card_density: density,
-                                ..owner.display
+                                ..owner.display.value
                             },
                             cx,
                         );
@@ -304,7 +303,7 @@ impl SettingsWindowView {
             )
             .child(
                 settings_field(tr(language, "卡片预览行数", "Card preview lines")).child(
-                    NumberInput::new(&self.preview_lines_input)
+                    NumberInput::new(self.preview_lines.input())
                         .w_full()
                         .h(px(visual::CONTROL_HEIGHT_LARGE))
                         .disabled(display_pending),
@@ -347,18 +346,17 @@ impl SettingsWindowView {
                     ]
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
-                        let owner = self.owner.clone();
-                        settings_toggle(cx, Checkbox::new(id))
-                            .label(label)
-                            .checked(selected)
-                            .disabled(display_pending)
-                            .on_change(move |checked, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    let mut next = owner.display;
-                                    set_checked(&mut next, *checked);
-                                    owner.save_display(next, cx);
-                                });
-                            })
+                        pref_checkbox(
+                            cx,
+                            id,
+                            label,
+                            selected,
+                            display_pending,
+                            &self.owner,
+                            |owner| owner.display.value,
+                            set_checked,
+                            ClipboardView::save_display,
+                        )
                     }),
                 ),
             )
@@ -373,12 +371,12 @@ impl SettingsWindowView {
                     ],
                     display.time_format,
                     display_pending || !display.show_time,
-                    |owner| owner.display.time_format,
+                    |owner| owner.display.value.time_format,
                     |owner, format, cx| {
                         owner.save_display(
                             DisplayPreference {
                                 time_format: format,
-                                ..owner.display
+                                ..owner.display.value
                             },
                             cx,
                         );
@@ -403,12 +401,12 @@ impl SettingsWindowView {
                         ],
                         display.source_app_display,
                         display_pending || !display.show_source_app,
-                        |owner| owner.display.source_app_display,
+                        |owner| owner.display.value.source_app_display,
                         |owner, mode, cx| {
                             owner.save_display(
                                 DisplayPreference {
                                     source_app_display: mode,
-                                    ..owner.display
+                                    ..owner.display.value
                                 },
                                 cx,
                             );

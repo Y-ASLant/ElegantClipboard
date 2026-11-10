@@ -36,10 +36,10 @@ impl ClipboardView {
         result: Result<HoverPreviewPreference, String>,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.hover_preference_pending = false;
+        self.hover_preference.pending = false;
         match result {
             Ok(preference) => {
-                self.hover_preference = preference;
+                self.hover_preference.value = preference;
                 self.close_hover_preview("preferences_saved", cx);
                 self.is_error = false;
             }
@@ -140,7 +140,7 @@ impl ClipboardView {
                                                 < top
                                                     + px(history_row_height(
                                                         &this.history.items[index],
-                                                        this.display,
+                                                        this.display.value,
                                                     ))
                                     })
                                 })
@@ -281,7 +281,7 @@ impl ClipboardView {
                 } else {
                     item.content_type.as_str()
                 };
-            let allowed = self.hover_preference.allows(content_kind);
+            let allowed = self.hover_preference.value.allows(content_kind);
             if !allowed {
                 if self.hover_preview.id.is_some() {
                     self.close_hover_preview("content_kind_disabled", cx);
@@ -291,7 +291,7 @@ impl ClipboardView {
             if self.hover_preview.id != Some(id) {
                 self.close_hover_preview("source_changed", cx);
                 let generation = self.hover_preview.open(id);
-                let delay = self.hover_preference.delay_ms;
+                let delay = self.hover_preference.value.delay_ms;
                 tracing::debug!(
                     id,
                     generation,
@@ -325,12 +325,12 @@ impl ClipboardView {
         preference: HoverPreviewPreference,
         cx: &mut Context<Self>,
     ) {
-        if !self.hover_preference_pending
-            && self.hover_preference != preference
-            && self.send(Command::SetHoverPreview(preference), cx)
-        {
-            self.hover_preference_pending = true;
-            cx.notify();
-        }
+        self.save_pending(
+            |this| &mut this.hover_preference,
+            true,
+            preference,
+            Command::SetHoverPreview,
+            cx,
+        );
     }
 }

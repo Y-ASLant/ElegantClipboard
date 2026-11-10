@@ -1,9 +1,8 @@
 use super::settings_common::{
-    help_tooltip, owner_state, settings_description, settings_inline, settings_stack,
-    settings_toggle,
+    help_tooltip, owner_state, pref_switch, settings_description, settings_inline, settings_stack,
 };
 use super::*;
-use gpui_kit::component::{accordion::Accordion, alert::Alert, switch::Switch};
+use gpui_kit::component::{accordion::Accordion, alert::Alert};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum CaptureFormatInputError {
@@ -187,21 +186,18 @@ fn all_formats_switch(
     owner: &WeakEntity<ClipboardView>,
     cx: &mut Context<SettingsWindowView>,
 ) -> Div {
-    let owner = owner.clone();
     settings_inline()
-        .child(
-            settings_toggle(cx, Switch::new("capture-all-formats"))
-                .label(tr(language, "读取全部格式", "Read all formats"))
-                .checked(all)
-                .disabled(pending)
-                .on_change(move |checked, _, cx| {
-                    let _ = owner.update(cx, |owner, cx| {
-                        let mut next = owner.capture_formats.value.clone();
-                        next.all = *checked;
-                        owner.save_capture_formats(next, cx);
-                    });
-                }),
-        )
+        .child(pref_switch(
+            cx,
+            "capture-all-formats",
+            tr(language, "读取全部格式", "Read all formats"),
+            all,
+            pending,
+            owner,
+            |owner| owner.capture_formats.value.clone(),
+            |next, checked| next.all = checked,
+            ClipboardView::save_capture_formats,
+        ))
         .child(help_tooltip(
             "capture-all-formats-help",
             tr(

@@ -142,7 +142,7 @@ impl ClipboardView {
         let theme = self.theme;
         let language = self.language;
         let adding_todo = self.todo_draft.as_ref().map(|draft| draft.id.is_none());
-        let window_effect = self.window_effect;
+        let window_effect = self.window_effect.value;
         let owner = cx.weak_entity();
         cx.defer(move |cx| {
             let Some(owner_entity) = owner.upgrade() else {

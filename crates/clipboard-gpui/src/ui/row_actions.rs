@@ -74,7 +74,7 @@ impl ClipboardView {
             } else {
                 Some(format!("{file_count} 项"))
             }
-        } else if !self.display.show_char_count {
+        } else if !self.display.value.show_char_count {
             None
         } else if item.kind().is_some_and(|kind| kind.is_rich()) && item.char_count.is_none() {
             Some(tr(self.language, "纯文本未知", "Plain text unavailable").into())
@@ -83,17 +83,17 @@ impl ClipboardView {
         } else {
             Some(format!("{} 字符", item.char_count.unwrap_or(0)))
         };
-        let mut summary = if self.display.show_time {
+        let mut summary = if self.display.value.show_time {
             format_card_time(
                 &item.created_at,
-                self.display.time_format,
+                self.display.value.time_format,
                 self.language,
                 chrono::Local::now().naive_local(),
             )
         } else {
             kind.to_owned()
         };
-        if self.display.show_time
+        if self.display.value.show_time
             && !is_image
             && !matches!(item.content_type.as_str(), "text" | "url")
         {
@@ -104,7 +104,7 @@ impl ClipboardView {
             summary.push_str(" · ");
             summary.push_str(&detail);
         }
-        if self.display.show_byte_size {
+        if self.display.value.show_byte_size {
             let size = if is_files {
                 file_total_size
             } else {

@@ -32,7 +32,7 @@ impl ClipboardView {
             };
             let (theme, language) =
                 owner_entity.update(cx, |owner, _| (owner.theme, owner.language));
-            let window_effect = owner_entity.read(cx).window_effect;
+            let window_effect = owner_entity.read(cx).window_effect.value;
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
@@ -136,8 +136,8 @@ impl SettingsWindowView {
             cx.new(|cx| InputState::new(window, cx).default_value(retention.days.to_string()));
         let retention_count_input =
             cx.new(|cx| InputState::new(window, cx).default_value(retention.max_count.to_string()));
-        let effect = entity.read(cx).window_effect;
-        let hover = entity.read(cx).hover_preference;
+        let effect = entity.read(cx).window_effect.value;
+        let hover = entity.read(cx).hover_preference.value;
         let window_opacity = BoundedNumberInput::bind(
             window,
             cx,
@@ -147,15 +147,15 @@ impl SettingsWindowView {
                 max: i32::from(MAX_WINDOW_EFFECT_OPACITY),
                 saved: |owner| {
                     (
-                        i32::from(owner.window_effect.opacity),
-                        owner.window_effect_pending,
+                        i32::from(owner.window_effect.value.opacity),
+                        owner.window_effect.pending,
                     )
                 },
                 commit: |owner, value, cx| {
                     owner.save_window_effect(
                         WindowEffectPreference {
                             opacity: value as u8,
-                            ..owner.window_effect
+                            ..owner.window_effect.value
                         },
                         cx,
                     );
@@ -171,15 +171,15 @@ impl SettingsWindowView {
                 max: i32::from(MAX_HOVER_DELAY_MS),
                 saved: |owner| {
                     (
-                        i32::from(owner.hover_preference.delay_ms),
-                        owner.hover_preference_pending,
+                        i32::from(owner.hover_preference.value.delay_ms),
+                        owner.hover_preference.pending,
                     )
                 },
                 commit: |owner, value, cx| {
                     owner.save_hover_preference(
                         HoverPreviewPreference {
                             delay_ms: value as u16,
-                            ..owner.hover_preference
+                            ..owner.hover_preference.value
                         },
                         cx,
                     );
@@ -195,56 +195,43 @@ impl SettingsWindowView {
                 max: i32::from(MAX_HOVER_ZOOM_STEP),
                 saved: |owner| {
                     (
-                        i32::from(owner.hover_preference.zoom_step),
-                        owner.hover_preference_pending,
+                        i32::from(owner.hover_preference.value.zoom_step),
+                        owner.hover_preference.pending,
                     )
                 },
                 commit: |owner, value, cx| {
                     owner.save_hover_preference(
                         HoverPreviewPreference {
                             zoom_step: value as u8,
-                            ..owner.hover_preference
+                            ..owner.hover_preference.value
                         },
                         cx,
                     );
                 },
             },
         );
-        let preview_lines_last_value = entity.read(cx).display.card_max_lines;
-        let preview_lines_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value(preview_lines_last_value.to_string())
-        });
-        // Disable the input's default text-changing step so button presses emit Step events;
-        // our save handler then applies bounds and the same pending/ACK policy as typed edits.
-        preview_lines_input.update(cx, |input, cx| input.set_step(None, window, cx));
-        let preview_lines_input_subscription = cx.subscribe_in(
-            &preview_lines_input,
+        let preview_lines = BoundedNumberInput::bind(
             window,
-            |this, input, event, window, cx| {
-                if !matches!(event, InputEvent::Blur | InputEvent::PressEnter { .. }) {
-                    return;
-                }
-                let Some(owner) = this.owner.upgrade() else {
-                    return;
-                };
-                let (saved, pending) = {
-                    let owner = owner.read(cx);
-                    (owner.display.card_max_lines, owner.display_pending)
-                };
-                if pending {
-                    return;
-                }
-                let value = input.read(cx).value();
-                let parsed = value.parse::<i32>().ok();
-                let lines = parsed
-                    .map(|value| value.clamp(1, 10) as u8)
-                    .unwrap_or(saved);
-                if parsed != Some(i32::from(lines)) {
-                    input.update(cx, |input, cx| {
-                        input.set_value(lines.to_string(), window, cx)
-                    });
-                }
-                this.save_preview_lines(lines, cx);
+            cx,
+            i32::from(entity.read(cx).display.value.card_max_lines),
+            NumberSpec {
+                min: 1,
+                max: 10,
+                saved: |owner| {
+                    (
+                        i32::from(owner.display.value.card_max_lines),
+                        owner.display.pending,
+                    )
+                },
+                commit: |owner, value, cx| {
+                    owner.save_display(
+                        DisplayPreference {
+                            card_max_lines: value as u8,
+                            ..owner.display.value
+                        },
+                        cx,
+                    );
+                },
             },
         );
         let fonts = entity.read(cx).fonts.value.clone();
@@ -275,36 +262,6 @@ impl SettingsWindowView {
             window,
             cx,
         );
-        let preview_lines_step_subscription = cx.subscribe_in(
-            &preview_lines_input,
-            window,
-            |this, input, event: &NumberInputEvent, window, cx| {
-                let NumberInputEvent::Step(action) = event;
-                let Some(owner) = this.owner.upgrade() else {
-                    return;
-                };
-                let (saved, pending) = {
-                    let owner = owner.read(cx);
-                    (owner.display.card_max_lines, owner.display_pending)
-                };
-                if pending {
-                    return;
-                }
-                let value = input.read(cx).value();
-                let value = value.parse::<i32>().unwrap_or(i32::from(saved));
-                let lines = match action {
-                    StepAction::Increment => value.saturating_add(1),
-                    StepAction::Decrement => value.saturating_sub(1),
-                }
-                .clamp(1, 10) as u8;
-                if value != i32::from(lines) {
-                    input.update(cx, |input, cx| {
-                        input.set_value(lines.to_string(), window, cx)
-                    });
-                }
-                this.save_preview_lines(lines, cx);
-            },
-        );
         Self {
             owner,
             _owner_subscription: subscription,
@@ -323,11 +280,7 @@ impl SettingsWindowView {
             retention_days_input,
             retention_count_input,
             retention_error: None,
-            preview_lines_input,
-            _preview_lines_input_subscription: preview_lines_input_subscription,
-            _preview_lines_step_subscription: preview_lines_step_subscription,
-            preview_lines_last_value,
-            preview_lines_last_pending: false,
+            preview_lines,
             window_opacity,
             ui_font_size,
             card_font_size,
@@ -350,23 +303,6 @@ impl SettingsWindowView {
             capture_format_error: None,
             link_error: None,
         }
-    }
-
-    pub(super) fn save_preview_lines(&mut self, lines: u8, cx: &mut Context<Self>) {
-        let Some(owner) = self.owner.upgrade() else {
-            return;
-        };
-        owner.update(cx, |owner, cx| {
-            if !owner.display_pending && owner.display.card_max_lines != lines {
-                owner.save_display(
-                    DisplayPreference {
-                        card_max_lines: lines,
-                        ..owner.display
-                    },
-                    cx,
-                );
-            }
-        });
     }
 
     pub(super) fn add_app_filter_rule(&mut self, window: &mut Window, cx: &mut Context<Self>) {

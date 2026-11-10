@@ -1,10 +1,9 @@
 use super::settings_common::{
-    choice_tabs, command_checkbox, command_checkbox_help, owner_state, settings_description,
-    settings_field_help, settings_inline, settings_stack, settings_toggle,
+    choice_tabs, command_checkbox, command_checkbox_help, owner_state, pref_checkbox,
+    settings_description, settings_field_help, settings_inline, settings_stack,
 };
 use super::*;
 use gpui_kit::component::chart::BarChart;
-use gpui_kit::component::checkbox::Checkbox;
 
 impl SettingsWindowView {
     pub(super) fn settings_transient_filter_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -148,21 +147,20 @@ impl SettingsWindowView {
                 choices
                     .into_iter()
                     .map(|(id, label, selected, set_checked)| {
-                        let owner = self.owner.clone();
                         let mut next = monitor_types;
                         set_checked(&mut next, !selected);
-                        settings_toggle(cx, Checkbox::new(id))
-                            .min_w_0()
-                            .label(label)
-                            .checked(selected)
-                            .disabled(monitor_types_pending || !next.valid())
-                            .on_change(move |checked, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    let mut next = owner.monitor_types.value;
-                                    set_checked(&mut next, *checked);
-                                    owner.save_monitor_types(next, cx);
-                                });
-                            })
+                        pref_checkbox(
+                            cx,
+                            id,
+                            label,
+                            selected,
+                            monitor_types_pending || !next.valid(),
+                            &self.owner,
+                            |owner| owner.monitor_types.value,
+                            set_checked,
+                            ClipboardView::save_monitor_types,
+                        )
+                        .min_w_0()
                     }),
             )
             .into_any_element()
