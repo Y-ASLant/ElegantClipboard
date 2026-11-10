@@ -57,16 +57,24 @@ impl History {
         let tx = connection.transaction()?;
         tx.execute(
             "UPDATE clipboard_items SET html_content = ?1, rtf_content = ?2,
-             content_type = ?3, byte_size = ?4, preview = ?5,
+             content_type = ?3, categories = ?4, byte_size = ?5, preview = ?6,
              access_count = access_count + 1,
              last_accessed_at = datetime('now', 'localtime'),
              updated_at = datetime('now', 'localtime'),
              sort_order = (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM clipboard_items)
-             WHERE id = ?6",
+             WHERE id = ?7",
             rusqlite::params![
                 html,
                 rtf_encoded,
                 crate::same_text::upgraded_type(&target.content_type, input.content_type).as_str(),
+                crate::ContentCategory::membership(
+                    Some(crate::same_text::upgraded_type(
+                        &target.content_type,
+                        input.content_type,
+                    )),
+                    Some(input.text),
+                    &[],
+                ),
                 byte_size as i64,
                 preview,
                 target.id

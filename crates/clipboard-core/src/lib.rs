@@ -66,15 +66,43 @@ pub enum ContentCategory {
     Other,
 }
 
+pub const CATEGORY_TEXT: u32 = 1;
+pub const CATEGORY_IMAGE: u32 = 2;
+pub const CATEGORY_URL: u32 = 4;
+pub const CATEGORY_FILES: u32 = 8;
+
 impl ContentCategory {
-    fn content_types(self) -> &'static str {
+    /// 分类页读取的归属位。全部不筛选。
+    pub fn mask(self) -> Option<u32> {
         match self {
-            Self::All => "text,url,html,rtf,image,files",
-            Self::Text => "text,html,rtf,url",
-            Self::Image => "image",
-            Self::Url => "url",
-            Self::Other => "image,files,url",
+            Self::All => None,
+            Self::Text => Some(CATEGORY_TEXT),
+            Self::Image => Some(CATEGORY_IMAGE),
+            Self::Url => Some(CATEGORY_URL),
+            Self::Other => Some(CATEGORY_IMAGE | CATEGORY_FILES | CATEGORY_URL),
         }
+    }
+
+    /// 一条记录可以同时属于多个分类。采集和编辑都写这个结果，查询只读它。
+    pub fn membership(kind: Option<ContentType>, text: Option<&str>, paths: &[String]) -> u32 {
+        let mut categories = match kind {
+            Some(ContentType::Text | ContentType::Html | ContentType::Rtf) => CATEGORY_TEXT,
+            Some(ContentType::Url) => CATEGORY_TEXT | CATEGORY_URL,
+            Some(ContentType::Image) => CATEGORY_IMAGE,
+            Some(ContentType::Files) => CATEGORY_FILES,
+            None => 0,
+        };
+        if image_file_paths(paths) {
+            categories |= CATEGORY_IMAGE;
+        }
+        if matches!(
+            kind,
+            Some(ContentType::Text | ContentType::Html | ContentType::Rtf)
+        ) && text.is_some_and(clipboard::is_url)
+        {
+            categories |= CATEGORY_URL;
+        }
+        categories
     }
 }
 
@@ -309,7 +337,7 @@ impl History {
     ) -> Result<Vec<ClipboardItem>> {
         Ok(self.repo.list(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some(category.content_types().into()),
+            category_mask: category.mask(),
             favorite_only,
             group_id,
             // `limit <= 0` is the whole filtered result. A positive limit stays
@@ -345,7 +373,7 @@ impl History {
     ) -> Result<i64> {
         Ok(self.repo.count(QueryOptions {
             search: (!search.is_empty()).then(|| search.to_owned()),
-            content_type: Some(category.content_types().into()),
+            category_mask: category.mask(),
             favorite_only,
             group_id,
             ..Default::default()

@@ -1,4 +1,4 @@
-use crate::{History, MAX_TEXT_BYTES};
+use crate::{ContentType, History, MAX_TEXT_BYTES};
 use anyhow::{Result, bail};
 use rusqlite::params;
 use std::path::Path;
@@ -41,12 +41,13 @@ impl History {
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
         let affected = tx.execute(
-            "UPDATE clipboard_items SET content_type = 'text', text_content = ?1, preview = ?2,
-             content_hash = ?3, semantic_hash = ?4, byte_size = ?5, char_count = ?6,
+            "UPDATE clipboard_items SET content_type = 'text', categories = ?1, text_content = ?2, preview = ?3,
+             content_hash = ?4, semantic_hash = ?5, byte_size = ?6, char_count = ?7,
              html_content = NULL, rtf_content = NULL, image_path = NULL,
              image_width = NULL, image_height = NULL, file_paths = NULL, file_payload = NULL
-             WHERE id = ?7 AND content_hash = ?8 AND content_type IN ('text', 'url', 'html', 'rtf')",
+             WHERE id = ?8 AND content_hash = ?9 AND content_type IN ('text', 'url', 'html', 'rtf')",
             params![
+                crate::ContentCategory::membership(Some(ContentType::Text), Some(new_text), &[]),
                 new_text,
                 preview,
                 hash,

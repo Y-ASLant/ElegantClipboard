@@ -78,6 +78,7 @@ pub struct NewClipboardItem {
 pub struct QueryOptions {
     pub search: Option<String>,
     pub content_type: Option<String>,
+    pub category_mask: Option<u32>,
     pub favorite_only: bool,
     pub group_id: Option<i64>,
     pub limit: Option<i64>,
@@ -137,6 +138,9 @@ impl ConditionBuilder {
             );
         }
         builder = builder.content_type(options.content_type.as_deref());
+        if let Some(mask) = options.category_mask {
+            builder = builder.condition_with_param("(categories & ?) != 0", i64::from(mask));
+        }
         if options.favorite_only {
             builder = builder.condition("is_favorite = 1");
         }
@@ -261,21 +265,7 @@ impl ClipboardRepository {
         if types.is_empty() {
             return;
         }
-        if types.len() == 1 && types[0] == "image" {
-            // 图片格式的文件同时属于图片和文件，所以图片页也要列出它们。
-            conditions.push(format!(
-                "(content_type = ? OR (content_type = 'files' AND {}))",
-                crate::files::image_file_record_sql()
-            ));
-            params_vec.push("image".to_string().into());
-        } else if types.len() == 1 && types[0] == "url" {
-            // 带网页格式的链接仍是链接，同时保留在文本页。
-            conditions.push(format!(
-                "(content_type = ? OR (content_type IN ('text', 'html', 'rtf') AND {}))",
-                crate::clipboard::url_text_sql("text_content")
-            ));
-            params_vec.push("url".to_string().into());
-        } else if types.len() == 1 {
+        if types.len() == 1 {
             conditions.push("content_type = ?".to_string());
             params_vec.push(types[0].to_string().into());
         } else {

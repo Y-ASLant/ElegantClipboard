@@ -22,12 +22,17 @@ impl ClipboardRepository {
 
         conn.execute(
             "INSERT INTO clipboard_items
-             (content_type, text_content, html_content, rtf_content, image_path, file_paths, file_payload,
+             (content_type, categories, text_content, html_content, rtf_content, image_path, file_paths, file_payload,
               content_hash, semantic_hash, preview, byte_size, image_width, image_height, sort_order,
               char_count, source_app_name, source_app_icon, group_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 item.content_type.as_str(),
+                crate::ContentCategory::membership(
+                    Some(item.content_type),
+                    item.text_content.as_deref(),
+                    item.file_paths.as_deref().unwrap_or(&[]),
+                ),
                 item.text_content,
                 item.html_content,
                 item.rtf_content,

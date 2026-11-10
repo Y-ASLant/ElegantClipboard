@@ -4,6 +4,55 @@ use rusqlite::{Connection, params};
 use tracing::info;
 
 impl Database {
+    pub(super) fn backfill_categories(conn: &Connection) -> Result<(), rusqlite::Error> {
+        let exists: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('clipboard_items') WHERE name = 'categories'",
+            [],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            conn.execute_batch(
+                "ALTER TABLE clipboard_items ADD COLUMN categories INTEGER NOT NULL DEFAULT 0;",
+            )?;
+        }
+        let done: bool = conn
+            .query_row(
+                "SELECT COALESCE((SELECT value FROM settings WHERE key = '_migration_categories' LIMIT 1), '') = '1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if done {
+            return Ok(());
+        }
+        let mut stmt =
+            conn.prepare("SELECT id, content_type, text_content, file_paths FROM clipboard_items")?;
+        let rows: Vec<(i64, String, Option<String>, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        let mut update =
+            conn.prepare("UPDATE clipboard_items SET categories = ?1 WHERE id = ?2")?;
+        for (id, kind, text, paths) in rows {
+            let paths = crate::parse_file_paths_for_display(paths.as_deref());
+            let categories = crate::ContentCategory::membership(
+                crate::database::ContentType::parse(&kind),
+                text.as_deref(),
+                &paths,
+            );
+            update.execute(params![categories, id])?;
+        }
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('_migration_categories', '1')
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [],
+        )?;
+        info!("Backfilled category membership");
+        Ok(())
+    }
+
     fn url_content_type_migration_done(conn: &Connection) -> Result<bool, rusqlite::Error> {
         let settings_exist: bool = conn
             .query_row(

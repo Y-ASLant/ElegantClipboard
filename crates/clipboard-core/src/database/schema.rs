@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS groups (
 CREATE TABLE IF NOT EXISTS clipboard_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content_type TEXT NOT NULL,
+    categories INTEGER NOT NULL DEFAULT 0,
     text_content TEXT,
     html_content TEXT,
     rtf_content TEXT,

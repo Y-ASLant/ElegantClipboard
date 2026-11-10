@@ -176,16 +176,6 @@ pub(crate) fn is_url(text: &str) -> bool {
     false
 }
 
-/// 纯文本是否应按链接归类。与 `is_url` 同一口径，供分类查询使用。
-pub(crate) fn url_text_sql(column: &str) -> String {
-    format!(
-        "trim({column}) != '' AND instr({column}, char(10)) = 0 AND instr({column}, char(13)) = 0 \
-         AND instr(trim({column}), ' ') = 0 AND instr(trim({column}), char(9)) = 0 AND (\
-         lower(trim({column})) GLOB 'https://?*' OR lower(trim({column})) GLOB 'http://?*' OR \
-         lower(trim({column})) GLOB 'ftp://?*' OR lower(trim({column})) GLOB 'www.?*')"
-    )
-}
-
 /// Strip volatile fields from RTF that Word/Outlook regenerate on every copy,
 /// so identical user-visible content produces the same hash.
 ///

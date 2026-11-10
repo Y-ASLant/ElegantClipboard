@@ -302,7 +302,7 @@ fn category_queries_filter_search_count_and_group() -> Result<()> {
     history.move_to_group(ids[5], None, Some(group.id))?;
     assert_eq!(
         history.count_filtered_in_group("", false, None, ContentCategory::Other)?,
-        5
+        6
     );
     assert_eq!(
         history.list_filtered_in_group(
