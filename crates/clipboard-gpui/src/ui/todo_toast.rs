@@ -88,11 +88,12 @@ pub(super) fn open(
     let display_id = window.display(cx).map(|display| display.id());
     let width = px(CARD_WIDTH).min(screen.size.width - px(SCREEN_MARGIN * 2.));
     let card_height = px(CARD_HEIGHT).min(screen.size.height - px(SCREEN_MARGIN * 2.));
-    // Four extra pixels sit in the screen margin so the card can rise without clipping.
-    let height = card_height + px(visual::SPACE_1);
+    // The card slides inside a card-height window: entry/exit clip at the
+    // bottom edge, so no permanent transparent strip shows beneath the card.
+    let height = card_height;
     let origin = point(
         (screen.right() - width - px(SCREEN_MARGIN)).max(screen.left()),
-        (screen.bottom() - card_height - px(SCREEN_MARGIN)).max(screen.top()),
+        (screen.bottom() - height - px(SCREEN_MARGIN)).max(screen.top()),
     );
     let bounds = Bounds::new(origin, size(width, height));
     let opened = cx
@@ -105,7 +106,9 @@ pub(super) fn open(
                 kind: WindowKind::PopUp,
                 window_background: WindowBackgroundAppearance::Transparent,
                 focus: false,
-                show: true,
+                // 隐藏创建：先把客户区定位到屏幕内，再经原生接口显示，
+                // 否则系统按默认位置短暂展示并裁出白色外框。
+                show: false,
                 is_movable: false,
                 is_resizable: false,
                 is_minimizable: false,
@@ -116,7 +119,6 @@ pub(super) fn open(
             },
             move |window, cx| {
                 apply_theme(theme, window, cx);
-                window.refresh();
                 cx.new(|_| TodoToastWindow {
                     message: message.into(),
                     close_label,
@@ -127,37 +129,47 @@ pub(super) fn open(
             },
         )
         .ok()?;
-    let native = opened
-        .update(cx, |toast, toast_window, cx| {
-            toast.arm(toast_window, cx);
-            toast_window.refresh();
-            native_window::window_id(toast_window)
-        })
-        .ok()
-        .flatten()?;
-    place(native, bounds, scale);
+    // 原生定位会同步回调 GPUI 的尺寸更新，必须在 App/Window 借用之外执行；
+    // 否则 viewport 会停留在创建时的尺寸，把关闭按钮排到可见区域之外。
+    cx.spawn(async move |cx| {
+        let placed = opened
+            .update(cx, |_, toast_window, _| {
+                native_window::window_id(toast_window)
+            })
+            .and_then(|native| native.ok_or_else(|| anyhow::anyhow!("待办提醒窗口句柄不可用")))
+            .and_then(|native| place(native, bounds, scale));
+        if let Err(error) = placed {
+            tracing::warn!(%error, "failed to place to-do toast window");
+            let _ = opened.update(cx, |_, toast_window, _| toast_window.remove_window());
+            return;
+        }
+        let _ = opened.update(cx, |toast, toast_window, cx| toast.arm(toast_window, cx));
+    })
+    .detach();
     Some(opened)
 }
 
-fn place(native: isize, bounds: Bounds<Pixels>, scale: f32) {
+fn place(native: isize, bounds: Bounds<Pixels>, scale: f32) -> anyhow::Result<()> {
+    use clipboard_platform::external_drag as platform;
     #[cfg(windows)]
     {
-        let _ = crate::native::preview::avoid_activation(native);
-        let _ = crate::native::preview::set_bounds(native, bounds, scale);
+        crate::native::preview::avoid_activation(native)?;
+        crate::native::preview::set_bounds(native, bounds, scale)?;
     }
     #[cfg(not(windows))]
     {
-        let _ = clipboard_platform::external_drag::resize_drag_preview(
+        platform::resize_drag_preview(
             native,
             (f32::from(bounds.size.width) * scale).round() as i32,
             (f32::from(bounds.size.height) * scale).round() as i32,
-        );
-        let _ = clipboard_platform::external_drag::move_drag_preview(
+        )?;
+        platform::move_drag_preview(
             native,
             (f32::from(bounds.left()) * scale).round() as i32,
             (f32::from(bounds.top()) * scale).round() as i32,
-        );
+        )?;
     }
+    platform::show_drag_preview(native)
 }
 
 impl Render for TodoToastWindow {
