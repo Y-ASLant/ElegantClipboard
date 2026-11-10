@@ -4,15 +4,14 @@ use clipboard_rs::{Clipboard, ClipboardContext};
 pub(crate) fn read_html(clipboard: &ClipboardContext) -> Result<String> {
     #[cfg(windows)]
     {
-        let bytes = clipboard
-            .get_buffer("HTML Format")
-            .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))?;
+        let bytes =
+            super::read_content::retry_access_denied(|| clipboard.get_buffer("HTML Format"))
+                .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))?;
         parse_cf_html(&bytes)
     }
     #[cfg(not(windows))]
     {
-        clipboard
-            .get_html()
+        super::read_content::retry_access_denied(|| clipboard.get_html())
             .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))
     }
 }

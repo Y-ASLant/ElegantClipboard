@@ -25,9 +25,13 @@ impl SettingsWindowView {
             CornerRadiusPreference::Fixed(value) if ![0, 4, 16].contains(&value) => Some(value),
             _ => None,
         };
-        settings_columns()
+        // 三类语义各一行：语言/主题/主题色，圆角系三项，字体组独占整行；
+        // 混排同一 wrap 行会随宽度换行出孤列且控件节奏不同。
+        settings_stack()
             .child(
-                settings_column_field(tr(language, "语言", "Language")).child(choice_tabs(
+                settings_columns()
+                    .child(
+                        settings_column_field(tr(language, "语言", "Language")).child(choice_tabs(
                     "settings-window-language",
                     &self.owner,
                     [LanguagePreference::Chinese, LanguagePreference::English],
@@ -105,76 +109,93 @@ impl SettingsWindowView {
                         cx,
                     )),
             )
-            .child(
-                settings_column_field(tr(language, "圆角", "Corner radius")).child(choice_tabs(
-                    "settings-window-corner-radius",
-                    &self.owner,
-                    [
-                        CornerRadiusPreference::System,
-                        CornerRadiusPreference::Fixed(0),
-                        CornerRadiusPreference::Fixed(4),
-                        CornerRadiusPreference::Fixed(16),
-                    ],
-                    [
-                        tr(language, "跟随系统", "System"),
-                        tr(language, "关闭", "Off"),
-                        "4 px",
-                        "16 px",
-                    ],
-                    corner_radius.value,
-                    corner_radius.pending,
-                    |owner| owner.corner_radius.value,
-                    |owner, radius, cx| {
-                        if owner.send(Command::SetCornerRadius(radius), cx) {
-                            owner.corner_radius.pending = true;
-                            cx.notify();
-                        }
-                    },
-                    cx,
-                ).when(legacy_radius.is_some(), |tabs| tabs.selected_index(usize::MAX))),
             )
-            .when_some(legacy_radius, |content, value| {
-                content.child(settings_description(match language {
-                    LanguagePreference::Chinese => format!("当前保留旧设置：{value} px。选择上方选项后更新。"),
-                    LanguagePreference::English => format!("Keeping the saved legacy radius: {value} px. Choose an option above to update it."),
-                }, cx))
-            })
             .child(
-                settings_column_field_help(
-                    tr(language, "卡片圆角", "Card corners"),
-                    tr(
-                        language,
-                        "剪贴板卡片和预览卡片。默认是全局圆角的一半。",
-                        "Clipboard cards and preview cards. Default is half the global radius.",
-                    ),
-                    "card-corner-help",
-                )
-                    .child(choice_tabs(
-                        "settings-card-corner",
-                        &self.owner,
-                        [
-                            CardCornerPreference::Half,
-                            CardCornerPreference::Global,
-                            CardCornerPreference::Off,
-                        ],
-                        [
-                            tr(language, "默认", "Default"),
-                            tr(language, "跟随全局", "Global"),
-                            tr(language, "关闭", "Off"),
-                        ],
-                        card_corner.value,
-                        card_corner.pending,
-                        |owner| owner.card_corner.value,
-                        |owner, preference, cx| {
-                            if owner.send(Command::SetCardCorner(preference), cx) {
-                                owner.card_corner.pending = true;
-                                cx.notify();
-                            }
-                        },
-                        cx,
-                    )),
+                settings_columns()
+                    .child(
+                        settings_column_field(tr(language, "圆角", "Corner radius"))
+                            .child(
+                                choice_tabs(
+                                    "settings-window-corner-radius",
+                                    &self.owner,
+                                    [
+                                        CornerRadiusPreference::System,
+                                        CornerRadiusPreference::Fixed(0),
+                                        CornerRadiusPreference::Fixed(4),
+                                        CornerRadiusPreference::Fixed(16),
+                                    ],
+                                    [
+                                        tr(language, "跟随系统", "System"),
+                                        tr(language, "关闭", "Off"),
+                                        "4 px",
+                                        "16 px",
+                                    ],
+                                    corner_radius.value,
+                                    corner_radius.pending,
+                                    |owner| owner.corner_radius.value,
+                                    |owner, radius, cx| {
+                                        if owner.send(Command::SetCornerRadius(radius), cx) {
+                                            owner.corner_radius.pending = true;
+                                            cx.notify();
+                                        }
+                                    },
+                                    cx,
+                                )
+                                .when(legacy_radius.is_some(), |tabs| {
+                                    tabs.selected_index(usize::MAX)
+                                }),
+                            )
+                            .when_some(legacy_radius, |field, value| {
+                                field.child(settings_description(
+                                    match language {
+                                        LanguagePreference::Chinese => format!(
+                                            "当前保留旧设置：{value} px。选择上方选项后更新。"
+                                        ),
+                                        LanguagePreference::English => format!(
+                                            "Keeping the saved legacy radius: {value} px. Choose an option above to update it."
+                                        ),
+                                    },
+                                    cx,
+                                ))
+                            }),
+                    )
+                    .child(
+                        settings_column_field_help(
+                            tr(language, "卡片圆角", "Card corners"),
+                            tr(
+                                language,
+                                "剪贴板卡片和预览卡片。默认是全局圆角的一半。",
+                                "Clipboard cards and preview cards. Default is half the global radius.",
+                            ),
+                            "card-corner-help",
+                        )
+                        .child(choice_tabs(
+                            "settings-card-corner",
+                            &self.owner,
+                            [
+                                CardCornerPreference::Half,
+                                CardCornerPreference::Global,
+                                CardCornerPreference::Off,
+                            ],
+                            [
+                                tr(language, "默认", "Default"),
+                                tr(language, "跟随全局", "Global"),
+                                tr(language, "关闭", "Off"),
+                            ],
+                            card_corner.value,
+                            card_corner.pending,
+                            |owner| owner.card_corner.value,
+                            |owner, preference, cx| {
+                                if owner.send(Command::SetCardCorner(preference), cx) {
+                                    owner.card_corner.pending = true;
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        )),
+                    )
+                    .child(settings_column().child(self.settings_window_effect_content(cx))),
             )
-            .child(settings_column().child(self.settings_window_effect_content(cx)))
             .child(self.settings_fonts_content(cx))
             .into_any_element()
     }

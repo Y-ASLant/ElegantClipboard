@@ -111,6 +111,7 @@ pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedStrin
 }
 
 /// 「标签 + 说明图标」行，供字段标签使用。
+/// 不单独设行高：与 `settings_label` 同用 1.5 行高，保证同排字段的控件顶缘对齐。
 fn label_with_help(
     label: &'static str,
     help: impl Into<SharedString>,
@@ -120,9 +121,6 @@ fn label_with_help(
         .flex()
         .items_center()
         .gap(px(visual::SPACE_1))
-        // Match the icon button's `line_height(1)` so the glyph and CJK label
-        // share one center line instead of inheriting the stack's 1.5 leading.
-        .line_height(relative(1.))
         .child(settings_label(label))
         .child(help_tooltip(id, help))
 }

@@ -7,6 +7,45 @@ use clipboard_core::{
     MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES,
 };
 use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat, common::RustImage};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+
+/// `OpenClipboard` 全局独占：源应用复制后短暂持有句柄时，open 会拿到
+/// OSError(5)（ERROR_ACCESS_DENIED）。clipboard-rs 自带的重试只 `Sleep(0)`，
+/// 打不穿毫秒级持锁；这里按有限预算重试单次读取，对齐 Windows 独占语义。
+const ACCESS_DENIED_BUDGET: Duration = Duration::from_millis(250);
+const ACCESS_DENIED_DELAY: Duration = Duration::from_millis(20);
+
+pub(crate) fn retry_access_denied<T, E: ToString>(
+    mut read: impl FnMut() -> Result<T, E>,
+) -> Result<T, E> {
+    let deadline = Instant::now() + ACCESS_DENIED_BUDGET;
+    loop {
+        match read() {
+            Err(error) if is_access_denied(&error) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    return Err(error);
+                }
+                thread::sleep(ACCESS_DENIED_DELAY.min(deadline - now));
+            }
+            result => return result,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn is_access_denied<E: ToString>(error: &E) -> bool {
+    // clipboard-rs 把 Windows 错误渲染成 "…, code = OSError(5): 拒绝访问。"。
+    error.to_string().contains("OSError(5)")
+}
+
+#[cfg(not(windows))]
+fn is_access_denied<E: ToString>(_: &E) -> bool {
+    false
+}
 
 #[cfg(windows)]
 pub(crate) const RTF_FORMAT: &str = "Rich Text Format";
@@ -31,8 +70,7 @@ pub(super) fn read_content(
         #[cfg(target_os = "linux")]
         let paths = super::file_list::read_files(clipboard)?;
         #[cfg(not(target_os = "linux"))]
-        let paths = clipboard
-            .get_files()
+        let paths = retry_access_denied(|| clipboard.get_files())
             .map_err(|error| anyhow::anyhow!("读取剪贴板文件失败：{error}"))?;
         if paths.is_empty()
             || paths.len() > MAX_FILE_PATHS
@@ -57,7 +95,7 @@ pub(super) fn read_content(
         .then(|| {
             clipboard
                 .has(ContentFormat::Rtf)
-                .then(|| clipboard.get_buffer(RTF_FORMAT).ok())
+                .then(|| retry_access_denied(|| clipboard.get_buffer(RTF_FORMAT)).ok())
                 .flatten()
                 .filter(|value| !value.is_empty())
         })
@@ -74,7 +112,7 @@ pub(super) fn read_content(
         .then(|| {
             clipboard
                 .has(ContentFormat::Text)
-                .then(|| clipboard.get_text().ok())
+                .then(|| retry_access_denied(|| clipboard.get_text()).ok())
                 .flatten()
                 .filter(|value| !value.is_empty())
         })
@@ -120,8 +158,7 @@ fn prefer_image(html: Option<&str>, rtf: Option<&[u8]>, text: Option<&str>) -> b
 }
 
 fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
-    let image = clipboard
-        .get_image()
+    let image = retry_access_denied(|| clipboard.get_image())
         .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
     let (width, height) = image.get_size();
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
@@ -182,6 +219,32 @@ fn linux_text(clipboard: &ClipboardContext, formats: Option<&[String]>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::prefer_image;
+
+    #[cfg(windows)]
+    #[test]
+    fn access_denied_retry_succeeds_and_other_errors_pass_through() {
+        use super::retry_access_denied;
+
+        let mut calls = 0;
+        let value = retry_access_denied(|| {
+            calls += 1;
+            if calls == 1 {
+                Err("Get image error, code = OSError(5): 拒绝访问。")
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!(value, Ok(7));
+        assert_eq!(calls, 2);
+
+        let mut calls = 0;
+        let result: Result<i32, &str> = retry_access_denied(|| {
+            calls += 1;
+            Err("some other error")
+        });
+        assert_eq!(result, Err("some other error"));
+        assert_eq!(calls, 1);
+    }
 
     #[test]
     fn image_markup_preserves_pixels_without_displacing_document_text_or_rtf() {
