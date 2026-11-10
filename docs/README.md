@@ -77,7 +77,7 @@ Linux X11 采集内容与来源查询整体受前后 selection generation 校验
 
 `window_effect.rs` 提供当前系统的真实材质能力及降级策略，不覆盖已保存的偏好；Windows DWM、macOS 模糊和 Linux 不透明分别由 GPUI 原生层应用。
 
-复制协议统一为 `Command::Copy { id, mode, purpose }` 与 `Command::Merge { ids, purpose }`。`CopyMode` 指定格式/转换，`CopyPurpose` 区分普通复制和带请求编号的回贴；成功回执与失败分类使用同一目的信息，不再维护成对的 `*ForPaste` 命令。`Service.initial_preferences` 持有核心层 `PreferenceSnapshot`，启动数据警告仍独立保存。
+复制协议统一为 `Command::Copy { id, mode, purpose }` 与 `Command::Merge { ids, purpose }`。`CopyMode` 指定格式/转换，`CopyPurpose` 区分普通复制和带请求编号的回贴；成功回执与失败分类使用同一目的信息，不再维护成对的 `*ForPaste` 命令。核心合并结果 `MergedContent.text` 始终包含按选中顺序合并的文本，Windows 和 Unix 写回共用这一契约。`Service.initial_preferences` 持有核心层 `PreferenceSnapshot`，启动数据警告仍独立保存。
 
 ### GPUI 界面层
 
@@ -97,7 +97,7 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |
 | `shortcuts`、`shortcut_labels`、`paste_actions`、`storage`、`data_import` | 快捷键注册与显示、受控粘贴、数据占用与恢复到独立目录 |
-| `paste_coordinator`、`paste_requests`、`paste_delivery`、`sequence` | 私有粘贴状态、请求代次、原生投递及序列适配；队列与单次投递阶段分别建模 |
+| `paste_coordinator`、`paste_requests`、`paste_delivery`、`sequence` | 私有粘贴状态、请求代次、原生投递及序列适配；序列队列与单条投递并存，投递阶段由 `wait` 是否已消费区分 |
 | `image_assets`、`thumbnail_cache` | 可见范围图片资源、后台缩略图与纹理生命周期 |
 | `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、快捷键配置、隔离练习教程与初始偏好、内容展示助手、主题及本地化展示 |
 

@@ -128,8 +128,11 @@ pub(super) fn shortcut_from_keystroke(
 }
 
 #[cfg(test)]
-mod shortcut_capture_tests {
-    use super::shortcut_from_keystroke;
+mod tests {
+    use super::{
+        LanguagePreference, PasteRegistrationWarning, paste_registration_summary,
+        shortcut_from_keystroke,
+    };
     use gpui_kit::{Keystroke, Modifiers};
 
     #[test]
@@ -187,10 +190,6 @@ mod shortcut_capture_tests {
         };
         assert!(shortcut_from_keystroke(&bare, false, false).is_err());
     }
-}
-#[cfg(test)]
-mod paste_registration_tests {
-    use super::{LanguagePreference, PasteRegistrationWarning, paste_registration_summary};
 
     #[test]
     fn many_failures_produce_one_bounded_status_with_a_representative_error() {

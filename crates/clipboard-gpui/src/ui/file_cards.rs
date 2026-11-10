@@ -220,11 +220,11 @@ impl ClipboardView {
                 let _ = view.update(cx, |this, cx| {
                     let mut changed = false;
                     for (id, source, info) in results {
-                        if this.history.items.iter().any(|item| {
-                            item.id == id
-                                && item.content_type == "files"
-                                && item.file_paths.as_deref().unwrap_or_default() == source
-                        }) {
+                        if this
+                            .file_card_checked
+                            .get(&id)
+                            .is_some_and(|current| *current == source)
+                        {
                             this.file_card_info.insert(id, info);
                             changed = true;
                         }

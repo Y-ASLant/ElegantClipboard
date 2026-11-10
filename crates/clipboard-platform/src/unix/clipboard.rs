@@ -31,9 +31,7 @@ impl Worker {
         if !merged.files.is_empty() {
             contents.push(ClipboardContent::Files(merged.files));
         }
-        if let Some(text) = merged.text {
-            contents.push(ClipboardContent::Text(text));
-        }
+        contents.push(ClipboardContent::Text(merged.text));
         let mut state = lock_capture_state(&self.state)?;
         let clipboard_sequence =
             write_verified(&self.clipboard, contents, &mut state.ignored_sequence)?;

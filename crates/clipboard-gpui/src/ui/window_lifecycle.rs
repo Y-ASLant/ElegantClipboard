@@ -12,43 +12,10 @@ pub(super) fn log_window_geometry(window: &Window, cx: &App, operation: &'static
     );
     #[cfg(windows)]
     if let Some(hwnd) = native_window::window_id(window) {
-        log_native_geometry(hwnd, operation);
+        native_window::log_native_geometry(hwnd, operation);
     }
 }
 
-#[cfg(windows)]
-pub(super) fn log_native_geometry(hwnd: isize, operation: &'static str) {
-    use ::windows::Win32::{
-        Foundation::{HWND, RECT},
-        UI::{
-            HiDpi::GetDpiForWindow,
-            WindowsAndMessaging::{GetClientRect, GetWindowRect},
-        },
-    };
-    let handle = HWND(hwnd as *mut _);
-    let mut outer = RECT::default();
-    let mut client = RECT::default();
-    let result = unsafe {
-        GetWindowRect(handle, &mut outer).and_then(|()| GetClientRect(handle, &mut client))
-    };
-    match result {
-        Ok(()) => tracing::debug!(
-            operation,
-            native_window = hwnd,
-            screen_x = outer.left,
-            screen_y = outer.top,
-            outer_width = outer.right - outer.left,
-            outer_height = outer.bottom - outer.top,
-            client_width = client.right - client.left,
-            client_height = client.bottom - client.top,
-            dpi = unsafe { GetDpiForWindow(handle) },
-            "Native window geometry"
-        ),
-        Err(error) => {
-            tracing::warn!(operation, native_window = hwnd, %error, "Native geometry unavailable")
-        }
-    }
-}
 // Settings also observes the view, so its implicit GPUI window association can
 // point at the settings window. Flush effects even when the main window is hidden.
 pub(super) fn update_clipboard_window<R>(

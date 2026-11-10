@@ -324,9 +324,7 @@ fn write_merged_clipboard(
     if !merged.files.is_empty() {
         contents.push(ClipboardContent::Files(merged.files.clone()));
     }
-    if let Some(text) = &merged.text {
-        contents.push(ClipboardContent::Text(text.clone()));
-    }
+    contents.push(ClipboardContent::Text(merged.text.clone()));
     let write_result = clipboard
         .set(contents)
         .map_err(|error| anyhow!("写入合并内容失败：{error}"));
@@ -338,12 +336,10 @@ fn write_merged_clipboard(
 
     for _ in 0..4 {
         let before = unsafe { GetClipboardSequenceNumber() };
-        let text_matches = merged.text.as_ref().is_none_or(|expected| {
-            clipboard
-                .get_text()
-                .ok()
-                .is_some_and(|actual| actual == expected.as_str())
-        });
+        let text_matches = clipboard
+            .get_text()
+            .ok()
+            .is_some_and(|actual| actual == merged.text);
         let files_match = merged.files.is_empty()
             || clipboard
                 .get_files()

@@ -16,8 +16,8 @@ impl SettingsWindowView {
                 .small()
                 .into_any_element();
         }
-        let app_filter = owner_state.app_filter.value.clone();
-        let app_filter_pending = owner_state.app_filter.pending;
+        let filter = owner_state.app_filter.clone();
+        let app_filter = &filter.value;
         let running_apps = if self.app_picker_open {
             owner_state.running_apps.clone()
         } else {
@@ -34,7 +34,7 @@ impl SettingsWindowView {
                     "app-filter-enabled",
                     tr(language, "启用应用过滤", "Enable app filter"),
                     app_filter.enabled,
-                    app_filter_pending,
+                    filter.pending,
                     &self.owner,
                     |owner| owner.app_filter.value.clone(),
                     |next, checked| next.enabled = checked,
@@ -53,7 +53,7 @@ impl SettingsWindowView {
                             tr(language, "白名单", "Allowlist"),
                         ],
                         app_filter.mode,
-                        app_filter_pending,
+                        filter.pending,
                         |owner| owner.app_filter.value.mode,
                         |owner, mode, cx| {
                             let mut next = owner.app_filter.value.clone();
@@ -98,7 +98,7 @@ impl SettingsWindowView {
                                     .flex_shrink_0()
                                     .outline()
                                     .label(tr(language, "添加", "Add"))
-                                    .disabled(app_filter_pending)
+                                    .disabled(filter.pending)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.add_app_filter_rule(window, cx);
                                     })),
@@ -141,7 +141,7 @@ impl SettingsWindowView {
                                     rule,
                                     index,
                                     index + 1 == rule_count,
-                                    app_filter_pending,
+                                    filter.pending,
                                     &self.owner,
                                     cx,
                                 )
@@ -219,8 +219,7 @@ impl SettingsWindowView {
                                                                         index,
                                                                         index + 1
                                                                             == running_count,
-                                                                        &app_filter.rules,
-                                                                        app_filter_pending,
+                                                                        &filter,
                                                                         &self.owner,
                                                                         cx,
                                                                     )
@@ -278,14 +277,17 @@ fn running_app_row(
     app: &RunningApp,
     index: usize,
     last: bool,
-    rules: &[String],
-    pending: bool,
+    filter: &PendingPref<AppFilterPreference>,
     owner: &WeakEntity<ClipboardView>,
     cx: &App,
 ) -> Div {
     let owner = owner.clone();
     let process = app.process.clone();
-    let already_added = rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
+    let already_added = filter
+        .value
+        .rules
+        .iter()
+        .any(|rule| rule.eq_ignore_ascii_case(&process));
     settings_inset_list_row(cx, last)
         .when_some(app.icon.clone(), |row, path| {
             row.child(
@@ -314,7 +316,7 @@ fn running_app_row(
                     .small()
                     .tooltip(app.process.clone())
                     .label(tr(language, "添加", "Add"))
-                    .disabled(pending || already_added)
+                    .disabled(filter.pending || already_added)
                     .on_click(move |_, _, cx| {
                         let _ = owner.update(cx, |owner, cx| {
                             if let Some(next) = owner.app_filter.value.clone().with_rule(&process) {

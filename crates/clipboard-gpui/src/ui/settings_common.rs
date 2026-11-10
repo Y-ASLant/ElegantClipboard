@@ -147,7 +147,6 @@ pub(super) fn settings_column_field_help(
         .flex_grow(1.)
 }
 
-/// 设置页内嵌列表（规则、运行中应用等）：外框圆角裁剪行内 hover/选中底。
 pub(super) fn settings_inset_list(cx: &App) -> Div {
     div()
         .w_full()
@@ -175,7 +174,6 @@ pub(super) fn settings_inset_list_row(cx: &App, last: bool) -> Div {
     row
 }
 
-/// 运行中应用列表在设置列宽下的可视高度上限。
 pub(super) const SETTINGS_INSET_LIST_MAX_HEIGHT: f32 = 288.;
 
 pub(super) fn settings_description(text: impl Into<SharedString>, cx: &App) -> Div {

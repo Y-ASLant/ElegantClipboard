@@ -2,6 +2,7 @@ use ::windows::Win32::{
     Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::ClientToScreen,
     UI::{
+        HiDpi::GetDpiForWindow,
         Input::KeyboardAndMouse::{
             GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
             SendInput, SetActiveWindow, SetFocus, VK_MENU,
@@ -61,6 +62,32 @@ pub fn is_window_minimized(window: &Window) -> bool {
 /// Opaque window identifier passed to clipboard-platform native operations.
 pub(crate) fn window_id(window: &Window) -> Option<isize> {
     window_hwnd(window).map(|hwnd| hwnd.0 as isize)
+}
+
+pub(crate) fn log_native_geometry(hwnd: isize, operation: &'static str) {
+    let handle = HWND(hwnd as *mut _);
+    let mut outer = RECT::default();
+    let mut client = RECT::default();
+    let result = unsafe {
+        GetWindowRect(handle, &mut outer).and_then(|()| GetClientRect(handle, &mut client))
+    };
+    match result {
+        Ok(()) => tracing::debug!(
+            operation,
+            native_window = hwnd,
+            screen_x = outer.left,
+            screen_y = outer.top,
+            outer_width = outer.right - outer.left,
+            outer_height = outer.bottom - outer.top,
+            client_width = client.right - client.left,
+            client_height = client.bottom - client.top,
+            dpi = unsafe { GetDpiForWindow(handle) },
+            "Native window geometry"
+        ),
+        Err(error) => {
+            tracing::warn!(operation, native_window = hwnd, %error, "Native geometry unavailable")
+        }
+    }
 }
 
 /// Main-window presentation never calls GPUI activation: hidden-created Windows

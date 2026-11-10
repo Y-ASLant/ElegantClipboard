@@ -32,15 +32,17 @@ pub fn valid_format_name(name: &str) -> bool {
         && !name.chars().any(char::is_control)
 }
 
-/// 事务前暂存的 blob：Drop 删除 pending，提交成功后由调用方解除。
+/// 事务前暂存的 blob；提交成功后 `pending` 置 `None`，避免 Drop 误删正式文件。
 pub(crate) struct StagedBlob {
     hash: String,
-    pending: PathBuf,
+    pending: Option<PathBuf>,
 }
 
 impl Drop for StagedBlob {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.pending);
+        if let Some(pending) = &self.pending {
+            let _ = std::fs::remove_file(pending);
+        }
     }
 }
 
@@ -96,7 +98,10 @@ fn stage_blobs(rows: &[(String, Vec<u8>)], blob_root: &std::path::Path) -> Resul
     for (_, data) in rows {
         if data.len() > NATIVE_INLINE_MAX_BYTES {
             let (hash, pending) = store.write_pending(data)?;
-            staged.push(StagedBlob { hash, pending });
+            staged.push(StagedBlob {
+                hash,
+                pending: Some(pending),
+            });
         }
     }
     Ok(staged)
@@ -189,7 +194,7 @@ impl History {
         }
         let blob_root = self.blob_root()?;
         // 压缩与 fsync 在事务外完成，写连接锁只覆盖行插入。
-        let staged = stage_blobs(&accepted, &blob_root)?;
+        let mut staged = stage_blobs(&accepted, &blob_root)?;
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
@@ -206,12 +211,13 @@ impl History {
         insert_rows_in_transaction(&tx, item_id, &accepted, &staged)?;
         tx.commit()?;
         drop(connection);
-        // 提交成功后正式落盘；此后 StagedBlob Drop 删 pending 是空操作。
         let store = BlobStore::new(blob_root);
-        for blob in &staged {
-            store.commit(blob.hash(), &blob.pending)?;
+        for blob in &mut staged {
+            if let Some(pending) = &blob.pending {
+                store.commit(blob.hash(), pending)?;
+                blob.pending = None;
+            }
         }
-        std::mem::forget(staged);
         Ok(skips)
     }
 

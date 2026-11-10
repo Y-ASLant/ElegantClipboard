@@ -121,11 +121,14 @@ fn missing_blob_file_degrades_instead_of_failing() -> Result<()> {
 fn attach_to_missing_item_fails() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;
-    assert!(
-        history
-            .attach_native_formats(999, vec![capture("Fmt", b"x")])
-            .is_err()
-    );
+    for payload in [vec![1], vec![2; NATIVE_INLINE_MAX_BYTES + 1]] {
+        assert!(
+            history
+                .attach_native_formats(999, vec![capture("Fmt", &payload)])
+                .is_err()
+        );
+    }
+    assert_eq!(std::fs::read_dir(history.blob_root()?)?.count(), 0);
     Ok(())
 }
 

@@ -3,12 +3,6 @@ use clipboard_platform::{Command, CopyMode, CopyPurpose, paste_delivery::PasteWa
 
 type Target = (isize, u32);
 
-#[derive(Clone, Copy)]
-enum DeliveryPhase {
-    Copying,
-    Delivering,
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct QuickPaste {
     pub(super) target: Target,
@@ -18,7 +12,7 @@ pub(super) struct QuickPaste {
 
 struct Delivery {
     target: Target,
-    phase: DeliveryPhase,
+    /// 复制回执到达后取走等待策略，`None` 表示已进入投递阶段。
     wait: Option<PasteWaitPolicy>,
 }
 
@@ -80,7 +74,6 @@ impl PasteCoordinator {
     pub fn begin_copy(&mut self, target: Target, wait: PasteWaitPolicy) -> u64 {
         self.pending.begin(Delivery {
             target,
-            phase: DeliveryPhase::Copying,
             wait: Some(wait),
         })
     }
@@ -114,24 +107,17 @@ impl PasteCoordinator {
         Some(self.interrupt(None))
     }
 
-    /// A receipt moves one request into delivery exactly once; stale receipts cannot reenter.
-    /// `wait` 被取走而非克隆：回执只会把请求推进一次，第二次到来只能拿到 None。
     pub fn receive(&mut self, request_id: u64) -> Option<(Target, PasteWaitPolicy)> {
         let pending = self.pending.get_mut(request_id)?;
-        if !matches!(pending.phase, DeliveryPhase::Copying) {
-            return None;
-        }
-        pending.phase = DeliveryPhase::Delivering;
         Some((pending.target, pending.wait.take()?))
     }
 
     pub fn delivering(&self, request_id: u64) -> bool {
         self.pending
             .get(request_id)
-            .is_some_and(|pending| matches!(pending.phase, DeliveryPhase::Delivering))
+            .is_some_and(|pending| pending.wait.is_none())
     }
 
-    /// Queue ownership and an individual delivery are independent: after delivery the queue waits.
     pub fn complete_delivery(&mut self, request_id: u64) -> Option<usize> {
         if !self.delivering(request_id) {
             return None;
@@ -243,7 +229,6 @@ impl PasteCoordinator {
         self.interrupt(None)
     }
 
-    /// Called before enqueueing a clipboard replacement, including the first sequence copy.
     pub fn replace(&mut self, command: &Command) -> Option<Interrupted> {
         let keep_request = match command {
             Command::Copy { purpose, .. } | Command::Merge { purpose, .. } => purpose.request_id(),

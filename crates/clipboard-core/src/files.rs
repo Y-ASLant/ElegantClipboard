@@ -99,10 +99,7 @@ impl History {
 
     pub fn files(&self, id: i64) -> Result<Vec<String>> {
         let item = self.item(id)?;
-        if item.content_type != "files" {
-            bail!("记录不是文件");
-        }
-        parse_file_paths(item.file_paths.as_deref())
+        Self::file_paths_for_copy(&item)
     }
 
     /// 普通文件历史始终仅使用原始路径进行复制。

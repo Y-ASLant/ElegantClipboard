@@ -4,7 +4,7 @@ use std::{collections::HashSet, path::Path};
 
 #[derive(Debug)]
 pub struct MergedContent {
-    pub text: Option<String>,
+    pub text: String,
     pub files: Vec<String>,
 }
 
@@ -57,7 +57,7 @@ impl History {
         }
 
         Ok(MergedContent {
-            text: Some(text_parts.join("\n")),
+            text: text_parts.join("\n"),
             files,
         })
     }
@@ -137,7 +137,7 @@ mod tests {
             other.display(),
             shared.display()
         );
-        assert_eq!(merged.text.as_deref(), Some(expected_text.as_str()));
+        assert_eq!(merged.text, expected_text);
         assert_eq!(
             merged.files,
             vec![
@@ -178,8 +178,8 @@ mod tests {
         legacy.html_content = Some("\0".repeat(crate::MAX_TEXT_BYTES / 3 + 1));
         assert!(merge_text(&legacy).is_err());
         assert_eq!(
-            history.merge_content(&[html, text])?.text.as_deref(),
-            Some("Hello world\nplain")
+            history.merge_content(&[html, text])?.text,
+            "Hello world\nplain"
         );
 
         let rtf = history.capture_rich(None, Some(b"{\\rtf1 no text}"), None, &images)?;
