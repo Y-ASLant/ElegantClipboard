@@ -187,10 +187,7 @@ impl ClipboardView {
                         .tooltip(label)
                         .accessibility_label(label)
                         .disabled(
-                            action == FloatingAction::AddTodo
-                                && (self.todo_edit_saving
-                                    || self.editor_window.is_some()
-                                    || self.todo_draft.is_some()),
+                            action == FloatingAction::AddTodo && self.todo_editor_unavailable(),
                         )
                         .on_click(cx.listener(
                             move |this, event, window, cx| {

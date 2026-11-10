@@ -65,6 +65,16 @@ impl ClipboardView {
         }
     }
 
+    /// 待办编辑器与历史条目编辑器（含主窗口备注对话框）共用 editor 会话，
+    /// 浮钮的禁用状态必须与此保持一致，否则表现为点击无反应。
+    pub(super) fn todo_editor_unavailable(&self) -> bool {
+        self.editor_pending()
+            || self.todo_edit_saving
+            || self.editor.id.is_some()
+            || self.editor_window.is_some()
+            || self.todo_draft.is_some()
+    }
+
     pub(super) fn open_todo_editor(
         &mut self,
         id: Option<i64>,
@@ -72,12 +82,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.editor_pending()
-            || self.todo_edit_saving
-            || self.editor.id.is_some()
-            || self.editor_window.is_some()
-            || self.todo_draft.is_some()
-        {
+        if self.todo_editor_unavailable() {
             return;
         }
         self.todo_draft = Some(TodoDraft { id, text });
