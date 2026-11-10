@@ -10,6 +10,8 @@ pub(super) struct TodoToastWindow {
     message: SharedString,
     close_label: &'static str,
     generation: u64,
+    motion: u64,
+    leaving: bool,
 }
 
 impl TodoToastWindow {
@@ -20,15 +22,47 @@ impl TodoToastWindow {
     }
 
     fn arm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.leaving = false;
         self.generation = self.generation.wrapping_add(1);
+        self.motion = self.motion.wrapping_add(1);
         let generation = self.generation;
         let handle = window.window_handle();
         cx.spawn(async move |view, cx| {
             cx.background_executor().timer(VISIBLE_FOR).await;
             cx.update(|cx| {
                 let _ = handle.update(cx, |_, toast_window, cx| {
+                    let _ = view.update(cx, |toast, cx| {
+                        if toast.generation == generation && !toast.leaving {
+                            toast.dismiss(toast_window, cx);
+                        }
+                    });
+                });
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.leaving {
+            return;
+        }
+        self.leaving = true;
+        self.motion = self.motion.wrapping_add(1);
+        if cx.reduce_motion() {
+            window.remove_window();
+            return;
+        }
+        let motion = self.motion;
+        let handle = window.window_handle();
+        cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(visual::MOTION_DURATION)
+                .await;
+            cx.update(|cx| {
+                let _ = handle.update(cx, |_, toast_window, cx| {
                     let _ = view.update(cx, |toast, _| {
-                        if toast.generation == generation {
+                        if toast.leaving && toast.motion == motion {
                             toast_window.remove_window();
                         }
                     });
@@ -36,6 +70,7 @@ impl TodoToastWindow {
             });
         })
         .detach();
+        cx.notify();
     }
 }
 
@@ -52,10 +87,12 @@ pub(super) fn open(
     let scale = window.scale_factor();
     let display_id = window.display(cx).map(|display| display.id());
     let width = px(CARD_WIDTH).min(screen.size.width - px(SCREEN_MARGIN * 2.));
-    let height = px(CARD_HEIGHT).min(screen.size.height - px(SCREEN_MARGIN * 2.));
+    let card_height = px(CARD_HEIGHT).min(screen.size.height - px(SCREEN_MARGIN * 2.));
+    // Four extra pixels sit in the screen margin so the card can rise without clipping.
+    let height = card_height + px(visual::SPACE_1);
     let origin = point(
         (screen.right() - width - px(SCREEN_MARGIN)).max(screen.left()),
-        (screen.bottom() - height - px(SCREEN_MARGIN)).max(screen.top()),
+        (screen.bottom() - card_height - px(SCREEN_MARGIN)).max(screen.top()),
     );
     let bounds = Bounds::new(origin, size(width, height));
     let opened = cx
@@ -63,14 +100,10 @@ pub(super) fn open(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 display_id,
-                // 不留系统标题栏，否则 44px 高的窗口会把内容裁掉，只剩白底。
-                titlebar: Some(TitlebarOptions {
-                    appears_transparent: true,
-                    ..Default::default()
-                }),
-                window_decorations: Some(WindowDecorations::Client),
+                // No reserved titlebar: a 44px popup otherwise keeps a blank white bar.
+                titlebar: None,
                 kind: WindowKind::PopUp,
-                window_background: WindowBackgroundAppearance::Opaque,
+                window_background: WindowBackgroundAppearance::Transparent,
                 focus: false,
                 show: true,
                 is_movable: false,
@@ -88,6 +121,8 @@ pub(super) fn open(
                     message: message.into(),
                     close_label,
                     generation: 0,
+                    motion: 0,
+                    leaving: false,
                 })
             },
         )
@@ -126,14 +161,23 @@ fn place(native: isize, bounds: Bounds<Pixels>, scale: f32) {
 }
 
 impl Render for TodoToastWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(not(target_os = "macos"))]
+        window.set_background_appearance(WindowBackgroundAppearance::Transparent);
         let close_label = self.close_label;
-        div()
-            .size_full()
+        let motion = self.motion;
+        let leaving = self.leaving;
+        let card = div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .h(px(CARD_HEIGHT))
             .flex()
             .items_center()
             .gap(px(visual::SPACE_2))
             .px(px(visual::SPACE_3))
+            .overflow_hidden()
+            .rounded(cx.theme().radius)
             .bg(cx.theme().popover)
             .border(px(visual::BORDER_WIDTH))
             .border_color(cx.theme().border)
@@ -161,7 +205,54 @@ impl Render for TodoToastWindow {
                     .icon(Icon::new(IconName::Close).size(px(visual::ICON_SMALL)))
                     .accessibility_label(close_label)
                     .tooltip(close_label)
-                    .on_click(|_, window, _| window.remove_window()),
+                    .on_click(cx.listener(|this, _, window, cx| this.dismiss(window, cx))),
+            );
+        let card = if cx.reduce_motion() || motion == 0 {
+            card.top_0()
+                .when(motion == 0, |card| card.opacity(0.))
+                .into_any_element()
+        } else {
+            let exit = leaving;
+            card.with_animation(
+                ("todo-toast", motion),
+                toast_motion(cx, exit),
+                move |card, progress| {
+                    let (offset, opacity) = toast_shift(progress, exit);
+                    card.top(px(offset)).opacity(opacity)
+                },
             )
+            .into_any_element()
+        };
+        div().relative().size_full().child(card)
+    }
+}
+
+fn toast_motion(cx: &App, exit: bool) -> Animation {
+    let easing = if exit {
+        cx.theme().motion.easing_exit.clone()
+    } else {
+        cx.theme().motion.easing_enter.clone()
+    };
+    Animation::new(visual::MOTION_DURATION).with_easing(move |progress| easing.sample(progress))
+}
+
+fn toast_shift(progress: f32, leaving: bool) -> (f32, f32) {
+    if leaving {
+        (visual::SPACE_1 * progress, 1. - progress)
+    } else {
+        (visual::SPACE_1 * (1. - progress), progress)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::toast_shift;
+
+    #[test]
+    fn toast_rises_in_and_drops_out() {
+        assert_eq!(toast_shift(0., false), (4., 0.));
+        assert_eq!(toast_shift(1., false), (0., 1.));
+        assert_eq!(toast_shift(0., true), (0., 1.));
+        assert_eq!(toast_shift(1., true), (4., 0.));
     }
 }

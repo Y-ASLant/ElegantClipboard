@@ -15,8 +15,6 @@ pub(super) fn settings_stack() -> Div {
         .whitespace_normal()
 }
 
-/// Section blurbs longer than this stay in the card body; shorter ones use the title info icon.
-const SECTION_TOOLTIP_MAX_CHARS: usize = 40;
 /// CJK help copy has no spaces; without a max width the tooltip stays one line and is clipped.
 const HELP_TOOLTIP_MAX_WIDTH: f32 = 320.;
 
@@ -111,8 +109,8 @@ pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedStrin
     button
 }
 
-/// 「标签 + 说明图标」行：字段标题和分区卡片标题共用。
-pub(super) fn label_with_help(
+/// 「标签 + 说明图标」行，供字段标签使用。
+fn label_with_help(
     label: &'static str,
     help: impl Into<SharedString>,
     id: impl Into<ElementId>,
@@ -169,25 +167,6 @@ fn settings_description_sized(text: impl Into<SharedString>, size: f32, cx: &App
         .text_color(cx.theme().muted_foreground)
         .whitespace_normal()
         .child(text.into())
-}
-
-/// 分区说明的承载位置：短说明收进标题信息图标，长说明留在卡片正文首行。
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum SectionDescription {
-    Hidden,
-    Tooltip,
-    Body,
-}
-
-pub(super) fn section_description_layout(description: &str) -> SectionDescription {
-    let chars = description.chars().count();
-    if chars == 0 {
-        SectionDescription::Hidden
-    } else if chars <= SECTION_TOOLTIP_MAX_CHARS {
-        SectionDescription::Tooltip
-    } else {
-        SectionDescription::Body
-    }
 }
 
 /// 设置各 section 共用的开场：升级 owner 弱引用并读取主窗口状态。

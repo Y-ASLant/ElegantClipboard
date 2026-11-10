@@ -68,6 +68,8 @@ mod startup;
 mod storage;
 mod theme_color;
 mod thumbnail_cache;
+mod todo_card;
+mod todo_motion;
 mod todo_toast;
 mod todos;
 mod update_events;
@@ -279,6 +281,10 @@ struct ClipboardView {
     todo_draft: Option<todos::TodoDraft>,
     todo_edit_saving: bool,
     todo_notice: Option<todos::TodoNotice>,
+    todo_heights: Rc<RefCell<HashMap<i64, f32>>>,
+    todo_move_offsets: HashMap<i64, f32>,
+    todo_motion_revision: u64,
+    todo_motion_task: Option<Task<()>>,
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
     group_rename_id: Option<i64>,

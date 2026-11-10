@@ -279,6 +279,10 @@ impl ClipboardView {
             todo_draft: None,
             todo_edit_saving: false,
             todo_notice: None,
+            todo_heights: Rc::new(RefCell::new(HashMap::new())),
+            todo_move_offsets: HashMap::new(),
+            todo_motion_revision: 0,
+            todo_motion_task: None,
             group_name_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(language, "分组名称", "Group name"))
             }),

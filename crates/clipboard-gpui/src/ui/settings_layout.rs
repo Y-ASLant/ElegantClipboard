@@ -1,7 +1,4 @@
-use super::settings_common::{
-    SectionDescription, label_with_help, section_description_layout, settings_description,
-    settings_stack,
-};
+use super::settings_common::{settings_description, settings_stack};
 use super::*;
 use gpui_kit::component::{
     group_box::{GroupBox, GroupBoxVariant, GroupBoxVariants},
@@ -370,6 +367,11 @@ impl Render for SettingsWindowView {
                     );
                     let settings = settings.clone();
                     let group = SettingGroup::new().variant(GroupBoxVariant::Normal);
+                    let group = if title.is_empty() {
+                        group
+                    } else {
+                        group.title(title)
+                    };
                     group
                         .text_size(px(visual::TEXT_BODY))
                         .font_semibold()
@@ -388,15 +390,12 @@ impl Render for SettingsWindowView {
                                         (section.content)(view, cx)
                                     })
                                     .unwrap_or_else(|_| div().into_any_element());
-                                let layout = section_description_layout(description);
-                                let body = if layout == SectionDescription::Body {
-                                    settings_stack()
-                                        .child(settings_description(description, cx))
-                                        .child(content)
-                                        .into_any_element()
-                                } else {
-                                    content
-                                };
+                                let body = settings_stack()
+                                    .when(!description.is_empty(), |stack| {
+                                        stack.child(settings_description(description, cx))
+                                    })
+                                    .child(content)
+                                    .into_any_element();
                                 // 页面内容直接渲染，切换页面不做淡入动效。
                                 div()
                                     .w_full()
@@ -405,19 +404,6 @@ impl Render for SettingsWindowView {
                                         GroupBox::new()
                                             .id(("settings-card", section_ix))
                                             .outline()
-                                            .when(!title.is_empty(), |card| {
-                                                card.title(
-                                                    if layout == SectionDescription::Tooltip {
-                                                        label_with_help(
-                                                            title,
-                                                            description,
-                                                            ("section-help", section_ix),
-                                                        )
-                                                    } else {
-                                                        div().child(title)
-                                                    },
-                                                )
-                                            })
                                             .content_style(
                                                 StyleRefinement::default()
                                                     .bg(cx.theme().group_box)
