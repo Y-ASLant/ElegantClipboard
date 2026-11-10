@@ -21,3 +21,13 @@ pub fn card_radius(cx: &App) -> Pixels {
         CardCornerPreference::Off => px(0.),
     }
 }
+
+/// 与 `render_row_action_bar` 水平 `px` 一致。
+const ACTION_BAR_PADDING: f32 = 2.;
+
+/// 操作栏内按钮选中/悬停底色使用的圆角：随卡片圆角，并扣除栏内边距。
+pub fn action_bar_button_radius(cx: &App) -> Pixels {
+    let outer = card_radius(cx);
+    let inset = outer - px(ACTION_BAR_PADDING);
+    inset.max(px(0.))
+}

@@ -140,10 +140,12 @@ impl ClipboardView {
         on_click: impl Fn(&mut Self, &ClickEvent, &mut Window, &mut Context<Self>) + 'static,
     ) -> Button {
         let label: SharedString = label.into();
+        let button_radius = crate::card_radius::action_bar_button_radius(cx);
         Button::new((name, id as usize))
             .ghost()
             .xsmall()
             .h(px(visual::SPACE_6))
+            .rounded(button_radius)
             .icon(icon.into().size(px(visual::ICON_SMALL)))
             .tooltip(label.clone())
             .accessibility_label(label)
@@ -176,6 +178,7 @@ impl ClipboardView {
             .items_center()
             .gap(px(visual::SPACE_1))
             .rounded(crate::card_radius::card_radius(cx))
+            .overflow_hidden()
             .bg(cx.theme().popover)
             .text_color(cx.theme().popover_foreground)
             .border(px(visual::BORDER_WIDTH))

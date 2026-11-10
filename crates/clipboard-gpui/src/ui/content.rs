@@ -13,7 +13,7 @@ impl ClipboardView {
             (self.display.value.category_tabs.enabled_count() + 1).max(1) as f32;
         // Deduct the group selector, row gap, and the Kit segmented-tab insets.
         let category_width = (window.viewport_size().width
-            - px(PAGE_PADDING * 2. + 138. + visual::SPACE_2 * 2. + 6.))
+            - px(PAGE_PADDING * 2. + visual::GROUP_SELECT_WIDTH + visual::SPACE_2 * 2. + 6.))
             / category_tab_count;
         let empty_message = if self.history.loading {
             tr(self.language, "正在加载…", "Loading…")

@@ -139,8 +139,8 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
     }
 }
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
-/// 分组下拉触发器与弹出菜单共用的宽度。
-pub const GROUP_SELECT_WIDTH: f32 = 138.;
+/// 分组下拉触发器与弹出菜单共用的宽度（紧凑，为最小窗口下的分类标签留空间）。
+pub const GROUP_SELECT_WIDTH: f32 = 100.;
 pub const DRAG_MOTION_DURATION: Duration = crate::design_system::SLOW;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);

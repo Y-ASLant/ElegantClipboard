@@ -459,8 +459,8 @@ pub enum WindowPositionPreference {
     FixedPosition,
 }
 
-pub const MIN_WINDOW_WIDTH: u32 = 400;
-pub const MIN_WINDOW_HEIGHT: u32 = 520;
+pub const MIN_WINDOW_WIDTH: u32 = 320;
+pub const MIN_WINDOW_HEIGHT: u32 = 480;
 pub const MAX_WINDOW_WIDTH: u32 = 4096;
 pub const MAX_WINDOW_HEIGHT: u32 = 2160;
 

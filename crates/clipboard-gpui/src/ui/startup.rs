@@ -1,4 +1,5 @@
 use super::*;
+use clipboard_core::preferences::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
 use clipboard_platform::InstanceBusy;
 
 gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine, Pin, PinOff]);
@@ -173,7 +174,10 @@ pub fn run(
                         appears_transparent: true,
                         ..Default::default()
                     }),
-                    window_min_size: Some(size(px(400.), px(520.))),
+                    window_min_size: Some(size(
+                        px(MIN_WINDOW_WIDTH as f32),
+                        px(MIN_WINDOW_HEIGHT as f32),
+                    )),
                     focus: !cfg!(windows) && !startup.hidden,
                     show: !cfg!(windows) && !startup.hidden,
                     app_id: Some("com.aslant.elegant-clipboard-gpui".into()),

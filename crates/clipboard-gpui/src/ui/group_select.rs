@@ -162,9 +162,10 @@ impl ClipboardView {
                 Button::new("group-select")
                     .outline()
                     .w_full()
+                    .min_w_0()
                     .h(px(visual::CONTROL_HEIGHT))
                     .text_size(px(visual::TEXT_BODY))
-                    .label(title)
+                    .child(div().flex_1().min_w_0().truncate().child(title))
                     .dropdown_caret(true)
                     .disabled(
                         self.todos_open
