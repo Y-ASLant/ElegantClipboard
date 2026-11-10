@@ -7,6 +7,10 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.todos_open && matches!(event, InputEvent::Change) {
+            cx.notify();
+            return;
+        }
         if matches!(event, InputEvent::Change) {
             self.cancel_sequence(cx);
             self.cancel_pending_row_click();
@@ -31,6 +35,7 @@ impl ClipboardView {
         } else if matches!(event, InputEvent::Focus) {
             self.cancel_pending_row_click();
         } else if matches!(event, InputEvent::PressEnter { .. })
+            && !self.todos_open
             && !self.batch_mode
             && let Some(id) = self.history.selected
         {

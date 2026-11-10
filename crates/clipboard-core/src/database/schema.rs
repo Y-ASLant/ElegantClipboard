@@ -122,6 +122,15 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_group ON clipboard_items(group_id);
 CREATE INDEX IF NOT EXISTS idx_clipboard_same_text
     ON clipboard_items(text_content) WHERE group_id IS NULL;
 
+-- User-authored tasks. Not clipboard history, so capture, paste, and retention ignore them.
+CREATE TABLE IF NOT EXISTS todos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    completed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
 -- Insert default settings
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('global_shortcut', 'Alt+C'),

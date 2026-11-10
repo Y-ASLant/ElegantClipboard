@@ -208,7 +208,12 @@ impl ClipboardView {
                                 self.scroll.max_offset().y,
                                 self.scroll.bounds().size.height,
                             ) || self.scroll_top_position.is_pressed(),
-                            |container| container.child(self.render_scroll_top(cx)),
+                            |container| {
+                                container.child(self.render_floating_action(
+                                    super::history_scroll_top::FloatingAction::ScrollTop,
+                                    cx,
+                                ))
+                            },
                         ),
                 )
             })

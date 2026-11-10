@@ -54,6 +54,20 @@ impl ClipboardView {
         }
     }
 
+    pub(super) fn save_todo_preference(
+        &mut self,
+        preference: TodoPreference,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.todo_preference.pending
+            && preference != self.todo_preference.value
+            && self.send(Command::SetTodoPreference(preference), cx)
+        {
+            self.todo_preference.pending = true;
+            cx.notify();
+        }
+    }
+
     pub(super) fn save_audio(&mut self, audio: AudioPreference, cx: &mut Context<Self>) {
         if !self.audio.pending
             && audio != self.audio.value
@@ -320,6 +334,18 @@ impl ClipboardView {
                 self.is_error = true;
             }
         }
+        true
+    }
+
+    pub(super) fn apply_todo_preference_saved(
+        &mut self,
+        result: Result<TodoPreference, String>,
+    ) -> bool {
+        self.acknowledge_save(
+            result,
+            |this| &mut this.todo_preference,
+            ("保存待办设置失败", "Failed to save to-do settings"),
+        );
         true
     }
 

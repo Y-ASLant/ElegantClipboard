@@ -23,6 +23,7 @@ pub mod rich;
 pub(crate) mod same_text;
 pub mod search;
 pub mod text_transform;
+mod todos;
 pub use blob_store::sweep_pending_at;
 pub use files::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES, parse_file_paths_for_display};
 pub use image::{DeletionOutcome, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, SavedImage, save_png};
@@ -32,6 +33,7 @@ pub use native_format::{
 };
 pub use preview::{FilePreviewEntry, PreviewContent};
 pub use text_transform::TextTransform;
+pub use todos::Todo;
 
 use anyhow::{Context, Result, bail};
 use database::{

@@ -9,7 +9,7 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
-        let category_tab_count = self.display.category_tabs.enabled_count().max(1) as f32;
+        let category_tab_count = (self.display.category_tabs.enabled_count() + 1).max(1) as f32;
         // Deduct the group selector, row gap, and the Kit segmented-tab insets.
         let category_width = (window.viewport_size().width
             - px(PAGE_PADDING * 2. + 138. + visual::SPACE_2 * 2. + 6.))
@@ -146,32 +146,44 @@ impl ClipboardView {
                                             .h(px(visual::CONTROL_HEIGHT))
                                             .max_width(category_width)
                                             .last_empty_space(div().w_0())
-                                            .selected_index(self.category_tab_index())
+                                            .selected_index(self.toolbar_tab_index())
                                             .on_click(cx.listener(
                                                 |this, index: &usize, window, cx| {
-                                                    if let Some(entry) =
-                                                        this.category_tab_entries().get(*index)
-                                                    {
-                                                        this.select_category(
-                                                            entry.filter,
-                                                            window,
-                                                            cx,
-                                                        );
-                                                    }
+                                                    this.select_toolbar_tab(*index, window, cx);
                                                 },
                                             ))
-                                            .children(self.category_tab_entries().into_iter().map(
-                                                |entry| {
-                                                    Tab::new()
-                                                        .text_size(px(visual::TEXT_BODY))
-                                                        .min_w_0()
-                                                        .w(category_width)
-                                                        .label(entry.label)
-                                                        .aria_label(entry.accessible)
-                                                        .flex_1()
-                                                },
-                                            )),
+                                            .children(self.toolbar_tabs().into_iter().map(|tab| {
+                                                let (label, accessible) = self.toolbar_tab_text(tab);
+                                                Tab::new()
+                                                    .text_size(px(visual::TEXT_BODY))
+                                                    .min_w_0()
+                                                    .w(category_width)
+                                                    .label(label)
+                                                    .aria_label(accessible)
+                                                    .flex_1()
+                                            })),
                                     ),
+                                )
+                            })
+                            .when(!self.display.show_category_filter, |row| {
+                                row.child(
+                                    Button::new("open-todos")
+                                        .h(px(visual::CONTROL_HEIGHT))
+                                        .outline()
+                                        .selected(self.todos_open)
+                                        .label(tr(self.language, "待办", "To-do"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            if this.todos_open {
+                                                let filter = if this.history.favorite_only() {
+                                                    None
+                                                } else {
+                                                    Some(this.history.category())
+                                                };
+                                                this.select_category(filter, window, cx);
+                                            } else {
+                                                this.open_todos(window, cx);
+                                            }
+                                        })),
                                 )
                             })
                             .child(
@@ -359,7 +371,11 @@ impl ClipboardView {
                     cx,
                 ))
             })
-            .child(self.render_history_list(empty_message, cx))
+            .child(if self.todos_open {
+                self.render_todos(cx).into_any_element()
+            } else {
+                self.render_history_list(empty_message, cx).into_any_element()
+            })
             .into_any_element()
     }
 }

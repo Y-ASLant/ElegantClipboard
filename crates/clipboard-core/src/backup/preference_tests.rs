@@ -73,6 +73,13 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             paste_enabled: true,
             paste_timing: SoundTiming::AfterSuccess,
         },
+        todo: TodoPreference {
+            density: TodoDensity::Compact,
+            show_created: false,
+            show_edited: true,
+            show_completed: false,
+            toast: true,
+        },
         retention: RetentionPolicy {
             days: 30,
             max_count: 500,
@@ -131,6 +138,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_hover_preview(expected.hover_preview)?;
     preferences.set_display(expected.display)?;
     preferences.set_audio(expected.audio)?;
+    preferences.set_todo_preference(expected.todo)?;
     history.save_retention(expected.retention, true, &dir.path().join("images"))?;
     preferences.set_transient_filter(expected.transient_filter)?;
     preferences.set_monitor_types(expected.monitor_types)?;

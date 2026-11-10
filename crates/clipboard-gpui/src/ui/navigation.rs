@@ -1,3 +1,4 @@
+use super::category_tabs::ToolbarTab;
 use super::*;
 pub(super) fn history_row_height(
     item: &clipboard_core::database::ClipboardItem,
@@ -98,7 +99,7 @@ impl ClipboardView {
             None => self.history.favorite_only(),
             Some(category) => !self.history.favorite_only() && self.history.category() == category,
         };
-        if selected {
+        if selected && !self.todos_open {
             return;
         }
         self.cancel_sequence(cx);
@@ -106,6 +107,7 @@ impl ClipboardView {
         self.close_hover_preview("category_changed", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
+        self.todos_open = false;
         self.reset_selection();
         self.search_task = None;
         if let Some(category) = category {
@@ -114,6 +116,10 @@ impl ClipboardView {
             self.history.set_favorite_filter(true);
         }
         self.scroll_to_top();
+        if selected {
+            cx.notify();
+            return;
+        }
         self.query(cx);
         window.focus(&self.list_focus, cx);
         cx.notify();
@@ -128,10 +134,12 @@ impl ClipboardView {
         if !self.display.show_category_filter {
             return;
         }
-        if let Some(next) = self.category_tab_index().checked_add_signed(direction) {
-            let filter = self.visible_tab_filters().nth(next);
-            if let Some(filter) = filter {
-                self.select_category(filter, window, cx);
+        let tabs = self.toolbar_tabs();
+        if let Some(next) = self.toolbar_tab_index().checked_add_signed(direction) {
+            match tabs.get(next) {
+                Some(ToolbarTab::Todos) => self.open_todos(window, cx),
+                Some(ToolbarTab::Category(filter)) => self.select_category(*filter, window, cx),
+                None => {}
             }
         }
     }

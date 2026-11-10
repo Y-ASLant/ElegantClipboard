@@ -57,6 +57,7 @@ mod settings_quick_paste;
 mod settings_retention;
 mod settings_shortcuts;
 mod settings_storage;
+mod settings_todos;
 mod settings_window;
 mod settings_window_effect;
 mod shortcut_events;
@@ -67,6 +68,8 @@ mod startup;
 mod storage;
 mod theme_color;
 mod thumbnail_cache;
+mod todo_toast;
+mod todos;
 mod update_events;
 mod view_init;
 mod window_lifecycle;
@@ -107,7 +110,7 @@ use crate::{
     },
 };
 use clipboard_core::{
-    ContentCategory, FilePreviewEntry, PreviewContent, TextTransform,
+    ContentCategory, FilePreviewEntry, PreviewContent, TextTransform, Todo,
     backup::BackupReport,
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{
@@ -117,8 +120,8 @@ use clipboard_core::{
         MAX_HOVER_DELAY_MS, MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS,
         MIN_HOVER_ZOOM_STEP, MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteDeliveryMode,
         PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor,
-        ThemePreference, TimeFormat, WindowEffect, WindowEffectPreference,
-        WindowPositionPreference, WindowSizePreference,
+        ThemePreference, TimeFormat, TodoDensity, TodoPreference, WindowEffect,
+        WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -272,6 +275,12 @@ struct ClipboardView {
     file_card_checked: HashMap<i64, String>,
     groups: Vec<Group>,
     search: Entity<InputState>,
+    todos_open: bool,
+    todos: Vec<Todo>,
+    todos_pending: bool,
+    todo_draft: Option<todos::TodoDraft>,
+    todo_edit_saving: bool,
+    todo_notice: Option<todos::TodoNotice>,
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
     group_rename_id: Option<i64>,
@@ -338,6 +347,7 @@ struct ClipboardView {
     onboarding_shortcut: Option<Entity<onboarding::shortcut::OnboardingShortcut>>,
     onboarding_practice: Option<Entity<onboarding::practice::OnboardingPractice>>,
     settings_window: Option<AnyWindowHandle>,
+    todo_toast: Option<WindowHandle<todo_toast::TodoToastWindow>>,
     history_menu_window: Option<AnyWindowHandle>,
     settings_window_opening: bool,
     theme: ThemePreference,
@@ -383,6 +393,7 @@ struct ClipboardView {
     restore_clipboard: PendingPref<bool>,
     display: DisplayPreference,
     display_pending: bool,
+    todo_preference: PendingPref<TodoPreference>,
     audio: PendingPref<AudioPreference>,
     retention: PendingPref<clipboard_core::retention::RetentionPolicy>,
     retention_saved: bool,
@@ -435,6 +446,7 @@ struct ClipboardView {
 enum SettingsPage {
     General,
     Display,
+    Todos,
     Theme,
     Data,
     AppFilter,

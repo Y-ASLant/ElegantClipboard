@@ -191,6 +191,7 @@ impl ClipboardView {
             service.initial_preferences.paste_delivery_mode,
         );
         let display = service.initial_preferences.display;
+        let todo_preference = service.initial_preferences.todo;
         let audio = service.initial_preferences.audio;
         let (retention, retention_saved) = (
             service.initial_preferences.retention,
@@ -272,6 +273,12 @@ impl ClipboardView {
             file_card_checked: HashMap::new(),
             groups: Vec::new(),
             search,
+            todos_open: false,
+            todos: Vec::new(),
+            todos_pending: false,
+            todo_draft: None,
+            todo_edit_saving: false,
+            todo_notice: None,
             group_name_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(language, "分组名称", "Group name"))
             }),
@@ -343,6 +350,7 @@ impl ClipboardView {
             onboarding_shortcut: None,
             onboarding_practice: None,
             settings_window: None,
+            todo_toast: None,
             history_menu_window: None,
             settings_window_opening: false,
             theme,
@@ -390,6 +398,7 @@ impl ClipboardView {
             sequence_hotkey_pending: false,
             display,
             display_pending: false,
+            todo_preference: PendingPref::new(todo_preference),
             retention_saved,
             retention: PendingPref::new(retention),
             audio: PendingPref::new(audio),

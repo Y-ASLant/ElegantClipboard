@@ -155,6 +155,27 @@ pub(crate) fn suppress_activation(handle: isize) -> Result<()> {
     configure_popup(handle, true)
 }
 
+/// Stay above other windows without taking focus. Does not disable DWM composition.
+pub(crate) fn avoid_activation(handle: isize) -> Result<()> {
+    let hwnd = checked_window(handle)?;
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let ex =
+            (ex | (WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW).0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )?;
+    }
+    Ok(())
+}
+
 /// Set the physical CLIENT rectangle, correcting once after a synchronous DPI change.
 pub(crate) fn set_bounds(handle: isize, bounds: Bounds<Pixels>, scale: f32) -> Result<()> {
     ensure!(scale.is_finite() && scale > 0., "预览缩放比例无效");

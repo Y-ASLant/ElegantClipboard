@@ -91,12 +91,18 @@ impl ClipboardView {
     }
 
     pub(super) fn close_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.editor_pending() {
+        if self.editor_pending() || self.todo_edit_saving {
             return false;
         }
-        if self.editor.id.take().is_some() {
-            let content_editor = self.editor_source_hash.is_some();
-            self.release_editor_session();
+        let had_item = self.editor.id.take().is_some();
+        let had_todo = self.todo_draft.take().is_some();
+        if had_item || had_todo {
+            let content_editor = self.editor_source_hash.is_some() || had_todo;
+            if had_item {
+                self.release_editor_session();
+            } else {
+                self.editor_error = None;
+            }
             if let Some(handle) = self.editor_window.take() {
                 window.focus(&self.list_focus, cx);
                 cx.defer(move |cx| {

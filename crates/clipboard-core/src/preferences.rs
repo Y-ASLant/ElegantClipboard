@@ -46,6 +46,7 @@ const CAPTURE_FORMATS_KEY: &str = "gpui_capture_formats";
 const APP_FILTER_KEY: &str = "gpui_app_filter";
 const ONBOARDING_COMPLETED_KEY: &str = "gpui_onboarding_completed";
 const AUDIO_KEY: &str = "gpui_audio";
+const TODO_KEY: &str = "gpui_todo";
 const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
 const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
 const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
@@ -390,6 +391,14 @@ impl Preferences {
 
     pub fn set_audio(&self, preference: AudioPreference) -> Result<()> {
         self.write_json(AUDIO_KEY, &preference)
+    }
+
+    pub fn todo_preference(&self) -> Result<TodoPreference> {
+        self.read_json(TODO_KEY, |_| true)
+    }
+
+    pub fn set_todo_preference(&self, preference: TodoPreference) -> Result<()> {
+        self.write_json(TODO_KEY, &preference)
     }
 
     pub fn monitor_types(&self) -> Result<MonitorTypesPreference> {

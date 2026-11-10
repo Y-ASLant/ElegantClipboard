@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::component::input::{Editor, EditorState, Escape as EditorEscape};
+use gpui_kit::component::text::TextView;
 
 const CONTEXT: &str = "ContentEditor";
 const EDITOR_WIDTH: f32 = 640.;
@@ -22,8 +23,12 @@ pub(super) fn bind_keys(cx: &mut App) {
     ]);
 }
 
-fn editor_title(language: LanguagePreference) -> &'static str {
-    tr(language, "编辑内容", "Edit content")
+fn editor_title(language: LanguagePreference, adding_todo: Option<bool>) -> &'static str {
+    match adding_todo {
+        Some(true) => tr(language, "添加待办", "Add to-do"),
+        Some(false) => tr(language, "编辑待办", "Edit to-do"),
+        None => tr(language, "编辑内容", "Edit content"),
+    }
 }
 
 fn save_shortcut_label() -> &'static str {
@@ -45,6 +50,7 @@ pub(super) struct ContentEditorWindow {
     loaded: bool,
     _owner_subscription: Subscription,
     _owner_release_subscription: Subscription,
+    _editor_subscription: Subscription,
 }
 
 impl ContentEditorWindow {
@@ -54,21 +60,26 @@ impl ContentEditorWindow {
             .expect("content editor requires its owner view");
         let language = entity.read(cx).language;
         let subscription = cx.observe_in(&entity, window, |this, owner, window, cx| {
-            let language = owner.read(cx).language;
-            if language != this.language {
+            let owner = owner.read(cx);
+            let language = owner.language;
+            let adding_todo = owner.todo_draft.as_ref().map(|draft| draft.id.is_none());
+            if language != this.language || adding_todo.is_some() {
                 this.language = language;
-                window.set_window_title(editor_title(language));
+                window.set_window_title(editor_title(language, adding_todo));
             }
             cx.notify();
         });
         let release_subscription = cx.observe_release(&entity, |_, _, cx| cx.notify());
+        let editor = cx.new(|cx| EditorState::new(window, cx).line_number(true));
+        let editor_subscription = cx.observe(&editor, |_, _, cx| cx.notify());
         Self {
             owner,
-            editor: cx.new(|cx| EditorState::new(window, cx).line_number(true)),
+            editor,
             language,
             loaded: false,
             _owner_subscription: subscription,
             _owner_release_subscription: release_subscription,
+            _editor_subscription: editor_subscription,
         }
     }
 
@@ -97,9 +108,13 @@ impl ContentEditorWindow {
 
     fn save(&mut self, cx: &mut Context<Self>) {
         let text = self.editor.read(cx).value().to_string();
-        let _ = self
-            .owner
-            .update(cx, |owner, cx| owner.save_content_editor(text, cx));
+        let _ = self.owner.update(cx, |owner, cx| {
+            if owner.todo_draft.is_some() {
+                owner.save_todo_editor(text, cx);
+            } else {
+                owner.save_content_editor(text, cx);
+            }
+        });
     }
 }
 
@@ -111,19 +126,29 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_editor_window(window, cx, move |view| {
+            view.editor.id == Some(id) && view.editor_window.is_none()
+        });
+    }
+
+    pub(super) fn open_editor_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        still_waiting: impl Fn(&ClipboardView) -> bool + 'static,
+    ) {
         let display_id = window.display(cx).map(|display| display.id());
         let bounds = Bounds::centered(display_id, size(px(EDITOR_WIDTH), px(EDITOR_HEIGHT)), cx);
         let theme = self.theme;
         let language = self.language;
+        let adding_todo = self.todo_draft.as_ref().map(|draft| draft.id.is_none());
         let window_effect = self.window_effect;
         let owner = cx.weak_entity();
         cx.defer(move |cx| {
             let Some(owner_entity) = owner.upgrade() else {
                 return;
             };
-            let still_waiting = owner_entity.update(cx, |view, _| {
-                view.editor.id == Some(id) && view.editor_window.is_none()
-            });
+            let still_waiting = owner_entity.update(cx, |view, _| still_waiting(view));
             if !still_waiting {
                 return;
             }
@@ -131,7 +156,7 @@ impl ClipboardView {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 display_id,
                 titlebar: Some(TitlebarOptions {
-                    title: Some(editor_title(language).into()),
+                    title: Some(editor_title(language, adding_todo).into()),
                     ..TitleBar::title_bar_options()
                 }),
                 window_min_size: Some(size(px(EDITOR_MIN_WIDTH), px(EDITOR_MIN_HEIGHT))),
@@ -145,7 +170,7 @@ impl ClipboardView {
             let opened = gpui_kit::open_window(options, cx, move |window, cx| {
                 apply_theme(theme, window, cx);
                 acrylic::init_window_effect(window_effect, window, cx);
-                window.set_window_title(editor_title(language));
+                window.set_window_title(editor_title(language, adding_todo));
                 window.on_window_should_close(cx, move |_, cx| {
                     close_owner
                         .update(cx, |owner, cx| owner.close_content_editor_from_window(cx))
@@ -164,14 +189,18 @@ impl ClipboardView {
     }
 
     pub(super) fn close_content_editor_from_window(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.editor_pending() {
+        if self.editor_pending() || self.todo_edit_saving {
             return false;
         }
         self.editor_window = None;
-        if self.editor.id.take().is_none() {
+        let had_item = self.editor.id.take().is_some();
+        let had_todo = self.todo_draft.take().is_some();
+        if !had_item && !had_todo {
             return true;
         }
-        self.release_editor_session();
+        if had_item {
+            self.release_editor_session();
+        }
         let focus = self.list_focus.clone();
         let main = self.main_window;
         cx.defer(move |cx| {
@@ -183,6 +212,7 @@ impl ClipboardView {
 
     fn fail_content_editor_open(&mut self, error: impl std::fmt::Debug, cx: &mut Context<Self>) {
         self.editor_window = None;
+        self.todo_draft = None;
         if self.editor.id.take().is_some() {
             self.release_editor_session();
         }
@@ -204,10 +234,24 @@ impl Render for ContentEditorWindow {
         let Some(owner) = self.owner.upgrade() else {
             return unavailable_editor(self.language, cx);
         };
-        let (language, pending, ready, loading, rich, error, initial_text) = {
+        let (
+            language,
+            pending,
+            ready,
+            loading,
+            rich,
+            editing_todo,
+            adding_todo,
+            error,
+            initial_text,
+        ) = {
             let view = owner.read(cx);
+            let editing_todo = view.todo_draft.is_some();
+            let adding_todo = view.todo_draft.as_ref().map(|draft| draft.id.is_none());
             let initial_text = if self.loaded {
                 None
+            } else if let Some(draft) = &view.todo_draft {
+                Some(draft.text.clone())
             } else {
                 match view.editor.result.as_ref() {
                     Some(Ok(PreviewContent::Text(text) | PreviewContent::RichText(text))) => {
@@ -224,13 +268,17 @@ impl Render for ContentEditorWindow {
             });
             (
                 view.language,
-                view.editor_pending(),
-                matches!(
-                    view.editor.result,
-                    Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
-                ),
-                view.editor.result.is_none(),
-                matches!(view.editor.result, Some(Ok(PreviewContent::RichText(_)))),
+                view.editor_pending() || view.todo_edit_saving,
+                editing_todo
+                    || matches!(
+                        view.editor.result,
+                        Some(Ok(PreviewContent::Text(_) | PreviewContent::RichText(_)))
+                    ),
+                !editing_todo && view.editor.result.is_none(),
+                !editing_todo
+                    && matches!(view.editor.result, Some(Ok(PreviewContent::RichText(_)))),
+                editing_todo,
+                adding_todo,
                 error,
                 initial_text,
             )
@@ -253,7 +301,7 @@ impl Render for ContentEditorWindow {
                 this.cancel(window, cx);
             }))
             .on_action(cx.listener(|this, _: &SaveContentEditor, _, cx| this.save(cx)))
-            .child(editor_title_bar(language, cx))
+            .child(editor_title_bar(language, adding_todo, cx))
             .child(
                 div()
                     .flex_1()
@@ -283,6 +331,26 @@ impl Render for ContentEditorWindow {
                                 .text_size(px(visual::TEXT_SMALL))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(tr(language, "正在加载…", "Loading…")),
+                        )
+                    })
+                    .when(editing_todo, |body| {
+                        let preview = self.editor.read(cx).value().to_string();
+                        body.child(
+                            div()
+                                .flex_1()
+                                .min_h(px(120.))
+                                .min_w_0()
+                                .overflow_y_scrollbar()
+                                .rounded(crate::card_radius::card_radius(cx))
+                                .border(px(visual::BORDER_WIDTH))
+                                .border_color(crate::design_system::container_border(cx))
+                                .bg(cx.theme().colors.list)
+                                .p(px(visual::SPACE_3))
+                                .child(
+                                    TextView::markdown("todo-editor-preview", preview)
+                                        .selectable(false)
+                                        .scrollable(false),
+                                ),
                         )
                     })
                     .when(rich, |body| {
@@ -344,19 +412,19 @@ impl Render for ContentEditorWindow {
     }
 }
 
-fn editor_title_bar(language: LanguagePreference, cx: &App) -> TitleBar {
+fn editor_title_bar(language: LanguagePreference, adding_todo: Option<bool>, cx: &App) -> TitleBar {
     TitleBar::new().bg(cx.theme().sidebar).child(
         div()
             .text_size(cx.theme().font_size)
             .font_family(cx.theme().font_family.clone())
             .font_medium()
-            .child(editor_title(language)),
+            .child(editor_title(language, adding_todo)),
     )
 }
 
 fn unavailable_editor(language: LanguagePreference, cx: &mut App) -> Div {
     window_shell(cx)
-        .child(editor_title_bar(language, cx))
+        .child(editor_title_bar(language, None, cx))
         .child(
             div().p(px(visual::SPACE_3)).child(
                 Alert::error(

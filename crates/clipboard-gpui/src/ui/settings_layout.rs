@@ -59,6 +59,22 @@ const SECTIONS: &[Section] = &[
         content: SettingsWindowView::settings_display_content,
     },
     Section {
+        page: SettingsPage::Todos,
+        chinese: "列表",
+        english: "List",
+        description_chinese: "卡片外观与历史列表相同",
+        description_english: "Same card appearance as history",
+        content: SettingsWindowView::settings_todo_list_content,
+    },
+    Section {
+        page: SettingsPage::Todos,
+        chinese: "提醒",
+        english: "Reminders",
+        description_chinese: "开启后，添加或完成待办会在屏幕右下角弹出，3 秒后消失，也可点关闭。不进入主窗口。",
+        description_english: "After adding or completing a to-do, a toast appears at the bottom-right of the screen. It closes after 3 seconds or when dismissed, and does not appear inside the main window.",
+        content: SettingsWindowView::settings_todo_toast_content,
+    },
+    Section {
         page: SettingsPage::Display,
         chinese: "悬停预览",
         english: "Hover preview",

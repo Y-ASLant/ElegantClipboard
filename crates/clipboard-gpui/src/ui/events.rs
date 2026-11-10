@@ -258,6 +258,7 @@ impl ClipboardView {
             }
             Event::DisplaySaved(result) => self.apply_display_saved(result, window, cx),
             Event::AudioSaved(result) => self.apply_audio_saved(result),
+            Event::TodoPreferenceSaved(result) => self.apply_todo_preference_saved(result),
             Event::TransientFilterSaved(result) => self.apply_transient_filter_saved(result),
             Event::DiagnosticsEnabledSaved(result) => self.apply_diagnostics_enabled_saved(result),
             Event::RunAsAdminSaved(result) => self.apply_run_as_admin_saved(result),
@@ -267,6 +268,7 @@ impl ClipboardView {
             Event::MonitorTypesSaved(result) => self.apply_monitor_types_saved(result),
             Event::CaptureFormatsSaved(result) => self.apply_capture_formats_saved(result),
             Event::AppFilterSaved(result) => self.apply_app_filter_saved(result),
+            Event::Todos(todos) => self.apply_todos(todos, window, cx),
             Event::RunningApps(apps) => {
                 self.running_apps_pending = false;
                 self.running_apps = apps;
@@ -327,6 +329,15 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let todo_command_failed = self.todo_edit_saving || self.todos_pending;
+        self.todos_pending = false;
+        if matches!(kind, FailureKind::Other) && todo_command_failed {
+            self.todo_notice = None;
+        }
+        self.todo_edit_saving = false;
+        if self.todo_draft.is_some() {
+            self.editor_error = Some(message.clone());
+        }
         if let FailureKind::Query(generation) = kind
             && !self.history.fail_query(generation)
         {

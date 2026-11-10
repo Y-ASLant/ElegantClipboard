@@ -258,6 +258,50 @@ pub enum CardDensity {
     Spacious,
 }
 
+/// 待办列表密度。默认跟随历史列表，避免单独保存后把已有显示设置冲掉。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoDensity {
+    #[default]
+    FollowDisplay,
+    Compact,
+    Standard,
+    Spacious,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TodoPreference {
+    pub density: TodoDensity,
+    pub show_created: bool,
+    pub show_edited: bool,
+    pub show_completed: bool,
+    pub toast: bool,
+}
+
+impl Default for TodoPreference {
+    fn default() -> Self {
+        Self {
+            density: TodoDensity::FollowDisplay,
+            show_created: true,
+            show_edited: true,
+            show_completed: true,
+            toast: false,
+        }
+    }
+}
+
+impl TodoPreference {
+    pub fn density(self, display: CardDensity) -> CardDensity {
+        match self.density {
+            TodoDensity::FollowDisplay => display,
+            TodoDensity::Compact => CardDensity::Compact,
+            TodoDensity::Standard => CardDensity::Standard,
+            TodoDensity::Spacious => CardDensity::Spacious,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeFormat {

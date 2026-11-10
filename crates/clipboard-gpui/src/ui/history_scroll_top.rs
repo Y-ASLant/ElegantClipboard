@@ -72,13 +72,23 @@ impl ScrollTopPosition {
         }
     }
 
-    pub(super) fn finish(&mut self) {
-        if let Some(gesture) = self.gesture.take() {
-            self.suppress_click = gesture.moved;
-            if gesture.moved {
-                self.x = if self.x < 0.5 { 0. } else { 1. };
-            }
+    /// 结束本次按压。返回是否应视为点击。拖拽只抑制同一次松手产生的按钮点击，不挡住下一次。
+    pub(super) fn finish(&mut self) -> bool {
+        let Some(gesture) = self.gesture.take() else {
+            return false;
+        };
+        let clicked = !gesture.moved;
+        self.suppress_click = gesture.moved;
+        if gesture.moved {
+            self.x = if self.x < 0.5 { 0. } else { 1. };
         }
+        clicked
+    }
+
+    pub(super) fn take_suppressed_click(&mut self) -> bool {
+        let suppressed = self.suppress_click;
+        self.suppress_click = false;
+        suppressed
     }
 
     pub(super) fn is_pressed(&self) -> bool {
@@ -86,11 +96,37 @@ impl ScrollTopPosition {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FloatingAction {
+    ScrollTop,
+    AddTodo,
+}
+
 impl ClipboardView {
-    pub(super) fn render_scroll_top(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn activate_floating_action(
+        &mut self,
+        action: FloatingAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            FloatingAction::ScrollTop => self.animate_scroll_to_top(cx),
+            FloatingAction::AddTodo => self.open_todo_editor(None, String::new(), window, cx),
+        }
+        cx.notify();
+    }
+
+    pub(super) fn render_floating_action(
+        &self,
+        action: FloatingAction,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let owner = cx.entity().downgrade();
         let position = &self.scroll_top_position;
-        let label = tr(self.language, "返回顶部", "Back to top");
+        let label = match action {
+            FloatingAction::ScrollTop => tr(self.language, "返回顶部", "Back to top"),
+            FloatingAction::AddTodo => tr(self.language, "添加待办", "Add to-do"),
+        };
         div()
             .absolute()
             .left(px(INSET_X))
@@ -117,9 +153,12 @@ impl ClipboardView {
                         }
                     }))
                     .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                        if event.button == MouseButton::Left
-                            && let Some(viewport) = this.drag_viewport.get()
-                        {
+                        if event.button != MouseButton::Left {
+                            return;
+                        }
+                        // 上次拖拽留下的抑制不能挡住这次按下。
+                        this.scroll_top_position.suppress_click = false;
+                        if let Some(viewport) = this.drag_viewport.get() {
                             this.scroll_top_position.begin(event.position, viewport);
                             this.cancel_pending_row_click();
                             this.close_hover_preview("scroll_top_pressed", cx);
@@ -127,27 +166,43 @@ impl ClipboardView {
                     }))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
-                        Button::new("history-scroll-to-top")
-                            .outline()
-                            .size(px(BUTTON_SIZE))
-                            .rounded(cx.theme().radius)
-                            .bg(cx.theme().popover)
-                            .border_color(cx.theme().border)
-                            .icon(
-                                Icon::new(gpui_kit::assets::IconName::ArrowUpToLine)
-                                    .size(px(visual::ICON_SIZE)),
-                            )
-                            .tooltip(label)
-                            .accessibility_label(label)
-                            .on_click(cx.listener(|this, event, _, cx| {
-                                cx.stop_propagation();
-                                if matches!(event, ClickEvent::Keyboard(_))
-                                    || !this.scroll_top_position.suppress_click
-                                {
-                                    this.animate_scroll_to_top(cx);
-                                    cx.notify();
+                        Button::new(match action {
+                            FloatingAction::ScrollTop => "history-scroll-to-top",
+                            FloatingAction::AddTodo => "todo-add-float",
+                        })
+                        .outline()
+                        .size(px(BUTTON_SIZE))
+                        .rounded(cx.theme().radius)
+                        .bg(cx.theme().popover)
+                        .border_color(cx.theme().border)
+                        .icon(
+                            Icon::new(match action {
+                                FloatingAction::ScrollTop => {
+                                    gpui_kit::assets::IconName::ArrowUpToLine
                                 }
-                            })),
+                                FloatingAction::AddTodo => gpui_kit::assets::IconName::Plus,
+                            })
+                            .size(px(visual::ICON_SIZE)),
+                        )
+                        .tooltip(label)
+                        .accessibility_label(label)
+                        .disabled(
+                            action == FloatingAction::AddTodo
+                                && (self.todo_edit_saving
+                                    || self.editor_window.is_some()
+                                    || self.todo_draft.is_some()),
+                        )
+                        .on_click(cx.listener(
+                            move |this, event, window, cx| {
+                                cx.stop_propagation();
+                                if !matches!(event, ClickEvent::Keyboard(_))
+                                    && this.scroll_top_position.take_suppressed_click()
+                                {
+                                    return;
+                                }
+                                this.activate_floating_action(action, window, cx);
+                            },
+                        )),
                     ),
             )
             .child(
@@ -179,7 +234,7 @@ impl ClipboardView {
                             });
                         });
                         let release_owner = owner.clone();
-                        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                             if phase != DispatchPhase::Capture || event.button != MouseButton::Left
                             {
                                 return;
@@ -192,8 +247,12 @@ impl ClipboardView {
                                     if let Some(viewport) = this.drag_viewport.get() {
                                         this.scroll_top_position.move_to(event.position, viewport);
                                     }
-                                    this.scroll_top_position.finish();
-                                    // Allow Button to clear its pressed state; on_click rejects drags.
+                                    let clicked = this.scroll_top_position.finish();
+                                    if clicked {
+                                        // 按钮的 on_click 可能在拖拽后不再送达，松手即执行未移动的点击。
+                                        this.scroll_top_position.suppress_click = true;
+                                        this.activate_floating_action(action, window, cx);
+                                    }
                                     cx.notify();
                                 }
                             });

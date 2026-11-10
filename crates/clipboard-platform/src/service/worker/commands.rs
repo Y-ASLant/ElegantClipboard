@@ -348,6 +348,13 @@ impl Worker {
             Command::SetAudio(preference) => {
                 return self.save_setting(preference, Preferences::set_audio, Event::AudioSaved);
             }
+            Command::SetTodoPreference(preference) => {
+                return self.save_setting(
+                    preference,
+                    Preferences::set_todo_preference,
+                    Event::TodoPreferenceSaved,
+                );
+            }
             Command::SetMonitorTypes(preference) => {
                 return self.handle_set_monitor_types(preference);
             }
@@ -413,6 +420,30 @@ impl Worker {
                     self.snapshot()?;
                 }
                 self.send_event(Event::NoteSaved(result))?;
+                return Ok(());
+            }
+            Command::ListTodos => {
+                self.send_event(Event::Todos(self.history.list_todos()?))?;
+                return Ok(());
+            }
+            Command::AddTodo(text) => {
+                self.history.add_todo(&text)?;
+                self.send_event(Event::Todos(self.history.list_todos()?))?;
+                return Ok(());
+            }
+            Command::SetTodoCompleted { id, completed } => {
+                self.history.set_todo_completed(id, completed)?;
+                self.send_event(Event::Todos(self.history.list_todos()?))?;
+                return Ok(());
+            }
+            Command::UpdateTodo { id, text } => {
+                self.history.update_todo(id, &text)?;
+                self.send_event(Event::Todos(self.history.list_todos()?))?;
+                return Ok(());
+            }
+            Command::DeleteTodo(id) => {
+                self.history.delete_todo(id)?;
+                self.send_event(Event::Todos(self.history.list_todos()?))?;
                 return Ok(());
             }
             Command::ListRunningApps => {

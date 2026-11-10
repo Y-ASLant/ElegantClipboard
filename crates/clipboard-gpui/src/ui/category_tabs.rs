@@ -42,46 +42,62 @@ pub(super) fn set_category_tab_visible(
     }
 }
 
-pub(super) struct CategoryTabEntry {
-    pub filter: Option<ContentCategory>,
-    pub label: &'static str,
-    pub accessible: &'static str,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ToolbarTab {
+    Category(Option<ContentCategory>),
+    Todos,
 }
 
 impl ClipboardView {
-    /// 可见标签的筛选值序列，顺序与 `category_tab_entries` 一致，但不分配字符串。
-    /// 仅供索引进位/命中使用；需要展示文本时仍走 `category_tab_entries`。
-    pub(super) fn visible_tab_filters(&self) -> impl Iterator<Item = Option<ContentCategory>> + '_ {
-        category_tab_flags(&self.display.category_tabs)
+    /// 分类标签可见时的工具栏顺序。待办固定插在收藏槽位之后，不受分类显隐开关影响。
+    pub(super) fn toolbar_tabs(&self) -> Vec<ToolbarTab> {
+        let mut tabs = Vec::new();
+        for (index, (visible, (filter, ..))) in category_tab_flags(&self.display.category_tabs)
             .into_iter()
             .zip(CATEGORY_TAB_SPECS)
-            .filter_map(|(visible, (filter, ..))| visible.then_some(*filter))
+            .enumerate()
+        {
+            if visible {
+                tabs.push(ToolbarTab::Category(*filter));
+            }
+            if index == 1 {
+                tabs.push(ToolbarTab::Todos);
+            }
+        }
+        tabs
     }
 
-    pub(super) fn category_tab_entries(&self) -> Vec<CategoryTabEntry> {
-        category_tab_flags(&self.display.category_tabs)
-            .into_iter()
-            .zip(CATEGORY_TAB_SPECS)
-            .filter(|(visible, ..)| *visible)
-            .map(
-                |(_, (filter, chinese, english, accessible_en))| CategoryTabEntry {
-                    filter: *filter,
-                    label: tr(self.language, chinese, english),
-                    accessible: tr(self.language, chinese, accessible_en),
-                },
-            )
-            .collect()
-    }
-
-    pub(super) fn category_tab_index(&self) -> usize {
-        let active = if self.history.favorite_only() {
-            None
+    pub(super) fn toolbar_tab_index(&self) -> usize {
+        let active = if self.todos_open {
+            ToolbarTab::Todos
+        } else if self.history.favorite_only() {
+            ToolbarTab::Category(None)
         } else {
-            Some(self.history.category())
+            ToolbarTab::Category(Some(self.history.category()))
         };
-        self.visible_tab_filters()
-            .position(|filter| filter == active)
+        self.toolbar_tabs()
+            .iter()
+            .position(|tab| *tab == active)
             .unwrap_or(0)
+    }
+
+    pub(super) fn toolbar_tab_text(&self, tab: ToolbarTab) -> (&'static str, &'static str) {
+        match tab {
+            ToolbarTab::Todos => (
+                tr(self.language, "待办", "To-do"),
+                tr(self.language, "待办", "To-do"),
+            ),
+            ToolbarTab::Category(filter) => CATEGORY_TAB_SPECS
+                .iter()
+                .find(|(spec, ..)| *spec == filter)
+                .map(|(_, chinese, english, accessible)| {
+                    (
+                        tr(self.language, chinese, english),
+                        tr(self.language, chinese, accessible),
+                    )
+                })
+                .unwrap_or(("全部", "All")),
+        }
     }
 
     pub(super) fn active_category_tab_visible(&self) -> bool {

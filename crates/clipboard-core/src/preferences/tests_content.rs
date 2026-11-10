@@ -236,6 +236,38 @@ fn display_requires_all_tab_and_at_least_two_category_tabs() -> Result<()> {
 }
 
 #[test]
+fn todo_preferences_survive_restart_and_recover_invalid_values() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("clipboard.db");
+    let db = Database::new(path.clone())?;
+    let preferences = Preferences::new(&db);
+    assert_eq!(preferences.todo_preference()?, TodoPreference::default());
+    let todo = TodoPreference {
+        density: TodoDensity::Spacious,
+        show_created: false,
+        show_edited: false,
+        show_completed: false,
+        toast: true,
+    };
+    preferences.set_todo_preference(todo)?;
+    drop(db);
+    let db = Database::new(path)?;
+    let preferences = Preferences::new(&db);
+    assert_eq!(preferences.todo_preference()?, todo);
+    assert_eq!(
+        preferences.todo_preference()?.density(CardDensity::Compact),
+        CardDensity::Spacious
+    );
+    assert_eq!(
+        TodoPreference::default().density(CardDensity::Compact),
+        CardDensity::Compact
+    );
+    SettingsRepository::new(&db).set(TODO_KEY, "invalid")?;
+    assert_eq!(preferences.todo_preference()?, TodoPreference::default());
+    Ok(())
+}
+
+#[test]
 fn audio_preferences_survive_restart_and_recover_invalid_values() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("clipboard.db");

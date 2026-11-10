@@ -2,14 +2,14 @@ use crate::source_app;
 use crate::update::ReleaseInfo;
 use anyhow::Result;
 use clipboard_core::{
-    ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent, TextTransform,
+    ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent, TextTransform, Todo,
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
         AppFilterPreference, AudioPreference, CaptureFormatPreference, CardCornerPreference,
         CornerRadiusPreference, DedupStrategy, DisplayPreference, FontPreference, HotkeyPreference,
         HoverPreviewPreference, LanguagePreference, MonitorTypesPreference, PasteDeliveryMode,
-        PasteKeyPreference, PasteShortcutConfig, ThemeColor, ThemePreference,
+        PasteKeyPreference, PasteShortcutConfig, ThemeColor, ThemePreference, TodoPreference,
         WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
     retention::RetentionPolicy,
@@ -177,6 +177,7 @@ pub enum Command {
     SetHoverPreview(HoverPreviewPreference),
     SetDisplay(DisplayPreference),
     SetAudio(AudioPreference),
+    SetTodoPreference(TodoPreference),
     SetRetention {
         policy: RetentionPolicy,
         confirmed: bool,
@@ -190,6 +191,17 @@ pub enum Command {
     /// 序列粘贴推进键（决策 0004）；空串停用。校验失败拒绝并回滚。
     SetSequenceHotkey(String),
     ListRunningApps,
+    ListTodos,
+    AddTodo(String),
+    SetTodoCompleted {
+        id: i64,
+        completed: bool,
+    },
+    DeleteTodo(i64),
+    UpdateTodo {
+        id: i64,
+        text: String,
+    },
     CompleteOnboarding,
     BumpToTop(i64),
     ResolveQuickPaste {
@@ -446,6 +458,7 @@ pub enum Event {
     HoverPreviewSaved(Result<HoverPreviewPreference, String>),
     DisplaySaved(Result<DisplayPreference, String>),
     AudioSaved(Result<AudioPreference, String>),
+    TodoPreferenceSaved(Result<TodoPreference, String>),
     RetentionSaved(Result<(RetentionPolicy, DeletionOutcome), String>),
     MonitorTypesSaved(Result<MonitorTypesPreference, String>),
     CaptureFormatsSaved(Result<CaptureFormatPreference, String>),
@@ -458,6 +471,7 @@ pub enum Event {
     /// 恢复完成；Ok(false) 包括无匹配快照、已取消或剪贴板已改变。
     ClipboardRestored(Result<bool, String>),
     RunningApps(Vec<source_app::RunningApp>),
+    Todos(Vec<Todo>),
     OnboardingCompleted(Result<(), String>),
     AutostartSaved(Result<bool, String>),
     DataSize(Result<DataSizeInfo, String>),
