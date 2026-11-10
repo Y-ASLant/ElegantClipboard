@@ -197,7 +197,7 @@ fn todo_actions(
         .flex()
         .items_center()
         .gap(px(visual::SPACE_1))
-        .rounded(cx.theme().radius)
+        .rounded(crate::card_radius::card_radius(cx))
         .bg(cx.theme().popover)
         .text_color(cx.theme().popover_foreground)
         .border(px(visual::BORDER_WIDTH))

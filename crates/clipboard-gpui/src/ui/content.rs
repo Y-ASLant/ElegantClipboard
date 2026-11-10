@@ -98,9 +98,20 @@ impl ClipboardView {
                                             .text_size(px(visual::TEXT_SMALL))
                                             .text_color(cx.theme().muted_foreground)
                                             .child(if self.language == LanguagePreference::English {
-                                                format!("{} items", self.history.total)
+                                                if self.todos_open {
+                                                    format!("{} to-dos", self.todos.len())
+                                                } else {
+                                                    format!("{} items", self.history.total)
+                                                }
                                             } else {
-                                                format!("{} 条记录", self.history.total)
+                                                format!(
+                                                    "{} 条记录",
+                                                    if self.todos_open {
+                                                        self.todos.len() as i64
+                                                    } else {
+                                                        self.history.total
+                                                    }
+                                                )
                                             }),
                                     )
                                     .child(
