@@ -71,6 +71,20 @@ fn main() -> anyhow::Result<()> {
         .map_err(|error| anyhow!("重置隔离剪贴板失败：{error}"))?;
     println!("window station: {station_name}");
     let directory = tempfile::tempdir()?;
+    {
+        // 自定义样本格式必须显式加入名单，仍使用名单模式覆盖实际采集路径。
+        let database =
+            clipboard_core::database::Database::new(directory.path().join("clipboard.db"))?;
+        let preferences = clipboard_core::preferences::Preferences::new(&database);
+        let mut formats = preferences.capture_formats()?;
+        for name in [
+            scenarios::NATIVE_FORMAT_NAME,
+            regressions::NATIVE_FORMAT_NAME,
+        ] {
+            formats = formats.with_name(name).context("冒烟原生格式名无效")?;
+        }
+        preferences.set_capture_formats(formats)?;
+    }
     let (service, events) = Service::start(Some(directory.path().to_owned()), true)?;
     thread::sleep(Duration::from_millis(500));
 

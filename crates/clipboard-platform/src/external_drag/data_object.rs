@@ -1,4 +1,4 @@
-use super::{PreparedExternalDrag, payload::FormatData};
+use super::PreparedExternalDrag;
 use std::{cell::Cell, sync::Arc};
 use windows::{
     Win32::{
@@ -20,7 +20,7 @@ use windows::{
 
 #[implement(IDataObject)]
 struct DragDataObject {
-    formats: Arc<Vec<(u16, FormatData)>>,
+    formats: Arc<Vec<(u16, Vec<u8>)>>,
 }
 
 pub(super) fn data_object(payload: PreparedExternalDrag) -> IDataObject {
@@ -31,7 +31,7 @@ pub(super) fn data_object(payload: PreparedExternalDrag) -> IDataObject {
 }
 
 impl DragDataObject {
-    fn lookup(&self, format: *const FORMATETC) -> Result<&FormatData> {
+    fn lookup(&self, format: *const FORMATETC) -> Result<&[u8]> {
         let format = unsafe { format.as_ref() }.ok_or(E_POINTER)?;
         if format.dwAspect != DVASPECT_CONTENT.0 {
             return Err(DV_E_DVASPECT.into());
@@ -45,14 +45,15 @@ impl DragDataObject {
         self.formats
             .iter()
             .find(|(id, _)| *id == format.cfFormat)
-            .map(|(_, data)| data)
+            .map(|(_, data)| data.as_slice())
             .ok_or_else(|| DV_E_FORMATETC.into())
     }
 }
 
 impl IDataObject_Impl for DragDataObject_Impl {
     fn GetData(&self, format: *const FORMATETC) -> Result<STGMEDIUM> {
-        self.lookup(format)?.with_bytes(|bytes| unsafe {
+        let bytes = self.lookup(format)?;
+        unsafe {
             let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes.len())?;
             let pointer = GlobalLock(handle);
             if pointer.is_null() {
@@ -69,7 +70,7 @@ impl IDataObject_Impl for DragDataObject_Impl {
                 u: STGMEDIUM_0 { hGlobal: handle },
                 pUnkForRelease: Default::default(),
             })
-        })
+        }
     }
     fn GetDataHere(&self, _: *const FORMATETC, _: *mut STGMEDIUM) -> Result<()> {
         Err(DV_E_TYMED.into())

@@ -1,7 +1,7 @@
 //! 系统字体枚举与偏好解析（对齐旧版 main 分支的继承关系）。
 
 use clipboard_core::preferences::FontPreference;
-use fontdb::{Database, ID};
+use fontdb::Database;
 use gpui_kit::SharedString;
 use std::sync::LazyLock;
 
@@ -78,25 +78,4 @@ fn is_decorative_font(name: &str) -> bool {
     SKIP_PREFIXES
         .iter()
         .any(|prefix| name.eq_ignore_ascii_case(prefix) || name.starts_with(prefix))
-}
-
-#[allow(dead_code)]
-pub fn has_system_family(name: &str) -> bool {
-    let trimmed = name.trim();
-    if trimmed.is_empty() {
-        return true;
-    }
-    let mut database = Database::new();
-    database.load_system_fonts();
-    database
-        .faces()
-        .any(|face| face_has_family(face.id, &database, trimmed))
-}
-
-fn face_has_family(face: ID, database: &Database, family: &str) -> bool {
-    database
-        .face(face)
-        .into_iter()
-        .flat_map(|face| face.families.iter())
-        .any(|(name, _)| name.eq_ignore_ascii_case(family))
 }

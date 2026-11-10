@@ -24,15 +24,6 @@ fn group_rename() {
 }
 
 #[test]
-fn group_delete() {
-    let (_dir, db) = temp_db();
-    let repo = GroupRepository::new(&db);
-    let group = repo.create("To Delete").unwrap();
-    repo.delete(group.id).unwrap();
-    assert!(repo.list_with_count().unwrap().is_empty());
-}
-
-#[test]
 fn group_delete_cascades_items() {
     let (_dir, db) = temp_db();
     let group_repo = GroupRepository::new(&db);
@@ -43,7 +34,11 @@ fn group_delete_cascades_items() {
     item.group_id = Some(group.id);
     let id = clip_repo.insert(item).unwrap();
 
-    group_repo.delete(group.id).unwrap();
+    // Schema 不变量：groups 删除必须 CASCADE 删除其条目（生产路径先移条目再删组）。
+    db.write_connection()
+        .lock()
+        .execute("DELETE FROM groups WHERE id = ?1", params![group.id])
+        .unwrap();
     assert!(clip_repo.get_by_id(id).unwrap().is_none());
 }
 

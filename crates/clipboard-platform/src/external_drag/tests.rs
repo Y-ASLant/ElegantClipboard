@@ -99,8 +99,8 @@ fn com_requests_reject_unsupported_aspects_indices_media_and_formats() -> Result
 #[test]
 fn enumeration_clones_position_and_preserves_partial_fetch_and_skip_results() -> Result<()> {
     let object = data_object::data_object(PreparedExternalDrag::formats_only(vec![
-        (CF_UNICODETEXT.0, vec![0, 0].into()),
-        (CF_DIB.0, vec![1].into()),
+        (CF_UNICODETEXT.0, vec![0, 0]),
+        (CF_DIB.0, vec![1]),
     ]));
     let enumeration = unsafe { object.EnumFormatEtc(DATADIR_GET.0 as u32) }?;
     let mut one = [FORMATETC::default()];

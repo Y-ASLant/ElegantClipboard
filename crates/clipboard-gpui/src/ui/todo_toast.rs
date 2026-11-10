@@ -173,9 +173,9 @@ fn place(native: isize, bounds: Bounds<Pixels>, scale: f32) -> anyhow::Result<()
 }
 
 impl Render for TodoToastWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(not(target_os = "macos"))]
-        window.set_background_appearance(WindowBackgroundAppearance::Transparent);
+        _window.set_background_appearance(WindowBackgroundAppearance::Transparent);
         let close_label = self.close_label;
         let motion = self.motion;
         let leaving = self.leaving;

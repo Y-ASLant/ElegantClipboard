@@ -16,15 +16,6 @@ fn settings_get_nonexistent() {
 }
 
 #[test]
-fn settings_clear_all() {
-    let (_dir, db) = temp_db();
-    let repo = SettingsRepository::new(&db);
-    repo.set("extra", "val").unwrap();
-    repo.clear_all().unwrap();
-    assert!(repo.get_all().unwrap().is_empty());
-}
-
-#[test]
 fn settings_upsert() {
     let (_dir, db) = temp_db();
     let repo = SettingsRepository::new(&db);

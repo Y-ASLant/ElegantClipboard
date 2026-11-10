@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) const NATIVE_FORMAT_NAME: &str = "ElegantClipboard QA Native Format";
+
 /// 等待一条 preview 文本匹配的 Snapshot 出现，返回其 id。
 pub(super) fn wait_snapshot_by_preview(
     events: &async_channel::Receiver<Event>,
@@ -42,7 +44,7 @@ pub(super) fn native_format_roundtrip(
     directory: &std::path::Path,
 ) -> anyhow::Result<()> {
     let native_payload: Vec<u8> = (0..512u32).map(|value| (value % 251) as u8).collect();
-    let native_name = "ElegantClipboard QA Native Format";
+    let native_name = NATIVE_FORMAT_NAME;
     let native_text = format!("native-fidelity-{}", std::process::id());
     clipboard
         .set(vec![

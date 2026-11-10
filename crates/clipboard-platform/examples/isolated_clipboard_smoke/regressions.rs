@@ -11,6 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) const NATIVE_FORMAT_NAME: &str = "ElegantClipboard Regression Native";
+
 pub(super) fn run(
     service: &Service,
     events: &async_channel::Receiver<Event>,
@@ -85,7 +87,7 @@ pub(super) fn run(
     println!("image clipboard uses decoded dimensions ok");
 
     let text = "native payload original";
-    let native = "ElegantClipboard Regression Native";
+    let native = NATIVE_FORMAT_NAME;
     clipboard
         .set(vec![
             ClipboardContent::Text(text.into()),

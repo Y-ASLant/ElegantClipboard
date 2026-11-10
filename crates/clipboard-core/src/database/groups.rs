@@ -84,14 +84,6 @@ impl GroupRepository {
         Ok(())
     }
 
-    /// 删除分组（ON DELETE CASCADE 自动删除该分组的所有 clipboard_items）
-    pub fn delete(&self, id: i64) -> Result<(), rusqlite::Error> {
-        let conn = self.write_conn.lock();
-        conn.execute("DELETE FROM groups WHERE id = ?1", params![id])?;
-        debug!("Deleted group {}", id);
-        Ok(())
-    }
-
     /// 将条目移动到指定分组（None = 移回默认分组）
     pub fn move_item_to_group(
         &self,

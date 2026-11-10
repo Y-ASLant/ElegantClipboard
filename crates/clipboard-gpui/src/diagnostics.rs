@@ -30,7 +30,6 @@ fn log_targets() -> Targets {
 pub(crate) struct Diagnostics {
     writer: LogWriter,
     filter: reload::Handle<Targets, tracing_subscriber::Registry>,
-    enabled: std::sync::atomic::AtomicBool,
     // Drop the session lease only after closing the writer.
     session: Session,
 }
@@ -38,8 +37,6 @@ pub(crate) struct Diagnostics {
 impl Diagnostics {
     /// 会话日志开关；panic.log 独立写入不受影响。
     pub(crate) fn set_enabled(&self, enabled: bool) {
-        self.enabled
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
         let _ = self.filter.modify(|targets| {
             *targets = if enabled {
                 log_targets()
@@ -98,7 +95,6 @@ fn start_session(root: &Path, panic_directory: &OnceLock<PathBuf>) -> anyhow::Re
     Ok(Diagnostics {
         writer,
         filter: filter_handle,
-        enabled: std::sync::atomic::AtomicBool::new(false),
         session,
     })
 }

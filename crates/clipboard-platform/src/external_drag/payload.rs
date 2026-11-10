@@ -14,30 +14,8 @@ const IMAGE_DROP_RETENTION: Duration = Duration::from_secs(30);
 /// Image drags offer a temporary PNG file first, then a ready 24-bit CF_DIB and PNG bytes.
 #[derive(Clone, Debug)]
 pub struct PreparedExternalDrag {
-    pub(super) formats: Arc<Vec<(u16, FormatData)>>,
+    pub(super) formats: Arc<Vec<(u16, Vec<u8>)>>,
     image_file: Option<Arc<ImageDropFile>>,
-}
-
-#[derive(Debug)]
-pub(super) enum FormatData {
-    Bytes(Vec<u8>),
-}
-
-impl From<Vec<u8>> for FormatData {
-    fn from(bytes: Vec<u8>) -> Self {
-        Self::Bytes(bytes)
-    }
-}
-
-impl FormatData {
-    pub(super) fn with_bytes<T>(
-        &self,
-        consume: impl FnOnce(&[u8]) -> windows::core::Result<T>,
-    ) -> windows::core::Result<T> {
-        match self {
-            Self::Bytes(bytes) => consume(bytes),
-        }
-    }
 }
 
 /// A PNG written only for this drag. The stored history file is never offered.
@@ -95,7 +73,7 @@ pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDra
     match item.content_type.as_str() {
         "files" => {
             let paths = History::file_paths_for_copy(item)?;
-            formats.push((CF_HDROP.0, file_drop(&paths)?.into()));
+            formats.push((CF_HDROP.0, file_drop(&paths)?));
         }
         "image" => {
             let path = item.image_path.as_deref().context("图片文件路径缺失")?;
@@ -112,23 +90,23 @@ pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDra
                 .to_owned();
             image_file = Some(Arc::new(file));
             // QQ prefers a file it can open after the drop returns.
-            formats.push((CF_HDROP.0, file_drop(&[offered])?.into()));
-            formats.push((CF_DIB.0, crate::cf_dib::from_png(&png)?.into()));
-            formats.push((registered_format("PNG")?, png.into()));
+            formats.push((CF_HDROP.0, file_drop(&[offered])?));
+            formats.push((CF_DIB.0, crate::cf_dib::from_png(&png)?));
+            formats.push((registered_format("PNG")?, png));
         }
         "text" | "url" | "html" | "rtf" => {
             if let Some(text) = item.text_content.as_deref().filter(|text| !text.is_empty()) {
-                formats.push((CF_UNICODETEXT.0, unicode_text(text)?.into()));
+                formats.push((CF_UNICODETEXT.0, unicode_text(text)?));
             }
             if let Some(html) = item.html_content.as_deref().filter(|html| !html.is_empty()) {
-                formats.push((registered_format("HTML Format")?, html_format(html)?.into()));
+                formats.push((registered_format("HTML Format")?, html_format(html)?));
             }
             if let Some(rtf) = item
                 .rtf_content
                 .as_deref()
                 .and_then(clipboard_core::rich::decode_rtf_for_clipboard)
             {
-                formats.push((registered_format("Rich Text Format")?, rtf.into()));
+                formats.push((registered_format("Rich Text Format")?, rtf));
             }
         }
         kind => bail!("记录类型 {kind} 不支持拖放"),
@@ -144,7 +122,7 @@ pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDra
 
 #[cfg(test)]
 impl PreparedExternalDrag {
-    pub(super) fn formats_only(formats: Vec<(u16, FormatData)>) -> Self {
+    pub(super) fn formats_only(formats: Vec<(u16, Vec<u8>)>) -> Self {
         Self {
             formats: Arc::new(formats),
             image_file: None,

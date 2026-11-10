@@ -97,9 +97,4 @@ fn run(
         }
         ui::run(options, diagnostics)
     }
-    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-    {
-        let _ = (options, diagnostics);
-        anyhow::bail!("This operating system is not supported")
-    }
 }
