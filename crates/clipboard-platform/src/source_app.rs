@@ -132,28 +132,10 @@ fn extract_icon_png(executable: &str) -> Option<Vec<u8>> {
             BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC,
             DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
         },
-        UI::{
-            Shell::ExtractIconExW,
-            WindowsAndMessaging::{
-                DI_NORMAL, DestroyIcon, DrawIconEx, GetIconInfo, HICON, ICONINFO,
-            },
-        },
+        UI::WindowsAndMessaging::{DI_NORMAL, DestroyIcon, DrawIconEx, GetIconInfo, ICONINFO},
     };
 
-    let wide = crate::instance::to_wide(executable);
-    let mut icon = HICON::default();
-    let count = unsafe {
-        ExtractIconExW(
-            windows::core::PCWSTR::from_raw(wide.as_ptr()),
-            0,
-            Some(&mut icon),
-            None,
-            1,
-        )
-    };
-    if count == 0 || icon.0.is_null() {
-        return None;
-    }
+    let icon = load_icon(executable)?;
     let mut icon_info = ICONINFO::default();
     if unsafe { GetIconInfo(icon, &mut icon_info) }.is_err() {
         let _ = unsafe { DestroyIcon(icon) };
@@ -225,6 +207,47 @@ fn extract_icon_png(executable: &str) -> Option<Vec<u8>> {
     Some(buffer.into_inner())
 }
 
+fn load_icon(executable: &str) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    use windows::Win32::UI::{Shell::ExtractIconExW, WindowsAndMessaging::HICON};
+
+    let normalized = executable.replace('/', "\\");
+    let wide = crate::instance::to_wide(&normalized);
+    let path = windows::core::PCWSTR::from_raw(wide.as_ptr());
+    let mut icon = HICON::default();
+    let count = unsafe { ExtractIconExW(path, 0, Some(&mut icon), None, 1) };
+    if count != 0 && !icon.0.is_null() {
+        return Some(icon);
+    }
+    shell_icon(path)
+}
+
+fn shell_icon(
+    path: windows::core::PCWSTR,
+) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+    use windows::Win32::{
+        Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
+        System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx, CoUninitialize},
+        UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGetFileInfoW},
+    };
+
+    let init = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    let mut info = SHFILEINFOW::default();
+    let found = unsafe {
+        SHGetFileInfoW(
+            path,
+            FILE_FLAGS_AND_ATTRIBUTES::default(),
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON,
+        )
+    };
+    let icon = (found != 0 && !info.hIcon.0.is_null()).then_some(info.hIcon);
+    if init.is_ok() {
+        unsafe { CoUninitialize() };
+    }
+    icon
+}
+
 fn display_name_from_path(path: &str) -> Option<String> {
     let name = Path::new(path).file_stem()?.to_str()?.trim();
     (!name.is_empty()).then(|| name.chars().take(128).collect())
@@ -249,15 +272,39 @@ mod tests {
         use image::GenericImageView;
 
         let system_root = std::env::var("SystemRoot")?;
-        let executable = Path::new(&system_root).join("System32/notepad.exe");
-        anyhow::ensure!(executable.is_file(), "system executable is unavailable");
-        let cache = tempfile::tempdir()?;
-        let icon = extract_and_cache_icon(&executable.to_string_lossy(), cache.path())
-            .ok_or_else(|| anyhow::anyhow!("icon extraction failed"))?;
-        assert!(Path::new(&icon).starts_with(cache.path()));
-        let image = image::open(icon)?;
-        assert_eq!(image.dimensions(), (32, 32));
-        assert!(image.to_rgba8().pixels().any(|pixel| pixel[3] > 0));
+        let root = Path::new(&system_root);
+        let mut executables = vec![
+            root.join("System32/notepad.exe"),
+            root.join("System32/ApplicationFrameHost.exe"),
+        ];
+        if let Ok(entries) = std::fs::read_dir(root.join("SystemApps")) {
+            executables.extend(entries.flatten().filter_map(|entry| {
+                let candidate = entry.path().join("TextInputHost.exe");
+                candidate.is_file().then_some(candidate)
+            }));
+        }
+        anyhow::ensure!(
+            executables.iter().any(|path| path
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("TextInputHost.exe"))),
+            "TextInputHost.exe is unavailable"
+        );
+        for executable in executables {
+            anyhow::ensure!(executable.is_file(), "{}", executable.display());
+            let cache = tempfile::tempdir()?;
+            let icon = extract_and_cache_icon(&executable.to_string_lossy(), cache.path())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("icon extraction failed for {}", executable.display())
+                })?;
+            assert!(Path::new(&icon).starts_with(cache.path()));
+            let image = image::open(&icon)?;
+            assert_eq!(image.dimensions(), (32, 32), "{}", executable.display());
+            assert!(
+                image.to_rgba8().pixels().any(|pixel| pixel[3] > 0),
+                "{}",
+                executable.display()
+            );
+        }
         Ok(())
     }
 }

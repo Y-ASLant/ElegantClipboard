@@ -1,6 +1,6 @@
 use super::settings_common::{
-    choice_tabs, owner_state, pref_checkbox, settings_description, settings_field, settings_inline,
-    settings_stack,
+    SETTINGS_INSET_LIST_MAX_HEIGHT, choice_tabs, owner_state, pref_checkbox, settings_description,
+    settings_field, settings_inline, settings_inset_list, settings_inset_list_row, settings_stack,
 };
 use super::*;
 use gpui_kit::component::{accordion::Accordion, alert::Alert};
@@ -24,6 +24,8 @@ impl SettingsWindowView {
             Vec::new()
         };
         let running_apps_pending = owner_state.running_apps_pending;
+        let rule_count = app_filter.rules.len();
+        let running_count = running_apps.len();
 
         settings_stack()
             .child(
@@ -64,9 +66,17 @@ impl SettingsWindowView {
             )
             .child(settings_description(
                 if app_filter.mode == AppFilterMode::Blacklist {
-                    tr(language, "匹配规则的应用不记录；来源未知时继续记录", "Matching apps are skipped; unknown sources are recorded")
+                    tr(
+                        language,
+                        "匹配规则的应用不记录；来源未知时继续记录",
+                        "Matching apps are skipped; unknown sources are recorded",
+                    )
                 } else {
-                    tr(language, "只记录匹配规则的应用；规则为空或来源未知时继续记录", "Only matching apps are recorded; empty rules or unknown sources are recorded")
+                    tr(
+                        language,
+                        "只记录匹配规则的应用；规则为空或来源未知时继续记录",
+                        "Only matching apps are recorded; empty rules or unknown sources are recorded",
+                    )
                 },
                 cx,
             ))
@@ -99,47 +109,46 @@ impl SettingsWindowView {
                 panel.child(
                     Alert::error(
                         "app-filter-error",
-                        tr(language, "规则无效、数量已达上限或保存尚未完成", "Invalid rule, rule limit reached, or save still in progress"),
+                        tr(
+                            language,
+                            "规则无效、数量已达上限或保存尚未完成",
+                            "Invalid rule, rule limit reached, or save still in progress",
+                        ),
                     )
                     .small(),
                 )
             })
-            .when(app_filter.rules.is_empty(), |panel| {
+            .when(rule_count == 0, |panel| {
+                panel.child(settings_description(
+                    tr(
+                        language,
+                        "尚无规则，可输入进程名或 *、? 通配符",
+                        "No rules yet. Enter a process name or use * and ? wildcards",
+                    ),
+                    cx,
+                ))
+            })
+            .when(rule_count > 0, |panel| {
                 panel.child(
-                    settings_description(
-                        tr(language, "尚无规则，可输入进程名或 *、? 通配符", "No rules yet. Enter a process name or use * and ? wildcards"),
-                        cx,
+                    settings_inset_list(cx).children(
+                        app_filter
+                            .rules
+                            .iter()
+                            .enumerate()
+                            .map(|(index, rule)| {
+                                app_filter_rule_row(
+                                    language,
+                                    rule,
+                                    index,
+                                    index + 1 == rule_count,
+                                    app_filter_pending,
+                                    &self.owner,
+                                    cx,
+                                )
+                            }),
                     ),
                 )
             })
-            .children(app_filter.rules.iter().enumerate().map(|(index, rule)| {
-                let owner = self.owner.clone();
-                let remove_rule = rule.clone();
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(div().flex_1().min_w_0().text_size(px(14.)).whitespace_normal().child(rule.clone()))
-                    .child(
-                        Button::new(format!("app-filter-remove-{index}"))
-                            .h(px(visual::CONTROL_HEIGHT))
-                            .flex_shrink_0()
-                            .ghost()
-                            .label(tr(language, "移除", "Remove"))
-                            .disabled(app_filter_pending)
-                            .on_click(move |_, _, cx| {
-                                let _ = owner.update(cx, |owner, cx| {
-                                    let next = owner.app_filter.value.clone().without_rule(&remove_rule);
-                                    owner.save_app_filter(next, cx);
-                                });
-                            }),
-                    )
-            }))
             .child(
                 Accordion::new("app-filter-running-apps")
                     .w_full()
@@ -166,75 +175,153 @@ impl SettingsWindowView {
                         })
                         .open(self.app_picker_open)
                         .child(
-                            div()
-                                .w_full()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .when(self.app_picker_open, |list| {
-                                    list.when(running_apps_pending, |list| {
-                                        list.child(settings_description(
-                                            tr(language, "正在读取运行中应用…", "Loading running apps…"),
-                                            cx,
-                                        ))
-                                    })
-                                    .when(!running_apps_pending && running_apps.is_empty(), |list| {
-                                        list.child(settings_description(
-                                            tr(language, "没有找到可选应用", "No running apps found"),
-                                            cx,
-                                        ))
-                                    })
-                                    .children(running_apps.into_iter().enumerate().map(|(index, app)| {
-                                        let owner = self.owner.clone();
-                                        let process = app.process.clone();
-                                        let already_added = app_filter.rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
-                                        div()
-                                            .w_full()
-                                            .min_w_0()
-                                            .flex()
-                                            .items_start()
-                                            .gap_3()
-                                            .py_2()
-                                            .when_some(app.icon, |row, path| {
-                                                row.child(img(std::path::PathBuf::from(path)).w(px(18.)).h(px(18.)).flex_shrink_0().object_fit(ObjectFit::Contain).with_fallback(|| div().into_any_element()))
-                                            })
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w_0()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .child(
-                                                        div()
-                                                            .w_full()
-                                                            .min_w_0()
-                                                            .whitespace_normal()
-                                                            .child(app.process.clone()),
-                                                    )
-                                                    .child(settings_description(app.name, cx)),
-                                            )
-                                            .child(
-                                                Button::new(format!("app-filter-pick-{index}"))
-                                                    .h(px(visual::CONTROL_HEIGHT))
-                                                    .flex_shrink_0()
-                                                    .ghost()
-                                                    .tooltip(app.process)
-                                                    .label(tr(language, "添加", "Add"))
-                                                    .disabled(app_filter_pending || already_added)
-                                                    .on_click(move |_, _, cx| {
-                                                        let _ = owner.update(cx, |owner, cx| {
-                                                            if let Some(next) = owner.app_filter.value.clone().with_rule(&process) {
-                                                                owner.save_app_filter(next, cx);
-                                                            }
-                                                        });
-                                                    }),
-                                            )
-                                    }))
+                            settings_stack()
+                                .when(self.app_picker_open, |content| {
+                                    content
+                                        .when(running_apps_pending, |content| {
+                                            content.child(settings_description(
+                                                tr(
+                                                    language,
+                                                    "正在读取运行中应用…",
+                                                    "Loading running apps…",
+                                                ),
+                                                cx,
+                                            ))
+                                        })
+                                        .when(
+                                            !running_apps_pending && running_count == 0,
+                                            |content| {
+                                                content.child(settings_description(
+                                                    tr(
+                                                        language,
+                                                        "没有找到可选应用",
+                                                        "No running apps found",
+                                                    ),
+                                                    cx,
+                                                ))
+                                            },
+                                        )
+                                        .when(
+                                            !running_apps_pending && running_count > 0,
+                                            |content| {
+                                                content.child(
+                                                    settings_inset_list(cx)
+                                                        .max_h(px(SETTINGS_INSET_LIST_MAX_HEIGHT))
+                                                        .overflow_y_scrollbar()
+                                                        .children(
+                                                            running_apps
+                                                                .iter()
+                                                                .enumerate()
+                                                                .map(|(index, app)| {
+                                                                    running_app_row(
+                                                                        language,
+                                                                        app,
+                                                                        index,
+                                                                        index + 1
+                                                                            == running_count,
+                                                                        &app_filter.rules,
+                                                                        app_filter_pending,
+                                                                        &self.owner,
+                                                                        cx,
+                                                                    )
+                                                                }),
+                                                        ),
+                                                )
+                                            },
+                                        )
                                 }),
                         )
                     }),
             )
             .into_any_element()
     }
+}
+
+fn app_filter_rule_row(
+    language: LanguagePreference,
+    rule: &str,
+    index: usize,
+    last: bool,
+    pending: bool,
+    owner: &WeakEntity<ClipboardView>,
+    cx: &App,
+) -> Div {
+    let owner = owner.clone();
+    let remove_rule = rule.to_owned();
+    settings_inset_list_row(cx, last)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(visual::TEXT_BODY))
+                .whitespace_normal()
+                .child(rule.to_owned()),
+        )
+        .child(
+            Button::new(format!("app-filter-remove-{index}"))
+                .h(px(visual::CONTROL_HEIGHT))
+                .flex_shrink_0()
+                .ghost()
+                .label(tr(language, "移除", "Remove"))
+                .disabled(pending)
+                .on_click(move |_, _, cx| {
+                    let _ = owner.update(cx, |owner, cx| {
+                        let next = owner.app_filter.value.clone().without_rule(&remove_rule);
+                        owner.save_app_filter(next, cx);
+                    });
+                }),
+        )
+}
+
+fn running_app_row(
+    language: LanguagePreference,
+    app: &RunningApp,
+    index: usize,
+    last: bool,
+    rules: &[String],
+    pending: bool,
+    owner: &WeakEntity<ClipboardView>,
+    cx: &App,
+) -> Div {
+    let owner = owner.clone();
+    let process = app.process.clone();
+    let already_added = rules.iter().any(|rule| rule.eq_ignore_ascii_case(&process));
+    settings_inset_list_row(cx, last)
+        .when_some(app.icon.clone(), |row, path| {
+            row.child(
+                div().flex_none().child(
+                    img(std::path::PathBuf::from(path))
+                        .w(px(visual::ICON_SIZE))
+                        .h(px(visual::ICON_SIZE))
+                        .object_fit(ObjectFit::Contain)
+                        .with_fallback(|| div().into_any_element()),
+                ),
+            )
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(px(visual::TEXT_BODY))
+                .whitespace_normal()
+                .child(app.process.clone()),
+        )
+        .child(
+            div().flex_none().self_center().child(
+                Button::new(format!("app-filter-pick-{index}"))
+                    .h(px(visual::CONTROL_HEIGHT))
+                    .outline()
+                    .small()
+                    .tooltip(app.process.clone())
+                    .label(tr(language, "添加", "Add"))
+                    .disabled(pending || already_added)
+                    .on_click(move |_, _, cx| {
+                        let _ = owner.update(cx, |owner, cx| {
+                            if let Some(next) = owner.app_filter.value.clone().with_rule(&process) {
+                                owner.save_app_filter(next, cx);
+                            }
+                        });
+                    }),
+            ),
+        )
 }

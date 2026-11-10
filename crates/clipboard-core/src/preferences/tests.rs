@@ -127,10 +127,20 @@ fn window_size_persists_and_invalid_values_fall_back() -> Result<()> {
     let db = Database::new(path)?;
     let preferences = Preferences::new(&db);
     assert_eq!(preferences.window_size()?, Some(size));
-    for invalid in ["399x700", "900x519", "4097x700", "900x2161", "broken"] {
+    for invalid in ["319x700", "900x479", "4097x700", "900x2161", "broken"] {
         SettingsRepository::new(&db).set(WINDOW_SIZE_KEY, invalid)?;
-        assert_eq!(preferences.window_size()?, None);
+        assert_eq!(preferences.window_size()?, None, "{invalid}");
     }
+    SettingsRepository::new(&db).set(WINDOW_SIZE_KEY, "320x480")?;
+    assert_eq!(
+        preferences.window_size()?,
+        WindowSizePreference::new(320, 480)
+    );
+    SettingsRepository::new(&db).set(WINDOW_SIZE_KEY, "4096x2160")?;
+    assert_eq!(
+        preferences.window_size()?,
+        WindowSizePreference::new(4096, 2160)
+    );
     Ok(())
 }
 

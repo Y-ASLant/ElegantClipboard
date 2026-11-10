@@ -147,6 +147,37 @@ pub(super) fn settings_column_field_help(
         .flex_grow(1.)
 }
 
+/// 设置页内嵌列表（规则、运行中应用等）：外框圆角裁剪行内 hover/选中底。
+pub(super) fn settings_inset_list(cx: &App) -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .rounded(cx.theme().radius)
+        .border(px(visual::BORDER_WIDTH))
+        .border_color(crate::design_system::container_border(cx))
+        .overflow_hidden()
+}
+
+pub(super) fn settings_inset_list_row(cx: &App, last: bool) -> Div {
+    let mut row = div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap(px(visual::SPACE_3))
+        .px(px(visual::SPACE_3))
+        .py(px(visual::SPACE_2));
+    if !last {
+        row = row.border_b_1().border_color(cx.theme().border);
+    }
+    row
+}
+
+/// 运行中应用列表在设置列宽下的可视高度上限。
+pub(super) const SETTINGS_INSET_LIST_MAX_HEIGHT: f32 = 288.;
+
 pub(super) fn settings_description(text: impl Into<SharedString>, cx: &App) -> Div {
     settings_description_sized(text, visual::TEXT_SMALL, cx)
 }
