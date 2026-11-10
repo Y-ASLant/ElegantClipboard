@@ -48,7 +48,14 @@ impl Worker {
         if before == 0 {
             return None;
         }
-        let snapshot = super::super::read_formats::read_clipboard(&self.clipboard).ok()?;
+        let allowed = self
+            .state
+            .lock()
+            .ok()
+            .map(|state| state.formats.clone())
+            .unwrap_or_default();
+        let snapshot =
+            super::super::read_formats::read_clipboard(&self.clipboard, &allowed).ok()?;
         let after = current_sequence(&self.clipboard).ok()?;
         (before == after && snapshot.content.is_some()).then_some(snapshot)
     }

@@ -73,6 +73,7 @@ impl Service {
         let (events, outgoing) = async_channel::bounded(64);
         let state = Arc::new(Mutex::new(CaptureState {
             paused: initial_preferences.paused,
+            formats: initial_preferences.capture_formats.clone(),
             ..Default::default()
         }));
         let stop = Arc::new(AtomicBool::new(false));
@@ -166,6 +167,7 @@ impl Service {
                                     command,
                                     Command::ObservedCapture { .. }
                                         | Command::SetMonitorTypes(_)
+                                        | Command::SetCaptureFormats(_)
                                         | Command::SetAppFilter(_)
                                 )
                             {
@@ -277,7 +279,9 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
         let ignored_sequence = state.ignored_sequence;
         let mut reread = || {
             let sequence = current_sequence(&worker.clipboard)?;
-            let (content, formats) = super::read_formats::read_current_capture(&worker.clipboard)?;
+            let allowed = state.formats.clone();
+            let (content, formats) =
+                super::read_formats::read_current_capture(&worker.clipboard, &allowed)?;
             anyhow::ensure!(
                 current_sequence(&worker.clipboard)? == sequence,
                 "确认瞬时内容时剪贴板已变化"

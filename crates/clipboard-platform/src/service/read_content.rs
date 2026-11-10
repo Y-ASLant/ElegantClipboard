@@ -2,6 +2,7 @@ use super::CapturedClipboard;
 use crate::source_app;
 use anyhow::Result;
 use clipboard_core::NativeFormatCapture;
+use clipboard_core::preferences::CaptureFormatPreference;
 use clipboard_core::{
     MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES,
 };
@@ -23,9 +24,10 @@ pub(super) struct ClipboardSnapshot {
 }
 pub(super) fn read_content(
     clipboard: &ClipboardContext,
+    allowed: &CaptureFormatPreference,
     #[cfg(target_os = "linux")] formats: Option<&[String]>,
 ) -> Result<(Option<CapturedClipboard>, Option<&'static str>)> {
-    if clipboard.has(ContentFormat::Files) {
+    if allowed.allows_files() && clipboard.has(ContentFormat::Files) {
         #[cfg(target_os = "linux")]
         let paths = super::file_list::read_files(clipboard)?;
         #[cfg(not(target_os = "linux"))]
@@ -40,25 +42,45 @@ pub(super) fn read_content(
         }
         return Ok((Some(CapturedClipboard::Files(paths)), None));
     }
-    let html = clipboard
-        .has(ContentFormat::Html)
-        .then(|| super::read_html::read_html(clipboard).ok())
-        .flatten()
-        .filter(|value| !value.is_empty());
-    let rtf = clipboard
-        .has(ContentFormat::Rtf)
-        .then(|| clipboard.get_buffer(RTF_FORMAT).ok())
-        .flatten()
-        .filter(|value| !value.is_empty());
+    let html = allowed
+        .allows_html()
+        .then(|| {
+            clipboard
+                .has(ContentFormat::Html)
+                .then(|| super::read_html::read_html(clipboard).ok())
+                .flatten()
+                .filter(|value| !value.is_empty())
+        })
+        .flatten();
+    let rtf = allowed
+        .allows_rtf()
+        .then(|| {
+            clipboard
+                .has(ContentFormat::Rtf)
+                .then(|| clipboard.get_buffer(RTF_FORMAT).ok())
+                .flatten()
+                .filter(|value| !value.is_empty())
+        })
+        .flatten();
     #[cfg(target_os = "linux")]
-    let text = linux_text(clipboard, formats)?;
+    let text = allowed
+        .allows_text()
+        .then(|| linux_text(clipboard, formats))
+        .transpose()?
+        .flatten();
     #[cfg(not(target_os = "linux"))]
-    let text = clipboard
-        .has(ContentFormat::Text)
-        .then(|| clipboard.get_text().ok())
-        .flatten()
-        .filter(|value| !value.is_empty());
-    if prefer_image(html.as_deref(), rtf.as_deref(), text.as_deref())
+    let text = allowed
+        .allows_text()
+        .then(|| {
+            clipboard
+                .has(ContentFormat::Text)
+                .then(|| clipboard.get_text().ok())
+                .flatten()
+                .filter(|value| !value.is_empty())
+        })
+        .flatten();
+    if allowed.allows_image()
+        && prefer_image(html.as_deref(), rtf.as_deref(), text.as_deref())
         && clipboard.has(ContentFormat::Image)
         && let Ok(image) = read_image(clipboard)
     {
@@ -83,7 +105,7 @@ pub(super) fn read_content(
         }
         return Ok((Some(CapturedClipboard::Text(text)), warning));
     }
-    if clipboard.has(ContentFormat::Image) {
+    if allowed.allows_image() && clipboard.has(ContentFormat::Image) {
         return Ok((Some(read_image(clipboard)?), None));
     }
     Ok((None, None))

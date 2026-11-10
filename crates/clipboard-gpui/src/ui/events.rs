@@ -265,6 +265,7 @@ impl ClipboardView {
             Event::UpdateDownloaded(result) => self.apply_update_downloaded(result),
             Event::UpdateInstallStarted(result) => self.apply_update_install_started(result, cx),
             Event::MonitorTypesSaved(result) => self.apply_monitor_types_saved(result),
+            Event::CaptureFormatsSaved(result) => self.apply_capture_formats_saved(result),
             Event::AppFilterSaved(result) => self.apply_app_filter_saved(result),
             Event::RunningApps(apps) => {
                 self.running_apps_pending = false;

@@ -4,6 +4,7 @@ use super::{
 };
 use crate::source_app;
 use anyhow::{Result, anyhow};
+use clipboard_core::preferences::CaptureFormatPreference;
 use clipboard_core::{MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES, NativeFormatCapture};
 use clipboard_rs::{Clipboard, ClipboardContext};
 
@@ -96,7 +97,10 @@ fn is_metadata(name: &str) -> bool {
         )
 }
 
-pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSnapshot> {
+pub(super) fn read_clipboard(
+    clipboard: &ClipboardContext,
+    allowed: &CaptureFormatPreference,
+) -> Result<ClipboardSnapshot> {
     let mut formats = formats(clipboard)?;
     if is_private(&formats, clipboard) {
         return Ok(ClipboardSnapshot {
@@ -109,6 +113,7 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
     }
     let (content, warning) = read_content(
         clipboard,
+        allowed,
         #[cfg(target_os = "linux")]
         Some(&formats),
     )?;
@@ -116,7 +121,9 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
     let mut total = 0usize;
     if content.is_some() {
         for name in &formats {
-            if PRIMARY_FORMATS.contains(&name.as_str()) || PRIVATE_FORMATS.contains(&name.as_str())
+            if !allowed.includes(name)
+                || PRIMARY_FORMATS.contains(&name.as_str())
+                || PRIVATE_FORMATS.contains(&name.as_str())
             {
                 continue;
             }
@@ -136,7 +143,7 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
             });
         }
     }
-    formats.retain(|name| !is_metadata(name));
+    formats.retain(|name| !is_metadata(name) && allowed.includes(name));
     Ok(ClipboardSnapshot {
         content,
         source: source_app::clipboard_source(),
@@ -148,6 +155,7 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
 
 pub(super) fn read_current_capture(
     clipboard: &ClipboardContext,
+    allowed: &CaptureFormatPreference,
 ) -> Result<(Option<CapturedClipboard>, Vec<String>)> {
     let mut formats = formats(clipboard)?;
     if is_private(&formats, clipboard) {
@@ -155,10 +163,11 @@ pub(super) fn read_current_capture(
     }
     let content = read_content(
         clipboard,
+        allowed,
         #[cfg(target_os = "linux")]
         Some(&formats),
     )?
     .0;
-    formats.retain(|name| !is_metadata(name));
+    formats.retain(|name| !is_metadata(name) && allowed.includes(name));
     Ok((content, formats))
 }

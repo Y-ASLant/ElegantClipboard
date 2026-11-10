@@ -3,6 +3,7 @@ use anyhow::Result;
 use serde::{Serialize, de::DeserializeOwned};
 
 mod backup;
+mod capture_formats;
 mod corner_radius;
 mod fonts;
 mod hover_preview;
@@ -10,6 +11,7 @@ mod snapshot;
 mod types;
 mod window_effect;
 pub(crate) use backup::prune_non_gpui_settings;
+pub use capture_formats::CaptureFormatPreference;
 pub use hover_preview::*;
 pub use snapshot::PreferenceSnapshot;
 pub use types::*;
@@ -40,6 +42,7 @@ const HOVER_PREVIEW_KEY: &str = "gpui_hover_preview";
 const DISPLAY_KEY: &str = "gpui_display";
 const FONT_KEY: &str = "gpui_fonts";
 const MONITOR_TYPES_KEY: &str = "gpui_monitor_types";
+const CAPTURE_FORMATS_KEY: &str = "gpui_capture_formats";
 const APP_FILTER_KEY: &str = "gpui_app_filter";
 const ONBOARDING_COMPLETED_KEY: &str = "gpui_onboarding_completed";
 const AUDIO_KEY: &str = "gpui_audio";
@@ -398,6 +401,17 @@ impl Preferences {
     pub fn set_monitor_types(&self, preference: MonitorTypesPreference) -> Result<()> {
         anyhow::ensure!(preference.valid(), "至少需要监听一种内容类型");
         self.write_json(MONITOR_TYPES_KEY, &preference)
+    }
+
+    pub fn capture_formats(&self) -> Result<CaptureFormatPreference> {
+        self.read_json(CAPTURE_FORMATS_KEY, CaptureFormatPreference::valid)
+            .map(CaptureFormatPreference::normalized)
+    }
+
+    pub fn set_capture_formats(&self, preference: CaptureFormatPreference) -> Result<()> {
+        let preference = preference.normalized();
+        anyhow::ensure!(preference.valid(), "采集格式名单无效");
+        self.write_json(CAPTURE_FORMATS_KEY, &preference)
     }
 
     pub fn app_filter(&self) -> Result<AppFilterPreference> {

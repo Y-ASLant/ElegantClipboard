@@ -3,8 +3,8 @@ use super::{Event, Worker};
 use crate::sequence::current_sequence;
 use anyhow::{Context, Result};
 use clipboard_core::preferences::{
-    AppFilterPreference, FontPreference, HotkeyPreference, MonitorTypesPreference,
-    PasteShortcutConfig, Preferences,
+    AppFilterPreference, CaptureFormatPreference, FontPreference, HotkeyPreference,
+    MonitorTypesPreference, PasteShortcutConfig, Preferences,
 };
 
 fn save_hotkey(preferences: &Preferences, hotkey: HotkeyPreference) -> Result<HotkeyPreference> {
@@ -102,6 +102,20 @@ impl Worker {
             })
             .map_err(|error| error.to_string());
         self.send_event(Event::MonitorTypesSaved(result))
+    }
+
+    pub(super) fn handle_set_capture_formats(
+        &mut self,
+        preference: CaptureFormatPreference,
+    ) -> Result<()> {
+        let preference = preference.normalized();
+        let result = (|| {
+            self.preferences.set_capture_formats(preference.clone())?;
+            lock_capture_state(&self.state)?.formats = preference.clone();
+            Ok(preference)
+        })()
+        .map_err(|error: anyhow::Error| error.to_string());
+        self.send_event(Event::CaptureFormatsSaved(result))
     }
 
     pub(super) fn handle_set_app_filter(

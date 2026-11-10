@@ -84,6 +84,14 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Data,
+        chinese: "采集格式",
+        english: "Capture formats",
+        description_chinese: "关闭后只读取名单中的格式",
+        description_english: "Read only listed formats when off",
+        content: SettingsWindowView::settings_capture_formats_content,
+    },
+    Section {
+        page: SettingsPage::Data,
         chinese: "瞬时内容过滤",
         english: "Transient filtering",
         description_chinese: "复制后 300ms 内被撤销或覆盖的内容（划词工具临时复制、表格单元格碎片）不再进入历史。复制后立即从本应用粘贴不受影响。",

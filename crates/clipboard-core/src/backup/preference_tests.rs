@@ -87,6 +87,10 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
             image: false,
             files: false,
         },
+        capture_formats: CaptureFormatPreference {
+            all: true,
+            names: vec!["Biff12".into()],
+        },
         app_filter: AppFilterPreference {
             enabled: true,
             mode: AppFilterMode::Whitelist,
@@ -130,6 +134,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     history.save_retention(expected.retention, true, &dir.path().join("images"))?;
     preferences.set_transient_filter(expected.transient_filter)?;
     preferences.set_monitor_types(expected.monitor_types)?;
+    preferences.set_capture_formats(expected.capture_formats.clone())?;
     preferences.set_app_filter(&expected.app_filter)?;
     preferences.set_window_effect(expected.window_effect)?;
     preferences.set_diagnostics_enabled(expected.diagnostics_enabled)?;

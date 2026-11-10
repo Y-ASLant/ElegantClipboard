@@ -79,6 +79,22 @@ impl ClipboardView {
         }
     }
 
+    pub(super) fn save_capture_formats(
+        &mut self,
+        preference: CaptureFormatPreference,
+        cx: &mut Context<Self>,
+    ) {
+        let preference = preference.normalized();
+        if !self.capture_formats.pending
+            && preference.valid()
+            && preference != self.capture_formats.value
+            && self.send(Command::SetCaptureFormats(preference), cx)
+        {
+            self.capture_formats.pending = true;
+            cx.notify();
+        }
+    }
+
     pub(super) fn save_app_filter(
         &mut self,
         preference: AppFilterPreference,
@@ -324,6 +340,18 @@ impl ClipboardView {
             result,
             |this| &mut this.monitor_types,
             ("保存监听类型失败", "Failed to save capture types"),
+        );
+        true
+    }
+
+    pub(super) fn apply_capture_formats_saved(
+        &mut self,
+        result: Result<CaptureFormatPreference, String>,
+    ) -> bool {
+        self.acknowledge_save(
+            result,
+            |this| &mut this.capture_formats,
+            ("保存采集格式失败", "Failed to save capture formats"),
         );
         true
     }

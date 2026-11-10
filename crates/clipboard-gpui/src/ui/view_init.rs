@@ -205,6 +205,7 @@ impl ClipboardView {
         #[cfg(windows)]
         let is_admin = clipboard_platform::elevation::is_elevated().unwrap_or(false);
         let monitor_types = service.initial_preferences.monitor_types;
+        let capture_formats = service.initial_preferences.capture_formats.clone();
         let app_filter = service.initial_preferences.app_filter.clone();
         let onboarding_completed = service.initial_preferences.onboarding_completed;
         if !startup.hidden || tray.is_err() {
@@ -400,6 +401,7 @@ impl ClipboardView {
             is_admin,
             update_check: UpdateCheck::Idle,
             monitor_types: PendingPref::new(monitor_types),
+            capture_formats: PendingPref::new(capture_formats),
             app_filter: PendingPref::new(app_filter),
             running_apps: Vec::new(),
             running_apps_pending: false,

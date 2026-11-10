@@ -2,6 +2,7 @@ use super::CapturedClipboard;
 use super::read_content::{ClipboardSnapshot, read_content};
 use crate::source_app;
 use anyhow::Result;
+use clipboard_core::preferences::CaptureFormatPreference;
 use clipboard_core::{MAX_NATIVE_FORMAT_BYTES, MAX_NATIVE_FORMAT_TOTAL_BYTES, NativeFormatCapture};
 use clipboard_rs::ClipboardContext;
 
@@ -81,6 +82,15 @@ fn format_name(format: u32) -> Option<String> {
     Some(String::from_utf16_lossy(&buffer[..length as usize]))
 }
 
+fn is_private_name(name: &str) -> bool {
+    matches!(
+        name,
+        "CanIncludeInClipboardHistory"
+            | "ExcludeClipboardContentFromMonitorProcessing"
+            | "CanUploadToCloudClipboard"
+    )
+}
+
 fn is_blacklisted_name(name: &str) -> bool {
     NATIVE_FORMAT_BLACKLIST
         .iter()
@@ -129,7 +139,10 @@ fn captured_formats(_guard: &clipboard_win::Clipboard) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSnapshot> {
+pub(super) fn read_clipboard(
+    clipboard: &ClipboardContext,
+    allowed: &CaptureFormatPreference,
+) -> Result<ClipboardSnapshot> {
     if super::privacy::excludes_history(clipboard)? {
         return Ok(ClipboardSnapshot {
             content: None,
@@ -140,10 +153,10 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
         });
     }
     let source = source_app::clipboard_source();
-    let (content, warning) = read_content(clipboard)?;
+    let (content, warning) = read_content(clipboard, allowed)?;
     // 主内容为空时快照会被丢弃，无需枚举格式。
     let (extra, formats) = if content.is_some() {
-        read_extra_in_session()
+        read_extra_in_session(allowed)
     } else {
         (Vec::new(), Vec::new())
     };
@@ -158,23 +171,27 @@ pub(super) fn read_clipboard(clipboard: &ClipboardContext) -> Result<ClipboardSn
 
 /// 额外格式枚举需要独立短会话；主读取（clipboard_rs）已关闭其会话，
 /// 序列号稳定性由调用方的 read_stable_capture 保证。
-fn read_extra_in_session() -> (Vec<NativeFormatCapture>, Vec<String>) {
+fn read_extra_in_session(
+    allowed: &CaptureFormatPreference,
+) -> (Vec<NativeFormatCapture>, Vec<String>) {
     let Ok(guard) = clipboard_win::Clipboard::new_attempts(10) else {
         return (Vec::new(), Vec::new());
     };
     let _ = guard;
-    let (captures, formats) = enum_formats_once();
+    let (captures, formats) = enum_formats_once(allowed);
     (captures, formats)
 }
 
 /// 单次枚举同时产出 captured_formats（显示名）与实际载荷，
 /// 避免 EnumFormats + GetClipboardFormatNameW 各跑两遍。
-fn enum_formats_once() -> (Vec<NativeFormatCapture>, Vec<String>) {
+fn enum_formats_once(allowed: &CaptureFormatPreference) -> (Vec<NativeFormatCapture>, Vec<String>) {
     let mut formats = Vec::new();
     let mut captures = Vec::new();
     let mut total = 0usize;
     for format in clipboard_win::EnumFormats::new() {
-        if let Some(name) = captured_format_name(format) {
+        if let Some(name) = captured_format_name(format)
+            && allowed.includes(&name)
+        {
             formats.push(name);
         }
         if BLACKLISTED_STANDARD_IDS.contains(&format) {
@@ -183,7 +200,10 @@ fn enum_formats_once() -> (Vec<NativeFormatCapture>, Vec<String>) {
         let Some(name) = format_name(format) else {
             continue;
         };
-        if is_blacklisted_name(&name) {
+        if !allowed.includes(&name) || is_private_name(&name) {
+            continue;
+        }
+        if allowed.all && is_blacklisted_name(&name) {
             continue;
         }
         let mut data = Vec::new();
@@ -205,13 +225,19 @@ fn enum_formats_once() -> (Vec<NativeFormatCapture>, Vec<String>) {
 /// 瞬时确认只重读主内容与实际格式名；额外载荷沿用原始快照。
 pub(super) fn read_current_capture(
     clipboard: &ClipboardContext,
+    allowed: &CaptureFormatPreference,
 ) -> Result<(Option<CapturedClipboard>, Vec<String>)> {
     if super::privacy::excludes_history(clipboard)? {
         return Ok((None, Vec::new()));
     }
-    let content = read_content(clipboard)?.0;
+    let content = read_content(clipboard, allowed)?.0;
     let formats = clipboard_win::Clipboard::new_attempts(10)
-        .map(|guard| captured_formats(&guard))
+        .map(|guard| {
+            captured_formats(&guard)
+                .into_iter()
+                .filter(|name| allowed.includes(name))
+                .collect()
+        })
         .unwrap_or_default();
     Ok((content, formats))
 }

@@ -16,6 +16,7 @@ pub(super) struct CaptureState {
     pub(super) paused: bool,
     pub(super) ignored_sequence: u32,
     pub(super) last_sequence: u32,
+    pub(super) formats: clipboard_core::preferences::CaptureFormatPreference,
 }
 
 pub(super) fn lock_capture_state(
@@ -73,7 +74,7 @@ impl WatchHandler {
         let Some((sequence, snapshot)) = read_stable_capture(
             &state,
             || current_sequence(&self.clipboard).unwrap_or(0),
-            || super::read_formats::read_clipboard(&self.clipboard),
+            || super::read_formats::read_clipboard(&self.clipboard, &state.formats),
         )?
         else {
             return Ok(());

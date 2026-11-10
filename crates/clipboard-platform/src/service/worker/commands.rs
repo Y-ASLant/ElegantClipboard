@@ -351,6 +351,9 @@ impl Worker {
             Command::SetMonitorTypes(preference) => {
                 return self.handle_set_monitor_types(preference);
             }
+            Command::SetCaptureFormats(preference) => {
+                return self.handle_set_capture_formats(preference);
+            }
             Command::SetTransientFilter(enabled) => {
                 return self.handle_set_transient_filter(enabled);
             }

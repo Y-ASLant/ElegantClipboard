@@ -152,12 +152,23 @@ impl SettingsWindowView {
         });
         let app_filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("notepad.exe or *browser*"));
+        let capture_format_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("CF_UNICODETEXT"));
         let app_filter_input_subscription =
             cx.subscribe_in(&app_filter_input, window, |this, _, event, window, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
                     this.add_app_filter_rule(window, cx);
                 }
             });
+        let capture_format_input_subscription = cx.subscribe_in(
+            &capture_format_input,
+            window,
+            |this, _, event, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.add_capture_format(window, cx);
+                }
+            },
+        );
         let retention = entity.read(cx).retention.value;
         let retention_days_input =
             cx.new(|cx| InputState::new(window, cx).default_value(retention.days.to_string()));
@@ -371,6 +382,10 @@ impl SettingsWindowView {
             hover_zoom,
             app_picker_open: false,
             app_filter_error: false,
+            capture_formats_expanded: false,
+            capture_format_input,
+            _capture_format_input_subscription: capture_format_input_subscription,
+            capture_format_error: None,
             link_error: None,
         }
     }

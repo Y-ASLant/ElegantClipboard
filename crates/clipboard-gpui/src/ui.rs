@@ -44,6 +44,7 @@ mod sequence;
 mod settings_about;
 mod settings_app_filter;
 mod settings_audio;
+mod settings_capture_formats;
 mod settings_common;
 mod settings_data;
 mod settings_display;
@@ -110,14 +111,14 @@ use clipboard_core::{
     backup::BackupReport,
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{
-        AppFilterMode, AppFilterPreference, AudioPreference, CardDensity, CornerRadiusPreference,
-        DedupStrategy, DisplayPreference, FontPreference, HotkeyPreference, HoverPreviewDetails,
-        HoverPreviewPosition, HoverPreviewPreference, LanguagePreference, MAX_HOVER_DELAY_MS,
-        MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS, MIN_HOVER_ZOOM_STEP,
-        MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteDeliveryMode, PasteKeyPreference,
-        PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor, ThemePreference,
-        TimeFormat, WindowEffect, WindowEffectPreference, WindowPositionPreference,
-        WindowSizePreference,
+        AppFilterMode, AppFilterPreference, AudioPreference, CaptureFormatPreference, CardDensity,
+        CornerRadiusPreference, DedupStrategy, DisplayPreference, FontPreference, HotkeyPreference,
+        HoverPreviewDetails, HoverPreviewPosition, HoverPreviewPreference, LanguagePreference,
+        MAX_HOVER_DELAY_MS, MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS,
+        MIN_HOVER_ZOOM_STEP, MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteDeliveryMode,
+        PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor,
+        ThemePreference, TimeFormat, WindowEffect, WindowEffectPreference,
+        WindowPositionPreference, WindowSizePreference,
     },
 };
 use clipboard_platform::hotkey::{
@@ -393,6 +394,7 @@ struct ClipboardView {
     is_admin: bool,
     update_check: UpdateCheck,
     monitor_types: PendingPref<MonitorTypesPreference>,
+    capture_formats: PendingPref<CaptureFormatPreference>,
     app_filter: PendingPref<AppFilterPreference>,
     running_apps: Vec<RunningApp>,
     running_apps_pending: bool,
@@ -484,6 +486,10 @@ struct SettingsWindowView {
     hover_zoom: settings_window::BoundedNumberInput,
     app_picker_open: bool,
     app_filter_error: bool,
+    capture_formats_expanded: bool,
+    capture_format_input: Entity<InputState>,
+    _capture_format_input_subscription: Subscription,
+    capture_format_error: Option<settings_capture_formats::CaptureFormatInputError>,
     link_error: Option<String>,
 }
 
