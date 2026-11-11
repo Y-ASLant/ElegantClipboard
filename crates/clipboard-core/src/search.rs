@@ -45,6 +45,11 @@ pub fn search_excerpt(full: &str, preview: &str, search: &str) -> Option<String>
     if !matching_ranges(preview, search, 1).is_empty() {
         return None;
     }
+    // Rows can also match via file_paths or note; reject absent terms with a
+    // fast byte scan instead of the per-char Unicode comparison below.
+    if !full.contains(search) && !full.to_lowercase().contains(&search.to_lowercase()) {
+        return None;
+    }
     let matched = matching_ranges(full, search, 1).pop()?;
     let start = full[..matched.start]
         .char_indices()

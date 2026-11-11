@@ -104,30 +104,65 @@ impl History {
         let mut ids = Vec::new();
         let mut hashes = Vec::new();
         if policy.days > 0 || policy.max_count > 0 {
-            let mut query = tx.prepare(
-                "WITH ranked AS (
-                    SELECT id, image_path, file_payload, content_hash, created_at,
-                           ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC, id DESC) AS position
-                    FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0
-                        AND (?3 = 0 OR group_id IS NULL)
-                 )
-                 SELECT id, image_path, file_payload, content_hash FROM ranked
-                 WHERE (?1 > 0 AND julianday(created_at) < julianday('now', 'localtime') - ?1)
-                    OR (?2 > 0 AND position > ?2)",
-            )?;
-            let rows = query.query_map(
-                params![policy.days, policy.max_count, legacy_scope],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
-            )?;
-            for row in rows {
-                let (id, image, payload, hash) = row?;
+            // Probes first: an indexed range check for age and an OFFSET probe
+            // for count, so captures only pay for window ranking when rows can
+            // actually qualify. The cutoff compares stored 'YYYY-MM-DD HH:MM:SS'
+            // localtime strings lexicographically; julianday(...) IS NOT NULL
+            // keeps malformed timestamps excluded as before.
+            let expired = policy.days > 0
+                && tx.query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM clipboard_items
+                        WHERE is_pinned = 0 AND is_favorite = 0
+                              AND (?2 = 0 OR group_id IS NULL)
+                              AND julianday(created_at) IS NOT NULL
+                              AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days')
+                    )",
+                    params![policy.days, legacy_scope],
+                    |row| row.get(0),
+                )?;
+            let over_limit = policy.max_count > 0
+                && tx
+                    .query_row(
+                        "SELECT id FROM clipboard_items
+                         WHERE is_pinned = 0 AND is_favorite = 0
+                               AND (?2 = 0 OR group_id IS NULL)
+                         ORDER BY created_at DESC, id DESC
+                         LIMIT 1 OFFSET ?1",
+                        params![i64::from(policy.max_count), legacy_scope],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?
+                    .is_some();
+            let mut rows = Vec::new();
+            if expired || over_limit {
+                let mut query = tx.prepare(
+                    "WITH ranked AS (
+                        SELECT id, image_path, file_payload, content_hash, created_at,
+                               ROW_NUMBER() OVER (PARTITION BY group_id ORDER BY created_at DESC, id DESC) AS position
+                        FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0
+                            AND (?3 = 0 OR group_id IS NULL)
+                     )
+                     SELECT id, image_path, file_payload, content_hash FROM ranked
+                     WHERE (?1 > 0 AND julianday(created_at) IS NOT NULL
+                            AND created_at < datetime('now', 'localtime', '-' || ?1 || ' days'))
+                        OR (?2 > 0 AND position > ?2)",
+                )?;
+                rows = query
+                    .query_map(
+                        params![policy.days, policy.max_count, legacy_scope],
+                        |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, Option<String>>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, String>(3)?,
+                            ))
+                        },
+                    )?
+                    .collect::<Result<Vec<_>, _>>()?;
+            }
+            for (id, image, payload, hash) in rows {
                 ids.push(id);
                 images.extend(image);
                 payloads.extend(payload);
