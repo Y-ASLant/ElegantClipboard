@@ -270,6 +270,7 @@ impl Service {
 
 /// 逐条确认到期的瞬时条目：在 CaptureState 临界区内重读当前剪贴板，
 /// 与 watcher 的稳定读互斥（模式同 handle_copy 的写回锁）。
+/// undecidable 标记内容无法判定（读取静默失败），此时按序列号/格式保守判定。
 fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
     let mut deliver = Vec::new();
     {
@@ -280,13 +281,13 @@ fn deliver_transient_due(worker: &mut Worker, feedback: &CaptureFeedback) {
         let mut reread = || {
             let sequence = current_sequence(&worker.clipboard)?;
             let allowed = state.formats.clone();
-            let (content, formats) =
+            let (content, formats, undecidable) =
                 super::read_formats::read_current_capture(&worker.clipboard, &allowed)?;
             anyhow::ensure!(
                 current_sequence(&worker.clipboard)? == sequence,
                 "确认瞬时内容时剪贴板已变化"
             );
-            Ok((sequence, content, formats))
+            Ok((sequence, content, formats, undecidable))
         };
         for (entry, outcome) in
             worker

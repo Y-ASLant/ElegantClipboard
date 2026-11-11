@@ -312,7 +312,7 @@ mod tests {
             window.push(new_pending(1, content, extra, formats, source, now).hold_permit(permit));
             assert!(queue.try_send(capture("x")).is_err());
             let outcomes = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-                Ok((if deliver { 1 } else { 2 }, None, Vec::new()))
+                Ok((if deliver { 1 } else { 2 }, None, Vec::new(), false))
             });
             assert!(queue.try_send(capture("x")).is_err());
             drop(outcomes);

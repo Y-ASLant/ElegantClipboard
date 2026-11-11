@@ -39,8 +39,10 @@ pub(crate) fn retry_clipboard_read<T, E: ToString>(
 #[cfg(windows)]
 fn is_retryable_read_error<E: ToString>(error: &E) -> bool {
     // clipboard-rs 将 Win32 错误转换成字符串，按完整错误码匹配，不依赖系统语言。
+    // OSError(0)：源应用广播了格式但 GetClipboardData/GlobalLock 返回 NULL 且无错误码，
+    // 常见于延迟渲染（微信 CF_DIBV5）；在预算内重试可能等到真实数据。
     let message = error.to_string();
-    ["OSError(5)", "OSError(1418)"]
+    ["OSError(0)", "OSError(5)", "OSError(1418)"]
         .iter()
         .any(|code| message.contains(code))
 }
@@ -149,9 +151,28 @@ pub(super) fn read_content(
         return Ok((Some(CapturedClipboard::Text(text)), warning));
     }
     if allowed.allows_image() && clipboard.has(ContentFormat::Image) {
-        return Ok((Some(read_image(clipboard)?), None));
+        match read_image(clipboard) {
+            // 源应用广播了图片格式但数据读不到（微信 CF_DIBV5 延迟渲染/空句柄，
+            // 重试后仍 OSError(0)）：复制本身成功，静默跳过，不弹错误横幅也不占位。
+            Err(error) if is_missing_image_data(&error) => {
+                return Ok((None, None));
+            }
+            result => return Ok((Some(result?), None)),
+        }
     }
     Ok((None, None))
+}
+
+/// Win32 读取已广播的图片格式失败时不设置错误码，clipboard-rs 报 OSError(0)。
+/// 该情况表示源应用延迟渲染或提供了不可读的格式句柄，非真正的读取故障。
+#[cfg(windows)]
+fn is_missing_image_data(error: &anyhow::Error) -> bool {
+    error.to_string().contains("OSError(0)")
+}
+
+#[cfg(not(windows))]
+fn is_missing_image_data(_: &anyhow::Error) -> bool {
+    false
 }
 
 fn prefer_image(html: Option<&str>, rtf: Option<&[u8]>, text: Option<&str>) -> bool {
@@ -230,7 +251,7 @@ mod tests {
     fn clipboard_read_recovers_from_access_denied_and_missing_session() {
         use super::retry_clipboard_read;
 
-        for codes in [[5, 1418], [1418, 5]] {
+        for codes in [[5, 1418], [1418, 5], [0, 5], [0, 1418]] {
             let mut calls = 0;
             let result = retry_clipboard_read(|| {
                 let error = codes.get(calls).copied();
@@ -250,7 +271,12 @@ mod tests {
     fn clipboard_read_stops_on_nonretryable_errors_even_after_a_retry() {
         use super::retry_clipboard_read;
 
-        for error in ["invalid file list", "OSError(50)", "OSError(14180)"] {
+        for error in [
+            "invalid file list",
+            "OSError(50)",
+            "OSError(14180)",
+            "OSError(100)",
+        ] {
             for retry_first in [false, true] {
                 let mut calls = 0;
                 let result: Result<(), &str> = retry_clipboard_read(|| {

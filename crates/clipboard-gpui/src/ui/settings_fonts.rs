@@ -1,5 +1,6 @@
 use super::settings_common::{
-    owner_state, settings_description, settings_field, settings_inline, settings_stack,
+    owner_state, settings_description, settings_field, settings_inline, settings_number_field,
+    settings_stack,
 };
 use super::*;
 use clipboard_core::preferences::FontPreference;
@@ -241,21 +242,20 @@ impl SettingsWindowView {
                         .search_placeholder(tr(language, "搜索字体", "Search fonts")),
                 )
                 .child(
-                    div().flex_none().child(
-                        NumberInput::new(size_input.input())
-                            .w(px(visual::FONT_SIZE_STEPPER_WIDTH))
-                            .min_w(px(visual::FONT_SIZE_STEPPER_WIDTH))
-                            .flex_none()
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .accessibility_label(label)
-                            .disabled(disabled)
-                            .suffix(
-                                div()
-                                    .text_size(px(visual::TEXT_SMALL))
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child("px"),
-                            ),
-                    ),
+                    div()
+                        .flex_none()
+                        .w(px(visual::FONT_SIZE_STEPPER_WIDTH))
+                        .child(settings_number_field(
+                            NumberInput::new(size_input.input())
+                                .accessibility_label(label)
+                                .suffix(
+                                    div()
+                                        .text_size(px(visual::TEXT_SMALL))
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("px"),
+                                ),
+                            disabled,
+                        )),
                 ),
         )
     }

@@ -1,5 +1,6 @@
 use super::settings_common::{
-    settings_column_field, settings_columns, settings_description, settings_inline, settings_stack,
+    settings_column_field, settings_columns, settings_description, settings_inline,
+    settings_number_field, settings_stack,
 };
 use super::*;
 use clipboard_core::{DeletionOutcome, retention::RetentionPolicy};
@@ -71,18 +72,18 @@ impl SettingsWindowView {
                 settings_columns()
                     .child(
                         settings_column_field(tr(language, "保留天数", "Retention days")).child(
-                            NumberInput::new(&self.retention_days_input)
-                                .w_full()
-                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .disabled(saved.pending),
+                            settings_number_field(
+                                NumberInput::new(&self.retention_days_input),
+                                saved.pending,
+                            ),
                         ),
                     )
                     .child(
                         settings_column_field(tr(language, "每组数量", "Items per group")).child(
-                            NumberInput::new(&self.retention_count_input)
-                                .w_full()
-                                .h(px(visual::CONTROL_HEIGHT_LARGE))
-                                .disabled(saved.pending),
+                            settings_number_field(
+                                NumberInput::new(&self.retention_count_input),
+                                saved.pending,
+                            ),
                         ),
                     ),
             )

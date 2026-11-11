@@ -223,15 +223,17 @@ fn enum_formats_once(allowed: &CaptureFormatPreference) -> (Vec<NativeFormatCapt
 }
 
 /// 瞬时确认只重读主内容与实际格式名；额外载荷沿用原始快照。
+/// 返回 (内容, 格式名, 内容是否不可判定)：图片等格式广播了但读不到时为 true，
+/// 调用方此时不能凭空内容判定条目被取代。
 pub(super) fn read_current_capture(
     clipboard: &ClipboardContext,
     allowed: &CaptureFormatPreference,
-) -> Result<(Option<CapturedClipboard>, Vec<String>)> {
+) -> Result<(Option<CapturedClipboard>, Vec<String>, bool)> {
     if super::privacy::excludes_history(clipboard)? {
-        return Ok((None, Vec::new()));
+        return Ok((None, Vec::new(), false));
     }
     let content = read_content(clipboard, allowed)?.0;
-    let formats = clipboard_win::Clipboard::new_attempts(10)
+    let formats: Vec<String> = clipboard_win::Clipboard::new_attempts(10)
         .map(|guard| {
             captured_formats(&guard)
                 .into_iter()
@@ -239,5 +241,10 @@ pub(super) fn read_current_capture(
                 .collect()
         })
         .unwrap_or_default();
-    Ok((content, formats))
+    let undecidable = content.is_none()
+        && allowed.allows_image()
+        && formats
+            .iter()
+            .any(|name| matches!(name.as_str(), "CF_DIB" | "CF_DIBV5" | "CF_BITMAP" | "PNG"));
+    Ok((content, formats, undecidable))
 }

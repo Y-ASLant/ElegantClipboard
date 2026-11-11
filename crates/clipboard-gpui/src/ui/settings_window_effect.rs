@@ -1,5 +1,6 @@
 use super::settings_common::{
-    owner_state, settings_description, settings_field, settings_field_help, settings_stack,
+    owner_state, settings_description, settings_field, settings_field_help, settings_number_field,
+    settings_stack,
 };
 use super::*;
 use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
@@ -72,12 +73,10 @@ impl SettingsWindowView {
                     ),
                     "window-density-help",
                 )
-                    .child(
-                        NumberInput::new(self.window_opacity.input())
-                            .w_full()
-                            .h(px(visual::CONTROL_HEIGHT_LARGE))
-                            .disabled(pending),
-                    ))
+                    .child(settings_number_field(
+                        NumberInput::new(self.window_opacity.input()),
+                        pending,
+                    )))
             })
             .when(!supported, |content| {
                 let saved = effect_label(language, preference.effect);

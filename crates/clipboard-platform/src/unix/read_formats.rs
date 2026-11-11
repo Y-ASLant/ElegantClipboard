@@ -156,10 +156,10 @@ pub(super) fn read_clipboard(
 pub(super) fn read_current_capture(
     clipboard: &ClipboardContext,
     allowed: &CaptureFormatPreference,
-) -> Result<(Option<CapturedClipboard>, Vec<String>)> {
+) -> Result<(Option<CapturedClipboard>, Vec<String>, bool)> {
     let mut formats = formats(clipboard)?;
     if is_private(&formats, clipboard) {
-        return Ok((None, Vec::new()));
+        return Ok((None, Vec::new(), false));
     }
     let content = read_content(
         clipboard,
@@ -169,5 +169,13 @@ pub(super) fn read_current_capture(
     )?
     .0;
     formats.retain(|name| !is_metadata(name) && allowed.includes(name));
-    Ok((content, formats))
+    let undecidable = content.is_none()
+        && allowed.allows_image()
+        && formats.iter().any(|name| {
+            matches!(
+                name.as_str(),
+                "image/png" | "image/tiff" | "image/bmp" | "public.png" | "public.tiff"
+            )
+        });
+    Ok((content, formats, undecidable))
 }

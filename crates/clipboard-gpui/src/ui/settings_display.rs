@@ -2,7 +2,7 @@ use super::category_tabs::{CATEGORY_TAB_SPECS, category_tab_flags, set_category_
 use super::settings_common::{
     choice_tabs, owner_state, pref_checkbox, settings_column, settings_column_field,
     settings_column_field_help, settings_columns, settings_description, settings_field,
-    settings_field_help, settings_inline, settings_stack, settings_toggle,
+    settings_field_help, settings_inline, settings_number_field, settings_stack, settings_toggle,
 };
 use super::*;
 use clipboard_core::preferences::CardCornerPreference;
@@ -324,10 +324,10 @@ impl SettingsWindowView {
             )
             .child(
                 settings_field(tr(language, "卡片预览行数", "Card preview lines")).child(
-                    NumberInput::new(self.preview_lines.input())
-                        .w_full()
-                        .h(px(visual::CONTROL_HEIGHT_LARGE))
-                        .disabled(display_pending),
+                    settings_number_field(
+                        NumberInput::new(self.preview_lines.input()),
+                        display_pending,
+                    ),
                 ),
             )
             .child(

@@ -51,6 +51,10 @@ pub(crate) enum PollOutcome {
     Discard,
 }
 
+/// 确认重读的结果：(剪贴板序列号, 当前内容, 格式名, 内容是否不可判定)。
+/// `undecidable` 为 true 时载荷不可信（读取可能静默失败），不能凭它判定条目被取代。
+pub(crate) type ConfirmationRead = (u32, Option<CapturedClipboard>, Vec<String>, bool);
+
 impl TransientWindow {
     pub(crate) fn new(enabled: bool) -> Self {
         Self {
@@ -86,13 +90,15 @@ impl TransientWindow {
         self.pending.front().map(|entry| entry.due)
     }
 
-    /// 取出到期条目并判定。`reread` 在 CaptureState 临界区内重读当前剪贴板。
+    /// 取出到期条目并判定。`reread` 在 CaptureState 临界区内重读当前剪贴板，
+    /// 返回 (序列号, 当前内容, 格式名, 内容是否不可判定)。
     /// 同一批次内缓存首次重读结果：序列号未变时后续条目直接复用，避免重复全量读取。
+    /// 序列号未变时载荷不可信（读取可能静默失败），条目照常入库，不比较内容。
     pub(crate) fn poll_due(
         &mut self,
         now: Instant,
         ignored_sequence: u32,
-        reread: &mut dyn FnMut() -> Result<(u32, Option<CapturedClipboard>, Vec<String>)>,
+        reread: &mut dyn FnMut() -> Result<ConfirmationRead>,
     ) -> Vec<(PendingCapture, PollOutcome)> {
         let mut results = Vec::new();
         let mut cached = None;
@@ -101,7 +107,7 @@ impl TransientWindow {
             let outcome = {
                 let read = cached.get_or_insert_with(|| reread().map_err(|_| ()));
                 match read {
-                    Ok((current, content, formats)) => {
+                    Ok((current, content, formats, undecidable)) => {
                         if *current == entry.sequence {
                             // 确认读可能补上首次快照漏掉的格式名；空结果不覆盖已有名称。
                             if !formats.is_empty() {
@@ -113,6 +119,8 @@ impl TransientWindow {
                             PollOutcome::Deliver
                         } else {
                             match content {
+                                // 读取无法判定内容（图片格式不可读等），保守保留。
+                                _ if *undecidable => PollOutcome::Deliver,
                                 // 内容为空/不同：被还原或取代，丢弃。
                                 None => PollOutcome::Discard,
                                 Some(current_content) if *current_content == entry.content => {

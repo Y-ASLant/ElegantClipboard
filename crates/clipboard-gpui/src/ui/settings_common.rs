@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tooltip::Tooltip;
 
@@ -84,6 +85,19 @@ fn settings_label(label: impl Into<SharedString>) -> Div {
 
 pub(super) fn settings_column_field(label: &'static str) -> Div {
     settings_field(label).flex_basis(px(280.)).flex_grow(1.)
+}
+
+/// Kit `NumberInput` in settings: reset inherited body line height, stretch the
+/// control to `CONTROL_HEIGHT_LARGE`, and keep the default Medium step icons
+/// (16px) so +/- match other settings chrome.
+pub(super) fn settings_number_field(input: NumberInput, disabled: bool) -> Div {
+    div()
+        .w_full()
+        .h(px(visual::CONTROL_HEIGHT_LARGE))
+        .flex()
+        .items_stretch()
+        .line_height(relative(1.))
+        .child(input.w_full().h_full().disabled(disabled))
 }
 
 /// 字段/分区标题旁的「说明」入口：悬停图标展示解释文本，不再常驻占行。

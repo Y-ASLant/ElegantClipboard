@@ -20,6 +20,14 @@ fn entry(sequence: u32, value: &str, now: Instant) -> PendingCapture {
     )
 }
 
+fn ok_read(
+    sequence: u32,
+    content: Option<CapturedClipboard>,
+    formats: Vec<String>,
+) -> Result<(u32, Option<CapturedClipboard>, Vec<String>, bool)> {
+    Ok((sequence, content, formats, false))
+}
+
 fn delivered(outcomes: &[(PendingCapture, PollOutcome)]) -> usize {
     outcomes
         .iter()
@@ -42,7 +50,7 @@ fn due_entry_with_unchanged_sequence_is_delivered() {
     let now = Instant::now();
     assert!(window.push(entry(7, "stable", now)).is_empty());
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-        Ok((7, Some(text_capture("stable")), Vec::new()))
+        ok_read(7, Some(text_capture("stable")), Vec::new())
     });
     assert_eq!(delivered(&results), 1);
     assert_eq!(results[0].0.formats, ["original/native"]);
@@ -56,7 +64,7 @@ fn unchanged_sequence_adopts_format_names_from_the_confirmation_read() {
     pending.formats.clear();
     assert!(window.push(pending).is_empty());
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-        Ok((7, Some(text_capture("stable")), vec!["CF_HDROP".into()]))
+        ok_read(7, Some(text_capture("stable")), vec!["CF_HDROP".into()])
     });
     assert_eq!(delivered(&results), 1);
     assert_eq!(results[0].0.formats, ["CF_HDROP"]);
@@ -68,7 +76,9 @@ fn replaced_by_empty_content_is_discarded() {
     let now = Instant::now();
     window.push(entry(7, "flash", now));
     // 序列号变化且当前剪贴板为空（划词工具还原）。
-    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || Ok((8, None, Vec::new())));
+    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
+        ok_read(8, None, Vec::new())
+    });
     assert_eq!(delivered(&results), 0);
 }
 
@@ -78,7 +88,7 @@ fn replaced_by_different_content_is_discarded() {
     let now = Instant::now();
     window.push(entry(7, "old", now));
     let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-        Ok((8, Some(text_capture("new content")), Vec::new()))
+        ok_read(8, Some(text_capture("new content")), Vec::new())
     });
     assert_eq!(delivered(&results), 0);
 }
@@ -90,11 +100,24 @@ fn replaced_by_identical_content_uses_latest_formats_even_when_empty() {
         let now = Instant::now();
         window.push(entry(7, "same", now));
         let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
-            Ok((8, Some(text_capture("same")), formats.clone()))
+            ok_read(8, Some(text_capture("same")), formats.clone())
         });
         assert_eq!(delivered(&results), 1);
         assert_eq!(results[0].0.formats, formats);
     }
+}
+
+#[test]
+fn undecidable_replacement_keeps_the_entry() {
+    let mut window = TransientWindow::new(true);
+    let now = Instant::now();
+    window.push(entry(7, "user copy", now));
+    // 序列号变化、内容读为空但标记为不可判定（图片格式不可读）：不能当作被取代丢弃。
+    let results = window.poll_due(now + TRANSIENT_WINDOW, 0, &mut || {
+        Ok((8, None, vec!["CF_DIBV5".into()], true))
+    });
+    assert_eq!(delivered(&results), 1);
+    assert_eq!(results[0].0.formats, ["original/native"]);
 }
 
 #[test]
@@ -104,11 +127,11 @@ fn replaced_by_own_paste_is_still_delivered() {
     window.push(entry(7, "user copy", now));
     // 序列号 9 是自身写回（ignored_sequence=9）。
     let results = window.poll_due(now + TRANSIENT_WINDOW, 9, &mut || {
-        Ok((
+        ok_read(
             9,
             Some(text_capture("pasted item")),
             vec!["own/paste".into()],
-        ))
+        )
     });
     assert_eq!(delivered(&results), 1);
     assert_eq!(results[0].0.formats, ["original/native"]);
@@ -157,7 +180,7 @@ fn queued_captures_keep_their_own_sequence_and_only_the_final_content_survives()
     let outcomes = window.poll_due(
         now + TRANSIENT_WINDOW + Duration::from_millis(100),
         0,
-        &mut || Ok((102, Some(text_capture("final")), Vec::new())),
+        &mut || ok_read(102, Some(text_capture("final")), Vec::new()),
     );
     assert_eq!(outcomes.len(), 2);
     assert!(matches!(outcomes[0].1, PollOutcome::Discard));

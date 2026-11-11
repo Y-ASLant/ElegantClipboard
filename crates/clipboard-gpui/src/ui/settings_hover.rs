@@ -1,6 +1,6 @@
 use super::settings_common::{
     choice_tabs, owner_state, pref_checkbox, settings_field, settings_field_help, settings_inline,
-    settings_stack,
+    settings_number_field, settings_stack,
 };
 use super::*;
 use gpui_kit::component::input::NumberInput;
@@ -90,12 +90,10 @@ impl SettingsWindowView {
                     tr(language, "100–2000 毫秒。", "100–2000 ms."),
                     "hover-delay-help",
                 )
-                .child(
-                    NumberInput::new(self.hover_delay.input())
-                        .w_full()
-                        .h(px(visual::CONTROL_HEIGHT_LARGE))
-                        .disabled(hover_pending),
-                ),
+                .child(settings_number_field(
+                    NumberInput::new(self.hover_delay.input()),
+                    hover_pending,
+                )),
             )
             .child(
                 settings_field(tr(language, "浮窗位置", "Position")).child(choice_tabs(
@@ -132,12 +130,10 @@ impl SettingsWindowView {
                     tr(language, "5–50。", "5–50."),
                     "hover-zoom-help",
                 )
-                .child(
-                    NumberInput::new(self.hover_zoom.input())
-                        .w_full()
-                        .h(px(visual::CONTROL_HEIGHT_LARGE))
-                        .disabled(hover_pending),
-                ),
+                .child(settings_number_field(
+                    NumberInput::new(self.hover_zoom.input()),
+                    hover_pending,
+                )),
             )
             .child(
                 settings_field(tr(language, "预览信息", "Preview details")).child(
