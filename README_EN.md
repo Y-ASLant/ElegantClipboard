@@ -19,7 +19,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 - Interface: Simplified Chinese/English, light/dark themes, corner-radius options, frosted-glass/mica/opaque background materials (per platform capability), always-on-top, hide-on-outside-click and opening-position options; the borderless main window drags by a grip above the search box and offers a return-to-top button after scrolling; quick-paste shortcuts are off by default and can enable Alt+1–0 for the ten most recent records and Ctrl+Alt+1–3 for the top three favorites
 - Data management: backups export as GPUI ZIP and can restore GPUI/legacy backups or import an old database into a separate empty directory; per-group count and age limits protect favorites and pinned items; global shortcut, tray, autostart, capture pause, and single-instance activation
 
-Known limitations: remote http(s) images in HTML previews do not load; editing an HTML entry saves it as plain text; paste-back temporary image files live under `image_tmp/` in the data directory and are swept at startup.
+Known limitations: remote http(s) images in HTML previews do not load; editing an HTML entry saves it as plain text; paste-back temporary image files live under `image_tmp/` in the data directory and are swept at startup. Some apps (e.g. WeChat) advertise an image format but delay-render it without data — such copies cannot be captured and are skipped silently, without an error banner.
 
 See [cross-platform GPUI status](docs/WINDOWS_MVP.md) for implementation details, dependencies and verification commands; historical verification records live under `docs/evidence/`.
 
