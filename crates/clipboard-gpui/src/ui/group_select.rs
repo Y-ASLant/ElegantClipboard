@@ -122,8 +122,27 @@ pub(super) fn group_options(
 }
 
 impl ClipboardView {
+    pub(super) fn longest_group_label(&self, window: &Window, cx: &App) -> f32 {
+        let mut style = window.text_style();
+        style.font_family = cx.theme().font_family.clone();
+        let font_size = px(visual::TEXT_BODY);
+        group_options(&self.groups, self.language, self.history.group_id())
+            .into_iter()
+            .map(|option| {
+                let text = option.title;
+                f32::from(
+                    window
+                        .text_system()
+                        .shape_line(text.clone(), font_size, &[style.to_run(text.len())], None)
+                        .width,
+                )
+            })
+            .fold(0., f32::max)
+    }
+
     pub(super) fn render_group_select(
         &self,
+        width: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -291,8 +310,8 @@ impl ClipboardView {
                     .occlude()
                     .popover_style(cx)
                     .p(px(4.))
-                    // 菜单外缘与触发器槽位同宽，同一 token。
-                    .w(px(visual::GROUP_SELECT_WIDTH))
+                    // 菜单外缘与触发器槽位同宽。
+                    .w(px(width))
                     .child(list)
                     .into_any_element()
             })

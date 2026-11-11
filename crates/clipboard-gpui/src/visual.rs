@@ -1,5 +1,5 @@
 //! Shared spacing, control sizing and motion for the native UI.
-use clipboard_core::preferences::CardDensity;
+use clipboard_core::preferences::{CardDensity, MIN_WINDOW_WIDTH};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use std::{
@@ -139,8 +139,24 @@ pub fn thumbnail_size(density: CardDensity) -> (f32, f32) {
     }
 }
 pub const GROUP_BAR_HEIGHT: f32 = 42.;
-/// 分组下拉触发器与弹出菜单共用的宽度（紧凑，为最小窗口下的分类标签留空间）。
-pub const GROUP_SELECT_WIDTH: f32 = 100.;
+/// Group selector width at [`MIN_WINDOW_WIDTH`]. Wider windows grow it until the label fits.
+pub const GROUP_SELECT_MIN_WIDTH: f32 = 100.;
+/// Outline padding, dropdown caret, and the gap in front of the caret.
+pub const GROUP_SELECT_CHROME: f32 = 52.;
+
+/// Shared width of the group trigger and its menu.
+///
+/// The minimum window keeps the compact slot so category tabs do not shrink.
+/// Width above that goes to the selector until `label_width` plus chrome fits.
+pub fn group_select_width(viewport: f32, label_width: f32) -> f32 {
+    let reserved = PAGE_PADDING * 2. + SPACE_2 * 2. + 6.;
+    let available = (viewport - reserved).max(GROUP_SELECT_MIN_WIDTH);
+    let surplus = (available - (MIN_WINDOW_WIDTH as f32 - reserved)).max(0.);
+    let natural = (label_width + GROUP_SELECT_CHROME).max(GROUP_SELECT_MIN_WIDTH);
+    (GROUP_SELECT_MIN_WIDTH + surplus)
+        .min(natural)
+        .min(available)
+}
 pub const DRAG_MOTION_DURATION: Duration = crate::design_system::SLOW;
 pub const DRAG_EDGE_ZONE: f32 = 32.;
 pub const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(60);
@@ -484,5 +500,28 @@ mod card_height_tests {
             2
         );
         assert!(media_row_height(density, false, 1) < row_height(density, 3));
+    }
+}
+
+#[cfg(test)]
+mod group_select_width_tests {
+    use super::{
+        GROUP_SELECT_CHROME, GROUP_SELECT_MIN_WIDTH, MIN_WINDOW_WIDTH, group_select_width,
+    };
+
+    #[test]
+    fn group_selector_stays_compact_until_the_window_has_surplus() {
+        let min = MIN_WINDOW_WIDTH as f32;
+        assert_eq!(group_select_width(min, 400.), GROUP_SELECT_MIN_WIDTH);
+        assert_eq!(group_select_width(min, 0.), GROUP_SELECT_MIN_WIDTH);
+        assert_eq!(
+            group_select_width(min + 80., 10_000.),
+            GROUP_SELECT_MIN_WIDTH + 80.
+        );
+        assert_eq!(
+            group_select_width(min + 500., 80.),
+            80. + GROUP_SELECT_CHROME
+        );
+        assert_eq!(group_select_width(min + 500., 0.), GROUP_SELECT_MIN_WIDTH);
     }
 }
