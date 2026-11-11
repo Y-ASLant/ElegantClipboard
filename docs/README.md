@@ -73,6 +73,8 @@
 | `notification.rs`、`notification/` | Windows WinRT、macOS UserNotifications 与 Linux D-Bus 系统通知；由界面层在后台调用 |
 | `service/tests/` | 三平台共用服务行为回归；Windows 图标与信号同步等专属夹具单独按平台编译 |
 
+Windows 文件采集与写回校验共用 `windows/read_files.rs`：在当前线程创建专属消息窗口，用非空 HWND 打开会话后直接读取文件列表，避免同进程其他线程的 `OpenClipboard(NULL)` 会话关闭当前读取。主内容及隐私标记读取共用 `retry_clipboard_read`：遇到 `ERROR_ACCESS_DENIED`（5）或 `ERROR_CLIPBOARD_NOT_OPEN`（1418）时，在 250 ms 重试预算内重新执行完整读取；其他错误立即返回。读取外层不嵌套剪贴板 guard，快照仍由前后序列号校验防止混入不同次复制的内容。
+
 Linux X11 采集内容与来源查询整体受前后 selection generation 校验保护；不以无关前台窗口冒充 clipboard owner。XDND 在释放鼠标后锁定目标和位置，等待最终响应期间不重新投放到另一窗口。Wayland 必须支持 data-control，按完整载荷轮询检测变化，不能区分相同内容的再次复制。
 
 `window_effect.rs` 提供当前系统的真实材质能力及降级策略，不覆盖已保存的偏好；Windows DWM、macOS 模糊和 Linux 不透明分别由 GPUI 原生层应用。

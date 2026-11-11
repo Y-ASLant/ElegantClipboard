@@ -12,24 +12,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// `OpenClipboard` 全局独占：源应用复制后短暂持有句柄时，open 会拿到
-/// OSError(5)（ERROR_ACCESS_DENIED）。clipboard-rs 自带的重试只 `Sleep(0)`，
-/// 打不穿毫秒级持锁；这里按有限预算重试单次读取，对齐 Windows 独占语义。
-const ACCESS_DENIED_BUDGET: Duration = Duration::from_millis(250);
-const ACCESS_DENIED_DELAY: Duration = Duration::from_millis(20);
+const READ_RETRY_BUDGET: Duration = Duration::from_millis(250);
+const READ_RETRY_DELAY: Duration = Duration::from_millis(20);
 
-pub(crate) fn retry_access_denied<T, E: ToString>(
+/// 重试完整读取；每次尝试都必须重新打开会话，并在返回前关闭。
+/// Windows 的 5 表示打开时被占用，1418 表示读取时没有有效的打开会话。
+/// 不在外层持有 clipboard_win guard：嵌套会话的关闭会释放系统剪贴板锁。
+pub(crate) fn retry_clipboard_read<T, E: ToString>(
     mut read: impl FnMut() -> Result<T, E>,
 ) -> Result<T, E> {
-    let deadline = Instant::now() + ACCESS_DENIED_BUDGET;
+    let deadline = Instant::now() + READ_RETRY_BUDGET;
     loop {
         match read() {
-            Err(error) if is_access_denied(&error) => {
+            Err(error) if is_retryable_read_error(&error) => {
                 let now = Instant::now();
                 if now >= deadline {
                     return Err(error);
                 }
-                thread::sleep(ACCESS_DENIED_DELAY.min(deadline - now));
+                thread::sleep(READ_RETRY_DELAY.min(deadline - now));
             }
             result => return result,
         }
@@ -37,13 +37,16 @@ pub(crate) fn retry_access_denied<T, E: ToString>(
 }
 
 #[cfg(windows)]
-fn is_access_denied<E: ToString>(error: &E) -> bool {
-    // clipboard-rs 把 Windows 错误渲染成 "…, code = OSError(5): 拒绝访问。"。
-    error.to_string().contains("OSError(5)")
+fn is_retryable_read_error<E: ToString>(error: &E) -> bool {
+    // clipboard-rs 将 Win32 错误转换成字符串，按完整错误码匹配，不依赖系统语言。
+    let message = error.to_string();
+    ["OSError(5)", "OSError(1418)"]
+        .iter()
+        .any(|code| message.contains(code))
 }
 
 #[cfg(not(windows))]
-fn is_access_denied<E: ToString>(_: &E) -> bool {
+fn is_retryable_read_error<E: ToString>(_: &E) -> bool {
     false
 }
 
@@ -69,8 +72,10 @@ pub(super) fn read_content(
     if allowed.allows_files() && clipboard.has(ContentFormat::Files) {
         #[cfg(target_os = "linux")]
         let paths = super::file_list::read_files(clipboard)?;
-        #[cfg(not(target_os = "linux"))]
-        let paths = retry_access_denied(|| clipboard.get_files())
+        #[cfg(windows)]
+        let paths = super::file_list::read_files()?;
+        #[cfg(target_os = "macos")]
+        let paths = retry_clipboard_read(|| clipboard.get_files())
             .map_err(|error| anyhow::anyhow!("读取剪贴板文件失败：{error}"))?;
         if paths.is_empty()
             || paths.len() > MAX_FILE_PATHS
@@ -95,7 +100,7 @@ pub(super) fn read_content(
         .then(|| {
             clipboard
                 .has(ContentFormat::Rtf)
-                .then(|| retry_access_denied(|| clipboard.get_buffer(RTF_FORMAT)).ok())
+                .then(|| retry_clipboard_read(|| clipboard.get_buffer(RTF_FORMAT)).ok())
                 .flatten()
                 .filter(|value| !value.is_empty())
         })
@@ -112,7 +117,7 @@ pub(super) fn read_content(
         .then(|| {
             clipboard
                 .has(ContentFormat::Text)
-                .then(|| retry_access_denied(|| clipboard.get_text()).ok())
+                .then(|| retry_clipboard_read(|| clipboard.get_text()).ok())
                 .flatten()
                 .filter(|value| !value.is_empty())
         })
@@ -158,7 +163,7 @@ fn prefer_image(html: Option<&str>, rtf: Option<&[u8]>, text: Option<&str>) -> b
 }
 
 fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
-    let image = retry_access_denied(|| clipboard.get_image())
+    let image = retry_clipboard_read(|| clipboard.get_image())
         .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
     let (width, height) = image.get_size();
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
@@ -222,28 +227,58 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn access_denied_retry_succeeds_and_other_errors_pass_through() {
-        use super::retry_access_denied;
+    fn clipboard_read_recovers_from_access_denied_and_missing_session() {
+        use super::retry_clipboard_read;
 
-        let mut calls = 0;
-        let value = retry_access_denied(|| {
-            calls += 1;
-            if calls == 1 {
-                Err("Get image error, code = OSError(5): 拒绝访问。")
-            } else {
-                Ok(7)
+        for codes in [[5, 1418], [1418, 5]] {
+            let mut calls = 0;
+            let result = retry_clipboard_read(|| {
+                let error = codes.get(calls).copied();
+                calls += 1;
+                match error {
+                    Some(code) => Err(format!("Get files error, code = OSError({code})")),
+                    None => Ok(7),
+                }
+            });
+            assert_eq!(result, Ok(7));
+            assert_eq!(calls, 3);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn clipboard_read_stops_on_nonretryable_errors_even_after_a_retry() {
+        use super::retry_clipboard_read;
+
+        for error in ["invalid file list", "OSError(50)", "OSError(14180)"] {
+            for retry_first in [false, true] {
+                let mut calls = 0;
+                let result: Result<(), &str> = retry_clipboard_read(|| {
+                    calls += 1;
+                    if retry_first && calls == 1 {
+                        Err("Get files error, code = OSError(1418)")
+                    } else {
+                        Err(error)
+                    }
+                });
+                assert_eq!(result, Err(error));
+                assert_eq!(calls, if retry_first { 2 } else { 1 });
             }
-        });
-        assert_eq!(value, Ok(7));
-        assert_eq!(calls, 2);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn persistent_missing_session_returns_the_last_error_within_the_retry_budget() {
+        use super::retry_clipboard_read;
 
         let mut calls = 0;
-        let result: Result<i32, &str> = retry_access_denied(|| {
+        let result: Result<(), String> = retry_clipboard_read(|| {
             calls += 1;
-            Err("some other error")
+            Err(format!("attempt {calls}: OSError(1418)"))
         });
-        assert_eq!(result, Err("some other error"));
-        assert_eq!(calls, 1);
+        assert!(calls > 1);
+        assert_eq!(result, Err(format!("attempt {calls}: OSError(1418)")));
     }
 
     #[test]

@@ -20,7 +20,7 @@ pub(super) fn excludes_history(clipboard: &ClipboardContext) -> Result<bool> {
     if unsafe { IsClipboardFormatAvailable(history) }.is_err() {
         return Ok(false);
     }
-    let value = crate::service::read_content::retry_access_denied(|| {
+    let value = crate::service::read_content::retry_clipboard_read(|| {
         clipboard.get_buffer("CanIncludeInClipboardHistory")
     })
     .map_err(|error| anyhow!("无法读取剪贴板历史权限，本次复制未保存：{error}"))?;

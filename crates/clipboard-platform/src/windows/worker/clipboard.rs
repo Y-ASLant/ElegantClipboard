@@ -126,7 +126,7 @@ impl Worker {
             result.map_err(|error| anyhow!("复制文件失败：{error}"))?;
             verified_copy_sequence(
                 || unsafe { GetClipboardSequenceNumber() },
-                || self.clipboard.get_files().ok().as_ref() == Some(&files),
+                || crate::service::file_list::read_files().ok().as_ref() == Some(&files),
             )?
         } else if let Some(png) = image {
             write_image_with_file(&item, &self.data_dir, &png, &mut state.ignored_sequence)?;
@@ -341,8 +341,7 @@ fn write_merged_clipboard(
             .ok()
             .is_some_and(|actual| actual == merged.text);
         let files_match = merged.files.is_empty()
-            || clipboard
-                .get_files()
+            || crate::service::file_list::read_files()
                 .ok()
                 .is_some_and(|actual| actual.as_slice() == merged.files.as_slice());
         if !text_matches || !files_match {

@@ -5,13 +5,13 @@ pub(crate) fn read_html(clipboard: &ClipboardContext) -> Result<String> {
     #[cfg(windows)]
     {
         let bytes =
-            super::read_content::retry_access_denied(|| clipboard.get_buffer("HTML Format"))
+            super::read_content::retry_clipboard_read(|| clipboard.get_buffer("HTML Format"))
                 .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))?;
         parse_cf_html(&bytes)
     }
     #[cfg(not(windows))]
     {
-        super::read_content::retry_access_denied(|| clipboard.get_html())
+        super::read_content::retry_clipboard_read(|| clipboard.get_html())
             .map_err(|error| anyhow::anyhow!("读取剪贴板 HTML 失败：{error}"))
     }
 }

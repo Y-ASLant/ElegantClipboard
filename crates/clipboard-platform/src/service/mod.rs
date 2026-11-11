@@ -2,6 +2,9 @@ mod capture;
 mod data;
 mod data_directory;
 mod file_actions;
+#[cfg(windows)]
+#[path = "../windows/read_files.rs"]
+mod file_list;
 #[cfg(target_os = "linux")]
 #[path = "../unix/file_list.rs"]
 mod file_list;
