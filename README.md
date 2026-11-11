@@ -21,7 +21,7 @@ ElegantClipboard 是使用 Rust、GPUI 和 gpui-kit 构建的原生剪贴板管�
 
 已知限制：HTML 预览中引用 http(s) 的远程图片不加载；编辑 HTML 条目保存后降级为纯文本；图片回贴的临时文件位于数据目录 `image_tmp/`，启动时自动清扫。
 
-Windows 实现和历史验收详见 [Windows GPUI 状态](docs/WINDOWS_MVP.md)。
+实现细节、依赖与验证命令详见[跨平台 GPUI 应用状态](docs/WINDOWS_MVP.md)；历史验收记录见 `docs/evidence/`。
 
 ## 平台差异
 

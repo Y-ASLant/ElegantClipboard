@@ -21,7 +21,7 @@ ElegantClipboard is a native clipboard manager built with Rust, GPUI, and gpui-k
 
 Known limitations: remote http(s) images in HTML previews do not load; editing an HTML entry saves it as plain text; paste-back temporary image files live under `image_tmp/` in the data directory and are swept at startup.
 
-See [Windows GPUI status](docs/WINDOWS_MVP.md) for Windows implementation details and historical verification.
+See [cross-platform GPUI status](docs/WINDOWS_MVP.md) for implementation details, dependencies and verification commands; historical verification records live under `docs/evidence/`.
 
 ## Platform differences
 
