@@ -67,7 +67,7 @@ impl Default for HoverPreviewPreference {
             text: true,
             files: false,
             expanded_image: false,
-            delay_ms: 500,
+            delay_ms: 300,
             position: HoverPreviewPosition::Auto,
             zoom_step: 10,
             details: HoverPreviewDetails::default(),
