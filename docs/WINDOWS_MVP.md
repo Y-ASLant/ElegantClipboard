@@ -26,7 +26,7 @@ Windows 是主要验收平台，macOS 与 Linux 实现同仓构建（能力差�
 
 ## 依赖策略
 
-当前使用[GPUI Kit稳定版0.8.1](https://github.com/longbridge/gpui-kit/releases/tag/v0.8.1)，配套`gpui-base`、`gpui-component`、`gpui-component-macros`及`gpui-kit-assets`均为0.8.1，默认`gpui-pre-*`后端为0.3.10。通过`cargo update -p gpui-kit --precise 0.8.1`定向更新锁文件，包含上游要求的Taffy 0.15.1及WGPU/Naga 30.0.1；不切换可选后端，不升级无关直接依赖。以下日期条目保留历史验收背景。
+当前使用[GPUI Kit 稳定版 0.9.1](https://crates.io/crates/gpui-kit/0.9.1)，配套 `gpui-base`、`gpui-component`、`gpui-component-macros` 及 `gpui-kit-assets` 均为 0.9.1，默认 `gpui-pre-*` 后端为 0.3.12。通过 `cargo update -p gpui-kit --precise 0.9.1` 定向更新锁文件，配套分词依赖解析为 ICU 2.4；不切换可选后端，不升级无关直接依赖。以下日期条目保留历史验收背景。
 
 2026-09-27 已查询直接依赖的 crates.io 最新稳定版本，并将 gpui-kit 从 0.6.4 升至 0.6.6；其余直接依赖保持当前最新稳定版本。执行 `cargo update` 更新锁文件中的兼容间接依赖：
 
@@ -54,7 +54,7 @@ Release 以体积优先：`opt-level = "z"`、`lto = "fat"`、`codegen-units = 1
 
 | 直接依赖 | 当前使用版本 |
 |---|---|
-| gpui-kit | 0.8.1（配套gpui-pre 0.3.10） |
+| gpui-kit | 0.9.1（配套 gpui-pre 0.3.12） |
 | tray-icon | 0.26.0 |
 | raw-window-handle | 0.6.2 |
 | rusqlite | 0.40.2 |
@@ -76,7 +76,7 @@ Release 以体积优先：`opt-level = "z"`、`lto = "fat"`、`codegen-units = 1
 
 工具链要求 Rust 1.98+；此前模块重构验证使用 Rust 1.99.0。Cargo.lock 固定实际解析结果。依赖升级流程：查询最新稳定版本 → 更新 workspace requirements → 定向 `cargo update -p` → fmt/clippy/test/build → 原生交互验收。`zip` 使用锁定的稳定版 9.0.5。
 
-**上游例外**：稳定版gpui-kit 0.8.1的Windows依赖路径`gpui-kit → gpui-base/gpui-component → ropey`仍使用ropey 2.0.0-beta.1；`gpui-pre-*`配套版本为0.3.10。详见[技术决策](decisions/0001-windows-gpui.md)，不宣称整个依赖树均为稳定版。
+**上游例外**：稳定版 gpui-kit 0.9.1 的 Windows 依赖路径 `gpui-kit → gpui-base/gpui-component → ropey` 仍使用 ropey 2.0.0-beta.1；`gpui-pre-*` 配套版本为 0.3.12。详见[技术决策](decisions/0001-windows-gpui.md)，不宣称整个依赖树均为稳定版。
 
 ## 2026-10-16 列表优化验证
 
@@ -386,6 +386,14 @@ Windows通过`DWMWA_USE_IMMERSIVE_DARK_MODE`将原生材质配色同步到应用
 最终Release原生验证覆盖明暗×无/毛玻璃/云母六种组合（材质浓度40%）、材质往返、保存通知、卡片悬停/图片预览、明暗菜单与编辑对话框、取消编辑、向下滚动后回顶，以及浅色→深色即时切换。两窗原生明暗属性随主题为0/1，圆角策略保持0。截图位于`target/qa/surface-*.png`；圆角细节以100%缩放截图放大观察，未宣称不同DPI的渲染后端已逐一验收。后半段桌面被其他应用遮挡，改为向自有HWND发送交互消息并用PrintWindow观察目标窗口；材质真实合成以此前屏幕截图为证，PrintWindow不用于判断系统背板透明度。
 
 276个Rust文件符合500行限制，`just check`、444项测试（2项原有忽略）与Release构建通过。未增加仅断言样式常量的测试。临时驱动删除，隔离配置恢复，未写入真实剪贴板；macOS/Linux本次未做原生视觉验收，系统动画关闭状态也未通过改动用户系统设置来测试。
+
+## GPUI Kit 0.9.1 升级验证
+
+2026-11-11 通过 crates.io 查询确认最新稳定版为 0.9.1，将 workspace requirement 从 0.8.1 更新到 0.9.1，并定向更新锁文件。`cargo tree -p gpui-kit --depth 1 --locked` 确认 Kit、Base、Component、Assets 为 0.9.1，默认 `gpui-pre`、Macros 和 Platform 为 0.3.12。应用现有 API 调用直接兼容，无需修改界面代码。
+
+Windows 自动检查通过：314 个 Rust 文件符合 640 行上限，`just check` 包含格式、workspace all-targets 编译和 Clippy `-D warnings`；`just test` 为 437 项通过、2 项原有忽略；`just build` 的 Release 构建通过。
+
+新 Release 使用独立临时数据目录运行 `--smoke-test`，禁用剪贴板采集。通过原生点击从数据页切换到应用过滤页并展开运行中应用，截图确认主窗口、数据设置、过滤控件、应用图标及列表正常显示，实例按期退出且退出码为 0。临时驱动已删除；本轮未执行 macOS/Linux 原生界面验收。
 
 ## GPUI Kit 0.8.1升级验证
 

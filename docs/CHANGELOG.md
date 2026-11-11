@@ -4,6 +4,7 @@
 
 ## 2.0.0-beta.23（预发行版）
 
+- GPUI Kit 从 0.8.1 升级至[最新稳定版 0.9.1](https://crates.io/crates/gpui-kit/0.9.1)，同步配套 Base、Component、Macros、Assets 0.9.1 和默认 `gpui-pre-*` 后端 0.3.12；锁文件一并更新。
 - Windows 文件读取改用线程专属消息窗口打开剪贴板，避免并发空窗口句柄会话互相关闭导致“线程没有打开的剪贴板”（1418）。主内容和历史隐私标记读取遇到 5 或 1418 时，在有限预算内重新打开会话并重试。
 - 设置 → 应用过滤的运行中应用只显示进程名，不再显示窗口标题。没有内嵌图标的系统进程改用外壳关联图标，例如 `ApplicationFrameHost.exe` 和 `TextInputHost.exe`。
 
