@@ -209,6 +209,18 @@ impl Default for HistoryState {
     }
 }
 
+/// A history generation that is loading and still needs `Command::Query`.
+#[must_use = "arm a history query or the list stays loading"]
+pub struct HistoryReload {
+    generation: u64,
+}
+
+impl HistoryReload {
+    pub(crate) fn generation(self) -> u64 {
+        self.generation
+    }
+}
+
 impl HistoryState {
     pub fn favorite_only(&self) -> bool {
         matches!(self.filter, HistoryFilter::Favorites)
@@ -229,39 +241,58 @@ impl HistoryState {
         !show_category_filter && (self.favorite_only() || self.category() != ContentCategory::All)
     }
 
-    fn set_filter(&mut self, filter: HistoryFilter) {
+    /// `None` leaves generation and any in-flight snapshot untouched.
+    fn set_filter(&mut self, filter: HistoryFilter) -> Option<HistoryReload> {
+        if self.filter == filter {
+            return None;
+        }
         self.filter = filter;
-        self.begin_search();
+        Some(self.begin_search())
     }
 
-    pub fn set_favorite_filter(&mut self, favorite_only: bool) {
+    #[must_use = "arm a history query or the list stays loading"]
+    pub fn set_favorite_filter(&mut self, favorite_only: bool) -> Option<HistoryReload> {
         self.set_filter(if favorite_only {
             HistoryFilter::Favorites
         } else {
             HistoryFilter::All
-        });
+        })
     }
 
-    pub fn set_category(&mut self, category: ContentCategory) {
-        self.set_filter(HistoryFilter::Category(category));
+    #[must_use = "arm a history query or the list stays loading"]
+    pub fn set_category(&mut self, category: ContentCategory) -> Option<HistoryReload> {
+        self.set_filter(match category {
+            ContentCategory::All => HistoryFilter::All,
+            category => HistoryFilter::Category(category),
+        })
     }
 
-    pub fn set_group(&mut self, group_id: Option<i64>) {
+    #[must_use = "arm a history query or the list stays loading"]
+    pub fn set_group(&mut self, group_id: Option<i64>) -> Option<HistoryReload> {
+        if self.group_id == group_id {
+            return None;
+        }
         self.group_id = group_id;
-        self.begin_search();
+        Some(self.begin_search())
     }
 
-    pub fn reset_filters(&mut self) {
+    #[must_use = "arm a history query or the list stays loading"]
+    pub fn reset_filters(&mut self) -> HistoryReload {
         self.group_id = None;
-        self.set_filter(HistoryFilter::All);
+        self.filter = HistoryFilter::All;
+        self.begin_search()
     }
 
-    pub fn begin_search(&mut self) {
+    #[must_use = "arm a history query or the list stays loading"]
+    pub fn begin_search(&mut self) -> HistoryReload {
         self.generation += 1;
         self.loading = true;
         self.items.clear();
         self.selected = None;
         self.total = 0;
+        HistoryReload {
+            generation: self.generation,
+        }
     }
 
     pub fn apply(&mut self, items: Vec<ClipboardItem>, total: i64, generation: u64) -> bool {
@@ -329,6 +360,11 @@ pub fn remove_deleted_item(items: &mut Vec<ClipboardItem>, total: &mut i64, id: 
     items.remove(index);
     *total = total.saturating_sub(1).max(0);
     true
+}
+
+#[cfg(test)]
+fn settle(reload: impl Sized) {
+    let _ = std::mem::size_of_val(&reload);
 }
 
 #[cfg(test)]

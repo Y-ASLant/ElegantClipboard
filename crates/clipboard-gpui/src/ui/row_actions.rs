@@ -46,8 +46,7 @@ impl ClipboardView {
                             .size(px(visual::ICON_SMALL)),
                     )
             })
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.cancel_pending_row_click();
+            .on_click(cx.listener(|_, _, _, cx| {
                 cx.stop_propagation();
             }))
     }
@@ -186,8 +185,7 @@ impl ClipboardView {
             .shadow(visual::control_shadow())
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.cancel_pending_row_click();
+                cx.listener(|_, _, _, cx| {
                     cx.stop_propagation();
                 }),
             )

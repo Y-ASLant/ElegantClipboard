@@ -105,7 +105,7 @@ use crate::window_effect;
 use crate::{
     options::Options,
     state::{
-        HistoryState, PreviewState, drag_edge_target_index, format_card_time,
+        HistoryReload, HistoryState, PreviewState, drag_edge_target_index, format_card_time,
         next_drag_scroll_index, reorder_pixel_offsets, selection_range_ids, source_app_parts,
     },
 };
@@ -330,8 +330,6 @@ struct ClipboardView {
     hover_source_active: bool,
     hover_task: Option<Task<()>>,
     hover_preference: PendingPref<HoverPreviewPreference>,
-    pending_row_click: Option<(i64, u64)>,
-    row_click_task: Option<Task<()>>,
     save_as_pending: Option<i64>,
     list_focus: FocusHandle,
     scroll: VirtualListScrollHandle,
@@ -434,10 +432,12 @@ struct ClipboardView {
     pause_pending: bool,
     message: String,
     is_error: bool,
+    /// The history query for this generation produced neither a snapshot nor a failure.
+    history_reply_missed: bool,
     feedback_pending: bool,
     _subscriptions: Vec<Subscription>,
     _events: Task<()>,
-    search_task: Option<Task<()>>,
+    history_load_task: Option<Task<()>>,
     feedback_task: Option<Task<()>>,
     history_drag_scroll_task: Option<Task<()>>,
     window_size_task: Option<Task<()>>,

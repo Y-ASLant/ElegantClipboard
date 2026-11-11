@@ -121,7 +121,6 @@ impl ClipboardView {
         {
             return;
         }
-        self.cancel_pending_row_click();
         self.history.selected = Some(id);
         match action {
             HistoryMenuAction::Paste => self.paste_selected(id, window, cx),

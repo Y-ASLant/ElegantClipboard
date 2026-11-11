@@ -250,6 +250,12 @@ impl ClipboardView {
         } else {
             window.focus(&list_focus, cx);
         }
+        let history_load_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(super::navigation::HISTORY_REPLY_TIMEOUT)
+                .await;
+            let _ = view.update(cx, |this, cx| this.fail_unanswered_history(0, cx));
+        }));
         Self {
             service,
             main_window,
@@ -333,8 +339,6 @@ impl ClipboardView {
             hover_source_active: false,
             hover_task: None,
             hover_preference: PendingPref::new(hover_preference),
-            pending_row_click: None,
-            row_click_task: None,
             save_as_pending: None,
             list_focus,
             scroll: VirtualListScrollHandle::new(),
@@ -441,10 +445,11 @@ impl ClipboardView {
                 startup_errors.join("；")
             },
             is_error: !startup_errors.is_empty(),
+            history_reply_missed: false,
             feedback_pending: !startup_errors.is_empty(),
             _subscriptions: vec![subscription, appearance, activation, bounds, feedback],
             _events: event_task,
-            search_task: None,
+            history_load_task,
             feedback_task: None,
             history_drag_scroll_task: None,
             window_size_task: None,

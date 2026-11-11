@@ -260,7 +260,6 @@ impl ClipboardView {
                 || self.external_drag.is_some()
                 || self.history.loading
                 || self.editor.id.is_some()
-                || self.pending_row_click.is_some()
                 || self.history_menu_open(cx)
             {
                 return;

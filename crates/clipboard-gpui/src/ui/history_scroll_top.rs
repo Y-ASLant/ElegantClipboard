@@ -160,7 +160,6 @@ impl ClipboardView {
                         this.scroll_top_position.suppress_click = false;
                         if let Some(viewport) = this.drag_viewport.get() {
                             this.scroll_top_position.begin(event.position, viewport);
-                            this.cancel_pending_row_click();
                             this.close_hover_preview("scroll_top_pressed", cx);
                         }
                     }))

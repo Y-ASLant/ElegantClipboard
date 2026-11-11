@@ -86,7 +86,6 @@ impl ClipboardView {
         true
     }
     pub(super) fn paste_selected(&mut self, id: i64, window: &Window, cx: &mut Context<Self>) {
-        self.cancel_pending_row_click();
         let Some(target) = self.paste_state.target() else {
             self.set_feedback_message(tr(
                 self.language,
@@ -180,7 +179,6 @@ impl ClipboardView {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        self.cancel_pending_row_click();
         if self.paste_state.pending() {
             return;
         }

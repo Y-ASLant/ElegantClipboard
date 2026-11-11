@@ -207,7 +207,6 @@ impl ClipboardView {
         }
         self.close_hover_preview("main_deactivated", cx);
         self.dismiss_onboarding_transients(cx);
-        self.cancel_pending_row_click();
         // 回贴会在隐藏面板前聚焦原目标；正常失活须保留等待中的投递和序列。
         let foreground = crate::native::foreground_target();
         let Some((interrupted, was_active)) = self.paste_state.deactivate(foreground) else {
@@ -268,7 +267,6 @@ impl ClipboardView {
             self.paste_state.set_target(None);
             return;
         }
-        self.cancel_pending_row_click();
         self.close_hover_preview("main_hiding", cx);
         if let Some(interrupted) = self.paste_state.hide() {
             self.apply_paste_interruption(interrupted);
@@ -277,12 +275,11 @@ impl ClipboardView {
             self.reset_selection();
         }
         if self.auto_reset_state.value && self.paste_state.sequence_remaining().is_none() {
-            self.search_task = None;
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
-            self.history.reset_filters();
+            let reload = self.history.reset_filters();
             self.scroll_to_top();
-            self.query(cx);
+            self.arm_history_query(reload, false, cx);
         }
     }
     /// 当前打开的覆盖层，按 Esc 关闭优先级排列（同时至多一层）。
@@ -311,7 +308,6 @@ impl ClipboardView {
             cx.stop_propagation();
             return;
         }
-        self.cancel_pending_row_click();
         self.close_hover_preview("dismiss", cx);
         if self.card_drag_active(cx) {
             cx.stop_active_drag(window);

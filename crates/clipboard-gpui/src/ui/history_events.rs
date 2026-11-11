@@ -9,10 +9,12 @@ impl ClipboardView {
                 .iter()
                 .any(|group| Some(group.id) == self.history.group_id())
         {
+            self.release_history_drag(cx);
             self.reset_selection();
-            self.history.set_group(None);
-            self.scroll_to_top();
-            self.query(cx);
+            if let Some(reload) = self.history.set_group(None) {
+                self.scroll_to_top();
+                self.arm_history_query(reload, false, cx);
+            }
         }
         self.groups = groups;
         true
@@ -299,12 +301,21 @@ impl ClipboardView {
         for &id in &self.drag_deleted_ids {
             crate::state::remove_deleted_item(&mut items, &mut total, id);
         }
-        if self.external_drag.is_some() && generation == self.history.generation {
+        if self.external_drag.is_some()
+            && generation == self.history.generation
+            && !self.history.loading
+        {
             self.drag_snapshot = Some((items, total, generation));
             return true;
         }
         if !self.history.apply(items, total, generation) {
             return true;
+        }
+        if self.history_reply_missed {
+            self.history_reply_missed = false;
+            self.is_error = false;
+            self.message.clear();
+            self.feedback_pending = false;
         }
         self.reconcile_history_rows(cx);
         true

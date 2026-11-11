@@ -103,45 +103,80 @@ fn drag_scroll_stops_at_loaded_list_edges() {
 }
 
 #[test]
+fn unchanged_scope_keeps_the_in_flight_generation() {
+    let mut state = HistoryState::default();
+    assert!(state.set_category(ContentCategory::All).is_none());
+    assert_eq!(state.generation, 0);
+    assert!(state.loading);
+
+    assert!(state.set_group(Some(9)).is_some());
+    let generation = state.generation;
+    assert!(state.set_group(Some(9)).is_none());
+    assert_eq!(state.generation, generation);
+    assert!(state.loading);
+    assert!(!state.apply(vec![], 0, generation - 1));
+    assert!(state.apply(vec![], 0, generation));
+    assert!(!state.loading);
+
+    assert!(state.set_category(ContentCategory::Text).is_some());
+    let generation = state.generation;
+    assert!(state.set_category(ContentCategory::Text).is_none());
+    assert_eq!(state.generation, generation);
+    assert!(state.loading);
+    assert!(state.apply(vec![], 0, generation));
+
+    assert!(state.set_favorite_filter(true).is_some());
+    assert!(state.favorite_only());
+    assert_eq!(state.category(), ContentCategory::All);
+    let generation = state.generation;
+    assert!(state.set_favorite_filter(true).is_none());
+    assert_eq!(state.generation, generation);
+    assert!(state.loading);
+    assert!(state.set_category(ContentCategory::All).is_some());
+    assert!(!state.favorite_only());
+    assert!(state.generation > generation);
+}
+
+#[test]
 fn filter_change_rejects_previous_results() {
     let mut state = HistoryState {
         selected: Some(42),
         ..Default::default()
     };
     let old = state.generation;
-    state.set_favorite_filter(true);
+    super::settle(state.set_favorite_filter(true));
     assert!(state.favorite_only());
     assert_eq!(state.selected, None);
     assert!(!state.apply(vec![], 100, old));
-    state.begin_search();
+    super::settle(state.begin_search());
     assert!(state.favorite_only());
     assert!(state.apply(vec![], 0, state.generation));
-    state.set_favorite_filter(false);
+    super::settle(state.set_favorite_filter(false));
     assert!(!state.favorite_only());
     assert!(state.loading);
     let old = state.generation;
-    state.set_group(Some(7));
+    super::settle(state.set_group(Some(7)));
     assert_eq!(state.group_id(), Some(7));
     assert!(!state.apply(vec![], 1, old));
     assert!(!state.fail_query(old));
     assert!(state.loading);
     assert!(state.fail_query(state.generation));
     assert!(!state.loading);
-    state.set_group(None);
+    super::settle(state.set_group(None));
     assert_eq!(state.group_id(), None);
     let old = state.generation;
-    state.set_category(ContentCategory::Other);
+    super::settle(state.set_category(ContentCategory::Other));
     assert_eq!(state.category(), ContentCategory::Other);
     assert!(!state.favorite_only());
     assert!(!state.apply(vec![], 0, old));
-    state.set_favorite_filter(true);
+    super::settle(state.set_favorite_filter(true));
     assert_eq!(state.category(), ContentCategory::All);
     assert!(state.favorite_only());
-    state.set_group(Some(7));
+    super::settle(state.set_group(Some(7)));
     assert!(state.favorite_only());
     assert_eq!(state.category(), ContentCategory::All);
     let old = state.generation;
-    state.reset_filters();
+    super::settle(state.reset_filters());
     assert_eq!(state.group_id(), None);
     assert!(!state.favorite_only());
     assert_eq!(state.category(), ContentCategory::All);
@@ -158,7 +193,7 @@ fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow
     let items = history.list_in_group("", PAGE_SIZE, false, Some(group.id))?;
     let mut state = HistoryState::default();
 
-    state.set_group(Some(group.id));
+    super::settle(state.set_group(Some(group.id)));
     assert!(state.apply(items, 1, state.generation));
     assert_eq!(state.select_index(0), Some(0));
     let group_generation = state.generation;
@@ -171,21 +206,21 @@ fn hiding_category_tabs_preserves_group_selection_and_resets_filters() -> anyhow
     }
 
     for category in [ContentCategory::Text, ContentCategory::Other] {
-        state.set_category(category);
+        super::settle(state.set_category(category));
         assert!(!state.should_reset_category_filter(true));
         assert_eq!(state.category(), category);
         assert!(state.should_reset_category_filter(false));
-        state.set_category(ContentCategory::All);
+        super::settle(state.set_category(ContentCategory::All));
         assert_eq!(state.category(), ContentCategory::All);
         assert_eq!(state.group_id(), Some(group.id));
         assert!(!state.should_reset_category_filter(false));
     }
 
-    state.set_favorite_filter(true);
+    super::settle(state.set_favorite_filter(true));
     assert!(!state.should_reset_category_filter(true));
     assert!(state.favorite_only());
     assert!(state.should_reset_category_filter(false));
-    state.set_category(ContentCategory::All);
+    super::settle(state.set_category(ContentCategory::All));
     assert!(!state.favorite_only());
     assert_eq!(state.group_id(), Some(group.id));
     assert!(!state.should_reset_category_filter(false));
@@ -251,32 +286,32 @@ fn group_tabs_and_search_compose_without_leaking_rows_or_selection() -> anyhow::
     };
     let mut state = HistoryState::default();
     query(&mut state, "needle", &ids[..1])?;
-    state.set_category(ContentCategory::Text);
-    state.set_group(Some(first));
+    super::settle(state.set_category(ContentCategory::Text));
+    super::settle(state.set_group(Some(first)));
     query(&mut state, "needle", &ids[1..2])?;
     let stale_rows = state.items.clone();
     let stale_generation = state.generation;
-    state.set_group(Some(second));
+    super::settle(state.set_group(Some(second)));
     assert_eq!(state.selected, None);
     assert!(state.items.is_empty());
     assert!(!state.apply(stale_rows, 1, stale_generation));
     assert!(!state.fail_query(stale_generation));
     query(&mut state, "needle", &ids[4..5])?;
-    state.set_category(ContentCategory::Other);
-    state.set_group(Some(first));
+    super::settle(state.set_category(ContentCategory::Other));
+    super::settle(state.set_group(Some(first)));
     query(&mut state, "needle", &ids[2..3])?;
-    state.set_favorite_filter(true);
+    super::settle(state.set_favorite_filter(true));
     query(&mut state, "needle", &ids[1..3])?;
-    state.set_group(None);
+    super::settle(state.set_group(None));
     query(&mut state, "needle", &ids[..1])?;
-    state.set_group(Some(first));
-    state.begin_search();
+    super::settle(state.set_group(Some(first)));
+    super::settle(state.begin_search());
     query(&mut state, "files", &ids[2..3])?;
-    state.begin_search();
+    super::settle(state.begin_search());
     query(&mut state, "unmatched", &[])?;
-    state.set_category(ContentCategory::Text);
+    super::settle(state.set_category(ContentCategory::Text));
     query(&mut state, "unmatched", &ids[3..4])?;
-    state.reset_filters();
+    super::settle(state.reset_filters());
     query(&mut state, "", &ids[..1])?;
     Ok(())
 }
@@ -318,7 +353,7 @@ fn late_search_results_are_rejected_and_selection_follows_ids() -> anyhow::Resul
     assert_eq!(state.selected, Some(b));
     assert_eq!(state.select_index(0), Some(0));
     assert_eq!(state.selected, Some(a));
-    state.begin_search();
+    super::settle(state.begin_search());
     assert!(!state.apply(history.list("", PAGE_SIZE, false)?, 2, 0));
     assert!(state.items.is_empty());
     assert!(state.apply(history.list("beta", PAGE_SIZE, false)?, 1, 1));

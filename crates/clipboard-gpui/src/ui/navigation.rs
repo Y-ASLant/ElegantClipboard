@@ -1,3 +1,5 @@
+pub(super) const HISTORY_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 use super::category_tabs::ToolbarTab;
 use super::*;
 pub(super) fn history_row_height(
@@ -69,7 +71,7 @@ pub(super) fn show_history_scroll_to_top(
     viewport_height > px(0.) && max_offset_y > viewport_height && scrolled > viewport_height
 }
 impl ClipboardView {
-    pub(super) fn query(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn query(&mut self, cx: &mut Context<Self>) -> bool {
         let generation = self.history.generation;
         if !self.send(
             Command::Query {
@@ -83,6 +85,89 @@ impl ClipboardView {
             cx,
         ) {
             self.history.fail_query(generation);
+            self.history_reply_missed = true;
+            return false;
+        }
+        self.history_reply_missed = false;
+        true
+    }
+
+    pub(super) fn history_needs_reload(&self) -> bool {
+        self.history.loading || self.history_reply_missed
+    }
+
+    /// Send the query for `reload`, then end loading if that generation never replies.
+    /// Search passes `debounce` so a burst of keystrokes shares one request.
+    pub(super) fn arm_history_query(
+        &mut self,
+        reload: HistoryReload,
+        debounce: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let generation = reload.generation();
+        if !debounce {
+            if self.query(cx) {
+                self.arm_history_reply_timeout(generation, cx);
+            }
+            return;
+        }
+        self.history_load_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(150))
+                .await;
+            let sent = view
+                .update(cx, |this, cx| {
+                    if this.history.generation != generation || !this.history.loading {
+                        return false;
+                    }
+                    this.query(cx)
+                })
+                .unwrap_or(false);
+            if !sent {
+                return;
+            }
+            cx.background_executor().timer(HISTORY_REPLY_TIMEOUT).await;
+            let _ = view.update(cx, |this, cx| this.fail_unanswered_history(generation, cx));
+        }));
+    }
+
+    pub(super) fn reload_current_history(&mut self, cx: &mut Context<Self>) {
+        let generation = self.history.generation;
+        if self.query(cx) {
+            self.arm_history_reply_timeout(generation, cx);
+        }
+    }
+
+    fn arm_history_reply_timeout(&mut self, generation: u64, cx: &mut Context<Self>) {
+        self.history_load_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor().timer(HISTORY_REPLY_TIMEOUT).await;
+            let _ = view.update(cx, |this, cx| this.fail_unanswered_history(generation, cx));
+        }));
+    }
+
+    pub(super) fn fail_unanswered_history(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if self.history.generation != generation || !self.history.loading {
+            return;
+        }
+        self.history.fail_query(generation);
+        self.history_reply_missed = true;
+        self.set_feedback_message(
+            tr(
+                self.language,
+                "历史列表没有返回",
+                "The history list did not load",
+            )
+            .into(),
+        );
+        self.is_error = true;
+        cx.notify();
+    }
+
+    /// Drop a drag session before the history generation changes, so a parked
+    /// snapshot cannot land on the next scope.
+    pub(super) fn release_history_drag(&mut self, cx: &mut Context<Self>) {
+        if self.external_drag.is_some() {
+            self.finish_external_drag(cx);
         }
     }
 
@@ -100,27 +185,43 @@ impl ClipboardView {
             Some(category) => !self.history.favorite_only() && self.history.category() == category,
         };
         if selected && !self.todos_open {
+            if self.history_needs_reload() {
+                self.scroll_to_top();
+                self.reload_current_history(cx);
+                window.focus(&self.list_focus, cx);
+                cx.notify();
+            }
             return;
         }
+        if !selected {
+            self.release_history_drag(cx);
+        }
         self.cancel_sequence(cx);
-        self.cancel_pending_row_click();
         self.close_hover_preview("category_changed", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
         self.todos_open = false;
         self.reset_selection();
-        self.search_task = None;
-        if let Some(category) = category {
-            self.history.set_category(category);
-        } else {
-            self.history.set_favorite_filter(true);
-        }
-        self.scroll_to_top();
         if selected {
+            self.scroll_to_top();
+            if self.history_needs_reload() {
+                self.reload_current_history(cx);
+            }
+            window.focus(&self.list_focus, cx);
             cx.notify();
             return;
         }
-        self.query(cx);
+        let reload = if let Some(category) = category {
+            self.history.set_category(category)
+        } else {
+            self.history.set_favorite_filter(true)
+        };
+        self.scroll_to_top();
+        if let Some(reload) = reload {
+            self.arm_history_query(reload, false, cx);
+        } else if self.history_needs_reload() {
+            self.reload_current_history(cx);
+        }
         window.focus(&self.list_focus, cx);
         cx.notify();
     }
@@ -208,7 +309,6 @@ impl ClipboardView {
         strategy: ScrollStrategy,
         cx: &mut Context<Self>,
     ) {
-        self.cancel_pending_row_click();
         self.scroll_to_top_task = None;
         if let Some(index) = self.history.select_relative(direction) {
             self.scroll.scroll_to_item(index, strategy);
@@ -245,7 +345,6 @@ impl ClipboardView {
         strategy: ScrollStrategy,
         cx: &mut Context<Self>,
     ) {
-        self.cancel_pending_row_click();
         self.scroll_to_top_task = None;
         if let Some(index) = self.history.select_index(index) {
             if strategy == ScrollStrategy::Top {

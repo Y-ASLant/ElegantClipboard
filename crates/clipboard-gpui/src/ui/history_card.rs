@@ -210,10 +210,6 @@ impl ClipboardView {
         let row = div()
             .id(("history-row", id as usize))
             .relative()
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(|this, _, _, _| this.cancel_pending_row_click()),
-            )
             .on_hover(cx.listener(move |this, is_hovered: &bool, window, cx| {
                 hovered.update(cx, |hovered, _| hovered.content = *is_hovered);
                 // 鼠标驱动的焦点：悬停进入即转移选中态，与键盘/点击同一目标。
@@ -251,10 +247,10 @@ impl ClipboardView {
             .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 this.close_history_menu(cx);
-                if this.card_drag_active(cx) {
+                if !event.is_keyboard() && this.drag_release_pending {
                     return;
                 }
-                this.handle_row_click(id, event, window, cx);
+                this.activate_row(id, event.modifiers().shift, window, cx);
             }))
             .when(drag_enabled, |row| {
                 #[cfg(target_os = "linux")]
@@ -281,7 +277,6 @@ impl ClipboardView {
                     .on_drag(drag, move |drag, offset, window, cx| {
                         let mut preview = drag.clone();
                         entity.update(cx, |this, cx| {
-                            this.cancel_pending_row_click();
                             this.close_hover_preview("card_drag_started", cx);
                             this.history.selected = Some(drag.id);
                             this.drop_target = None;

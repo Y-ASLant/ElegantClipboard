@@ -198,7 +198,6 @@ impl ClipboardView {
         }
         let hash = text.then(|| item.content_hash.clone());
         let note = item.note.clone().unwrap_or_default();
-        self.cancel_pending_row_click();
         self.close_hover_preview("editor_opening", cx);
         self.history.selected = Some(id);
         self.group_move_id = None;

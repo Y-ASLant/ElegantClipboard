@@ -2,7 +2,6 @@ use super::*;
 
 impl ClipboardView {
     pub(super) fn open_settings_window(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
-        self.cancel_pending_row_click();
         self.close_hover_preview("settings_opening", cx);
         if let Some(handle) = self.settings_window {
             if handle

@@ -347,7 +347,6 @@ impl ClipboardView {
             self.drop_target = None;
         }
         self.history_drag_direction = 0;
-        self.cancel_pending_row_click();
         if let Some((items, total, generation)) = self.drag_snapshot.take()
             && !self.reorder_pending
         {

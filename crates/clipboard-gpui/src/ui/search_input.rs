@@ -13,7 +13,6 @@ impl ClipboardView {
         }
         if matches!(event, InputEvent::Change) {
             self.cancel_sequence(cx);
-            self.cancel_pending_row_click();
             self.close_hover_preview("search_changed", cx);
             if matches!(
                 self.confirmation,
@@ -23,17 +22,11 @@ impl ClipboardView {
             }
             self.reset_selection();
             self.sync_confirmation_dialog(window, cx);
-            self.history.begin_search();
+            self.release_history_drag(cx);
+            let reload = self.history.begin_search();
             self.scroll_to_top();
-            self.search_task = Some(cx.spawn(async move |view, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_millis(150))
-                    .await;
-                let _ = view.update(cx, |this, cx| this.query(cx));
-            }));
+            self.arm_history_query(reload, true, cx);
             cx.notify();
-        } else if matches!(event, InputEvent::Focus) {
-            self.cancel_pending_row_click();
         } else if matches!(event, InputEvent::PressEnter { .. })
             && !self.todos_open
             && !self.batch_mode

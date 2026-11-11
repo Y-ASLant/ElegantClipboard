@@ -44,7 +44,6 @@ impl ClipboardView {
             return;
         }
         self.cancel_sequence(cx);
-        self.cancel_pending_row_click();
         self.close_hover_preview("todos", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;

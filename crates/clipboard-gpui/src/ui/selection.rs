@@ -20,7 +20,6 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.cancel_pending_row_click();
         if self.batch_pending || self.history.loading {
             return;
         }
@@ -46,73 +45,6 @@ impl ClipboardView {
         cx.notify();
     }
 
-    pub(super) fn cancel_pending_row_click(&mut self) {
-        self.pending_row_click = None;
-        self.row_click_task = None;
-    }
-
-    pub(super) fn handle_row_click(
-        &mut self,
-        id: i64,
-        event: &ClickEvent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.reorder_pending
-            || self.card_drag_active(cx)
-            || self.history.loading
-            || self.batch_pending
-            || self.paste_state.pending()
-            || self.editor.id.is_some()
-            || !self.history.items.iter().any(|item| item.id == id)
-        {
-            return;
-        }
-        if !event.is_keyboard() && self.drag_release_pending {
-            return;
-        }
-        let editable = self
-            .history
-            .items
-            .iter()
-            .any(|item| item.id == id && item.kind().is_some_and(|kind| kind.is_text_like()));
-        if self.batch_mode || !editable || event.is_keyboard() {
-            self.cancel_pending_row_click();
-            self.activate_row(id, event.modifiers().shift, window, cx);
-            return;
-        }
-        if event.click_count() >= 2 {
-            self.cancel_pending_row_click();
-            if !self.history.loading && !self.batch_pending && !self.paste_state.pending() {
-                self.open_editor(id, true, window, cx);
-            }
-            return;
-        }
-        self.cancel_pending_row_click();
-        let generation = self.history.generation;
-        self.close_hover_preview("row_click_pending", cx);
-        self.pending_row_click = Some((id, generation));
-        self.history.selected = Some(id);
-        window.focus(&self.list_focus, cx);
-        let delay = input::double_click_interval().max(Duration::from_millis(1))
-            + Duration::from_millis(30);
-        let main_window = window.window_handle();
-        self.row_click_task = Some(cx.spawn_in(window, async move |view, cx| {
-            cx.background_executor().timer(delay).await;
-            let _ = update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                if this.pending_row_click == Some((id, generation))
-                    && this.history.generation == generation
-                    && this.editor.id.is_none()
-                    && !this.batch_mode
-                {
-                    this.cancel_pending_row_click();
-                    this.activate_row(id, false, window, cx);
-                }
-            });
-        }));
-        cx.notify();
-    }
-
     pub(super) fn activate_row(
         &mut self,
         id: i64,
@@ -130,7 +62,6 @@ impl ClipboardView {
         {
             return;
         }
-        self.cancel_pending_row_click();
         self.close_hover_preview("row_activated", cx);
         self.history.selected = Some(id);
         window.focus(&self.list_focus, cx);

@@ -66,18 +66,24 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if self.history.group_id() == group_id {
+            if self.history_needs_reload() {
+                self.scroll_to_top();
+                self.reload_current_history(cx);
+                window.focus(&self.list_focus, cx);
+                cx.notify();
+            }
             return;
         }
+        self.release_history_drag(cx);
         self.cancel_sequence(cx);
-        self.cancel_pending_row_click();
         self.close_hover_preview("group_changed", cx);
-        self.search_task = None;
         self.group_move_id = None;
         self.close_history_confirmation(window, cx);
         self.reset_selection();
-        self.history.set_group(group_id);
-        self.scroll_to_top();
-        self.query(cx);
+        if let Some(reload) = self.history.set_group(group_id) {
+            self.scroll_to_top();
+            self.arm_history_query(reload, false, cx);
+        }
         window.focus(&self.list_focus, cx);
         cx.notify();
     }

@@ -63,7 +63,7 @@ fn deletion_acknowledgement_respects_changed_filter_and_rejects_old_snapshot() {
     history.toggle_favorite(remaining.id).unwrap();
     let mut state = HistoryState::default();
     state.apply(rows.clone(), 2, 0);
-    state.set_favorite_filter(true);
+    super::settle(state.set_favorite_filter(true));
     history.delete(deleted).unwrap();
 
     assert!(!state.apply_deleted(deleted));

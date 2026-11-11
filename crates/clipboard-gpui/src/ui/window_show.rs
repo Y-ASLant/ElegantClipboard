@@ -79,12 +79,12 @@ impl ClipboardView {
             window.focus(&self.list_focus, cx);
         } else {
             if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
-                self.search_task = None;
                 self.search
                     .update(cx, |input, cx| input.set_value("", window, cx));
-                self.history.begin_search();
+                self.release_history_drag(cx);
+                let reload = self.history.begin_search();
                 self.scroll_to_top();
-                self.query(cx);
+                self.arm_history_query(reload, false, cx);
             }
             if self.editor.id.is_none() {
                 if self.search_auto_focus.value {
