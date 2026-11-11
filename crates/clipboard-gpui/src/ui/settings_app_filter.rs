@@ -175,60 +175,46 @@ impl SettingsWindowView {
                         })
                         .open(self.app_picker_open)
                         .child(
-                            settings_stack()
-                                .when(self.app_picker_open, |content| {
-                                    content
-                                        .when(running_apps_pending, |content| {
-                                            content.child(settings_description(
-                                                tr(
+                            settings_stack().when(self.app_picker_open, |content| {
+                                if running_apps_pending {
+                                    return content.child(settings_description(
+                                        tr(
+                                            language,
+                                            "正在读取运行中应用…",
+                                            "Loading running apps…",
+                                        ),
+                                        cx,
+                                    ));
+                                }
+                                if running_apps.is_empty() {
+                                    return content.child(settings_description(
+                                        tr(
+                                            language,
+                                            "没有找到可选应用",
+                                            "No running apps found",
+                                        ),
+                                        cx,
+                                    ));
+                                }
+                                content.child(
+                                    settings_inset_list(cx)
+                                        .max_h(px(SETTINGS_INSET_LIST_MAX_HEIGHT))
+                                        .overflow_y_scrollbar()
+                                        .children(running_apps.into_iter().enumerate().map(
+                                            |(index, app)| {
+                                                running_app_row(
                                                     language,
-                                                    "正在读取运行中应用…",
-                                                    "Loading running apps…",
-                                                ),
-                                                cx,
-                                            ))
-                                        })
-                                        .when(
-                                            !running_apps_pending && running_count == 0,
-                                            |content| {
-                                                content.child(settings_description(
-                                                    tr(
-                                                        language,
-                                                        "没有找到可选应用",
-                                                        "No running apps found",
-                                                    ),
+                                                    app,
+                                                    index,
+                                                    index + 1 == running_count,
+                                                    &filter,
+                                                    &self.owner,
                                                     cx,
-                                                ))
-                                            },
-                                        )
-                                        .when(
-                                            !running_apps_pending && running_count > 0,
-                                            |content| {
-                                                content.child(
-                                                    settings_inset_list(cx)
-                                                        .max_h(px(SETTINGS_INSET_LIST_MAX_HEIGHT))
-                                                        .overflow_y_scrollbar()
-                                                        .children(
-                                                            running_apps
-                                                                .iter()
-                                                                .enumerate()
-                                                                .map(|(index, app)| {
-                                                                    running_app_row(
-                                                                        language,
-                                                                        app,
-                                                                        index,
-                                                                        index + 1
-                                                                            == running_count,
-                                                                        &filter,
-                                                                        &self.owner,
-                                                                        cx,
-                                                                    )
-                                                                }),
-                                                        ),
                                                 )
                                             },
-                                        )
-                                }),
+                                        )),
+                                )
+                            }),
                         )
                     }),
             )
@@ -274,7 +260,7 @@ fn app_filter_rule_row(
 
 fn running_app_row(
     language: LanguagePreference,
-    app: &RunningApp,
+    app: RunningApp,
     index: usize,
     last: bool,
     filter: &PendingPref<AppFilterPreference>,
@@ -289,7 +275,7 @@ fn running_app_row(
         .iter()
         .any(|rule| rule.eq_ignore_ascii_case(&process));
     settings_inset_list_row(cx, last)
-        .when_some(app.icon.clone(), |row, path| {
+        .when_some(app.icon, |row, path| {
             row.child(
                 div().flex_none().child(
                     img(std::path::PathBuf::from(path))
@@ -314,7 +300,7 @@ fn running_app_row(
                     .h(px(visual::CONTROL_HEIGHT))
                     .outline()
                     .small()
-                    .tooltip(app.process.clone())
+                    .tooltip(app.process)
                     .label(tr(language, "添加", "Add"))
                     .disabled(filter.pending || already_added)
                     .on_click(move |_, _, cx| {
