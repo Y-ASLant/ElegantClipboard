@@ -195,12 +195,7 @@ pub(super) fn parse(content: &str, label: &str, data_dir: &Path) -> Option<Entry
                     return None;
                 }
                 let exe = Path::new(&args[0].text);
-                if !exe.is_absolute()
-                    || !matches!(
-                        exe.file_name()?.to_str()?,
-                        "ElegantClipboard"
-                    )
-                {
+                if !exe.is_absolute() || !matches!(exe.file_name()?.to_str()?, "ElegantClipboard") {
                     return None;
                 }
                 executable = Some(exe.to_path_buf());

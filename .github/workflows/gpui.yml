@@ -49,7 +49,7 @@ jobs:
         run: ./scripts/package-gpui-windows.ps1
       - name: Built and unpacked Windows startup
         timeout-minutes: 3
-        run: ./scripts/run-ci-command.ps1 -LogName windows-startup -Program pwsh -CommandArgs @('-File', './scripts/smoke-gpui-windows-package.ps1', '-Archive', (Get-Item target/packages/*-windows-x64.zip).FullName, '-Executable', './target/release/elegant-clipboard-gpui.exe')
+        run: ./scripts/run-ci-command.ps1 -LogName windows-startup -Program pwsh -CommandArgs @('-File', './scripts/smoke-gpui-windows-package.ps1', '-Archive', (Get-Item target/packages/*-windows-x64.zip).FullName, '-Executable', './target/release/ElegantClipboard.exe')
       - name: Upload validated Windows package
         if: inputs.package-artifacts
         uses: actions/upload-artifact@v7.0.2
@@ -117,7 +117,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 2
         shell: pwsh
-        run: ./scripts/run-ci-command.ps1 -LogName linux-startup -Program dbus-run-session -CommandArgs @('--', 'xvfb-run', '-a', './target/release/elegant-clipboard-gpui', '--smoke-test', '--data-dir', "$env:RUNNER_TEMP/elegant-gpui-smoke")
+        run: ./scripts/run-ci-command.ps1 -LogName linux-startup -Program dbus-run-session -CommandArgs @('--', 'xvfb-run', '-a', './target/release/ElegantClipboard', '--smoke-test', '--data-dir', "$env:RUNNER_TEMP/elegant-gpui-smoke")
       - name: macOS DMG smoke
         if: runner.os == 'macOS'
         timeout-minutes: 2

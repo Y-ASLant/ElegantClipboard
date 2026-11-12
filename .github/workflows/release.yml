@@ -23,7 +23,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Unable to read Cargo metadata: $LASTEXITCODE"
           }
-          $package = @($metadata.packages | Where-Object name -eq 'elegant-clipboard-gpui')
+          $package = @($metadata.packages | Where-Object name -eq 'ElegantClipboard')
           if ($package.Count -ne 1) {
             throw 'Unable to determine the GPUI package version'
           }
