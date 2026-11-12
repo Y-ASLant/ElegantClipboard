@@ -28,14 +28,15 @@ pub fn create(
     #[cfg(target_os = "linux")]
     linux::initialize()?;
     let menu = create_menu(language, paused, monitoring)?;
-    let icon = app_icon()?;
-    let tray = TrayIconBuilder::new()
+    let builder = TrayIconBuilder::new()
         .with_tooltip(tooltip_text(language, paused, monitoring))
-        .with_icon(icon)
         .with_menu(Box::new(menu))
-        .with_menu_on_left_click(false)
-        .build()
-        .context("无法启动系统托盘")?;
+        .with_menu_on_left_click(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder.with_icon_templated(menu_bar_icon()?);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.with_icon(app_icon()?);
+    let tray = builder.build().context("无法启动系统托盘")?;
     let menu_sender = sender.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let command = match event.id.as_ref() {
@@ -201,6 +202,20 @@ pub fn is_tray_click(tray: &TrayIcon, position: (i32, i32)) -> bool {
     })
 }
 
+/// 44×44 px alpha-only glyph shown at 22 pt; AppKit tints it for the menu bar appearance.
+#[cfg(target_os = "macos")]
+fn menu_bar_icon() -> Result<Icon> {
+    let image = image::load_from_memory_with_format(
+        include_bytes!("../../../assets/tray-template.png"),
+        image::ImageFormat::Png,
+    )
+    .context("无法读取菜单栏图标")?
+    .to_rgba8();
+    let (width, height) = image.dimensions();
+    Icon::from_rgba(image.into_raw(), width, height).context("无法创建托盘图标")
+}
+
+#[cfg(not(target_os = "macos"))]
 fn app_icon() -> Result<Icon> {
     let image = image::load_from_memory_with_format(
         include_bytes!("../../../App.ico"),
