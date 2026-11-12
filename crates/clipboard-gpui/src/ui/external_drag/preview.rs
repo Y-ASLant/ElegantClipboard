@@ -47,7 +47,7 @@ impl ClipboardView {
                     is_movable: false,
                     is_resizable: false,
                     window_background: WindowBackgroundAppearance::Transparent,
-                    app_id: Some("com.aslant.elegant-clipboard-gpui.drag".into()),
+                    app_id: Some("com.aslant.ElegantClipboard.drag".into()),
                     ..Default::default()
                 },
                 move |_, cx| cx.new(|_| DragPreview { card: Some(card) }),

@@ -16,15 +16,15 @@ try {
         ($IsLinux -and $hostTarget -notmatch '^(aarch64|x86_64)-unknown-linux-gnu$')) {
         throw "Unsupported native package target: $hostTarget"
     }
-    & cargo build -p elegant-clipboard-gpui --release --locked
+    & cargo build -p ElegantClipboard --release --locked
     if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
     $metadataJson = & cargo metadata --no-deps --format-version 1 --locked
     if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed.' }
     $metadata = $metadataJson | ConvertFrom-Json
-    $package = @($metadata.packages | Where-Object name -eq 'elegant-clipboard-gpui')
+    $package = @($metadata.packages | Where-Object name -eq 'ElegantClipboard')
     if ($package.Count -ne 1) { throw 'Unable to determine application version.' }
     $version = $package[0].version
-    $executable = Join-Path $metadata.target_directory 'release/elegant-clipboard-gpui'
+    $executable = Join-Path $metadata.target_directory 'release/ElegantClipboard'
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw 'Release executable is missing.'
     }
@@ -40,14 +40,14 @@ try {
             $app = Join-Path $stage 'ElegantClipboard.app'
             $contents = Join-Path $app 'Contents'
             New-Item -ItemType Directory -Path (Join-Path $contents 'MacOS') | Out-Null
-            Copy-Item -LiteralPath $executable -Destination (Join-Path $contents 'MacOS/elegant-clipboard-gpui')
+            Copy-Item -LiteralPath $executable -Destination (Join-Path $contents 'MacOS/ElegantClipboard')
             $plist = @"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.aslant.elegant-clipboard-gpui</string>
+<key>CFBundleIdentifier</key><string>com.aslant.ElegantClipboard</string>
 <key>CFBundleName</key><string>ElegantClipboard</string>
-<key>CFBundleExecutable</key><string>elegant-clipboard-gpui</string>
+<key>CFBundleExecutable</key><string>ElegantClipboard</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$bundleVersion</string>
 <key>CFBundleVersion</key><string>$bundleVersion</string>
@@ -72,7 +72,7 @@ try {
             Copy-Item -LiteralPath $executable -Destination $bundle
             Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination $bundle
             Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $bundle
-            & chmod 755 (Join-Path $bundle 'elegant-clipboard-gpui')
+            & chmod 755 (Join-Path $bundle 'ElegantClipboard')
             if ($LASTEXITCODE -ne 0) { throw 'Unable to mark executable.' }
             $archive = Join-Path $packageRoot "$name.tar.gz"
             & tar -czf $archive -C $stage $name

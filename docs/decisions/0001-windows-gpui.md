@@ -25,7 +25,7 @@
 核验命令：
 
 ```powershell
-cargo tree -p elegant-clipboard-gpui --target x86_64-pc-windows-msvc -i ropey
+cargo tree -p ElegantClipboard --target x86_64-pc-windows-msvc -i ropey
 ```
 
 ## 界面与生命周期

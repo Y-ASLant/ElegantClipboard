@@ -45,7 +45,7 @@ impl ClipboardView {
                 window_min_size: Some(size(px(700.), px(420.))),
                 focus: true,
                 show: true,
-                app_id: Some("com.aslant.elegant-clipboard-gpui.settings".into()),
+                app_id: Some("com.aslant.ElegantClipboard.settings".into()),
                 ..TitleBar::window_options()
             };
             let settings_owner = owner.clone();

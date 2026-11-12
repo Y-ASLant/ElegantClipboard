@@ -57,7 +57,7 @@ fn belongs_to(value: &registry::Value, data_dir: &Path) -> bool {
     let executable = executable
         .file_name()
         .map(|name| name.to_string_lossy().to_lowercase());
-    executable.as_deref() == Some("elegant-clipboard-gpui.exe")
+    executable.as_deref() == Some("elegantclipboard.exe")
         && !data.contains(['"', '\0'])
         && path_key(Path::new(data)) == path_key(data_dir)
 }

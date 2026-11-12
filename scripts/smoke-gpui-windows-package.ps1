@@ -16,7 +16,7 @@ New-Item -ItemType Directory -Path $temporary | Out-Null
 try {
     $unpacked = Join-Path $temporary 'unpacked'
     Expand-Archive -LiteralPath $archivePath -DestinationPath $unpacked
-    $applications = @($builtExecutable, (Join-Path $unpacked 'elegant-clipboard-gpui.exe'))
+    $applications = @($builtExecutable, (Join-Path $unpacked 'ElegantClipboard.exe'))
     for ($index = 0; $index -lt $applications.Count; $index++) {
         $application = (Resolve-Path -LiteralPath $applications[$index]).Path
         $data = Join-Path $temporary "data-$index"

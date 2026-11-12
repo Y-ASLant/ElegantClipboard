@@ -67,7 +67,7 @@ impl HistoryMenuWindow {
                 is_resizable: false,
                 is_minimizable: false,
                 window_min_size: Some(size(px(1.), px(1.))),
-                app_id: Some("com.aslant.elegant-clipboard-gpui.menu".into()),
+                app_id: Some("com.aslant.ElegantClipboard.menu".into()),
                 ..Default::default()
             },
             {

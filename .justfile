@@ -13,7 +13,7 @@ clean:
 
 # 构建 GPUI release 可执行文件
 build:
-    cargo build -p elegant-clipboard-gpui --release --locked
+    cargo build -p ElegantClipboard --release --locked
 
 # 构建 Windows x64 GPUI ZIP 包
 package:
@@ -26,7 +26,7 @@ package-unix:
 
 # 运行 GPUI 应用
 run:
-    cargo run -p elegant-clipboard-gpui --locked
+    cargo run -p ElegantClipboard --locked
 
 # 检查模块行数、rustfmt、cargo check 与 Clippy
 [windows]

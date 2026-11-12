@@ -211,7 +211,7 @@ pub(super) fn open_overlay(
                 is_minimizable: false,
                 window_min_size: Some(size(px(1.), px(1.))),
                 inactive_frame_interval: None,
-                app_id: Some("com.aslant.elegant-clipboard-gpui.hover".into()),
+                app_id: Some("com.aslant.ElegantClipboard.hover".into()),
                 ..Default::default()
             },
             |_, cx| cx.new(|_| view),

@@ -180,7 +180,7 @@ pub fn run(
                     )),
                     focus: !cfg!(windows) && !startup.hidden,
                     show: !cfg!(windows) && !startup.hidden,
-                    app_id: Some("com.aslant.elegant-clipboard-gpui".into()),
+                    app_id: Some("com.aslant.ElegantClipboard".into()),
                     ..WindowOptions::default()
                 },
                 cx,

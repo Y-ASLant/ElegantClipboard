@@ -13,7 +13,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or $hostLine -ne 'host: x86_64-pc-windows-msvc') {
         throw '当前仅支持 Windows x64 MSVC 构建目标'
     }
-    & cargo build -p elegant-clipboard-gpui --release --locked
+    & cargo build -p ElegantClipboard --release --locked
     if ($LASTEXITCODE -ne 0) {
         throw "Cargo Release 构建失败：$LASTEXITCODE"
     }
@@ -21,13 +21,13 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "无法读取 Cargo 包信息：$LASTEXITCODE"
     }
-    $package = @($metadata.packages | Where-Object name -eq 'elegant-clipboard-gpui')
+    $package = @($metadata.packages | Where-Object name -eq 'ElegantClipboard')
     if ($package.Count -ne 1) {
         throw '无法确定 GPUI 应用版本'
     }
     $filename = "ElegantClipboard-v$($package[0].version)-windows-x64.zip"
     $packageRoot = Join-Path $metadata.target_directory 'packages'
-    $executable = Join-Path $metadata.target_directory 'release\elegant-clipboard-gpui.exe'
+    $executable = Join-Path $metadata.target_directory 'release\ElegantClipboard.exe'
     if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
         throw 'Release 可执行文件不存在'
     }
@@ -36,7 +36,7 @@ try {
     $stage = Join-Path $packageRoot ("stage-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage | Out-Null
     try {
-        Copy-Item -LiteralPath $executable -Destination (Join-Path $stage 'elegant-clipboard-gpui.exe')
+        Copy-Item -LiteralPath $executable -Destination (Join-Path $stage 'ElegantClipboard.exe')
         Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'LICENSE')
         Copy-Item -LiteralPath (Join-Path $root 'docs\WINDOWS_PACKAGE_README.txt') -Destination (Join-Path $stage 'README.txt')
 

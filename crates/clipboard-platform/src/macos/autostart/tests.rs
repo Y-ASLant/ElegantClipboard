@@ -1,9 +1,7 @@
 use super::*;
 
 fn executable(version: &str) -> PathBuf {
-    std::env::temp_dir()
-        .join(version)
-        .join("elegant-clipboard-gpui")
+    std::env::temp_dir().join(version).join("ElegantClipboard")
 }
 
 #[test]

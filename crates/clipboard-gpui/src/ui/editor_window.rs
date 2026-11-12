@@ -162,7 +162,7 @@ impl ClipboardView {
                 window_min_size: Some(size(px(EDITOR_MIN_WIDTH), px(EDITOR_MIN_HEIGHT))),
                 focus: true,
                 show: true,
-                app_id: Some("com.aslant.elegant-clipboard-gpui.editor".into()),
+                app_id: Some("com.aslant.ElegantClipboard.editor".into()),
                 ..TitleBar::window_options()
             };
             let editor_owner = owner.clone();

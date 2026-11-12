@@ -68,7 +68,7 @@ sudo apt-get install build-essential clang cmake pkg-config libssl-dev libgtk-3-
 Linux needs a graphical session and a working Vulkan driver; a headless SSH shell cannot run the GUI.
 
 ```powershell
-just run    # or cargo run -p elegant-clipboard-gpui --locked
+just run    # or cargo run -p ElegantClipboard --locked
 ```
 
 Default data directories:
@@ -82,7 +82,7 @@ Default data directories:
 Old data directories and login entries are not migrated automatically; history from the latest 1.x release can be imported from its database or a legacy ZIP. Startup removes legacy `staged` file copies and their database references while keeping original paths. An explicit `--data-dir` is used as given:
 
 ```powershell
-cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
+cargo run -p ElegantClipboard --locked -- --no-monitor --data-dir .\target\gpui-check
 ```
 
 ## Diagnostic logs
@@ -105,7 +105,7 @@ just test
 just build
 ```
 
-The release executable is `target/release/elegant-clipboard-gpui[.exe]`.
+The release executable is `target/release/ElegantClipboard[.exe]`.
 
 Packaging:
 

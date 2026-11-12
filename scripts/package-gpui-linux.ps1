@@ -191,10 +191,10 @@ try {
     $docDir = Join-Path $payload 'usr/share/doc/elegant-clipboard'
     $iconDir = Join-Path $payload 'usr/share/icons/hicolor/256x256/apps'
     New-Item -ItemType Directory -Path $binDir, $docDir, $iconDir, (Join-Path $payload 'usr/share/applications') | Out-Null
-    Copy-Item -LiteralPath $executablePath -Destination (Join-Path $binDir 'elegant-clipboard-gpui')
-    & chmod 755 (Join-Path $binDir 'elegant-clipboard-gpui')
+    Copy-Item -LiteralPath $executablePath -Destination (Join-Path $binDir 'ElegantClipboard')
+    & chmod 755 (Join-Path $binDir 'ElegantClipboard')
     if ($LASTEXITCODE -ne 0) { throw 'Unable to mark the installed executable.' }
-    & ln -s elegant-clipboard-gpui (Join-Path $binDir 'elegant-clipboard')
+    & ln -s ElegantClipboard (Join-Path $binDir 'elegant-clipboard')
     if ($LASTEXITCODE -ne 0) { throw 'Unable to create the elegant-clipboard command.' }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'LICENSE') -Destination (Join-Path $docDir 'LICENSE')
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'README.md') -Destination (Join-Path $docDir 'README.md')
@@ -281,7 +281,7 @@ fi
     if ($LASTEXITCODE -ne 0) { throw 'Unable to stage the rpm payload.' }
     $requireLines = ($rpmRequires | ForEach-Object { "Requires: $_" }) -join "`n"
     $fileLines = @(
-        '%attr(0755, root, root) /usr/bin/elegant-clipboard-gpui',
+        '%attr(0755, root, root) /usr/bin/ElegantClipboard',
         '/usr/bin/elegant-clipboard',
         '/usr/share/applications/elegant-clipboard.desktop',
         '/usr/share/icons/hicolor/256x256/apps/elegant-clipboard.png',
@@ -347,7 +347,7 @@ $fileLines
     Move-Item -LiteralPath $built[0].FullName -Destination $rpmPath
 
     $requiredPaths = @(
-        'usr/bin/elegant-clipboard-gpui',
+        'usr/bin/ElegantClipboard',
         'usr/bin/elegant-clipboard',
         'usr/share/applications/elegant-clipboard.desktop',
         'usr/share/icons/hicolor/256x256/apps/elegant-clipboard.png',

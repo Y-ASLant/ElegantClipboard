@@ -200,7 +200,7 @@ cargo fmt --all -- --check
 cargo check --workspace --all-targets --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-cargo build -p elegant-clipboard-gpui --release --locked
+cargo build -p ElegantClipboard --release --locked
 cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 .\scripts\package-gpui-windows.ps1
 ```
@@ -209,16 +209,16 @@ cargo run -p clipboard-platform --example isolated_clipboard_smoke --locked
 
 ```powershell
 # 正常使用：启动原生窗口并记录后续复制的受支持内容
-cargo run -p elegant-clipboard-gpui --locked
+cargo run -p ElegantClipboard --locked
 
 # 隔离检查：禁用采集，只浏览指定目录中的历史
-cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
+cargo run -p ElegantClipboard --locked -- --no-monitor --data-dir .\target\gpui-check
 
 # 窗口冒烟：禁用采集，约 3 秒后自动退出
-cargo run -p elegant-clipboard-gpui --locked -- --smoke-test --data-dir .\target\gpui-smoke
+cargo run -p ElegantClipboard --locked -- --smoke-test --data-dir .\target\gpui-smoke
 
 # 从旧版数据库导入到尚无 clipboard.db 的 GPUI 数据目录；命令完成后退出
-cargo run -p elegant-clipboard-gpui --locked -- --import-db "C:\旧版目录\clipboard.db"
+cargo run -p ElegantClipboard --locked -- --import-db "C:\旧版目录\clipboard.db"
 ```
 
 打包脚本仅接受 Windows x64 MSVC 构建，使用锁定依赖生成 `target/packages/ElegantClipboard-v<版本>-windows-x64.zip` 与同名的 NSIS `*-setup.exe` 及各自 `.sha256`。压缩包含 exe、许可证和运行说明；安装包为当前用户安装，目录是 `%LOCALAPPDATA%\Programs\ElegantClipboard`，与数据目录分开，卸载不删除历史数据。两者均未经签名，不包含自动更新。

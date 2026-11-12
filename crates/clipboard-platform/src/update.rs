@@ -40,10 +40,7 @@ struct GithubAsset {
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(30)))
-        .user_agent(concat!(
-            "elegant-clipboard-gpui/",
-            env!("CARGO_PKG_VERSION")
-        ))
+        .user_agent(concat!("ElegantClipboard/", env!("CARGO_PKG_VERSION")))
         .build()
         .into()
 }

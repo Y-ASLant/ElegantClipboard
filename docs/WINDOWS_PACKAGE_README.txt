@@ -1,6 +1,6 @@
 ElegantClipboard GPUI Windows 独立压缩包
 
-1. 解压整个压缩包，双击 elegant-clipboard-gpui.exe。
+1. 解压整个压缩包，双击 ElegantClipboard.exe。
 2. 首次运行会在当前用户的 LocalAppData 中创建独立 GPUI 数据目录；不会自动读取旧版 Tauri 数据。
 3. 关闭主窗口后程序留在系统托盘。可用 Alt+C（新用户默认，已保存的快捷键保持不变）或托盘图标唤回；自动粘贴仅在从目标应用直接唤出、期间没有切走历史窗口时可用。从托盘菜单选择“退出 ElegantClipboard”才会结束进程。
 4. 设置中的开机启动默认关闭，按需手动开启。移动 exe 后需重新开启，以更新启动路径。

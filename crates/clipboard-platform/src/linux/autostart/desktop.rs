@@ -146,7 +146,7 @@ pub(super) fn parse(content: &str, data_dir: &Path) -> Option<Entry> {
                 if !exe.is_absolute()
                     || !matches!(
                         exe.file_name()?.to_str()?,
-                        "elegant-clipboard-gpui" | "ElegantClipboard"
+                        "ElegantClipboard"
                     )
                 {
                     return None;

@@ -20,7 +20,7 @@ use storage::{LogWriter, MAX_EVENT_BYTES, RotatingFile, Session};
 fn log_targets() -> Targets {
     Targets::new()
         .with_default(LevelFilter::WARN)
-        .with_target("elegant_clipboard_gpui", LevelFilter::DEBUG)
+        .with_target(env!("CARGO_CRATE_NAME"), LevelFilter::DEBUG)
         .with_target("clipboard_platform", LevelFilter::DEBUG)
         .with_target("clipboard_core", LevelFilter::DEBUG)
         // Existing repository DEBUG messages contain user-supplied group names.

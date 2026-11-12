@@ -68,7 +68,7 @@ sudo apt-get install build-essential clang cmake pkg-config libssl-dev libgtk-3-
 Linux 运行需要可用的图形会话及 Vulkan 驱动，不要在无显示服务的 SSH 会话中启动 GUI。
 
 ```powershell
-just run    # 或 cargo run -p elegant-clipboard-gpui --locked
+just run    # 或 cargo run -p ElegantClipboard --locked
 ```
 
 默认数据目录：
@@ -82,7 +82,7 @@ just run    # 或 cargo run -p elegant-clipboard-gpui --locked
 旧版本数据目录和开机启动项不自动搬迁；1.2.10 的历史可导入旧数据库或旧版 ZIP。启动时清理历史 `staged` 文件副本及其数据库引用，保留原始路径。`--data-dir` 显式指定后原样使用：
 
 ```powershell
-cargo run -p elegant-clipboard-gpui --locked -- --no-monitor --data-dir .\target\gpui-check
+cargo run -p ElegantClipboard --locked -- --no-monitor --data-dir .\target\gpui-check
 ```
 
 ## 诊断日志
@@ -105,7 +105,7 @@ just test
 just build
 ```
 
-Release 可执行文件为 `target/release/elegant-clipboard-gpui[.exe]`。
+Release 可执行文件为 `target/release/ElegantClipboard[.exe]`。
 
 打包：
 

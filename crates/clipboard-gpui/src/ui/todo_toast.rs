@@ -114,7 +114,7 @@ pub(super) fn open(
                 is_minimizable: false,
                 window_min_size: Some(size(px(1.), px(1.))),
                 inactive_frame_interval: None,
-                app_id: Some("com.aslant.elegant-clipboard-gpui.todo-toast".into()),
+                app_id: Some("com.aslant.ElegantClipboard.todo-toast".into()),
                 ..Default::default()
             },
             move |window, cx| {

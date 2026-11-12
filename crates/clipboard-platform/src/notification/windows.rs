@@ -18,7 +18,7 @@ use windows::{
     core::{BSTR, GUID, HRESULT, HSTRING, Interface, PCWSTR},
 };
 
-const APP_ID: &str = "com.aslant.elegant-clipboard-gpui";
+const APP_ID: &str = "com.aslant.ElegantClipboard";
 const APP_ID_KEY: PROPERTYKEY = PROPERTYKEY {
     fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3),
     pid: 5,

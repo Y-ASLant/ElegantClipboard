@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-const BUNDLE_ID: &str = "com.aslant.elegant-clipboard-gpui";
+const BUNDLE_ID: &str = "com.aslant.ElegantClipboard";
 static SEND_LOCK: Mutex<()> = Mutex::new(());
 static DELEGATE: OnceLock<Retained<NotificationDelegate>> = OnceLock::new();
 static AUTHORIZATION: Mutex<Option<mpsc::Receiver<Result<(), String>>>> = Mutex::new(None);

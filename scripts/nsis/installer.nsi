@@ -42,7 +42,7 @@ ${Using:StrFunc} UnStrStr
 
 !define PRODUCTNAME "ElegantClipboard"
 !define MANUFACTURER "ASLant"
-!define EXE "elegant-clipboard-gpui.exe"
+!define EXE "ElegantClipboard.exe"
 !define HOMEPAGE "https://github.com/Y-ASLant/ElegantClipboard"
 !define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
 !define RUNKEY "Software\Microsoft\Windows\CurrentVersion\Run"
@@ -118,7 +118,7 @@ LangString createDesktop ${LANG_ENGLISH} "Create a desktop shortcut"
       Return
     ${EndIf}
     System::Call 'Kernel32::SetEnvironmentVariable(t "ELEGANT_CLIPBOARD_EXE", t "$INSTDIR\${EXE}")'
-    nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -Command "if (Get-Process -Name elegant-clipboard-gpui -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$env:ELEGANT_CLIPBOARD_EXE }) { exit 10 } else { exit 0 }"'
+    nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -Command "if (Get-Process -Name ElegantClipboard -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$env:ELEGANT_CLIPBOARD_EXE }) { exit 10 } else { exit 0 }"'
     Pop $0
     Pop $1
     ${If} $0 = 0
@@ -130,7 +130,7 @@ LangString createDesktop ${LANG_ENGLISH} "Create a desktop shortcut"
         MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" IDOK kill${Unique}
         Abort
       kill${Unique}:
-        nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -Command "Get-Process -Name elegant-clipboard-gpui -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$env:ELEGANT_CLIPBOARD_EXE } | Stop-Process -Force; Start-Sleep -Milliseconds 500; if (Get-Process -Name elegant-clipboard-gpui -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$env:ELEGANT_CLIPBOARD_EXE }) { exit 1 } else { exit 0 }"'
+        nsExec::ExecToStack 'powershell.exe -NoProfile -NonInteractive -Command "Get-Process -Name ElegantClipboard -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$env:ELEGANT_CLIPBOARD_EXE } | Stop-Process -Force; Start-Sleep -Milliseconds 500; if (Get-Process -Name ElegantClipboard -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq $$env:ELEGANT_CLIPBOARD_EXE }) { exit 1 } else { exit 0 }"'
         Pop $0
         Pop $1
         ${If} $0 <> 0

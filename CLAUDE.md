@@ -10,7 +10,7 @@ This branch is a Rust-only GPUI application for Windows, macOS, and Linux. Do no
 
 - `crates/clipboard-core`: platform-neutral data and business logic (SQLite, query, retention, backup, preferences)
 - `crates/clipboard-platform`: the shared `Service` plus per-OS integration
-- `crates/clipboard-gpui` (package `elegant-clipboard-gpui`): GPUI application and interface
+- `crates/clipboard-gpui` (package `ElegantClipboard`): GPUI application and interface
 - `docs`: design decisions and verification evidence; `docs/README.md` maps modules to responsibilities
 - `scripts`: packaging, smoke, measurement, and the source-size check
 
@@ -49,8 +49,8 @@ Recipes live in the hidden `.justfile`. `just check`, `just test`, and `just bui
 ```powershell
 just check    # source-size, rustfmt, cargo check, clippy -D warnings
 just test     # cargo test --workspace --locked
-just build    # cargo build -p elegant-clipboard-gpui --release --locked
-just run      # cargo run -p elegant-clipboard-gpui --locked
+just build    # cargo build -p ElegantClipboard --release --locked
+just run      # cargo run -p ElegantClipboard --locked
 just format
 ```
 

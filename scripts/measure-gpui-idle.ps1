@@ -15,7 +15,7 @@ if (-not $IsWindows) {
 }
 
 $process = Get-Process -Id $ProcessId -ErrorAction Stop
-if ([IO.Path]::GetFileName($process.Path) -ne 'elegant-clipboard-gpui.exe') {
+if ([IO.Path]::GetFileName($process.Path) -ne 'ElegantClipboard.exe') {
     throw "进程 $ProcessId 不是 GPUI 应用"
 }
 $startTime = $process.StartTime
