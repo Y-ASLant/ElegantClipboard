@@ -150,7 +150,9 @@ impl ClipboardView {
             }
             HistoryMenuAction::SaveAs(name) => self.start_save_as(id, name.clone(), cx),
             HistoryMenuAction::ToggleFavorite => {
-                self.send(Command::ToggleFavorite(id), cx);
+                if self.send(Command::ToggleFavorite(id), cx) {
+                    self.start_favorite_flash(id, cx);
+                }
             }
             HistoryMenuAction::TogglePin => {
                 self.send(Command::TogglePin(id), cx);

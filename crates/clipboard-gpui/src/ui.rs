@@ -1,6 +1,7 @@
 mod category_tabs;
 mod confirmation;
 mod content;
+mod copy_flash;
 mod data_import;
 mod diagnostics_events;
 mod drag;
@@ -423,6 +424,9 @@ struct ClipboardView {
     reorder_before: Option<Vec<i64>>,
     reorder_offsets: HashMap<i64, f32>,
     feedback_revision: usize,
+    copy_flash: Option<copy_flash::CopyFlash>,
+    copy_flash_token: u64,
+    copy_flash_task: Option<Task<()>>,
     card_drag_direction: i8,
     external_drag: Option<external_drag::CardDragSession>,
     drag_preview_window: Option<WindowHandle<external_drag::DragPreview>>,

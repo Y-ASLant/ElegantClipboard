@@ -36,7 +36,50 @@ impl ClipboardView {
                 cx,
             );
         }
+        self.start_copy_flash(purpose, id, cx);
         true
+    }
+
+    fn start_copy_flash(&mut self, purpose: CopyPurpose, id: i64, cx: &mut Context<Self>) {
+        let Some(token) = copy_flash::record_copy_success(
+            &mut self.copy_flash,
+            &mut self.copy_flash_token,
+            purpose,
+            id,
+        ) else {
+            return;
+        };
+        self.arm_card_flash(token, cx);
+    }
+
+    pub(super) fn start_favorite_flash(&mut self, id: i64, cx: &mut Context<Self>) {
+        let Some(item) = self.history.items.iter().find(|item| item.id == id) else {
+            return;
+        };
+        if !copy_flash::shows_favorite_flash(item.is_favorite) {
+            return;
+        }
+        let token = copy_flash::begin_card_flash(
+            &mut self.copy_flash,
+            &mut self.copy_flash_token,
+            id,
+            copy_flash::CardFlashKind::Favorite,
+        );
+        self.arm_card_flash(token, cx);
+        cx.notify();
+    }
+
+    fn arm_card_flash(&mut self, token: u64, cx: &mut Context<Self>) {
+        self.copy_flash_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(copy_flash::FLASH_DURATION)
+                .await;
+            let _ = view.update(cx, |this, cx| {
+                if copy_flash::clear_copy_flash(&mut this.copy_flash, token) {
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     pub(super) fn apply_merged(

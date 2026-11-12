@@ -207,6 +207,9 @@ impl ClipboardView {
             |size| size.height,
         );
         let entity = cx.entity();
+        let card_flash = self
+            .copy_flash
+            .filter(|flash| flash.id == id && !cx.reduce_motion());
         let row = div()
             .id(("history-row", id as usize))
             .relative()
@@ -311,29 +314,45 @@ impl ClipboardView {
                 .left_0()
                 .size_full(),
             )
-            .child(surface.when(!self.batch_mode, |card| {
-                card.child(self.drag_handle(
-                    id,
-                    true,
-                    self.display.value.show_drag_area_indicator,
-                    cx,
-                ))
-                .child(self.drag_handle(id, false, self.display.value.show_drag_area_indicator, cx))
-                .child(
-                    self.render_row_action_bar(id, item, card_padding, cx)
-                        .id(("history-row-actions", id as usize))
-                        .block_mouse_except_scroll()
-                        .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
-                            action_hover.update(cx, |hovered, _| hovered.actions = *is_hovered);
-                            if *is_hovered {
-                                this.close_hover_preview("row_actions_hovered", cx);
-                            }
-                            cx.notify();
-                        }))
-                        .opacity(action_opacity)
-                        .when(action_opacity == 0., |bar| bar.invisible()),
-                )
-            }));
+            .child(
+                surface
+                    .when(!self.batch_mode, |card| {
+                        card.child(self.drag_handle(
+                            id,
+                            true,
+                            self.display.value.show_drag_area_indicator,
+                            cx,
+                        ))
+                        .child(self.drag_handle(
+                            id,
+                            false,
+                            self.display.value.show_drag_area_indicator,
+                            cx,
+                        ))
+                        .child(
+                            self.render_row_action_bar(id, item, card_padding, cx)
+                                .id(("history-row-actions", id as usize))
+                                .block_mouse_except_scroll()
+                                .on_hover(cx.listener(move |this, is_hovered: &bool, _, cx| {
+                                    action_hover
+                                        .update(cx, |hovered, _| hovered.actions = *is_hovered);
+                                    if *is_hovered {
+                                        this.close_hover_preview("row_actions_hovered", cx);
+                                    }
+                                    cx.notify();
+                                }))
+                                .opacity(action_opacity)
+                                .when(action_opacity == 0., |bar| bar.invisible()),
+                        )
+                    })
+                    .when_some(card_flash, |card, flash| {
+                        card.child(copy_flash::overlay(
+                            flash.token,
+                            flash.kind,
+                            cx.theme().primary,
+                        ))
+                    }),
+            );
         let row = self.history_row_menu(row, item, cx);
         let row = div()
             .when(live_drag_source, |row| row.opacity(0.))

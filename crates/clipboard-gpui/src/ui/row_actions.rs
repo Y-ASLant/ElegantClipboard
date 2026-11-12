@@ -230,7 +230,9 @@ impl ClipboardView {
                 false,
                 cx,
                 move |this, _, _, cx| {
-                    this.send(Command::ToggleFavorite(id), cx);
+                    if this.send(Command::ToggleFavorite(id), cx) {
+                        this.start_favorite_flash(id, cx);
+                    }
                 },
             ))
             .child(self.action_button(
@@ -251,6 +253,35 @@ impl ClipboardView {
                 cx,
                 move |this, _, _, cx| {
                     this.send(Command::TogglePin(id), cx);
+                },
+            ))
+            .child(self.action_button(
+                "copy",
+                id,
+                IconName::Copy,
+                tr(self.language, "复制", "Copy"),
+                self.paste_state.pending(),
+                false,
+                cx,
+                move |this, _, _, cx| {
+                    if this.history.loading
+                        || this.batch_pending
+                        || this.batch_mode
+                        || this.paste_state.pending()
+                        || !this.history.items.iter().any(|item| item.id == id)
+                    {
+                        return;
+                    }
+                    this.history.selected = Some(id);
+                    this.send(
+                        Command::Copy {
+                            id,
+                            mode: CopyMode::Original,
+                            purpose: CopyPurpose::Copy,
+                        },
+                        cx,
+                    );
+                    cx.notify();
                 },
             ))
             .child(self.action_button(
