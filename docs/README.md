@@ -19,6 +19,7 @@
 - [项目质量与重构评估](evidence/project-quality-review-2026-10-31.md)：重构前的源码、CI 与设计取舍评估。
 - [质量重构验证](evidence/quality-refactor-2026-10-31.md)：协议、粘贴状态、偏好、测试迁移和发布门槛的实现验证。
 - [macOS 右键菜单透明宿主修复](evidence/macos-menu-transparency-2026-11-05.md)：原生窗口样式、Retina 坐标修复及待实机验收范围。
+- [待办复用主页拖拽与预览](evidence/todo-shared-drag-2026-11-12.md)：共用原生预览窗口、指针会话、让位动效及 Windows 原生验收。
 - `evidence/`：各项功能的历史验收记录。
 
 当前仓库入口只有根 Cargo workspace；历史记录中出现的旧应用名称和路径仅用于说明迁移或兼容性测试，不是可构建入口。
@@ -94,7 +95,9 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `startup`、`view_init`、`window_lifecycle`、`window_render` | 应用启动、状态初始化、窗口生命周期及主窗口渲染 |
 | `events`、`history_events`、`preference_events`、`shortcut_events` | 平台事件路由和各领域状态更新 |
 | `navigation`、`history_list`、`history_card`、`row_actions`、`row_menu` | 列表导航、虚拟列表、卡片、按钮及上下文菜单 |
-| `drag`、`drag_visual`、`selection`、`groups`、`confirmation` | 拖拽状态与动效、批量选择、分组及确认交互 |
+| `drag`、`drag_visual`、`external_drag`、`external_drag/preview` | 历史与待办共用的拖拽会话、命中与让位动效、原生预览浮窗；历史条目另有窗口外传输载荷 |
+| `todo_drag`、`todo_card`、`todo_motion`、`todos` | 待办卡片、可见列表及行高、排序命令、完成状态变化动效；拖拽复用共用会话与预览 |
+| `selection`、`groups`、`confirmation` | 批量选择、分组及确认交互 |
 | `editor_actions`、`editor_window`、`file_cards` | 按需加载文本编辑、独立编辑窗口、备注保存及文件卡片信息；主窗口无整页预览 |
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
 | `settings_window`、`settings_*` | 设置窗口与按功能划分的页面；快捷键、过滤、音效、悬停和关于独立实现 |

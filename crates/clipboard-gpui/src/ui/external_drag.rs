@@ -4,7 +4,44 @@ use clipboard_platform::external_drag::{
 };
 
 mod preview;
+use super::todo_drag::TodoDrag;
 pub(super) use preview::DragPreview;
+
+#[derive(Clone)]
+pub(super) enum CardDrag {
+    History(Rc<HistoryDrag>),
+    Todo(Rc<TodoDrag>),
+}
+
+impl CardDrag {
+    fn size(&self) -> gpui_kit::Size<Pixels> {
+        match self {
+            Self::History(drag) => drag.size.get(),
+            Self::Todo(drag) => drag.size.get(),
+        }
+    }
+
+    fn history(&self) -> Option<&HistoryDrag> {
+        match self {
+            Self::History(drag) => Some(drag),
+            Self::Todo(_) => None,
+        }
+    }
+
+    fn valid(&self, view: &ClipboardView, cx: &App) -> bool {
+        match self {
+            Self::History(drag) => view.valid_drag(drag),
+            Self::Todo(drag) => view.valid_todo_drag(drag, cx),
+        }
+    }
+
+    fn drop_card(&self, view: &mut ClipboardView, cx: &mut Context<ClipboardView>) {
+        match self {
+            Self::History(drag) => view.drop_history_card(drag, cx),
+            Self::Todo(drag) => view.drop_todo(drag, cx),
+        }
+    }
+}
 
 pub(super) struct DragPreparation {
     id: i64,
@@ -14,7 +51,7 @@ pub(super) struct DragPreparation {
 
 pub(super) struct CardDragSession {
     token: u64,
-    drag: Rc<HistoryDrag>,
+    drag: CardDrag,
     source_hwnd: isize,
     preview_hwnd: isize,
     offset: (i32, i32),
@@ -39,16 +76,24 @@ impl ClipboardView {
     }
 
     pub(super) fn drag_source_id(&self) -> Option<i64> {
-        self.external_drag
-            .as_ref()
-            .map(|session| session.drag.id)
-            .or(self.history.selected)
+        match &self.external_drag {
+            Some(session) => session.drag.history().map(|drag| drag.id),
+            None => self.history.selected,
+        }
+    }
+
+    pub(super) fn todo_drag_source_id(&self) -> Option<i64> {
+        match &self.external_drag.as_ref()?.drag {
+            CardDrag::Todo(drag) => Some(drag.id),
+            CardDrag::History(_) => None,
+        }
     }
 
     pub(super) fn drag_image_path(&self) -> Option<PathBuf> {
         self.external_drag
             .as_ref()?
             .drag
+            .history()?
             .card
             .thumbnail_path
             .clone()
@@ -71,9 +116,9 @@ impl ClipboardView {
         self.send(Command::PrepareExternalDrag { id, token }, cx);
     }
 
-    pub(super) fn begin_external_drag(
+    pub(super) fn begin_card_drag(
         &mut self,
-        drag: &HistoryDrag,
+        drag: CardDrag,
         cursor_offset: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -82,7 +127,7 @@ impl ClipboardView {
         let Some(source) = native_window::window_id(window) else {
             return false;
         };
-        let dimensions = drag.size.get();
+        let dimensions = drag.size();
         if dimensions.width <= px(0.) || dimensions.height <= px(0.) {
             return false;
         }
@@ -95,24 +140,29 @@ impl ClipboardView {
             (f32::from(cursor_offset.x) * scale).round() as i32,
             (f32::from(cursor_offset.y) * scale).round() as i32,
         );
-        let Some(preview_hwnd) = self.open_drag_preview(drag, window, cx) else {
+        let Some(preview_hwnd) = self.open_drag_preview(&drag, window, cx) else {
             return false;
         };
-        if self
-            .drag_preparation
-            .as_ref()
-            .is_none_or(|prepared| prepared.id != drag.id)
-        {
-            self.prepare_card_drag(drag.id, cx);
-        }
-        let token = self
-            .drag_preparation
-            .as_ref()
-            .expect("prepared above")
-            .token;
+        let token = if let Some(history) = drag.history() {
+            if self
+                .drag_preparation
+                .as_ref()
+                .is_none_or(|prepared| prepared.id != history.id)
+            {
+                self.prepare_card_drag(history.id, cx);
+            }
+            self.drag_preparation
+                .as_ref()
+                .expect("prepared above")
+                .token
+        } else {
+            self.drag_preparation = None;
+            self.drag_token = self.drag_token.wrapping_add(1);
+            self.drag_token
+        };
         self.external_drag = Some(CardDragSession {
             token,
-            drag: Rc::new(drag.clone()),
+            drag,
             source_hwnd: source,
             preview_hwnd,
             offset,
@@ -162,7 +212,7 @@ impl ClipboardView {
                         this.finish_external_drag(cx);
                         return None;
                     }
-                    if !this.valid_drag(&drag) {
+                    if !drag.valid(this, cx) {
                         this.fail_card_drag(tr(this.language,
                             "列表已变化，拖动已取消", "The list changed; drag cancelled.").into(), cx);
                         return None;
@@ -179,20 +229,21 @@ impl ClipboardView {
                             this.update_card_drag_target(&drag, point(px(x), px(y)), cx);
                         }
                     } else {
-                        this.history_drag_direction = 0;
+                        this.card_drag_direction = 0;
                     }
                     if !pointer.left_button_down {
                         // Release is committed here even if GPUI never received MouseUp.
-                        if !outside { this.drop_history_card(&drag, cx); }
-                        else { this.set_feedback_message(tr(this.language,
+                        if !outside { drag.drop_card(this, cx); }
+                        else if drag.history().is_some() { this.set_feedback_message(tr(this.language,
                             "拖放尚未就绪，请按住卡片移出窗口后再松开",
                             "Drag was not ready. Hold the card outside the window before releasing.").into());
                             this.is_error = true; }
                         this.finish_external_drag(cx);
                         return None;
                     }
-                    let payload = if outside {
-                        this.drag_preparation.as_ref().and_then(|prepared| prepared.result.clone())
+                    let payload = if outside && drag.history().is_some() {
+                        this.drag_preparation.as_ref().filter(|prepared| prepared.token == token)
+                            .and_then(|prepared| prepared.result.clone())
                     } else { None };
                     let payload = match payload {
                         Some(Ok(payload)) => Some(payload),
@@ -237,7 +288,7 @@ impl ClipboardView {
                                 if let Ok(pointer) = native::poll_drag_pointer()
                                     && let Ok((x, y)) = native::drag_pointer_in_client(options.source_window, pointer, if cfg!(target_os = "macos") { 1.0 } else { window.scale_factor() }) {
                                     this.update_card_drag_target(&drag, point(px(x), px(y)), cx);
-                                    this.drop_history_card(&drag, cx);
+                                    drag.drop_card(this, cx);
                                 }
                                 this.finish_external_drag(cx);
                                 false
@@ -278,9 +329,9 @@ impl ClipboardView {
         true
     }
 
-    fn update_card_drag_target(
+    pub(super) fn update_card_drag_target(
         &mut self,
-        drag: &HistoryDrag,
+        drag: &CardDrag,
         pointer: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
@@ -297,15 +348,22 @@ impl ClipboardView {
         } else {
             0
         };
-        let target = if inside {
-            self.history_drag_target(drag, bounds.top(), pointer.y)
+        let target = if inside && drag.valid(self, cx) {
+            match drag {
+                CardDrag::History(drag) => self.history_drag_target(drag, bounds.top(), pointer.y),
+                CardDrag::Todo(drag) => self.todo_drag_target(drag, bounds.top(), pointer.y, cx),
+            }
         } else {
             self.drag_motion.hovered = None;
             None
         };
-        if self.drop_target != target || self.history_drag_direction != direction {
-            self.drop_target = target;
-            self.history_drag_direction = direction;
+        let current = match drag {
+            CardDrag::History(_) => &mut self.drop_target,
+            CardDrag::Todo(_) => &mut self.todo_drop_target,
+        };
+        if *current != target || self.card_drag_direction != direction {
+            *current = target;
+            self.card_drag_direction = direction;
             cx.notify();
         }
     }
@@ -346,7 +404,10 @@ impl ClipboardView {
         if !self.reorder_pending {
             self.drop_target = None;
         }
-        self.history_drag_direction = 0;
+        self.card_drag_direction = 0;
+        if !self.todo_reorder_pending {
+            self.todo_drop_target = None;
+        }
         if let Some((items, total, generation)) = self.drag_snapshot.take()
             && !self.reorder_pending
         {

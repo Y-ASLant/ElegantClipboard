@@ -24,6 +24,14 @@ impl ClipboardView {
                 // Resize, move, show and activate outside GPUI borrows: all can
                 // synchronously dispatch callbacks, including on a different display.
                 let initialized = request.initialize();
+                if initialized.is_ok()
+                    && let Ok(Some(hwnd)) =
+                        update_clipboard_window(&view, main, cx, |_, window, _| {
+                            native_window::window_id(window)
+                        })
+                {
+                    let _ = crate::native::preview::hide_from_taskbar(hwnd);
+                }
                 let position_request =
                     update_clipboard_window(&view, main, cx, |this, window, _| {
                         initialized?;

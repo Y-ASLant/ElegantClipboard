@@ -212,6 +212,12 @@ impl ClipboardView {
         if !startup.hidden || tray.is_err() {
             cx.defer_in(window, |this, window, cx| this.show_window(window, cx));
         }
+        #[cfg(windows)]
+        if let Some(hwnd) = native_window::window_id(window)
+            && let Err(error) = crate::native::preview::hide_from_taskbar(hwnd)
+        {
+            tracing::warn!(%error, "Could not hide main window from taskbar");
+        }
         acrylic::init_window_effect(window_effect, window, cx);
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
@@ -289,6 +295,9 @@ impl ClipboardView {
             todo_move_offsets: HashMap::new(),
             todo_motion_revision: 0,
             todo_motion_task: None,
+            todo_scroll: ScrollHandle::new(),
+            todo_reorder_pending: false,
+            todo_drop_target: None,
             group_name_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(language, "分组名称", "Group name"))
             }),
@@ -428,7 +437,7 @@ impl ClipboardView {
             reorder_before: None,
             reorder_offsets: HashMap::new(),
             feedback_revision: 0,
-            history_drag_direction: 0,
+            card_drag_direction: 0,
             external_drag: None,
             drag_preview_window: None,
             drag_preparation: None,
@@ -451,7 +460,7 @@ impl ClipboardView {
             _events: event_task,
             history_load_task,
             feedback_task: None,
-            history_drag_scroll_task: None,
+            card_drag_scroll_task: None,
             window_size_task: None,
         }
     }

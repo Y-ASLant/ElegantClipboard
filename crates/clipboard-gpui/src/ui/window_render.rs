@@ -73,15 +73,33 @@ impl Render for ClipboardView {
                 view.sync_confirmation_dialog(window, cx);
             });
         }
-        let drag_request = if self.card_drag_active(cx) {
-            self.drag_source_id().zip(self.drop_target)
-        } else if self.reorder_pending {
-            self.drag_motion.request
+        if self.todos_open {
+            let request = if self.card_drag_active(cx) {
+                self.todo_drag_source_id().zip(self.todo_drop_target)
+            } else if self.todo_reorder_pending {
+                self.drag_motion.request
+            } else {
+                None
+            };
+            let ids: Vec<_> = super::todo_drag::visible_todos(self, cx)
+                .map(|todo| todo.id)
+                .collect();
+            self.drag_motion
+                .update(request, ids.iter().copied(), &self.todo_row_offsets(cx));
         } else {
-            None
-        };
-        self.drag_motion
-            .update(drag_request, &self.history.items, &self.row_offsets);
+            let request = if self.card_drag_active(cx) {
+                self.drag_source_id().zip(self.drop_target)
+            } else if self.reorder_pending {
+                self.drag_motion.request
+            } else {
+                None
+            };
+            self.drag_motion.update(
+                request,
+                self.history.items.iter().map(|item| item.id),
+                &self.row_offsets,
+            );
+        }
         window_shell(cx)
             .child(history_menu_dismiss_layer(cx))
             .child(

@@ -21,9 +21,9 @@ use windows::Win32::{
             GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetWindowLongPtrW, GetWindowRect,
             GetWindowThreadProcessId, HTTRANSPARENT, HWND_TOPMOST, IsWindow, MA_NOACTIVATE,
             NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-            SetWindowLongPtrW, SetWindowPos, WM_MOUSEACTIVATE, WM_NCCALCSIZE, WM_NCDESTROY,
-            WM_NCHITTEST, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-            WS_POPUP, WS_VISIBLE,
+            SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_MOUSEACTIVATE, WM_NCCALCSIZE,
+            WM_NCDESTROY, WM_NCHITTEST, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
+            WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
         },
     },
 };
@@ -153,6 +153,26 @@ fn configure_popup(handle: isize, interactive: bool) -> Result<()> {
 /// Remove the host frame while retaining menu input and avoiding activation.
 pub(crate) fn suppress_activation(handle: isize) -> Result<()> {
     configure_popup(handle, true)
+}
+
+/// Hide a visible window from the taskbar without blocking later activation.
+pub(crate) fn hide_from_taskbar(handle: isize) -> Result<()> {
+    let hwnd = checked_window(handle)?;
+    unsafe {
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let ex = (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+        )?;
+    }
+    Ok(())
 }
 
 /// Stay above other windows without taking focus. Does not disable DWM composition.

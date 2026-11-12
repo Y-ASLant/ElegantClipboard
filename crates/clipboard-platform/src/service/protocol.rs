@@ -202,6 +202,11 @@ pub enum Command {
         id: i64,
         text: String,
     },
+    ReorderTodo {
+        from: i64,
+        to: i64,
+        after: bool,
+    },
     CompleteOnboarding,
     BumpToTop(i64),
     ResolveQuickPaste {

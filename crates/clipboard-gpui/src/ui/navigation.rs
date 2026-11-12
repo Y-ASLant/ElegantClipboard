@@ -193,8 +193,9 @@ impl ClipboardView {
             }
             return;
         }
-        if !selected {
+        if !selected || self.todos_open {
             self.release_history_drag(cx);
+            self.drag_motion = DragMotionState::default();
         }
         self.cancel_sequence(cx);
         self.close_hover_preview("category_changed", cx);

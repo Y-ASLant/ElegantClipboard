@@ -1,5 +1,6 @@
 use super::category_tabs::ToolbarTab;
 use super::history_scroll_top::FloatingAction;
+use super::todo_drag::TodoDrag;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +44,8 @@ impl ClipboardView {
         {
             return;
         }
+        self.release_history_drag(cx);
+        self.drag_motion = DragMotionState::default();
         self.cancel_sequence(cx);
         self.close_hover_preview("todos", cx);
         self.close_history_confirmation(window, cx);
@@ -137,8 +140,13 @@ impl ClipboardView {
             }
         }
         self.start_todo_slide(&todos, cx);
+        if self.todo_reorder_pending {
+            self.drag_motion = DragMotionState::default();
+        }
         self.todos = todos;
         self.todos_pending = false;
+        self.todo_reorder_pending = false;
+        self.todo_drop_target = None;
         if self.todo_edit_saving {
             self.todo_edit_saving = false;
             self.close_editor(window, cx);
@@ -146,22 +154,19 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn render_todos(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_todos(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let language = self.language;
         let pending = self.todos_pending;
         let query = self.search.read(cx).value().trim().to_owned();
-        let show_completed = self.todo_preference.value.show_completed;
-        let todos: Vec<_> = self
-            .todos
-            .iter()
-            .filter(|todo| show_completed || !todo.completed)
-            .filter(|todo| {
-                query.is_empty() || todo.text.to_lowercase().contains(&query.to_lowercase())
-            })
-            .cloned()
-            .collect();
+        let todos: Vec<_> = super::todo_drag::visible_todos(self, cx).cloned().collect();
+        let offsets = self.todo_row_offsets(cx);
         let viewport = self.drag_viewport.clone();
         div()
+            .id("todo-content")
             .relative()
             .flex_1()
             .min_h_0()
@@ -175,6 +180,17 @@ impl ClipboardView {
                 .absolute()
                 .size_full(),
             )
+            .on_drag_move(cx.listener(|this, event: &DragMoveEvent<TodoDrag>, _, cx| {
+                if this.external_drag.is_none() {
+                    let drag = external_drag::CardDrag::Todo(Rc::new(event.drag(cx).clone()));
+                    this.update_card_drag_target(&drag, event.event.position, cx);
+                }
+            }))
+            .on_drop(cx.listener(|this, drag: &TodoDrag, _, cx| {
+                if this.external_drag.is_none() {
+                    this.drop_todo(drag, cx);
+                }
+            }))
             .child(if todos.is_empty() {
                 super::todo_card::todo_empty(
                     if self.todos.is_empty() {
@@ -197,26 +213,37 @@ impl ClipboardView {
                 .into_any_element()
             } else {
                 div()
+                    .id("todo-list")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
-                    .px(px(PAGE_PADDING))
-                    .py(px(visual::SPACE_2))
                     .flex()
                     .flex_col()
-                    .gap(px(visual::SPACE_2))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.todo_scroll)
+                    .vertical_scrollbar(&self.todo_scroll)
                     .pb(px(visual::CONTROL_HEIGHT_LARGE + visual::SPACE_6))
-                    .children(todos.into_iter().map(|todo| {
+                    .children(todos.into_iter().enumerate().map(|(index, todo)| {
                         let id = todo.id;
-                        let row = super::todo_card::todo_row(self, todo, pending, cx);
-                        match self.todo_move_offsets.get(&id).copied() {
-                            Some(offset) => visual::reflow(
-                                row,
+                        let row = self.render_todo_row(todo, pending, window, cx);
+                        let (from, to) = self.drag_motion.offsets(index, &offsets);
+                        if from != 0. || to != 0. {
+                            visual::drag_yield(
+                                div().child(row),
+                                from,
+                                to,
+                                self.drag_motion.started,
+                                self.drag_motion.progress.clone(),
+                                cx,
+                            )
+                        } else if let Some(offset) = self.todo_move_offsets.get(&id).copied() {
+                            visual::reflow(
+                                div().child(row),
                                 offset,
                                 format!("todo-move-{}-{id}", self.todo_motion_revision),
                                 cx,
-                            ),
-                            None => row.into_any_element(),
+                            )
+                        } else {
+                            row
                         }
                     }))
                     .into_any_element()

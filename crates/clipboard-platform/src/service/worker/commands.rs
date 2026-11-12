@@ -446,6 +446,11 @@ impl Worker {
                 self.send_event(Event::Todos(self.history.list_todos()?))?;
                 return Ok(());
             }
+            Command::ReorderTodo { from, to, after } => {
+                self.history.reorder_todo(from, to, after)?;
+                self.send_event(Event::Todos(self.history.list_todos()?))?;
+                return Ok(());
+            }
             Command::ListRunningApps => {
                 let apps = source_app::running_apps(&self.icons_dir);
                 self.send_event(Event::RunningApps(apps))?;

@@ -76,15 +76,15 @@ impl DragMotionState {
     pub(in crate::ui) fn update(
         &mut self,
         request: Option<(i64, DropTarget)>,
-        items: &[DbClipboardItem],
+        ids: impl Iterator<Item = i64> + Clone,
         row_offsets: &[Pixels],
     ) {
         if self.request == request {
             return;
         }
         let next = request.and_then(|(source, target)| {
-            let source = items.iter().position(|item| item.id == source)?;
-            let target_index = items.iter().position(|item| item.id == target.id)?;
+            let source = ids.clone().position(|id| id == source)?;
+            let target_index = ids.clone().position(|id| id == target.id)?;
             DragPlacement::new(source, target_index, target.after)
         });
         self.transition(next, row_offsets, std::time::Instant::now());

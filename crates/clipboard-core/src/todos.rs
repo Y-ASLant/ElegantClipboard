@@ -32,14 +32,19 @@ impl History {
     pub fn update_todo(&self, id: i64, text: &str) -> Result<()> {
         update(&self.db, id, text)
     }
+
+    pub fn reorder_todo(&self, from: i64, to: i64, after: bool) -> Result<()> {
+        reorder(&self.db, from, to, after)
+    }
 }
 
 fn list(db: &Database) -> Result<Vec<Todo>> {
-    ensure_updated_at(db)?;
+    ensure_schema(db)?;
     let connection = db.read_connection();
     let connection = connection.lock();
     let mut query = connection.prepare(
-        "SELECT id, text, completed, created_at, updated_at FROM todos ORDER BY completed ASC, id DESC",
+        "SELECT id, text, completed, created_at, updated_at FROM todos
+         ORDER BY completed ASC, sort_order DESC, id DESC",
     )?;
     let todos = query
         .query_map([], |row| {
@@ -55,20 +60,81 @@ fn list(db: &Database) -> Result<Vec<Todo>> {
     Ok(todos)
 }
 
-fn ensure_updated_at(db: &Database) -> Result<()> {
+fn ensure_schema(db: &Database) -> Result<()> {
     let connection = db.write_connection();
     let connection = connection.lock();
-    let exists: bool = connection.query_row(
+    let has_updated_at: bool = connection.query_row(
         "SELECT COUNT(*) > 0 FROM pragma_table_info('todos') WHERE name = 'updated_at'",
         [],
         |row| row.get(0),
     )?;
-    if !exists {
+    if !has_updated_at {
         connection.execute_batch(
             "ALTER TABLE todos ADD COLUMN updated_at TEXT;
              UPDATE todos SET updated_at = created_at WHERE updated_at IS NULL;",
         )?;
     }
+    let has_sort_order: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('todos') WHERE name = 'sort_order'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_sort_order {
+        connection.execute_batch(
+            "ALTER TABLE todos ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+             UPDATE todos SET sort_order = id;",
+        )?;
+    }
+    Ok(())
+}
+
+fn reorder(db: &Database, from: i64, to: i64, after: bool) -> Result<()> {
+    if from == to {
+        return Ok(());
+    }
+    ensure_schema(db)?;
+    let connection = db.write_connection();
+    let mut connection = connection.lock();
+    let tx = connection.transaction()?;
+    let completed: i64 = tx
+        .query_row(
+            "SELECT completed FROM todos WHERE id = ?1",
+            params![from],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("待办已不存在"))?;
+    let target_completed: i64 = tx
+        .query_row(
+            "SELECT completed FROM todos WHERE id = ?1",
+            params![to],
+            |row| row.get(0),
+        )
+        .map_err(|_| anyhow::anyhow!("目标待办已不存在"))?;
+    if completed != target_completed {
+        bail!("不能在不同完成状态之间移动待办");
+    }
+    let mut ids: Vec<i64> = {
+        let mut query = tx.prepare(
+            "SELECT id FROM todos WHERE completed = ?1 ORDER BY sort_order DESC, id DESC",
+        )?;
+        query
+            .query_map(params![completed], |row| row.get(0))?
+            .collect::<Result<_, _>>()?
+    };
+    if !ids.contains(&from) || !ids.contains(&to) {
+        bail!("待办顺序已变化，请重新拖动");
+    }
+    ids.retain(|id| *id != from);
+    let index = ids.iter().position(|id| *id == to).unwrap() + usize::from(after);
+    ids.insert(index, from);
+    {
+        let mut update = tx.prepare("UPDATE todos SET sort_order = ?1 WHERE id = ?2")?;
+        for (index, id) in ids.iter().enumerate() {
+            let order = i64::try_from(ids.len().saturating_sub(index))?;
+            update.execute(params![order, id])?;
+        }
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -82,12 +148,17 @@ fn checked_text(text: &str) -> Result<&str> {
 
 fn add(db: &Database, text: &str) -> Result<i64> {
     let text = checked_text(text)?;
-    ensure_updated_at(db)?;
+    ensure_schema(db)?;
     let connection = db.write_connection();
     let connection = connection.lock();
+    let sort_order: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM todos WHERE completed = 0",
+        [],
+        |row| row.get(0),
+    )?;
     connection.execute(
-        "INSERT INTO todos (text, updated_at) VALUES (?1, datetime('now', 'localtime'))",
-        params![text],
+        "INSERT INTO todos (text, updated_at, sort_order) VALUES (?1, datetime('now', 'localtime'), ?2)",
+        params![text, sort_order],
     )?;
     Ok(connection.last_insert_rowid())
 }
@@ -106,7 +177,7 @@ fn set_completed(db: &Database, id: i64, completed: bool) -> Result<()> {
 
 fn update(db: &Database, id: i64, text: &str) -> Result<()> {
     let text = checked_text(text)?;
-    ensure_updated_at(db)?;
+    ensure_schema(db)?;
     let connection = db.write_connection();
     let changed = connection.lock().execute(
         "UPDATE todos SET text = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
@@ -151,6 +222,33 @@ mod tests {
         history.delete_todo(first)?;
         assert!(history.list_todos()?.iter().all(|todo| todo.id != first));
         assert!(history.add_todo("   ").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn open_tasks_keep_user_order_after_reorder() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("history.db"))?;
+        let a = history.add_todo("first")?;
+        let b = history.add_todo("second")?;
+        let c = history.add_todo("third")?;
+        assert_eq!(
+            history
+                .list_todos()?
+                .into_iter()
+                .take(3)
+                .map(|t| t.id)
+                .collect::<Vec<_>>(),
+            [c, b, a]
+        );
+        history.reorder_todo(a, b, false)?;
+        let ids: Vec<_> = history
+            .list_todos()?
+            .into_iter()
+            .take(3)
+            .map(|todo| todo.id)
+            .collect();
+        assert_eq!(ids, [c, a, b]);
         Ok(())
     }
 }

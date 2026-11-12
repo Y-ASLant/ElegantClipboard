@@ -388,7 +388,7 @@ impl ClipboardView {
                 ))
             })
             .child(if self.todos_open {
-                self.render_todos(cx).into_any_element()
+                self.render_todos(window, cx).into_any_element()
             } else {
                 self.render_history_list(empty_message, cx).into_any_element()
             })

@@ -281,9 +281,13 @@ impl ClipboardView {
                             this.history.selected = Some(drag.id);
                             this.drop_target = None;
                             this.drag_motion.hovered = None;
-                            this.start_history_drag_scroll(cx);
-                            preview.native_preview =
-                                this.begin_external_drag(drag, offset, window, cx);
+                            this.start_card_drag_scroll(cx);
+                            preview.native_preview = this.begin_card_drag(
+                                external_drag::CardDrag::History(Rc::new(drag.clone())),
+                                offset,
+                                window,
+                                cx,
+                            );
                             cx.notify();
                         });
                         cx.new(|_| preview)

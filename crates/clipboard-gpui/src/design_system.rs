@@ -11,8 +11,6 @@ use gpui_kit::{
 };
 use std::time::Duration;
 
-pub use crate::fonts::DEFAULT_UI_FONT_FAMILY as UI_FONT_FAMILY;
-
 #[derive(Clone)]
 struct FontSettings(FontPreference);
 impl Global for FontSettings {}

@@ -313,7 +313,7 @@ impl ClipboardView {
             cx.stop_active_drag(window);
             self.finish_external_drag(cx);
             self.drop_target = None;
-            self.history_drag_direction = 0;
+            self.card_drag_direction = 0;
             cx.notify();
             return;
         }

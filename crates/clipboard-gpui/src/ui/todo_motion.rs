@@ -10,7 +10,15 @@ impl ClipboardView {
         }
         let query = self.search.read(cx).value().trim().to_lowercase();
         let show_completed = self.todo_preference.value.show_completed;
-        let before = visible_todo_ids(&self.todos, show_completed, &query);
+        let mut before = visible_todo_ids(&self.todos, show_completed, &query);
+        if self.todo_reorder_pending
+            && let Some(placement) = self.drag_motion.to
+            && placement.source < before.len()
+            && placement.insertion < before.len()
+        {
+            let moved = before.remove(placement.source);
+            before.insert(placement.insertion, moved);
+        }
         let after = visible_todo_ids(next, show_completed, &query);
         let heights = self.todo_heights.borrow();
         let fallback = todo_row_fallback(self);
@@ -20,7 +28,6 @@ impl ClipboardView {
                 .copied()
                 .filter(|height| *height > 0.)
                 .unwrap_or(fallback)
-                + visual::SPACE_2
         });
         drop(heights);
         match offsets {
@@ -57,7 +64,7 @@ fn visible_todo_ids(todos: &[Todo], show_completed: bool, query: &str) -> Vec<i6
         .collect()
 }
 
-fn todo_row_fallback(view: &ClipboardView) -> f32 {
+pub(super) fn todo_row_fallback(view: &ClipboardView) -> f32 {
     let density = view
         .todo_preference
         .value
@@ -69,7 +76,8 @@ fn todo_row_fallback(view: &ClipboardView) -> f32 {
         } else {
             0.
         };
-    visual::card_padding(density) * 2. + visual::BORDER_WIDTH * 2. + body
+    let spacing = visual::card_spacing(density);
+    spacing * 2. + visual::card_padding(density) * 2. + visual::BORDER_WIDTH * 2. + body
 }
 
 /// `None` when the visible set changed. An empty map means the same order.

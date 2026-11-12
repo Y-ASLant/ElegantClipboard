@@ -51,8 +51,8 @@ impl ClipboardView {
                         this.drag_motion.hovered = None;
                         None
                     };
-                    if this.history_drag_direction != direction || this.drop_target != target {
-                        this.history_drag_direction = direction;
+                    if this.card_drag_direction != direction || this.drop_target != target {
+                        this.card_drag_direction = direction;
                         this.drop_target = target;
                         cx.notify();
                     }

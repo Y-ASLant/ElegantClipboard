@@ -69,6 +69,7 @@ mod storage;
 mod theme_color;
 mod thumbnail_cache;
 mod todo_card;
+mod todo_drag;
 mod todo_motion;
 mod todo_toast;
 mod todos;
@@ -285,6 +286,9 @@ struct ClipboardView {
     todo_move_offsets: HashMap<i64, f32>,
     todo_motion_revision: u64,
     todo_motion_task: Option<Task<()>>,
+    todo_scroll: ScrollHandle,
+    todo_reorder_pending: bool,
+    todo_drop_target: Option<DropTarget>,
     group_name_input: Entity<InputState>,
     group_editor_open: bool,
     group_rename_id: Option<i64>,
@@ -419,7 +423,7 @@ struct ClipboardView {
     reorder_before: Option<Vec<i64>>,
     reorder_offsets: HashMap<i64, f32>,
     feedback_revision: usize,
-    history_drag_direction: i8,
+    card_drag_direction: i8,
     external_drag: Option<external_drag::CardDragSession>,
     drag_preview_window: Option<WindowHandle<external_drag::DragPreview>>,
     drag_preparation: Option<external_drag::DragPreparation>,
@@ -439,7 +443,7 @@ struct ClipboardView {
     _events: Task<()>,
     history_load_task: Option<Task<()>>,
     feedback_task: Option<Task<()>>,
-    history_drag_scroll_task: Option<Task<()>>,
+    card_drag_scroll_task: Option<Task<()>>,
     window_size_task: Option<Task<()>>,
 }
 

@@ -1,6 +1,5 @@
 mod motion;
 
-use super::presentation::UI_FONT_FAMILY;
 use super::*;
 
 #[derive(Clone)]
@@ -268,19 +267,24 @@ fn pin_ribbon(cx: &App) -> Div {
     )
 }
 
+// 尺寸与内边距跟随源行的实测几何，原生浮窗与 GPUI 回退共用同一外壳。
+pub(super) fn drag_card(dimensions: gpui_kit::Size<Pixels>, density: CardDensity, cx: &App) -> Div {
+    div()
+        .font_family(crate::design_system::ui_font_family(cx))
+        .w(dimensions.width)
+        .h(dimensions.height)
+        .px(px(PAGE_PADDING))
+        .py(px(visual::card_spacing(density)))
+        .text_color(cx.theme().foreground)
+}
+
 impl HistoryDrag {
     pub(super) fn size(&self) -> gpui_kit::Size<Pixels> {
         self.size.get()
     }
 
     pub(super) fn render_card(&self, cx: &App) -> AnyElement {
-        div()
-            .font_family(UI_FONT_FAMILY)
-            .w(self.size().width)
-            .h(self.size().height)
-            .px(px(PAGE_PADDING))
-            .py(px(visual::card_spacing(self.card.display.card_density)))
-            .text_color(cx.theme().foreground)
+        drag_card(self.size(), self.card.display.card_density, cx)
             .child(self.card.surface(true, cx))
             .into_any_element()
     }
@@ -469,6 +473,51 @@ mod tests {
                 .unwrap();
             assert_eq!((current.id, current.after), (target.id, target.after));
         }
+    }
+
+    #[test]
+    fn filtered_domain_ids_drive_variable_height_placement() {
+        let ids = [71, 9, 104];
+        let offsets = [px(0.), px(40.), px(140.), px(200.)];
+        let mut motion = DragMotionState::default();
+        motion.update(
+            Some((
+                71,
+                super::DropTarget {
+                    id: 104,
+                    after: true,
+                },
+            )),
+            ids.into_iter(),
+            &offsets,
+        );
+        assert!(motion.to == DragPlacement::new(0, 2, true));
+        assert_eq!(motion.offsets(0, &offsets), (0., 160.));
+        assert_eq!(motion.offsets(1, &offsets), (0., -40.));
+        motion.update(
+            Some((
+                9,
+                super::DropTarget {
+                    id: 71,
+                    after: true,
+                },
+            )),
+            ids.into_iter(),
+            &offsets,
+        );
+        assert!(motion.to.is_none());
+        motion.update(
+            Some((
+                104,
+                super::DropTarget {
+                    id: 999,
+                    after: false,
+                },
+            )),
+            ids.into_iter(),
+            &offsets,
+        );
+        assert!(motion.to.is_none());
     }
 
     #[test]

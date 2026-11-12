@@ -23,6 +23,4 @@ desktop.ini
 
 # Local analysis output
 .rtk/
-
-# Local AI assistant workspace data
-.workbuddy-ai/
+.claude/

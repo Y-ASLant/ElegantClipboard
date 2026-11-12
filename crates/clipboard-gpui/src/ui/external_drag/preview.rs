@@ -1,13 +1,14 @@
 use super::*;
 
 pub(in crate::ui) struct DragPreview {
-    pub(super) card: Option<HistoryDrag>,
+    pub(super) card: Option<CardDrag>,
 }
 
 impl Render for DragPreview {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.card.as_ref() {
-            Some(card) => card.render_card(cx).into_any_element(),
+            Some(CardDrag::History(drag)) => drag.render_card(cx),
+            Some(CardDrag::Todo(drag)) => drag.render_card(window, cx),
             None => div().into_any_element(),
         }
     }
@@ -16,12 +17,11 @@ impl Render for DragPreview {
 impl ClipboardView {
     pub(super) fn open_drag_preview(
         &mut self,
-        drag: &HistoryDrag,
+        drag: &CardDrag,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<isize> {
-        let mut card = drag.clone();
-        card.native_preview = false;
+        let card = drag.clone();
         if let Some(popup) = self.drag_preview_window
             && let Ok(hwnd) = popup.update(cx, |preview, window, cx| {
                 preview.card = Some(card.clone());
@@ -37,7 +37,7 @@ impl ClipboardView {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                         point(px(0.), px(0.)),
-                        drag.size.get(),
+                        drag.size(),
                     ))),
                     display_id,
                     titlebar: None,

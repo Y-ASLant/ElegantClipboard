@@ -26,8 +26,6 @@ pub(super) fn apply_theme(preference: ThemePreference, window: &mut Window, cx: 
     acrylic::sync_theme(window, cx);
 }
 
-pub(super) use crate::design_system::UI_FONT_FAMILY;
-
 /// 所有窗口共用材质画布；内部表面由主题角色统一投影，浮层保持清晰。
 pub(super) fn window_shell(cx: &App) -> Div {
     let background = crate::design_system::canvas_background(cx);
