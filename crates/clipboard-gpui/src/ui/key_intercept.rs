@@ -54,7 +54,8 @@ impl ClipboardView {
                 if self.typing_activation.is_some() {
                     return;
                 }
-                if !self.onboarding_visible() && self.editor.id.is_none() {
+                // Typing from the list searches; a focused dialog or editor input keeps focus.
+                if self.list_focus.is_focused(window) && !self.onboarding_visible() {
                     self.search.update(cx, |input, cx| input.focus(window, cx));
                 }
                 self.activate_for_input(window, cx);

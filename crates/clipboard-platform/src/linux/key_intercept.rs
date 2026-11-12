@@ -18,7 +18,8 @@ use x11rb::{
     protocol::{
         Event,
         xproto::{
-            ConnectionExt as _, GrabMode, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MapState, ModMask,
+            ChangeWindowAttributesAux, ConnectionExt as _, EventMask, GrabMode, KEY_PRESS_EVENT,
+            KEY_RELEASE_EVENT, MapState, ModMask, NotifyDetail,
         },
         xtest::ConnectionExt as _,
     },
@@ -185,7 +186,13 @@ impl KeyInterceptor {
     pub fn start(events: Sender<InterceptedKey>, window_handle: isize) -> Result<Self> {
         let x = X11::connect_events()?;
         let window = window_handle as u32;
-        x.connection.get_window_attributes(window)?.reply()?;
+        x.connection
+            .change_window_attributes(
+                window,
+                &ChangeWindowAttributesAux::new()
+                    .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::FOCUS_CHANGE),
+            )?
+            .check()?;
         let plan = grab_plan(&x)?;
         let locks = super::hotkey::lock_masks(&x)?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -195,10 +202,34 @@ impl KeyInterceptor {
             .spawn(move || {
                 let mut grabbed = false;
                 let result = (|| -> Result<()> {
+                    // Map and focus changes arrive as events; no per-tick X round trips.
+                    let mut viewable = is_viewable(&x, window)?;
+                    let mut focused = focus_is_ours(&x, window)?;
                     while !stopping.load(Ordering::Acquire) {
                         while let Some(event) = x.connection.poll_for_event()? {
-                            let Event::KeyPress(event) = event else {
-                                continue;
+                            let event = match event {
+                                Event::KeyPress(event) => event,
+                                Event::MapNotify(event) if event.window == window => {
+                                    viewable = true;
+                                    continue;
+                                }
+                                Event::UnmapNotify(event) if event.window == window => {
+                                    viewable = false;
+                                    SUSPENDED.store(false, Ordering::Release);
+                                    continue;
+                                }
+                                Event::FocusIn(event) if event.event == window => {
+                                    focused = true;
+                                    continue;
+                                }
+                                Event::FocusOut(event)
+                                    if event.event == window
+                                        && event.detail != NotifyDetail::INFERIOR =>
+                                {
+                                    focused = false;
+                                    continue;
+                                }
+                                _ => continue,
                             };
                             let Some((_, keysym, _)) =
                                 plan.iter().find(|(keycode, _, _)| *keycode == event.detail)
@@ -216,13 +247,7 @@ impl KeyInterceptor {
                             }
                             let _ = events.try_send(key);
                         }
-                        let viewable = is_viewable(&x, window)?;
-                        if !viewable {
-                            SUSPENDED.store(false, Ordering::Release);
-                        }
-                        let want = viewable
-                            && !SUSPENDED.load(Ordering::Acquire)
-                            && !focus_is_ours(&x, window)?;
+                        let want = viewable && !focused && !SUSPENDED.load(Ordering::Acquire);
                         if want != grabbed {
                             set_grabs(&x, &plan, &locks, want)?;
                             grabbed = want;
