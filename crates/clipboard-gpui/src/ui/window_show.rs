@@ -59,7 +59,10 @@ impl ClipboardView {
             // Preserve native restore handling on Unix; Windows updates the hidden
             // window's restore placement before restoring it instead.
             if native_window::is_window_minimized(window) {
+                #[cfg(target_os = "macos")]
                 native_window::set_window_visible(window, true);
+                #[cfg(target_os = "linux")]
+                native_window::show_without_activation(window);
             }
             let result = position::position_window(window, self.window_position.value);
             self.finish_show_window(result, window, cx);
@@ -80,8 +83,10 @@ impl ClipboardView {
             ));
             self.is_error = true;
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
         native_window::set_window_visible(window, true);
+        #[cfg(target_os = "linux")]
+        native_window::show_without_activation(window);
         log_window_geometry(window, cx, "main_shown");
         if self.onboarding_visible() {
             window.focus(&self.list_focus, cx);

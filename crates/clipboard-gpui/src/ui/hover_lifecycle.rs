@@ -198,7 +198,10 @@ impl ClipboardView {
         if self.hover_overlay_stack_blocks_source() {
             return false;
         }
-        if !window.is_window_active() {
+        // Windows and X11 show the history window without focus; macOS panels take key.
+        if !window.is_window_active()
+            && (cfg!(target_os = "macos") || !native_window::is_window_shown(window))
+        {
             return false;
         }
         #[cfg(windows)]

@@ -26,6 +26,7 @@ mod hover_surface;
 mod hover_window;
 use hover_window::HoverPreviewWindowView;
 mod image_assets;
+mod key_intercept;
 mod menu_window;
 mod native_health;
 mod navigation;
@@ -130,6 +131,8 @@ use clipboard_platform::hotkey::{
     Hotkey, PasteHotkeyEvent, PasteHotkeys, PasteRegistrationWarning, SequenceAdvanceEvent,
     normalize_paste_shortcut, validate_paste_shortcuts,
 };
+#[cfg(not(target_os = "macos"))]
+use clipboard_platform::key_intercept::KeyInterceptor;
 use clipboard_platform::outside_click::OutsideClickMonitor;
 use clipboard_platform::source_app::RunningApp;
 use clipboard_platform::{
@@ -271,6 +274,11 @@ struct ClipboardView {
     _sequence_hotkey_events: Task<()>,
     _outside_click_monitor: Option<OutsideClickMonitor>,
     _outside_click_events: Task<()>,
+    #[cfg(not(target_os = "macos"))]
+    _key_interceptor: Option<KeyInterceptor>,
+    #[cfg(not(target_os = "macos"))]
+    _key_intercept_events: Task<()>,
+    typing_activation: Option<Task<()>>,
     exiting: Rc<Cell<bool>>,
     history: HistoryState,
     file_card_info: HashMap<i64, FileCardInfo>,

@@ -95,7 +95,7 @@ impl Drop for Worker {
     }
 }
 
-fn lock_masks(x: &X11) -> Result<Vec<u16>> {
+pub(super) fn lock_masks(x: &X11) -> Result<Vec<u16>> {
     let mut ignored = 2u16; // Caps Lock
     let mapping = x.connection.get_modifier_mapping()?.reply()?;
     let width = mapping.keycodes.len() / 8;

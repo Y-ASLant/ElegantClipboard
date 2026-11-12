@@ -1,5 +1,5 @@
 use ::windows::Win32::{
-    Foundation::{HWND, POINT, RECT},
+    Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::ClientToScreen,
     UI::{
         HiDpi::GetDpiForWindow,
@@ -7,9 +7,12 @@ use ::windows::Win32::{
             GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
             SendInput, SetActiveWindow, SetFocus, VK_MENU,
         },
+        Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
         WindowsAndMessaging::{
-            GetClientRect, GetWindowRect, IsIconic, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOW,
-            SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowPos, ShowWindow,
+            GetClientRect, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible,
+            MA_NOACTIVATE, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNA, SW_SHOWNOACTIVATE,
+            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
+            SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WM_NCDESTROY,
         },
     },
 };
@@ -136,34 +139,93 @@ impl WindowShowRequest {
         .context("无法初始化窗口尺寸")
     }
 
+    /// Show above other windows without taking focus from the paste target.
     pub fn show(self) {
         unsafe {
             let command = if IsIconic(self.hwnd).as_bool() {
-                SW_RESTORE
+                SW_SHOWNOACTIVATE
             } else {
-                SW_SHOW
+                SW_SHOWNA
             };
             let _ = ShowWindow(self.hwnd, command);
-            let _ = SetActiveWindow(self.hwnd);
-            let _ = SetFocus(Some(self.hwnd));
-            if !SetForegroundWindow(self.hwnd).as_bool()
-                && GetAsyncKeyState(i32::from(VK_MENU.0)) >= 0
-            {
-                // Preserve the foreground fallback, but never release a held Alt chord.
-                let key_down = INPUT {
-                    r#type: INPUT_KEYBOARD,
-                    Anonymous: INPUT_0 {
-                        ki: KEYBDINPUT {
-                            wVk: VK_MENU,
-                            ..Default::default()
-                        },
+            let _ = SetWindowPos(
+                self.hwnd,
+                Some(HWND_TOPMOST),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+            );
+        }
+    }
+}
+
+/// Take keyboard focus for text input, then drop the topmost band so later
+/// windows (settings, dialogs) can stack above the history window again.
+pub fn activate_for_input(window: &Window) {
+    let Some(hwnd) = window_hwnd(window) else {
+        return;
+    };
+    unsafe {
+        let _ = SetActiveWindow(hwnd);
+        let _ = SetFocus(Some(hwnd));
+        if !SetForegroundWindow(hwnd).as_bool() && GetAsyncKeyState(i32::from(VK_MENU.0)) >= 0 {
+            // Preserve the foreground fallback, but never release a held Alt chord.
+            let key_down = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VK_MENU,
+                        ..Default::default()
                     },
-                };
-                let mut key_up = key_down;
-                key_up.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
-                SendInput(&[key_down, key_up], std::mem::size_of::<INPUT>() as i32);
-                let _ = SetForegroundWindow(self.hwnd);
+                },
+            };
+            let mut key_up = key_down;
+            key_up.Anonymous.ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(&[key_down, key_up], std::mem::size_of::<INPUT>() as i32);
+            let _ = SetForegroundWindow(hwnd);
+        }
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_NOTOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        );
+    }
+}
+
+/// Clicks must not activate the history window; only text input does.
+pub(crate) fn suppress_click_activation(handle: isize) -> Result<()> {
+    let hwnd = HWND(handle as *mut _);
+    anyhow::ensure!(
+        unsafe { SetWindowSubclass(hwnd, Some(click_proc), 3, 0) }.as_bool(),
+        "无法设置历史窗口消息处理"
+    );
+    Ok(())
+}
+
+unsafe extern "system" fn click_proc(
+    hwnd: HWND,
+    msg: u32,
+    w: WPARAM,
+    l: LPARAM,
+    id: usize,
+    _: usize,
+) -> LRESULT {
+    unsafe {
+        match msg {
+            WM_MOUSEACTIVATE if !super::foreground_window_is_ours() => {
+                LRESULT(MA_NOACTIVATE as isize)
             }
+            WM_NCDESTROY => {
+                let _ = RemoveWindowSubclass(hwnd, Some(click_proc), id);
+                DefSubclassProc(hwnd, msg, w, l)
+            }
+            _ => DefSubclassProc(hwnd, msg, w, l),
         }
     }
 }

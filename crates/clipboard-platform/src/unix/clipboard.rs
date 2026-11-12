@@ -138,6 +138,7 @@ impl Worker {
                 self.history
                     .native_formats_for_copy(id)?
                     .into_iter()
+                    .filter(|(name, _)| super::super::read_formats::is_restorable(name))
                     .map(|(name, data)| ClipboardContent::Other(name, data)),
             );
         }
@@ -226,6 +227,7 @@ fn restore_contents(
     contents.extend(
         extra
             .iter()
+            .filter(|format| super::super::read_formats::is_restorable(&format.name))
             .map(|format| ClipboardContent::Other(format.name.clone(), format.data.clone())),
     );
     #[cfg(target_os = "linux")]

@@ -3,6 +3,15 @@ use super::*;
 impl ClipboardView {
     pub(super) fn open_settings_window(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.close_hover_preview("settings_opening", cx);
+        // The history window floats above every app; hide it so settings is not covered.
+        let main_window = self.main_window;
+        let view = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = main_window.update(cx, |_, window, cx| {
+                view.update(cx, |this, cx| this.hide_window(window, cx))
+            });
+            cx.activate(true);
+        });
         if let Some(handle) = self.settings_window {
             if handle
                 .update(cx, |_, window, _| {

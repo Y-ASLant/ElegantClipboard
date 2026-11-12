@@ -53,3 +53,8 @@ pub fn is_window_minimized(window: &Window) -> bool {
     window_id(window)
         .is_some_and(|native| unsafe { msg_send![native as *mut AnyObject, isMiniaturized] })
 }
+
+/// The non-activating panel already takes key focus when shown.
+pub fn activate_for_input(window: &Window) {
+    window.activate_window();
+}
