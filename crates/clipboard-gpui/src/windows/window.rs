@@ -9,10 +9,11 @@ use ::windows::Win32::{
         },
         Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
         WindowsAndMessaging::{
-            GetClientRect, GetWindowRect, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible,
-            MA_NOACTIVATE, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNA, SW_SHOWNOACTIVATE,
-            SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetForegroundWindow,
-            SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WM_NCDESTROY,
+            GWL_EXSTYLE, GetClientRect, GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST,
+            HWND_TOPMOST, IsIconic, IsWindowVisible, MA_NOACTIVATE, SW_HIDE, SW_RESTORE, SW_SHOW,
+            SW_SHOWNA, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE,
+            WM_NCDESTROY, WS_EX_NOACTIVATE,
         },
     },
 };
@@ -198,9 +199,19 @@ pub fn activate_for_input(window: &Window) {
     }
 }
 
-/// Clicks must not activate the history window; only text input does.
+/// Keep the native foreground/caret on the paste target during mouse clicks.
+/// MA_NOACTIVATE alone can leave the foreground NULL before paste delivery.
+/// Explicit activation for text input still works with WS_EX_NOACTIVATE.
 pub(crate) fn suppress_click_activation(handle: isize) -> Result<()> {
     let hwnd = HWND(handle as *mut _);
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE.0 as isize;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style);
+        anyhow::ensure!(
+            GetWindowLongPtrW(hwnd, GWL_EXSTYLE) == style,
+            "无法设置历史窗口扩展样式"
+        );
+    }
     anyhow::ensure!(
         unsafe { SetWindowSubclass(hwnd, Some(click_proc), 3, 0) }.as_bool(),
         "无法设置历史窗口消息处理"
@@ -232,3 +243,6 @@ unsafe extern "system" fn click_proc(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod interaction_tests;

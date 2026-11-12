@@ -18,6 +18,18 @@ Windows 是主要验收平台，macOS 与 Linux 实现同仓构建（能力差�
 
 默认数据目录为 `%LOCALAPPDATA%\ElegantClipboard`。不自动搬迁 2.0 beta 或 1.2.10 以外版本的数据目录和开机启动项；1.2.10 的数据库和 ZIP 可导入到空的数据目录。自动测试使用临时目录、合成文本和仓库内 PNG 样本。
 
+### Windows 历史窗口焦点
+
+历史窗口使用 `WS_EX_NOACTIVATE`，配合非激活显示与 `WM_MOUSEACTIVATE` 处理，保持原应用的前台窗口和编辑光标；只有搜索等文本输入显式激活历史窗口。仅返回 `MA_NOACTIVATE` 可能在点击期间出现空前台句柄，导致受控粘贴按安全规则取消。投递阶段仍拒绝目标或剪贴板变化，不对空前台句柄放宽校验。
+
+隔离的交互式 Windows 桌面可运行原生回归测试（创建空白 Notepad 和测试窗口、移动鼠标点击，结束后关闭测试进程并恢复鼠标位置；不访问剪贴板或用户数据）：
+
+```powershell
+cargo test -p ElegantClipboard --locked history_click_preserves -- --ignored --test-threads=1
+```
+
+该测试默认忽略，避免常规测试操作当前桌面。完整验收仍需从目标应用的编辑光标唤出真实历史窗口，确认不激活，再点击文本卡片检查实际插入。
+
 ### 内容限制与保留策略
 
 - 单条文本最多 1 MiB；富文本的 HTML、RTF 原始字节与纯文本合计最多 1 MiB。
