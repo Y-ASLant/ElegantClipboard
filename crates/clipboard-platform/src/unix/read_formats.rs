@@ -62,6 +62,12 @@ const PRIMARY_FORMATS: &[&str] = &[
     "com.apple.pasteboard.promised-file-content-type",
 ];
 
+/// macOS refuses to write legacy pasteboard names such as `NSStringPboardType` or
+/// `CorePasteboardFlavorType 0x…`; only UTIs can be restored.
+pub(crate) fn is_restorable(name: &str) -> bool {
+    !cfg!(target_os = "macos") || (name.contains('.') && !name.contains(char::is_whitespace))
+}
+
 fn formats(clipboard: &ClipboardContext) -> Result<Vec<String>> {
     clipboard
         .available_formats()
@@ -124,6 +130,7 @@ pub(super) fn read_clipboard(
             if !allowed.includes(name)
                 || PRIMARY_FORMATS.contains(&name.as_str())
                 || PRIVATE_FORMATS.contains(&name.as_str())
+                || !is_restorable(name)
             {
                 continue;
             }
@@ -178,4 +185,17 @@ pub(super) fn read_current_capture(
             )
         });
     Ok((content, formats, undecidable))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::is_restorable;
+
+    #[test]
+    fn legacy_pasteboard_names_are_not_restored() {
+        assert!(!is_restorable("NSStringPboardType"));
+        assert!(!is_restorable("CorePasteboardFlavorType 0x75747874"));
+        assert!(is_restorable("public.plain-text"));
+        assert!(is_restorable("com.microsoft.ole.source"));
+    }
 }

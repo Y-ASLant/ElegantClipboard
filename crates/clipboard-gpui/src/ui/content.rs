@@ -79,6 +79,12 @@ impl ClipboardView {
             .child(
                 div()
                     .key_context("HistorySearch")
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                            this.activate_for_input(window, cx);
+                        }),
+                    )
                     .flex_none()
                     .px(px(PAGE_PADDING))
                     .pb(px(visual::SPACE_2))

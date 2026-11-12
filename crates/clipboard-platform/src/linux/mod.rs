@@ -4,6 +4,7 @@ mod drag_payload;
 mod drag_selection;
 pub mod external_drag;
 pub mod hotkey;
+pub mod key_intercept;
 pub mod outside_click;
 mod shortcut;
 pub mod source_app;

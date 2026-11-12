@@ -181,6 +181,10 @@ pub fn run(
                     focus: !cfg!(windows) && !startup.hidden,
                     show: !cfg!(windows) && !startup.hidden,
                     app_id: Some("com.aslant.ElegantClipboard".into()),
+                    // A non-activating panel floats above the target app and takes keyboard
+                    // focus without stealing activation from it.
+                    #[cfg(target_os = "macos")]
+                    kind: WindowKind::PopUp,
                     ..WindowOptions::default()
                 },
                 cx,

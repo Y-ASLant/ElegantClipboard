@@ -139,6 +139,23 @@ impl ClipboardView {
             Ok(None)
         };
         let outside_click_events = Self::outside_click_events(outside_click_receiver, window, cx);
+        #[cfg(not(target_os = "macos"))]
+        let (key_interceptor, key_intercept_events) = {
+            let (sender, receiver) = async_channel::bounded(32);
+            let interceptor = tray
+                .is_ok()
+                .then(|| native_window::window_id(window))
+                .flatten()
+                .and_then(|handle| {
+                    KeyInterceptor::start(sender, handle)
+                        .inspect_err(|error| tracing::warn!(%error, "Key forwarding unavailable"))
+                        .ok()
+                });
+            (
+                interceptor,
+                Self::key_intercept_events(receiver, window, cx),
+            )
+        };
         let outside_click_error = outside_click_monitor
             .as_ref()
             .err()
@@ -218,6 +235,12 @@ impl ClipboardView {
         {
             tracing::warn!(%error, "Could not hide main window from taskbar");
         }
+        #[cfg(windows)]
+        if let Some(hwnd) = native_window::window_id(window)
+            && let Err(error) = native_window::suppress_click_activation(hwnd)
+        {
+            tracing::warn!(%error, "Could not keep clicks from activating the main window");
+        }
         acrylic::init_window_effect(window_effect, window, cx);
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
@@ -279,6 +302,11 @@ impl ClipboardView {
             _sequence_hotkey_events: _sequence_hotkey_events_task,
             _outside_click_monitor: outside_click_monitor.ok().flatten(),
             _outside_click_events: outside_click_events,
+            #[cfg(not(target_os = "macos"))]
+            _key_interceptor: key_interceptor,
+            #[cfg(not(target_os = "macos"))]
+            _key_intercept_events: key_intercept_events,
+            typing_activation: None,
             exiting,
             history: HistoryState::default(),
             file_card_info: HashMap::new(),
