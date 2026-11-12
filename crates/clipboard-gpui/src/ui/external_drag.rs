@@ -16,7 +16,7 @@ pub(super) enum CardDrag {
 impl CardDrag {
     fn size(&self) -> gpui_kit::Size<Pixels> {
         match self {
-            Self::History(drag) => drag.size.get(),
+            Self::History(drag) => drag.size(),
             Self::Todo(drag) => drag.size.get(),
         }
     }

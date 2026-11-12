@@ -36,7 +36,7 @@ impl ClipboardView {
         !self.todos_pending
             && !self.todo_reorder_pending
             && self.todos_open
-            && visible_todos(self, cx).any(|todo| *todo == drag.snapshot.todo)
+            && visible_todos(self, cx).any(|todo| todo.id == drag.id)
     }
 
     pub(super) fn todo_row_offsets(&self, cx: &App) -> Vec<Pixels> {
