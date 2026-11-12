@@ -17,5 +17,11 @@ pub(crate) const NAVIGATION_KEYS: [&str; 11] = [
     "up", "down", "left", "right", "home", "end", "pageup", "pagedown", "enter", "delete", "escape",
 ];
 
-/// Control shortcuts forwarded without focus besides control+navigation keys.
-pub(crate) const CONTROL_LETTERS: [&str; 2] = ["a", "f"];
+/// The control shortcut forwarded without focus for `letter` (Ctrl+A, Ctrl+F).
+pub(crate) fn control_shortcut(letter: char) -> Option<&'static str> {
+    match letter.to_ascii_lowercase() {
+        'a' => Some("a"),
+        'f' => Some("f"),
+        _ => None,
+    }
+}

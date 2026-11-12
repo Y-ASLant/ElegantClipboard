@@ -1,7 +1,7 @@
 //! Low-level keyboard hook that forwards navigation keys to the history window
 //! while it is shown without activation, so the paste target keeps focus.
 pub use crate::key_intercept_types::InterceptedKey;
-use crate::key_intercept_types::{CONTROL_LETTERS, NAVIGATION_KEYS};
+use crate::key_intercept_types::{NAVIGATION_KEYS, control_shortcut};
 use anyhow::{Context, Result, anyhow};
 use async_channel::Sender;
 use std::{
@@ -73,15 +73,12 @@ fn classify(vk: u32) -> Option<InterceptedKey> {
     }
     let character = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR) } & 0x7fff;
     if control {
-        let letter = char::from_u32(character)?.to_ascii_lowercase();
-        return CONTROL_LETTERS
-            .into_iter()
-            .find(|name| name.starts_with(letter))
-            .map(|key| InterceptedKey::Shortcut {
-                key,
-                control,
-                shift,
-            });
+        let key = char::from_u32(character).and_then(control_shortcut)?;
+        return Some(InterceptedKey::Shortcut {
+            key,
+            control,
+            shift,
+        });
     }
     (character >= 0x20).then_some(InterceptedKey::Text)
 }

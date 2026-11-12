@@ -2,7 +2,7 @@
 //! while it is shown without input focus, so the paste target keeps focus.
 use super::x11::X11;
 pub use crate::key_intercept_types::InterceptedKey;
-use crate::key_intercept_types::{CONTROL_LETTERS, NAVIGATION_KEYS};
+use crate::key_intercept_types::{NAVIGATION_KEYS, control_shortcut};
 use anyhow::{Result, bail};
 use async_channel::Sender;
 use std::{
@@ -17,7 +17,9 @@ use x11rb::{
     connection::Connection,
     protocol::{
         Event,
-        xproto::{ConnectionExt as _, GrabMode, MapState, ModMask},
+        xproto::{
+            ConnectionExt as _, GrabMode, KEY_PRESS_EVENT, KEY_RELEASE_EVENT, MapState, ModMask,
+        },
         xtest::ConnectionExt as _,
     },
 };
@@ -36,35 +38,41 @@ static PENDING_TEXT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static SUSPENDED: AtomicBool = AtomicBool::new(false);
 static GRABBED: AtomicBool = AtomicBool::new(false);
 
+fn navigation_key(keysym: u32) -> Option<&'static str> {
+    if keysym == KEYPAD_ENTER {
+        return Some("enter");
+    }
+    NAVIGATION_KEYSYMS
+        .iter()
+        .position(|symbol| *symbol == keysym)
+        .map(|index| NAVIGATION_KEYS[index])
+}
+
+/// Latin-1 keysyms in the printable ASCII range equal their character code.
+fn is_printable(keysym: u32) -> bool {
+    (0x20..0x7f).contains(&keysym)
+}
+
 fn classify(keysym: u32, state: u16) -> Option<InterceptedKey> {
     let control = state & CONTROL != 0;
     let shift = state & SHIFT != 0;
-    let navigation = if keysym == KEYPAD_ENTER {
-        Some("enter")
-    } else {
-        NAVIGATION_KEYSYMS
-            .iter()
-            .position(|symbol| *symbol == keysym)
-            .map(|index| NAVIGATION_KEYS[index])
-    };
-    if let Some(key) = navigation {
+    if let Some(key) = navigation_key(keysym) {
         return Some(InterceptedKey::Shortcut {
             key,
             control,
             shift,
         });
     }
-    let character = char::from_u32(keysym).filter(|_| (0x20..0x7f).contains(&keysym))?;
+    if !is_printable(keysym) {
+        return None;
+    }
     if control {
-        let letter = character.to_ascii_lowercase();
-        return CONTROL_LETTERS
-            .into_iter()
-            .find(|name| name.starts_with(letter))
-            .map(|key| InterceptedKey::Shortcut {
-                key,
-                control,
-                shift,
-            });
+        let key = char::from_u32(keysym).and_then(control_shortcut)?;
+        return Some(InterceptedKey::Shortcut {
+            key,
+            control,
+            shift,
+        });
     }
     Some(InterceptedKey::Text)
 }
@@ -84,21 +92,15 @@ fn grab_plan(x: &X11) -> Result<Vec<(u8, u32, &'static [u16])>> {
         .enumerate()
         .filter_map(|(offset, symbols)| {
             let keysym = *symbols.first()?;
-            let modifiers: &'static [u16] =
-                if keysym == KEYPAD_ENTER || NAVIGATION_KEYSYMS.contains(&keysym) {
-                    &[0, SHIFT, CONTROL, CONTROL | SHIFT]
-                } else if (0x20..0x7f).contains(&keysym) {
-                    if CONTROL_LETTERS
-                        .iter()
-                        .any(|name| u32::from(name.as_bytes()[0]) == keysym)
-                    {
-                        &[0, SHIFT, CONTROL]
-                    } else {
-                        &[0, SHIFT]
-                    }
-                } else {
-                    return None;
-                };
+            let modifiers: &'static [u16] = if navigation_key(keysym).is_some() {
+                &[0, SHIFT, CONTROL, CONTROL | SHIFT]
+            } else if !is_printable(keysym) {
+                return None;
+            } else if char::from_u32(keysym).and_then(control_shortcut).is_some() {
+                &[0, SHIFT, CONTROL]
+            } else {
+                &[0, SHIFT]
+            };
             Some((first + offset as u8, keysym, modifiers))
         })
         .collect())
@@ -129,22 +131,17 @@ fn set_grabs(x: &X11, plan: &[(u8, u32, &'static [u16])], locks: &[u16], grab: b
     Ok(())
 }
 
-/// Whether the window is viewable while another window holds input focus.
-fn should_grab(x: &X11, window: u32) -> Result<bool> {
-    if SUSPENDED.load(Ordering::Acquire) {
-        return Ok(false);
-    }
-    let viewable = x
-        .connection
+fn is_viewable(x: &X11, window: u32) -> Result<bool> {
+    Ok(x.connection
         .get_window_attributes(window)?
         .reply()?
         .map_state
-        == MapState::VIEWABLE;
-    if !viewable {
-        return Ok(false);
-    }
+        == MapState::VIEWABLE)
+}
+
+fn focus_is_ours(x: &X11, window: u32) -> Result<bool> {
     let focus = x.connection.get_input_focus()?.reply()?.focus;
-    Ok(focus != window && x.pid(focus).map_or(true, |pid| pid != std::process::id()))
+    Ok(focus == window || x.pid(focus).is_ok_and(|pid| pid == std::process::id()))
 }
 
 /// Replay swallowed text keys after the history window has taken input focus.
@@ -161,10 +158,7 @@ pub fn replay_pending_text() -> Result<()> {
     let x = X11::connect()?;
     x.connection.xtest_get_version(2, 2)?.reply()?;
     for key in keys {
-        for kind in [
-            x11rb::protocol::xproto::KEY_PRESS_EVENT,
-            x11rb::protocol::xproto::KEY_RELEASE_EVENT,
-        ] {
+        for kind in [KEY_PRESS_EVENT, KEY_RELEASE_EVENT] {
             x.connection
                 .xtest_fake_input(kind, key, 0, x.root, 0, 0, 0)?
                 .check()?;
@@ -222,16 +216,13 @@ impl KeyInterceptor {
                             }
                             let _ = events.try_send(key);
                         }
-                        let viewable = x
-                            .connection
-                            .get_window_attributes(window)?
-                            .reply()?
-                            .map_state
-                            == MapState::VIEWABLE;
+                        let viewable = is_viewable(&x, window)?;
                         if !viewable {
                             SUSPENDED.store(false, Ordering::Release);
                         }
-                        let want = should_grab(&x, window)?;
+                        let want = viewable
+                            && !SUSPENDED.load(Ordering::Acquire)
+                            && !focus_is_ours(&x, window)?;
                         if want != grabbed {
                             set_grabs(&x, &plan, &locks, want)?;
                             grabbed = want;

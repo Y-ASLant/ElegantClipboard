@@ -142,15 +142,15 @@ impl ClipboardView {
         #[cfg(not(target_os = "macos"))]
         let (key_interceptor, key_intercept_events) = {
             let (sender, receiver) = async_channel::bounded(32);
-            let interceptor = tray
-                .is_ok()
-                .then(|| native_window::window_id(window))
-                .flatten()
-                .and_then(|handle| {
+            let interceptor = if tray.is_ok() {
+                native_window::window_id(window).and_then(|handle| {
                     KeyInterceptor::start(sender, handle)
                         .inspect_err(|error| tracing::warn!(%error, "Key forwarding unavailable"))
                         .ok()
-                });
+                })
+            } else {
+                None
+            };
             (
                 interceptor,
                 Self::key_intercept_events(receiver, window, cx),

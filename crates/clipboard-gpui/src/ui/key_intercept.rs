@@ -81,17 +81,22 @@ impl ClipboardView {
                     break;
                 }
             }
-            #[cfg(not(target_os = "macos"))]
-            if active {
-                if let Err(error) = key_intercept::replay_pending_text() {
-                    tracing::warn!(%error, "Could not replay typed keys");
-                }
-            } else {
-                key_intercept::discard_pending_text();
-            }
-            #[cfg(target_os = "macos")]
-            let _ = active;
+            finish_typed_keys(active);
             let _ = view.update(cx, |this, _| this.typing_activation = None);
         }));
     }
 }
+
+/// Replay keys typed before activation, or drop them if focus never arrived.
+#[cfg(not(target_os = "macos"))]
+fn finish_typed_keys(active: bool) {
+    if !active {
+        key_intercept::discard_pending_text();
+    } else if let Err(error) = key_intercept::replay_pending_text() {
+        tracing::warn!(%error, "Could not replay typed keys");
+    }
+}
+
+/// The macOS panel receives typed keys directly; nothing is queued.
+#[cfg(target_os = "macos")]
+fn finish_typed_keys(_: bool) {}
