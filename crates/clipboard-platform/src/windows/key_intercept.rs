@@ -144,13 +144,13 @@ pub fn replay_pending_text() -> Result<()> {
             } else {
                 KEYBD_EVENT_FLAGS(0)
             };
-            [flags, flags | KEYEVENTF_KEYUP].map(|dwFlags| INPUT {
+            [flags, flags | KEYEVENTF_KEYUP].map(|key_flags| INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: INPUT_0 {
                     ki: KEYBDINPUT {
                         wVk: VIRTUAL_KEY(vk),
                         wScan: scan,
-                        dwFlags,
+                        dwFlags: key_flags,
                         ..Default::default()
                     },
                 },
