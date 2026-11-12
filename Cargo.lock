@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ElegantClipboard"
-version = "2.0.0-beta.24"
+version = "2.0.0-beta.25"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "clipboard-core"
-version = "2.0.0-beta.24"
+version = "2.0.0-beta.25"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "clipboard-platform"
-version = "2.0.0-beta.24"
+version = "2.0.0-beta.25"
 dependencies = [
  "anyhow",
  "async-channel",
