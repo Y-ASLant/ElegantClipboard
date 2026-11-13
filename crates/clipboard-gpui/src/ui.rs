@@ -123,7 +123,7 @@ use clipboard_core::{
         MAX_HOVER_DELAY_MS, MAX_HOVER_ZOOM_STEP, MAX_WINDOW_EFFECT_OPACITY, MIN_HOVER_DELAY_MS,
         MIN_HOVER_ZOOM_STEP, MIN_WINDOW_EFFECT_OPACITY, MonitorTypesPreference, PasteDeliveryMode,
         PasteKeyPreference, PasteShortcutConfig, SoundTiming, SourceAppDisplay, ThemeColor,
-        ThemePreference, TimeFormat, TodoDensity, TodoPreference, WindowEffect,
+        ThemePreference, TimeFormat, TodoDensity, TodoPreference, TodoTabPosition, WindowEffect,
         WindowEffectPreference, WindowPositionPreference, WindowSizePreference,
     },
 };

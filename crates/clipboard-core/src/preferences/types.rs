@@ -269,9 +269,19 @@ pub enum TodoDensity {
     Spacious,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoTabPosition {
+    AfterFavorites,
+    #[default]
+    Last,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TodoPreference {
+    pub enabled: bool,
+    pub tab_position: TodoTabPosition,
     pub density: TodoDensity,
     pub show_created: bool,
     pub show_edited: bool,
@@ -282,6 +292,8 @@ pub struct TodoPreference {
 impl Default for TodoPreference {
     fn default() -> Self {
         Self {
+            enabled: true,
+            tab_position: TodoTabPosition::Last,
             density: TodoDensity::FollowDisplay,
             show_created: true,
             show_edited: true,

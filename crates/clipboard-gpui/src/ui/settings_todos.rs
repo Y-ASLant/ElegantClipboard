@@ -5,6 +5,52 @@ use super::settings_common::{
 use super::*;
 
 impl SettingsWindowView {
+    pub(super) fn settings_todo_tab_content(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(owner_state) = owner_state(&self.owner, cx) else {
+            return div().into_any_element();
+        };
+        let language = owner_state.language;
+        let preference = owner_state.todo_preference.value;
+        let pending = owner_state.todo_preference.pending;
+        settings_stack()
+            .child(pref_switch(
+                cx,
+                "todo-enabled",
+                tr(language, "显示待办", "Show to-dos"),
+                preference.enabled,
+                pending,
+                &self.owner,
+                |owner| owner.todo_preference.value,
+                |next, checked| next.enabled = checked,
+                ClipboardView::save_todo_preference,
+            ))
+            .child(
+                settings_field(tr(language, "标签位置", "Tab position")).child(choice_tabs(
+                    "todo-tab-position",
+                    &self.owner,
+                    [TodoTabPosition::Last, TodoTabPosition::AfterFavorites],
+                    [
+                        tr(language, "末尾", "Last"),
+                        tr(language, "收藏之后", "After favorites"),
+                    ],
+                    preference.tab_position,
+                    pending || !preference.enabled,
+                    |owner| owner.todo_preference.value.tab_position,
+                    |owner, tab_position, cx| {
+                        owner.save_todo_preference(
+                            TodoPreference {
+                                tab_position,
+                                ..owner.todo_preference.value
+                            },
+                            cx,
+                        );
+                    },
+                    cx,
+                )),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn settings_todo_list_content(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(owner_state) = owner_state(&self.owner, cx) else {
             return div().into_any_element();

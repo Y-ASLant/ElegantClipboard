@@ -49,23 +49,11 @@ pub(super) enum ToolbarTab {
 }
 
 impl ClipboardView {
-    /// 分类标签可见时的工具栏顺序。待办固定插在收藏槽位之后，不受分类显隐开关影响。
     pub(super) fn toolbar_tabs(&self) -> Vec<ToolbarTab> {
-        let mut tabs = Vec::new();
-        for (index, (visible, (filter, ..))) in
-            category_tab_flags(&self.display.value.category_tabs)
-                .into_iter()
-                .zip(CATEGORY_TAB_SPECS)
-                .enumerate()
-        {
-            if visible {
-                tabs.push(ToolbarTab::Category(*filter));
-            }
-            if index == 1 {
-                tabs.push(ToolbarTab::Todos);
-            }
-        }
-        tabs
+        visible_toolbar_tabs(
+            &self.display.value.category_tabs,
+            self.todo_preference.value,
+        )
     }
 
     pub(super) fn toolbar_tab_index(&self) -> usize {
@@ -115,6 +103,78 @@ impl ClipboardView {
             ContentCategory::Image => tabs.image,
             ContentCategory::Url => tabs.url,
             ContentCategory::Other => tabs.other,
+        }
+    }
+}
+
+fn visible_toolbar_tabs(
+    categories: &CategoryTabVisibility,
+    todo: TodoPreference,
+) -> Vec<ToolbarTab> {
+    let mut tabs = Vec::new();
+    for (index, (visible, (filter, ..))) in category_tab_flags(categories)
+        .into_iter()
+        .zip(CATEGORY_TAB_SPECS)
+        .enumerate()
+    {
+        if visible {
+            tabs.push(ToolbarTab::Category(*filter));
+        }
+        if index == 1 && todo.enabled && todo.tab_position == TodoTabPosition::AfterFavorites {
+            tabs.push(ToolbarTab::Todos);
+        }
+    }
+    if todo.enabled && todo.tab_position == TodoTabPosition::Last {
+        tabs.push(ToolbarTab::Todos);
+    }
+    tabs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ToolbarTab, visible_toolbar_tabs};
+    use clipboard_core::ContentCategory;
+    use clipboard_core::preferences::{CategoryTabVisibility, TodoPreference, TodoTabPosition};
+
+    #[test]
+    fn todo_visibility_and_position_respect_hidden_categories() {
+        let categories = CategoryTabVisibility {
+            all: true,
+            favorites: false,
+            text: false,
+            image: true,
+            url: false,
+            other: true,
+        };
+        let all = ToolbarTab::Category(Some(ContentCategory::All));
+        let image = ToolbarTab::Category(Some(ContentCategory::Image));
+        let other = ToolbarTab::Category(Some(ContentCategory::Other));
+        assert_eq!(
+            visible_toolbar_tabs(&categories, TodoPreference::default()),
+            vec![all, image, other, ToolbarTab::Todos]
+        );
+        assert_eq!(
+            visible_toolbar_tabs(
+                &categories,
+                TodoPreference {
+                    tab_position: TodoTabPosition::AfterFavorites,
+                    ..Default::default()
+                }
+            ),
+            vec![all, ToolbarTab::Todos, image, other]
+        );
+        for tab_position in [TodoTabPosition::AfterFavorites, TodoTabPosition::Last] {
+            assert_eq!(
+                visible_toolbar_tabs(
+                    &categories,
+                    TodoPreference {
+                        enabled: false,
+                        tab_position,
+                        ..Default::default()
+                    }
+                ),
+                vec![all, image, other]
+            );
         }
     }
 }
