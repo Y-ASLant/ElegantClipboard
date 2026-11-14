@@ -78,15 +78,27 @@ pub fn pointer_outside_source(hwnd: isize, pointer: DragPointerState) -> Result<
     Ok(!contains(source_rect(hwnd)?, pointer))
 }
 
+thread_local! {
+    static WINDOW_PROBE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// True while `pointer_targets_window` runs `WindowFromPoint`, which sends
+/// `WM_NCHITTEST` synchronously to this thread's windows.
+pub fn window_probe_active() -> bool {
+    WINDOW_PROBE.get()
+}
+
 /// Whether the deepest window under `pointer` belongs to `hwnd` (itself or a child).
 pub fn pointer_targets_window(hwnd: isize, pointer: DragPointerState) -> bool {
     let target = HWND(hwnd as *mut _);
+    WINDOW_PROBE.set(true);
     let mut current = unsafe {
         WindowFromPoint(POINT {
             x: pointer.x,
             y: pointer.y,
         })
     };
+    WINDOW_PROBE.set(false);
     while !current.0.is_null() {
         if current == target {
             return true;
