@@ -171,10 +171,15 @@ impl ClipboardView {
                 apply_theme(theme, window, cx);
                 acrylic::init_window_effect(window_effect, window, cx);
                 window.set_window_title(editor_title(language, adding_todo));
-                window.on_window_should_close(cx, move |_, cx| {
-                    close_owner
+                window.on_window_should_close(cx, move |window, cx| {
+                    if close_owner
                         .update(cx, |owner, cx| owner.close_content_editor_from_window(cx))
                         .unwrap_or(true)
+                    {
+                        // Let GPUI destroy the HWND; a system close leaves it to drop a dead handle.
+                        window.remove_window();
+                    }
+                    false
                 });
                 cx.new(|cx| ContentEditorWindow::new(editor_owner, window, cx))
             });

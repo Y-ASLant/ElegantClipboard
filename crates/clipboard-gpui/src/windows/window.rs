@@ -9,11 +9,11 @@ use ::windows::Win32::{
         },
         Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
         WindowsAndMessaging::{
-            GWL_EXSTYLE, GetClientRect, GetWindowLongPtrW, GetWindowRect, HWND_NOTOPMOST,
+            GWL_EXSTYLE, GetClientRect, GetWindowLongPtrW, GetWindowRect, HTCLIENT, HWND_NOTOPMOST,
             HWND_TOPMOST, IsIconic, IsWindowVisible, MA_NOACTIVATE, SW_HIDE, SW_RESTORE, SW_SHOW,
             SW_SHOWNA, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
             SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE,
-            WM_NCDESTROY, WS_EX_NOACTIVATE,
+            WM_NCDESTROY, WM_NCHITTEST, WS_EX_NOACTIVATE,
         },
     },
 };
@@ -231,6 +231,11 @@ unsafe extern "system" fn click_proc(
         match msg {
             WM_MOUSEACTIVATE if !super::foreground_window_is_ours() => {
                 LRESULT(MA_NOACTIVATE as isize)
+            }
+            // GPUI's hit test needs the App borrow the probing caller already holds.
+            // Any opaque answer gives WindowFromPoint the same result.
+            WM_NCHITTEST if clipboard_platform::external_drag::window_probe_active() => {
+                LRESULT(HTCLIENT as isize)
             }
             WM_NCDESTROY => {
                 let _ = RemoveWindowSubclass(hwnd, Some(click_proc), id);

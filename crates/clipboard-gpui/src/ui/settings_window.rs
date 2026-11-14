@@ -63,12 +63,14 @@ impl ClipboardView {
                 apply_theme(theme, window, cx);
                 acrylic::init_window_effect(window_effect, window, cx);
                 window.set_window_title(tr(language, "设置", "Settings"));
-                window.on_window_should_close(cx, move |_, cx| {
+                window.on_window_should_close(cx, move |window, cx| {
                     let _ = close_owner.update(cx, |owner, cx| {
                         owner.settings_window = None;
                         cx.notify();
                     });
-                    true
+                    // Let GPUI destroy the HWND; a system close leaves it to drop a dead handle.
+                    window.remove_window();
+                    false
                 });
                 cx.new(|cx| SettingsWindowView::new(settings_owner.clone(), page, window, cx))
             });
