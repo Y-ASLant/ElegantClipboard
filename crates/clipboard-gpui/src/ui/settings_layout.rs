@@ -99,6 +99,14 @@ const SECTIONS: &[Section] = &[
     },
     Section {
         page: SettingsPage::Todos,
+        chinese: "主页入口",
+        english: "Home tab",
+        description_chinese: "隐藏待办入口不会删除已有待办。",
+        description_english: "Hiding the to-do tab does not delete existing to-dos.",
+        content: SettingsWindowView::settings_todo_tab_content,
+    },
+    Section {
+        page: SettingsPage::Todos,
         chinese: "列表",
         english: "List",
         description_chinese: "卡片外观与历史列表相同",

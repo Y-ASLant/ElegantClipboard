@@ -346,12 +346,22 @@ impl ClipboardView {
     pub(super) fn apply_todo_preference_saved(
         &mut self,
         result: Result<TodoPreference, String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> bool {
         self.acknowledge_save(
             result,
             |this| &mut this.todo_preference,
             ("保存待办设置失败", "Failed to save to-do settings"),
         );
+        if !self.todo_preference.value.enabled && self.todos_open {
+            let filter = if self.history.favorite_only() {
+                None
+            } else {
+                Some(self.history.category())
+            };
+            self.select_category(filter, window, cx);
+        }
         true
     }
 

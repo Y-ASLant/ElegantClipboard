@@ -37,7 +37,8 @@ impl ClipboardView {
     }
 
     pub(super) fn open_todos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.todos_open
+        if !self.todo_preference.value.enabled
+            || self.todos_open
             || self.group_delete_pending
             || self.clear_pending
             || self.group_reorder_pending

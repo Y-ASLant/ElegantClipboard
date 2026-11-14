@@ -9,8 +9,7 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
-        let category_tab_count =
-            (self.display.value.category_tabs.enabled_count() + 1).max(1) as f32;
+        let category_tab_count = self.toolbar_tabs().len().max(1) as f32;
         let group_width = visual::group_select_width(
             f32::from(window.viewport_size().width),
             self.longest_group_label(window, cx),
@@ -187,7 +186,10 @@ impl ClipboardView {
                                     ),
                                 )
                             })
-                            .when(!self.display.value.show_category_filter, |row| {
+                            .when(
+                                !self.display.value.show_category_filter
+                                    && self.todo_preference.value.enabled,
+                                |row| {
                                 row.child(
                                     Button::new("open-todos")
                                         .h(px(visual::CONTROL_HEIGHT))
@@ -207,7 +209,8 @@ impl ClipboardView {
                                             }
                                         })),
                                 )
-                            })
+                                },
+                            )
                             .child(
                                 div()
                                     .w(px(group_width))

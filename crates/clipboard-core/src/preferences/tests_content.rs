@@ -243,6 +243,8 @@ fn todo_preferences_survive_restart_and_recover_invalid_values() -> Result<()> {
     let preferences = Preferences::new(&db);
     assert_eq!(preferences.todo_preference()?, TodoPreference::default());
     let todo = TodoPreference {
+        enabled: false,
+        tab_position: TodoTabPosition::AfterFavorites,
         density: TodoDensity::Spacious,
         show_created: false,
         show_edited: false,
@@ -264,6 +266,29 @@ fn todo_preferences_survive_restart_and_recover_invalid_values() -> Result<()> {
     );
     SettingsRepository::new(&db).set(TODO_KEY, "invalid")?;
     assert_eq!(preferences.todo_preference()?, TodoPreference::default());
+    Ok(())
+}
+
+#[test]
+fn old_todo_preferences_keep_customizations_when_tab_options_are_missing() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let db = Database::new(directory.path().join("clipboard.db"))?;
+    SettingsRepository::new(&db).set(
+        TODO_KEY,
+        r#"{"density":"compact","show_created":false,"show_edited":true,"show_completed":false,"toast":true}"#,
+    )?;
+    assert_eq!(
+        Preferences::new(&db).todo_preference()?,
+        TodoPreference {
+            enabled: true,
+            tab_position: TodoTabPosition::Last,
+            density: TodoDensity::Compact,
+            show_created: false,
+            show_edited: true,
+            show_completed: false,
+            toast: true,
+        }
+    );
     Ok(())
 }
 
