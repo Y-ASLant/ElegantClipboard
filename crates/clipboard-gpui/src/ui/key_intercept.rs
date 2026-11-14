@@ -15,11 +15,23 @@ impl ClipboardView {
         let main_window = window.window_handle();
         cx.spawn_in(window, async move |view, cx| {
             while let Ok(key) = receiver.recv().await {
-                if update_clipboard_window(&view, main_window, cx, |this, window, cx| {
-                    this.handle_intercepted_key(key, window, cx);
-                })
-                .is_err()
-                {
+                let delivered = match key {
+                    // Bound actions update ClipboardView themselves, so the view must
+                    // not be leased while the keystroke is dispatched.
+                    InterceptedKey::Shortcut {
+                        key,
+                        control,
+                        shift,
+                    } => cx.update(|window, cx| {
+                        window.dispatch_keystroke(shortcut_keystroke(key, control, shift), cx);
+                    }),
+                    InterceptedKey::Text => {
+                        update_clipboard_window(&view, main_window, cx, |this, window, cx| {
+                            this.handle_typed_key(window, cx);
+                        })
+                    }
+                };
+                if delivered.is_err() {
                     return;
                 }
             }
@@ -27,40 +39,15 @@ impl ClipboardView {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn handle_intercepted_key(
-        &mut self,
-        key: InterceptedKey,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        match key {
-            InterceptedKey::Shortcut {
-                key,
-                control,
-                shift,
-            } => {
-                let keystroke = gpui_kit::Keystroke {
-                    modifiers: gpui_kit::Modifiers {
-                        control,
-                        shift,
-                        ..Default::default()
-                    },
-                    key: key.into(),
-                    key_char: None,
-                };
-                window.dispatch_keystroke(keystroke, cx);
-            }
-            InterceptedKey::Text => {
-                if self.typing_activation.is_some() {
-                    return;
-                }
-                // Typing from the list searches; a focused dialog or editor input keeps focus.
-                if self.list_focus.is_focused(window) && !self.onboarding_visible() {
-                    self.search.update(cx, |input, cx| input.focus(window, cx));
-                }
-                self.activate_for_input(window, cx);
-            }
+    fn handle_typed_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.typing_activation.is_some() {
+            return;
         }
+        // Typing from the list searches; a focused dialog or editor input keeps focus.
+        if self.list_focus.is_focused(window) && !self.onboarding_visible() {
+            self.search.update(cx, |input, cx| input.focus(window, cx));
+        }
+        self.activate_for_input(window, cx);
     }
 
     /// Text input needs real focus for the IME; navigation works without it.
@@ -85,6 +72,19 @@ impl ClipboardView {
             finish_typed_keys(active);
             let _ = view.update(cx, |this, _| this.typing_activation = None);
         }));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn shortcut_keystroke(key: &'static str, control: bool, shift: bool) -> gpui_kit::Keystroke {
+    gpui_kit::Keystroke {
+        modifiers: gpui_kit::Modifiers {
+            control,
+            shift,
+            ..Default::default()
+        },
+        key: key.into(),
+        key_char: None,
     }
 }
 
