@@ -6,7 +6,7 @@ use windows::Win32::{
     Graphics::{
         Dwm::{
             DWMNCRP_DISABLED, DWMWA_NCRENDERING_POLICY, DWMWA_WINDOW_CORNER_PREFERENCE,
-            DWMWCP_DONOTROUND, DwmSetWindowAttribute,
+            DWMWCP_DONOTROUND, DWMWCP_ROUND, DwmSetWindowAttribute,
         },
         Gdi::{
             ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
@@ -162,6 +162,14 @@ pub(crate) fn hide_from_taskbar(handle: isize) -> Result<()> {
         let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
         let ex = (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+        // Tool windows otherwise get the small corner radius on Windows 11.
+        // Older Windows ignores this hint.
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &DWMWCP_ROUND as *const _ as *const _,
+            size_of_val(&DWMWCP_ROUND) as u32,
+        );
         SetWindowPos(
             hwnd,
             None,
