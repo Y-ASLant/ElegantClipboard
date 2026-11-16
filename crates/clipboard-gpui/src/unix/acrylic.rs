@@ -31,3 +31,5 @@ pub fn apply_to_open_windows(effect: WindowEffect, window: &mut Window, cx: &mut
         }
     }
 }
+
+pub fn suppress_system_caption(_window: &Window) {}

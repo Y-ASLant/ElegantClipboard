@@ -1,7 +1,7 @@
 //! Windows 系统背板：亚克力（Acrylic）与云母（Mica）。
 //!
 //! 显式 DWM 系统背板覆盖整个窗口；保留缩放边框，不接管 WM_NCCALCSIZE，也不修改系统圆角策略。
-//! 材质开启时去掉标题栏样式，让 DWM 不再绘制系统关闭钮；不透明时把样式加回。
+//! 主窗口的系统标题栏样式由 `suppress_system_caption` 单独去掉，与材质无关；设置/编辑窗口保留 Kit TitleBar。
 //! 客户区由 GPUI 透明交换链与应用外壳染色共同绘制。
 //!
 //! 此模块只配置原生背板；组件表面由 design_system 按材质状态统一投影。
@@ -114,9 +114,8 @@ fn backdrop(effect: WindowEffect) -> DWM_SYSTEMBACKDROP_TYPE {
     }
 }
 
-/// Explicit backdrop types cover the whole window without extending the native caption.
-/// Caption-button styles are removed only while a material is on, so the transparent
-/// client area cannot reveal the system close button. `WS_THICKFRAME` stays for resize and shadow.
+/// Explicit backdrop types cover the whole window without changing frame chrome.
+/// Main-window caption stripping lives in `suppress_system_caption`.
 fn set_dwm_attributes(hwnd: HWND, effect: WindowEffect) -> ::windows::core::Result<()> {
     let enabled = effect != WindowEffect::Opaque;
     let use_host_backdrop_brush = BOOL::from(enabled);
@@ -125,7 +124,6 @@ fn set_dwm_attributes(hwnd: HWND, effect: WindowEffect) -> ::windows::core::Resu
     unsafe {
         set_attribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, &use_host_backdrop_brush)?;
         set_attribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop_type)?;
-        set_caption_buttons(hwnd, !enabled)?;
     }
     tracing::debug!(
         ?effect,
@@ -134,7 +132,18 @@ fn set_dwm_attributes(hwnd: HWND, effect: WindowEffect) -> ::windows::core::Resu
     Ok(())
 }
 
-fn set_caption_buttons(hwnd: HWND, visible: bool) -> ::windows::core::Result<()> {
+/// Main clipboard window only: never show system caption/min/max/close.
+/// Keeps `WS_THICKFRAME` for edge resize and DWM shadow. Settings/editor keep Kit TitleBar.
+pub(crate) fn suppress_system_caption(window: &Window) {
+    let Some(hwnd) = super::window::window_hwnd(window) else {
+        return;
+    };
+    if let Err(error) = suppress_system_caption_hwnd(hwnd) {
+        tracing::warn!(%error, "failed to suppress main window system caption");
+    }
+}
+
+fn suppress_system_caption_hwnd(hwnd: HWND) -> ::windows::core::Result<()> {
     use ::windows::Win32::UI::Controls::{
         SetWindowThemeAttribute, WTA_NONCLIENT, WTA_OPTIONS, WTNCA_NODRAWCAPTION, WTNCA_NODRAWICON,
         WTNCA_NOSYSMENU,
@@ -147,16 +156,12 @@ fn set_caption_buttons(hwnd: HWND, visible: bool) -> ::windows::core::Result<()>
     let buttons = (WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) as isize;
     let mask = WTNCA_NODRAWCAPTION | WTNCA_NODRAWICON | WTNCA_NOSYSMENU;
     let options = WTA_OPTIONS {
-        dwFlags: if visible { 0 } else { mask },
+        dwFlags: mask,
         dwMask: mask,
     };
     unsafe {
         let current = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        let style = if visible {
-            current | buttons
-        } else {
-            current & !buttons
-        };
+        let style = current & !buttons;
         if style != current {
             SetWindowLongPtrW(hwnd, GWL_STYLE, style);
             if GetWindowLongPtrW(hwnd, GWL_STYLE) != style {

@@ -242,6 +242,7 @@ impl ClipboardView {
             tracing::warn!(%error, "Could not keep clicks from activating the main window");
         }
         acrylic::init_window_effect(window_effect, window, cx);
+        acrylic::suppress_system_caption(window);
         apply_theme(theme, window, cx);
         let appearance = cx.observe_window_appearance(window, |this, window, cx| {
             if this.theme == ThemePreference::System {

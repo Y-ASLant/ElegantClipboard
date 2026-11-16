@@ -427,6 +427,8 @@ impl ClipboardView {
                     if material_changed {
                         self.close_hover_preview("window_material_changed", cx);
                         acrylic::apply_to_open_windows(preference.effect, window, cx);
+                        // Appearance changes can restore GPUI frame chrome; main stays frameless.
+                        acrylic::suppress_system_caption(window);
                     }
                     cx.refresh_windows();
                 }
