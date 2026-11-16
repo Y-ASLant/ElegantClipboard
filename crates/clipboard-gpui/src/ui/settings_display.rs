@@ -32,85 +32,85 @@ impl SettingsWindowView {
                 settings_columns()
                     .child(
                         settings_column_field(tr(language, "语言", "Language")).child(choice_tabs(
-                    "settings-window-language",
-                    &self.owner,
-                    [LanguagePreference::Chinese, LanguagePreference::English],
-                    ["简体中文", "English"],
-                    language,
-                    language_pending,
-                    |owner| owner.language,
-                    |owner, preference, cx| {
-                        if owner.send(Command::SetLanguage(preference), cx) {
-                            owner.language_pending = true;
-                            cx.notify();
-                        }
-                    },
-                    cx,
-                )),
-            )
-            .child(
-                settings_column_field(tr(language, "主题", "Theme")).child(choice_tabs(
-                    "settings-window-theme",
-                    &self.owner,
-                    [
-                        ThemePreference::System,
-                        ThemePreference::Light,
-                        ThemePreference::Dark,
-                    ],
-                    [
-                        tr(language, "跟随系统", "System"),
-                        tr(language, "浅色", "Light"),
-                        tr(language, "深色", "Dark"),
-                    ],
-                    theme,
-                    theme_pending,
-                    |owner| owner.theme,
-                    |owner, preference, cx| {
-                        if owner.send(Command::SetTheme(preference), cx) {
-                            owner.theme_pending = true;
-                            cx.notify();
-                        }
-                    },
-                    cx,
-                )),
-            )
-            .child(
-                settings_column_field_help(
-                    tr(language, "主题色", "Theme color"),
-                    tr(
-                        language,
-                        "主按钮、链接和悬停连线使用的颜色",
-                        "Color used by primary buttons, links, and the hover connector",
+                            "settings-window-language",
+                            &self.owner,
+                            [LanguagePreference::Chinese, LanguagePreference::English],
+                            ["简体中文", "English"],
+                            language,
+                            language_pending,
+                            |owner| owner.language,
+                            |owner, preference, cx| {
+                                if owner.send(Command::SetLanguage(preference), cx) {
+                                    owner.language_pending = true;
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        )),
+                    )
+                    .child(
+                        settings_column_field(tr(language, "主题", "Theme")).child(choice_tabs(
+                            "settings-window-theme",
+                            &self.owner,
+                            [
+                                ThemePreference::System,
+                                ThemePreference::Light,
+                                ThemePreference::Dark,
+                            ],
+                            [
+                                tr(language, "跟随系统", "System"),
+                                tr(language, "浅色", "Light"),
+                                tr(language, "深色", "Dark"),
+                            ],
+                            theme,
+                            theme_pending,
+                            |owner| owner.theme,
+                            |owner, preference, cx| {
+                                if owner.send(Command::SetTheme(preference), cx) {
+                                    owner.theme_pending = true;
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        )),
+                    )
+                    .child(
+                        settings_column_field_help(
+                            tr(language, "主题色", "Theme color"),
+                            tr(
+                                language,
+                                "主按钮、链接和悬停连线使用的颜色",
+                                "Color used by primary buttons, links, and the hover connector",
+                            ),
+                            "theme-color-help",
+                        )
+                        .child(choice_tabs(
+                            "settings-theme-color",
+                            &self.owner,
+                            [
+                                ThemeColor::VibrantOrange,
+                                ThemeColor::Cyan,
+                                ThemeColor::GoogleBlue,
+                                ThemeColor::Rouge,
+                            ],
+                            [
+                                tr(language, "赭石", "Ochre"),
+                                tr(language, "鸭青", "Mallard"),
+                                tr(language, "群青", "Ultramarine"),
+                                tr(language, "胭脂", "Rouge"),
+                            ],
+                            theme_color,
+                            theme_color_pending,
+                            |owner| owner.theme_color,
+                            |owner, preference, cx| {
+                                if owner.send(Command::SetThemeColor(preference), cx) {
+                                    owner.theme_color_pending = true;
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        )),
                     ),
-                    "theme-color-help",
-                )
-                    .child(choice_tabs(
-                        "settings-theme-color",
-                        &self.owner,
-                        [
-                            ThemeColor::VibrantOrange,
-                            ThemeColor::Cyan,
-                            ThemeColor::GoogleBlue,
-                            ThemeColor::Rouge,
-                        ],
-                        [
-                            tr(language, "赭石", "Ochre"),
-                            tr(language, "鸭青", "Mallard"),
-                            tr(language, "群青", "Ultramarine"),
-                            tr(language, "胭脂", "Rouge"),
-                        ],
-                        theme_color,
-                        theme_color_pending,
-                        |owner| owner.theme_color,
-                        |owner, preference, cx| {
-                            if owner.send(Command::SetThemeColor(preference), cx) {
-                                owner.theme_color_pending = true;
-                                cx.notify();
-                            }
-                        },
-                        cx,
-                    )),
-            )
             )
             .child(
                 settings_columns()

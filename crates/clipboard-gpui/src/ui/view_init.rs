@@ -267,6 +267,11 @@ impl ClipboardView {
         Self::schedule_feedback(cx);
         cx.on_release(|this, cx| {
             this.suspend_onboarding(cx);
+            if let Some(preview) = this.drag_preview_window.take() {
+                cx.defer(move |cx| {
+                    let _ = preview.update(cx, |_, window, _| window.remove_window());
+                });
+            }
             for image in this.thumbnails.drain_images() {
                 cx.drop_image(image, None);
             }

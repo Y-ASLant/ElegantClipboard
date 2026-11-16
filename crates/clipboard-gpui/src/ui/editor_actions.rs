@@ -50,6 +50,9 @@ impl ClipboardView {
             }
             Err(error) => {
                 self.editor_error = Some(error.clone());
+                if self.editor_window.is_none() {
+                    self.close_editor(window, cx);
+                }
                 self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "保存编辑失败", "Failed to save changes")
@@ -183,7 +186,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.editor.id.is_some()
+        if self.todo_editor_unavailable()
             || window.has_active_dialog(cx)
             || self.batch_pending
             || self.history.loading

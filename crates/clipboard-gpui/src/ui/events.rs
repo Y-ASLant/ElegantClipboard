@@ -331,6 +331,12 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let closed_editor_failed = self.editor_window.is_none()
+            && match kind {
+                FailureKind::EditText { .. } => self.editor_save_pending,
+                FailureKind::Other => self.todo_edit_saving,
+                _ => false,
+            };
         let todo_command_failed = self.todo_edit_saving || self.todos_pending;
         self.todos_pending = false;
         if matches!(kind, FailureKind::Other) && todo_command_failed {
@@ -414,6 +420,9 @@ impl ClipboardView {
                 window.refresh();
             }
             FailureKind::Other | FailureKind::SaveAs(_) => {}
+        }
+        if closed_editor_failed {
+            self.close_editor(window, cx);
         }
         self.set_feedback_message(message);
         self.is_error = true;

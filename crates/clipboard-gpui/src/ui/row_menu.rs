@@ -210,6 +210,7 @@ impl ClipboardView {
         let can_paste = self.paste_state.target().is_some() && self._tray.is_some();
         let paste_pending = self.paste_state.pending();
         let save_as_pending = self.save_as_pending.is_some();
+        let editor_unavailable = self.todo_editor_unavailable();
         let group_move_disabled = self.group_move_disabled();
         if batch_mode {
             row.into_any_element()
@@ -371,7 +372,7 @@ impl ClipboardView {
                             .when(text_like, |menu| {
                                 menu.item(history_menu_item(
                                     tr(language, "编辑", "Edit"),
-                                    false,
+                                    editor_unavailable,
                                     entity.clone(),
                                     id,
                                     HistoryMenuAction::Edit,
@@ -379,7 +380,7 @@ impl ClipboardView {
                             })
                             .item(history_menu_item(
                                 tr(language, "编辑备注", "Edit note"),
-                                false,
+                                editor_unavailable,
                                 entity.clone(),
                                 id,
                                 HistoryMenuAction::EditNote,

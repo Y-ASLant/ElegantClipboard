@@ -327,7 +327,7 @@ impl ClipboardView {
                 if this.external_drag.as_ref().is_some_and(|session| session.token != token) { return false; }
                 if this.external_drag.is_some() { this.finish_external_drag(cx); }
                 true
-            }).unwrap_or(true);
+            }).unwrap_or(false);
             if may_hide { let _ = native::hide_drag_preview(preview_hwnd); }
         }).detach();
         true
