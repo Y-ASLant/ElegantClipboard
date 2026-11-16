@@ -96,7 +96,7 @@ impl SettingsWindowView {
                         [
                             tr(language, "活力橙", "Vibrant orange"),
                             tr(language, "鸭青", "Mallard"),
-                            tr(language, "谷歌蓝", "Google blue"),
+                            tr(language, "群青", "Ultramarine"),
                             tr(language, "胭脂", "Rouge"),
                         ],
                         theme_color,

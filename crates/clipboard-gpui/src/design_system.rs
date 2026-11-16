@@ -236,10 +236,12 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     };
     let palette = accent_palette(accent);
     let primary = color(palette.primary);
+    // Light text reuses the button hover step. Primary itself is too light for
+    // text on the frosted selection wash (orange 4.18:1, 鸭青 4.06:1).
     let primary_text = color(if dark {
         palette.text_dark
     } else {
-        palette.text_light
+        palette.hover
     });
     let accent_subtle = color(if dark {
         palette.subtle_dark
@@ -355,9 +357,9 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     colors.drop_target = selection_surface;
     colors.link = primary_text;
     colors.link_hover = color(if dark {
-        palette.link_hover_dark
+        palette.text_dark
     } else {
-        palette.link_hover_light
+        palette.active
     });
     colors.link_active = primary_text;
     colors.description_list_label = tint(subtle, ink, 0.16);
@@ -422,15 +424,12 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
 
 struct AccentPalette {
     primary: u32,
-    text_light: u32,
     text_dark: u32,
     hover: u32,
     active: u32,
     subtle_light: u32,
     subtle_dark: u32,
     ring: u32,
-    link_hover_light: u32,
-    link_hover_dark: u32,
 }
 
 fn accent_palette(color: AccentColor) -> AccentPalette {
@@ -438,54 +437,43 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
         AccentColor::VibrantOrange => AccentPalette {
             // Saturated fill keeps white label above 4.5:1 on `#ffffff` (sRGB).
             primary: 0xc2410c,
-            text_light: 0xae3a0f,
             text_dark: 0xfdba74,
             hover: 0x9a3412,
             active: 0x7c2d12,
             subtle_light: 0xffedd5,
             subtle_dark: 0x3b1d0b,
             ring: 0xfb923c,
-            link_hover_light: 0xa63d0a,
-            link_hover_dark: 0xfed7aa,
         },
         AccentColor::Cyan => AccentPalette {
-            // 鸭青. Saturated fill keeps white label at 5.36:1 on `#ffffff` (sRGB).
+            // 鸭青. Fill keeps white label at 5.36:1 on `#ffffff` (sRGB).
+            // Selected stroke is muted so the card outline does not glare.
             primary: 0x1a7770,
-            text_light: 0x1a6b65,
-            text_dark: 0x76e7de,
+            text_dark: 0x9bc8c3,
             hover: 0x17625c,
             active: 0x18524e,
-            subtle_light: 0xe4f6f4,
+            subtle_light: 0xe3f0ee,
             subtle_dark: 0x1c3330,
-            ring: 0x4cd6cc,
-            link_hover_light: 0x196862,
-            link_hover_dark: 0xa5f2eb,
+            ring: 0x6d9591,
         },
         AccentColor::Rouge => AccentPalette {
             // 胭脂 `#9d2933`. White label is 7.5:1 on `#ffffff` (sRGB).
             primary: 0x9d2933,
-            text_light: 0x9d2933,
             text_dark: 0xe6b7b5,
             hover: 0x8d1726,
             active: 0x741721,
             subtle_light: 0xfee4e3,
             subtle_dark: 0x4d2525,
             ring: 0xea9796,
-            link_hover_light: 0x931527,
-            link_hover_dark: 0xead1cf,
         },
         AccentColor::GoogleBlue => AccentPalette {
             // Primary tuned so white fill text clears ~4.5:1 on `#ffffff` (sRGB).
             primary: 0x185abc,
-            text_light: 0x185abc,
             text_dark: 0x8ab4f8,
             hover: 0x164e96,
             active: 0x143e78,
             subtle_light: 0xe8f0fe,
             subtle_dark: 0x1b2a4a,
             ring: 0x8ab4f8,
-            link_hover_light: 0x143e78,
-            link_hover_dark: 0xd2e3fc,
         },
     }
 }
