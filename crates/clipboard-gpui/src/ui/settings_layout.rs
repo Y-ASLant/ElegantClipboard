@@ -396,17 +396,19 @@ impl Render for SettingsWindowView {
                                     .child(content)
                                     .into_any_element();
                                 // 页面内容直接渲染，切换页面不做淡入动效。
-                                let mut card_style = StyleRefinement::default()
+                                let base_style = StyleRefinement::default()
                                     .bg(cx.theme().group_box)
                                     .border_color(crate::design_system::container_border(cx))
                                     .min_w_0();
-                                // 关于页无分组标题，底边距减半，避免版本行下空白过大。
-                                if page == SettingsPage::About {
-                                    card_style = card_style
+                                let card_style = if page == SettingsPage::About {
+                                    // 关于页无分组标题，底边距减半。
+                                    base_style
                                         .pt(px(visual::SPACE_4))
                                         .px(px(visual::SPACE_4))
-                                        .pb(px(visual::SPACE_2));
-                                }
+                                        .pb(px(visual::SPACE_2))
+                                } else {
+                                    base_style
+                                };
                                 div()
                                     .w_full()
                                     .min_w_0()

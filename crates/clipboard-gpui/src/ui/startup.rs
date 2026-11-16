@@ -2,20 +2,10 @@ use super::*;
 use clipboard_core::preferences::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
 use clipboard_platform::InstanceBusy;
 
+gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine, Pin, PinOff]);
 gpui_kit::assets::icon_assets!(
-    ActionIcons,
-    [
-        Trash,
-        ArrowUpToLine,
-        Pin,
-        PinOff,
-        Clipboard,
-        ClipboardList,
-        SearchX,
-        Type,
-        Image,
-        Link,
-    ]
+    EmptyStateIcons,
+    [Clipboard, ClipboardList, SearchX, Type, Image, Link]
 );
 
 struct AppAssets;
@@ -27,15 +17,19 @@ impl AssetSource for AppAssets {
         if path == "app-icon.png" {
             return Ok(Some(std::borrow::Cow::Borrowed(APP_ICON)));
         }
-        match ActionIcons.load(path)? {
-            Some(icon) => Ok(Some(icon)),
-            None => gpui_kit::assets::Assets.load(path),
+        if let Some(icon) = ActionIcons.load(path)? {
+            return Ok(Some(icon));
         }
+        if let Some(icon) = EmptyStateIcons.load(path)? {
+            return Ok(Some(icon));
+        }
+        gpui_kit::assets::Assets.load(path)
     }
 
     fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(ActionIcons.list(path)?);
+        paths.extend(EmptyStateIcons.list(path)?);
         Ok(paths)
     }
 }
