@@ -3,7 +3,7 @@ use super::*;
 impl ClipboardView {
     pub(super) fn render_history_list(
         &self,
-        empty_message: &'static str,
+        empty: (gpui_kit::assets::IconName, &'static str),
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let viewport = self.drag_viewport.clone();
@@ -125,6 +125,7 @@ impl ClipboardView {
                 }
             }))
             .when(self.history.items.is_empty(), |container| {
+                let (empty_icon, empty_message) = empty;
                 container.child(
                     div()
                         .size_full()
@@ -143,7 +144,7 @@ impl ClipboardView {
                                 .items_center()
                                 .justify_center()
                                 .child(
-                                    Icon::new(IconName::Copy)
+                                    Icon::new(empty_icon)
                                         .size(px(visual::SPACE_6))
                                         .text_color(cx.theme().muted_foreground),
                                 ),

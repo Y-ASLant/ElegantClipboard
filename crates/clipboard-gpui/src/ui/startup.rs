@@ -2,7 +2,21 @@ use super::*;
 use clipboard_core::preferences::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
 use clipboard_platform::InstanceBusy;
 
-gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine, Pin, PinOff]);
+gpui_kit::assets::icon_assets!(
+    ActionIcons,
+    [
+        Trash,
+        ArrowUpToLine,
+        Pin,
+        PinOff,
+        Clipboard,
+        ClipboardList,
+        SearchX,
+        Type,
+        Image,
+        Link,
+    ]
+);
 
 struct AppAssets;
 

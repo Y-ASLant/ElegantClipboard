@@ -48,7 +48,7 @@ impl Render for ListSurface {
                         view.history.items.iter().map(|item| item.id),
                         &view.row_offsets,
                     );
-                    view.render_history_list(history_empty_message(view, cx), cx)
+                    view.render_history_list(history_empty_state(view, cx), cx)
                         .into_any_element()
                 }
             })
@@ -100,39 +100,68 @@ impl Render for ListChrome {
     }
 }
 
-fn history_empty_message(view: &ClipboardView, cx: &App) -> &'static str {
+fn history_empty_state(
+    view: &ClipboardView,
+    cx: &App,
+) -> (gpui_kit::assets::IconName, &'static str) {
+    use gpui_kit::assets::IconName;
     if view.history.loading {
-        tr(view.language, "正在加载…", "Loading…")
+        (
+            IconName::ClipboardList,
+            tr(view.language, "正在加载…", "Loading…"),
+        )
     } else if !view.search.read(cx).value().is_empty() {
-        tr(
-            view.language,
-            "没有匹配的记录，试试其他关键词",
-            "No matching items. Try another search.",
+        (
+            IconName::SearchX,
+            tr(
+                view.language,
+                "没有匹配的记录，试试其他关键词",
+                "No matching items. Try another search.",
+            ),
         )
     } else if view.history.favorite_only() {
-        tr(
-            view.language,
-            "还没有收藏，点击记录上的“收藏”保留常用文本",
-            "No favorites yet. Mark an item as a favorite to keep it handy.",
+        (
+            IconName::Heart,
+            tr(
+                view.language,
+                "还没有收藏，点击记录上的“收藏”保留常用文本",
+                "No favorites yet. Mark an item as a favorite to keep it handy.",
+            ),
         )
     } else if view.history.group_id().is_some() {
-        tr(
-            view.language,
-            "该分组暂无可显示的记录",
-            "There are no items in this group.",
+        (
+            IconName::FolderOpen,
+            tr(
+                view.language,
+                "该分组暂无可显示的记录",
+                "There are no items in this group.",
+            ),
         )
     } else {
         match view.history.category() {
-            ContentCategory::Text => tr(view.language, "还没有文本记录", "No text items yet."),
-            ContentCategory::Image => tr(view.language, "还没有图片记录", "No image items yet."),
-            ContentCategory::Url => tr(view.language, "还没有链接记录", "No link items yet."),
-            ContentCategory::Other => {
-                tr(view.language, "还没有其他类型记录", "No other items yet.")
-            }
-            _ => tr(
-                view.language,
-                "复制一段文本，它会出现在这里",
-                "Copy something and it will appear here.",
+            ContentCategory::Text => (
+                IconName::Type,
+                tr(view.language, "还没有文本记录", "No text items yet."),
+            ),
+            ContentCategory::Image => (
+                IconName::Image,
+                tr(view.language, "还没有图片记录", "No image items yet."),
+            ),
+            ContentCategory::Url => (
+                IconName::Link,
+                tr(view.language, "还没有链接记录", "No link items yet."),
+            ),
+            ContentCategory::Other => (
+                IconName::File,
+                tr(view.language, "还没有其他类型记录", "No other items yet."),
+            ),
+            _ => (
+                IconName::Clipboard,
+                tr(
+                    view.language,
+                    "复制一段文本，它会出现在这里",
+                    "Copy something and it will appear here.",
+                ),
             ),
         }
     }
