@@ -331,7 +331,7 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let closed_editor_failed = self.editor_window.is_none()
+        let orphaned_editor_failed = self.editor_window.is_none()
             && match kind {
                 FailureKind::EditText { .. } => self.editor_save_pending,
                 FailureKind::Other => self.todo_edit_saving,
@@ -421,8 +421,8 @@ impl ClipboardView {
             }
             FailureKind::Other | FailureKind::SaveAs(_) => {}
         }
-        if closed_editor_failed {
-            self.close_editor(window, cx);
+        if orphaned_editor_failed {
+            self.abandon_orphaned_editor(window, cx);
         }
         self.set_feedback_message(message);
         self.is_error = true;

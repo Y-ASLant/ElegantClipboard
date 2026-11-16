@@ -36,7 +36,7 @@ pub use native_format::{
 };
 pub use preview::{FilePreviewEntry, PreviewContent};
 pub use text_transform::TextTransform;
-pub use todos::Todo;
+pub use todos::{Todo, TodoStatus};
 
 use anyhow::{Context, Result, bail};
 use database::{

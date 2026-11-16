@@ -61,16 +61,16 @@ impl DragMotionState {
         candidate_rows(offsets, pointer_y, px(from_bound.max(to_bound)))
     }
 
-    pub(in crate::ui) fn hover_target(
+    pub(in crate::ui) fn hover_target<G: Copy + PartialEq>(
         &mut self,
         source: usize,
-        item_at: impl Fn(usize) -> Option<(i64, bool)>,
+        item_at: impl Fn(usize) -> Option<(i64, G)>,
         offsets: &[Pixels],
         pointer_y: Pixels,
         previous: Option<DropTarget>,
     ) -> Option<DropTarget> {
         offsets.get(source + 1)?;
-        let (_, pinned) = item_at(source)?;
+        let (_, group) = item_at(source)?;
         let progress = self.started.map_or(1., |_| self.progress.get());
         let top_at = |index| {
             let (from, to) = self.offsets(index, offsets);
@@ -88,21 +88,21 @@ impl DragMotionState {
             let top = top_at(index);
             let bottom = top + offsets[index + 1] - offsets[index];
             if pointer_y >= top && pointer_y < bottom {
-                let Some((id, is_pinned)) = item_at(index) else {
+                let Some((id, item_group)) = item_at(index) else {
                     break;
                 };
                 if self.hovered == Some(id) {
                     return previous;
                 }
-                hovered = Some((id, is_pinned, top));
+                hovered = Some((id, item_group, top));
                 break;
             }
         }
-        let Some((id, is_pinned, top)) = hovered else {
+        let Some((id, item_group, top)) = hovered else {
             self.hovered = None;
             return previous;
         };
-        if is_pinned != pinned {
+        if item_group != group {
             self.hovered = None;
             return previous;
         }

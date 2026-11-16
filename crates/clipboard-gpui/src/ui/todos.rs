@@ -4,18 +4,10 @@ use super::todo_drag::TodoDrag;
 use super::*;
 use gpui_kit::component::menu::PopupMenuItem;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TodoNotice {
-    Added,
-    Completed(i64),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NoticeStatus {
-    Show,
-    Wait,
-    Drop,
-}
+pub(super) use super::todo_notice::TodoNotice;
+use super::todo_notice::{
+    NoticeStatus, notice_status, notice_text, show_todo_notice, todo_status_label,
+};
 
 #[derive(Clone, Debug)]
 pub(super) struct TodoDraft {
@@ -170,6 +162,7 @@ impl ClipboardView {
         entity: Entity<Self>,
         id: i64,
         text: String,
+        status: TodoStatus,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut App,
@@ -188,8 +181,25 @@ impl ClipboardView {
             cx,
             entity.clone(),
             move |menu, _, _| {
-                menu.min_w(px(180.))
-                    .max_w(px(280.))
+                let mut menu = menu.min_w(px(180.)).max_w(px(280.));
+                for next in [
+                    TodoStatus::Pending,
+                    TodoStatus::InProgress,
+                    TodoStatus::Done,
+                    TodoStatus::Closed,
+                ] {
+                    let entity = entity.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(todo_status_label(language, next))
+                            .disabled(pending || status == next)
+                            .on_click(move |_, _, cx| {
+                                entity.update(cx, |view, cx| {
+                                    view.set_todo_status(id, next, cx);
+                                });
+                            }),
+                    );
+                }
+                menu.separator()
                     .item(
                         PopupMenuItem::new(tr(language, "编辑", "Edit"))
                             .icon(Icon::new(IconName::FileText).size(px(visual::ICON_SIZE)))
@@ -221,6 +231,18 @@ impl ClipboardView {
                     )
             },
         );
+    }
+
+    pub(super) fn set_todo_status(&mut self, id: i64, status: TodoStatus, cx: &mut Context<Self>) {
+        if !self.todos_pending && self.send(Command::SetTodoStatus { id, status }, cx) {
+            if status.is_finished() {
+                self.todo_notice = Some(TodoNotice::StatusSet { id, status });
+            } else {
+                self.todo_notice = None;
+            }
+            self.todos_pending = true;
+            cx.notify();
+        }
     }
 
     /// 待办编辑器与历史条目编辑器（含主窗口备注对话框）共用 editor 会话，
@@ -420,166 +442,5 @@ impl ClipboardView {
                     .into_any_element()
             })
             .child(self.render_floating_action(FloatingAction::AddTodo, cx))
-    }
-}
-
-fn notice_status(notice: TodoNotice, before: &[Todo], after: &[Todo]) -> NoticeStatus {
-    match notice {
-        TodoNotice::Added => {
-            if after
-                .iter()
-                .any(|todo| before.iter().all(|old| old.id != todo.id))
-            {
-                NoticeStatus::Show
-            } else {
-                NoticeStatus::Wait
-            }
-        }
-        TodoNotice::Completed(id) => {
-            let was_open = before.iter().any(|todo| todo.id == id && !todo.completed);
-            let is_done = after.iter().any(|todo| todo.id == id && todo.completed);
-            if was_open && is_done {
-                NoticeStatus::Show
-            } else if was_open {
-                NoticeStatus::Wait
-            } else {
-                NoticeStatus::Drop
-            }
-        }
-    }
-}
-
-fn notice_text(
-    notice: TodoNotice,
-    before: &[Todo],
-    after: &[Todo],
-    language: LanguagePreference,
-) -> String {
-    let text = match notice {
-        TodoNotice::Added => after
-            .iter()
-            .find(|todo| before.iter().all(|old| old.id != todo.id))
-            .map(|todo| todo.text.as_str())
-            .unwrap_or(""),
-        TodoNotice::Completed(id) => after
-            .iter()
-            .find(|todo| todo.id == id)
-            .map(|todo| todo.text.as_str())
-            .unwrap_or(""),
-    };
-    let excerpt = super::todo_card::card_excerpt(text);
-    let excerpt = truncate_excerpt(&excerpt, 40);
-    let added = matches!(notice, TodoNotice::Added);
-    match (language, added, excerpt.is_empty()) {
-        (LanguagePreference::Chinese, true, true) => "已添加待办".to_owned(),
-        (LanguagePreference::Chinese, true, false) => format!("已添加：{excerpt}"),
-        (LanguagePreference::Chinese, false, true) => "已完成待办".to_owned(),
-        (LanguagePreference::Chinese, false, false) => format!("已完成：{excerpt}"),
-        (_, true, true) => "To-do added".to_owned(),
-        (_, true, false) => format!("Added: {excerpt}"),
-        (_, false, true) => "To-do completed".to_owned(),
-        (_, false, false) => format!("Completed: {excerpt}"),
-    }
-}
-
-fn truncate_excerpt(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_owned();
-    }
-    let end = text
-        .char_indices()
-        .nth(max_chars)
-        .map(|(index, _)| index)
-        .unwrap_or(text.len());
-    format!("{}…", &text[..end])
-}
-
-fn show_todo_notice(
-    view: &mut ClipboardView,
-    message: String,
-    window: &mut Window,
-    cx: &mut Context<ClipboardView>,
-) {
-    if let Some(handle) = view.todo_toast
-        && handle
-            .update(cx, |toast, window, cx| {
-                toast.replace(message.clone(), window, cx)
-            })
-            .is_ok()
-    {
-        return;
-    }
-    view.todo_toast = super::todo_toast::open(
-        message,
-        tr(view.language, "关闭", "Close"),
-        view.theme,
-        cx.weak_entity(),
-        window,
-        cx,
-    );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{NoticeStatus, TodoNotice, notice_status, notice_text};
-    use clipboard_core::Todo;
-    use clipboard_core::preferences::LanguagePreference;
-
-    fn todo(id: i64, text: &str, completed: bool) -> Todo {
-        Todo {
-            id,
-            text: text.to_owned(),
-            completed,
-            created_at: "2026-11-10 09:00:00".into(),
-            updated_at: "2026-11-10 09:00:00".into(),
-        }
-    }
-
-    #[test]
-    fn notice_waits_for_the_matching_list_and_names_the_change() {
-        let before = vec![todo(1, "buy milk", false)];
-        assert_eq!(
-            notice_status(TodoNotice::Added, &before, &before),
-            NoticeStatus::Wait
-        );
-        let added = vec![
-            todo(2, "**write** notes", false),
-            todo(1, "buy milk", false),
-        ];
-        assert_eq!(
-            notice_status(TodoNotice::Added, &before, &added),
-            NoticeStatus::Show
-        );
-        assert_eq!(
-            notice_text(
-                TodoNotice::Added,
-                &before,
-                &added,
-                LanguagePreference::Chinese
-            ),
-            "已添加：write notes"
-        );
-        assert_eq!(
-            notice_status(TodoNotice::Completed(1), &before, &before),
-            NoticeStatus::Wait
-        );
-        let done = vec![todo(1, "buy milk", true)];
-        assert_eq!(
-            notice_status(TodoNotice::Completed(1), &before, &done),
-            NoticeStatus::Show
-        );
-        assert_eq!(
-            notice_text(
-                TodoNotice::Completed(1),
-                &before,
-                &done,
-                LanguagePreference::English
-            ),
-            "Completed: buy milk"
-        );
-        assert_eq!(
-            notice_status(TodoNotice::Completed(9), &before, &done),
-            NoticeStatus::Drop
-        );
     }
 }

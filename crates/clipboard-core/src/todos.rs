@@ -3,11 +3,43 @@ use crate::database::Database;
 use anyhow::{Result, bail};
 use rusqlite::params;
 
+/// 待办进度：手动设置，不自动流转。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TodoStatus {
+    #[default]
+    Pending = 0,
+    InProgress = 1,
+    Done = 2,
+    Closed = 3,
+}
+
+impl TodoStatus {
+    pub fn from_i64(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Pending),
+            1 => Some(Self::InProgress),
+            2 => Some(Self::Done),
+            3 => Some(Self::Closed),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(self) -> i64 {
+        self as i64
+    }
+
+    /// 已处理 / 已关闭：列表可按设置隐藏，标题划线。
+    pub fn is_finished(self) -> bool {
+        matches!(self, Self::Done | Self::Closed)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Todo {
     pub id: i64,
     pub text: String,
-    pub completed: bool,
+    pub status: TodoStatus,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -21,8 +53,8 @@ impl History {
         add(&self.db, text)
     }
 
-    pub fn set_todo_completed(&self, id: i64, completed: bool) -> Result<()> {
-        set_completed(&self.db, id, completed)
+    pub fn set_todo_status(&self, id: i64, status: TodoStatus) -> Result<()> {
+        set_status(&self.db, id, status)
     }
 
     pub fn delete_todo(&self, id: i64) -> Result<()> {
@@ -43,15 +75,16 @@ fn list(db: &Database) -> Result<Vec<Todo>> {
     let connection = db.read_connection();
     let connection = connection.lock();
     let mut query = connection.prepare(
-        "SELECT id, text, completed, created_at, updated_at FROM todos
-         ORDER BY completed ASC, sort_order DESC, id DESC",
+        "SELECT id, text, status, created_at, updated_at FROM todos
+         ORDER BY status ASC, sort_order DESC, id DESC",
     )?;
     let todos = query
         .query_map([], |row| {
+            let status = TodoStatus::from_i64(row.get(2)?).unwrap_or(TodoStatus::Pending);
             Ok(Todo {
                 id: row.get(0)?,
                 text: row.get(1)?,
-                completed: row.get::<_, i64>(2)? != 0,
+                status,
                 created_at: row.get(3)?,
                 updated_at: row.get(4)?,
             })
@@ -85,6 +118,18 @@ fn ensure_schema(db: &Database) -> Result<()> {
              UPDATE todos SET sort_order = id;",
         )?;
     }
+    let has_status: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('todos') WHERE name = 'status'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_status {
+        // 旧 completed：0 → 待处理，非 0 → 已处理。
+        connection.execute_batch(
+            "ALTER TABLE todos ADD COLUMN status INTEGER NOT NULL DEFAULT 0;
+             UPDATE todos SET status = CASE WHEN completed != 0 THEN 2 ELSE 0 END;",
+        )?;
+    }
     Ok(())
 }
 
@@ -96,29 +141,28 @@ fn reorder(db: &Database, from: i64, to: i64, after: bool) -> Result<()> {
     let connection = db.write_connection();
     let mut connection = connection.lock();
     let tx = connection.transaction()?;
-    let completed: i64 = tx
+    let status: i64 = tx
         .query_row(
-            "SELECT completed FROM todos WHERE id = ?1",
+            "SELECT status FROM todos WHERE id = ?1",
             params![from],
             |row| row.get(0),
         )
         .map_err(|_| anyhow::anyhow!("待办已不存在"))?;
-    let target_completed: i64 = tx
+    let target_status: i64 = tx
         .query_row(
-            "SELECT completed FROM todos WHERE id = ?1",
+            "SELECT status FROM todos WHERE id = ?1",
             params![to],
             |row| row.get(0),
         )
         .map_err(|_| anyhow::anyhow!("目标待办已不存在"))?;
-    if completed != target_completed {
-        bail!("不能在不同完成状态之间移动待办");
+    if status != target_status {
+        bail!("不能在不同进度状态之间移动待办");
     }
     let mut ids: Vec<i64> = {
-        let mut query = tx.prepare(
-            "SELECT id FROM todos WHERE completed = ?1 ORDER BY sort_order DESC, id DESC",
-        )?;
+        let mut query =
+            tx.prepare("SELECT id FROM todos WHERE status = ?1 ORDER BY sort_order DESC, id DESC")?;
         query
-            .query_map(params![completed], |row| row.get(0))?
+            .query_map(params![status], |row| row.get(0))?
             .collect::<Result<_, _>>()?
     };
     if !ids.contains(&from) || !ids.contains(&to) {
@@ -152,22 +196,34 @@ fn add(db: &Database, text: &str) -> Result<i64> {
     let connection = db.write_connection();
     let connection = connection.lock();
     let sort_order: i64 = connection.query_row(
-        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM todos WHERE completed = 0",
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM todos WHERE status = 0",
         [],
         |row| row.get(0),
     )?;
     connection.execute(
-        "INSERT INTO todos (text, updated_at, sort_order) VALUES (?1, datetime('now', 'localtime'), ?2)",
+        "INSERT INTO todos (text, status, updated_at, sort_order)
+         VALUES (?1, 0, datetime('now', 'localtime'), ?2)",
         params![text, sort_order],
     )?;
     Ok(connection.last_insert_rowid())
 }
 
-fn set_completed(db: &Database, id: i64, completed: bool) -> Result<()> {
+fn set_status(db: &Database, id: i64, status: TodoStatus) -> Result<()> {
+    ensure_schema(db)?;
     let connection = db.write_connection();
-    let changed = connection.lock().execute(
-        "UPDATE todos SET completed = ?1 WHERE id = ?2",
-        params![i64::from(completed), id],
+    let connection = connection.lock();
+    let sort_order: i64 = connection.query_row(
+        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM todos WHERE status = ?1 AND id != ?2",
+        params![status.as_i64(), id],
+        |row| row.get(0),
+    )?;
+    let changed = connection.execute(
+        "UPDATE todos
+         SET status = ?1,
+             sort_order = ?2,
+             updated_at = datetime('now', 'localtime')
+         WHERE id = ?3",
+        params![status.as_i64(), sort_order, id],
     )?;
     if changed == 0 {
         bail!("待办已不存在");
@@ -206,17 +262,23 @@ mod tests {
     use crate::History;
 
     #[test]
-    fn added_tasks_can_be_checked_and_sink_below_open_tasks() -> Result<()> {
+    fn status_migration_and_manual_status_changes() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let history = History::open(dir.path().join("history.db"))?;
         let first = history.add_todo("  buy milk  ")?;
         let second = history.add_todo("write notes")?;
-        history.set_todo_completed(first, true)?;
+        assert_eq!(history.list_todos()?[0].status, TodoStatus::Pending);
+        history.set_todo_status(first, TodoStatus::Done)?;
         let todos = history.list_todos()?;
         assert_eq!(todos[0].id, second);
-        assert!(!todos[0].completed);
-        assert_eq!(todos[1].text, "buy milk");
-        assert!(todos[1].completed);
+        assert_eq!(todos[0].status, TodoStatus::Pending);
+        assert_eq!(todos[1].id, first);
+        assert_eq!(todos[1].status, TodoStatus::Done);
+        history.set_todo_status(second, TodoStatus::InProgress)?;
+        history.set_todo_status(first, TodoStatus::Closed)?;
+        let todos = history.list_todos()?;
+        assert_eq!(todos[0].status, TodoStatus::InProgress);
+        assert_eq!(todos[1].status, TodoStatus::Closed);
         history.update_todo(second, "**bold**\n- item")?;
         assert_eq!(history.list_todos()?[0].text, "**bold**\n- item");
         history.delete_todo(first)?;
@@ -249,6 +311,36 @@ mod tests {
             .map(|todo| todo.id)
             .collect();
         assert_eq!(ids, [c, a, b]);
+        history.set_todo_status(a, TodoStatus::Done)?;
+        assert!(history.reorder_todo(a, b, false).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_completed_column_maps_into_status() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("history.db");
+        {
+            let db = Database::new(path.clone())?;
+            let conn = db.write_connection();
+            conn.lock().execute_batch(
+                "DROP TABLE IF EXISTS todos;
+                 CREATE TABLE todos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    completed INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                 INSERT INTO todos (text, completed) VALUES ('open', 0), ('done', 1);",
+            )?;
+        }
+        let history = History::open(path)?;
+        let todos = history.list_todos()?;
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].text, "open");
+        assert_eq!(todos[0].status, TodoStatus::Pending);
+        assert_eq!(todos[1].text, "done");
+        assert_eq!(todos[1].status, TodoStatus::Done);
         Ok(())
     }
 }

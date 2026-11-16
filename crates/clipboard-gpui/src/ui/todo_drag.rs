@@ -57,7 +57,7 @@ impl ClipboardView {
             source,
             |index| {
                 let todo = self.todos.get(*layout.sources.get(index)?)?;
-                Some((todo.id, todo.completed))
+                Some((todo.id, todo.status))
             },
             &layout.offsets,
             content_y,

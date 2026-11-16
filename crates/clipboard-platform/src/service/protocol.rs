@@ -3,6 +3,7 @@ use crate::update::ReleaseInfo;
 use anyhow::Result;
 use clipboard_core::{
     ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent, TextTransform, Todo,
+    TodoStatus,
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
@@ -193,9 +194,9 @@ pub enum Command {
     ListRunningApps,
     ListTodos,
     AddTodo(String),
-    SetTodoCompleted {
+    SetTodoStatus {
         id: i64,
-        completed: bool,
+        status: TodoStatus,
     },
     DeleteTodo(i64),
     UpdateTodo {

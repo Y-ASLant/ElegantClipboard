@@ -431,8 +431,8 @@ impl Worker {
                 self.send_event(Event::Todos(self.history.list_todos()?))?;
                 return Ok(());
             }
-            Command::SetTodoCompleted { id, completed } => {
-                self.history.set_todo_completed(id, completed)?;
+            Command::SetTodoStatus { id, status } => {
+                self.history.set_todo_status(id, status)?;
                 self.send_event(Event::Todos(self.history.list_todos()?))?;
                 return Ok(());
             }

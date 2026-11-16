@@ -58,7 +58,7 @@ fn visible_todo_ids(todos: &[Todo], show_completed: bool, query: &str) -> Vec<i6
     todos
         .iter()
         .filter(|todo| {
-            (show_completed || !todo.completed)
+            (show_completed || !todo.status.is_finished())
                 && (query.is_empty() || todo.text.to_lowercase().contains(query))
         })
         .map(|todo| todo.id)

@@ -100,7 +100,7 @@ impl ClipboardView {
             layout.sources.clear();
             layout.indexes.clear();
             for (source, todo) in self.todos.iter().enumerate() {
-                if (self.todo_preference.value.show_completed || !todo.completed)
+                if (self.todo_preference.value.show_completed || !todo.status.is_finished())
                     && (normalized.is_empty() || todo.text.to_lowercase().contains(&normalized))
                 {
                     let index = layout.ids.len();
@@ -157,7 +157,7 @@ fn todo_scroll_anchor(offsets: &[Pixels], scroll_y: Pixels) -> (usize, Pixels) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Todo, TodoListLayout, px, todo_scroll_anchor};
+    use super::{Todo, TodoListLayout, TodoStatus, px, todo_scroll_anchor};
     use std::collections::HashMap;
     #[test]
     fn scroll_anchor_preserves_partial_rows_and_footer_clearance() {
@@ -171,7 +171,7 @@ mod tests {
         let todo = |id, text: &str| Todo {
             id,
             text: text.into(),
-            completed: false,
+            status: TodoStatus::Pending,
             created_at: String::new(),
             updated_at: String::new(),
         };

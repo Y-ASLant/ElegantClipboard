@@ -75,6 +75,7 @@ mod todo_card;
 mod todo_drag;
 mod todo_layout;
 mod todo_motion;
+mod todo_notice;
 mod todo_toast;
 mod todos;
 mod update_events;
@@ -115,7 +116,7 @@ use crate::{
     },
 };
 use clipboard_core::{
-    ContentCategory, FilePreviewEntry, PreviewContent, TextTransform, Todo,
+    ContentCategory, FilePreviewEntry, PreviewContent, TextTransform, Todo, TodoStatus,
     backup::BackupReport,
     database::{ClipboardItem as DbClipboardItem, Group},
     preferences::{

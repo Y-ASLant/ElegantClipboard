@@ -1,7 +1,6 @@
 use super::todo_drag::TodoDrag;
 use super::*;
 use clipboard_core::preferences::{DisplayPreference, TodoPreference};
-use gpui_kit::component::checkbox::Checkbox;
 
 #[derive(Clone)]
 pub(super) struct TodoDragSnapshot {
@@ -82,7 +81,7 @@ fn todo_card_chrome(
     preview: bool,
     window: &mut Window,
     cx: &mut App,
-    checkbox: Option<Checkbox>,
+    status_control: Option<Button>,
     selected: bool,
 ) -> impl IntoElement {
     let density = snapshot
@@ -135,11 +134,15 @@ fn todo_card_chrome(
         window,
         cx,
     );
-    let checkbox = checkbox.unwrap_or_else(|| {
-        Checkbox::new(("todo-preview", id as u64))
-            .checked(snapshot.todo.completed)
+    let status_control = status_control.unwrap_or_else(|| {
+        Button::new(("todo-status-preview", id as u64))
+            .ghost()
+            .xsmall()
+            .label(super::todo_notice::todo_status_label(
+                snapshot.language,
+                snapshot.todo.status,
+            ))
             .disabled(true)
-            .accessibility_label(snapshot.todo.text.clone())
     });
     let mut surface = div()
         .id(("todo-surface", id as usize))
@@ -171,7 +174,7 @@ fn todo_card_chrome(
                         .h(px(visual::PREVIEW_LINE_HEIGHT))
                         .flex()
                         .items_center()
-                        .child(checkbox),
+                        .child(status_control),
                 )
                 .child(
                     div()
@@ -183,7 +186,9 @@ fn todo_card_chrome(
                         .line_clamp(snapshot.display.card_max_lines as usize)
                         .text_ellipsis()
                         .text_color(cx.theme().foreground)
-                        .when(snapshot.todo.completed, |title| title.line_through())
+                        .when(snapshot.todo.status.is_finished(), |title| {
+                            title.line_through()
+                        })
                         .child(if excerpt.is_empty() {
                             tr(snapshot.language, "空白待办", "Empty to-do").to_owned()
                         } else {
@@ -251,14 +256,14 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let id = todo.id;
-        let completed = todo.completed;
+        let status = todo.status;
         let text = todo.text.clone();
-        let owner = cx.entity().downgrade();
-        let remove_owner = owner.clone();
+        let remove_owner = cx.entity().downgrade();
         let layout = self.todo_layout.clone();
         let list_surface = self.list_surface.downgrade();
         let entity = cx.entity();
         let menu_owner = entity.clone();
+        let status_owner = entity.clone();
         let snapshot = todo_drag_snapshot(self, &todo);
         let density = self
             .todo_preference
@@ -274,27 +279,24 @@ impl ClipboardView {
             native_preview: false,
         };
         let drag_enabled = !pending && !self.todo_reorder_pending && self.todos_open;
-        let checkbox = Checkbox::new(("todo", id as u64))
-            .checked(completed)
+        let status_label = super::todo_notice::todo_status_label(self.language, status);
+        let status_control = Button::new(("todo-status", id as u64))
+            .ghost()
+            .xsmall()
+            .label(status_label)
             .disabled(pending)
-            .accessibility_label(text.clone())
-            .on_change(move |checked, _, cx| {
-                let _ = owner.update(cx, |view, cx| {
-                    if !view.todos_pending
-                        && view.send(
-                            Command::SetTodoCompleted {
-                                id,
-                                completed: *checked,
-                            },
-                            cx,
-                        )
-                    {
-                        view.todo_notice =
-                            checked.then_some(super::todos::TodoNotice::Completed(id));
-                        view.todos_pending = true;
-                        cx.notify();
-                    }
-                });
+            .tooltip(tr(self.language, "设置进度", "Set status"))
+            .on_click(move |_, window, cx| {
+                let position = window.mouse_position();
+                ClipboardView::open_todo_menu(
+                    status_owner.clone(),
+                    id,
+                    text.clone(),
+                    status,
+                    position,
+                    window,
+                    cx,
+                );
             });
         let surface = div()
             .w_full()
@@ -303,13 +305,13 @@ impl ClipboardView {
                 false,
                 window,
                 cx,
-                Some(checkbox),
+                Some(status_control),
                 self.selected_todo == Some(id),
             ))
             .child(todo_action_bar(
                 self,
                 id,
-                &text,
+                &todo.text,
                 pending,
                 remove_owner,
                 card_padding,
@@ -355,7 +357,8 @@ impl ClipboardView {
                     ClipboardView::open_todo_menu(
                         menu_owner.clone(),
                         id,
-                        text.clone(),
+                        todo.text.clone(),
+                        status,
                         event.position,
                         window,
                         cx,

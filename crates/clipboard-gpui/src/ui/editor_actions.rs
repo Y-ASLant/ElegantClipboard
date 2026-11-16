@@ -50,9 +50,7 @@ impl ClipboardView {
             }
             Err(error) => {
                 self.editor_error = Some(error.clone());
-                if self.editor_window.is_none() {
-                    self.close_editor(window, cx);
-                }
+                self.abandon_orphaned_editor(window, cx);
                 self.set_feedback_message(format!(
                     "{}: {error}",
                     tr(self.language, "保存编辑失败", "Failed to save changes")
@@ -91,6 +89,13 @@ impl ClipboardView {
             }
         }
         true
+    }
+
+    /// Window already gone (release cleared the handle) but a save failed: drop the mutex session.
+    pub(super) fn abandon_orphaned_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editor_window.is_none() {
+            let _ = self.close_editor(window, cx);
+        }
     }
 
     pub(super) fn close_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
