@@ -250,7 +250,7 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     // Foreground on bright semantic fills in dark mode (meets contrast vs. light fills).
     let status_on_bright = color(0x18181b);
     let status_fill_foreground = if dark { status_on_bright } else { white };
-    let selection_surface = tint(accent_subtle, primary, 0.45);
+    let selection_surface = tint(accent_subtle, color(palette.ring), 0.45);
 
     // Kit inputs (including Settings' internal search) use this surface.
     // Dialogs, menus, notifications and passive previews use popover instead.
@@ -320,14 +320,14 @@ fn apply_colors(colors: &mut ThemeColor, dark: bool, effect: WindowEffect, accen
     colors.list_even = content;
     colors.list_hover = content_hover;
     colors.list_active = selection_surface;
-    colors.list_active_border = primary;
+    colors.list_active_border = color(palette.ring);
     colors.table = content;
     colors.table_head = tint(subtle, ink, 0.16);
     colors.table_head_foreground = secondary_text;
     colors.table_even = tint(subtle, ink, 0.08);
     colors.table_hover = control_hover;
     colors.table_active = selection_surface;
-    colors.table_active_border = primary;
+    colors.table_active_border = color(palette.ring);
     colors.table_row_border = content_border;
     colors.table_foot = tint(subtle, ink, 0.16);
     colors.table_foot_foreground = secondary_text;
@@ -444,7 +444,7 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
             active: 0x7c2d12,
             subtle_light: 0xffedd5,
             subtle_dark: 0x3b1d0b,
-            ring: 0xea580c,
+            ring: 0xfb923c,
             link_hover_light: 0xa63d0a,
             link_hover_dark: 0xfed7aa,
         },
@@ -457,7 +457,7 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
             active: 0x164e63,
             subtle_light: 0xcffafe,
             subtle_dark: 0x083344,
-            ring: 0x0891b2,
+            ring: 0x22d3ee,
             link_hover_light: 0x12667a,
             link_hover_dark: 0xa5f3fc,
         },
@@ -470,7 +470,7 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
             active: 0x143e78,
             subtle_light: 0xe8f0fe,
             subtle_dark: 0x1b2a4a,
-            ring: 0x4285f4,
+            ring: 0x8ab4f8,
             link_hover_light: 0x143e78,
             link_hover_dark: 0xd2e3fc,
         },

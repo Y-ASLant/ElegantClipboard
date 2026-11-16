@@ -221,7 +221,7 @@ impl HistoryCardSnapshot {
             .overflow_hidden()
             .border(px(visual::BORDER_WIDTH))
             .border_color(if self.selected {
-                cx.theme().primary
+                cx.theme().list_active_border
             } else {
                 crate::design_system::container_border(cx)
             })

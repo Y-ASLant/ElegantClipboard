@@ -127,7 +127,7 @@ fn todo_card_chrome(
     let border = visual::transition_color(
         ElementId::from((border_channel, id as usize)),
         if selected {
-            cx.theme().primary
+            cx.theme().list_active_border
         } else {
             crate::design_system::container_border(cx)
         },
