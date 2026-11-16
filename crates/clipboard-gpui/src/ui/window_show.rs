@@ -90,6 +90,9 @@ impl ClipboardView {
         log_window_geometry(window, cx, "main_shown");
         if self.onboarding_visible() {
             window.focus(&self.list_focus, cx);
+            // Shown without activation so a later paste keeps the target app.
+            // Onboarding has to take keys itself: tabs, switches and Enter.
+            native_window::activate_for_input(window);
         } else {
             if self.search_auto_clear.value && !self.search.read(cx).value().is_empty() {
                 self.search
