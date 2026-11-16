@@ -509,7 +509,7 @@ struct SettingsWindowView {
     retention_count_input: Entity<InputState>,
     retention_error: Option<String>,
     preview_lines: settings_window::BoundedNumberInput,
-    window_opacity: settings_window::BoundedNumberInput,
+    window_opacity: settings_window::BoundedSlider,
     ui_font_size: settings_window::BoundedNumberInput,
     card_font_size: settings_window::BoundedNumberInput,
     preview_font_size: settings_window::BoundedNumberInput,

@@ -148,30 +148,7 @@ impl SettingsWindowView {
             cx.new(|cx| InputState::new(window, cx).default_value(retention.max_count.to_string()));
         let effect = entity.read(cx).window_effect.value;
         let hover = entity.read(cx).hover_preference.value;
-        let window_opacity = BoundedNumberInput::bind(
-            window,
-            cx,
-            i32::from(effect.opacity),
-            NumberSpec {
-                min: i32::from(MIN_WINDOW_EFFECT_OPACITY),
-                max: i32::from(MAX_WINDOW_EFFECT_OPACITY),
-                saved: |owner| {
-                    (
-                        i32::from(owner.window_effect.value.opacity),
-                        owner.window_effect.pending,
-                    )
-                },
-                commit: |owner, value, cx| {
-                    owner.save_window_effect(
-                        WindowEffectPreference {
-                            opacity: value as u8,
-                            ..owner.window_effect.value
-                        },
-                        cx,
-                    );
-                },
-            },
-        );
+        let window_opacity = BoundedSlider::bind_opacity(window, cx, i32::from(effect.opacity));
         let hover_delay = BoundedNumberInput::bind(
             window,
             cx,
@@ -456,6 +433,103 @@ impl BoundedNumberInput {
         if self.input.read(cx).value() != text {
             self.input
                 .update(cx, |input, cx| input.set_value(text, window, cx));
+        }
+    }
+}
+
+/// 0–100 density slider: drag previews tint, release persists.
+pub(super) struct BoundedSlider {
+    state: Entity<gpui_kit::component::slider::SliderState>,
+    _events: Subscription,
+    last_value: i32,
+    last_pending: bool,
+}
+
+impl BoundedSlider {
+    pub(super) fn bind_opacity(
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+        initial: i32,
+    ) -> Self {
+        use gpui_kit::component::slider::{SliderEvent, SliderState};
+        let min = i32::from(MIN_WINDOW_EFFECT_OPACITY);
+        let max = i32::from(MAX_WINDOW_EFFECT_OPACITY);
+        let initial = initial.clamp(min, max);
+        let state = cx.new(|_| {
+            SliderState::new()
+                .min(min as f32)
+                .max(max as f32)
+                .step(1.0)
+                .default_value(initial as f32)
+        });
+        let events = cx.subscribe_in(
+            &state,
+            window,
+            move |this, state, event: &SliderEvent, _, cx| {
+                let raw = state.read(cx).value().start().round() as i32;
+                let opacity = raw.clamp(min, max) as u8;
+                let Some(owner) = this.owner.upgrade() else {
+                    return;
+                };
+                match event {
+                    SliderEvent::Change(_) => {
+                        owner.update(cx, |owner, cx| {
+                            if owner.window_effect.pending {
+                                return;
+                            }
+                            window_effect::preview_opacity(opacity, cx);
+                            cx.refresh_windows();
+                        });
+                        cx.notify();
+                    }
+                    SliderEvent::Release(_) => {
+                        owner.update(cx, |owner, cx| {
+                            owner.save_window_effect(
+                                WindowEffectPreference {
+                                    opacity,
+                                    ..owner.window_effect.value
+                                },
+                                cx,
+                            );
+                        });
+                    }
+                }
+            },
+        );
+        Self {
+            state,
+            _events: events,
+            last_value: initial,
+            last_pending: false,
+        }
+    }
+
+    pub(super) fn state(&self) -> &Entity<gpui_kit::component::slider::SliderState> {
+        &self.state
+    }
+
+    pub(super) fn displayed(&self, cx: &App) -> i32 {
+        self.state.read(cx).value().start().round() as i32
+    }
+
+    pub(super) fn sync(
+        &mut self,
+        confirmed: i32,
+        pending: bool,
+        window: &mut Window,
+        cx: &mut Context<SettingsWindowView>,
+    ) {
+        let refresh = confirmed != self.last_value || (self.last_pending && !pending);
+        self.last_value = confirmed;
+        self.last_pending = pending;
+        if !refresh {
+            return;
+        }
+        let current = self.state.read(cx).value().start().round() as i32;
+        if current != confirmed {
+            self.state.update(cx, |state, cx| {
+                state.set_value(confirmed as f32, window, cx)
+            });
         }
     }
 }

@@ -30,6 +30,18 @@ pub(crate) fn active(cx: &App) -> WindowEffectPreference {
         .map_or_else(WindowEffectPreference::default, |setting| setting.0)
 }
 
+/// Drag-time density preview: updates shell tint without rewriting control tokens.
+pub(crate) fn preview_opacity(opacity: u8, cx: &mut App) {
+    let current = active(cx);
+    if current.effect == WindowEffect::Opaque || current.opacity == opacity {
+        return;
+    }
+    cx.set_global(WindowEffectSetting(WindowEffectPreference {
+        opacity,
+        ..current
+    }));
+}
+
 /// 在应用初始化之后注册，晚于 gpui-component 的 `WindowState`。
 ///
 /// GPUI 的直接混合状态是 `SrcBlendAlpha = ONE, DestBlendAlpha = ONE`，即 **alpha

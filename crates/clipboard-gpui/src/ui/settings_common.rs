@@ -100,6 +100,34 @@ pub(super) fn settings_number_field(input: NumberInput, disabled: bool) -> Div {
         .child(input.w_full().h_full().disabled(disabled))
 }
 
+/// Kit `Slider` plus a fixed-width percent readout for settings density rows.
+pub(super) fn settings_slider_field(
+    slider: impl IntoElement,
+    value: i32,
+    disabled: bool,
+    cx: &App,
+) -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .h(px(visual::CONTROL_HEIGHT_LARGE))
+        .flex()
+        .items_center()
+        .gap(px(visual::SPACE_3))
+        .opacity(if disabled { 0.55 } else { 1. })
+        .child(div().flex_1().min_w_0().flex().items_center().child(slider))
+        .child(
+            div()
+                .w(px(44.))
+                .flex_none()
+                .text_right()
+                .font_family("monospace")
+                .text_size(px(visual::TEXT_BODY))
+                .text_color(cx.theme().muted_foreground)
+                .child(format!("{value}%")),
+        )
+}
+
 /// 字段/分区标题旁的「说明」入口：悬停图标展示解释文本，不再常驻占行。
 pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Button {
     let text: SharedString = text.into();

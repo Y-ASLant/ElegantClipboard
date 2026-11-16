@@ -1,10 +1,10 @@
 use super::settings_common::{
-    owner_state, settings_description, settings_field, settings_field_help, settings_number_field,
+    owner_state, settings_description, settings_field, settings_field_help, settings_slider_field,
     settings_stack,
 };
 use super::*;
 use clipboard_platform::window_effect::{WindowEffectBackend, WindowEffectCapabilities};
-use gpui_kit::component::input::NumberInput;
+use gpui_kit::component::slider::Slider;
 
 impl SettingsWindowView {
     pub(super) fn settings_window_effect_content(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -64,19 +64,34 @@ impl SettingsWindowView {
         settings_stack()
             .child(settings_field(tr(language, "背景材质", "Background material")).child(tabs))
             .when(backend != WindowEffectBackend::Opaque, |content| {
-                content.child(settings_field_help(
-                    tr(language, "背景浓度", "Background density"),
-                    tr(
-                        language,
-                        "输入 0–100，数值越高背景越实。窗口、侧栏与内容卡片共享材质层次；文字、控件和浮层保持清晰，不改变系统模糊半径。",
-                        "Enter 0–100. Higher density makes the background more solid. The window, sidebar and content cards share material surfaces; text, controls and overlays stay clear. The system blur radius is unchanged.",
-                    ),
-                    "window-density-help",
-                )
-                    .child(settings_number_field(
-                        NumberInput::new(self.window_opacity.input()),
+                let density = self.window_opacity.displayed(cx).clamp(
+                    i32::from(MIN_WINDOW_EFFECT_OPACITY),
+                    i32::from(MAX_WINDOW_EFFECT_OPACITY),
+                );
+                content.child(
+                    settings_field_help(
+                        tr(language, "背景浓度", "Background density"),
+                        tr(
+                            language,
+                            "拖动调整 0–100，数值越高背景越实。窗口、侧栏与内容卡片共享材质层次；文字、控件和浮层保持清晰，不改变系统模糊半径。",
+                            "Drag 0–100. Higher density makes the background more solid. The window, sidebar and content cards share material surfaces; text, controls and overlays stay clear. The system blur radius is unchanged.",
+                        ),
+                        "window-density-help",
+                    )
+                    .child(settings_slider_field(
+                        Slider::new(self.window_opacity.state())
+                            .w_full()
+                            .disabled(pending)
+                            .accessibility_label(tr(
+                                language,
+                                "背景浓度",
+                                "Background density",
+                            )),
+                        density,
                         pending,
-                    )))
+                        cx,
+                    )),
+                )
             })
             .when(!supported, |content| {
                 let saved = effect_label(language, preference.effect);
