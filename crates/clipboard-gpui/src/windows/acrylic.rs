@@ -1,7 +1,7 @@
 //! Windows 系统背板：亚克力（Acrylic）与云母（Mica）。
 //!
-//! 显式 DWM 系统背板覆盖整个窗口；保留 GPUI 创建的窗口样式和非客户区。
-//! 不移除 caption/缩放边框，不接管 WM_NCCALCSIZE，也不修改系统圆角策略。
+//! 显式 DWM 系统背板覆盖整个窗口；保留缩放边框，不接管 WM_NCCALCSIZE，也不修改系统圆角策略。
+//! 材质开启时去掉标题栏样式，让 DWM 不再绘制系统关闭钮；不透明时把样式加回。
 //! 客户区由 GPUI 透明交换链与应用外壳染色共同绘制。
 //!
 //! 此模块只配置原生背板；组件表面由 design_system 按材质状态统一投影。
@@ -114,8 +114,9 @@ fn backdrop(effect: WindowEffect) -> DWM_SYSTEMBACKDROP_TYPE {
     }
 }
 
-/// Keep the native frame, hit testing, shadow and corner policy intact.
 /// Explicit backdrop types cover the whole window without extending the native caption.
+/// Caption-button styles are removed only while a material is on, so the transparent
+/// client area cannot reveal the system close button. `WS_THICKFRAME` stays for resize and shadow.
 fn set_dwm_attributes(hwnd: HWND, effect: WindowEffect) -> ::windows::core::Result<()> {
     let enabled = effect != WindowEffect::Opaque;
     let use_host_backdrop_brush = BOOL::from(enabled);
@@ -124,11 +125,60 @@ fn set_dwm_attributes(hwnd: HWND, effect: WindowEffect) -> ::windows::core::Resu
     unsafe {
         set_attribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, &use_host_backdrop_brush)?;
         set_attribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop_type)?;
+        set_caption_buttons(hwnd, !enabled)?;
     }
     tracing::debug!(
         ?effect,
-        "applied DWM material without changing native frame"
+        "applied DWM material without changing the resize frame"
     );
+    Ok(())
+}
+
+fn set_caption_buttons(hwnd: HWND, visible: bool) -> ::windows::core::Result<()> {
+    use ::windows::Win32::UI::Controls::{
+        SetWindowThemeAttribute, WTA_NONCLIENT, WTA_OPTIONS, WTNCA_NODRAWCAPTION, WTNCA_NODRAWICON,
+        WTNCA_NOSYSMENU,
+    };
+    use ::windows::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+        WS_SYSMENU,
+    };
+    let buttons = (WS_CAPTION.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) as isize;
+    let mask = WTNCA_NODRAWCAPTION | WTNCA_NODRAWICON | WTNCA_NOSYSMENU;
+    let options = WTA_OPTIONS {
+        dwFlags: if visible { 0 } else { mask },
+        dwMask: mask,
+    };
+    unsafe {
+        let current = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let style = if visible {
+            current | buttons
+        } else {
+            current & !buttons
+        };
+        if style != current {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+            if GetWindowLongPtrW(hwnd, GWL_STYLE) != style {
+                return Err(::windows::core::Error::from_thread());
+            }
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+            )?;
+        }
+        SetWindowThemeAttribute(
+            hwnd,
+            WTA_NONCLIENT,
+            (&options as *const WTA_OPTIONS).cast(),
+            std::mem::size_of::<WTA_OPTIONS>() as u32,
+        )?;
+    }
     Ok(())
 }
 
