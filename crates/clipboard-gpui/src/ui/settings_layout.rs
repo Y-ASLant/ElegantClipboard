@@ -396,6 +396,17 @@ impl Render for SettingsWindowView {
                                     .child(content)
                                     .into_any_element();
                                 // 页面内容直接渲染，切换页面不做淡入动效。
+                                let mut card_style = StyleRefinement::default()
+                                    .bg(cx.theme().group_box)
+                                    .border_color(crate::design_system::container_border(cx))
+                                    .min_w_0();
+                                // 关于页无分组标题，底边距减半，避免版本行下空白过大。
+                                if page == SettingsPage::About {
+                                    card_style = card_style
+                                        .pt(px(visual::SPACE_4))
+                                        .px(px(visual::SPACE_4))
+                                        .pb(px(visual::SPACE_2));
+                                }
                                 div()
                                     .w_full()
                                     .min_w_0()
@@ -403,14 +414,7 @@ impl Render for SettingsWindowView {
                                         GroupBox::new()
                                             .id(("settings-card", section_ix))
                                             .outline()
-                                            .content_style(
-                                                StyleRefinement::default()
-                                                    .bg(cx.theme().group_box)
-                                                    .border_color(
-                                                        crate::design_system::container_border(cx),
-                                                    )
-                                                    .min_w_0(),
-                                            )
+                                            .content_style(card_style)
                                             .child(body),
                                     )
                                     .into_any_element()
