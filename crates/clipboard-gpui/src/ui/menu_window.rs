@@ -162,12 +162,29 @@ fn close_menu_window(_: &MouseDownEvent, window: &mut Window, cx: &mut App) {
     window.remove_window();
 }
 
+// PopupMenu reads theme.radius while it renders, which is after this function
+// returns but still inside the window update. global_mut skips Theme::update,
+// whose refresh would draw every window again. The deferred restore runs when
+// that update ends, after this window's draw.
+fn use_card_radius(cx: &mut Context<HistoryMenuWindow>) {
+    let radius = crate::card_radius::card_radius(cx);
+    let previous = gpui_kit::component::Theme::global(cx).radius;
+    if previous == radius {
+        return;
+    }
+    gpui_kit::component::Theme::global_mut(cx).radius = radius;
+    cx.defer(move |cx| {
+        gpui_kit::component::Theme::global_mut(cx).radius = previous;
+    });
+}
+
 impl Render for HistoryMenuWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // On macOS, keep the clear native background prepared before showing.
         // GPUI's Transparent setter restores a nonzero alpha for window shadows.
         #[cfg(not(target_os = "macos"))]
         window.set_background_appearance(WindowBackgroundAppearance::Transparent);
+        use_card_radius(cx);
         if self.menu.is_none()
             && let Some(build) = self.build.take()
         {

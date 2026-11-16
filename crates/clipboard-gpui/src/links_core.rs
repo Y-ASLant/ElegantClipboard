@@ -9,8 +9,8 @@ pub enum ProjectLink {
     Author,
     Repository,
     Issues,
-    /// 发布页（仅非 Windows 的「检查更新」打开；Windows 走自动更新流程）。
-    #[allow(dead_code)]
+    /// 发布页。非 Windows 的「检查更新」打开它；Windows 走应用内更新，变体只为匹配完整。
+    #[cfg_attr(windows, expect(dead_code, reason = "Windows checks updates in-app"))]
     Releases,
 }
 

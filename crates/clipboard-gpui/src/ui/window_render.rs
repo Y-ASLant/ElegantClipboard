@@ -60,9 +60,10 @@ impl ClipboardView {
     }
 }
 
-/// Kit pins a typed notification's icon at a fixed `top: 18px`, so it misses
-/// the text's center once the line box changes. Draw the mark in the same row.
-fn feedback_notification(message: String, error: bool) -> Notification {
+// A typed Notification pins its icon at top: 18px, so the mark and the line
+// box stop sharing a center. Build the row here instead.
+fn feedback_notification(message: impl Into<SharedString>, error: bool) -> Notification {
+    let message = message.into();
     Notification::new().content(move |_, _, cx| {
         let (icon, color) = if error {
             (IconName::CircleX, cx.theme().danger)
@@ -81,6 +82,7 @@ fn feedback_notification(message: String, error: bool) -> Notification {
             .into_any_element()
     })
 }
+
 impl Render for ClipboardView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self
