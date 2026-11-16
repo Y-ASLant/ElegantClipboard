@@ -159,7 +159,7 @@ impl ClipboardView {
             || self.paste_state.merging()
             || self.batch_pending
             || self.confirmation.is_some()
-            || self.editor.id.is_some()
+            // Independent editor windows stay open; only in-main note dialog used to block hide.
             || self
                 ._tray
                 .as_ref()
@@ -247,7 +247,12 @@ impl ClipboardView {
     }
 
     pub(super) fn hide_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.card_drag_active(cx) || !self.close_editor(window, cx) {
+        if self.card_drag_active(cx) {
+            return;
+        }
+        // Independent editor/todo windows outlive the history panel (same as settings).
+        // Only dismiss in-main note/dialog editing that has no separate HWND.
+        if self.editor_window.is_none() && !self.close_editor(window, cx) {
             return;
         }
         self.prepare_to_hide(window, cx);
@@ -284,7 +289,7 @@ impl ClipboardView {
     }
     /// 当前打开的覆盖层，按 Esc 关闭优先级排列（同时至多一层）。
     pub(super) fn active_overlay(&self) -> Option<Overlay> {
-        if self.editor.id.is_some() {
+        if self.editor.id.is_some() && self.editor_window.is_none() {
             Some(Overlay::Editor)
         } else if let Some(kind) = self.confirmation {
             Some(Overlay::Confirmation(kind))

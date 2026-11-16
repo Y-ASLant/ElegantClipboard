@@ -233,7 +233,10 @@ pub fn run(
                         if exiting.get() {
                             return true;
                         }
-                        if !close_view.update(cx, |this, cx| this.close_editor(window, cx)) {
+                        // Keep independent editor/todo windows; only block on in-main note save.
+                        if close_view.update(cx, |this, cx| {
+                            this.editor_window.is_none() && !this.close_editor(window, cx)
+                        }) {
                             return false;
                         }
                         if !tray_enabled.get() {
