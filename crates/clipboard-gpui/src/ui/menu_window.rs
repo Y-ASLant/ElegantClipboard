@@ -1,8 +1,17 @@
 use super::*;
+use gpui_kit::Size as Extent;
 use gpui_kit::component::menu::PopupMenu;
+
+use std::cell::RefCell;
 
 const MENU_SLOT: f32 = 328.;
 const MENU_HEIGHT: f32 = 480.;
+const MENU_SHADOW: f32 = 8.;
+const SUBMENU_ROOM: f32 = 320.;
+// PopupMenu rows are rems(1.625), with p_1 padding and gap_y_0p5.
+const MENU_ITEM_REM: f32 = 1.625;
+const MENU_PAD_REM: f32 = 0.25;
+const MENU_GAP_REM: f32 = 0.125;
 
 type MenuBuild = Box<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
 
@@ -11,6 +20,12 @@ pub(super) struct HistoryMenuWindow {
     build: Option<MenuBuild>,
     armed: bool,
     shown: Rc<Cell<bool>>,
+    flyout: Rc<Cell<bool>>,
+    rows: Rc<RefCell<Vec<RowKind>>>,
+    menu_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    anchor: Point<Pixels>,
+    screen: Bounds<Pixels>,
+    fitted: Rc<Cell<Option<(i32, i32, i32, i32)>>>,
     _activation: Subscription,
 }
 
@@ -20,7 +35,6 @@ impl HistoryMenuWindow {
         window: &mut Window,
         cx: &mut App,
         owner: Entity<ClipboardView>,
-        has_submenu: bool,
         build: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
     ) {
         owner.update(cx, |view, cx| {
@@ -33,14 +47,10 @@ impl HistoryMenuWindow {
         let screen = window
             .display(cx)
             .map_or(window.bounds(), |display| display.visible_bounds());
-        // PopupMenu draws submenus in this same native window. A flat menu
-        // occupies one slot; only a menu containing submenus needs both panes.
-        let width = px(if has_submenu {
-            MENU_SLOT * 2.
-        } else {
-            MENU_SLOT
-        })
-        .min(screen.size.width);
+        // Hidden until the first layout. One slot is enough to measure the
+        // menu; the window is resized to that size before it is shown.
+        let width = px(MENU_SLOT).min(screen.size.width);
+
         let height = px(MENU_HEIGHT).min(screen.size.height);
         let origin_x = cursor
             .x
@@ -89,6 +99,12 @@ impl HistoryMenuWindow {
                             build: Some(Box::new(build)),
                             armed,
                             shown: Rc::new(Cell::new(false)),
+                            flyout: Rc::new(Cell::new(false)),
+                            rows: Rc::new(RefCell::new(Vec::new())),
+                            menu_bounds: Rc::new(Cell::new(None)),
+                            anchor: cursor,
+                            screen,
+                            fitted: Rc::new(Cell::new(None)),
                             _activation,
                         }
                     })
@@ -178,6 +194,128 @@ fn use_card_radius(cx: &mut Context<HistoryMenuWindow>) {
     });
 }
 
+// Without this width the window clips the submenu painted past the menu's right edge.
+fn fitted_menu_bounds(
+    anchor: Point<Pixels>,
+    screen: Bounds<Pixels>,
+    menu: Extent<Pixels>,
+    flyout: bool,
+) -> Bounds<Pixels> {
+    let pad = px(MENU_SHADOW);
+    let width = if flyout {
+        menu.width + pad + px(SUBMENU_ROOM) + px(1.)
+    } else {
+        menu.width + pad * 2.
+    };
+    let width = width.min(screen.size.width).max(px(1.));
+    let height = (menu.height + pad * 2.).min(screen.size.height).max(px(1.));
+    let mut origin_x = anchor.x - pad;
+    let mut origin_y = anchor.y - pad;
+    if origin_y + height > screen.bottom() {
+        origin_y = anchor.y - height + pad;
+    }
+    if origin_x + width > screen.right() {
+        origin_x = screen.right() - width;
+    }
+    origin_x = origin_x.max(screen.left());
+    origin_y = origin_y.max(screen.top());
+    Bounds::new(point(origin_x, origin_y), size(width, height))
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum RowKind {
+    Item,
+    Submenu,
+}
+
+thread_local! {
+    static MENU_ROWS: Cell<Option<Rc<RefCell<Vec<RowKind>>>>> = const { Cell::new(None) };
+}
+
+pub(super) fn note_menu_row(kind: RowKind) {
+    MENU_ROWS.with(|current| {
+        if let Some(rows) = current.take() {
+            rows.borrow_mut().push(kind);
+            current.set(Some(rows));
+        }
+    });
+}
+
+fn pointer_wants_flyout(
+    menu: Bounds<Pixels>,
+    pointer: Point<Pixels>,
+    rows: &[RowKind],
+    rem: Pixels,
+    open: bool,
+) -> bool {
+    let item = rem * MENU_ITEM_REM;
+    let gap = rem * MENU_GAP_REM;
+    let pad = rem * MENU_PAD_REM;
+    let mut y = menu.top() + pad;
+    let mut on_submenu = false;
+    let mut on_other = false;
+    for row in rows {
+        let on_row = pointer.y >= y
+            && pointer.y < y + item
+            && pointer.x >= menu.left()
+            && pointer.x <= menu.right();
+        if on_row {
+            match row {
+                RowKind::Submenu => on_submenu = true,
+                RowKind::Item => on_other = true,
+            }
+        }
+        y += item + gap;
+    }
+    // The kit keeps a submenu open until another row is hovered. Shrinking
+    // before that paints the submenu back over the parent.
+    if on_submenu {
+        return true;
+    }
+    if on_other {
+        return false;
+    }
+    open
+}
+
+fn placed_key(bounds: Bounds<Pixels>) -> (i32, i32, i32, i32) {
+    (
+        f32::from(bounds.origin.x).round() as i32,
+        f32::from(bounds.origin.y).round() as i32,
+        f32::from(bounds.size.width).round() as i32,
+        f32::from(bounds.size.height).round() as i32,
+    )
+}
+
+impl HistoryMenuWindow {
+    fn sync_flyout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.shown.get() {
+            return;
+        }
+        let Some(menu) = self.menu_bounds.get() else {
+            return;
+        };
+        let wants = pointer_wants_flyout(
+            menu,
+            window.mouse_position(),
+            &self.rows.borrow(),
+            window.rem_size(),
+            self.flyout.get(),
+        );
+        if wants == self.flyout.get() {
+            return;
+        }
+        let Some(native) = native_window::window_id(window) else {
+            return;
+        };
+        let placed = fitted_menu_bounds(self.anchor, self.screen, menu.size, wants);
+        place_menu_window(native, placed, window.scale_factor());
+        window.bounds_changed(cx);
+        self.fitted.set(Some(placed_key(placed)));
+        self.flyout.set(wants);
+    }
+}
+
 impl Render for HistoryMenuWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // On macOS, keep the clear native background prepared before showing.
@@ -188,12 +326,21 @@ impl Render for HistoryMenuWindow {
         if self.menu.is_none()
             && let Some(build) = self.build.take()
         {
+            let rows = self.rows.clone();
+            MENU_ROWS.with(|current| current.set(Some(rows)));
             self.menu = Some(PopupMenu::build(window, cx, move |menu, window, cx| {
                 build(menu, window, cx)
             }));
+            MENU_ROWS.with(|current| current.set(None));
         }
+        self.sync_flyout(window, cx);
         let menu = self.menu.clone();
-        let reveal_after_layout = !self.shown.get();
+        let anchor = self.anchor;
+        let screen = self.screen;
+        let fitted = self.fitted.clone();
+        let flyout = self.flyout.clone();
+        let menu_bounds = self.menu_bounds.clone();
+        let shown = self.shown.clone();
         div()
             .size_full()
             .occlude()
@@ -204,40 +351,129 @@ impl Render for HistoryMenuWindow {
             .on_mouse_down(MouseButton::Right, close_menu_window)
             .when_some(menu, |layer, menu| {
                 layer.child(
-                    div()
-                        .m(px(8.))
-                        .max_w(px(320.))
-                        .child(menu)
-                        .when(reveal_after_layout, |menu| {
-                            let shown = self.shown.clone();
-                            menu.child(
-                                canvas(
-                                    move |bounds, window, cx| {
-                                        if bounds.size.width < px(180.)
-                                            || bounds.size.height < px(70.)
-                                        {
-                                            return;
-                                        }
-                                        if !shown.get()
-                                            && let Some(native) = native_window::window_id(window)
-                                        {
-                                            shown.set(true);
-                                            cx.defer(move |_| {
-                                                let _ = clipboard_platform::external_drag::show_drag_preview(
-                                                    native,
-                                                );
-                                            });
-                                        }
-                                    },
-                                    |_, _, _, _| {},
-                                )
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .size_full(),
-                            )
-                        }),
+                    div().m(px(MENU_SHADOW)).max_w(px(320.)).child(menu).child(
+                        canvas(
+                            move |bounds, window, cx| {
+                                if bounds.size.width < px(1.) || bounds.size.height < px(1.) {
+                                    return;
+                                }
+                                menu_bounds.set(Some(bounds));
+                                let placed =
+                                    fitted_menu_bounds(anchor, screen, bounds.size, flyout.get());
+                                let Some(native) = native_window::window_id(window) else {
+                                    return;
+                                };
+                                let key = placed_key(placed);
+                                if fitted.get() == Some(key) {
+                                    return;
+                                }
+                                fitted.set(Some(key));
+                                let scale = window.scale_factor();
+                                let reveal = !shown.get();
+                                shown.set(true);
+                                cx.defer(move |_| {
+                                    place_menu_window(native, placed, scale);
+                                    if reveal {
+                                        let _ =
+                                            clipboard_platform::external_drag::show_drag_preview(
+                                                native,
+                                            );
+                                    }
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    ),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MENU_SHADOW, RowKind, fitted_menu_bounds, pointer_wants_flyout};
+    use gpui_kit::{Bounds, Pixels, point, px, size};
+
+    fn screen() -> Bounds<Pixels> {
+        Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(800.)))
+    }
+
+    #[test]
+    fn closed_menu_window_matches_the_menu_not_a_fixed_slot() {
+        let menu = size(px(240.), px(300.));
+        let anchor = point(px(400.), px(200.));
+        let bounds = fitted_menu_bounds(anchor, screen(), menu, false);
+        assert_eq!(bounds.size, size(px(256.), px(316.)));
+        assert_eq!(bounds.origin, point(px(392.), px(192.)));
+    }
+
+    #[test]
+    fn menu_near_the_bottom_flips_above_the_cursor() {
+        let menu = size(px(240.), px(120.));
+        let anchor = point(px(100.), px(760.));
+        let bounds = fitted_menu_bounds(anchor, screen(), menu, false);
+        assert_eq!(bounds.bottom(), anchor.y + px(MENU_SHADOW));
+    }
+
+    #[test]
+    fn open_flyout_includes_the_submenu() {
+        let menu = size(px(240.), px(300.));
+        let anchor = point(px(400.), px(200.));
+        let bounds = fitted_menu_bounds(anchor, screen(), menu, true);
+        assert_eq!(bounds.size, size(px(569.), px(316.)));
+        assert_eq!(bounds.origin, point(px(392.), px(192.)));
+    }
+
+    #[test]
+    fn flyout_stays_closed_until_the_pointer_is_on_its_row() {
+        let menu = Bounds::new(point(px(0.), px(0.)), size(px(240.), px(300.)));
+        let rows = [RowKind::Item, RowKind::Item, RowKind::Submenu];
+        let rem = px(16.);
+        assert!(pointer_wants_flyout(
+            menu,
+            point(px(20.), px(70.)),
+            &rows,
+            rem,
+            false,
+        ));
+        assert!(!pointer_wants_flyout(
+            menu,
+            point(px(20.), px(40.)),
+            &rows,
+            rem,
+            false,
+        ));
+        assert!(pointer_wants_flyout(
+            menu,
+            point(px(300.), px(100.)),
+            &rows,
+            rem,
+            true,
+        ));
+        assert!(!pointer_wants_flyout(
+            menu,
+            point(px(300.), px(100.)),
+            &rows,
+            rem,
+            false,
+        ));
+        assert!(!pointer_wants_flyout(
+            menu,
+            point(px(20.), px(40.)),
+            &rows,
+            rem,
+            true,
+        ));
+        assert!(pointer_wants_flyout(
+            menu,
+            point(px(20.), px(200.)),
+            &rows,
+            rem,
+            true,
+        ));
     }
 }

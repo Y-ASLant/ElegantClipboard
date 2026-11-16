@@ -187,7 +187,6 @@ impl ClipboardView {
             window,
             cx,
             entity.clone(),
-            false,
             move |menu, _, _| {
                 menu.min_w(px(180.))
                     .max_w(px(280.))

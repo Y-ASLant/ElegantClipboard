@@ -9,6 +9,7 @@ pub(super) fn history_menu_item(
     id: i64,
     action: HistoryMenuAction,
 ) -> PopupMenuItem {
+    menu_window::note_menu_row(menu_window::RowKind::Item);
     let label = label.into();
     let icon = match &action {
         HistoryMenuAction::Paste => IconName::Replace,
@@ -98,6 +99,7 @@ fn action_submenu<const N: usize>(
     entity: Entity<ClipboardView>,
     items: [(&'static str, HistoryMenuAction); N],
 ) -> PopupMenu {
+    menu_window::note_menu_row(menu_window::RowKind::Submenu);
     menu.item(PopupMenuItem::submenu(
         title,
         PopupMenu::build(window, cx, move |menu, _, _| {
@@ -211,15 +213,11 @@ impl ClipboardView {
                 cx.stop_propagation();
                 let entity = entity.clone();
                 let save_as_name = entity.read(cx).save_as_suggested_for(id);
-                // Rich text and plain text items each get a transform/format
-                // submenu; everything else stays in a single-pane window.
-                let has_submenu = is_rich_item || is_text_item;
                 menu_window::HistoryMenuWindow::open(
                     event.position,
                     window,
                     cx,
                     entity.clone(),
-                    has_submenu,
                     move |menu, window, cx| {
                         let menu = menu
                             .min_w(px(240.))
