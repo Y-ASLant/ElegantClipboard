@@ -51,7 +51,6 @@ pub(super) struct ContentEditorWindow {
     _owner_subscription: Subscription,
     _owner_release_subscription: Subscription,
     _editor_subscription: Subscription,
-    _window_release: Subscription,
 }
 
 impl ContentEditorWindow {
@@ -73,30 +72,7 @@ impl ContentEditorWindow {
         let release_subscription = cx.observe_release(&entity, |_, _, cx| cx.notify());
         let editor = cx.new(|cx| EditorState::new(window, cx).line_number(true));
         let editor_subscription = cx.observe(&editor, |_, _, cx| cx.notify());
-        // Last resort if the HWND dies without Cancel / should_close (e.g. bare
-        // `remove_window`): drop leftover draft so the add FAB is not stuck disabled.
-        let window_release = cx.on_release(move |this, cx| {
-            let _ = this.owner.update(cx, |owner, cx| {
-                if owner.editor_pending() || owner.todo_edit_saving {
-                    return;
-                }
-                if owner.editor_window.is_none()
-                    && owner.todo_draft.is_none()
-                    && owner.editor.id.is_none()
-                {
-                    return;
-                }
-                owner.editor_window = None;
-                let had_item = owner.editor.id.take().is_some();
-                owner.todo_draft = None;
-                if had_item {
-                    owner.release_editor_session();
-                } else {
-                    owner.editor_error = None;
-                }
-                cx.notify();
-            });
-        });
+        window_lifecycle::bind_satellite_release(owner.clone(), window, cx);
         Self {
             owner,
             editor,
@@ -105,7 +81,6 @@ impl ContentEditorWindow {
             _owner_subscription: subscription,
             _owner_release_subscription: release_subscription,
             _editor_subscription: editor_subscription,
-            _window_release: window_release,
         }
     }
 
@@ -123,8 +98,7 @@ impl ContentEditorWindow {
     }
 
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // `remove_window` does not run `on_window_should_close`; clear the owner
-        // session here or `todo_draft` / `editor_window` keep the add FAB disabled.
+        // Cancel/Esc uses remove_window (no should_close); clear session first.
         let closed = self
             .owner
             .update(cx, |owner, cx| owner.close_content_editor_from_window(cx))

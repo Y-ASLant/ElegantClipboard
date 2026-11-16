@@ -94,7 +94,7 @@ impl SettingsWindowView {
                             ThemeColor::Rouge,
                         ],
                         [
-                            tr(language, "活力橙", "Vibrant orange"),
+                            tr(language, "赭石", "Ochre"),
                             tr(language, "鸭青", "Mallard"),
                             tr(language, "群青", "Ultramarine"),
                             tr(language, "胭脂", "Rouge"),

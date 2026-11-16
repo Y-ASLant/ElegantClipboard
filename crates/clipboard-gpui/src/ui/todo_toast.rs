@@ -78,6 +78,7 @@ pub(super) fn open(
     message: String,
     close_label: &'static str,
     theme: ThemePreference,
+    owner: WeakEntity<ClipboardView>,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<WindowHandle<TodoToastWindow>> {
@@ -119,12 +120,15 @@ pub(super) fn open(
             },
             move |window, cx| {
                 apply_theme(theme, window, cx);
-                cx.new(|_| TodoToastWindow {
-                    message: message.into(),
-                    close_label,
-                    generation: 0,
-                    motion: 0,
-                    leaving: false,
+                cx.new(|cx| {
+                    window_lifecycle::bind_satellite_release(owner, window, cx);
+                    TodoToastWindow {
+                        message: message.into(),
+                        close_label,
+                        generation: 0,
+                        motion: 0,
+                        leaving: false,
+                    }
                 })
             },
         )

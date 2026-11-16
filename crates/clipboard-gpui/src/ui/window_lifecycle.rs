@@ -31,7 +31,69 @@ pub(super) fn update_clipboard_window<R>(
     })
 }
 
+/// Drop an owner-held window handle when it still points at `window_id`.
+fn clear_handle_if_id(slot: &mut Option<AnyWindowHandle>, window_id: WindowId) -> bool {
+    if slot.is_some_and(|handle| handle.window_id() == window_id) {
+        *slot = None;
+        true
+    } else {
+        false
+    }
+}
+
+/// `remove_window` does not run `on_window_should_close`. Satellite roots call this
+/// from `on_release` so owner slots cannot keep a dead handle (or a stuck editor draft).
+pub(super) fn bind_satellite_release<V: 'static>(
+    owner: WeakEntity<ClipboardView>,
+    window: &Window,
+    cx: &mut Context<V>,
+) {
+    let window_id = window.window_handle().window_id();
+    cx.on_release(move |_, cx| {
+        let _ = owner.update(cx, |owner, cx| {
+            owner.release_satellite_window(window_id, cx);
+        });
+    })
+    .detach();
+}
+
 impl ClipboardView {
+    /// Clear any satellite handle still pointing at `window_id`, and drop the
+    /// content-editor session when that editor window itself is gone.
+    pub(super) fn release_satellite_window(&mut self, window_id: WindowId, cx: &mut Context<Self>) {
+        let mut changed = clear_handle_if_id(&mut self.history_menu_window, window_id);
+        changed |= clear_handle_if_id(&mut self.settings_window, window_id);
+        changed |= clear_handle_if_id(&mut self.hover_popup, window_id);
+        if self
+            .todo_toast
+            .as_ref()
+            .is_some_and(|handle| handle.window_id() == window_id)
+        {
+            self.todo_toast = None;
+            changed = true;
+        }
+        if self
+            .editor_window
+            .is_some_and(|handle| handle.window_id() == window_id)
+        {
+            self.editor_window = None;
+            changed = true;
+            // Save in flight: keep draft/id so the command result can still finish.
+            if !self.editor_pending() && !self.todo_edit_saving {
+                let had_item = self.editor.id.take().is_some();
+                let had_todo = self.todo_draft.take().is_some();
+                if had_item {
+                    self.release_editor_session();
+                } else if had_todo {
+                    self.editor_error = None;
+                }
+            }
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
     /// 托盘命令事件循环（从 view_init 拆分）。
     pub(super) fn spawn_tray_events(
         receiver: async_channel::Receiver<TrayCommand>,

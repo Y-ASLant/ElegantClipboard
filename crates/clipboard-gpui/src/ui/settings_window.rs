@@ -122,6 +122,7 @@ impl SettingsWindowView {
             this.language = owner.language;
             cx.notify();
         });
+        window_lifecycle::bind_satellite_release(owner.clone(), window, cx);
         let app_filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("notepad.exe or *browser*"));
         let capture_format_input =

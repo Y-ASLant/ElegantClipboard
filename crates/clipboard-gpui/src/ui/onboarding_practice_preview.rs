@@ -107,7 +107,7 @@ impl OnboardingPractice {
             if !valid {
                 return;
             }
-            match hover_popup::open_overlay(preview, display_id, cx) {
+            match hover_popup::open_overlay(preview, None, display_id, cx) {
                 Ok(handle) => {
                     let accepted = owner
                         .update(cx, |this, cx| {

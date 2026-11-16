@@ -513,6 +513,7 @@ fn show_todo_notice(
         message,
         tr(view.language, "关闭", "Close"),
         view.theme,
+        cx.weak_entity(),
         window,
         cx,
     );

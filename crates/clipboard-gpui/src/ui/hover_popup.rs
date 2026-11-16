@@ -127,6 +127,7 @@ impl ClipboardView {
             }
             let opened = open_overlay(
                 HoverPreviewWindowView::new((id, generation), language, result, zoom_step, setup),
+                Some(owner.downgrade()),
                 display_id,
                 cx,
             );
@@ -189,6 +190,7 @@ impl ClipboardView {
 /// native overlay. Callers retain ownership and reject stale async requests.
 pub(super) fn open_overlay(
     view: HoverPreviewWindowView,
+    owner: Option<WeakEntity<ClipboardView>>,
     display_id: Option<DisplayId>,
     cx: &mut AsyncApp,
 ) -> anyhow::Result<WindowHandle<HoverPreviewWindowView>> {
@@ -214,7 +216,14 @@ pub(super) fn open_overlay(
                 app_id: Some("com.aslant.ElegantClipboard.hover".into()),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| view),
+            |window, cx| {
+                cx.new(|cx| {
+                    if let Some(owner) = owner {
+                        window_lifecycle::bind_satellite_release(owner, window, cx);
+                    }
+                    view
+                })
+            },
         )
     })?;
     // Every native mutation is outside App/Window/entity borrows.

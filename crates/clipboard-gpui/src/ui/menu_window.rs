@@ -62,6 +62,7 @@ impl HistoryMenuWindow {
         }
         let display_id = window.display(cx).map(|display| display.id());
         let weak = owner.downgrade();
+        let release_owner = weak.clone();
         let opened = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -95,6 +96,7 @@ impl HistoryMenuWindow {
                                 }
                             },
                         );
+                        window_lifecycle::bind_satellite_release(release_owner, window, cx);
                         HistoryMenuWindow {
                             menu: None,
                             build: Some(Box::new(build)),
