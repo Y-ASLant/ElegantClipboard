@@ -167,17 +167,21 @@ impl SettingsWindowView {
             .child(
                 settings_field(tr(language, "字体", "Fonts")).child(
                     settings_inline()
+                        .flex_nowrap()
                         .justify_between()
-                        .child(settings_description(
-                            tr(
-                                language,
-                                "界面、历史卡片与悬停预览可分别指定字体与字号；空选项沿用上一级默认。",
-                                "Set interface, card, and hover preview fonts independently. An empty choice inherits from the level above.",
-                            ),
-                            cx,
-                        ))
+                        .child(
+                            div().flex_1().min_w_0().child(settings_description(
+                                tr(
+                                    language,
+                                    "界面、历史卡片与悬停预览可分别指定字体与字号；空选项沿用上一级默认。",
+                                    "Set interface, card, and hover preview fonts independently. An empty choice inherits from the level above.",
+                                ),
+                                cx,
+                            )),
+                        )
                         .child(
                             Button::new("reset-fonts")
+                                .flex_shrink_0()
                                 .label(tr(language, "恢复默认", "Reset to defaults"))
                                 .h(px(visual::CONTROL_HEIGHT))
                                 .ghost()

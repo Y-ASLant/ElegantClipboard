@@ -193,7 +193,7 @@ impl Render for TodoToastWindow {
             .gap(px(visual::SPACE_2))
             .px(px(visual::SPACE_3))
             .overflow_hidden()
-            .rounded(cx.theme().radius)
+            .rounded(crate::card_radius::card_radius(cx))
             .bg(cx.theme().popover)
             .border(px(visual::BORDER_WIDTH))
             .border_color(cx.theme().border)
