@@ -243,7 +243,6 @@ fn todo_preferences_survive_restart_and_recover_invalid_values() -> Result<()> {
     assert_eq!(preferences.todo_preference()?, TodoPreference::default());
     let todo = TodoPreference {
         enabled: false,
-        tab_position: TodoTabPosition::AfterFavorites,
         density: TodoDensity::Spacious,
         show_created: false,
         show_edited: false,
@@ -280,7 +279,6 @@ fn old_todo_preferences_keep_customizations_when_tab_options_are_missing() -> Re
         Preferences::new(&db).todo_preference()?,
         TodoPreference {
             enabled: true,
-            tab_position: TodoTabPosition::Last,
             density: TodoDensity::Compact,
             show_created: false,
             show_edited: true,

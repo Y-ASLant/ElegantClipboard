@@ -24,30 +24,6 @@ impl SettingsWindowView {
                 |next, checked| next.enabled = checked,
                 ClipboardView::save_todo_preference,
             ))
-            .child(
-                settings_field(tr(language, "标签位置", "Tab position")).child(choice_tabs(
-                    "todo-tab-position",
-                    &self.owner,
-                    [TodoTabPosition::Last, TodoTabPosition::AfterFavorites],
-                    [
-                        tr(language, "末尾", "Last"),
-                        tr(language, "收藏之后", "After favorites"),
-                    ],
-                    preference.tab_position,
-                    pending || !preference.enabled,
-                    |owner| owner.todo_preference.value.tab_position,
-                    |owner, tab_position, cx| {
-                        owner.save_todo_preference(
-                            TodoPreference {
-                                tab_position,
-                                ..owner.todo_preference.value
-                            },
-                            cx,
-                        );
-                    },
-                    cx,
-                )),
-            )
             .into_any_element()
     }
 

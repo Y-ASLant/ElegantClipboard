@@ -74,7 +74,6 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         },
         todo: TodoPreference {
             enabled: false,
-            tab_position: TodoTabPosition::AfterFavorites,
             density: TodoDensity::Compact,
             show_created: false,
             show_edited: true,

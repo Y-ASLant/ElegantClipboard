@@ -112,19 +112,15 @@ fn visible_toolbar_tabs(
     todo: TodoPreference,
 ) -> Vec<ToolbarTab> {
     let mut tabs = Vec::new();
-    for (index, (visible, (filter, ..))) in category_tab_flags(categories)
+    for (visible, (filter, ..)) in category_tab_flags(categories)
         .into_iter()
         .zip(CATEGORY_TAB_SPECS)
-        .enumerate()
     {
         if visible {
             tabs.push(ToolbarTab::Category(*filter));
         }
-        if index == 1 && todo.enabled && todo.tab_position == TodoTabPosition::AfterFavorites {
-            tabs.push(ToolbarTab::Todos);
-        }
     }
-    if todo.enabled && todo.tab_position == TodoTabPosition::Last {
+    if todo.enabled {
         tabs.push(ToolbarTab::Todos);
     }
     tabs
@@ -134,10 +130,10 @@ fn visible_toolbar_tabs(
 mod tests {
     use super::{ToolbarTab, visible_toolbar_tabs};
     use clipboard_core::ContentCategory;
-    use clipboard_core::preferences::{CategoryTabVisibility, TodoPreference, TodoTabPosition};
+    use clipboard_core::preferences::{CategoryTabVisibility, TodoPreference};
 
     #[test]
-    fn todo_visibility_and_position_respect_hidden_categories() {
+    fn todo_visibility_appends_last_when_enabled() {
         let categories = CategoryTabVisibility {
             all: true,
             favorites: false,
@@ -157,24 +153,11 @@ mod tests {
             visible_toolbar_tabs(
                 &categories,
                 TodoPreference {
-                    tab_position: TodoTabPosition::AfterFavorites,
+                    enabled: false,
                     ..Default::default()
                 }
             ),
-            vec![all, ToolbarTab::Todos, image, other]
+            vec![all, image, other]
         );
-        for tab_position in [TodoTabPosition::AfterFavorites, TodoTabPosition::Last] {
-            assert_eq!(
-                visible_toolbar_tabs(
-                    &categories,
-                    TodoPreference {
-                        enabled: false,
-                        tab_position,
-                        ..Default::default()
-                    }
-                ),
-                vec![all, image, other]
-            );
-        }
     }
 }
