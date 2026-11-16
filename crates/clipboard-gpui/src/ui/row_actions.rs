@@ -6,51 +6,6 @@ impl ClipboardView {
         self.group_move_pending || (self.groups.is_empty() && self.history.group_id().is_none())
     }
 
-    /// 两侧仅显示拖拽提示；整张卡片负责拖拽手势。
-    pub(super) fn drag_handle(
-        &self,
-        id: i64,
-        anchored_left: bool,
-        show_drag_area_indicator: bool,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        let mut handle = div()
-            .id((
-                if anchored_left {
-                    "history-drag-left"
-                } else {
-                    "history-drag-right"
-                },
-                id as usize,
-            ))
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .w(px(18.))
-            .flex()
-            .items_center()
-            .justify_center();
-        handle = if anchored_left {
-            handle.left_0()
-        } else {
-            handle.right_0()
-        };
-        handle
-            .when(show_drag_area_indicator, |handle| {
-                handle
-                    .invisible()
-                    .group_hover("", |handle| handle.visible())
-                    .text_color(cx.theme().primary)
-                    .child(
-                        Icon::new(gpui_kit::assets::IconName::GripVertical)
-                            .size(px(visual::ICON_SMALL)),
-                    )
-            })
-            .on_click(cx.listener(|_, _, _, cx| {
-                cx.stop_propagation();
-            }))
-    }
-
     /// 卡片摘要行文本：时间/类型、字符数、大小与失效提示。
     pub(super) fn row_summary(
         &self,

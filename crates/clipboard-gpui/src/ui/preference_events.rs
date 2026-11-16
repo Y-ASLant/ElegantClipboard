@@ -205,13 +205,7 @@ impl ClipboardView {
             Ok(language) => {
                 self.close_hover_preview("language_changed", cx);
                 self.language = language;
-                self.search.update(cx, |input, cx| {
-                    input.set_placeholder(
-                        tr(language, "搜索剪贴板历史…", "Search clipboard history…"),
-                        window,
-                        cx,
-                    );
-                });
+                self.sync_search_prompt(window, cx);
                 self.group_name_input.update(cx, |input, cx| {
                     input.set_placeholder(tr(language, "分组名称", "Group name"), window, cx);
                 });

@@ -317,19 +317,7 @@ impl ClipboardView {
             .child(
                 surface
                     .when(!self.batch_mode, |card| {
-                        card.child(self.drag_handle(
-                            id,
-                            true,
-                            self.display.value.show_drag_area_indicator,
-                            cx,
-                        ))
-                        .child(self.drag_handle(
-                            id,
-                            false,
-                            self.display.value.show_drag_area_indicator,
-                            cx,
-                        ))
-                        .child(
+                        card.child(
                             self.render_row_action_bar(id, item, card_padding, cx)
                                 .id(("history-row-actions", id as usize))
                                 .block_mouse_except_scroll()

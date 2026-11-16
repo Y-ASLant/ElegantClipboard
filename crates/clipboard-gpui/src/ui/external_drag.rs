@@ -82,6 +82,10 @@ impl ClipboardView {
         }
     }
 
+    pub(super) fn active_history_drag(&self) -> Option<&HistoryDrag> {
+        self.external_drag.as_ref()?.drag.history()
+    }
+
     pub(super) fn todo_drag_source_id(&self) -> Option<i64> {
         match &self.external_drag.as_ref()?.drag {
             CardDrag::Todo(drag) => Some(drag.id),
@@ -364,7 +368,7 @@ impl ClipboardView {
         if *current != target || self.card_drag_direction != direction {
             *current = target;
             self.card_drag_direction = direction;
-            cx.notify();
+            self.list_surface.update(cx, |_, cx| cx.notify());
         }
     }
 

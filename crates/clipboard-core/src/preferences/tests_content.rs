@@ -106,7 +106,6 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
             url: false,
             other: false,
         },
-        show_drag_area_indicator: false,
         card_density: CardDensity::Compact,
         card_max_lines: 5,
         show_time: false,
@@ -136,7 +135,7 @@ fn display_preferences_survive_restart_and_recover_invalid_values() -> Result<()
     assert_eq!(preferences.display()?, DisplayPreference::default());
     SettingsRepository::new(&db).set(
         DISPLAY_KEY,
-        r#"{"show_category_filter":false,"card_density":"compact"}"#,
+        r#"{"show_category_filter":false,"card_density":"compact","show_drag_area_indicator":true}"#,
     )?;
     assert_eq!(
         preferences.display()?,

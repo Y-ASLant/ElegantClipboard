@@ -1,5 +1,11 @@
 use super::*;
 
+fn candidate_rows(offsets: &[Pixels], pointer_y: Pixels, radius: Pixels) -> std::ops::Range<usize> {
+    let first = offsets[1..].partition_point(|bottom| *bottom <= pointer_y - radius);
+    let end = offsets[..offsets.len() - 1].partition_point(|top| *top <= pointer_y + radius);
+    first..end
+}
+
 impl DragPlacement {
     pub(in crate::ui) fn new(source: usize, target: usize, after: bool) -> Option<Self> {
         let insertion = target + usize::from(after);
@@ -26,24 +32,55 @@ impl DragPlacement {
 }
 
 impl DragMotionState {
+    fn hover_candidates(
+        &self,
+        source: usize,
+        offsets: &[Pixels],
+        pointer_y: Pixels,
+    ) -> std::ops::Range<usize> {
+        // Geometry stays fixed throughout a drag. Non-source placement shifts
+        // are at most the source height, and interruption blends those shifts.
+        // Retained bounds also cover a previous drag's now-visible source.
+        let from_bound = self
+            .from_offset_bounds
+            .iter()
+            .filter(|(index, _)| *index != source)
+            .map(|(_, offset)| *offset)
+            .fold(0_f32, f32::max);
+        let to_bound = self
+            .to
+            .filter(|to| to.source + 1 < offsets.len() && to.insertion + 1 < offsets.len())
+            .map_or(0., |to| {
+                let height = f32::from(offsets[to.source + 1] - offsets[to.source]);
+                if to.source == source {
+                    height
+                } else {
+                    height.max(to.shift(to.source, offsets).abs())
+                }
+            });
+        candidate_rows(offsets, pointer_y, px(from_bound.max(to_bound)))
+    }
+
     pub(in crate::ui) fn hover_target(
         &mut self,
         source: usize,
-        items: impl Iterator<Item = (i64, bool)> + Clone,
+        item_at: impl Fn(usize) -> Option<(i64, bool)>,
         offsets: &[Pixels],
         pointer_y: Pixels,
         previous: Option<DropTarget>,
     ) -> Option<DropTarget> {
         offsets.get(source + 1)?;
-        let (_, pinned) = items.clone().nth(source)?;
+        let (_, pinned) = item_at(source)?;
         let progress = self.started.map_or(1., |_| self.progress.get());
         let top_at = |index| {
             let (from, to) = self.offsets(index, offsets);
             offsets[index] + px(from + (to - from) * progress)
         };
         let source_top = top_at(source);
+        let candidates = self.hover_candidates(source, offsets, pointer_y);
         let mut hovered = None;
-        for (index, (id, is_pinned)) in items.enumerate().take(offsets.len() - 1) {
+        // Ascending model order preserves first-row-wins during animated overlap.
+        for index in candidates {
             // The source is invisible; its moving slot must not occlude a real card.
             if index == source {
                 continue;
@@ -51,6 +88,9 @@ impl DragMotionState {
             let top = top_at(index);
             let bottom = top + offsets[index + 1] - offsets[index];
             if pointer_y >= top && pointer_y < bottom {
+                let Some((id, is_pinned)) = item_at(index) else {
+                    break;
+                };
                 if self.hovered == Some(id) {
                     return previous;
                 }
@@ -115,8 +155,22 @@ impl DragMotionState {
                     previous.shift(index, row_offsets) * progress;
             }
         }
-        self.from_offsets
-            .retain(|index, offset| *index + 1 < row_offsets.len() && *offset != 0.);
+        // Excluding one invisible source needs the two largest magnitudes to
+        // retain the maximum bound for every remaining visible row.
+        self.from_offset_bounds = [(0, 0.); 2];
+        self.from_offsets.retain(|index, offset| {
+            if *index + 1 >= row_offsets.len() || *offset == 0. {
+                return false;
+            }
+            let entry = (*index, offset.abs());
+            if entry.1 > self.from_offset_bounds[0].1 {
+                self.from_offset_bounds[1] = self.from_offset_bounds[0];
+                self.from_offset_bounds[0] = entry;
+            } else if entry.1 > self.from_offset_bounds[1].1 {
+                self.from_offset_bounds[1] = entry;
+            }
+            true
+        });
         self.to = next;
         self.started = Some(now);
         self.progress.reset();
@@ -133,3 +187,6 @@ impl DragMotionState {
         )
     }
 }
+
+#[cfg(test)]
+mod tests;

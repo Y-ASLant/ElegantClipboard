@@ -95,8 +95,9 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `startup`、`view_init`、`window_lifecycle`、`window_render` | 应用启动、状态初始化、窗口生命周期及主窗口渲染 |
 | `events`、`history_events`、`preference_events`、`shortcut_events` | 平台事件路由和各领域状态更新 |
 | `navigation`、`history_list`、`history_card`、`row_actions`、`row_menu` | 列表导航、虚拟列表、卡片、按钮及上下文菜单 |
+| `list_surface` | 历史与待办的独立列表渲染边界、搜索工具栏缓存；辅助功能活跃时保留完整语义树 |
 | `drag`、`drag_visual`、`external_drag`、`external_drag/preview` | 历史与待办共用的拖拽会话、命中与让位动效、原生预览浮窗；历史条目另有窗口外传输载荷 |
-| `todo_drag`、`todo_card`、`todo_motion`、`todos` | 待办卡片、可见列表及行高、排序命令、完成状态变化动效；拖拽复用共用会话与预览 |
+| `todo_drag`、`todo_card`、`todo_layout`、`todo_motion`、`todos` | 待办虚拟列表、筛选索引与实测行高缓存、排序命令及完成状态变化动效；拖拽复用共用会话与预览 |
 | `selection`、`groups`、`confirmation` | 批量选择、分组及确认交互 |
 | `editor_actions`、`editor_window`、`file_cards` | 按需加载文本编辑、独立编辑窗口、备注保存及文件卡片信息；主窗口无整页预览 |
 | `hover_lifecycle`、`hover_window` | 悬停请求、浮窗生命周期和内容 |
@@ -107,6 +108,8 @@ GPUI 原生分派在 `main.rs` 按目标选择 `windows/` 或 `unix/`；Unix 的
 | `onboarding`、`onboarding_shortcut`、`onboarding_practice`、`onboarding_preferences`、`content`、`presentation` | 首次引导导航、快捷键配置、隔离练习教程与初始偏好、内容展示助手、主题及本地化展示 |
 
 纯状态算法仍在 `state.rs`，对应行为测试在 `state/tests.rs`；UI 专属布局、拖拽和预览测试保留在其所属子模块。`ui/thumbnail_cache.rs` 负责列表缩略图的后台解码、两任务并发限制、外部文件版本和过期结果校验；`ui/image_assets.rs` 将其与可见范围、拖动引用和纹理回收衔接，原始图片仍用于悬停预览与复制。
+
+拖拽性能验证（Windows）：GPUI 包 107 项测试通过、1 项交互桌面测试忽略；构建、Clippy、格式与 640 行检查通过。隔离原生窗口使用 2,000 条混合行高待办，可访问树中仅出现约 7–9 个可见及预绘制行；已验证排序持久化、滚动、搜索、窗口变窄后的换行、完成待办及完整文本 OLE 外拖。非激活窗口下以每秒 20 次指针步进采样 60 次，浮窗位置跟随延迟中位数约 4.6ms、P95 约 7.9ms，未抢接收窗口焦点；该数据不是渲染帧率，也不是修改前后对比。未在 macOS、Linux 或混合 DPI 下实机测量。连接辅助功能时重建子树是当前 GPUI 缓存不重放语义节点的兼容处理，虚拟列表仍生效。
 
 确认操作仅由 `HistoryConfirmation` 表示当前类型与分组作用域，保存中的状态仍按操作分别保留。普通偏好使用 `PendingPref<T>`，仅在保存成功后替换生效值；快捷键注册回滚、语言和显示布局等副作用仍由专用处理器负责。窗口隐藏复用清理与隐藏动作，各入口的保护条件不合并。
 

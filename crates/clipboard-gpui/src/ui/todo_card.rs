@@ -74,7 +74,7 @@ pub(super) fn todo_row_surface(
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
-    todo_card_chrome(snapshot, preview, window, cx, None)
+    todo_card_chrome(snapshot, preview, window, cx, None, false)
 }
 
 fn todo_card_chrome(
@@ -83,6 +83,7 @@ fn todo_card_chrome(
     window: &mut Window,
     cx: &mut App,
     checkbox: Option<Checkbox>,
+    selected: bool,
 ) -> impl IntoElement {
     let density = snapshot
         .todo_preference
@@ -94,6 +95,8 @@ fn todo_card_chrome(
     let id = snapshot.todo.id;
     let background = if preview {
         cx.theme().popover
+    } else if selected {
+        cx.theme().list_active
     } else {
         cx.theme().colors.list
     };
@@ -123,7 +126,11 @@ fn todo_card_chrome(
     );
     let border = visual::transition_color(
         ElementId::from((border_channel, id as usize)),
-        crate::design_system::container_border(cx),
+        if selected {
+            cx.theme().primary
+        } else {
+            crate::design_system::container_border(cx)
+        },
         surface_motion,
         window,
         cx,
@@ -198,6 +205,44 @@ fn todo_card_chrome(
 }
 
 impl ClipboardView {
+    pub(super) fn render_todo_item(
+        &self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let layout = self.todo_layout.borrow();
+        let Some(&source) = layout.sources.get(index) else {
+            return div()
+                .h(px(visual::CONTROL_HEIGHT_LARGE + visual::SPACE_6))
+                .into_any_element();
+        };
+        let todo = self.todos[source].clone();
+        let id = todo.id;
+        let (from, to) = self.drag_motion.offsets(index, &layout.offsets);
+        drop(layout);
+        let row = self.render_todo_row(todo, self.todos_pending, window, cx);
+        if from != 0. || to != 0. {
+            visual::drag_yield(
+                div().child(row),
+                from,
+                to,
+                self.drag_motion.started,
+                self.drag_motion.progress.clone(),
+                cx,
+            )
+        } else if let Some(offset) = self.todo_move_offsets.get(&id).copied() {
+            visual::reflow(
+                div().child(row),
+                offset,
+                format!("todo-move-{}-{id}", self.todo_motion_revision),
+                cx,
+            )
+        } else {
+            row
+        }
+    }
+
     pub(super) fn render_todo_row(
         &self,
         todo: Todo,
@@ -210,7 +255,8 @@ impl ClipboardView {
         let text = todo.text.clone();
         let owner = cx.entity().downgrade();
         let remove_owner = owner.clone();
-        let heights = self.todo_heights.clone();
+        let layout = self.todo_layout.clone();
+        let list_surface = self.list_surface.downgrade();
         let entity = cx.entity();
         let snapshot = todo_drag_snapshot(self, &todo);
         let density = self
@@ -227,7 +273,6 @@ impl ClipboardView {
             native_preview: false,
         };
         let drag_enabled = !pending && !self.todo_reorder_pending && self.todos_open;
-        let show_handles = self.display.value.show_drag_area_indicator;
         let checkbox = Checkbox::new(("todo", id as u64))
             .checked(completed)
             .disabled(pending)
@@ -258,9 +303,8 @@ impl ClipboardView {
                 window,
                 cx,
                 Some(checkbox),
+                self.selected_todo == Some(id),
             ))
-            .child(self.drag_handle(id, true, show_handles, cx))
-            .child(self.drag_handle(id, false, show_handles, cx))
             .child(todo_action_bar(
                 self,
                 id,
@@ -279,10 +323,15 @@ impl ClipboardView {
             .pb(px(card_spacing))
             .child(
                 canvas(
-                    move |bounds, _, _| {
-                        heights
-                            .borrow_mut()
-                            .insert(id, f32::from(bounds.size.height));
+                    move |bounds, window, _| {
+                        let height = f32::from(bounds.size.height);
+                        let mut layout = layout.borrow_mut();
+                        if layout.record_height(id, height) {
+                            let list_surface = list_surface.clone();
+                            window.on_next_frame(move |_, cx| {
+                                let _ = list_surface.update(cx, |_, cx| cx.notify());
+                            });
+                        }
                         measured_size.set(bounds.size);
                     },
                     |_, _, _, _| {},
@@ -293,6 +342,18 @@ impl ClipboardView {
                 .size_full(),
             )
             .child(surface)
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                if *hovered && !this.card_drag_active(cx) {
+                    this.select_todo(id, cx);
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_todo_menu(id, text.clone(), event.position, window, cx);
+                }),
+            )
             .when(drag_enabled, |row| {
                 row.cursor_grab()
                     .on_drag(drag, move |drag, offset, window, cx| {
@@ -350,6 +411,7 @@ fn todo_action_bar(
         .border_color(cx.theme().border)
         .shadow(visual::control_shadow())
         .invisible()
+        .when(view.selected_todo == Some(id), |bar| bar.visible())
         .group_hover("", |bar| bar.visible())
         .child(
             todo_icon_button(
@@ -372,13 +434,7 @@ fn todo_action_bar(
                 pending,
             )
             .on_click(move |_, _, cx| {
-                let _ = owner.update(cx, |view, cx| {
-                    if !view.todos_pending && view.send(Command::DeleteTodo(id), cx) {
-                        view.todo_notice = None;
-                        view.todos_pending = true;
-                        cx.notify();
-                    }
-                });
+                let _ = owner.update(cx, |view, cx| view.remove_todo(id, cx));
             }),
         )
 }

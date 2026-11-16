@@ -2,10 +2,7 @@ use super::*;
 use clipboard_core::preferences::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
 use clipboard_platform::InstanceBusy;
 
-gpui_kit::assets::icon_assets!(
-    ActionIcons,
-    [Trash, ArrowUpToLine, Pin, PinOff, GripVertical]
-);
+gpui_kit::assets::icon_assets!(ActionIcons, [Trash, ArrowUpToLine, Pin, PinOff]);
 
 struct AppAssets;
 
@@ -141,6 +138,11 @@ pub fn run(
                 KeyBinding::new("escape", DismissOrHide, Some("ClipboardApp")),
                 KeyBinding::new("ctrl-f", FocusSearch, Some("ClipboardApp")),
                 KeyBinding::new("down", FocusFirstHistoryItem, Some("HistorySearch > Input")),
+                KeyBinding::new("down", NextTodo, Some("TodoList")),
+                KeyBinding::new("up", PreviousTodo, Some("TodoList")),
+                KeyBinding::new("enter", EditSelectedTodo, Some("TodoList")),
+                KeyBinding::new("delete", RemoveSelectedTodo, Some("TodoList")),
+                KeyBinding::new("backspace", RemoveSelectedTodo, Some("TodoList")),
             ]);
             #[cfg(target_os = "macos")]
             cx.bind_keys([
@@ -183,6 +185,9 @@ pub fn run(
                     )),
                     focus: !cfg!(windows) && !startup.hidden,
                     show: !cfg!(windows) && !startup.hidden,
+                    // This non-activating window also clocks native drag following.
+                    // Keep demand-driven animation at the display cadence, not the inactive cap.
+                    inactive_frame_interval: None,
                     app_id: Some("com.aslant.ElegantClipboard".into()),
                     // A non-activating panel floats above the target app and takes keyboard
                     // focus without stealing activation from it.

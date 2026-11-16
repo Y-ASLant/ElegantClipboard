@@ -56,8 +56,8 @@ impl ClipboardView {
             && self
                 .history
                 .items
-                .iter()
-                .any(|item| item.id == drag.id && item.is_pinned == drag.pinned)
+                .get(drag.card.card_index)
+                .is_some_and(|item| item.id == drag.id && item.is_pinned == drag.pinned)
     }
 
     pub(super) fn history_drag_target(
@@ -66,20 +66,15 @@ impl ClipboardView {
         viewport_top: Pixels,
         pointer_y: Pixels,
     ) -> Option<DropTarget> {
-        let source = self
-            .history
-            .items
-            .iter()
-            .position(|item| item.id == drag.id)?;
+        if !self.valid_drag(drag) {
+            return None;
+        }
+        let source = drag.card.card_index;
         let content_y = pointer_y - viewport_top - self.scroll.offset().y;
-        let slots = self
-            .history
-            .items
-            .iter()
-            .map(|item| (item.id, item.is_pinned));
+        let items = &self.history.items;
         self.drag_motion.hover_target(
             source,
-            slots,
+            |index| items.get(index).map(|item| (item.id, item.is_pinned)),
             &self.row_offsets,
             content_y,
             self.drop_target,
@@ -152,7 +147,7 @@ impl ClipboardView {
                         if !this.reorder_pending {
                             this.drop_target = None;
                         }
-                        cx.notify();
+                        this.list_surface.update(cx, |_, cx| cx.notify());
                         return false;
                     }
                     if this.native_drag_active() || this.card_drag_direction == 0 {
@@ -188,9 +183,16 @@ impl ClipboardView {
                     )
                     .and_then(|index| this.history.items.get(index))
                     .and_then(|target| {
-                        let source = this
-                            .drag_source_id()
-                            .and_then(|id| this.history.items.iter().find(|item| item.id == id))?;
+                        let source = if let Some(drag) = this.active_history_drag() {
+                            if !this.valid_drag(drag) {
+                                return None;
+                            }
+                            this.history.items.get(drag.card.card_index)?
+                        } else {
+                            this.drag_source_id().and_then(|id| {
+                                this.history.items.iter().find(|item| item.id == id)
+                            })?
+                        };
                         (source.id != target.id && source.is_pinned == target.is_pinned).then_some(
                             DropTarget {
                                 id: target.id,
@@ -201,7 +203,7 @@ impl ClipboardView {
                     .or(this.drop_target);
                     if next != current || this.drop_target != target {
                         this.drop_target = target;
-                        cx.notify();
+                        this.list_surface.update(cx, |_, cx| cx.notify());
                     }
                     true
                 }) else {

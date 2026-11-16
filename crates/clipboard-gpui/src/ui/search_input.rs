@@ -7,6 +7,9 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(event, InputEvent::Change) {
+            self.todo_layout.borrow_mut().invalidate_filter();
+        }
         if self.todos_open && matches!(event, InputEvent::Change) {
             cx.notify();
             return;

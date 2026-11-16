@@ -27,6 +27,7 @@ mod hover_window;
 use hover_window::HoverPreviewWindowView;
 mod image_assets;
 mod key_intercept;
+mod list_surface;
 mod menu_window;
 mod native_health;
 mod navigation;
@@ -72,6 +73,7 @@ mod theme_color;
 mod thumbnail_cache;
 mod todo_card;
 mod todo_drag;
+mod todo_layout;
 mod todo_motion;
 mod todo_toast;
 mod todos;
@@ -182,6 +184,10 @@ gpui_kit::actions!(
         PastePlainTextSelected,
         PasteSelected,
         DeleteSelected,
+        NextTodo,
+        PreviousTodo,
+        EditSelectedTodo,
+        RemoveSelectedTodo,
         FocusSearch,
         FocusFirstHistoryItem,
         DismissOrHide
@@ -226,6 +232,7 @@ struct DragMotionState {
     hovered: Option<i64>,
     started: Option<std::time::Instant>,
     from_offsets: HashMap<usize, f32>,
+    from_offset_bounds: [(usize, f32); 2],
     to: Option<DragPlacement>,
     progress: Rc<visual::DragProgress>,
 }
@@ -286,16 +293,19 @@ struct ClipboardView {
     groups: Vec<Group>,
     search: Entity<InputState>,
     todos_open: bool,
+    selected_todo: Option<i64>,
     todos: Vec<Todo>,
     todos_pending: bool,
     todo_draft: Option<todos::TodoDraft>,
     todo_edit_saving: bool,
     todo_notice: Option<todos::TodoNotice>,
-    todo_heights: Rc<RefCell<HashMap<i64, f32>>>,
+    todo_layout: Rc<RefCell<todo_layout::TodoListLayout>>,
+    list_surface: Entity<list_surface::ListSurface>,
+    list_chrome: Entity<list_surface::ListChrome>,
     todo_move_offsets: HashMap<i64, f32>,
     todo_motion_revision: u64,
     todo_motion_task: Option<Task<()>>,
-    todo_scroll: ScrollHandle,
+    todo_scroll: VirtualListScrollHandle,
     todo_reorder_pending: bool,
     todo_drop_target: Option<DropTarget>,
     group_name_input: Entity<InputState>,

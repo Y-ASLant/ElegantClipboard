@@ -381,7 +381,6 @@ impl CategoryTabVisibility {
 pub struct DisplayPreference {
     pub show_category_filter: bool,
     pub category_tabs: CategoryTabVisibility,
-    pub show_drag_area_indicator: bool,
     pub card_density: CardDensity,
     pub card_max_lines: u8,
     pub show_time: bool,
@@ -398,7 +397,6 @@ impl Default for DisplayPreference {
         Self {
             show_category_filter: true,
             category_tabs: CategoryTabVisibility::default(),
-            show_drag_area_indicator: true,
             card_density: CardDensity::Standard,
             card_max_lines: 2,
             show_time: true,

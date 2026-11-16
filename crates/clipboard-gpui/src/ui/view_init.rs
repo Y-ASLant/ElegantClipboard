@@ -285,6 +285,9 @@ impl ClipboardView {
                 .await;
             let _ = view.update(cx, |this, cx| this.fail_unanswered_history(0, cx));
         }));
+        let list_owner = cx.entity();
+        let list_surface = cx.new(|cx| list_surface::ListSurface::new(&list_owner, cx));
+        let list_chrome = cx.new(|cx| list_surface::ListChrome::new(&list_owner, cx));
         Self {
             service,
             main_window,
@@ -314,16 +317,19 @@ impl ClipboardView {
             groups: Vec::new(),
             search,
             todos_open: false,
+            selected_todo: None,
             todos: Vec::new(),
             todos_pending: false,
             todo_draft: None,
             todo_edit_saving: false,
             todo_notice: None,
-            todo_heights: Rc::new(RefCell::new(HashMap::new())),
+            todo_layout: Rc::new(RefCell::new(todo_layout::TodoListLayout::default())),
+            list_surface,
+            list_chrome,
             todo_move_offsets: HashMap::new(),
             todo_motion_revision: 0,
             todo_motion_task: None,
-            todo_scroll: ScrollHandle::new(),
+            todo_scroll: VirtualListScrollHandle::new(),
             todo_reorder_pending: false,
             todo_drop_target: None,
             group_name_input: cx.new(|cx| {

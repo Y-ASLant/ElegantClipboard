@@ -10,7 +10,7 @@ impl ClipboardView {
         }
         let query = self.search.read(cx).value().trim().to_lowercase();
         let show_completed = self.todo_preference.value.show_completed;
-        let mut before = visible_todo_ids(&self.todos, show_completed, &query);
+        let mut before = self.todo_layout.borrow().ids.clone();
         if self.todo_reorder_pending
             && let Some(placement) = self.drag_motion.to
             && placement.source < before.len()
@@ -20,16 +20,17 @@ impl ClipboardView {
             before.insert(placement.insertion, moved);
         }
         let after = visible_todo_ids(next, show_completed, &query);
-        let heights = self.todo_heights.borrow();
+        let layout = self.todo_layout.borrow();
         let fallback = todo_row_fallback(self);
         let offsets = slide_offsets(&before, &after, |id| {
-            heights
+            layout
+                .heights
                 .get(&id)
                 .copied()
                 .filter(|height| *height > 0.)
                 .unwrap_or(fallback)
         });
-        drop(heights);
+        drop(layout);
         match offsets {
             Some(offsets) if !offsets.is_empty() => {
                 self.todo_motion_revision = self.todo_motion_revision.wrapping_add(1);
@@ -42,7 +43,7 @@ impl ClipboardView {
                     let _ = view.update(cx, |this, cx| {
                         if this.todo_motion_revision == revision {
                             this.todo_move_offsets.clear();
-                            cx.notify();
+                            this.list_surface.update(cx, |_, cx| cx.notify());
                         }
                     });
                 }));

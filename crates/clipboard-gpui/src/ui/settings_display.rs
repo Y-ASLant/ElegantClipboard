@@ -209,42 +209,17 @@ impl SettingsWindowView {
         let display_pending = owner_state.display.pending;
         // 分段条、数字框和复选框高度不同，各占一行；同一行只放同类复选框。
         settings_stack()
-            .child(
-                settings_inline().children(
-                    [
-                        (
-                            "show-category-filter",
-                            tr(language, "显示分类筛选", "Show category filters"),
-                            display.show_category_filter,
-                            (|next: &mut DisplayPreference, checked| {
-                                next.show_category_filter = checked
-                            }) as fn(&mut DisplayPreference, bool),
-                        ),
-                        (
-                            "show-drag-area-indicator",
-                            tr(language, "显示卡片拖动区域", "Show card drag areas"),
-                            display.show_drag_area_indicator,
-                            |next: &mut DisplayPreference, checked| {
-                                next.show_drag_area_indicator = checked
-                            },
-                        ),
-                    ]
-                    .into_iter()
-                    .map(|(id, label, selected, set_checked)| {
-                        pref_checkbox(
-                            cx,
-                            id,
-                            label,
-                            selected,
-                            display_pending,
-                            &self.owner,
-                            |owner| owner.display.value,
-                            set_checked,
-                            ClipboardView::save_display,
-                        )
-                    }),
-                ),
-            )
+            .child(settings_inline().child(pref_checkbox(
+                cx,
+                "show-category-filter",
+                tr(language, "显示分类筛选", "Show category filters"),
+                display.show_category_filter,
+                display_pending,
+                &self.owner,
+                |owner| owner.display.value,
+                |next: &mut DisplayPreference, checked| next.show_category_filter = checked,
+                ClipboardView::save_display,
+            )))
             .child(
                 settings_field_help(
                     tr(language, "分类筛选标签", "Category filter tabs"),

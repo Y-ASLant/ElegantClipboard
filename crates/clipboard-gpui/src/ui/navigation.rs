@@ -202,7 +202,8 @@ impl ClipboardView {
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
         self.todos_open = false;
-        self.reset_selection();
+        self.selected_todo = None;
+        self.sync_search_prompt(window, cx);
         if selected {
             self.scroll_to_top();
             if self.history_needs_reload() {
@@ -333,6 +334,16 @@ impl ClipboardView {
     }
 
     pub(super) fn focus_first_history_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.todos_open {
+            let Some(&id) = self.todo_layout.borrow().ids.first() else {
+                return;
+            };
+            self.selected_todo = Some(id);
+            self.todo_scroll.scroll_to_item(0, ScrollStrategy::Top);
+            window.focus(&self.list_focus, cx);
+            cx.notify();
+            return;
+        }
         if self.history.loading || self.history.items.is_empty() {
             return;
         }

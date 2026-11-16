@@ -9,52 +9,10 @@ impl ClipboardView {
         if self.onboarding_visible() {
             return self.render_onboarding(window, cx).into_any_element();
         }
-        let category_tab_count = self.toolbar_tabs().len().max(1) as f32;
-        let group_width = visual::group_select_width(
-            f32::from(window.viewport_size().width),
-            self.longest_group_label(window, cx),
-        );
-        // Deduct the group selector, row gap, and the Kit segmented-tab insets.
-        let category_width = (window.viewport_size().width
-            - px(PAGE_PADDING * 2. + group_width + visual::SPACE_2 * 2. + 6.))
-            / category_tab_count;
-        let empty_message = if self.history.loading {
-            tr(self.language, "正在加载…", "Loading…")
-        } else if self.search.read(cx).value().is_empty() {
-            if self.history.favorite_only() {
-                tr(
-                    self.language,
-                    "还没有收藏，点击记录上的“收藏”保留常用文本",
-                    "No favorites yet. Mark an item as a favorite to keep it handy.",
-                )
-            } else if self.history.group_id().is_some() {
-                tr(
-                    self.language,
-                    "该分组暂无可显示的记录",
-                    "There are no items in this group.",
-                )
-            } else if self.history.category() == ContentCategory::Text {
-                tr(self.language, "还没有文本记录", "No text items yet.")
-            } else if self.history.category() == ContentCategory::Image {
-                tr(self.language, "还没有图片记录", "No image items yet.")
-            } else if self.history.category() == ContentCategory::Url {
-                tr(self.language, "还没有链接记录", "No link items yet.")
-            } else if self.history.category() == ContentCategory::Other {
-                tr(self.language, "还没有其他类型记录", "No other items yet.")
-            } else {
-                tr(
-                    self.language,
-                    "复制一段文本，它会出现在这里",
-                    "Copy something and it will appear here.",
-                )
-            }
-        } else {
-            tr(
-                self.language,
-                "没有匹配的记录，试试其他关键词",
-                "No matching items. Try another search.",
-            )
-        };
+        let chrome = self.list_chrome.clone();
+        // GPUI's cached replay omits semantic nodes; rebuild for connected accessibility clients.
+        let cache_subtrees = !window.is_a11y_active();
+        let height = chrome.read(cx).height.get().filter(|_| cache_subtrees);
         div()
             .key_context("ClipboardApp")
             .flex()
@@ -75,6 +33,42 @@ impl ClipboardView {
                 this.search
                     .update(cx, |search, cx| search.focus(window, cx));
             }))
+            .child(if let Some(height) = height {
+                chrome
+                    .cached(StyleRefinement::default().w_full().h(height))
+                    .into_any_element()
+            } else {
+                chrome.into_any_element()
+            })
+            .child(div().flex_1().min_h_0().child(if cache_subtrees {
+                self.list_surface
+                    .clone()
+                    .cached(StyleRefinement::default().size_full())
+                    .into_any_element()
+            } else {
+                self.list_surface.clone().into_any_element()
+            }))
+            .into_any_element()
+    }
+
+    pub(super) fn render_list_chrome(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let category_tab_count = self.toolbar_tabs().len().max(1) as f32;
+        let group_width = visual::group_select_width(
+            f32::from(window.viewport_size().width),
+            self.longest_group_label(window, cx),
+        );
+        // Deduct the group selector, row gap, and the Kit segmented-tab insets.
+        let category_width = (window.viewport_size().width
+            - px(PAGE_PADDING * 2. + group_width + visual::SPACE_2 * 2. + 6.))
+            / category_tab_count;
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
             .child(
                 div()
                     .key_context("HistorySearch")
@@ -106,38 +100,39 @@ impl ClipboardView {
                                         div()
                                             .text_size(px(visual::TEXT_SMALL))
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(if self.language == LanguagePreference::English {
-                                                if self.todos_open {
-                                                    format!("{} to-dos", self.todos.len())
-                                                } else {
-                                                    format!("{} items", self.history.total)
-                                                }
-                                            } else {
-                                                format!(
-                                                    "{} 条记录",
+                                            .child(
+                                                if self.language == LanguagePreference::English {
                                                     if self.todos_open {
-                                                        self.todos.len() as i64
+                                                        format!("{} to-dos", self.todos.len())
                                                     } else {
-                                                        self.history.total
+                                                        format!("{} items", self.history.total)
                                                     }
-                                                )
-                                            }),
+                                                } else {
+                                                    format!(
+                                                        "{} 条记录",
+                                                        if self.todos_open {
+                                                            self.todos.len() as i64
+                                                        } else {
+                                                            self.history.total
+                                                        }
+                                                    )
+                                                },
+                                            ),
                                     )
                                     .child(
                                         Button::new("history-search-info")
                                             .text()
-                                            .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
+                                            .icon(
+                                                Icon::new(IconName::Info)
+                                                    .size(px(visual::ICON_SMALL)),
+                                            )
                                             .xsmall()
                                             .accessibility_label(tr(
                                                 self.language,
                                                 "搜索说明",
                                                 "Search help",
                                             ))
-                                            .tooltip(tr(
-                                                self.language,
-                                                "输入关键词搜索剪贴板历史；点击 × 清空搜索。",
-                                                "Search clipboard history by keyword; click × to clear.",
-                                            )),
+                                            .tooltip(self.search_help()),
                                     ),
                             ),
                     ),
@@ -174,7 +169,8 @@ impl ClipboardView {
                                                 },
                                             ))
                                             .children(self.toolbar_tabs().into_iter().map(|tab| {
-                                                let (label, accessible) = self.toolbar_tab_text(tab);
+                                                let (label, accessible) =
+                                                    self.toolbar_tab_text(tab);
                                                 Tab::new()
                                                     .text_size(px(visual::TEXT_BODY))
                                                     .min_w_0()
@@ -190,25 +186,25 @@ impl ClipboardView {
                                 !self.display.value.show_category_filter
                                     && self.todo_preference.value.enabled,
                                 |row| {
-                                row.child(
-                                    Button::new("open-todos")
-                                        .h(px(visual::CONTROL_HEIGHT))
-                                        .outline()
-                                        .selected(self.todos_open)
-                                        .label(tr(self.language, "待办", "To-do"))
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            if this.todos_open {
-                                                let filter = if this.history.favorite_only() {
-                                                    None
+                                    row.child(
+                                        Button::new("open-todos")
+                                            .h(px(visual::CONTROL_HEIGHT))
+                                            .outline()
+                                            .selected(self.todos_open)
+                                            .label(tr(self.language, "待办", "To-do"))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                if this.todos_open {
+                                                    let filter = if this.history.favorite_only() {
+                                                        None
+                                                    } else {
+                                                        Some(this.history.category())
+                                                    };
+                                                    this.select_category(filter, window, cx);
                                                 } else {
-                                                    Some(this.history.category())
-                                                };
-                                                this.select_category(filter, window, cx);
-                                            } else {
-                                                this.open_todos(window, cx);
-                                            }
-                                        })),
-                                )
+                                                    this.open_todos(window, cx);
+                                                }
+                                            })),
+                                    )
                                 },
                             )
                             .child(
@@ -395,11 +391,6 @@ impl ClipboardView {
                     ),
                     cx,
                 ))
-            })
-            .child(if self.todos_open {
-                self.render_todos(window, cx).into_any_element()
-            } else {
-                self.render_history_list(empty_message, cx).into_any_element()
             })
             .into_any_element()
     }

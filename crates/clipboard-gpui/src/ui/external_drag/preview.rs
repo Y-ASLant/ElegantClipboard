@@ -44,6 +44,7 @@ impl ClipboardView {
                     kind: WindowKind::PopUp,
                     focus: false,
                     show: false,
+                    inactive_frame_interval: None,
                     is_movable: false,
                     is_resizable: false,
                     window_background: WindowBackgroundAppearance::Transparent,

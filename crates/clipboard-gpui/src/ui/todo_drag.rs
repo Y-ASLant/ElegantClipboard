@@ -32,26 +32,12 @@ impl Render for TodoDrag {
 }
 
 impl ClipboardView {
-    pub(super) fn valid_todo_drag(&self, drag: &TodoDrag, cx: &App) -> bool {
+    pub(super) fn valid_todo_drag(&self, drag: &TodoDrag, _cx: &App) -> bool {
         !self.todos_pending
             && !self.todo_reorder_pending
             && self.todos_open
-            && visible_todos(self, cx).any(|todo| todo.id == drag.id)
-    }
-
-    pub(super) fn todo_row_offsets(&self, cx: &App) -> Vec<Pixels> {
-        let heights = self.todo_heights.borrow();
-        let fallback = super::todo_motion::todo_row_fallback(self);
-        let mut offsets = vec![px(0.)];
-        for todo in visible_todos(self, cx) {
-            let height = heights
-                .get(&todo.id)
-                .copied()
-                .filter(|height| *height > 0.)
-                .unwrap_or(fallback);
-            offsets.push(*offsets.last().expect("initial offset") + px(height));
-        }
-        offsets
+            && self.todo_layout.borrow().has_current_filter()
+            && self.todo_layout.borrow().indexes.contains_key(&drag.id)
     }
 
     pub(super) fn todo_drag_target(
@@ -59,18 +45,21 @@ impl ClipboardView {
         drag: &TodoDrag,
         list_top: Pixels,
         pointer_y: Pixels,
-        cx: &App,
+        _cx: &App,
     ) -> Option<DropTarget> {
-        let offsets = self.todo_row_offsets(cx);
-        let slots: Vec<_> = visible_todos(self, cx)
-            .map(|todo| (todo.id, todo.completed))
-            .collect();
-        let source = slots.iter().position(|(id, _)| *id == drag.id)?;
+        let layout = self.todo_layout.borrow();
+        if !layout.has_current_filter() {
+            return None;
+        }
+        let source = *layout.indexes.get(&drag.id)?;
         let content_y = pointer_y - list_top - self.todo_scroll.offset().y;
         self.drag_motion.hover_target(
             source,
-            slots.iter().copied(),
-            &offsets,
+            |index| {
+                let todo = self.todos.get(*layout.sources.get(index)?)?;
+                Some((todo.id, todo.completed))
+            },
+            &layout.offsets,
             content_y,
             self.todo_drop_target,
         )
@@ -78,12 +67,18 @@ impl ClipboardView {
 
     pub(super) fn scroll_todo_drag(&mut self, cx: &mut Context<Self>) {
         let current = self.todo_scroll.offset();
-        let step =
-            px(super::todo_motion::todo_row_fallback(self) * f32::from(self.card_drag_direction));
+        let layout = self.todo_layout.borrow();
+        let height = self
+            .todo_drag_source_id()
+            .and_then(|id| layout.indexes.get(&id).copied())
+            .map(|index| layout.offsets[index + 1] - layout.offsets[index])
+            .unwrap_or_else(|| px(super::todo_motion::todo_row_fallback(self)));
+        let step = height * f32::from(self.card_drag_direction);
+        drop(layout);
         let y = (current.y - step).clamp(-self.todo_scroll.max_offset().y, px(0.));
         if y != current.y {
             self.todo_scroll.set_offset(point(current.x, y));
-            cx.notify();
+            self.list_surface.update(cx, |_, cx| cx.notify());
         }
     }
 
@@ -117,27 +112,16 @@ impl ClipboardView {
             },
             cx,
         ) {
-            let ids: Vec<_> = visible_todos(self, cx).map(|todo| todo.id).collect();
+            let layout = self.todo_layout.borrow();
             self.drag_motion.update(
                 Some((drag.id, target)),
-                ids.iter().copied(),
-                &self.todo_row_offsets(cx),
+                layout.ids.iter().copied(),
+                &layout.offsets,
             );
+            drop(layout);
             self.todo_reorder_pending = true;
             self.todo_drop_target = Some(target);
         }
         cx.notify();
     }
-}
-
-pub(super) fn visible_todos<'a>(
-    view: &'a ClipboardView,
-    cx: &App,
-) -> impl Iterator<Item = &'a Todo> {
-    let query = view.search.read(cx).value().trim().to_lowercase();
-    let show_completed = view.todo_preference.value.show_completed;
-    view.todos.iter().filter(move |todo| {
-        (show_completed || !todo.completed)
-            && (query.is_empty() || todo.text.to_lowercase().contains(&query))
-    })
 }

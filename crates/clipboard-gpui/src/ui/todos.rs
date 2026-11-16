@@ -2,6 +2,7 @@ use super::category_tabs::ToolbarTab;
 use super::history_scroll_top::FloatingAction;
 use super::todo_drag::TodoDrag;
 use super::*;
+use gpui_kit::component::menu::PopupMenuItem;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum TodoNotice {
@@ -56,6 +57,8 @@ impl ClipboardView {
             self.exit_batch_mode(cx);
         }
         self.todos_open = true;
+        self.selected_todo = None;
+        self.sync_search_prompt(window, cx);
         self.scroll_to_top();
         self.load_todos(cx);
         cx.notify();
@@ -66,6 +69,156 @@ impl ClipboardView {
             self.todos_pending = true;
             cx.notify();
         }
+    }
+    pub(super) fn sync_search_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let placeholder = if self.todos_open {
+            tr(self.language, "搜索待办…", "Search to-dos…")
+        } else {
+            tr(
+                self.language,
+                "搜索剪贴板历史…",
+                "Search clipboard history…",
+            )
+        };
+        self.search.update(cx, |input, cx| {
+            input.set_placeholder(placeholder, window, cx)
+        });
+    }
+
+    pub(super) fn search_help(&self) -> &'static str {
+        if self.todos_open {
+            tr(
+                self.language,
+                "输入关键词搜索待办；点击 × 清空搜索。",
+                "Search to-dos by keyword; click × to clear.",
+            )
+        } else {
+            tr(
+                self.language,
+                "输入关键词搜索剪贴板历史；点击 × 清空搜索。",
+                "Search clipboard history by keyword; click × to clear.",
+            )
+        }
+    }
+
+    pub(super) fn select_todo(&mut self, id: i64, cx: &mut Context<Self>) {
+        if self.selected_todo == Some(id) {
+            return;
+        }
+        self.selected_todo = Some(id);
+        cx.notify();
+    }
+
+    pub(super) fn select_adjacent_todo(
+        &mut self,
+        direction: isize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids = self.todo_layout.borrow().ids.clone();
+        if ids.is_empty() {
+            return;
+        }
+        let current = self
+            .selected_todo
+            .and_then(|id| ids.iter().position(|item| *item == id));
+        if direction < 0 && current == Some(0) {
+            self.search
+                .update(cx, |search, cx| search.focus(window, cx));
+            return;
+        }
+        let next = match current {
+            Some(index) => index.saturating_add_signed(direction).min(ids.len() - 1),
+            None => usize::from(direction > 0).saturating_mul(ids.len() - 1),
+        };
+        self.selected_todo = Some(ids[next]);
+        self.todo_scroll
+            .scroll_to_item(next, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
+    pub(super) fn edit_selected_todo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.selected_todo else {
+            return;
+        };
+        let Some(text) = self
+            .todos
+            .iter()
+            .find(|todo| todo.id == id)
+            .map(|todo| todo.text.clone())
+        else {
+            return;
+        };
+        self.open_todo_editor(Some(id), text, window, cx);
+    }
+
+    pub(super) fn remove_todo(&mut self, id: i64, cx: &mut Context<Self>) {
+        if !self.todos_pending && self.send(Command::DeleteTodo(id), cx) {
+            self.todo_notice = None;
+            self.todos_pending = true;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn remove_selected_todo(&mut self, cx: &mut Context<Self>) {
+        if let Some(id) = self.selected_todo {
+            self.remove_todo(id, cx);
+        }
+    }
+
+    pub(super) fn open_todo_menu(
+        &mut self,
+        id: i64,
+        text: String,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selected_todo = Some(id);
+        let pending = self.todos_pending || self.todo_editor_unavailable();
+        let language = self.language;
+        let entity = cx.entity();
+        menu_window::HistoryMenuWindow::open(
+            position,
+            window,
+            cx,
+            entity.clone(),
+            false,
+            move |menu, _, _| {
+                menu.min_w(px(180.))
+                    .max_w(px(280.))
+                    .item(
+                        PopupMenuItem::new(tr(language, "编辑", "Edit"))
+                            .icon(Icon::new(IconName::FileText).size(px(visual::ICON_SIZE)))
+                            .disabled(pending)
+                            .on_click({
+                                let entity = entity.clone();
+                                let text = text.clone();
+                                move |_, window, cx| {
+                                    entity.update(cx, |view, cx| {
+                                        view.open_todo_editor(Some(id), text.clone(), window, cx);
+                                    });
+                                }
+                            }),
+                    )
+                    .separator()
+                    .item(
+                        PopupMenuItem::new(tr(language, "移除", "Remove"))
+                            .icon(
+                                Icon::new(gpui_kit::assets::IconName::Trash)
+                                    .size(px(visual::ICON_SIZE)),
+                            )
+                            .disabled(pending)
+                            .on_click({
+                                let entity = entity.clone();
+                                move |_, _, cx| {
+                                    entity.update(cx, |view, cx| view.remove_todo(id, cx));
+                                }
+                            }),
+                    )
+            },
+        );
+        cx.notify();
     }
 
     /// 待办编辑器与历史条目编辑器（含主窗口备注对话框）共用 editor 会话，
@@ -144,6 +297,11 @@ impl ClipboardView {
         if self.todo_reorder_pending {
             self.drag_motion = DragMotionState::default();
         }
+        if self.todos != todos {
+            self.todo_layout
+                .borrow_mut()
+                .retain_measurements(&self.todos, &todos);
+        }
         self.todos = todos;
         self.todos_pending = false;
         self.todo_reorder_pending = false;
@@ -155,19 +313,33 @@ impl ClipboardView {
         true
     }
 
-    pub(super) fn render_todos(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    pub(super) fn render_todos(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let language = self.language;
-        let pending = self.todos_pending;
-        let query = self.search.read(cx).value().trim().to_owned();
-        let todos: Vec<_> = super::todo_drag::visible_todos(self, cx).cloned().collect();
-        let offsets = self.todo_row_offsets(cx);
+        let empty = self.todo_layout.borrow().ids.is_empty();
+        let has_query = !self.search.read(cx).value().trim().is_empty();
+        let measure_index = self
+            .todo_layout
+            .borrow()
+            .offsets
+            .partition_point(|offset| *offset <= -self.todo_scroll.offset().y)
+            .saturating_sub(1);
         let viewport = self.drag_viewport.clone();
         div()
             .id("todo-content")
+            .key_context("TodoList")
+            .track_focus(&self.list_focus)
+            .on_action(cx.listener(|this, _: &NextTodo, window, cx| {
+                this.select_adjacent_todo(1, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &PreviousTodo, window, cx| {
+                this.select_adjacent_todo(-1, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &EditSelectedTodo, window, cx| {
+                this.edit_selected_todo(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &RemoveSelectedTodo, _, cx| {
+                this.remove_selected_todo(cx);
+            }))
             .relative()
             .flex_1()
             .min_h_0()
@@ -192,11 +364,11 @@ impl ClipboardView {
                     this.drop_todo(drag, cx);
                 }
             }))
-            .child(if todos.is_empty() {
+            .child(if empty {
                 super::todo_card::todo_empty(
                     if self.todos.is_empty() {
                         tr(language, "还没有待办", "No to-dos yet.")
-                    } else if !query.is_empty() {
+                    } else if has_query {
                         tr(
                             language,
                             "没有匹配的待办，试试其他关键词",
@@ -217,36 +389,32 @@ impl ClipboardView {
                     .id("todo-list")
                     .flex_1()
                     .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.todo_scroll)
-                    .vertical_scrollbar(&self.todo_scroll)
-                    .pb(px(visual::CONTROL_HEIGHT_LARGE + visual::SPACE_6))
-                    .children(todos.into_iter().enumerate().map(|(index, todo)| {
-                        let id = todo.id;
-                        let row = self.render_todo_row(todo, pending, window, cx);
-                        let (from, to) = self.drag_motion.offsets(index, &offsets);
-                        if from != 0. || to != 0. {
-                            visual::drag_yield(
-                                div().child(row),
-                                from,
-                                to,
-                                self.drag_motion.started,
-                                self.drag_motion.progress.clone(),
-                                cx,
-                            )
-                        } else if let Some(offset) = self.todo_move_offsets.get(&id).copied() {
-                            visual::reflow(
-                                div().child(row),
-                                offset,
-                                format!("todo-move-{}-{id}", self.todo_motion_revision),
-                                cx,
-                            )
-                        } else {
-                            row
-                        }
-                    }))
+                    .relative()
+                    .child(
+                        v_virtual_list(
+                            cx.entity(),
+                            "todo-virtual-list",
+                            self.todo_layout.borrow().sizes.clone(),
+                            |this, visible, window, cx| {
+                                visible
+                                    .map(|index| this.render_todo_item(index, window, cx))
+                                    .collect()
+                            },
+                        )
+                        .track_scroll(&self.todo_scroll)
+                        .with_item_to_measure_index(measure_index)
+                        .size_full(),
+                    )
+                    .child(
+                        div()
+                            .id("todo-scrollbar-rail")
+                            .absolute()
+                            .right_0()
+                            .top_0()
+                            .bottom_0()
+                            .w(px(visual::SCROLLBAR_RAIL_WIDTH))
+                            .vertical_scrollbar(&self.todo_scroll),
+                    )
                     .into_any_element()
             })
             .child(self.render_floating_action(FloatingAction::AddTodo, cx))
