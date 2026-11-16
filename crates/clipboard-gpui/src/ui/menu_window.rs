@@ -14,6 +14,7 @@ const MENU_PAD_REM: f32 = 0.25;
 const MENU_GAP_REM: f32 = 0.125;
 
 type MenuBuild = Box<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>;
+type PlacedKey = (i32, i32, i32, i32);
 
 pub(super) struct HistoryMenuWindow {
     menu: Option<Entity<PopupMenu>>,
@@ -25,7 +26,7 @@ pub(super) struct HistoryMenuWindow {
     menu_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     anchor: Point<Pixels>,
     screen: Bounds<Pixels>,
-    fitted: Rc<Cell<Option<(i32, i32, i32, i32)>>>,
+    fitted: Rc<Cell<Option<PlacedKey>>>,
     _activation: Subscription,
 }
 
@@ -226,6 +227,7 @@ fn fitted_menu_bounds(
 pub(super) enum RowKind {
     Item,
     Submenu,
+    Separator,
 }
 
 thread_local! {
@@ -255,17 +257,21 @@ fn pointer_wants_flyout(
     let mut on_submenu = false;
     let mut on_other = false;
     for row in rows {
-        let on_row = pointer.y >= y
-            && pointer.y < y + item
-            && pointer.x >= menu.left()
-            && pointer.x <= menu.right();
-        if on_row {
-            match row {
-                RowKind::Submenu => on_submenu = true,
-                RowKind::Item => on_other = true,
+        let advance = match row {
+            RowKind::Separator => rem * MENU_GAP_REM * 2. + px(2.) + gap,
+            RowKind::Item | RowKind::Submenu => {
+                if pointer.y >= y
+                    && pointer.y < y + item
+                    && pointer.x >= menu.left()
+                    && pointer.x <= menu.right()
+                {
+                    on_submenu |= matches!(row, RowKind::Submenu);
+                    on_other |= matches!(row, RowKind::Item);
+                }
+                item + gap
             }
-        }
-        y += item + gap;
+        };
+        y += advance;
     }
     // The kit keeps a submenu open until another row is hovered. Shrinking
     // before that paints the submenu back over the parent.
@@ -278,7 +284,7 @@ fn pointer_wants_flyout(
     open
 }
 
-fn placed_key(bounds: Bounds<Pixels>) -> (i32, i32, i32, i32) {
+fn placed_key(bounds: Bounds<Pixels>) -> PlacedKey {
     (
         f32::from(bounds.origin.x).round() as i32,
         f32::from(bounds.origin.y).round() as i32,
@@ -471,6 +477,25 @@ mod tests {
         assert!(pointer_wants_flyout(
             menu,
             point(px(20.), px(200.)),
+            &rows,
+            rem,
+            true,
+        ));
+    }
+
+    #[test]
+    fn row_after_a_separator_closes_the_flyout() {
+        let menu = Bounds::new(point(px(0.), px(0.)), size(px(240.), px(300.)));
+        let rows = [
+            RowKind::Item,
+            RowKind::Submenu,
+            RowKind::Separator,
+            RowKind::Item,
+        ];
+        let rem = px(16.);
+        assert!(!pointer_wants_flyout(
+            menu,
+            point(px(20.), px(90.)),
             &rows,
             rem,
             true,

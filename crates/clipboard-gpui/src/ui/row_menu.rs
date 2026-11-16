@@ -34,6 +34,11 @@ pub(super) fn history_menu_item(
         })
 }
 
+fn separated(menu: PopupMenu) -> PopupMenu {
+    menu_window::note_menu_row(menu_window::RowKind::Separator);
+    menu.separator()
+}
+
 fn run_history_menu_action(
     view: &Entity<ClipboardView>,
     id: i64,
@@ -362,7 +367,7 @@ impl ClipboardView {
                         } else {
                             menu
                         };
-                        menu.separator()
+                        let menu = separated(menu)
                             .when(text_like, |menu| {
                                 menu.item(history_menu_item(
                                     tr(language, "编辑", "Edit"),
@@ -378,8 +383,8 @@ impl ClipboardView {
                                 entity.clone(),
                                 id,
                                 HistoryMenuAction::EditNote,
-                            ))
-                            .separator()
+                            ));
+                        let menu = separated(menu)
                             .item(
                                 history_menu_item(
                                     if favorite {
@@ -414,22 +419,21 @@ impl ClipboardView {
                                 entity.clone(),
                                 id,
                                 HistoryMenuAction::MoveToGroup,
-                            ))
-                            .separator()
-                            .item(
-                                history_menu_item(
-                                    tr(language, "删除", "Delete"),
-                                    false,
-                                    entity.clone(),
-                                    id,
-                                    HistoryMenuAction::Delete,
-                                )
-                                .icon(
-                                    Icon::new(IconName::Trash)
-                                        .size(px(visual::ICON_SIZE))
-                                        .text_color(cx.theme().danger),
-                                ),
+                            ));
+                        separated(menu).item(
+                            history_menu_item(
+                                tr(language, "删除", "Delete"),
+                                false,
+                                entity.clone(),
+                                id,
+                                HistoryMenuAction::Delete,
                             )
+                            .icon(
+                                Icon::new(IconName::Trash)
+                                    .size(px(visual::ICON_SIZE))
+                                    .text_color(cx.theme().danger),
+                            ),
+                        )
                     },
                 );
             })
