@@ -1,6 +1,7 @@
 use super::todo_drag::TodoDrag;
 use super::*;
 use clipboard_core::preferences::{DisplayPreference, TodoPreference};
+use gpui_kit::component::checkbox::Checkbox;
 
 #[derive(Clone)]
 pub(super) struct TodoDragSnapshot {
@@ -81,7 +82,7 @@ fn todo_card_chrome(
     preview: bool,
     window: &mut Window,
     cx: &mut App,
-    status_control: Option<Button>,
+    checkbox: Option<Checkbox>,
     selected: bool,
 ) -> impl IntoElement {
     let density = snapshot
@@ -134,15 +135,11 @@ fn todo_card_chrome(
         window,
         cx,
     );
-    let status_control = status_control.unwrap_or_else(|| {
-        Button::new(("todo-status-preview", id as u64))
-            .ghost()
-            .xsmall()
-            .label(super::todo_notice::todo_status_label(
-                snapshot.language,
-                snapshot.todo.status,
-            ))
+    let checkbox = checkbox.unwrap_or_else(|| {
+        Checkbox::new(("todo-preview", id as u64))
+            .checked(snapshot.todo.status.is_finished())
             .disabled(true)
+            .accessibility_label(snapshot.todo.text.clone())
     });
     let mut surface = div()
         .id(("todo-surface", id as usize))
@@ -174,7 +171,7 @@ fn todo_card_chrome(
                         .h(px(visual::PREVIEW_LINE_HEIGHT))
                         .flex()
                         .items_center()
-                        .child(status_control),
+                        .child(checkbox),
                 )
                 .child(
                     div()
@@ -196,14 +193,14 @@ fn todo_card_chrome(
                         }),
                 ),
         );
-    if let Some(times) = todo_times(snapshot) {
+    if let Some(meta) = todo_meta(snapshot) {
         surface = surface.child(
             div()
                 .h(px(visual::METADATA_ROW_HEIGHT))
                 .text_size(px(visual::TEXT_SMALL))
                 .line_height(relative(1.))
                 .text_color(cx.theme().muted_foreground)
-                .child(times),
+                .child(meta),
         );
     }
     surface
@@ -258,12 +255,12 @@ impl ClipboardView {
         let id = todo.id;
         let status = todo.status;
         let text = todo.text.clone();
-        let remove_owner = cx.entity().downgrade();
+        let owner = cx.entity().downgrade();
+        let remove_owner = owner.clone();
         let layout = self.todo_layout.clone();
         let list_surface = self.list_surface.downgrade();
         let entity = cx.entity();
         let menu_owner = entity.clone();
-        let status_owner = entity.clone();
         let snapshot = todo_drag_snapshot(self, &todo);
         let density = self
             .todo_preference
@@ -279,24 +276,23 @@ impl ClipboardView {
             native_preview: false,
         };
         let drag_enabled = !pending && !self.todo_reorder_pending && self.todos_open;
-        let status_label = super::todo_notice::todo_status_label(self.language, status);
-        let status_control = Button::new(("todo-status", id as u64))
-            .ghost()
-            .xsmall()
-            .label(status_label)
+        let checkbox = Checkbox::new(("todo", id as u64))
+            .checked(status.is_finished())
             .disabled(pending)
-            .tooltip(tr(self.language, "设置进度", "Set status"))
-            .on_click(move |_, window, cx| {
-                let position = window.mouse_position();
-                ClipboardView::open_todo_menu(
-                    status_owner.clone(),
-                    id,
-                    text.clone(),
-                    status,
-                    position,
-                    window,
-                    cx,
-                );
+            .accessibility_label(format!(
+                "{} · {}",
+                text,
+                super::todo_notice::todo_status_label(self.language, status)
+            ))
+            .on_change(move |checked, _, cx| {
+                let _ = owner.update(cx, |view, cx| {
+                    let next = if *checked {
+                        TodoStatus::Done
+                    } else {
+                        TodoStatus::Pending
+                    };
+                    view.set_todo_status(id, next, cx);
+                });
             });
         let surface = div()
             .w_full()
@@ -305,7 +301,7 @@ impl ClipboardView {
                 false,
                 window,
                 cx,
-                Some(status_control),
+                Some(checkbox),
                 self.selected_todo == Some(id),
             ))
             .child(todo_action_bar(
@@ -467,11 +463,16 @@ fn todo_icon_button(
         .disabled(disabled)
 }
 
-fn todo_times(snapshot: &TodoDragSnapshot) -> Option<String> {
+/// 元信息：非「待处理」时显示进度文案；时间仍按设置。
+fn todo_meta(snapshot: &TodoDragSnapshot) -> Option<String> {
     let preference = snapshot.todo_preference;
-    if !preference.show_created && !preference.show_edited {
-        return None;
-    }
+    let status = match snapshot.todo.status {
+        TodoStatus::Pending => None,
+        status => Some(super::todo_notice::todo_status_label(
+            snapshot.language,
+            status,
+        )),
+    };
     let now = chrono::Local::now().naive_local();
     let created = preference.show_created.then(|| {
         format_card_time(
@@ -490,13 +491,19 @@ fn todo_times(snapshot: &TodoDragSnapshot) -> Option<String> {
         )
     });
     let chinese = snapshot.language == LanguagePreference::Chinese;
-    match (created, edited) {
+    let times = match (created, edited) {
         (Some(created), Some(edited)) if chinese => Some(format!("创建 {created} · 编辑 {edited}")),
         (Some(created), Some(edited)) => Some(format!("Created {created} · Edited {edited}")),
         (Some(created), None) if chinese => Some(format!("创建 {created}")),
         (Some(created), None) => Some(format!("Created {created}")),
         (None, Some(edited)) if chinese => Some(format!("编辑 {edited}")),
         (None, Some(edited)) => Some(format!("Edited {edited}")),
+        (None, None) => None,
+    };
+    match (status, times) {
+        (Some(status), Some(times)) => Some(format!("{status} · {times}")),
+        (Some(status), None) => Some(status.to_owned()),
+        (None, Some(times)) => Some(times),
         (None, None) => None,
     }
 }
