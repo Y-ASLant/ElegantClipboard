@@ -167,17 +167,21 @@ impl ClipboardView {
     }
 
     pub(super) fn open_todo_menu(
-        &mut self,
+        entity: Entity<Self>,
         id: i64,
         text: String,
         position: Point<Pixels>,
         window: &mut Window,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
-        self.selected_todo = Some(id);
-        let pending = self.todos_pending || self.todo_editor_unavailable();
-        let language = self.language;
-        let entity = cx.entity();
+        let (pending, language) = entity.update(cx, |view, cx| {
+            view.selected_todo = Some(id);
+            cx.notify();
+            (
+                view.todos_pending || view.todo_editor_unavailable(),
+                view.language,
+            )
+        });
         menu_window::HistoryMenuWindow::open(
             position,
             window,
@@ -218,7 +222,6 @@ impl ClipboardView {
                     )
             },
         );
-        cx.notify();
     }
 
     /// 待办编辑器与历史条目编辑器（含主窗口备注对话框）共用 editor 会话，

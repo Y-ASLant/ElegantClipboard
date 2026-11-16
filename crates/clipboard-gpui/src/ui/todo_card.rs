@@ -258,6 +258,7 @@ impl ClipboardView {
         let layout = self.todo_layout.clone();
         let list_surface = self.list_surface.downgrade();
         let entity = cx.entity();
+        let menu_owner = entity.clone();
         let snapshot = todo_drag_snapshot(self, &todo);
         let density = self
             .todo_preference
@@ -349,10 +350,17 @@ impl ClipboardView {
             }))
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                move |event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
-                    this.open_todo_menu(id, text.clone(), event.position, window, cx);
-                }),
+                    ClipboardView::open_todo_menu(
+                        menu_owner.clone(),
+                        id,
+                        text.clone(),
+                        event.position,
+                        window,
+                        cx,
+                    );
+                },
             )
             .when(drag_enabled, |row| {
                 row.cursor_grab()

@@ -196,8 +196,8 @@ impl Render for HistoryMenuWindow {
                             menu.child(
                                 canvas(
                                     move |bounds, window, cx| {
-                                        if bounds.size.width < px(200.)
-                                            || bounds.size.height < px(80.)
+                                        if bounds.size.width < px(180.)
+                                            || bounds.size.height < px(70.)
                                         {
                                             return;
                                         }

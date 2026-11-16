@@ -21,11 +21,7 @@ impl ClipboardView {
             return;
         }
         if let Some(handle) = self.settings_window {
-            let notification = if self.is_error {
-                Notification::error(self.message.clone())
-            } else {
-                Notification::success(self.message.clone())
-            };
+            let notification = feedback_notification(self.message.clone(), self.is_error);
             if handle
                 .update(cx, |_, window, cx| {
                     window.push_notification(notification.id::<ClipboardView>(), cx);
@@ -62,6 +58,28 @@ impl ClipboardView {
             )))
             .into_any_element()
     }
+}
+
+/// Kit pins a typed notification's icon at a fixed `top: 18px`, so it misses
+/// the text's center once the line box changes. Draw the mark in the same row.
+fn feedback_notification(message: String, error: bool) -> Notification {
+    Notification::new().content(move |_, _, cx| {
+        let (icon, color) = if error {
+            (IconName::CircleX, cx.theme().danger)
+        } else {
+            (IconName::CircleCheck, cx.theme().success)
+        };
+        div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_sm()
+            .line_height(relative(1.))
+            .child(Icon::new(icon).size_4().flex_shrink_0().text_color(color))
+            .child(div().min_w_0().child(message.clone()))
+            .into_any_element()
+    })
 }
 impl Render for ClipboardView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
