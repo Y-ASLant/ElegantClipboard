@@ -119,6 +119,7 @@ impl Preferences {
         Ok(match self.repository.get(THEME_COLOR_KEY)?.as_deref() {
             Some("orange") => ThemeColor::VibrantOrange,
             Some("cyan") => ThemeColor::Cyan,
+            Some("rouge") => ThemeColor::Rouge,
             _ => ThemeColor::GoogleBlue,
         })
     }
@@ -129,6 +130,7 @@ impl Preferences {
             match color {
                 ThemeColor::VibrantOrange => "orange",
                 ThemeColor::Cyan => "cyan",
+                ThemeColor::Rouge => "rouge",
                 ThemeColor::GoogleBlue => "google_blue",
             },
         )?)

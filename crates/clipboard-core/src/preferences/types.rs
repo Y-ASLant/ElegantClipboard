@@ -518,6 +518,7 @@ pub enum ThemePreference {
 pub enum ThemeColor {
     VibrantOrange,
     Cyan,
+    Rouge,
     #[default]
     GoogleBlue,
 }

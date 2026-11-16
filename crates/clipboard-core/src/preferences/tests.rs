@@ -35,6 +35,8 @@ fn theme_color_defaults_to_google_blue_and_rejects_unknown_values() -> Result<()
     assert_eq!(preferences.theme_color()?, ThemeColor::Cyan);
     preferences.set_theme_color(ThemeColor::VibrantOrange)?;
     assert_eq!(preferences.theme_color()?, ThemeColor::VibrantOrange);
+    preferences.set_theme_color(ThemeColor::Rouge)?;
+    assert_eq!(preferences.theme_color()?, ThemeColor::Rouge);
     SettingsRepository::new(&db).set(THEME_COLOR_KEY, "unknown")?;
     assert_eq!(preferences.theme_color()?, ThemeColor::GoogleBlue);
     Ok(())

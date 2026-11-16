@@ -449,17 +449,30 @@ fn accent_palette(color: AccentColor) -> AccentPalette {
             link_hover_dark: 0xfed7aa,
         },
         AccentColor::Cyan => AccentPalette {
-            // Saturated fill keeps white label above 4.5:1 on `#ffffff` (sRGB).
-            primary: 0x0e7490,
-            text_light: 0x116982,
-            text_dark: 0x67e8f9,
-            hover: 0x155e75,
-            active: 0x164e63,
-            subtle_light: 0xcffafe,
-            subtle_dark: 0x083344,
-            ring: 0x22d3ee,
-            link_hover_light: 0x12667a,
-            link_hover_dark: 0xa5f3fc,
+            // 鸭青. Saturated fill keeps white label at 5.36:1 on `#ffffff` (sRGB).
+            primary: 0x1a7770,
+            text_light: 0x1a6b65,
+            text_dark: 0x76e7de,
+            hover: 0x17625c,
+            active: 0x18524e,
+            subtle_light: 0xe4f6f4,
+            subtle_dark: 0x1c3330,
+            ring: 0x4cd6cc,
+            link_hover_light: 0x196862,
+            link_hover_dark: 0xa5f2eb,
+        },
+        AccentColor::Rouge => AccentPalette {
+            // 胭脂 `#9d2933`. White label is 7.5:1 on `#ffffff` (sRGB).
+            primary: 0x9d2933,
+            text_light: 0x9d2933,
+            text_dark: 0xe6b7b5,
+            hover: 0x8d1726,
+            active: 0x741721,
+            subtle_light: 0xfee4e3,
+            subtle_dark: 0x4d2525,
+            ring: 0xea9796,
+            link_hover_light: 0x931527,
+            link_hover_dark: 0xead1cf,
         },
         AccentColor::GoogleBlue => AccentPalette {
             // Primary tuned so white fill text clears ~4.5:1 on `#ffffff` (sRGB).
