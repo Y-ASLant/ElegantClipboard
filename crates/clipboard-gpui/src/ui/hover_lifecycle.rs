@@ -154,6 +154,7 @@ impl ClipboardView {
         }));
     }
 
+    #[cfg(windows)]
     fn hover_pointer_on_source(&self, id: Option<i64>, x: f32, y: f32) -> bool {
         let Some(id) = id else {
             tracing::debug!("Hover source miss: no preview id");
@@ -203,6 +204,7 @@ impl ClipboardView {
         hit
     }
 
+    #[cfg(windows)]
     fn memo_pointer_on_source(&self, id: i64, viewport: Bounds<Pixels>, y: f32) -> bool {
         let layout = self.todo_layout.borrow();
         let Some(index) = layout.indexes.get(&id).copied() else {
