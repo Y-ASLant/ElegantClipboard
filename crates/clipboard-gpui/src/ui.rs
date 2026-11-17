@@ -1,6 +1,7 @@
 mod category_tabs;
 mod confirmation;
 mod content;
+mod content_editor;
 mod copy_flash;
 mod data_import;
 mod diagnostics_events;
