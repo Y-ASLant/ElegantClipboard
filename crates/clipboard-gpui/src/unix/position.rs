@@ -138,7 +138,7 @@ fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<bo
             y.clamp(work.origin.y, (top - fitted_h).max(work.origin.y)),
         );
         let rect = NSRect::new(origin, NSSize::new(fitted_w, fitted_h));
-        let _: () = msg_send![native, setFrame: rect display: false];
+        let _: () = msg_send![native, setFrame: rect, display: false];
         Ok(resized)
     }
 }

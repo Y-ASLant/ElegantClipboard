@@ -106,105 +106,124 @@ fn process_name_for_window(window: HWND) -> Option<SourceApp> {
 
 pub fn extract_and_cache_icon(executable: &str, icons_dir: &Path) -> Option<String> {
     let hash = clipboard_core::backup::hash_token(executable.to_lowercase().as_bytes());
-    let path = icons_dir.join(format!("{}.png", &hash[..12]));
-    if path.is_file() {
+    let stem = &hash[..12];
+    let path = icons_dir.join(format!("{stem}.png"));
+    // g2 = alpha-preserving DIB; old cache used screen bitmaps (black fringes).
+    let generation = icons_dir.join(format!("{stem}.g2"));
+    if path.is_file() && generation.is_file() {
         return Some(path.to_string_lossy().into_owned());
     }
     let png = extract_icon_png(executable)?;
     std::fs::create_dir_all(icons_dir).ok()?;
     let mut temporary = tempfile::NamedTempFile::new_in(icons_dir).ok()?;
     std::io::Write::write_all(&mut temporary, &png).ok()?;
-    match temporary.persist_noclobber(&path) {
-        Ok(_) => Some(path.to_string_lossy().into_owned()),
-        Err(error) if path.is_file() => {
-            drop(error.file);
-            Some(path.to_string_lossy().into_owned())
-        }
-        Err(_) => None,
-    }
+    temporary.persist(&path).ok()?;
+    let _ = std::fs::write(&generation, b"2");
+    Some(path.to_string_lossy().into_owned())
 }
+
+const ICON_PX: i32 = 32;
+const ICON_BYTES: usize = (ICON_PX * ICON_PX * 4) as usize;
 
 fn extract_icon_png(executable: &str) -> Option<Vec<u8>> {
     use image::{ImageFormat, RgbaImage};
     use std::io::Cursor;
-    use windows::Win32::{
-        Graphics::Gdi::{
-            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC,
-            DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
-        },
-        UI::WindowsAndMessaging::{DI_NORMAL, DestroyIcon, DrawIconEx, GetIconInfo, ICONINFO},
-    };
 
     let icon = load_icon(executable)?;
-    let mut icon_info = ICONINFO::default();
-    if unsafe { GetIconInfo(icon, &mut icon_info) }.is_err() {
-        let _ = unsafe { DestroyIcon(icon) };
-        return None;
+    // Prefer a zeroed 32-bit DIB so DrawIconEx can keep real alpha.
+    // Screen-compatible bitmaps drop alpha and leave black fringes.
+    let mut pixels = draw_icon(icon, [0, 0, 0, 0])?;
+    if !pixels.as_chunks::<4>().0.iter().any(|px| px[3] != 0) {
+        let on_black = draw_icon(icon, [0, 0, 0, 255])?;
+        let on_white = draw_icon(icon, [255, 255, 255, 255])?;
+        for ((out, black), white) in pixels
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(on_black.as_chunks::<4>().0)
+            .zip(on_white.as_chunks::<4>().0)
+        {
+            let alpha = 255u8.saturating_sub(
+                ((u16::from(white[0].saturating_sub(black[0]))
+                    + u16::from(white[1].saturating_sub(black[1]))
+                    + u16::from(white[2].saturating_sub(black[2])))
+                    / 3) as u8,
+            );
+            if alpha == 0 {
+                out.copy_from_slice(&[0, 0, 0, 0]);
+            } else {
+                out[0] = black[0];
+                out[1] = black[1];
+                out[2] = black[2];
+                out[3] = alpha;
+            }
+        }
     }
+    let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::DestroyIcon(icon) };
+
+    for chunk in pixels.as_chunks_mut::<4>().0 {
+        chunk.swap(0, 2);
+    }
+    let image = RgbaImage::from_raw(ICON_PX as u32, ICON_PX as u32, pixels)?;
+    let mut buffer = Cursor::new(Vec::new());
+    image.write_to(&mut buffer, ImageFormat::Png).ok()?;
+    Some(buffer.into_inner())
+}
+
+fn draw_icon(
+    icon: windows::Win32::UI::WindowsAndMessaging::HICON,
+    fill: [u8; 4],
+) -> Option<Vec<u8>> {
+    use windows::Win32::{
+        Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection,
+            DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
+        },
+        UI::WindowsAndMessaging::{DI_NORMAL, DrawIconEx},
+    };
+
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: ICON_PX,
+            biHeight: -ICON_PX,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let screen = unsafe { GetDC(None) };
     let memory = unsafe { CreateCompatibleDC(Some(screen)) };
-    let bitmap = unsafe { CreateCompatibleBitmap(screen, 32, 32) };
-    let pixels = if screen.0.is_null() || memory.0.is_null() || bitmap.0.is_null() {
-        None
-    } else {
-        let old = unsafe { SelectObject(memory, bitmap.into()) };
-        let drawn = unsafe { DrawIconEx(memory, 0, 0, icon, 32, 32, 0, None, DI_NORMAL) };
-        unsafe { SelectObject(memory, old) };
-        if drawn.is_err() {
-            None
-        } else {
-            let mut bitmap_info = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: 32,
-                    biHeight: -32,
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let mut pixels = vec![0u8; 32 * 32 * 4];
-            let lines = unsafe {
-                GetDIBits(
-                    memory,
-                    bitmap,
-                    0,
-                    32,
-                    Some(pixels.as_mut_ptr().cast()),
-                    &mut bitmap_info,
-                    DIB_RGB_COLORS,
-                )
-            };
-            (lines == 32).then_some(pixels)
+    let mut bits = std::ptr::null_mut();
+    let bitmap =
+        unsafe { CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0) }
+            .ok()
+            .filter(|bitmap| !bitmap.0.is_null() && !bits.is_null());
+    let pixels = match bitmap {
+        Some(bitmap) if !screen.0.is_null() && !memory.0.is_null() => {
+            let slice = unsafe { std::slice::from_raw_parts_mut(bits.cast::<u8>(), ICON_BYTES) };
+            for px in slice.as_chunks_mut::<4>().0 {
+                px.copy_from_slice(&fill);
+            }
+            let old = unsafe { SelectObject(memory, bitmap.into()) };
+            let drawn =
+                unsafe { DrawIconEx(memory, 0, 0, icon, ICON_PX, ICON_PX, 0, None, DI_NORMAL) };
+            unsafe { SelectObject(memory, old) };
+            let out = drawn.is_ok().then(|| slice.to_vec());
+            let _ = unsafe { DeleteObject(bitmap.into()) };
+            out
         }
+        _ => None,
     };
-    if !bitmap.0.is_null() {
-        let _ = unsafe { DeleteObject(bitmap.into()) };
-    }
     if !memory.0.is_null() {
         let _ = unsafe { DeleteDC(memory) };
     }
     if !screen.0.is_null() {
         unsafe { ReleaseDC(None, screen) };
     }
-    if !icon_info.hbmColor.0.is_null() {
-        let _ = unsafe { DeleteObject(icon_info.hbmColor.into()) };
-    }
-    if !icon_info.hbmMask.0.is_null() {
-        let _ = unsafe { DeleteObject(icon_info.hbmMask.into()) };
-    }
-    let _ = unsafe { DestroyIcon(icon) };
-
-    let mut pixels = pixels?;
-    for chunk in pixels.as_chunks_mut::<4>().0 {
-        chunk.swap(0, 2);
-    }
-    let image = RgbaImage::from_raw(32, 32, pixels)?;
-    let mut buffer = Cursor::new(Vec::new());
-    image.write_to(&mut buffer, ImageFormat::Png).ok()?;
-    Some(buffer.into_inner())
+    pixels
 }
 
 fn load_icon(executable: &str) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
