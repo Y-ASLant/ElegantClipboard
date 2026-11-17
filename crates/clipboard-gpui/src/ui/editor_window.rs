@@ -43,6 +43,31 @@ fn save_shortcut_label() -> &'static str {
     }
 }
 
+fn markdown_preview_source(text: &str) -> String {
+    let text = text.replace("\r\n", "\n");
+    let mut out = String::with_capacity(text.len() + text.matches('\n').count() * 2);
+    let mut in_fence = false;
+    let mut lines = text.split('\n').peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        let fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        out.push_str(line);
+        if lines.peek().is_none() {
+            break;
+        }
+        let paragraph = line.is_empty() || lines.peek().is_some_and(|next| next.is_empty());
+        if paragraph || in_fence || fence {
+            out.push('\n');
+        } else {
+            out.push_str("  \n");
+        }
+        if fence {
+            in_fence = !in_fence;
+        }
+    }
+    out
+}
+
 fn memo_kind_toggle(
     adding: bool,
     kind: Option<MemoKind>,
@@ -453,7 +478,9 @@ impl Render for ContentEditorWindow {
                             },
                         )
                         .when(self.markdown_preview, |area| {
-                            let preview = self.editor.read(cx).value().to_string();
+                            let preview = markdown_preview_source(
+                                self.editor.read(cx).value().as_ref(),
+                            );
                             area.child(
                                 div().size_full().overflow_y_scrollbar().child(
                                     div()
