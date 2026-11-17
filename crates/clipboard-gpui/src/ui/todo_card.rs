@@ -294,7 +294,10 @@ impl ClipboardView {
                     view.set_todo_status(id, next, cx);
                 });
             });
+        // 操作栏必须留在这个分组里，离开卡片后 group_hover 才会收起。
+        // 选中只改描边，不显示按钮。
         let surface = div()
+            .group("todo-card")
             .w_full()
             .child(todo_card_chrome(
                 &snapshot,
@@ -418,8 +421,9 @@ fn todo_action_bar(
         .border_color(cx.theme().border)
         .shadow(visual::control_shadow())
         .invisible()
-        .when(view.selected_todo == Some(id), |bar| bar.visible())
-        .group_hover("", |bar| bar.visible())
+        .when(!view.card_drag_active(cx), |bar| {
+            bar.group_hover("todo-card", |style| style.visible())
+        })
         .child(
             todo_icon_button(
                 ("todo-edit", id as usize),
