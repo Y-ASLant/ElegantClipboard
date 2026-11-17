@@ -1,5 +1,6 @@
 use super::*;
 use gpui_kit::component::input::{Editor, EditorState, Escape as EditorEscape};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::text::TextView;
 
 const CONTEXT: &str = "ContentEditor";
@@ -48,48 +49,37 @@ fn memo_kind_toggle(
     language: LanguagePreference,
     owner: WeakEntity<ClipboardView>,
     _cx: &App,
-) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .gap(px(visual::SPACE_2))
-        .when(adding, |row| {
-            row.child(memo_kind_button(
-                "memo-kind-todo",
-                MemoKind::Todo,
-                kind,
-                tr(language, "待办", "To-do"),
-                owner.clone(),
-            ))
-            .child(memo_kind_button(
-                "memo-kind-note",
-                MemoKind::Note,
-                kind,
-                tr(language, "笔记", "Note"),
-                owner,
-            ))
-        })
-}
-
-fn memo_kind_button(
-    id: &'static str,
-    kind: MemoKind,
-    selected: Option<MemoKind>,
-    label: impl Into<SharedString>,
-    owner: WeakEntity<ClipboardView>,
-) -> Button {
-    Button::new(id)
-        .xsmall()
-        .selected(selected == Some(kind))
-        .label(label)
-        .on_click(move |_, _, cx| {
+) -> AnyElement {
+    if !adding {
+        return div().into_any_element();
+    }
+    let labels = [tr(language, "待办", "To-do"), tr(language, "笔记", "Note")];
+    TabBar::new("memo-kind")
+        .segmented()
+        .h(px(visual::CONTROL_HEIGHT))
+        .w(px(168.))
+        .selected_index(usize::from(kind == Some(MemoKind::Note)))
+        .children(labels.map(|label| {
+            Tab::new()
+                .label(label)
+                .text_size(px(visual::TEXT_SMALL))
+                .aria_label(label)
+                .flex_1()
+        }))
+        .on_click(move |index: &usize, _, cx| {
+            let next = if *index == 0 {
+                MemoKind::Todo
+            } else {
+                MemoKind::Note
+            };
             let _ = owner.update(cx, |view, cx| {
                 if let Some(draft) = view.todo_draft.as_mut().filter(|draft| draft.id.is_none()) {
-                    draft.kind = kind;
+                    draft.kind = next;
                 }
                 cx.notify();
             });
         })
+        .into_any_element()
 }
 
 pub(super) struct ContentEditorWindow {
