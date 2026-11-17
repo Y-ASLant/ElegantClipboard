@@ -261,22 +261,6 @@ impl History {
             .join("blobs"))
     }
 
-    /// 清空全部额外格式行（clear-all 用），返回释放的 blob 哈希。
-    pub(crate) fn detach_all_native_formats(&self) -> Result<Vec<String>> {
-        let hashes: Vec<String> = self.referenced_blob_hashes()?.into_iter().collect();
-        let connection = self.db.write_connection();
-        let connection = connection.lock();
-        connection.execute("DELETE FROM native_formats", [])?;
-        Ok(hashes)
-    }
-
-    pub(crate) fn delete_all_aliases(&self) -> Result<()> {
-        let connection = self.db.write_connection();
-        let connection = connection.lock();
-        connection.execute("DELETE FROM content_hash_aliases", [])?;
-        Ok(())
-    }
-
     /// 全库仍在引用的 blob 哈希集合（GC 的 used 集）。
     pub(crate) fn referenced_blob_hashes(&self) -> Result<std::collections::HashSet<String>> {
         let connection = self.db.read_connection();
@@ -285,19 +269,6 @@ impl History {
             .prepare("SELECT DISTINCT blob_hash FROM native_formats WHERE blob_hash IS NOT NULL")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         Ok(rows.flatten().collect())
-    }
-
-    /// clear_history 路径：事务内按 clearable 条件收集并删除额外格式行与别名。
-    pub(crate) fn clear_native_by_clearable_condition(
-        &self,
-        group_id: Option<i64>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
-        let connection = self.db.write_connection();
-        let mut connection = connection.lock();
-        let tx = connection.transaction()?;
-        let (blobs, hashes) = clear_native_in_transaction(&tx, group_id)?;
-        tx.commit()?;
-        Ok((blobs, hashes))
     }
 }
 

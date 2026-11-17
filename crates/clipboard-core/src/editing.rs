@@ -69,9 +69,8 @@ impl History {
         )?;
         tx.commit()?;
         drop(connection);
-        if let Some(image_path) = item.image_path {
-            let _ = self.cleanup_media(vec![image_path], Vec::new(), blobs, images_dir);
-        }
+        let images = item.image_path.into_iter().collect();
+        let _ = self.cleanup_media(images, Vec::new(), blobs, images_dir);
         Ok(true)
     }
 }
@@ -183,6 +182,62 @@ mod tests {
         assert!(item.html_content.is_none());
         assert!(item.rtf_content.is_none());
         assert_eq!(history.text(id)?, "hello again");
+        Ok(())
+    }
+
+    #[test]
+    fn edit_releases_unreferenced_native_blobs_and_keeps_shared() -> Result<()> {
+        use crate::native_format::{NATIVE_INLINE_MAX_BYTES, NativeFormatCapture};
+
+        let dir = tempfile::tempdir()?;
+        let history = History::open(dir.path().join("clipboard.db"))?;
+        let images = dir.path().join("images");
+        let payload = vec![9u8; NATIVE_INLINE_MAX_BYTES + 1];
+        let alone = history.capture_rich(Some("<b>alone</b>"), None, Some("alone"), &images)?;
+        history.attach_native_formats(
+            alone,
+            vec![NativeFormatCapture {
+                name: "Example.Custom".into(),
+                data: payload.clone(),
+            }],
+        )?;
+        let shared_a = history.capture_rich(Some("<b>a</b>"), None, Some("a"), &images)?;
+        let shared_b = history.capture_rich(Some("<b>b</b>"), None, Some("b"), &images)?;
+        let shared_payload = vec![3u8; NATIVE_INLINE_MAX_BYTES + 2];
+        history.attach_native_formats(
+            shared_a,
+            vec![NativeFormatCapture {
+                name: "Shared.Fmt".into(),
+                data: shared_payload.clone(),
+            }],
+        )?;
+        history.attach_native_formats(
+            shared_b,
+            vec![NativeFormatCapture {
+                name: "Shared.Fmt".into(),
+                data: shared_payload,
+            }],
+        )?;
+        let blobs = dir.path().join("blobs");
+        assert_eq!(std::fs::read_dir(&blobs)?.count(), 2);
+
+        let hash = history.item(alone)?.content_hash;
+        assert!(history.edit_text(alone, &hash, "edited alone", &images)?);
+        assert!(history.native_formats_for_copy(alone)?.is_empty());
+        assert_eq!(std::fs::read_dir(&blobs)?.count(), 1, "独有 blob 应回收");
+
+        let hash_a = history.item(shared_a)?.content_hash;
+        assert!(history.edit_text(shared_a, &hash_a, "edited a", &images)?);
+        assert_eq!(
+            std::fs::read_dir(&blobs)?.count(),
+            1,
+            "共享 blob 在仍有引用时保留"
+        );
+        assert_eq!(
+            history.native_formats_for_copy(shared_b)?.len(),
+            1,
+            "另一条共享引用仍可读"
+        );
         Ok(())
     }
 }

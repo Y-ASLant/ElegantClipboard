@@ -287,6 +287,45 @@ fn committed_deletions_report_cleanup_failures_and_continue_other_media() -> Res
 }
 
 #[test]
+fn clear_ops_roll_back_native_formats_when_item_delete_fails() -> Result<()> {
+    use crate::NativeFormatCapture;
+
+    for clear_all in [false, true] {
+        let directory = tempfile::tempdir()?;
+        let db = Database::new(directory.path().join("clipboard.db"))?;
+        let history = History::new(&db);
+        let images = directory.path().join("images");
+        let id = history.capture("keep-me")?.unwrap();
+        history.attach_native_formats(
+            id,
+            vec![NativeFormatCapture {
+                name: "Example.Custom".into(),
+                data: b"payload".to_vec(),
+            }],
+        )?;
+        assert_eq!(history.native_formats_for_copy(id)?.len(), 1);
+        db.write_connection().lock().execute_batch(
+            "CREATE TRIGGER fail_del BEFORE DELETE ON clipboard_items BEGIN
+               SELECT RAISE(ABORT, 'simulated delete failure');
+             END;",
+        )?;
+        let result = if clear_all {
+            history.clear_all_with_media(&images)
+        } else {
+            history.clear_history_with_media(None, &images)
+        };
+        assert!(result.is_err(), "clear_all={clear_all}");
+        assert!(history.item(id).is_ok(), "主记录应回滚保留");
+        assert_eq!(
+            history.native_formats_for_copy(id)?.len(),
+            1,
+            "原生格式应与主记录同事务回滚 clear_all={clear_all}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn missing_media_is_already_cleaned_and_shared_payload_errors_prevent_deletion() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;

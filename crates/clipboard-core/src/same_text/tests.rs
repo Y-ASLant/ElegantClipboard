@@ -74,6 +74,7 @@ fn rich_target_never_downgrades_and_html_stays_html() -> Result<()> {
     assert_eq!(first, second);
     let item = history.item(first)?;
     assert_eq!(item.content_type, "html");
+    assert_eq!(item.html_content.as_deref(), Some("<b>first</b>"));
     assert!(item.rtf_content.is_some());
     Ok(())
 }
@@ -129,5 +130,42 @@ fn merged_preview_and_byte_size_are_recomputed() -> Result<()> {
         "byte_size 应重算为 text+html+rtf 总和"
     );
     assert_eq!(item.preview.as_deref(), Some("merge size"));
+    Ok(())
+}
+
+#[test]
+fn rich_then_plain_keeps_existing_html() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let images = directory.path().join("images");
+    let id = history.capture_rich(Some("<b>shared</b>"), None, Some("shared"), &images)?;
+    let plain = history.capture("shared")?.unwrap();
+    assert_eq!(id, plain);
+    let item = history.item(id)?;
+    assert_eq!(item.content_type, "html");
+    assert_eq!(item.html_content.as_deref(), Some("<b>shared</b>"));
+    assert_eq!(
+        item.byte_size,
+        ("shared".len() + "<b>shared</b>".len()) as i64
+    );
+    Ok(())
+}
+
+#[test]
+fn non_ascii_plain_and_rich_merge() -> Result<()> {
+    for text in ["共享文本", "café"] {
+        let directory = tempfile::tempdir()?;
+        let history = History::open(directory.path().join("clipboard.db"))?;
+        let images = directory.path().join("images");
+        let plain = history.capture(text)?.unwrap();
+        let expected_html = format!("<b>{text}</b>");
+        let rich = history.capture_rich(Some(&expected_html), None, Some(text), &images)?;
+        assert_eq!(plain, rich, "{text} 应跨格式同文合并");
+        assert_eq!(history.count("", false)?, 1);
+        assert_eq!(
+            history.item(plain)?.html_content.as_deref(),
+            Some(expected_html.as_str())
+        );
+    }
     Ok(())
 }

@@ -19,11 +19,10 @@ impl History {
             "SELECT id, content_type, content_hash, preview FROM clipboard_items
              WHERE text_content = ?1 AND group_id IS NULL
                AND content_type IN ('text','url','html','rtf')
-               AND length(text_content) = ?2
              ORDER BY sort_order DESC, created_at DESC, id DESC LIMIT 1",
         )?;
         let target = statement
-            .query_row(rusqlite::params![text, text.len() as i64], |row| {
+            .query_row(rusqlite::params![text], |row| {
                 Ok(SameTextTarget {
                     id: row.get(0)?,
                     content_type: row.get(1)?,
@@ -41,20 +40,33 @@ impl History {
         input: &MergeInput<'_>,
         images_dir: Option<&std::path::Path>,
     ) -> Result<i64> {
-        let rtf_encoded = input.rtf.map(crate::rich::encode_rtf_for_storage);
-        let html = input.html.map(str::to_owned);
-        let byte_size = input.text.len()
-            + html.as_ref().map_or(0, |value| value.len())
-            + rtf_encoded.as_ref().map_or(0, |value| value.len());
         let preview = Some(
             target
                 .preview
                 .clone()
                 .unwrap_or_else(|| crate::truncate_preview(input.text)),
         );
+        let content_type =
+            crate::same_text::upgraded_type(&target.content_type, input.content_type);
+        let categories =
+            crate::ContentCategory::membership(Some(content_type), Some(input.text), &[]);
         let connection = self.db.write_connection();
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
+        // 本次缺省的表示保留已有列，避免纯文本/单格式回写清空另一侧富文本。
+        let (existing_html, existing_rtf): (Option<String>, Option<String>) = tx.query_row(
+            "SELECT html_content, rtf_content FROM clipboard_items WHERE id = ?1",
+            [target.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let html = input.html.map(str::to_owned).or(existing_html);
+        let rtf_encoded = input
+            .rtf
+            .map(crate::rich::encode_rtf_for_storage)
+            .or(existing_rtf);
+        let byte_size = input.text.len()
+            + html.as_ref().map_or(0, |value| value.len())
+            + rtf_encoded.as_ref().map_or(0, |value| value.len());
         tx.execute(
             "UPDATE clipboard_items SET html_content = ?1, rtf_content = ?2,
              content_type = ?3, categories = ?4, byte_size = ?5, preview = ?6,
@@ -66,15 +78,8 @@ impl History {
             rusqlite::params![
                 html,
                 rtf_encoded,
-                crate::same_text::upgraded_type(&target.content_type, input.content_type).as_str(),
-                crate::ContentCategory::membership(
-                    Some(crate::same_text::upgraded_type(
-                        &target.content_type,
-                        input.content_type,
-                    )),
-                    Some(input.text),
-                    &[],
-                ),
+                content_type.as_str(),
+                categories,
                 byte_size as i64,
                 preview,
                 target.id

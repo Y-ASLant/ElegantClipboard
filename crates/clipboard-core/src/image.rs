@@ -181,9 +181,21 @@ impl History {
     ) -> Result<DeletionOutcome> {
         let candidates = self.repo.get_clearable_image_paths(group_id, None)?;
         let staged = self.repo.get_clearable_file_payloads(group_id, None)?;
-        // clear_native_in_transaction 事务内已删除别名；此处只需 blob 引用。
-        let (blobs, _) = self.clear_native_by_clearable_condition(group_id)?;
-        let deleted = self.repo.clear_history(group_id, None)?;
+        let connection = self.db.write_connection();
+        let mut connection = connection.lock();
+        let tx = connection.transaction()?;
+        let (blobs, _) = crate::native_format::clear_native_in_transaction(&tx, group_id)?;
+        let (group_cond, group_param) = match group_id {
+            Some(id) => ("group_id = ?1", Some(id)),
+            None => ("group_id IS NULL", None),
+        };
+        let delete_sql = format!(
+            "DELETE FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {group_cond}"
+        );
+        let deleted =
+            tx.execute(&delete_sql, rusqlite::params_from_iter(group_param.iter()))? as i64;
+        tx.commit()?;
+        drop(connection);
         Ok(DeletionOutcome {
             deleted,
             cleanup_warning: self.cleanup_media(candidates, staged, blobs, images_dir),
@@ -195,9 +207,21 @@ impl History {
     pub fn clear_all_with_media(&self, images_dir: &Path) -> Result<DeletionOutcome> {
         let images = self.repo.get_all_image_paths()?;
         let payloads = self.repo.get_all_file_payloads()?;
-        let blobs = self.detach_all_native_formats()?;
-        self.delete_all_aliases()?;
-        let deleted = self.repo.clear_all()?;
+        let connection = self.db.write_connection();
+        let mut connection = connection.lock();
+        let tx = connection.transaction()?;
+        let blobs = {
+            let mut statement = tx.prepare(
+                "SELECT DISTINCT blob_hash FROM native_formats WHERE blob_hash IS NOT NULL",
+            )?;
+            let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+            rows.flatten().collect::<Vec<_>>()
+        };
+        tx.execute("DELETE FROM native_formats", [])?;
+        tx.execute("DELETE FROM content_hash_aliases", [])?;
+        let deleted = tx.execute("DELETE FROM clipboard_items", [])? as i64;
+        tx.commit()?;
+        drop(connection);
         Ok(DeletionOutcome {
             deleted,
             cleanup_warning: self.cleanup_media(images, payloads, blobs, images_dir),
