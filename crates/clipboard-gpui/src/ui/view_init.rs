@@ -439,6 +439,7 @@ impl ClipboardView {
             window_position: PendingPref::new(window_position),
             persist_window_size,
             persist_window_size_pending: false,
+            suppress_window_size_persist: false,
             auto_reset_state: PendingPref::new(auto_reset_state),
             search_auto_focus: PendingPref::new(search_auto_focus),
             search_auto_clear: PendingPref::new(search_auto_clear),

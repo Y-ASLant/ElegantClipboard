@@ -255,16 +255,28 @@ fn follow_cursor_flips_and_clamps_within_work_area() {
         ),
         (-612, 440)
     );
+    let fitted = fit_window_size(work, 2200, 1200);
+    assert_eq!(fitted, (1920, 1040));
     assert_eq!(
         placement(
             WindowPositionPreference::FollowCursor,
             (-1910, 10),
             work,
-            2200,
-            1200
+            fitted.0,
+            fitted.1
         ),
         (-1920, 0)
     );
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn fit_window_size_shrinks_only_to_work_area() {
+    let work = (100, 200, 500, 800);
+    assert_eq!(fit_window_size(work, 200, 300), (200, 300));
+    assert_eq!(fit_window_size(work, 900, 50), (400, 50));
+    assert_eq!(fit_window_size(work, 10, 900), (10, 600));
+    assert_eq!(fit_window_size((0, 0, 0, 0), 80, 90), (1, 1));
 }
 
 #[cfg(any(windows, target_os = "linux"))]

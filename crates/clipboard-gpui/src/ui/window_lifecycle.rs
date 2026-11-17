@@ -170,7 +170,10 @@ impl ClipboardView {
         log_window_geometry(window, cx, "main_bounds_changed");
         self.close_history_menu(cx);
         self.close_hover_preview("owner_bounds_changed", cx);
-        if !self.persist_window_size || self.persist_window_size_pending {
+        if self.suppress_window_size_persist
+            || !self.persist_window_size
+            || self.persist_window_size_pending
+        {
             return;
         }
         let WindowBounds::Windowed(bounds) = window.window_bounds() else {

@@ -173,6 +173,16 @@ fn popup_size(
 #[cfg(any(windows, target_os = "linux"))]
 const CURSOR_GAP: i32 = 12;
 
+/// Shrink width/height so the frame can lie entirely inside the work area.
+/// Physical/screen pixels; never grows. Degenerate work areas still yield at least 1×1.
+#[cfg(any(windows, target_os = "linux"))]
+pub fn fit_window_size(work: (i32, i32, i32, i32), width: i32, height: i32) -> (i32, i32) {
+    let (left, top, right, bottom) = work;
+    let max_w = (right - left).max(1);
+    let max_h = (bottom - top).max(1);
+    (width.max(1).min(max_w), height.max(1).min(max_h))
+}
+
 /// 主窗口摆放：top-left 原点整数像素坐标（x 向右、y 向下，Windows 与 X11 均如此）下的纯运算。
 ///
 /// - `FollowCursor`：先放光标右下方、偏移 `CURSOR_GAP`；右侧放不下整体翻到左侧；x/y 都夹进工作区。
@@ -180,6 +190,7 @@ const CURSOR_GAP: i32 = 12;
 /// - `FixedPosition`：不在此处理（`position_window` 已提前返回）。
 ///
 /// `work` 为 `(left, top, right, bottom)`，`cursor` 为指针位置，返回夹取后的左上角坐标。
+/// 调用方须先用 [`fit_window_size`] 把宽高限制在工作区内，否则夹取只能保住顶边，底边仍可能溢出。
 /// macOS 的 Cocoa 坐标系 y 轴向上且光标坐标带小数，纵向运算与这里是镜像关系，
 /// 不经由此函数（见 `unix/position.rs`）。
 #[cfg(any(windows, target_os = "linux"))]

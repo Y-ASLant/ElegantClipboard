@@ -43,7 +43,7 @@ impl ClipboardView {
                 };
                 let result = match position_request {
                     Ok(Some(position)) => position.apply(),
-                    Ok(None) => Ok(()),
+                    Ok(None) => Ok(false),
                     Err(error) => Err(error),
                 };
                 request.show();
@@ -71,17 +71,32 @@ impl ClipboardView {
 
     fn finish_show_window(
         &mut self,
-        positioning: anyhow::Result<()>,
+        positioning: anyhow::Result<bool>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Err(error) = positioning {
-            tracing::error!(%error, "Main window positioning failed");
-            self.set_feedback_message(format!(
-                "{}: {error}",
-                tr(self.language, "无法定位窗口", "Failed to position window")
-            ));
-            self.is_error = true;
+        match positioning {
+            Err(error) => {
+                tracing::error!(%error, "Main window positioning failed");
+                self.set_feedback_message(format!(
+                    "{}: {error}",
+                    tr(self.language, "无法定位窗口", "Failed to position window")
+                ));
+                self.is_error = true;
+            }
+            Ok(false) => {}
+            Ok(true) => {
+                // Auto-fit must not overwrite the saved preferred size.
+                self.suppress_window_size_persist = true;
+                self.window_size_task = Some(cx.spawn(async move |view, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(500))
+                        .await;
+                    let _ = view.update(cx, |this, _| {
+                        this.suppress_window_size_persist = false;
+                    });
+                }));
+            }
         }
         #[cfg(target_os = "macos")]
         native_window::set_window_visible(window, true);

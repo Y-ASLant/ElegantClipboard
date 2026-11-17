@@ -2,18 +2,18 @@ use anyhow::Result;
 use clipboard_core::preferences::WindowPositionPreference;
 use gpui_kit::Window;
 
-pub fn position_window(window: &Window, mode: WindowPositionPreference) -> Result<()> {
+pub fn position_window(window: &Window, mode: WindowPositionPreference) -> Result<bool> {
     if mode == WindowPositionPreference::FixedPosition
         || window.is_maximized()
         || window.is_fullscreen()
     {
-        return Ok(());
+        return Ok(false);
     }
     position_native(window, mode)
 }
 
 #[cfg(target_os = "linux")]
-fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<()> {
+fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<bool> {
     use anyhow::Context;
     use x11rb::{
         connection::Connection,
@@ -70,29 +70,26 @@ fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<()
         right = right.min((x as i32).saturating_add(width as i32));
         bottom = bottom.min((y as i32).saturating_add(height as i32));
     }
-    let width = i32::from(geometry.width);
-    let height = i32::from(geometry.height);
-    // FollowCursor / ScreenCenter 纯运算与 Windows 共用 crate::popup_geometry::placement；
-    // FixedPosition 已在 position_window 提前返回，不会走到这里。
-    let (x, y) =
-        crate::popup_geometry::placement(mode, cursor, (left, top, right, bottom), width, height);
-    connection
-        .configure_window(
-            id,
-            &ConfigureWindowAux::new()
-                .x(x.clamp(left, (right - width).max(left)))
-                .y(y.clamp(top, (bottom - height).max(top))),
-        )?
-        .check()?;
+    let original = (i32::from(geometry.width), i32::from(geometry.height));
+    let work = (left, top, right, bottom);
+    let (width, height) = crate::popup_geometry::fit_window_size(work, original.0, original.1);
+    let resized = (width, height) != original;
+    // FollowCursor / ScreenCenter 与 Windows 共用 placement；FixedPosition 已提前返回。
+    let (x, y) = crate::popup_geometry::placement(mode, cursor, work, width, height);
+    let mut aux = ConfigureWindowAux::new().x(x).y(y);
+    if resized {
+        aux = aux.width(width as u32).height(height as u32);
+    }
+    connection.configure_window(id, &aux)?.check()?;
     connection.flush()?;
-    Ok(())
+    Ok(resized)
 }
 
 #[cfg(target_os = "macos")]
-fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<()> {
+fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<bool> {
     use anyhow::Context;
     use objc2::{class, msg_send, runtime::AnyObject};
-    use objc2_foundation::{NSPoint, NSRect};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
     let native =
         super::window::window_id(window).context("无法取得 AppKit 窗口")? as *mut AnyObject;
     unsafe {
@@ -115,26 +112,33 @@ fn position_native(window: &Window, mode: WindowPositionPreference) -> Result<()
         let screen = selected.context("无法确定光标所在显示器")?;
         let work: NSRect = msg_send![screen, visibleFrame];
         let frame: NSRect = msg_send![native, frame];
+        let max_w = work.size.width.max(1.);
+        let max_h = work.size.height.max(1.);
+        let fitted_w = frame.size.width.max(1.).min(max_w);
+        let fitted_h = frame.size.height.max(1.).min(max_h);
+        let resized = (fitted_w - frame.size.width).abs() > f64::EPSILON
+            || (fitted_h - frame.size.height).abs() > f64::EPSILON;
         let right = work.origin.x + work.size.width;
         let top = work.origin.y + work.size.height;
         let (x, y) = if mode == WindowPositionPreference::ScreenCenter {
             (
-                work.origin.x + (work.size.width - frame.size.width) / 2.,
-                work.origin.y + (work.size.height - frame.size.height) / 2.,
+                work.origin.x + (work.size.width - fitted_w) / 2.,
+                work.origin.y + (work.size.height - fitted_h) / 2.,
             )
         } else {
-            let x = if cursor.x + 12. + frame.size.width > right {
-                cursor.x - frame.size.width - 12.
+            let x = if cursor.x + 12. + fitted_w > right {
+                cursor.x - fitted_w - 12.
             } else {
                 cursor.x + 12.
             };
-            (x, cursor.y - 12. - frame.size.height)
+            (x, cursor.y - 12. - fitted_h)
         };
         let origin = NSPoint::new(
-            x.clamp(work.origin.x, (right - frame.size.width).max(work.origin.x)),
-            y.clamp(work.origin.y, (top - frame.size.height).max(work.origin.y)),
+            x.clamp(work.origin.x, (right - fitted_w).max(work.origin.x)),
+            y.clamp(work.origin.y, (top - fitted_h).max(work.origin.y)),
         );
-        let _: () = msg_send![native, setFrameOrigin: origin];
+        let rect = NSRect::new(origin, NSSize::new(fitted_w, fitted_h));
+        let _: () = msg_send![native, setFrame: rect display: false];
+        Ok(resized)
     }
-    Ok(())
 }

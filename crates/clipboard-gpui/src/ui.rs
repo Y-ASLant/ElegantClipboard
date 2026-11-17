@@ -405,6 +405,8 @@ struct ClipboardView {
     window_position: PendingPref<WindowPositionPreference>,
     persist_window_size: bool,
     persist_window_size_pending: bool,
+    /// Skip saving size after an automatic work-area fit on show.
+    suppress_window_size_persist: bool,
     auto_reset_state: PendingPref<bool>,
     search_auto_focus: PendingPref<bool>,
     search_auto_clear: PendingPref<bool>,
