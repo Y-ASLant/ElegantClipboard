@@ -58,3 +58,38 @@ pub fn is_window_minimized(window: &Window) -> bool {
 pub fn activate_for_input(window: &Window) {
     window.activate_window();
 }
+
+const NORMAL_WINDOW_LEVEL: isize = 0;
+/// Matches `NSPopUpWindowLevel`, the level GPUI assigns to `WindowKind::PopUp`.
+const POPUP_WINDOW_LEVEL: isize = 101;
+
+/// Drop the popup band so a normal editor can appear above the history panel.
+pub fn release_above(window: &Window) {
+    set_level(window, NORMAL_WINDOW_LEVEL);
+}
+
+/// Restore the floating panel level used when the history window was created.
+pub fn raise_above(window: &Window) {
+    set_level(window, POPUP_WINDOW_LEVEL);
+}
+
+/// Order the window in front and leave the popup window level.
+pub fn raise_front(window: &Window) {
+    set_level(window, NORMAL_WINDOW_LEVEL);
+    let Some(native) = window_id(window) else {
+        return;
+    };
+    let native = native as *mut AnyObject;
+    // SAFETY: native is the live NSWindow for this GPUI window.
+    unsafe {
+        let _: () = msg_send![native, orderFrontRegardless];
+    }
+}
+
+fn set_level(window: &Window, level: isize) {
+    if let Some(native) = window_id(window) {
+        unsafe {
+            let _: () = msg_send![native as *mut AnyObject, setLevel: level];
+        }
+    }
+}

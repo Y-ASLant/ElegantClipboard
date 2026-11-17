@@ -102,6 +102,16 @@ impl ClipboardView {
         native_window::set_window_visible(window, true);
         #[cfg(target_os = "linux")]
         native_window::show_without_activation(window);
+        if let Some(editor) = self.editor_window {
+            native_window::release_above(window);
+            let _ = editor.update(cx, |_, editor_window, _| {
+                native_window::raise_front(editor_window);
+            });
+        }
+        #[cfg(target_os = "macos")]
+        if self.editor_window.is_none() {
+            native_window::raise_above(window);
+        }
         log_window_geometry(window, cx, "main_shown");
         if self.onboarding_visible() {
             window.focus(&self.list_focus, cx);
@@ -117,7 +127,7 @@ impl ClipboardView {
                 self.scroll_to_top();
                 self.arm_history_query(reload, false, cx);
             }
-            if self.editor.id.is_none() {
+            if self.editor.id.is_none() && self.editor_window.is_none() {
                 if self.search_auto_focus.value {
                     self.search.update(cx, |input, cx| input.focus(window, cx));
                 } else {

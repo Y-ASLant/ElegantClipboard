@@ -187,9 +187,31 @@ pub fn activate_for_input(window: &Window) {
             SendInput(&[key_down, key_up], std::mem::size_of::<INPUT>() as i32);
             let _ = SetForegroundWindow(hwnd);
         }
+        place(hwnd, Some(HWND_NOTOPMOST));
+    }
+}
+
+/// Leave the topmost band without taking focus.
+pub fn release_above(window: &Window) {
+    if let Some(hwnd) = window_hwnd(window) {
+        place(hwnd, Some(HWND_NOTOPMOST));
+    }
+}
+
+/// Place the window at the top of the non-topmost band without activating it.
+pub fn raise_front(window: &Window) {
+    if let Some(hwnd) = window_hwnd(window) {
+        // NULL insert-after is HWND_TOP.
+        place(hwnd, None);
+    }
+}
+
+fn place(hwnd: HWND, after: Option<HWND>) {
+    // SAFETY: hwnd is a live GPUI window. Flags only change z-order.
+    unsafe {
         let _ = SetWindowPos(
             hwnd,
-            Some(HWND_NOTOPMOST),
+            after,
             0,
             0,
             0,

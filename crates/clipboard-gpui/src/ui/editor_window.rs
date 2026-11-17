@@ -145,6 +145,7 @@ impl ClipboardView {
         let language = self.language;
         let adding_todo = self.todo_draft.as_ref().map(|draft| draft.id.is_none());
         let window_effect = self.window_effect.value;
+        let main_window = window.window_handle();
         let owner = cx.weak_entity();
         cx.defer(move |cx| {
             let Some(owner_entity) = owner.upgrade() else {
@@ -154,6 +155,10 @@ impl ClipboardView {
             if !still_waiting {
                 return;
             }
+            // Panel is topmost and non-activating; drop that before the editor exists.
+            let _ = main_window.update(cx, |_, window, _| {
+                native_window::release_above(window);
+            });
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 display_id,
@@ -185,13 +190,26 @@ impl ClipboardView {
                 });
                 cx.new(|cx| ContentEditorWindow::new(editor_owner, window, cx))
             });
-            owner_entity.update(cx, |owner, cx| {
-                match opened {
-                    Ok((handle, _)) => owner.editor_window = Some(handle),
-                    Err(error) => owner.fail_content_editor_open(error, cx),
-                }
+            let handle = owner_entity.update(cx, |owner, cx| {
+                let handle = match opened {
+                    Ok((handle, _)) => {
+                        owner.editor_window = Some(handle);
+                        Some(handle)
+                    }
+                    Err(error) => {
+                        owner.fail_content_editor_open(error, cx);
+                        None
+                    }
+                };
                 cx.notify();
+                handle
             });
+            if let Some(handle) = handle {
+                let _ = handle.update(cx, |_, editor, _| {
+                    native_window::raise_front(editor);
+                    native_window::activate_for_input(editor);
+                });
+            }
         });
     }
 

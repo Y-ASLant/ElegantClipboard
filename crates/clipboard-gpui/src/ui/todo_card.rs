@@ -294,8 +294,7 @@ impl ClipboardView {
                     view.set_todo_status(id, next, cx);
                 });
             });
-        // 操作栏必须留在这个分组里，离开卡片后 group_hover 才会收起。
-        // 选中只改描边，不显示按钮。
+        // 操作栏是分组子节点，离开卡片后 group_hover 才会收起。选中不显示按钮。
         let surface = div()
             .group("todo-card")
             .w_full()

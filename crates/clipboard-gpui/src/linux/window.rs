@@ -3,7 +3,9 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use x11rb::{
     connection::Connection,
     properties::WmHints,
-    protocol::xproto::{AtomEnum, ConnectionExt, MapState, PropMode},
+    protocol::xproto::{
+        AtomEnum, ConfigureWindowAux, ConnectionExt, MapState, PropMode, StackMode,
+    },
     wrapper::ConnectionExt as _,
 };
 
@@ -100,6 +102,58 @@ pub fn activate_for_input(window: &Window) {
         let _ = connection.flush();
     }
     window.activate_window();
+}
+
+/// Drop `_NET_WM_STATE_ABOVE` so an editor can stack over the history panel.
+pub fn release_above(window: &Window) {
+    let Some(id) = window_id(window) else {
+        return;
+    };
+    let Ok((connection, _)) = x11rb::connect(None) else {
+        return;
+    };
+    let id = id as u32;
+    let Some(state) = intern(&connection, "_NET_WM_STATE") else {
+        return;
+    };
+    let Some(above) = intern(&connection, "_NET_WM_STATE_ABOVE") else {
+        return;
+    };
+    let Ok(reply) = connection
+        .get_property(false, id, state, AtomEnum::ATOM, 0, 32)
+        .and_then(|cookie| cookie.reply())
+    else {
+        return;
+    };
+    let Some(values) = reply.value32() else {
+        return;
+    };
+    let kept = values.filter(|atom| *atom != above).collect::<Vec<_>>();
+    let _ = connection.change_property32(PropMode::REPLACE, id, state, AtomEnum::ATOM, &kept);
+    let _ = connection.flush();
+}
+
+/// Place the window above its siblings without asking for focus.
+pub fn raise_front(window: &Window) {
+    let Some(id) = window_id(window) else {
+        return;
+    };
+    let Ok((connection, _)) = x11rb::connect(None) else {
+        return;
+    };
+    let id = id as u32;
+    let _ =
+        connection.configure_window(id, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE));
+    let _ = connection.map_window(id);
+    let _ = connection.flush();
+}
+
+fn intern(connection: &impl Connection, name: &str) -> Option<u32> {
+    connection
+        .intern_atom(false, name.as_bytes())
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .map(|reply| reply.atom)
 }
 
 fn set_input_hint(connection: &impl Connection, id: u32, input: bool) -> anyhow::Result<()> {
