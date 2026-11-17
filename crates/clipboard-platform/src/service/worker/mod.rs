@@ -64,10 +64,10 @@ pub(super) struct Worker {
 }
 
 impl Worker {
-    /// 启动清扫：blob pending 残留与过期图片临时文件。
+    /// 启动清扫：图片临时文件、blob pending，以及库中已无引用的正式 blob。
     pub(super) fn sweep_temp_media(&self) -> Result<()> {
         image_tmp::sweep_image_tmp(&self.data_dir)?;
-        clipboard_core::sweep_pending_at(&self.history.blob_root()?)
+        self.history.sweep_blob_store()
     }
 
     /// Blocking event delivery; the only failure mode is a closed UI receiver.

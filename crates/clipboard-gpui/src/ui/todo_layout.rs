@@ -157,7 +157,7 @@ fn todo_scroll_anchor(offsets: &[Pixels], scroll_y: Pixels) -> (usize, Pixels) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Todo, TodoListLayout, TodoStatus, px, todo_scroll_anchor};
+    use super::{MemoKind, Todo, TodoListLayout, TodoStatus, px, todo_scroll_anchor};
     use std::collections::HashMap;
     #[test]
     fn scroll_anchor_preserves_partial_rows_and_footer_clearance() {
@@ -172,6 +172,7 @@ mod tests {
             id,
             text: text.into(),
             status: TodoStatus::Pending,
+            kind: MemoKind::Todo,
             created_at: String::new(),
             updated_at: String::new(),
         };

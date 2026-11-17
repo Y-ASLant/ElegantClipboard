@@ -412,8 +412,30 @@ impl History {
         Ok(())
     }
 
+    /// 删除单条记录并回收其无引用 blob。带图片/文件载荷时请用 [`Self::delete_with_media`]。
     pub fn delete(&self, id: i64) -> Result<()> {
-        Ok(self.repo.delete(id)?)
+        let Some(item) = self.repo.get_by_id(id)? else {
+            return Ok(());
+        };
+        let connection = self.db.write_connection();
+        let mut connection = connection.lock();
+        let tx = connection.transaction()?;
+        let blobs = crate::native_format::detach_rows_in_transaction(&tx, &[id])?;
+        crate::native_format::delete_aliases_in_transaction(&tx, &[item.content_hash])?;
+        tx.execute("DELETE FROM clipboard_items WHERE id = ?1", [id])?;
+        tx.commit()?;
+        drop(connection);
+        let _ = self.cleanup_blobs(blobs);
+        Ok(())
+    }
+
+    /// 启动清扫：pending 临时文件 + 库中已无引用的正式 blob。
+    pub fn sweep_blob_store(&self) -> Result<()> {
+        let root = self.blob_root()?;
+        crate::blob_store::BlobStore::new(root.clone()).sweep_pending()?;
+        let used = self.referenced_blob_hashes()?;
+        crate::blob_store::BlobStore::new(root).collect_garbage(&used)?;
+        Ok(())
     }
 
     pub fn toggle_favorite(&self, id: i64) -> Result<bool> {

@@ -82,6 +82,56 @@ fn same_name_replaces_previous_payload() -> Result<()> {
 }
 
 #[test]
+fn replacing_large_format_gcs_superseded_blob() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let id = history.capture("host")?.unwrap();
+    let first = vec![1u8; NATIVE_INLINE_MAX_BYTES + 1];
+    let second = vec![2u8; NATIVE_INLINE_MAX_BYTES + 1];
+    history.attach_native_formats(id, vec![capture("Huge", &first)])?;
+    let blobs = directory.path().join("blobs");
+    assert_eq!(std::fs::read_dir(&blobs)?.count(), 1);
+    history.attach_native_formats(id, vec![capture("Huge", &second)])?;
+    assert_eq!(
+        std::fs::read_dir(&blobs)?.count(),
+        1,
+        "同名大格式替换后旧 blob 应回收"
+    );
+    assert_eq!(
+        history.native_formats_for_copy(id)?,
+        vec![("Huge".to_owned(), second)]
+    );
+    Ok(())
+}
+
+#[test]
+fn bare_delete_and_sweep_recover_orphan_blobs() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let history = History::open(directory.path().join("clipboard.db"))?;
+    let id = history.capture("host")?.unwrap();
+    let payload = vec![5u8; NATIVE_INLINE_MAX_BYTES + 1];
+    history.attach_native_formats(id, vec![capture("Huge", &payload)])?;
+    let blobs = directory.path().join("blobs");
+    assert_eq!(std::fs::read_dir(&blobs)?.count(), 1);
+
+    history.delete(id)?;
+    assert_eq!(
+        std::fs::read_dir(&blobs)?.count(),
+        0,
+        "裸 delete 应回收无引用 blob"
+    );
+
+    // 模拟 commit 后 GC 前崩溃留下的正式孤儿：无 DB 引用的合法 hash 文件。
+    let orphan = blobs.join(&"a".repeat(64));
+    std::fs::create_dir_all(&blobs)?;
+    std::fs::write(&orphan, b"orphan")?;
+    assert!(orphan.is_file());
+    history.sweep_blob_store()?;
+    assert!(!orphan.exists(), "启动清扫应回收无引用正式 blob");
+    Ok(())
+}
+
+#[test]
 fn large_formats_land_in_blob_store_and_gc_after_delete() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let history = History::open(directory.path().join("clipboard.db"))?;

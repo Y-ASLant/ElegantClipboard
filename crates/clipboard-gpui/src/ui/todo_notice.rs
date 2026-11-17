@@ -148,13 +148,14 @@ pub(super) fn show_todo_notice(
 mod tests {
     use super::{NoticeStatus, TodoNotice, notice_status, notice_text};
     use clipboard_core::preferences::LanguagePreference;
-    use clipboard_core::{Todo, TodoStatus};
+    use clipboard_core::{MemoKind, Todo, TodoStatus};
 
     fn todo(id: i64, text: &str, status: TodoStatus) -> Todo {
         Todo {
             id,
             text: text.to_owned(),
             status,
+            kind: MemoKind::Todo,
             created_at: "2026-11-10 09:00:00".into(),
             updated_at: "2026-11-10 09:00:00".into(),
         }

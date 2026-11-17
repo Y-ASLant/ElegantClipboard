@@ -185,15 +185,7 @@ impl History {
         let mut connection = connection.lock();
         let tx = connection.transaction()?;
         let (blobs, _) = crate::native_format::clear_native_in_transaction(&tx, group_id)?;
-        let (group_cond, group_param) = match group_id {
-            Some(id) => ("group_id = ?1", Some(id)),
-            None => ("group_id IS NULL", None),
-        };
-        let delete_sql = format!(
-            "DELETE FROM clipboard_items WHERE is_pinned = 0 AND is_favorite = 0 AND {group_cond}"
-        );
-        let deleted =
-            tx.execute(&delete_sql, rusqlite::params_from_iter(group_param.iter()))? as i64;
+        let deleted = crate::native_format::clear_clearable_items_in_transaction(&tx, group_id)?;
         tx.commit()?;
         drop(connection);
         Ok(DeletionOutcome {

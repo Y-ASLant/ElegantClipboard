@@ -208,6 +208,22 @@ impl History {
         if exists.is_none() {
             bail!("记录已不存在，无法保存原生格式");
         }
+        // REPLACE 前收集将被覆盖的 blob，提交后再 GC，避免同名大格式替换泄漏文件。
+        let mut superseded = Vec::new();
+        {
+            let mut select = tx.prepare(
+                "SELECT blob_hash FROM native_formats
+                 WHERE item_id = ?1 AND format_name = ?2 AND blob_hash IS NOT NULL",
+            )?;
+            for (name, _) in &accepted {
+                if let Some(hash) = select
+                    .query_row(params![item_id, name], |row| row.get::<_, String>(0))
+                    .optional()?
+                {
+                    superseded.push(hash);
+                }
+            }
+        }
         insert_rows_in_transaction(&tx, item_id, &accepted, &staged)?;
         tx.commit()?;
         drop(connection);
@@ -218,6 +234,7 @@ impl History {
                 blob.pending = None;
             }
         }
+        let _ = self.cleanup_blobs(superseded);
         Ok(skips)
     }
 
@@ -272,16 +289,24 @@ impl History {
     }
 }
 
-/// 事务内按 clearable 条件（未置顶未收藏，可按分组过滤）收集删除 blob 与别名。
-pub(crate) fn clear_native_in_transaction(
-    tx: &rusqlite::Transaction<'_>,
-    group_id: Option<i64>,
-) -> Result<(Vec<String>, Vec<String>)> {
+/// clearable 条件与参数：未置顶未收藏，可按分组过滤。清空原生格式与主表必须共用。
+pub(crate) fn clearable_condition(group_id: Option<i64>) -> (String, Option<i64>) {
     let (group_cond, group_param) = match group_id {
         Some(id) => ("group_id = ?1", Some(id)),
         None => ("group_id IS NULL", None),
     };
-    let condition = format!("is_pinned = 0 AND is_favorite = 0 AND {group_cond}");
+    (
+        format!("is_pinned = 0 AND is_favorite = 0 AND {group_cond}"),
+        group_param,
+    )
+}
+
+/// 事务内按 clearable 条件收集删除 blob 与别名。
+pub(crate) fn clear_native_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    group_id: Option<i64>,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let (condition, group_param) = clearable_condition(group_id);
     let blob_sql = format!(
         "SELECT DISTINCT nf.blob_hash FROM native_formats nf
          JOIN clipboard_items ci ON ci.id = nf.item_id
@@ -312,6 +337,16 @@ pub(crate) fn clear_native_in_transaction(
     tx.execute(&delete_sql, params_ref)?;
     delete_aliases_in_transaction(tx, &hashes)?;
     Ok((blobs, hashes))
+}
+
+/// 事务内删除 clearable 主记录；条件必须与 [`clear_native_in_transaction`] 一致。
+pub(crate) fn clear_clearable_items_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    group_id: Option<i64>,
+) -> Result<i64> {
+    let (condition, group_param) = clearable_condition(group_id);
+    let delete_sql = format!("DELETE FROM clipboard_items WHERE {condition}");
+    Ok(tx.execute(&delete_sql, rusqlite::params_from_iter(group_param.iter()))? as i64)
 }
 
 /// 保留策略路径：事务内按 id 列表收集并删除额外格式行与别名。
