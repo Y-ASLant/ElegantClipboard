@@ -122,7 +122,7 @@ fn bare_delete_and_sweep_recover_orphan_blobs() -> Result<()> {
     );
 
     // 模拟 commit 后 GC 前崩溃留下的正式孤儿：无 DB 引用的合法 hash 文件。
-    let orphan = blobs.join(&"a".repeat(64));
+    let orphan = blobs.join("a".repeat(64));
     std::fs::create_dir_all(&blobs)?;
     std::fs::write(&orphan, b"orphan")?;
     assert!(orphan.is_file());

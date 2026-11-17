@@ -198,15 +198,17 @@ impl ClipboardView {
     }
 }
 
+type HoverSource = (
+    Bounds<Pixels>,
+    Option<(i64, i64)>,
+    hover_information::HoverInformation,
+);
+
 fn memo_hover_source(
     view: &ClipboardView,
     id: i64,
     owner_bounds: Bounds<Pixels>,
-) -> Option<(
-    Bounds<Pixels>,
-    Option<(i64, i64)>,
-    hover_information::HoverInformation,
-)> {
+) -> Option<HoverSource> {
     let layout = view.todo_layout.borrow();
     let index = *layout.indexes.get(&id)?;
     let top_offset = *layout.offsets.get(index)?;
