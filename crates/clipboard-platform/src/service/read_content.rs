@@ -3,10 +3,12 @@ use crate::source_app;
 use anyhow::Result;
 use clipboard_core::NativeFormatCapture;
 use clipboard_core::preferences::CaptureFormatPreference;
-use clipboard_core::{
-    MAX_FILE_PATHS, MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES,
-};
-use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat, common::RustImage};
+use clipboard_core::{MAX_FILE_PATHS, MAX_PATH_LIST_BYTES, MAX_TEXT_BYTES};
+#[cfg(not(windows))]
+use clipboard_core::{MAX_IMAGE_BYTES, MAX_IMAGE_PIXELS};
+#[cfg(not(windows))]
+use clipboard_rs::common::RustImage;
+use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat};
 use std::{
     thread,
     time::{Duration, Instant},
@@ -41,10 +43,16 @@ fn is_retryable_read_error<E: ToString>(error: &E) -> bool {
     // clipboard-rs 将 Win32 错误转换成字符串，按完整错误码匹配，不依赖系统语言。
     // OSError(0)：源应用广播了格式但 GetClipboardData/GlobalLock 返回 NULL 且无错误码，
     // 常见于延迟渲染（微信 CF_DIBV5）；在预算内重试可能等到真实数据。
+    // failed to fill whole buffer：PNG/位图句柄已有但 Global 数据尚未写满。
     let message = error.to_string();
-    ["OSError(0)", "OSError(5)", "OSError(1418)"]
-        .iter()
-        .any(|code| message.contains(code))
+    [
+        "OSError(0)",
+        "OSError(5)",
+        "OSError(1418)",
+        "failed to fill whole buffer",
+    ]
+    .iter()
+    .any(|code| message.contains(code))
 }
 
 #[cfg(not(windows))]
@@ -164,10 +172,10 @@ pub(super) fn read_content(
 }
 
 /// Win32 读取已广播的图片格式失败时不设置错误码，clipboard-rs 报 OSError(0)。
-/// 该情况表示源应用延迟渲染或提供了不可读的格式句柄，非真正的读取故障。
+/// 不完整 PNG（`failed to fill whole buffer`）等延迟渲染也按「无可用像素」处理。
 #[cfg(windows)]
 fn is_missing_image_data(error: &anyhow::Error) -> bool {
-    error.to_string().contains("OSError(0)")
+    super::read_image::is_missing_image_data(error)
 }
 
 #[cfg(not(windows))]
@@ -184,23 +192,30 @@ fn prefer_image(html: Option<&str>, rtf: Option<&[u8]>, text: Option<&str>) -> b
 }
 
 fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
-    let image = retry_clipboard_read(|| clipboard.get_image())
-        .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
-    let (width, height) = image.get_size();
-    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
-        anyhow::bail!("图片尺寸无效或超过 2500 万像素");
+    #[cfg(windows)]
+    {
+        return super::read_image::read_image(clipboard);
     }
-    let png = image
-        .to_png()
-        .map_err(|error| anyhow::anyhow!("编码剪贴板图片失败：{error}"))?;
-    if png.get_bytes().len() > MAX_IMAGE_BYTES {
-        anyhow::bail!("图片超过 50 MiB，未保存");
+    #[cfg(not(windows))]
+    {
+        let image = retry_clipboard_read(|| clipboard.get_image())
+            .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
+        let (width, height) = image.get_size();
+        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
+            anyhow::bail!("图片尺寸无效或超过 2500 万像素");
+        }
+        let png = image
+            .to_png()
+            .map_err(|error| anyhow::anyhow!("编码剪贴板图片失败：{error}"))?;
+        if png.get_bytes().len() > MAX_IMAGE_BYTES {
+            anyhow::bail!("图片超过 50 MiB，未保存");
+        }
+        Ok(CapturedClipboard::Image {
+            png: png.get_bytes().to_vec(),
+            width,
+            height,
+        })
     }
-    Ok(CapturedClipboard::Image {
-        png: png.get_bytes().to_vec(),
-        width,
-        height,
-    })
 }
 
 #[cfg(target_os = "linux")]

@@ -22,6 +22,9 @@ mod read_formats;
 #[path = "../unix/read_formats.rs"]
 pub(crate) mod read_formats;
 pub(crate) mod read_html;
+#[cfg(windows)]
+#[path = "../windows/read_image.rs"]
+mod read_image;
 mod watcher;
 mod worker;
 

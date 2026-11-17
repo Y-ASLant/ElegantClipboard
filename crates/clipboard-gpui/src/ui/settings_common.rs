@@ -137,14 +137,11 @@ pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedStrin
         .icon(IconName::Info)
         .flex_none()
         .accessibility_label(text.clone());
-    // Kit `Button::tooltip(str)` lays out as a single nowrap flex row, so long
-    // CJK help is clipped by the window. GPUI's tooltip builder can wrap.
+    // Kit Tooltip 本体是 h_flex；再套 flex_col + min_w_0 会把宽度压成竖条。
+    // 只限最大宽并允许换行，交给组件默认横排布局。
     button.interactivity().hoverable_tooltip(move |window, cx| {
         Tooltip::new(text.clone())
-            .flex()
-            .flex_col()
             .max_w(px(HELP_TOOLTIP_MAX_WIDTH))
-            .min_w(px(0.))
             .whitespace_normal()
             .line_height(relative(1.5))
             .build(window, cx)
