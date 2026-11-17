@@ -1,8 +1,8 @@
-//! Read clipboard images with format fallback.
+//! Windows clipboard image read with format fallback.
 //!
-//! `clipboard-rs` prefers PNG and fails the whole read when that buffer is
-//! incomplete (`failed to fill whole buffer`), even if CF_DIB / CF_DIBV5 is valid.
-//! Try PNG → DIBV5 → DIB and only error after every available format fails.
+//! `clipboard-rs` prefers PNG and aborts when that buffer is incomplete
+//! (`failed to fill whole buffer`), even if CF_DIB / CF_DIBV5 is valid.
+//! Order: PNG → DIBV5 → DIB.
 
 use super::CapturedClipboard;
 use super::read_content::retry_clipboard_read;
@@ -14,49 +14,68 @@ use clipboard_win::formats;
 use std::io::Cursor;
 
 pub(super) fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
-    let mut last_error: Option<anyhow::Error> = None;
+    let mut last_error = None;
 
-    if png_available() {
-        match retry_clipboard_read(|| clipboard.get_buffer("PNG")) {
-            Ok(bytes) if !bytes.is_empty() => match image_from_bytes(&bytes) {
-                Ok(image) => return captured_from_image(image),
-                Err(error) => last_error = Some(error),
-            },
-            Ok(_) => {}
-            Err(error) => last_error = Some(anyhow!("{error}")),
-        }
+    if png_available()
+        && let Some(image) = attempt(
+            &mut last_error,
+            || clipboard.get_buffer("PNG"),
+            decode_encoded_image,
+        )
+    {
+        return Ok(image);
     }
 
-    if clipboard_win::is_format_avail(formats::CF_DIBV5) {
-        match retry_clipboard_read(|| {
-            clipboard_win::get_clipboard(formats::RawData(formats::CF_DIBV5))
-                .map_err(|code| format!("OSError({code})"))
-        }) {
-            Ok(data) if !data.is_empty() => match image_from_dibv5(&data) {
-                Ok(image) => return captured_from_image(image),
-                Err(error) => last_error = Some(error),
+    if clipboard_win::is_format_avail(formats::CF_DIBV5)
+        && let Some(image) = attempt(
+            &mut last_error,
+            || {
+                clipboard_win::get_clipboard(formats::RawData(formats::CF_DIBV5))
+                    .map_err(|code| format!("OSError({code})"))
             },
-            Ok(_) => {}
-            Err(error) => last_error = Some(anyhow!("{error}")),
-        }
+            decode_dibv5,
+        )
+    {
+        return Ok(image);
     }
 
-    if clipboard_win::is_format_avail(formats::CF_DIB) {
-        match retry_clipboard_read(|| {
-            clipboard_win::get_clipboard(formats::Bitmap).map_err(|code| format!("OSError({code})"))
-        }) {
-            Ok(data) if !data.is_empty() => match image_from_bytes(&data) {
-                Ok(image) => return captured_from_image(image),
-                Err(error) => last_error = Some(error),
+    if clipboard_win::is_format_avail(formats::CF_DIB)
+        && let Some(image) = attempt(
+            &mut last_error,
+            || {
+                clipboard_win::get_clipboard(formats::Bitmap)
+                    .map_err(|code| format!("OSError({code})"))
             },
-            Ok(_) => {}
-            Err(error) => last_error = Some(anyhow!("{error}")),
-        }
+            decode_encoded_image,
+        )
+    {
+        return Ok(image);
     }
 
-    match last_error {
-        Some(error) => Err(anyhow!("读取剪贴板图片失败：{error}")),
-        None => Err(anyhow!("读取剪贴板图片失败：No image data in clipboard")),
+    Err(anyhow!(
+        "读取剪贴板图片失败：{}",
+        last_error.unwrap_or_else(|| "No image data in clipboard".into())
+    ))
+}
+
+fn attempt<E: ToString>(
+    last_error: &mut Option<String>,
+    read: impl FnMut() -> Result<Vec<u8>, E>,
+    decode: impl FnOnce(&[u8]) -> Result<RustImageData>,
+) -> Option<CapturedClipboard> {
+    match retry_clipboard_read(read) {
+        Ok(bytes) if !bytes.is_empty() => match decode(&bytes).and_then(captured_from_image) {
+            Ok(image) => Some(image),
+            Err(error) => {
+                *last_error = Some(error.to_string());
+                None
+            }
+        },
+        Ok(_) => None,
+        Err(error) => {
+            *last_error = Some(error.to_string());
+            None
+        }
     }
 }
 
@@ -65,11 +84,11 @@ fn png_available() -> bool {
         .is_some_and(|format| clipboard_win::is_format_avail(format.get()))
 }
 
-fn image_from_bytes(bytes: &[u8]) -> Result<RustImageData> {
+fn decode_encoded_image(bytes: &[u8]) -> Result<RustImageData> {
     RustImageData::from_bytes(bytes).map_err(|error| anyhow!("{error}"))
 }
 
-fn image_from_dibv5(data: &[u8]) -> Result<RustImageData> {
+fn decode_dibv5(data: &[u8]) -> Result<RustImageData> {
     let decoder = image::codecs::bmp::BmpDecoder::new_without_file_header(Cursor::new(data))
         .map_err(|error| anyhow!("{error}"))?;
     let image = image::DynamicImage::from_decoder(decoder).map_err(|error| anyhow!("{error}"))?;
@@ -94,7 +113,7 @@ fn captured_from_image(image: RustImageData) -> Result<CapturedClipboard> {
     })
 }
 
-/// Incomplete delayed-render buffers and empty handles are not user-facing faults.
+/// Delayed-render empty handles and incomplete buffers are not user-facing faults.
 pub(super) fn is_missing_image_data(error: &anyhow::Error) -> bool {
     let message = error.to_string();
     [

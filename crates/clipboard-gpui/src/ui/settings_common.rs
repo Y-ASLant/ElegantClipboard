@@ -1,8 +1,8 @@
 use super::*;
+use gpui_kit::component::Placement;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::tooltip::Tooltip;
 
 pub(super) fn settings_stack() -> Div {
     div()
@@ -16,9 +16,6 @@ pub(super) fn settings_stack() -> Div {
         .line_height(relative(1.5))
         .whitespace_normal()
 }
-
-/// CJK help copy has no spaces; without a max width the tooltip stays one line and is clipped.
-const HELP_TOOLTIP_MAX_WIDTH: f32 = 320.;
 
 /// Height, padding and label size for every settings checkbox and switch.
 pub(super) fn settings_toggle<T: Styled>(cx: &App, control: T) -> T {
@@ -128,25 +125,17 @@ pub(super) fn settings_slider_field(
         )
 }
 
-/// 字段/分区标题旁的「说明」入口：悬停图标展示解释文本，不再常驻占行。
+/// 字段说明 ⓘ：悬停展示解释；优先上方，避免鼠标挡字。
 pub(super) fn help_tooltip(id: impl Into<ElementId>, text: impl Into<SharedString>) -> Button {
     let text: SharedString = text.into();
-    let mut button = Button::new(id)
+    Button::new(id)
         .ghost()
         .xsmall()
         .icon(IconName::Info)
         .flex_none()
-        .accessibility_label(text.clone());
-    // Kit Tooltip 本体是 h_flex；再套 flex_col + min_w_0 会把宽度压成竖条。
-    // 只限最大宽并允许换行，交给组件默认横排布局。
-    button.interactivity().hoverable_tooltip(move |window, cx| {
-        Tooltip::new(text.clone())
-            .max_w(px(HELP_TOOLTIP_MAX_WIDTH))
-            .whitespace_normal()
-            .line_height(relative(1.5))
-            .build(window, cx)
-    });
-    button
+        .accessibility_label(text.clone())
+        .tooltip_placement(Placement::Top)
+        .tooltip(text)
 }
 
 /// 「标签 + 说明图标」行，供字段标签使用。

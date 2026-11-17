@@ -161,18 +161,15 @@ pub(super) fn read_content(
     if allowed.allows_image() && clipboard.has(ContentFormat::Image) {
         match read_image(clipboard) {
             // 源应用广播了图片格式但数据读不到（微信 CF_DIBV5 延迟渲染/空句柄，
-            // 重试后仍 OSError(0)）：复制本身成功，静默跳过，不弹错误横幅也不占位。
-            Err(error) if is_missing_image_data(&error) => {
-                return Ok((None, None));
-            }
-            result => return Ok((Some(result?), None)),
+            // 重试后仍 OSError(0) 或不完整 PNG）：复制本身成功，静默跳过。
+            Err(error) if is_missing_image_data(&error) => Ok((None, None)),
+            result => Ok((Some(result?), None)),
         }
+    } else {
+        Ok((None, None))
     }
-    Ok((None, None))
 }
 
-/// Win32 读取已广播的图片格式失败时不设置错误码，clipboard-rs 报 OSError(0)。
-/// 不完整 PNG（`failed to fill whole buffer`）等延迟渲染也按「无可用像素」处理。
 #[cfg(windows)]
 fn is_missing_image_data(error: &anyhow::Error) -> bool {
     super::read_image::is_missing_image_data(error)
@@ -191,31 +188,30 @@ fn prefer_image(html: Option<&str>, rtf: Option<&[u8]>, text: Option<&str>) -> b
         })
 }
 
+#[cfg(windows)]
 fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
-    #[cfg(windows)]
-    {
-        return super::read_image::read_image(clipboard);
+    super::read_image::read_image(clipboard)
+}
+
+#[cfg(not(windows))]
+fn read_image(clipboard: &ClipboardContext) -> Result<CapturedClipboard> {
+    let image = retry_clipboard_read(|| clipboard.get_image())
+        .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
+    let (width, height) = image.get_size();
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
+        anyhow::bail!("图片尺寸无效或超过 2500 万像素");
     }
-    #[cfg(not(windows))]
-    {
-        let image = retry_clipboard_read(|| clipboard.get_image())
-            .map_err(|error| anyhow::anyhow!("读取剪贴板图片失败：{error}"))?;
-        let (width, height) = image.get_size();
-        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
-            anyhow::bail!("图片尺寸无效或超过 2500 万像素");
-        }
-        let png = image
-            .to_png()
-            .map_err(|error| anyhow::anyhow!("编码剪贴板图片失败：{error}"))?;
-        if png.get_bytes().len() > MAX_IMAGE_BYTES {
-            anyhow::bail!("图片超过 50 MiB，未保存");
-        }
-        Ok(CapturedClipboard::Image {
-            png: png.get_bytes().to_vec(),
-            width,
-            height,
-        })
+    let png = image
+        .to_png()
+        .map_err(|error| anyhow::anyhow!("编码剪贴板图片失败：{error}"))?;
+    if png.get_bytes().len() > MAX_IMAGE_BYTES {
+        anyhow::bail!("图片超过 50 MiB，未保存");
     }
+    Ok(CapturedClipboard::Image {
+        png: png.get_bytes().to_vec(),
+        width,
+        height,
+    })
 }
 
 #[cfg(target_os = "linux")]
