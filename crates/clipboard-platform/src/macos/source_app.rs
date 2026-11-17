@@ -32,6 +32,22 @@ pub fn clipboard_source() -> Option<SourceApp> {
     })
 }
 
+/// Best-effort localized name for a paste target; uses process id.
+pub fn label_for_target((_window, pid): (isize, u32)) -> Option<String> {
+    if pid == 0 || pid == std::process::id() {
+        return None;
+    }
+    objc2::rc::autoreleasepool(|_| {
+        let application: Option<Retained<AnyObject>> = unsafe {
+            msg_send![
+                class!(NSRunningApplication),
+                runningApplicationWithProcessIdentifier: pid as i32
+            ]
+        };
+        source(application.as_ref()?).map(|app| app.name)
+    })
+}
+
 pub fn running_apps(icons_dir: &Path) -> Vec<RunningApp> {
     objc2::rc::autoreleasepool(|_| {
         let applications: Retained<AnyObject> =

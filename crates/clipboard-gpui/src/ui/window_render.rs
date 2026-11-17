@@ -1,6 +1,10 @@
 use super::*;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::status_bar::StatusBar;
+use std::time::Duration;
+
+const PANEL_STATUS_OK_FOR: Duration = Duration::from_secs(3);
+const PANEL_STATUS_ERR_FOR: Duration = Duration::from_secs(6);
 
 impl ClipboardView {
     pub(super) fn set_feedback_message(&mut self, message: String) {
@@ -20,6 +24,10 @@ impl ClipboardView {
         if !std::mem::take(&mut self.feedback_pending) || self.message.is_empty() {
             return;
         }
+        // Keep the line on the main StatusBar; auto-clear so it does not stick forever.
+        self.arm_panel_status_clear(cx);
+        cx.notify();
+
         if let Some(handle) = self.settings_window {
             let notification = feedback_notification(self.message.clone(), self.is_error);
             if handle
@@ -31,31 +39,77 @@ impl ClipboardView {
                 return;
             }
         }
+
+        // Main panel already shows the line; skip OS toast while it is visible.
+        let panel_visible = self
+            .main_window
+            .update(cx, |_, window, _| {
+                native_window::is_window_shown(window)
+                    && !native_window::is_window_minimized(window)
+            })
+            .unwrap_or(false);
+        if panel_visible {
+            return;
+        }
+
         let message = self.message.clone();
         cx.background_executor()
             .spawn(async move {
                 if let Err(error) =
                     clipboard_platform::notification::show("ElegantClipboard", &message)
                 {
-                    // 系统禁用通知或投递失败时不递归通知，也不回退到应用内 toast。
+                    // 系统禁用通知或投递失败时不递归通知。
                     tracing::error!(error = %format_args!("{error:#}"), "Sending system notification failed");
                 }
             })
             .detach();
     }
 
+    fn arm_panel_status_clear(&mut self, cx: &mut Context<Self>) {
+        self.panel_status_token = self.panel_status_token.wrapping_add(1);
+        let token = self.panel_status_token;
+        let wait = if self.is_error {
+            PANEL_STATUS_ERR_FOR
+        } else {
+            PANEL_STATUS_OK_FOR
+        };
+        self.panel_status_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = view.update(cx, |this, cx| {
+                if this.panel_status_token == token {
+                    this.message.clear();
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
     fn render_status(&self, cx: &Context<Self>) -> AnyElement {
-        if !self.reorder_pending {
+        let has_message = !self.message.is_empty();
+        if !self.reorder_pending && !has_message {
             return div().into_any_element();
         }
-        StatusBar::new()
-            .flex_shrink_0()
-            .px(px(PAGE_PADDING))
-            .left(div().text_color(cx.theme().muted_foreground).child(tr(
+        let left = if has_message {
+            let color = if self.is_error {
+                cx.theme().danger
+            } else {
+                cx.theme().muted_foreground
+            };
+            div()
+                .min_w_0()
+                .text_color(color)
+                .child(self.message.clone())
+        } else {
+            div().text_color(cx.theme().muted_foreground).child(tr(
                 self.language,
                 "正在保存顺序…",
                 "Saving order…",
-            )))
+            ))
+        };
+        StatusBar::new()
+            .flex_shrink_0()
+            .px(px(PAGE_PADDING))
+            .left(left)
             .into_any_element()
     }
 }

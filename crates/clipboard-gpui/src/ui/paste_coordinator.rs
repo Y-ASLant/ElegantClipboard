@@ -26,6 +26,8 @@ struct Sequence {
 #[derive(Default)]
 pub(super) struct PasteCoordinator {
     target: Option<Target>,
+    /// Resolved once when the target is set; empty when unknown.
+    target_label: Option<String>,
     pending: PendingRequest<Delivery>,
     quick: PendingRequest<QuickPaste>,
     sequence: Option<Sequence>,
@@ -45,8 +47,13 @@ impl PasteCoordinator {
         self.target
     }
 
+    pub fn target_label(&self) -> Option<&str> {
+        self.target_label.as_deref()
+    }
+
     pub fn set_target(&mut self, target: Option<Target>) {
         self.target = target;
+        self.target_label = target.and_then(clipboard_platform::source_app::label_for_target);
     }
 
     pub fn pending(&self) -> bool {

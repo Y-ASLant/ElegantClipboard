@@ -74,6 +74,11 @@ pub fn clipboard_source() -> Option<SourceApp> {
         .or_else(|| process_name_for_window(unsafe { GetForegroundWindow() }))
 }
 
+/// Short process/app name for a paste target `(hwnd, pid)`, best-effort.
+pub fn label_for_target((hwnd, _pid): (isize, u32)) -> Option<String> {
+    process_name_for_window(HWND(hwnd as *mut _)).map(|source| source.name)
+}
+
 fn process_name_for_window(window: HWND) -> Option<SourceApp> {
     if window.0.is_null() {
         return None;

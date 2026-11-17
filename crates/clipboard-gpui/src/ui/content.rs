@@ -124,13 +124,26 @@ impl ClipboardView {
                                                                 )
                                                         });
                                                     let mode = if can_paste {
-                                                        tr(
-                                                            self.language,
-                                                            "将贴回原窗口",
-                                                            "Will paste back",
-                                                        )
+                                                        match self.paste_state.target_label() {
+                                                            Some(name) if !name.is_empty() => {
+                                                                if self.language
+                                                                    == LanguagePreference::English
+                                                                {
+                                                                    format!("Will paste to {name}")
+                                                                } else {
+                                                                    format!("将贴回 {name}")
+                                                                }
+                                                            }
+                                                            _ => tr(
+                                                                self.language,
+                                                                "将贴回原窗口",
+                                                                "Will paste back",
+                                                            )
+                                                            .to_owned(),
+                                                        }
                                                     } else {
                                                         tr(self.language, "仅复制", "Copy only")
+                                                            .to_owned()
                                                     };
                                                     if self.language == LanguagePreference::English
                                                     {

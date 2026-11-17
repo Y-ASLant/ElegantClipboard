@@ -51,6 +51,12 @@ fn source(x: &X11, window: u32) -> Option<SourceApp> {
     })
 }
 
+/// Best-effort process stem for a paste target `(window, pid)`.
+pub fn label_for_target((window, _pid): (isize, u32)) -> Option<String> {
+    let x = X11::connect().ok()?;
+    source(&x, window as u32).map(|app| app.name)
+}
+
 pub fn clipboard_source() -> Option<SourceApp> {
     let x = X11::connect().ok()?;
     let selection = x.atom("CLIPBOARD").ok()?;
