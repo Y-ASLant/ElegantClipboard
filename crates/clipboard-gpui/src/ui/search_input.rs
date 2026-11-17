@@ -35,14 +35,8 @@ impl ClipboardView {
             && !self.batch_mode
             && let Some(id) = self.history.selected
         {
-            self.send(
-                Command::Copy {
-                    id,
-                    mode: CopyMode::Original,
-                    purpose: CopyPurpose::Copy,
-                },
-                cx,
-            );
+            // Same path as list Enter / card click: paste when a target exists.
+            self.activate_row(id, false, window, cx);
         }
     }
 }

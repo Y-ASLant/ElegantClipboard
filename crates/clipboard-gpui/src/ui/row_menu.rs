@@ -170,7 +170,7 @@ impl ClipboardView {
                 }
             }
             HistoryMenuAction::Delete => {
-                self.send(Command::Delete(id), cx);
+                self.request_delete_item(id, window, cx);
             }
         }
         cx.notify();

@@ -247,8 +247,8 @@ impl ClipboardView {
                 false,
                 false,
                 cx,
-                move |this, _, _, cx| {
-                    this.send(Command::Delete(id), cx);
+                move |this, _, window, cx| {
+                    this.request_delete_item(id, window, cx);
                 },
             ))
     }

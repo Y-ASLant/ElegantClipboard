@@ -109,6 +109,12 @@ fn history_empty_state(
     let language = view.language;
     let (icon, zh, en) = if view.history.loading {
         (IconName::ClipboardList, "正在加载…", "Loading…")
+    } else if view.history_reply_missed {
+        (
+            IconName::CircleX,
+            "历史列表没有返回，可重试",
+            "History did not load. You can retry.",
+        )
     } else if !view.search.read(cx).value().is_empty() {
         (
             IconName::SearchX,

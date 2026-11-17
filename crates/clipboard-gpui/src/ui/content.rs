@@ -100,24 +100,46 @@ impl ClipboardView {
                                         div()
                                             .text_size(px(visual::TEXT_SMALL))
                                             .text_color(cx.theme().muted_foreground)
-                                            .child(
-                                                if self.language == LanguagePreference::English {
-                                                    if self.todos_open {
-                                                        format!("{} to-dos", self.todos.len())
+                                            .child({
+                                                let count = if self.todos_open {
+                                                    self.todos.len() as i64
+                                                } else {
+                                                    self.history.total
+                                                };
+                                                if self.todos_open {
+                                                    if self.language == LanguagePreference::English
+                                                    {
+                                                        format!("{count} to-dos")
                                                     } else {
-                                                        format!("{} items", self.history.total)
+                                                        format!("{count} 条")
                                                     }
                                                 } else {
-                                                    format!(
-                                                        "{} 条记录",
-                                                        if self.todos_open {
-                                                            self.todos.len() as i64
-                                                        } else {
-                                                            self.history.total
-                                                        }
-                                                    )
-                                                },
-                                            ),
+                                                    let can_paste = self
+                                                        .paste_state
+                                                        .target()
+                                                        .is_some_and(|target| {
+                                                            self._tray.is_some()
+                                                                && paste::is_external_target(
+                                                                    window, target,
+                                                                )
+                                                        });
+                                                    let mode = if can_paste {
+                                                        tr(
+                                                            self.language,
+                                                            "将贴回原窗口",
+                                                            "Will paste back",
+                                                        )
+                                                    } else {
+                                                        tr(self.language, "仅复制", "Copy only")
+                                                    };
+                                                    if self.language == LanguagePreference::English
+                                                    {
+                                                        format!("{mode} · {count} items")
+                                                    } else {
+                                                        format!("{mode} · {count} 条")
+                                                    }
+                                                }
+                                            }),
                                     )
                                     .child(
                                         Button::new("history-search-info")

@@ -117,11 +117,11 @@ impl ClipboardView {
                     this.paste_selected(id, window, cx);
                 }
             }))
-            .on_action(cx.listener(|this, _: &DeleteSelected, _, cx| {
+            .on_action(cx.listener(|this, _: &DeleteSelected, window, cx| {
                 if !this.batch_mode
                     && let Some(id) = this.history.selected
                 {
-                    this.send(Command::Delete(id), cx);
+                    this.request_delete_item(id, window, cx);
                 }
             }))
             .when(self.history.items.is_empty(), |container| {
@@ -157,7 +157,19 @@ impl ClipboardView {
                                 .line_height(relative(1.5))
                                 .text_color(cx.theme().muted_foreground)
                                 .child(empty_message),
-                        ),
+                        )
+                        .when(self.history_reply_missed, |empty| {
+                            empty.child(
+                                Button::new("history-retry")
+                                    .small()
+                                    .outline()
+                                    .label(tr(self.language, "重试", "Retry"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.reload_current_history(cx);
+                                        cx.notify();
+                                    })),
+                            )
+                        }),
                 )
             })
             .when(!self.history.items.is_empty(), |container| {

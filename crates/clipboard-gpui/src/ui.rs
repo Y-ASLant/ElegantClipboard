@@ -263,6 +263,8 @@ enum HistoryConfirmation {
     DeleteGroup(i64),
     ClearHistory(Option<i64>),
     DeleteSelected,
+    /// Single history row; id must still be in the loaded list.
+    DeleteOne(i64),
 }
 
 struct ClipboardView {

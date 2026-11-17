@@ -6,7 +6,29 @@ impl HistoryConfirmation {
             Self::DeleteGroup(id) => group_id == Some(id),
             Self::ClearHistory(confirmed_group) => group_id == confirmed_group,
             Self::DeleteSelected => has_selection,
+            // Item presence is checked in confirmation_active.
+            Self::DeleteOne(_) => true,
         }
+    }
+}
+
+impl ClipboardView {
+    /// Confirm before removing one history row (action bar, menu, Delete key).
+    pub(super) fn request_delete_item(
+        &mut self,
+        id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.history.loading
+            || self.batch_pending
+            || self.batch_mode
+            || !self.history.items.iter().any(|item| item.id == id)
+        {
+            return;
+        }
+        self.history.selected = Some(id);
+        self.open_history_confirmation(HistoryConfirmation::DeleteOne(id), window, cx);
     }
 }
 
@@ -43,8 +65,15 @@ impl ClipboardView {
         cx.notify();
     }
     pub(super) fn confirmation_active(&self, kind: HistoryConfirmation) -> bool {
-        self.confirmation == Some(kind)
-            && kind.matches_scope(self.history.group_id(), !self.selected_ids.is_empty())
+        if self.confirmation != Some(kind) {
+            return false;
+        }
+        match kind {
+            HistoryConfirmation::DeleteOne(id) => {
+                self.history.items.iter().any(|item| item.id == id)
+            }
+            other => other.matches_scope(self.history.group_id(), !self.selected_ids.is_empty()),
+        }
     }
 
     pub(super) fn confirmation_pending(&self, kind: HistoryConfirmation) -> bool {
@@ -52,6 +81,7 @@ impl ClipboardView {
             HistoryConfirmation::DeleteGroup(_) => self.group_delete_pending,
             HistoryConfirmation::ClearHistory(_) => self.clear_pending,
             HistoryConfirmation::DeleteSelected => self.batch_pending,
+            HistoryConfirmation::DeleteOne(_) => false,
         }
     }
 
@@ -85,6 +115,10 @@ impl ClipboardView {
             HistoryConfirmation::DeleteGroup(_) => self.delete_group(cx),
             HistoryConfirmation::ClearHistory(_) => self.clear_history(cx),
             HistoryConfirmation::DeleteSelected => self.delete_selected(cx),
+            HistoryConfirmation::DeleteOne(id) => {
+                self.send(Command::Delete(id), cx);
+                self.close_history_confirmation(window, cx);
+            }
         }
         if matches!(kind, HistoryConfirmation::ClearHistory(_))
             && !self.clear_pending
@@ -175,6 +209,16 @@ impl ClipboardView {
                 };
                 (tr(language, "删除选中", "Delete selected"), prompt, confirm)
             }
+            HistoryConfirmation::DeleteOne(_) => (
+                tr(language, "删除记录", "Delete item"),
+                tr(
+                    language,
+                    "确定删除这条记录？无法撤销。",
+                    "Delete this item? This cannot be undone.",
+                )
+                .to_owned(),
+                tr(language, "删除", "Delete").to_owned(),
+            ),
         };
         let confirm_owner = owner.clone();
         let keyboard_owner = owner.clone();
@@ -236,7 +280,8 @@ impl ClipboardView {
                             HistoryConfirmation::ClearHistory(_) => {
                                 tr(language, "正在清理…", "Clearing…")
                             }
-                            HistoryConfirmation::DeleteSelected => {
+                            HistoryConfirmation::DeleteSelected
+                            | HistoryConfirmation::DeleteOne(_) => {
                                 tr(language, "正在删除…", "Deleting…")
                             }
                         }
