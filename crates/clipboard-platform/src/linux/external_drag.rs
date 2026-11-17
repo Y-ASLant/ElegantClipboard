@@ -1,4 +1,4 @@
-pub use super::drag_payload::{PreparedExternalDrag, prepare_external_drag};
+pub use super::drag_payload::{PreparedExternalDrag, prepare_external_drag, prepare_plain_text};
 use super::x11::X11;
 use anyhow::{Result, bail};
 use x11rb::{

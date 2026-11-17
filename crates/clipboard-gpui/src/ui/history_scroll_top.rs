@@ -125,7 +125,7 @@ impl ClipboardView {
         let position = &self.scroll_top_position;
         let label = match action {
             FloatingAction::ScrollTop => tr(self.language, "返回顶部", "Back to top"),
-            FloatingAction::AddTodo => tr(self.language, "添加待办", "Add to-do"),
+            FloatingAction::AddTodo => tr(self.language, "添加备忘录", "Add memo"),
         };
         div()
             .absolute()

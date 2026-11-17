@@ -120,6 +120,17 @@ pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDra
     })
 }
 
+pub fn prepare_plain_text(text: &str) -> Result<PreparedExternalDrag> {
+    let text = text.trim();
+    if text.is_empty() {
+        bail!("没有可拖放的内容");
+    }
+    Ok(PreparedExternalDrag {
+        formats: Arc::new(vec![(CF_UNICODETEXT.0, unicode_text(text)?)]),
+        image_file: None,
+    })
+}
+
 #[cfg(test)]
 impl PreparedExternalDrag {
     pub(super) fn formats_only(formats: Vec<(u16, Vec<u8>)>) -> Self {

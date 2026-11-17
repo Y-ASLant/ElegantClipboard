@@ -65,9 +65,9 @@ pub(super) fn notice_text(
     let excerpt = truncate_excerpt(&excerpt, 40);
     match notice {
         TodoNotice::Added => match (language, excerpt.is_empty()) {
-            (LanguagePreference::Chinese, true) => "已添加待办".to_owned(),
+            (LanguagePreference::Chinese, true) => "已添加备忘录".to_owned(),
             (LanguagePreference::Chinese, false) => format!("已添加：{excerpt}"),
-            (_, true) => "To-do added".to_owned(),
+            (_, true) => "Memo added".to_owned(),
             (_, false) => format!("Added: {excerpt}"),
         },
         TodoNotice::StatusSet { status, .. } => {

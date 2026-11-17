@@ -191,7 +191,7 @@ impl ClipboardView {
                                             .h(px(visual::CONTROL_HEIGHT))
                                             .outline()
                                             .selected(self.todos_open)
-                                            .label(tr(self.language, "待办", "To-do"))
+                                            .label(tr(self.language, "备忘录", "Memo"))
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 if this.todos_open {
                                                     let filter = if this.history.favorite_only() {

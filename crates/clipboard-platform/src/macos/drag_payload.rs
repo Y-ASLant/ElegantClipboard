@@ -81,6 +81,17 @@ pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDra
     Ok(PreparedExternalDrag(Arc::new(items)))
 }
 
+pub fn prepare_plain_text(text: &str) -> Result<PreparedExternalDrag> {
+    let text = text.trim();
+    if text.is_empty() {
+        bail!("记录没有可拖放的内容");
+    }
+    Ok(PreparedExternalDrag(Arc::new(vec![DragItem {
+        path: None,
+        formats: vec![("public.utf8-plain-text", text.as_bytes().to_vec())],
+    }])))
+}
+
 fn validate_path(path: &str) -> Result<()> {
     if !Path::new(path).is_absolute() || !Path::new(path).exists() {
         bail!("拖放源文件或文件夹已不存在：{path}");

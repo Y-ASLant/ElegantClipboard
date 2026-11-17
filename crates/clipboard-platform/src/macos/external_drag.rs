@@ -3,7 +3,7 @@ use anyhow::{Result, bail};
 use objc2::{class, msg_send};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-pub use super::drag_payload::{PreparedExternalDrag, prepare_external_drag};
+pub use super::drag_payload::{PreparedExternalDrag, prepare_external_drag, prepare_plain_text};
 pub use super::drag_session::run_external_drag;
 
 // Quartz pointer coordinates are logical points, origin at main-screen top left.

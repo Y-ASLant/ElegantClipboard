@@ -13,6 +13,7 @@ use super::todo_notice::{
 pub(super) struct TodoDraft {
     pub id: Option<i64>,
     pub text: String,
+    pub kind: MemoKind,
 }
 
 impl ClipboardView {
@@ -64,7 +65,7 @@ impl ClipboardView {
     }
     pub(super) fn sync_search_prompt(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = if self.todos_open {
-            tr(self.language, "搜索待办…", "Search to-dos…")
+            tr(self.language, "搜索备忘录…", "Search memos…")
         } else {
             tr(
                 self.language,
@@ -81,8 +82,8 @@ impl ClipboardView {
         if self.todos_open {
             tr(
                 self.language,
-                "输入关键词搜索待办；点击 × 清空搜索。",
-                "Search to-dos by keyword; click × to clear.",
+                "输入关键词搜索备忘录；点击 × 清空搜索。",
+                "Search memos by keyword; click × to clear.",
             )
         } else {
             tr(
@@ -265,7 +266,11 @@ impl ClipboardView {
         if self.todo_editor_unavailable() {
             return;
         }
-        self.todo_draft = Some(TodoDraft { id, text });
+        let kind = id
+            .and_then(|id| self.todos.iter().find(|todo| todo.id == id))
+            .map(|todo| todo.kind)
+            .unwrap_or(MemoKind::Todo);
+        self.todo_draft = Some(TodoDraft { id, text, kind });
         self.editor_error = None;
         self.open_editor_window(window, cx, |view| {
             view.todo_draft.is_some() && view.editor_window.is_none()
@@ -282,7 +287,10 @@ impl ClipboardView {
         let adding = draft.id.is_none();
         let command = match draft.id {
             Some(id) => Command::UpdateTodo { id, text },
-            None => Command::AddTodo(text),
+            None => Command::AddTodo {
+                text,
+                kind: draft.kind,
+            },
         };
         if self.send(command, cx) {
             if adding {
@@ -391,12 +399,12 @@ impl ClipboardView {
             .child(if empty {
                 super::todo_card::todo_empty(
                     if self.todos.is_empty() {
-                        tr(language, "还没有待办", "No to-dos yet.")
+                        tr(language, "还没有备忘录", "No memos yet.")
                     } else if has_query {
                         tr(
                             language,
-                            "没有匹配的待办，试试其他关键词",
-                            "No matching to-dos. Try another search.",
+                            "没有匹配的备忘录，试试其他关键词",
+                            "No matching memos. Try another keyword.",
                         )
                     } else {
                         tr(

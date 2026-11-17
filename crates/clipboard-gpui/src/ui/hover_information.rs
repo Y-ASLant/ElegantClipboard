@@ -54,6 +54,10 @@ impl HoverInformation {
         )
     }
 
+    pub(super) fn plain_text(details: HoverPreviewDetails) -> Self {
+        Self::blank(None, None, false, "text", details)
+    }
+
     pub(super) fn new(
         item: &ClipboardItem,
         image_dimensions: Option<(i64, i64)>,

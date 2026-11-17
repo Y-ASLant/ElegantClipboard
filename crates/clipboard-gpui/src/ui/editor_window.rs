@@ -25,8 +25,8 @@ pub(super) fn bind_keys(cx: &mut App) {
 
 fn editor_title(language: LanguagePreference, adding_todo: Option<bool>) -> &'static str {
     match adding_todo {
-        Some(true) => tr(language, "添加待办", "Add to-do"),
-        Some(false) => tr(language, "编辑待办", "Edit to-do"),
+        Some(true) => tr(language, "添加备忘录", "Add memo"),
+        Some(false) => tr(language, "编辑备忘录", "Edit memo"),
         None => tr(language, "编辑内容", "Edit content"),
     }
 }
@@ -40,6 +40,56 @@ fn save_shortcut_label() -> &'static str {
     {
         "Ctrl+S"
     }
+}
+
+fn memo_kind_toggle(
+    adding: bool,
+    kind: Option<MemoKind>,
+    language: LanguagePreference,
+    owner: WeakEntity<ClipboardView>,
+    _cx: &App,
+) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(visual::SPACE_2))
+        .when(adding, |row| {
+            row.child(memo_kind_button(
+                "memo-kind-todo",
+                MemoKind::Todo,
+                kind,
+                tr(language, "待办", "To-do"),
+                owner.clone(),
+            ))
+            .child(memo_kind_button(
+                "memo-kind-note",
+                MemoKind::Note,
+                kind,
+                tr(language, "笔记", "Note"),
+                owner,
+            ))
+        })
+}
+
+fn memo_kind_button(
+    id: &'static str,
+    kind: MemoKind,
+    selected: Option<MemoKind>,
+    label: impl Into<SharedString>,
+    owner: WeakEntity<ClipboardView>,
+) -> Button {
+    Button::new(id)
+        .xsmall()
+        .selected(selected == Some(kind))
+        .label(label)
+        .on_click(move |_, _, cx| {
+            let _ = owner.update(cx, |view, cx| {
+                if let Some(draft) = view.todo_draft.as_mut().filter(|draft| draft.id.is_none()) {
+                    draft.kind = kind;
+                }
+                cx.notify();
+            });
+        })
 }
 
 pub(super) struct ContentEditorWindow {
@@ -152,6 +202,7 @@ impl ContentEditorWindow {
                         .h_full()
                         .flex()
                         .items_center()
+                        .occlude()
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(editor_title_button(
                             "editor-pin",
@@ -329,9 +380,10 @@ impl Render for ContentEditorWindow {
         let Some(owner) = self.owner.upgrade() else {
             return unavailable_editor(self.language, cx);
         };
-        let (language, pending, ready, loading, rich, adding_todo, error, initial_text) = {
+        let (language, pending, ready, loading, rich, adding_todo, memo_kind, error, initial_text) = {
             let view = owner.read(cx);
             let editing_todo = view.todo_draft.is_some();
+            let memo_kind = view.todo_draft.as_ref().map(|draft| draft.kind);
             let adding_todo = view.todo_draft.as_ref().map(|draft| draft.id.is_none());
             let initial_text = if self.loaded {
                 None
@@ -363,6 +415,7 @@ impl Render for ContentEditorWindow {
                 !editing_todo
                     && matches!(view.editor.result, Some(Ok(PreviewContent::RichText(_)))),
                 adding_todo,
+                memo_kind,
                 error,
                 initial_text,
             )
@@ -467,36 +520,48 @@ impl Render for ContentEditorWindow {
             .child(
                 div()
                     .flex()
-                    .justify_end()
+                    .justify_between()
                     .items_center()
                     .flex_shrink_0()
-                    .gap(px(visual::SPACE_2))
                     .px(px(visual::SPACE_4))
                     .py(px(visual::SPACE_3))
                     .border_t_1()
                     .border_color(cx.theme().border)
+                    .child(memo_kind_toggle(
+                        adding_todo == Some(true),
+                        memo_kind,
+                        language,
+                        self.owner.clone(),
+                        cx,
+                    ))
                     .child(
-                        Button::new("editor-cancel")
-                            .outline()
-                            .label(tr(language, "取消", "Cancel"))
-                            .disabled(pending)
-                            .on_click(move |_, window, cx| {
-                                let _ = cancel.update(cx, |view, cx| view.cancel(window, cx));
-                            }),
-                    )
-                    .child(
-                        Button::new("editor-save")
-                            .primary()
-                            .label(if pending {
-                                tr(language, "保存中…", "Saving…")
-                            } else {
-                                tr(language, "保存", "Save")
-                            })
-                            .disabled(!editable)
-                            .tooltip(save_shortcut_label())
-                            .on_click(move |_, _, cx| {
-                                let _ = save.update(cx, |view, cx| view.save(cx));
-                            }),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(visual::SPACE_2))
+                            .child(
+                                Button::new("editor-cancel")
+                                    .outline()
+                                    .label(tr(language, "取消", "Cancel"))
+                                    .disabled(pending)
+                                    .on_click(move |_, window, cx| {
+                                        let _ = cancel.update(cx, |view, cx| view.cancel(window, cx));
+                                    }),
+                            )
+                            .child(
+                                Button::new("editor-save")
+                                    .primary()
+                                    .label(if pending {
+                                        tr(language, "保存中…", "Saving…")
+                                    } else {
+                                        tr(language, "保存", "Save")
+                                    })
+                                    .disabled(!editable)
+                                    .tooltip(save_shortcut_label())
+                                    .on_click(move |_, _, cx| {
+                                        let _ = save.update(cx, |view, cx| view.save(cx));
+                                    }),
+                            ),
                     ),
             )
     }

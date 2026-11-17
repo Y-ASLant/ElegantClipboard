@@ -85,6 +85,21 @@ pub fn prepare_external_drag(item: &ClipboardItem) -> Result<PreparedExternalDra
     })
 }
 
+pub fn prepare_plain_text(text: &str) -> Result<PreparedExternalDrag> {
+    let text = text.trim();
+    if text.is_empty() {
+        bail!("Item has no transferable content");
+    }
+    let bytes: Arc<[u8]> = text.as_bytes().into();
+    Ok(PreparedExternalDrag {
+        formats: Arc::new(vec![
+            ("text/plain;charset=utf-8", bytes.clone()),
+            ("UTF8_STRING", bytes),
+        ]),
+        files: None,
+    })
+}
+
 fn file_uris(paths: &[String]) -> Result<Vec<u8>> {
     if paths.is_empty() {
         bail!("File list is empty");

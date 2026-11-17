@@ -22,7 +22,7 @@ impl SettingsPage {
         match self {
             Self::General => tr(language, "常规", "General"),
             Self::Display => tr(language, "显示", "Display"),
-            Self::Todos => tr(language, "待办", "To-dos"),
+            Self::Todos => tr(language, "备忘录", "Memos"),
             Self::Theme => tr(language, "外观", "Appearance"),
             Self::Data => tr(language, "数据", "Data"),
             Self::AppFilter => tr(language, "应用过滤", "App filter"),
@@ -101,8 +101,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Todos,
         chinese: "主页入口",
         english: "Home tab",
-        description_chinese: "隐藏待办入口不会删除已有待办。",
-        description_english: "Hiding the to-do tab does not delete existing to-dos.",
+        description_chinese: "隐藏备忘录入口不会删除已有内容。",
+        description_english: "Hiding the memo tab does not delete existing memos.",
         content: SettingsWindowView::settings_todo_tab_content,
     },
     Section {
@@ -117,8 +117,8 @@ const SECTIONS: &[Section] = &[
         page: SettingsPage::Todos,
         chinese: "提醒",
         english: "Reminders",
-        description_chinese: "开启后，添加或完成待办会在屏幕右下角弹出，3 秒后消失，也可点关闭。不进入主窗口。",
-        description_english: "After adding or completing a to-do, a toast appears at the bottom-right of the screen. It closes after 3 seconds or when dismissed, and does not appear inside the main window.",
+        description_chinese: "开启后，添加备忘录或完成待办会在屏幕右下角弹出，3 秒后消失，也可点关闭。不进入主窗口。",
+        description_english: "After adding a memo or completing a to-do, a toast appears at the bottom-right of the screen. It closes after 3 seconds or when dismissed, and does not appear inside the main window.",
         content: SettingsWindowView::settings_todo_toast_content,
     },
     Section {

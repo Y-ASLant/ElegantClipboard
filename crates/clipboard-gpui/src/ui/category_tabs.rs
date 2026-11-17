@@ -73,8 +73,8 @@ impl ClipboardView {
     pub(super) fn toolbar_tab_text(&self, tab: ToolbarTab) -> (&'static str, &'static str) {
         match tab {
             ToolbarTab::Todos => (
-                tr(self.language, "待办", "To-do"),
-                tr(self.language, "待办", "To-do"),
+                tr(self.language, "备忘录", "Memo"),
+                tr(self.language, "备忘录", "Memo"),
             ),
             ToolbarTab::Category(filter) => CATEGORY_TAB_SPECS
                 .iter()

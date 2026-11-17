@@ -16,7 +16,7 @@ impl SettingsWindowView {
             .child(pref_switch(
                 cx,
                 "todo-enabled",
-                tr(language, "显示待办", "Show to-dos"),
+                tr(language, "显示备忘录", "Show memos"),
                 preference.enabled,
                 pending,
                 &self.owner,

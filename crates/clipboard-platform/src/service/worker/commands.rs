@@ -426,8 +426,8 @@ impl Worker {
                 self.send_event(Event::Todos(self.history.list_todos()?))?;
                 return Ok(());
             }
-            Command::AddTodo(text) => {
-                self.history.add_todo(&text)?;
+            Command::AddTodo { text, kind } => {
+                self.history.add_todo(&text, kind)?;
                 self.send_event(Event::Todos(self.history.list_todos()?))?;
                 return Ok(());
             }

@@ -14,6 +14,13 @@ pub(super) enum CardDrag {
 }
 
 impl CardDrag {
+    fn paste_id(&self) -> Option<i64> {
+        match self {
+            Self::History(drag) => Some(drag.id),
+            Self::Todo(drag) => Some(drag.id),
+        }
+    }
+
     fn size(&self) -> gpui_kit::Size<Pixels> {
         match self {
             Self::History(drag) => drag.size(),
@@ -25,6 +32,12 @@ impl CardDrag {
         match self {
             Self::History(drag) => Some(drag),
             Self::Todo(_) => None,
+        }
+    }
+    fn todo(&self) -> Option<&TodoDrag> {
+        match self {
+            Self::Todo(drag) => Some(drag),
+            Self::History(_) => None,
         }
     }
 
@@ -109,6 +122,18 @@ impl ClipboardView {
             .is_some_and(|session| session.native_active)
     }
 
+    pub(super) fn prepare_memo_drag(&mut self, id: i64, text: &str, cx: &mut Context<Self>) {
+        self.drag_token = self.drag_token.wrapping_add(1);
+        let token = self.drag_token;
+        let result = native::prepare_plain_text(text).map_err(|error| error.to_string());
+        self.drag_preparation = Some(DragPreparation {
+            id,
+            token,
+            result: Some(result),
+        });
+        cx.notify();
+    }
+
     pub(super) fn prepare_card_drag(&mut self, id: i64, cx: &mut Context<Self>) {
         self.drag_token = self.drag_token.wrapping_add(1);
         let token = self.drag_token;
@@ -147,13 +172,17 @@ impl ClipboardView {
         let Some(preview_hwnd) = self.open_drag_preview(&drag, window, cx) else {
             return false;
         };
-        let token = if let Some(history) = drag.history() {
+        let token = if let Some(id) = drag.paste_id() {
             if self
                 .drag_preparation
                 .as_ref()
-                .is_none_or(|prepared| prepared.id != history.id)
+                .is_none_or(|prepared| prepared.id != id)
             {
-                self.prepare_card_drag(history.id, cx);
+                if let Some(history) = drag.history() {
+                    self.prepare_card_drag(history.id, cx);
+                } else if let Some(todo) = drag.todo() {
+                    self.prepare_memo_drag(id, &todo.snapshot.todo.text, cx);
+                }
             }
             self.drag_preparation
                 .as_ref()
@@ -238,14 +267,14 @@ impl ClipboardView {
                     if !pointer.left_button_down {
                         // Release is committed here even if GPUI never received MouseUp.
                         if !outside { drag.drop_card(this, cx); }
-                        else if drag.history().is_some() { this.set_feedback_message(tr(this.language,
+                        else if drag.paste_id().is_some() { this.set_feedback_message(tr(this.language,
                             "拖放尚未就绪，请按住卡片移出窗口后再松开",
                             "Drag was not ready. Hold the card outside the window before releasing.").into());
                             this.is_error = true; }
                         this.finish_external_drag(cx);
                         return None;
                     }
-                    let payload = if outside && drag.history().is_some() {
+                    let payload = if outside && drag.paste_id().is_some() {
                         this.drag_preparation.as_ref().filter(|prepared| prepared.token == token)
                             .and_then(|prepared| prepared.result.clone())
                     } else { None };

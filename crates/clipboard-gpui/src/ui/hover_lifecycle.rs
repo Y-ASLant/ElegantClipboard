@@ -124,28 +124,19 @@ impl ClipboardView {
                             this.close_hover_preview("pointer_left_main", cx);
                             return false;
                         }
-                        let source = this.drag_viewport.get().is_some_and(|viewport| {
-                            if !viewport.contains(&point(px(x), px(y))) {
-                                return false;
-                            }
-                            this.history
-                                .items
-                                .iter()
-                                .position(|item| Some(item.id) == request.0)
-                                .and_then(|index| {
-                                    this.row_offsets.get(index).map(|offset| {
-                                        let top = viewport.top() + *offset + this.scroll.offset().y;
-                                        px(y) >= top
-                                            && px(y)
-                                                < top
-                                                    + px(history_row_height(
-                                                        &this.history.items[index],
-                                                        this.display.value,
-                                                    ))
-                                    })
-                                })
-                                .unwrap_or(false)
-                        });
+                        let source = this.hover_pointer_on_source(request.0, x, y);
+                        if !source {
+                            tracing::debug!(
+                                id = ?request.0,
+                                generation = request.1,
+                                x,
+                                y,
+                                over_main,
+                                over_preview,
+                                todos_open = this.todos_open,
+                                "Hover pointer left the source card"
+                            );
+                        }
                         if !source {
                             this.close_hover_preview("source_pointer_left", cx);
                             return false;
@@ -161,6 +152,77 @@ impl ClipboardView {
                 }
             }
         }));
+    }
+
+    fn hover_pointer_on_source(&self, id: Option<i64>, x: f32, y: f32) -> bool {
+        let Some(id) = id else {
+            tracing::debug!("Hover source miss: no preview id");
+            return false;
+        };
+        let Some(viewport) = self.drag_viewport.get() else {
+            tracing::debug!(id, x, y, "Hover source miss: list viewport missing");
+            return false;
+        };
+        if !viewport.contains(&point(px(x), px(y))) {
+            tracing::debug!(
+                id,
+                x,
+                y,
+                ?viewport,
+                "Hover source miss: pointer outside list"
+            );
+            return false;
+        }
+        if self.todos_open {
+            return self.memo_pointer_on_source(id, viewport, y);
+        }
+        let Some(index) = self.history.items.iter().position(|item| item.id == id) else {
+            tracing::debug!(id, "Hover source miss: history row not found");
+            return false;
+        };
+        let Some(offset) = self.row_offsets.get(index) else {
+            tracing::debug!(id, index, "Hover source miss: history offset missing");
+            return false;
+        };
+        let top = viewport.top() + *offset + self.scroll.offset().y;
+        let bottom = top
+            + px(history_row_height(
+                &self.history.items[index],
+                self.display.value,
+            ));
+        let hit = px(y) >= top && px(y) < bottom;
+        if !hit {
+            tracing::debug!(
+                id,
+                y,
+                ?top,
+                ?bottom,
+                "Hover source miss: outside history row"
+            );
+        }
+        hit
+    }
+
+    fn memo_pointer_on_source(&self, id: i64, viewport: Bounds<Pixels>, y: f32) -> bool {
+        let layout = self.todo_layout.borrow();
+        let Some(index) = layout.indexes.get(&id).copied() else {
+            tracing::debug!(id, "Hover source miss: memo row not in layout");
+            return false;
+        };
+        let (Some(top_offset), Some(bottom_offset)) = (
+            layout.offsets.get(index).copied(),
+            layout.offsets.get(index + 1).copied(),
+        ) else {
+            tracing::debug!(id, index, "Hover source miss: memo offset missing");
+            return false;
+        };
+        let top = viewport.top() + top_offset + self.todo_scroll.offset().y;
+        let bottom = viewport.top() + bottom_offset + self.todo_scroll.offset().y;
+        let hit = px(y) >= top && px(y) < bottom;
+        if !hit {
+            tracing::debug!(id, y, ?top, ?bottom, "Hover source miss: outside memo row");
+        }
+        hit
     }
 
     pub(super) fn zoom_hover_from_card(
@@ -312,6 +374,83 @@ impl ClipboardView {
                         {
                             tracing::debug!(id, generation, "Sending hover preview request");
                             this.send(Command::HoverPreview { id, generation }, cx);
+                        }
+                    });
+                }));
+            }
+            self.hover_source_active = true;
+        } else if self.hover_preview.id == Some(id) {
+            self.close_hover_preview("source_left", cx);
+        }
+    }
+
+    pub(super) fn set_memo_hover(
+        &mut self,
+        id: i64,
+        entered: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if crate::capabilities::positioning_unavailable_reason(self.language).is_some() {
+            return;
+        }
+        if entered {
+            if self.batch_mode
+                || cx.has_active_drag()
+                || self.external_drag.is_some()
+                || self.editor.id.is_some()
+                || self.history_menu_open(cx)
+                || !self.todos_open
+                || !self.hover_preference.value.allows("text")
+            {
+                return;
+            }
+            if !self.hover_source_allowed(window) {
+                if self.hover_preview.id.is_some() {
+                    self.close_hover_preview("hover_source_blocked", cx);
+                }
+                return;
+            }
+            let Some(text) = self
+                .todos
+                .iter()
+                .find(|todo| todo.id == id)
+                .map(|todo| todo.text.clone())
+            else {
+                return;
+            };
+            if self.hover_preview.id != Some(id) {
+                self.close_hover_preview("source_changed", cx);
+                let generation = self.hover_preview.open(id);
+                let delay = self.hover_preference.value.delay_ms;
+                let main = window.window_handle();
+                self.hover_task = Some(cx.spawn_in(window, async move |view, cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(u64::from(delay)))
+                        .await;
+                    let _ = update_clipboard_window(&view, main, cx, |this, window, cx| {
+                        let blocked = this.hover_overlay_stack_blocks_source();
+                        let current = this.hover_preview.id == Some(id)
+                            && this.hover_preview.generation == generation
+                            && this.hover_source_active
+                            && !blocked;
+                        tracing::debug!(
+                            id,
+                            generation,
+                            current_id = ?this.hover_preview.id,
+                            current_generation = this.hover_preview.generation,
+                            source_active = this.hover_source_active,
+                            blocked,
+                            current,
+                            "Memo hover delay elapsed"
+                        );
+                        if current {
+                            this.hover_preview.apply(
+                                id,
+                                generation,
+                                Ok(PreviewContent::Text(text)),
+                            );
+                            this.open_hover_popup(window, cx);
                         }
                     });
                 }));

@@ -35,11 +35,34 @@ impl TodoStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MemoKind {
+    #[default]
+    Todo = 0,
+    Note = 1,
+}
+
+impl MemoKind {
+    pub fn from_i64(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Todo),
+            1 => Some(Self::Note),
+            _ => None,
+        }
+    }
+
+    pub fn as_i64(self) -> i64 {
+        self as i64
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Todo {
     pub id: i64,
     pub text: String,
     pub status: TodoStatus,
+    pub kind: MemoKind,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,8 +72,8 @@ impl History {
         list(&self.db)
     }
 
-    pub fn add_todo(&self, text: &str) -> Result<i64> {
-        add(&self.db, text)
+    pub fn add_todo(&self, text: &str, kind: MemoKind) -> Result<i64> {
+        add(&self.db, text, kind)
     }
 
     pub fn set_todo_status(&self, id: i64, status: TodoStatus) -> Result<()> {
@@ -75,18 +98,20 @@ fn list(db: &Database) -> Result<Vec<Todo>> {
     let connection = db.read_connection();
     let connection = connection.lock();
     let mut query = connection.prepare(
-        "SELECT id, text, status, created_at, updated_at FROM todos
+        "SELECT id, text, status, kind, created_at, updated_at FROM todos
          ORDER BY status ASC, sort_order DESC, id DESC",
     )?;
     let todos = query
         .query_map([], |row| {
             let status = TodoStatus::from_i64(row.get(2)?).unwrap_or(TodoStatus::Pending);
+            let kind = MemoKind::from_i64(row.get(3)?).unwrap_or(MemoKind::Todo);
             Ok(Todo {
                 id: row.get(0)?,
                 text: row.get(1)?,
                 status,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                kind,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -129,6 +154,15 @@ fn ensure_schema(db: &Database) -> Result<()> {
             "ALTER TABLE todos ADD COLUMN status INTEGER NOT NULL DEFAULT 0;
              UPDATE todos SET status = CASE WHEN completed != 0 THEN 2 ELSE 0 END;",
         )?;
+    }
+    let has_kind: bool = connection.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('todos') WHERE name = 'kind'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_kind {
+        connection
+            .execute_batch("ALTER TABLE todos ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;")?;
     }
     Ok(())
 }
@@ -190,7 +224,7 @@ fn checked_text(text: &str) -> Result<&str> {
     Ok(text)
 }
 
-fn add(db: &Database, text: &str) -> Result<i64> {
+fn add(db: &Database, text: &str, kind: MemoKind) -> Result<i64> {
     let text = checked_text(text)?;
     ensure_schema(db)?;
     let connection = db.write_connection();
@@ -201,9 +235,9 @@ fn add(db: &Database, text: &str) -> Result<i64> {
         |row| row.get(0),
     )?;
     connection.execute(
-        "INSERT INTO todos (text, status, updated_at, sort_order)
-         VALUES (?1, 0, datetime('now', 'localtime'), ?2)",
-        params![text, sort_order],
+        "INSERT INTO todos (text, status, kind, updated_at, sort_order)
+         VALUES (?1, 0, ?2, datetime('now', 'localtime'), ?3)",
+        params![text, kind.as_i64(), sort_order],
     )?;
     Ok(connection.last_insert_rowid())
 }
@@ -265,8 +299,8 @@ mod tests {
     fn status_migration_and_manual_status_changes() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let history = History::open(dir.path().join("history.db"))?;
-        let first = history.add_todo("  buy milk  ")?;
-        let second = history.add_todo("write notes")?;
+        let first = history.add_todo("  buy milk  ", MemoKind::Todo)?;
+        let second = history.add_todo("write notes", MemoKind::Note)?;
         assert_eq!(history.list_todos()?[0].status, TodoStatus::Pending);
         history.set_todo_status(first, TodoStatus::Done)?;
         let todos = history.list_todos()?;
@@ -283,7 +317,8 @@ mod tests {
         assert_eq!(history.list_todos()?[0].text, "**bold**\n- item");
         history.delete_todo(first)?;
         assert!(history.list_todos()?.iter().all(|todo| todo.id != first));
-        assert!(history.add_todo("   ").is_err());
+        assert!(history.add_todo("   ", MemoKind::Todo).is_err());
+        assert_eq!(history.list_todos()?[0].kind, MemoKind::Note);
         Ok(())
     }
 
@@ -291,9 +326,9 @@ mod tests {
     fn open_tasks_keep_user_order_after_reorder() -> Result<()> {
         let dir = tempfile::tempdir()?;
         let history = History::open(dir.path().join("history.db"))?;
-        let a = history.add_todo("first")?;
-        let b = history.add_todo("second")?;
-        let c = history.add_todo("third")?;
+        let a = history.add_todo("first", MemoKind::Todo)?;
+        let b = history.add_todo("second", MemoKind::Todo)?;
+        let c = history.add_todo("third", MemoKind::Todo)?;
         assert_eq!(
             history
                 .list_todos()?

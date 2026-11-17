@@ -2,8 +2,8 @@ use crate::source_app;
 use crate::update::ReleaseInfo;
 use anyhow::Result;
 use clipboard_core::{
-    ContentCategory, DeletionOutcome, NativeFormatCapture, PreviewContent, TextTransform, Todo,
-    TodoStatus,
+    ContentCategory, DeletionOutcome, MemoKind, NativeFormatCapture, PreviewContent, TextTransform,
+    Todo, TodoStatus,
     backup::BackupReport,
     database::{ClipboardItem, Group},
     preferences::{
@@ -193,7 +193,10 @@ pub enum Command {
     SetSequenceHotkey(String),
     ListRunningApps,
     ListTodos,
-    AddTodo(String),
+    AddTodo {
+        text: String,
+        kind: MemoKind,
+    },
     SetTodoStatus {
         id: i64,
         status: TodoStatus,
