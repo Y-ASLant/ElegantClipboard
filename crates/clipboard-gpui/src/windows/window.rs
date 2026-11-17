@@ -191,11 +191,19 @@ pub fn activate_for_input(window: &Window) {
     }
 }
 
+/// Keep or drop the topmost band without taking focus.
+pub fn set_above(window: &Window, above: bool) {
+    if let Some(hwnd) = window_hwnd(window) {
+        place(
+            hwnd,
+            Some(if above { HWND_TOPMOST } else { HWND_NOTOPMOST }),
+        );
+    }
+}
+
 /// Leave the topmost band without taking focus.
 pub fn release_above(window: &Window) {
-    if let Some(hwnd) = window_hwnd(window) {
-        place(hwnd, Some(HWND_NOTOPMOST));
-    }
+    set_above(window, false);
 }
 
 /// Place the window at the top of the non-topmost band without activating it.

@@ -104,8 +104,8 @@ pub fn activate_for_input(window: &Window) {
     window.activate_window();
 }
 
-/// Drop `_NET_WM_STATE_ABOVE` so an editor can stack over the history panel.
-pub fn release_above(window: &Window) {
+/// Keep or drop `_NET_WM_STATE_ABOVE` without asking for focus.
+pub fn set_above(window: &Window, above: bool) {
     let Some(id) = window_id(window) else {
         return;
     };
@@ -116,21 +116,30 @@ pub fn release_above(window: &Window) {
     let Some(state) = intern(&connection, "_NET_WM_STATE") else {
         return;
     };
-    let Some(above) = intern(&connection, "_NET_WM_STATE_ABOVE") else {
+    let Some(flag) = intern(&connection, "_NET_WM_STATE_ABOVE") else {
         return;
     };
-    let Ok(reply) = connection
+    let mut values = connection
         .get_property(false, id, state, AtomEnum::ATOM, 0, 32)
-        .and_then(|cookie| cookie.reply())
-    else {
+        .ok()
+        .and_then(|cookie| cookie.reply().ok())
+        .and_then(|reply| reply.value32().map(|values| values.collect::<Vec<_>>()))
+        .unwrap_or_default();
+    let present = values.contains(&flag);
+    if above && !present {
+        values.push(flag);
+    } else if !above && present {
+        values.retain(|atom| *atom != flag);
+    } else {
         return;
-    };
-    let Some(values) = reply.value32() else {
-        return;
-    };
-    let kept = values.filter(|atom| *atom != above).collect::<Vec<_>>();
-    let _ = connection.change_property32(PropMode::REPLACE, id, state, AtomEnum::ATOM, &kept);
+    }
+    let _ = connection.change_property32(PropMode::REPLACE, id, state, AtomEnum::ATOM, &values);
     let _ = connection.flush();
+}
+
+/// Drop `_NET_WM_STATE_ABOVE` so an editor can stack over the history panel.
+pub fn release_above(window: &Window) {
+    set_above(window, false);
 }
 
 /// Place the window above its siblings without asking for focus.

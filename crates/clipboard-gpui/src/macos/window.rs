@@ -60,12 +60,25 @@ pub fn activate_for_input(window: &Window) {
 }
 
 const NORMAL_WINDOW_LEVEL: isize = 0;
+const FLOATING_WINDOW_LEVEL: isize = 3;
 /// Matches `NSPopUpWindowLevel`, the level GPUI assigns to `WindowKind::PopUp`.
 const POPUP_WINDOW_LEVEL: isize = 101;
 
+/// Keep a normal window above other apps, or return it to the normal level.
+pub fn set_above(window: &Window, above: bool) {
+    set_level(
+        window,
+        if above {
+            FLOATING_WINDOW_LEVEL
+        } else {
+            NORMAL_WINDOW_LEVEL
+        },
+    );
+}
+
 /// Drop the popup band so a normal editor can appear above the history panel.
 pub fn release_above(window: &Window) {
-    set_level(window, NORMAL_WINDOW_LEVEL);
+    set_above(window, false);
 }
 
 /// Restore the floating panel level used when the history window was created.
@@ -73,9 +86,8 @@ pub fn raise_above(window: &Window) {
     set_level(window, POPUP_WINDOW_LEVEL);
 }
 
-/// Order the window in front and leave the popup window level.
+/// Order the window in front without changing its level.
 pub fn raise_front(window: &Window) {
-    set_level(window, NORMAL_WINDOW_LEVEL);
     let Some(native) = window_id(window) else {
         return;
     };

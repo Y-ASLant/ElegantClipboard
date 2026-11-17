@@ -48,6 +48,8 @@ pub(super) struct ContentEditorWindow {
     language: LanguagePreference,
     /// 全文只在第一次到达时写入，避免后续刷新覆盖用户正在改的内容。
     loaded: bool,
+    pinned: bool,
+    markdown_preview: bool,
     _owner_subscription: Subscription,
     _owner_release_subscription: Subscription,
     _editor_subscription: Subscription,
@@ -78,6 +80,8 @@ impl ContentEditorWindow {
             editor,
             language,
             loaded: false,
+            pinned: false,
+            markdown_preview: false,
             _owner_subscription: subscription,
             _owner_release_subscription: release_subscription,
             _editor_subscription: editor_subscription,
@@ -117,6 +121,72 @@ impl ContentEditorWindow {
                 owner.save_content_editor(text, cx);
             }
         });
+    }
+
+    fn title_bar(
+        &self,
+        adding_todo: Option<bool>,
+        language: LanguagePreference,
+        cx: &mut Context<Self>,
+    ) -> TitleBar {
+        let pinned = self.pinned;
+        let preview = self.markdown_preview;
+        TitleBar::new().bg(cx.theme().sidebar).child(
+            div()
+                .w_full()
+                .flex()
+                .flex_1()
+                .items_center()
+                .justify_between()
+                .min_w_0()
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_size(cx.theme().font_size)
+                        .font_family(cx.theme().font_family.clone())
+                        .font_medium()
+                        .child(editor_title(language, adding_todo)),
+                )
+                .child(
+                    div()
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(editor_title_button(
+                            "editor-pin",
+                            gpui_kit::assets::IconName::Pin,
+                            if pinned {
+                                tr(language, "取消置顶", "Unpin window")
+                            } else {
+                                tr(language, "置顶窗口", "Pin window")
+                            },
+                            pinned,
+                            cx.listener(|this, _, window, cx| {
+                                this.pinned = !this.pinned;
+                                native_window::set_above(window, this.pinned);
+                                if this.pinned {
+                                    native_window::raise_front(window);
+                                }
+                                cx.notify();
+                            }),
+                        ))
+                        .child(editor_title_button(
+                            "editor-preview",
+                            IconName::Eye,
+                            if preview {
+                                tr(language, "隐藏预览", "Hide preview")
+                            } else {
+                                tr(language, "Markdown 预览", "Markdown preview")
+                            },
+                            preview,
+                            cx.listener(|this, _, _, cx| {
+                                this.markdown_preview = !this.markdown_preview;
+                                cx.notify();
+                            }),
+                        )),
+                ),
+        )
     }
 }
 
@@ -259,17 +329,7 @@ impl Render for ContentEditorWindow {
         let Some(owner) = self.owner.upgrade() else {
             return unavailable_editor(self.language, cx);
         };
-        let (
-            language,
-            pending,
-            ready,
-            loading,
-            rich,
-            editing_todo,
-            adding_todo,
-            error,
-            initial_text,
-        ) = {
+        let (language, pending, ready, loading, rich, adding_todo, error, initial_text) = {
             let view = owner.read(cx);
             let editing_todo = view.todo_draft.is_some();
             let adding_todo = view.todo_draft.as_ref().map(|draft| draft.id.is_none());
@@ -302,7 +362,6 @@ impl Render for ContentEditorWindow {
                 !editing_todo && view.editor.result.is_none(),
                 !editing_todo
                     && matches!(view.editor.result, Some(Ok(PreviewContent::RichText(_)))),
-                editing_todo,
                 adding_todo,
                 error,
                 initial_text,
@@ -326,76 +385,82 @@ impl Render for ContentEditorWindow {
                 this.cancel(window, cx);
             }))
             .on_action(cx.listener(|this, _: &SaveContentEditor, _, cx| this.save(cx)))
-            .child(editor_title_bar(language, adding_todo, cx))
+            .child(self.title_bar(adding_todo, language, cx))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .min_w_0()
-                    .p(px(visual::SPACE_4))
                     .flex()
                     .flex_col()
-                    .gap(px(visual::SPACE_3))
                     .child(
-                        div().flex_1().min_h(px(120.)).min_w_0().child(
-                            Editor::new(&self.editor)
-                                .flex_1()
-                                .h_full()
-                                // 输入框默认圆角偏大；编辑区跟随卡片和预览的圆角设置。
-                                .rounded(crate::card_radius::card_radius(cx))
-                                // 编辑器默认等宽字体。剪贴板正文跟随界面字体和字号。
-                                .font_family(cx.theme().font_family.clone())
-                                .text_size(cx.theme().font_size)
-                                .readonly(!editable)
-                                .aria_label(tr(language, "编辑文本", "Edit text")),
-                        ),
-                    )
-                    .when(loading, |body| {
-                        body.child(
-                            div()
-                                .text_size(px(visual::TEXT_SMALL))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(language, "正在加载…", "Loading…")),
+                        div().flex_1().min_h(px(120.)).min_w_0().when(
+                            !self.markdown_preview,
+                            |area| {
+                                area.child(
+                                    Editor::new(&self.editor)
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .h_full()
+                                        .font_family(cx.theme().font_family.clone())
+                                        .text_size(cx.theme().font_size)
+                                        .readonly(!editable)
+                                        .aria_label(tr(language, "编辑文本", "Edit text")),
+                                )
+                            },
                         )
-                    })
-                    .when(editing_todo, |body| {
-                        let preview = self.editor.read(cx).value().to_string();
-                        body.child(
-                            div()
-                                .flex_1()
-                                .min_h(px(120.))
-                                .min_w_0()
-                                .overflow_y_scrollbar()
-                                .rounded(crate::card_radius::card_radius(cx))
-                                .border(px(visual::BORDER_WIDTH))
-                                .border_color(crate::design_system::container_border(cx))
-                                .bg(cx.theme().colors.list)
-                                .p(px(visual::SPACE_3))
-                                .child(
-                                    TextView::markdown("todo-editor-preview", preview)
-                                        .selectable(false)
-                                        .scrollable(false),
+                        .when(self.markdown_preview, |area| {
+                            let preview = self.editor.read(cx).value().to_string();
+                            area.child(
+                                div().size_full().overflow_y_scrollbar().child(
+                                    div()
+                                        .px(px(visual::SPACE_4))
+                                        .py(px(visual::SPACE_3))
+                                        .child(
+                                            TextView::markdown("editor-markdown-preview", preview)
+                                                .selectable(false)
+                                                .scrollable(false),
+                                        ),
                                 ),
-                        )
-                    })
-                    .when(rich, |body| {
+                            )
+                        }),
+                    )
+                    .when(loading || rich || error.is_some(), |body| {
                         body.child(
                             div()
-                                .text_size(px(visual::TEXT_SMALL))
-                                .text_color(cx.theme().muted_foreground)
-                                .child(tr(
-                                    language,
-                                    "保存后将变为纯文本，原富文本格式不会保留",
-                                    "Saving converts this to plain text and removes rich-text formatting.",
-                                )),
-                        )
-                    })
-                    .when_some(error, |body, error| {
-                        body.child(
-                            Alert::error("editor-error", error)
-                                .small()
-                                .min_w_0()
-                                .whitespace_normal(),
+                                .px(px(visual::SPACE_4))
+                                .py(px(visual::SPACE_2))
+                                .flex()
+                                .flex_col()
+                                .gap(px(visual::SPACE_2))
+                                .when(loading, |status| {
+                                    status.child(
+                                        div()
+                                            .text_size(px(visual::TEXT_SMALL))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(tr(language, "正在加载…", "Loading…")),
+                                    )
+                                })
+                                .when(rich, |status| {
+                                    status.child(
+                                        div()
+                                            .text_size(px(visual::TEXT_SMALL))
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(tr(
+                                                language,
+                                                "保存后将变为纯文本，原富文本格式不会保留",
+                                                "Saving converts this to plain text and removes rich-text formatting.",
+                                            )),
+                                    )
+                                })
+                                .when_some(error, |status, error| {
+                                    status.child(
+                                        Alert::error("editor-error", error)
+                                            .small()
+                                            .min_w_0()
+                                            .whitespace_normal(),
+                                    )
+                                }),
                         )
                     }),
             )
@@ -445,6 +510,27 @@ fn editor_title_bar(language: LanguagePreference, adding_todo: Option<bool>, cx:
             .font_medium()
             .child(editor_title(language, adding_todo)),
     )
+}
+
+fn editor_title_button(
+    id: &'static str,
+    icon: impl Into<Icon>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Button {
+    let label = label.into();
+    Button::new(id)
+        .ghost()
+        .w(px(34.))
+        .h(px(34.))
+        .p_0()
+        .rounded(px(0.))
+        .selected(selected)
+        .icon(icon.into().small())
+        .tooltip(label.clone())
+        .accessibility_label(label)
+        .on_click(on_click)
 }
 
 fn unavailable_editor(language: LanguagePreference, cx: &mut App) -> Div {
