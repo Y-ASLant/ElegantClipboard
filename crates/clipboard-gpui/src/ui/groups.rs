@@ -80,6 +80,7 @@ impl ClipboardView {
         self.group_move_id = None;
         self.close_history_confirmation(window, cx);
         self.reset_selection();
+        self.located = None;
         if let Some(reload) = self.history.set_group(group_id) {
             self.scroll_to_top();
             self.arm_history_query(reload, false, cx);

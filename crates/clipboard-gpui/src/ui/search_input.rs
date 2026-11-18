@@ -14,7 +14,13 @@ impl ClipboardView {
             cx.notify();
             return;
         }
-        if matches!(event, InputEvent::Change) {
+        // Enter on the kept search text leaves the located view and searches again.
+        let resume = self.located.is_some()
+            && !self.todos_open
+            && matches!(event, InputEvent::PressEnter { .. });
+        if matches!(event, InputEvent::Change) || resume {
+            self.located = None;
+            self.locate_id = None;
             self.cancel_sequence(cx);
             self.close_hover_preview("search_changed", cx);
             if matches!(

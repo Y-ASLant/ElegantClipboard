@@ -310,6 +310,50 @@ impl ClipboardView {
                     cx,
                 ))
             })
+            .when_some(
+                self.locate_progress().filter(|(_, total)| *total > 1),
+                |container, (position, total)| {
+                    container.child(
+                        div()
+                            .px(px(PAGE_PADDING))
+                            .pb(px(visual::SPACE_2))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(visual::SPACE_2))
+                            .child(
+                                div()
+                                    .text_size(px(visual::TEXT_SMALL))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(if self.language == LanguagePreference::English {
+                                        format!("Match {position} of {total}")
+                                    } else {
+                                        format!("匹配 {position} / {total}")
+                                    }),
+                            )
+                            .child(
+                                Button::new("locate-previous")
+                                    .small()
+                                    .outline()
+                                    .label(tr(self.language, "上一个", "Previous"))
+                                    .disabled(position <= 1)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.locate_step(-1, cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("locate-next")
+                                    .small()
+                                    .outline()
+                                    .label(tr(self.language, "下一个", "Next"))
+                                    .disabled(position >= total)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.locate_step(1, cx);
+                                    })),
+                            ),
+                    )
+                },
+            )
             .when(self.batch_mode, |container| {
                 container.child(visual::reveal(
                     div()

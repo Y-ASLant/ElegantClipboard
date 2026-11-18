@@ -339,6 +339,7 @@ impl ClipboardView {
         if self.auto_reset_state.value && self.paste_state.sequence_remaining().is_none() {
             self.search
                 .update(cx, |input, cx| input.set_value("", window, cx));
+            self.located = None;
             let reload = self.history.reset_filters();
             self.scroll_to_top();
             self.arm_history_query(reload, false, cx);
