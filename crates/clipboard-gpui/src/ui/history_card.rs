@@ -140,7 +140,12 @@ impl ClipboardView {
         } else {
             cx.theme().colors.list
         };
-        let border = if card.selected {
+        // 定位标记不随悬停或选中变化：主题色描边加左侧色条。
+        let located = self.located == Some(id);
+        let locate_color = cx.theme().primary;
+        let border = if located {
+            locate_color
+        } else if card.selected {
             cx.theme().list_active_border
         } else {
             crate::design_system::container_border(cx)
@@ -314,6 +319,18 @@ impl ClipboardView {
                 .left_0()
                 .size_full(),
             )
+            .when(located, |row| {
+                row.child(
+                    div()
+                        .absolute()
+                        .left(px(3.))
+                        .top(px(card_spacing))
+                        .bottom(px(if last { PAGE_PADDING } else { card_spacing }))
+                        .w(px(4.))
+                        .rounded_full()
+                        .bg(locate_color),
+                )
+            })
             .child(
                 surface
                     .when(!self.batch_mode, |card| {

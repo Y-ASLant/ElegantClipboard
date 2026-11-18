@@ -70,12 +70,30 @@ pub(super) fn show_history_scroll_to_top(
     let scrolled = -offset_y;
     viewport_height > px(0.) && max_offset_y > viewport_height && scrolled > viewport_height
 }
+
+/// Scroll distance that centres row `index` in the viewport without leaving the list.
+pub(super) fn centered_row_scroll(
+    offsets: &[Pixels],
+    index: usize,
+    viewport_height: Pixels,
+) -> Option<Pixels> {
+    let top = *offsets.get(index)?;
+    let bottom = *offsets.get(index + 1)?;
+    let slack = (viewport_height - (bottom - top)).max(px(0.));
+    let furthest = (*offsets.last()? - viewport_height).max(px(0.));
+    Some((top - slack * 0.5).max(px(0.)).min(furthest))
+}
 impl ClipboardView {
     pub(super) fn query(&mut self, cx: &mut Context<Self>) -> bool {
         let generation = self.history.generation;
         if !self.send(
             Command::Query {
-                search: self.search.read(cx).value().to_string(),
+                // A located row shows the full list; the typed search is kept for later.
+                search: if self.located.is_some() {
+                    String::new()
+                } else {
+                    self.search.read(cx).value().to_string()
+                },
                 limit: 0,
                 favorite_only: self.history.favorite_only(),
                 category: self.history.category(),
@@ -201,6 +219,7 @@ impl ClipboardView {
         self.close_hover_preview("category_changed", cx);
         self.close_history_confirmation(window, cx);
         self.group_move_id = None;
+        self.located = None;
         self.todos_open = false;
         self.selected_todo = None;
         self.sync_search_prompt(window, cx);
@@ -225,6 +244,94 @@ impl ClipboardView {
             self.reload_current_history(cx);
         }
         window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    /// Leave the search and category filter for the full list of the current
+    /// group, then land on `id` once that list arrives so its neighbours show.
+    pub(super) fn locate_in_timeline(
+        &mut self,
+        id: i64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.release_history_drag(cx);
+        self.cancel_sequence(cx);
+        self.close_hover_preview("locate_in_timeline", cx);
+        self.close_history_confirmation(window, cx);
+        self.group_move_id = None;
+        self.located = Some(id);
+        // Captured before the reload below empties the filtered list.
+        self.located_matches = self.history.items.iter().map(|item| item.id).collect();
+        let reload = match self.history.set_category(ContentCategory::All) {
+            Some(reload) => reload,
+            None => self.history.begin_search(),
+        };
+        self.scroll_to_top();
+        self.locate_id = Some(id);
+        self.arm_history_query(reload, false, cx);
+        window.focus(&self.list_focus, cx);
+        cx.notify();
+    }
+
+    /// Select the row a pending `locate_in_timeline` asked for and centre it.
+    pub(super) fn finish_locate(&mut self) {
+        let Some(id) = self.locate_id.take() else {
+            return;
+        };
+        let Some(index) = self.history.items.iter().position(|item| item.id == id) else {
+            return;
+        };
+        self.history.selected = Some(id);
+        self.center_row(index);
+    }
+
+    fn center_row(&mut self, index: usize) {
+        self.scroll_to_top_task = None;
+        if let Some(top) =
+            centered_row_scroll(&self.row_offsets, index, self.scroll.bounds().size.height)
+        {
+            self.scroll.set_offset(point(px(0.), -top));
+        }
+    }
+
+    /// Rows of the full list that were in the filtered result, in list order.
+    fn located_rows(&self) -> Vec<(usize, i64)> {
+        self.history
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| self.located_matches.contains(&item.id))
+            .map(|(index, item)| (index, item.id))
+            .collect()
+    }
+
+    /// One-based position of the located row among those matches, and their count.
+    pub(super) fn locate_progress(&self) -> Option<(usize, usize)> {
+        let current = self.located?;
+        let rows = self.located_rows();
+        let position = rows.iter().position(|(_, id)| *id == current)?;
+        Some((position + 1, rows.len()))
+    }
+
+    /// Move the located mark to the previous or next match in the timeline.
+    pub(super) fn locate_step(&mut self, direction: isize, cx: &mut Context<Self>) {
+        let Some(current) = self.located else {
+            return;
+        };
+        let rows = self.located_rows();
+        let Some(&(index, id)) = rows
+            .iter()
+            .position(|(_, id)| *id == current)
+            .and_then(|position| position.checked_add_signed(direction))
+            .and_then(|position| rows.get(position))
+        else {
+            return;
+        };
+        self.close_hover_preview("locate_step", cx);
+        self.located = Some(id);
+        self.history.selected = Some(id);
+        self.center_row(index);
         cx.notify();
     }
 
@@ -379,7 +486,22 @@ impl ClipboardView {
 }
 #[cfg(test)]
 mod history_virtual_list_tests {
-    use super::{DragPlacement, history_top_row, px, show_history_scroll_to_top};
+    use super::{
+        DragPlacement, centered_row_scroll, history_top_row, px, show_history_scroll_to_top,
+    };
+
+    #[test]
+    fn located_row_is_centred_but_never_scrolls_past_either_end() {
+        let rows = [px(0.), px(100.), px(200.), px(300.), px(400.), px(500.)];
+        let viewport = px(200.);
+        assert_eq!(centered_row_scroll(&rows, 0, viewport), Some(px(0.)));
+        assert_eq!(centered_row_scroll(&rows, 2, viewport), Some(px(150.)));
+        assert_eq!(centered_row_scroll(&rows, 4, viewport), Some(px(300.)));
+        assert_eq!(centered_row_scroll(&rows, 5, viewport), None);
+        // A row taller than the viewport starts at its own top.
+        let tall = [px(0.), px(100.), px(500.)];
+        assert_eq!(centered_row_scroll(&tall, 1, viewport), Some(px(100.)));
+    }
 
     #[test]
     fn scroll_to_top_stays_hidden_for_a_wheel_notch_and_a_short_list() {

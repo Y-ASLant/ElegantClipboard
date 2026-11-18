@@ -359,6 +359,9 @@ impl ClipboardView {
             confirmation_error: None,
             group_move_id: None,
             group_move_pending: false,
+            locate_id: None,
+            located: None,
+            located_matches: HashSet::new(),
             editor: PreviewState::default(),
             editor_window: None,
             note_input: cx.new(|cx| {

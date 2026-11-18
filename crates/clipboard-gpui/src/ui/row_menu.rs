@@ -24,6 +24,7 @@ pub(super) fn history_menu_item(
         HistoryMenuAction::ToggleFavorite => IconName::Heart,
         HistoryMenuAction::TogglePin => IconName::Pin,
         HistoryMenuAction::MoveToGroup => IconName::Folder,
+        HistoryMenuAction::Locate => IconName::ClipboardList,
         HistoryMenuAction::Delete => IconName::Trash,
     };
     PopupMenuItem::new(label)
@@ -169,6 +170,7 @@ impl ClipboardView {
                     self.group_move_id = Some(id);
                 }
             }
+            HistoryMenuAction::Locate => self.locate_in_timeline(id, window, cx),
             HistoryMenuAction::Delete => {
                 self.request_delete_item(id, window, cx);
             }
@@ -212,6 +214,10 @@ impl ClipboardView {
         let save_as_pending = self.save_as_pending.is_some();
         let editor_unavailable = self.todo_editor_unavailable();
         let group_move_disabled = self.group_move_disabled();
+        // 完整列表里定位到自身没有意义，只在搜索或分类筛选的结果中提供。
+        let can_locate = (self.located.is_none() && !self.search.read(cx).value().is_empty())
+            || self.history.favorite_only()
+            || self.history.category() != ContentCategory::All;
         if batch_mode {
             row.into_any_element()
         } else {
@@ -420,7 +426,16 @@ impl ClipboardView {
                                 entity.clone(),
                                 id,
                                 HistoryMenuAction::MoveToGroup,
-                            ));
+                            ))
+                            .when(can_locate, |menu| {
+                                menu.item(history_menu_item(
+                                    tr(language, "定位到时间线", "Locate in timeline"),
+                                    false,
+                                    entity.clone(),
+                                    id,
+                                    HistoryMenuAction::Locate,
+                                ))
+                            });
                         separated(menu).item(
                             history_menu_item(
                                 tr(language, "删除", "Delete"),

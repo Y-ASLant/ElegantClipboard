@@ -256,6 +256,8 @@ enum HistoryMenuAction {
     ToggleFavorite,
     TogglePin,
     MoveToGroup,
+    /// 清空搜索与分类筛选，回到完整列表并定位到该条目。
+    Locate,
     Delete,
 }
 
@@ -332,6 +334,12 @@ struct ClipboardView {
     confirmation_error: Option<String>,
     group_move_id: Option<i64>,
     group_move_pending: bool,
+    /// 「定位到时间线」等待重新加载的条目；列表返回后滚动到它。
+    locate_id: Option<i64>,
+    /// 已定位的条目：卡片保持标记，搜索框文字保留但暂不参与筛选。
+    located: Option<i64>,
+    /// 定位时筛选结果里的全部条目，供「上一个/下一个」在时间线中跳转。
+    located_matches: HashSet<i64>,
     editor: PreviewState,
     /// 正文编辑的独立窗口。备注仍用主窗口对话框。
     editor_window: Option<AnyWindowHandle>,
