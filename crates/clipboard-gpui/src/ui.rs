@@ -107,7 +107,7 @@ use crate::native::{
     window as native_window,
 };
 use crate::tray::{self, TrayCommand};
-use crate::visual::{self, GROUP_BAR_HEIGHT, PAGE_PADDING};
+use crate::visual::{self, PAGE_PADDING};
 use crate::window_effect;
 use crate::{
     options::Options,
