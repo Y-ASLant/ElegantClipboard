@@ -20,6 +20,7 @@ fn source(application: &AnyObject) -> Option<SourceApp> {
     Some(SourceApp {
         name: name?.to_string(),
         executable,
+        detail: None,
     })
 }
 

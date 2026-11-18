@@ -152,8 +152,15 @@ pub(super) fn read_clipboard(
             formats: Vec::new(),
         });
     }
-    let source = source_app::clipboard_source();
+    let mut source = source_app::clipboard_source();
     let (content, warning) = read_content(clipboard, allowed)?;
+    // A page address says more than the browser's window title.
+    if content.is_some()
+        && let Some(source) = source.as_mut()
+        && let Some(url) = read_source_url()
+    {
+        source.detail = Some(url);
+    }
     // 主内容为空时快照会被丢弃，无需枚举格式。
     let (extra, formats) = if content.is_some() {
         read_extra_in_session(allowed)
@@ -167,6 +174,14 @@ pub(super) fn read_clipboard(
         extra,
         formats,
     })
+}
+
+fn read_source_url() -> Option<String> {
+    let _guard = clipboard_win::Clipboard::new_attempts(10).ok()?;
+    let format = clipboard_win::register_format("HTML Format")?;
+    let mut data = Vec::new();
+    clipboard_win::raw::get_vec(format.get(), &mut data).ok()?;
+    source_app::source_url_from_html(&data)
 }
 
 /// 额外格式枚举需要独立短会话；主读取（clipboard_rs）已关闭其会话，

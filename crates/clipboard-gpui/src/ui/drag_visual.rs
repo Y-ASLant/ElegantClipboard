@@ -59,7 +59,7 @@ impl HistoryCardSnapshot {
                         .flex()
                         .items_center()
                         .gap(px(visual::SPACE_1))
-                        .max_w(px(118.))
+                        .max_w(px(200.))
                         .overflow_hidden()
                         .when_some(
                             show_source_icon.then_some(source_icon).flatten(),
