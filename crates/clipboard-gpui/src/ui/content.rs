@@ -92,83 +92,16 @@ impl ClipboardView {
                             .cleanable(true)
                             .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
                             .suffix(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(visual::SPACE_2))
-                                    .child(
-                                        div()
-                                            .text_size(px(visual::TEXT_SMALL))
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child({
-                                                let count = if self.todos_open {
-                                                    self.todos.len() as i64
-                                                } else {
-                                                    self.history.total
-                                                };
-                                                if self.todos_open {
-                                                    if self.language == LanguagePreference::English
-                                                    {
-                                                        format!("{count} to-dos")
-                                                    } else {
-                                                        format!("{count} 条")
-                                                    }
-                                                } else {
-                                                    let can_paste = self
-                                                        .paste_state
-                                                        .target()
-                                                        .is_some_and(|target| {
-                                                            self._tray.is_some()
-                                                                && paste::is_external_target(
-                                                                    window, target,
-                                                                )
-                                                        });
-                                                    let mode = if can_paste {
-                                                        match self.paste_state.target_label() {
-                                                            Some(name) if !name.is_empty() => {
-                                                                if self.language
-                                                                    == LanguagePreference::English
-                                                                {
-                                                                    format!("Will paste to {name}")
-                                                                } else {
-                                                                    format!("将贴回 {name}")
-                                                                }
-                                                            }
-                                                            _ => tr(
-                                                                self.language,
-                                                                "将贴回原窗口",
-                                                                "Will paste back",
-                                                            )
-                                                            .to_owned(),
-                                                        }
-                                                    } else {
-                                                        tr(self.language, "仅复制", "Copy only")
-                                                            .to_owned()
-                                                    };
-                                                    if self.language == LanguagePreference::English
-                                                    {
-                                                        format!("{mode} · {count} items")
-                                                    } else {
-                                                        format!("{mode} · {count} 条")
-                                                    }
-                                                }
-                                            }),
-                                    )
-                                    .child(
-                                        Button::new("history-search-info")
-                                            .text()
-                                            .icon(
-                                                Icon::new(IconName::Info)
-                                                    .size(px(visual::ICON_SMALL)),
-                                            )
-                                            .xsmall()
-                                            .accessibility_label(tr(
-                                                self.language,
-                                                "搜索说明",
-                                                "Search help",
-                                            ))
-                                            .tooltip(self.search_help()),
-                                    ),
+                                Button::new("history-search-info")
+                                    .text()
+                                    .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
+                                    .xsmall()
+                                    .accessibility_label(tr(
+                                        self.language,
+                                        "搜索说明",
+                                        "Search help",
+                                    ))
+                                    .tooltip(self.search_help()),
                             ),
                     ),
             )

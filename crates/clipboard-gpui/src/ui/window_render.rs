@@ -84,11 +84,8 @@ impl ClipboardView {
         }));
     }
 
-    fn render_status(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_status(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
         let has_message = !self.message.is_empty();
-        if !self.reorder_pending && !has_message {
-            return div().into_any_element();
-        }
         let left = if has_message {
             let color = if self.is_error {
                 cx.theme().danger
@@ -97,20 +94,92 @@ impl ClipboardView {
             };
             div()
                 .min_w_0()
+                .text_size(px(visual::TEXT_SMALL))
                 .text_color(color)
                 .child(self.message.clone())
+        } else if self.reorder_pending || self.todo_reorder_pending {
+            div()
+                .text_size(px(visual::TEXT_SMALL))
+                .text_color(cx.theme().muted_foreground)
+                .child(tr(self.language, "正在保存顺序…", "Saving order…"))
         } else {
-            div().text_color(cx.theme().muted_foreground).child(tr(
-                self.language,
-                "正在保存顺序…",
-                "Saving order…",
-            ))
+            div()
+                .min_w_0()
+                .text_size(px(visual::TEXT_SMALL))
+                .text_color(cx.theme().muted_foreground)
+                .child(self.paste_mode_label(window))
         };
-        StatusBar::new()
+        let right = div()
+            .flex_none()
+            .text_size(px(visual::TEXT_SMALL))
+            .text_color(cx.theme().muted_foreground)
+            .child(self.status_count_label());
+        div()
             .flex_shrink_0()
-            .px(px(PAGE_PADDING))
-            .left(left)
+            .w_full()
+            .h(px(visual::STATUS_BAR_HEIGHT))
+            .cursor_grab()
+            .window_control_area(WindowControlArea::Drag)
+            .child(
+                StatusBar::new()
+                    .size_full()
+                    .h(px(visual::STATUS_BAR_HEIGHT))
+                    .px(px(PAGE_PADDING))
+                    .left(left)
+                    .right(right),
+            )
             .into_any_element()
+    }
+
+    fn status_count_label(&self) -> String {
+        if self.batch_mode && !self.todos_open {
+            let selected = self.selected_ids.len();
+            if self.language == LanguagePreference::English {
+                format!("{selected} selected")
+            } else {
+                format!("已选 {selected} 条")
+            }
+        } else {
+            let count = if self.todos_open {
+                self.todos.len() as i64
+            } else {
+                self.history.total
+            };
+            if self.todos_open {
+                if self.language == LanguagePreference::English {
+                    format!("{count} to-dos")
+                } else {
+                    format!("{count} 条备忘")
+                }
+            } else if self.language == LanguagePreference::English {
+                format!("{count} items")
+            } else {
+                format!("{count} 条")
+            }
+        }
+    }
+
+    fn paste_mode_label(&self, window: &Window) -> String {
+        if self.todos_open {
+            return tr(self.language, "备忘录", "Memos").to_owned();
+        }
+        let can_paste = self.paste_state.target().is_some_and(|target| {
+            self._tray.is_some() && paste::is_external_target(window, target)
+        });
+        if can_paste {
+            match self.paste_state.target_label() {
+                Some(name) if !name.is_empty() => {
+                    if self.language == LanguagePreference::English {
+                        format!("Will paste to {name}")
+                    } else {
+                        format!("将贴回 {name}")
+                    }
+                }
+                _ => tr(self.language, "将贴回原窗口", "Will paste back").to_owned(),
+            }
+        } else {
+            tr(self.language, "仅复制", "Copy only").to_owned()
+        }
     }
 }
 
@@ -164,7 +233,7 @@ impl Render for ClipboardView {
                             .w(px(36.))
                             .h(px(4.))
                             .rounded_full()
-                            .bg(cx.theme().border),
+                            .bg(cx.theme().muted_foreground.opacity(0.35)),
                     ),
             )
             .child(
@@ -173,7 +242,7 @@ impl Render for ClipboardView {
                     .min_h_0()
                     .child(self.render_content(window, cx)),
             )
-            .child(self.render_status(cx))
+            .child(self.render_status(window, cx))
     }
 }
 
