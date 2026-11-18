@@ -256,6 +256,8 @@ enum HistoryMenuAction {
     ToggleFavorite,
     TogglePin,
     MoveToGroup,
+    /// 进入多选并勾选本条（非整表全选）。
+    Select,
     /// 清空搜索与分类筛选，回到完整列表并定位到该条目。
     Locate,
     Delete,

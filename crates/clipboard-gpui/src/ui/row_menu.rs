@@ -24,6 +24,7 @@ pub(super) fn history_menu_item(
         HistoryMenuAction::ToggleFavorite => IconName::Heart,
         HistoryMenuAction::TogglePin => IconName::Pin,
         HistoryMenuAction::MoveToGroup => IconName::Folder,
+        HistoryMenuAction::Select => IconName::Check,
         HistoryMenuAction::Locate => IconName::ClipboardList,
         HistoryMenuAction::Delete => IconName::Trash,
     };
@@ -124,9 +125,16 @@ impl ClipboardView {
     ) {
         if self.history.loading
             || self.batch_pending
-            || self.batch_mode
             || !self.history.items.iter().any(|item| item.id == id)
         {
+            return;
+        }
+        // 单条进入多选：允许在 batch_mode 外（及内）勾选本条，不经全选。
+        if matches!(action, HistoryMenuAction::Select) {
+            self.toggle_selection(id, false, window, cx);
+            return;
+        }
+        if self.batch_mode {
             return;
         }
         self.history.selected = Some(id);
@@ -170,6 +178,7 @@ impl ClipboardView {
                     self.group_move_id = Some(id);
                 }
             }
+            HistoryMenuAction::Select => {}
             HistoryMenuAction::Locate => self.locate_in_timeline(id, window, cx),
             HistoryMenuAction::Delete => {
                 self.request_delete_item(id, window, cx);
@@ -420,6 +429,13 @@ impl ClipboardView {
                                 )
                                 .checked(pinned),
                             )
+                            .item(history_menu_item(
+                                tr(language, "选择", "Select"),
+                                false,
+                                entity.clone(),
+                                id,
+                                HistoryMenuAction::Select,
+                            ))
                             .item(history_menu_item(
                                 tr(language, "移动到分组", "Move to group"),
                                 group_move_disabled,

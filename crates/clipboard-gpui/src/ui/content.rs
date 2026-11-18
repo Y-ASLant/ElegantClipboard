@@ -244,80 +244,89 @@ impl ClipboardView {
         } else {
             tr(self.language, "序列粘贴", "Sequence paste")
         };
-        Self::mode_chrome_strip(cx)
+        let sequence_status = self.paste_state.sequence_remaining().map(|remaining| {
+            if self.language == LanguagePreference::English {
+                format!("{remaining} left · {}", self.sequence_hotkey)
+            } else {
+                format!("剩 {remaining} · {}", self.sequence_hotkey)
+            }
+        });
+        let exit = Button::new("batch-exit")
+            .small()
+            .outline()
+            .label(tr(self.language, "退出", "Exit"))
+            .tooltip(tr(self.language, "退出多选", "Exit multi-select"))
+            .disabled(self.batch_pending)
+            .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx)));
+        let invert = Button::new("batch-invert-selection")
+            .small()
+            .ghost()
+            .label(tr(self.language, "反选", "Invert"))
+            .tooltip(tr(
+                self.language,
+                "反选当前列表勾选",
+                "Invert selection on the loaded list",
+            ))
+            .disabled(self.batch_pending || self.history.items.is_empty())
+            .on_click(cx.listener(|this, _, _, cx| this.invert_batch_selection(cx)));
+        let actions = div()
+            .ml_auto()
+            .flex()
+            .flex_none()
+            .flex_wrap()
+            .items_center()
+            .justify_end()
+            .gap(px(visual::SPACE_2))
             .child(
-                Button::new("batch-exit")
+                Button::new("batch-merge")
                     .small()
-                    .ghost()
-                    .label(tr(self.language, "退出", "Exit"))
-                    .disabled(self.batch_pending)
-                    .on_click(cx.listener(|this, _, _, cx| this.exit_batch_mode(cx))),
+                    .outline()
+                    .label(merge_label)
+                    .disabled(!can_merge_or_sequence)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.merge_selected(window, cx);
+                    })),
             )
+            .when(sequence_status.is_none(), |row| {
+                row.child(
+                    Button::new("batch-sequence")
+                        .small()
+                        .outline()
+                        .label(tr(self.language, "序列粘贴", "Sequence"))
+                        .tooltip(sequence_hint)
+                        .disabled(!sequence_ready)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.start_sequence_paste(window, cx);
+                        })),
+                )
+            })
             .child(
+                Button::new("batch-delete-open")
+                    .small()
+                    .danger()
+                    .label(tr(self.language, "删除", "Delete"))
+                    .disabled(self.batch_pending || self.selected_ids.is_empty())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_history_confirmation(
+                            HistoryConfirmation::DeleteSelected,
+                            window,
+                            cx,
+                        );
+                    })),
+            );
+        let mut strip = Self::mode_chrome_strip(cx).child(exit).child(invert);
+        if let Some(status) = sequence_status {
+            strip = strip.child(
                 div()
                     .flex_1()
                     .min_w_0()
+                    .px(px(visual::SPACE_2))
                     .text_size(px(visual::TEXT_SMALL))
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        self.paste_state
-                            .sequence_remaining()
-                            .map(|remaining| {
-                                if self.language == LanguagePreference::English {
-                                    format!("{remaining} left · {}", self.sequence_hotkey)
-                                } else {
-                                    format!("剩 {remaining} · {}", self.sequence_hotkey)
-                                }
-                            })
-                            .unwrap_or_default(),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(visual::SPACE_2))
-                    .child(
-                        Button::new("batch-merge")
-                            .small()
-                            .outline()
-                            .label(merge_label)
-                            .disabled(!can_merge_or_sequence)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.merge_selected(window, cx);
-                            })),
-                    )
-                    .when(self.paste_state.sequence_remaining().is_none(), |actions| {
-                        actions.child(
-                            Button::new("batch-sequence")
-                                .small()
-                                .outline()
-                                .label(tr(self.language, "序列粘贴", "Sequence"))
-                                .tooltip(sequence_hint)
-                                .disabled(!sequence_ready)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.start_sequence_paste(window, cx);
-                                })),
-                        )
-                    })
-                    .child(
-                        Button::new("batch-delete-open")
-                            .small()
-                            .danger()
-                            .label(tr(self.language, "删除", "Delete"))
-                            .disabled(self.batch_pending || self.selected_ids.is_empty())
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_history_confirmation(
-                                    HistoryConfirmation::DeleteSelected,
-                                    window,
-                                    cx,
-                                );
-                            })),
-                    ),
-            )
+                    .child(status),
+            );
+        }
+        strip.child(actions)
     }
 
     fn render_move_strip(&self, id: i64, cx: &mut Context<Self>) -> Div {

@@ -13,6 +13,24 @@ impl ClipboardView {
         self.reset_selection();
         cx.notify();
     }
+
+    /// Flip marks on the loaded list; stay in multi-select.
+    pub(super) fn invert_batch_selection(&mut self, cx: &mut Context<Self>) {
+        if self.batch_pending || self.history.loading || self.history.items.is_empty() {
+            return;
+        }
+        self.batch_mode = true;
+        let loaded: HashSet<i64> = self.history.items.iter().map(|item| item.id).collect();
+        let mut next = HashSet::with_capacity(loaded.len());
+        for id in &loaded {
+            if !self.selected_ids.contains(id) {
+                next.insert(*id);
+            }
+        }
+        self.selected_ids = next;
+        self.selection_anchor = None;
+        cx.notify();
+    }
     pub(super) fn toggle_selection(
         &mut self,
         id: i64,
