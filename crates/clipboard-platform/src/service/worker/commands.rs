@@ -410,6 +410,9 @@ impl Worker {
             Command::SetSequenceHotkey(shortcut) => {
                 return self.handle_set_sequence_hotkey(shortcut);
             }
+            Command::SetBatchHotkey(shortcut) => {
+                return self.handle_set_batch_hotkey(shortcut);
+            }
             Command::SetNote { id, note } => {
                 let result = self
                     .history

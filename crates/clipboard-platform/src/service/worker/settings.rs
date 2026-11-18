@@ -46,6 +46,41 @@ fn save_sequence_hotkey(preferences: &Preferences, shortcut: &str) -> Result<Str
     Ok(shortcut)
 }
 
+/// 已规范化候选与另一快捷键串的碰撞检测：忽略空值与无法解析的历史值。
+fn shortcut_conflicts(other: &str, normalized: &str) -> bool {
+    !other.trim().is_empty()
+        && crate::hotkey::normalize_paste_shortcut(other)
+            .is_ok_and(|other| normalized.eq_ignore_ascii_case(&other))
+}
+
+/// 多选切换快捷键：窗口内生效；不得撞主热键、序列推进键或槽位。
+fn save_batch_hotkey(preferences: &Preferences, shortcut: &str) -> Result<String> {
+    let shortcut = crate::hotkey::normalize_paste_shortcut(shortcut)?;
+    if !shortcut.is_empty() {
+        if let HotkeyPreference::Shortcut(main) = preferences.hotkey()?
+            && shortcut_conflicts(&main, &shortcut)
+        {
+            anyhow::bail!("{shortcut} 与窗口唤出快捷键冲突");
+        }
+        let sequence = preferences.sequence_paste_hotkey()?;
+        if shortcut_conflicts(&sequence, &shortcut) {
+            anyhow::bail!("{shortcut} 与序列粘贴推进键冲突");
+        }
+        let slots = preferences.paste_shortcuts()?;
+        for favorite in [false, true] {
+            for slot in 1..=10u8 {
+                if let Some(value) = slots.slot(favorite, slot)
+                    && shortcut_conflicts(value, &shortcut)
+                {
+                    anyhow::bail!("{shortcut} 与快速粘贴槽位冲突");
+                }
+            }
+        }
+    }
+    preferences.set_batch_mode_hotkey(&shortcut)?;
+    Ok(shortcut)
+}
+
 impl Worker {
     pub(super) fn save_setting<T: Copy>(
         &self,
@@ -87,6 +122,12 @@ impl Worker {
         let result =
             save_sequence_hotkey(&self.preferences, &shortcut).map_err(|error| error.to_string());
         self.send_event(Event::SequenceHotkeySaved(result))
+    }
+
+    pub(super) fn handle_set_batch_hotkey(&mut self, shortcut: String) -> Result<()> {
+        let result =
+            save_batch_hotkey(&self.preferences, &shortcut).map_err(|error| error.to_string());
+        self.send_event(Event::BatchHotkeySaved(result))
     }
 
     pub(super) fn handle_set_monitor_types(

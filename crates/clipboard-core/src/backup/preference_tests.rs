@@ -36,6 +36,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
         dedup_strategy: DedupStrategy::AlwaysNew,
         restore_clipboard: true,
         sequence_hotkey: "Ctrl+Alt+F9".into(),
+        batch_hotkey: "Ctrl+Alt+F10".into(),
         quick_paste_enabled: true,
         paste_delivery_mode: PasteDeliveryMode::Controlled,
         paste_shortcuts: PasteShortcutConfig {
@@ -131,6 +132,7 @@ fn backup_roundtrips_all_non_default_preferences() -> Result<()> {
     preferences.set_dedup_strategy(expected.dedup_strategy)?;
     preferences.set_restore_clipboard(expected.restore_clipboard)?;
     preferences.set_sequence_paste_hotkey(&expected.sequence_hotkey)?;
+    preferences.set_batch_mode_hotkey(&expected.batch_hotkey)?;
     preferences.set_quick_paste_enabled(expected.quick_paste_enabled)?;
     preferences.set_paste_delivery_mode(expected.paste_delivery_mode)?;
     preferences.set_paste_shortcuts(&expected.paste_shortcuts)?;

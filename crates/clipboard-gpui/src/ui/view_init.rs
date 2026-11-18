@@ -87,6 +87,7 @@ impl ClipboardView {
         let initial_dedup_strategy = service.initial_preferences.dedup_strategy;
         let initial_restore_clipboard = service.initial_preferences.restore_clipboard;
         let initial_sequence_hotkey = service.initial_preferences.sequence_hotkey.clone();
+        let initial_batch_hotkey = service.initial_preferences.batch_hotkey.clone();
         let paste_delivery_mode = service.initial_preferences.paste_delivery_mode;
         let channels = Self::register_paste_hotkeys(
             startup.monitoring,
@@ -454,6 +455,7 @@ impl ClipboardView {
             dedup_strategy: PendingPref::new(initial_dedup_strategy),
             restore_clipboard: PendingPref::new(initial_restore_clipboard),
             sequence_hotkey: initial_sequence_hotkey,
+            batch_hotkey: PendingPref::new(initial_batch_hotkey),
             sequence_hotkey_pending: false,
             display: PendingPref::new(display),
             todo_preference: PendingPref::new(todo_preference),

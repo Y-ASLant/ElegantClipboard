@@ -191,6 +191,8 @@ pub enum Command {
     SetRestoreClipboard(bool),
     /// 序列粘贴推进键（决策 0004）；空串停用。校验失败拒绝并回滚。
     SetSequenceHotkey(String),
+    /// 多选切换快捷键（窗口内）；空串停用。
+    SetBatchHotkey(String),
     ListRunningApps,
     ListTodos,
     AddTodo {
@@ -476,6 +478,7 @@ pub enum Event {
     DedupStrategySaved(Result<DedupStrategy, String>),
     RestoreClipboardSaved(Result<bool, String>),
     SequenceHotkeySaved(Result<String, String>),
+    BatchHotkeySaved(Result<String, String>),
     NoteSaved(Result<i64, String>),
     /// 恢复完成；Ok(false) 包括无匹配快照、已取消或剪贴板已改变。
     ClipboardRestored(Result<bool, String>),

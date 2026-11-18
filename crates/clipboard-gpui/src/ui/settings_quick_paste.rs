@@ -30,6 +30,14 @@ impl SettingsWindowView {
         } else {
             sequence_hotkey.clone()
         };
+        let batch_hotkey = state.batch_hotkey.value.clone();
+        let batch_pending = state.batch_hotkey.pending;
+        let batch_label = if batch_hotkey.trim().is_empty() {
+            tr(language, "已停用", "Disabled").to_owned()
+        } else {
+            batch_hotkey.clone()
+        };
+        let batch_owner = self.owner.clone();
         let recent_shortcut_rows = self.recent_shortcuts_expanded.then(|| {
             self.paste_slot_rows(
                 false,
@@ -151,6 +159,51 @@ impl SettingsWindowView {
                 |panel| {
                     panel.child(self.sequence_shortcut_editor(language, cx))
                 },
+            )
+            // 进入多选的窗口内快捷键（列表聚焦时生效）；可录制或停用。
+            .child(
+                settings_field(tr(
+                    language,
+                    "多选快捷键（默认 Ctrl+A）",
+                    "Multi-select shortcut (default Ctrl+A)",
+                ))
+                .child(
+                    settings_shortcut_row()
+                        .child(shortcut_binding_display(
+                            batch_hotkey.trim(),
+                            batch_label,
+                        ))
+                        .child(
+                            Button::new("batch-shortcut-edit")
+                                .outline()
+                                .small()
+                                .label(tr(language, "修改", "Edit"))
+                                .disabled(batch_pending)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.begin_shortcut_edit(
+                                        ShortcutTarget::BatchMode,
+                                        window,
+                                        cx,
+                                    );
+                                })),
+                        )
+                        .child(
+                            Button::new("batch-shortcut-disable")
+                                .ghost()
+                                .small()
+                                .label(tr(language, "停用", "Disable"))
+                                .disabled(batch_pending || batch_hotkey.trim().is_empty())
+                                .on_click(move |_, _, cx| {
+                                    let _ = batch_owner.update(cx, |owner, cx| {
+                                        owner.select_batch_hotkey(String::new(), cx);
+                                    });
+                                }),
+                        ),
+                ),
+            )
+            .when(
+                self.shortcut_editing == Some(ShortcutTarget::BatchMode),
+                |panel| panel.child(self.batch_shortcut_editor(language, cx)),
             )
             .child(
                 settings_field(tr(

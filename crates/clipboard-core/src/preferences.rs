@@ -51,6 +51,7 @@ const WINDOW_EFFECT_KEY: &str = "gpui_window_effect";
 const DEDUP_STRATEGY_KEY: &str = "gpui_dedup_strategy";
 const RESTORE_CLIPBOARD_KEY: &str = "gpui_restore_clipboard";
 const SEQUENCE_HOTKEY_KEY: &str = "gpui_sequence_paste_hotkey";
+const BATCH_HOTKEY_KEY: &str = "gpui_batch_mode_hotkey";
 const DIAGNOSTICS_KEY: &str = "gpui_diagnostics_enabled";
 const RUN_AS_ADMIN_KEY: &str = "gpui_run_as_admin";
 
@@ -487,6 +488,17 @@ impl Preferences {
     pub fn set_sequence_paste_hotkey(&self, shortcut: &str) -> Result<()> {
         Ok(self.repository.set(SEQUENCE_HOTKEY_KEY, shortcut.trim())?)
     }
+    /// 进入/退出多选快捷键（窗口内，列表聚焦时生效）；空串停用。默认 Ctrl+A，macOS 为 Cmd+A。
+    pub fn batch_mode_hotkey(&self) -> Result<String> {
+        Ok(self
+            .repository
+            .get(BATCH_HOTKEY_KEY)?
+            .unwrap_or_else(|| default_batch_mode_hotkey().into()))
+    }
+
+    pub fn set_batch_mode_hotkey(&self, shortcut: &str) -> Result<()> {
+        Ok(self.repository.set(BATCH_HOTKEY_KEY, shortcut.trim())?)
+    }
 
     pub fn set_app_filter(&self, preference: &AppFilterPreference) -> Result<()> {
         anyhow::ensure!(preference.valid(), "应用过滤规则无效");
@@ -503,6 +515,14 @@ impl Preferences {
     }
 }
 
+/// Default multi-select toggle shortcut: Ctrl+A, or Cmd+A on macOS.
+pub fn default_batch_mode_hotkey() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Cmd+A"
+    } else {
+        "Ctrl+A"
+    }
+}
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

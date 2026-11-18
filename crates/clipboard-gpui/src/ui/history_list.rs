@@ -93,8 +93,18 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &PageDown, _, cx| {
                 this.select(this.page_step(), ScrollStrategy::Top, cx);
             }))
-            .on_action(cx.listener(|this, _: &SelectAllLoaded, window, cx| {
-                this.select_all_loaded(window, cx);
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                // 多选快捷键为可改偏好，不做静态绑定；与偏好串匹配才进多选。
+                if event.is_held || this.batch_hotkey.value.trim().is_empty() {
+                    return;
+                }
+                let shift_down = event.keystroke.modifiers.shift || input::shift_pressed();
+                if shortcut_from_keystroke(&event.keystroke, shift_down, false).is_ok_and(
+                    |shortcut| shortcut.eq_ignore_ascii_case(this.batch_hotkey.value.trim()),
+                ) {
+                    cx.stop_propagation();
+                    this.toggle_batch_mode(window, cx);
+                }
             }))
             .on_action(cx.listener(|this, _: &ActivateSelected, window, cx| {
                 if !this.batch_mode

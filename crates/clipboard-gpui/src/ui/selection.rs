@@ -105,13 +105,28 @@ impl ClipboardView {
         }
         cx.notify();
     }
-    pub(super) fn select_all_loaded(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.batch_pending || self.history.loading || self.history.items.is_empty() {
+    /// 多选快捷键切换：未在多选时进入（勾焦点条，无则空选），已在多选时退出。
+    pub(super) fn toggle_batch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.batch_pending || self.history.loading {
             return;
         }
+        if self.batch_mode {
+            self.exit_batch_mode(cx);
+            return;
+        }
+        if self.history.items.is_empty() {
+            return;
+        }
+        self.close_hover_preview("batch_enter", cx);
         self.batch_mode = true;
-        self.selected_ids
-            .extend(self.history.items.iter().map(|item| item.id));
+        // Seed with the focused row when nothing is marked yet.
+        if self.selected_ids.is_empty()
+            && let Some(id) = self.history.selected
+            && self.history.items.iter().any(|item| item.id == id)
+        {
+            self.selected_ids.insert(id);
+            self.selection_anchor = Some(id);
+        }
         if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
             self.close_history_confirmation(window, cx);
         }

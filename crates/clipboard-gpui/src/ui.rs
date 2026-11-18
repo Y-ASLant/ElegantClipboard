@@ -181,7 +181,6 @@ gpui_kit::actions!(
         Last,
         PageUp,
         PageDown,
-        SelectAllLoaded,
         ActivateSelected,
         PastePlainTextSelected,
         PasteSelected,
@@ -451,6 +450,8 @@ struct ClipboardView {
     paste_state: paste_coordinator::PasteCoordinator,
     paste_delivery_task: Option<Task<()>>,
     sequence_hotkey: String,
+    /// 多选切换快捷键；空串停用。
+    batch_hotkey: PendingPref<String>,
     sequence_hotkey_pending: bool,
     reorder_pending: bool,
     drop_target: Option<DropTarget>,
@@ -507,6 +508,8 @@ enum ShortcutTarget {
     Paste(bool, u8),
     /// 序列粘贴推进键（决策 0004）。
     Sequence,
+    /// 多选切换快捷键。
+    BatchMode,
 }
 
 struct SettingsWindowView {

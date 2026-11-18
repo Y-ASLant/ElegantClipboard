@@ -234,6 +234,14 @@ impl ClipboardView {
                 true
             }
             Event::SequenceHotkeySaved(result) => self.apply_sequence_hotkey_saved(result),
+            Event::BatchHotkeySaved(result) => {
+                self.acknowledge_save(
+                    result,
+                    |this| &mut this.batch_hotkey,
+                    ("保存多选快捷键失败", "Failed to save multi-select shortcut"),
+                );
+                true
+            }
             Event::NoteSaved(result) => self.apply_note_saved(result, window, cx),
             Event::ClipboardRestored(result) => match result {
                 // 没有快照（偏好关闭或读取失败）不打扰用户；失败要提示。
