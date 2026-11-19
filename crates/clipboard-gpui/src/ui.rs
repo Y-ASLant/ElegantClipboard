@@ -113,7 +113,7 @@ use crate::{
     options::Options,
     state::{
         HistoryReload, HistoryState, PreviewState, drag_edge_target_index, format_card_time,
-        next_drag_scroll_index, reorder_pixel_offsets, selection_range_ids, source_app_parts,
+        next_drag_scroll_index, reorder_pixel_offsets, source_app_parts, toggle_batch_mark,
     },
 };
 use clipboard_core::{
@@ -159,6 +159,7 @@ use gpui_kit::{
     *,
 };
 use group_select::GroupChoice;
+use indexmap::IndexSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use std::{
@@ -328,7 +329,7 @@ struct ClipboardView {
     clear_all_error: Option<String>,
     clear_all_pending: bool,
     batch_mode: bool,
-    selected_ids: HashSet<i64>,
+    selected_ids: IndexSet<i64>,
     selection_anchor: Option<i64>,
     batch_pending: bool,
     confirmation: Option<HistoryConfirmation>,

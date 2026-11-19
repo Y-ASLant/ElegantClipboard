@@ -36,16 +36,11 @@ impl ClipboardView {
             cx.notify();
             return;
         };
-        let ids: Vec<_> = self
-            .history
-            .items
-            .iter()
-            .filter(|item| self.selected_ids.contains(&item.id))
-            .map(|item| item.id)
-            .collect();
-        if ids.len() < 2 {
+        // Selection is reconciled after each snapshot; a reload can still leave the list empty.
+        if self.history.items.is_empty() || self.selected_ids.len() < 2 {
             return;
         }
+        let ids = self.selected_ids.iter().copied().collect();
         self.close_hover_preview("sequence_started", cx);
         if !self.paste_state.start_sequence(ids, target) {
             return;
