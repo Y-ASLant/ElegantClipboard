@@ -68,11 +68,14 @@ pub fn pointer_outside_source(handle: isize, pointer: DragPointerState) -> Resul
         || point.y >= frame.origin.y + frame.size.height)
 }
 
+/// `kCGDraggingWindowLevel`: above the history panel's `NSPopUpWindowLevel` (101).
+const DRAGGING_WINDOW_LEVEL: isize = 500;
+
 pub fn configure_drag_preview(handle: isize) -> Result<()> {
     let window = cocoa::window(handle)?;
     unsafe {
         let _: () = msg_send![&window, setIgnoresMouseEvents: true];
-        let _: () = msg_send![&window, setLevel: 3isize];
+        let _: () = msg_send![&window, setLevel: DRAGGING_WINDOW_LEVEL];
         let _: () = msg_send![&window, setHasShadow: false];
     }
     Ok(())
