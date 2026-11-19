@@ -478,7 +478,7 @@ struct ClipboardView {
     /// The history query for this generation produced neither a snapshot nor a failure.
     history_reply_missed: bool,
     feedback_pending: bool,
-    /// Clears StatusBar feedback after a short delay.
+    /// Clears transient search field feedback after a short delay.
     panel_status_token: u64,
     panel_status_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,

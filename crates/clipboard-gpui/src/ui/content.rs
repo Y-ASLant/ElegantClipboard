@@ -92,16 +92,26 @@ impl ClipboardView {
                             .cleanable(true)
                             .prefix(Icon::new(IconName::Search).size(px(visual::ICON_SIZE)))
                             .suffix(
-                                Button::new("history-search-info")
-                                    .text()
-                                    .icon(Icon::new(IconName::Info).size(px(visual::ICON_SMALL)))
-                                    .xsmall()
-                                    .accessibility_label(tr(
-                                        self.language,
-                                        "搜索说明",
-                                        "Search help",
-                                    ))
-                                    .tooltip(self.search_help()),
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(visual::SPACE_2))
+                                    .child(self.render_search_status(window, cx))
+                                    .child(
+                                        Button::new("history-search-info")
+                                            .text()
+                                            .icon(
+                                                Icon::new(IconName::Info)
+                                                    .size(px(visual::ICON_SMALL)),
+                                            )
+                                            .xsmall()
+                                            .accessibility_label(tr(
+                                                self.language,
+                                                "搜索说明",
+                                                "Search help",
+                                            ))
+                                            .tooltip(self.search_help()),
+                                    ),
                             ),
                     ),
             )

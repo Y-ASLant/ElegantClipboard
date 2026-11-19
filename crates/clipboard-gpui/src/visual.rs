@@ -16,7 +16,6 @@ pub const SPACE_6: f32 = 24.;
 pub const CONTROL_HEIGHT: f32 = 32.;
 pub const CONTROL_HEIGHT_LARGE: f32 = 36.;
 pub const CONTROL_HEIGHT_COMPACT: f32 = 28.;
-pub const STATUS_BAR_HEIGHT: f32 = 28.;
 
 /// Font-size spinbutton: `[-]` + three digits + `px` + `[+]`.
 pub const FONT_SIZE_STEPPER_WIDTH: f32 = 128.;
