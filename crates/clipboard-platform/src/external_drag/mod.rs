@@ -62,6 +62,7 @@ pub struct DragInput {
 }
 
 impl DragInput {
+    /// Record the foreground and mouse capture on the source window's UI thread.
     pub fn start(source: isize) -> Self {
         let source = HWND(source as *mut _);
         Self {
@@ -71,13 +72,10 @@ impl DragInput {
         }
     }
 
-    pub fn interrupted(&self, pointer: DragPointerState) -> bool {
-        self.foreground_changed()
-            || (self.captured && pointer.left_button_down && unsafe { GetCapture() } != self.source)
-    }
-
-    fn foreground_changed(&self) -> bool {
-        self.foreground != unsafe { GetForegroundWindow() }
+    /// Check before committing a drop. Normal mouse-up may release capture.
+    pub fn interrupted(&self, left_button_down: bool) -> bool {
+        foreground_changed(self.foreground)
+            || (self.captured && left_button_down && unsafe { GetCapture() } != self.source)
     }
 
     /// Release only the old source's capture, after returning from GPUI callbacks.
@@ -86,6 +84,10 @@ impl DragInput {
             let _ = unsafe { ReleaseCapture() };
         }
     }
+}
+
+fn foreground_changed(previous: HWND) -> bool {
+    previous != unsafe { GetForegroundWindow() }
 }
 
 /// Convert physical screen coordinates to GPUI logical client coordinates.
@@ -335,7 +337,7 @@ pub fn run_external_drag(
     }
     let pointer = poll_drag_pointer()?;
     let rect = source_rect(options.source_window)?;
-    if drag_escape_pressed() || input.interrupted(pointer) {
+    if drag_escape_pressed() || input.interrupted(pointer.left_button_down) {
         return Ok(ExternalDragOutcome::Cancelled);
     }
     if !pointer.left_button_down {
@@ -366,22 +368,20 @@ pub fn run_external_drag(
     }
     let mut effect = DROPEFFECT_NONE;
     let result = unsafe { DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect) };
-    if returned.get().is_some() && input.foreground_changed() {
-        return Ok(ExternalDragOutcome::Cancelled);
-    }
-    if returned.get() == Some(ExternalDragOutcome::ReturnedToSource)
-        && had_capture
-        && poll_drag_pointer().is_ok_and(|p| p.left_button_down)
-        && unsafe { IsWindow(Some(source_hwnd)) }.as_bool()
-    {
-        unsafe {
-            SetCapture(source_hwnd);
-        }
-    }
     if failed.get() {
         bail!("拖放预览更新失败");
     }
     if let Some(outcome) = returned.get() {
+        if foreground_changed(input.foreground) {
+            return Ok(ExternalDragOutcome::Cancelled);
+        }
+        if outcome == ExternalDragOutcome::ReturnedToSource
+            && had_capture
+            && poll_drag_pointer().is_ok_and(|pointer| pointer.left_button_down)
+            && unsafe { IsWindow(Some(source_hwnd)) }.as_bool()
+        {
+            unsafe { SetCapture(source_hwnd) };
+        }
         return Ok(outcome);
     }
     if result == DRAGDROP_S_DROP && effect.0 & DROPEFFECT_COPY.0 != 0 {

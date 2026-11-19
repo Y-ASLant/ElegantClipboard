@@ -1,6 +1,6 @@
 use super::{
-    DragPointerState, ExternalDragOptions, ExternalDragOutcome, contains, move_drag_preview,
-    poll_drag_pointer,
+    DragPointerState, ExternalDragOptions, ExternalDragOutcome, contains, foreground_changed,
+    move_drag_preview, poll_drag_pointer,
 };
 use std::{
     cell::Cell,
@@ -16,7 +16,6 @@ use windows::{
             Ole::{DROPEFFECT, IDropSource, IDropSource_Impl},
             SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS},
         },
-        UI::WindowsAndMessaging::GetForegroundWindow,
     },
     core::{BOOL, HRESULT, implement},
 };
@@ -82,10 +81,7 @@ impl DragSource {
 
 impl IDropSource_Impl for DragSource_Impl {
     fn QueryContinueDrag(&self, escape: BOOL, keys: MODIFIERKEYS_FLAGS) -> HRESULT {
-        if escape.as_bool()
-            || self.failed.get()
-            || self.foreground != unsafe { GetForegroundWindow() }
-        {
+        if escape.as_bool() || self.failed.get() || foreground_changed(self.foreground) {
             return DRAGDROP_S_CANCEL;
         }
         let Ok(mut pointer) = poll_drag_pointer() else {

@@ -270,7 +270,6 @@ impl ClipboardView {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
-                            this.close_history_menu(cx);
                             this.prepare_card_drag(id, cx);
                         }),
                     )

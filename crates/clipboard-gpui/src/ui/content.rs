@@ -28,14 +28,6 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &DismissOrHide, window, cx| {
                 this.dismiss_or_hide(window, cx);
             }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(ClipboardView::close_history_menu_from_press),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(ClipboardView::close_history_menu_from_press),
-            )
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| {
                 this.focus_search_for_input(window, cx);
             }))

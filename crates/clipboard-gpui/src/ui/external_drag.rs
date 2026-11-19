@@ -32,10 +32,10 @@ pub(super) enum CardDrag {
 }
 
 impl CardDrag {
-    fn paste_id(&self) -> Option<i64> {
+    fn id(&self) -> i64 {
         match self {
-            Self::History(drag) => Some(drag.id),
-            Self::Todo(drag) => Some(drag.id),
+            Self::History(drag) => drag.id,
+            Self::Todo(drag) => drag.id,
         }
     }
 
@@ -50,12 +50,6 @@ impl CardDrag {
         match self {
             Self::History(drag) => Some(drag),
             Self::Todo(_) => None,
-        }
-    }
-    fn todo(&self) -> Option<&TodoDrag> {
-        match self {
-            Self::Todo(drag) => Some(drag),
-            Self::History(_) => None,
         }
     }
 
@@ -92,9 +86,6 @@ pub(super) struct DragPreparation {
 pub(super) struct CardDragSession {
     token: u64,
     drag: CardDrag,
-    source_hwnd: isize,
-    preview_hwnd: isize,
-    offset: (i32, i32),
     native_active: bool,
 }
 
@@ -149,7 +140,7 @@ impl ClipboardView {
             .is_some_and(|session| session.native_active)
     }
 
-    pub(super) fn prepare_memo_drag(&mut self, id: i64, text: &str, cx: &mut Context<Self>) {
+    pub(super) fn prepare_memo_drag(&mut self, id: i64, text: &str, cx: &mut Context<Self>) -> u64 {
         self.drag_token = self.drag_token.wrapping_add(1);
         let token = self.drag_token;
         let result = native::prepare_plain_text(text).map_err(|error| error.to_string());
@@ -159,9 +150,10 @@ impl ClipboardView {
             result: Some(result),
         });
         cx.notify();
+        token
     }
 
-    pub(super) fn prepare_card_drag(&mut self, id: i64, cx: &mut Context<Self>) {
+    pub(super) fn prepare_card_drag(&mut self, id: i64, cx: &mut Context<Self>) -> u64 {
         self.drag_token = self.drag_token.wrapping_add(1);
         let token = self.drag_token;
         self.drag_preparation = Some(DragPreparation {
@@ -170,6 +162,7 @@ impl ClipboardView {
             result: None,
         });
         self.send(Command::PrepareExternalDrag { id, token }, cx);
+        token
     }
 
     pub(super) fn begin_card_drag(
@@ -197,33 +190,21 @@ impl ClipboardView {
         let Some(preview_hwnd) = self.open_drag_preview(&drag, window, cx) else {
             return false;
         };
-        let token = if let Some(id) = drag.paste_id() {
-            if self
-                .drag_preparation
-                .as_ref()
-                .is_none_or(|prepared| prepared.id != id)
-            {
-                if let Some(history) = drag.history() {
-                    self.prepare_card_drag(history.id, cx);
-                } else if let Some(todo) = drag.todo() {
-                    self.prepare_memo_drag(id, &todo.snapshot.todo.text, cx);
-                }
-            }
-            self.drag_preparation
-                .as_ref()
-                .expect("prepared above")
-                .token
-        } else {
-            self.drag_preparation = None;
-            self.drag_token = self.drag_token.wrapping_add(1);
-            self.drag_token
+        let id = drag.id();
+        let token = match self
+            .drag_preparation
+            .as_ref()
+            .filter(|prepared| prepared.id == id)
+        {
+            Some(prepared) => prepared.token,
+            None => match &drag {
+                CardDrag::History(_) => self.prepare_card_drag(id, cx),
+                CardDrag::Todo(todo) => self.prepare_memo_drag(id, &todo.snapshot.todo.text, cx),
+            },
         };
         self.external_drag = Some(CardDragSession {
             token,
-            drag,
-            source_hwnd: source,
-            preview_hwnd,
-            offset,
+            drag: drag.clone(),
             native_active: false,
         });
         self.drag_release_pending = false;
@@ -263,11 +244,9 @@ impl ClipboardView {
                     }
                 };
                 let state = update_clipboard_window(&view, main, cx, |this, window, cx| {
-                    let session = this.external_drag.as_ref().filter(|session| session.token == token)?;
-                    let source = session.source_hwnd;
-                    let drag = session.drag.clone();
+                    this.external_drag.as_ref().filter(|session| session.token == token)?;
                     #[cfg(windows)]
-                    if input.interrupted(pointer) {
+                    if input.interrupted(pointer.left_button_down) {
                         this.cancel_card_drag(window, cx);
                         return None;
                     }
@@ -306,16 +285,18 @@ impl ClipboardView {
                         }
                     };
                     if !pointer.left_button_down {
-                        // Release is committed here even if GPUI never received MouseUp.
-                        if let Some(pointer) = client_pointer { drag.drop_card(this, pointer, cx); }
-                        else if outside && drag.paste_id().is_some() { this.set_feedback_message(tr(this.language,
-                            "拖放尚未就绪，请按住卡片移出窗口后再松开",
-                            "Drag was not ready. Hold the card outside the window before releasing.").into());
-                            this.is_error = true; }
-                        this.finish_external_drag(cx);
+                        // Commit here even if GPUI never received MouseUp.
+                        if let Some(pointer) = client_pointer {
+                            drag.drop_card(this, pointer, cx);
+                            this.finish_external_drag(cx);
+                        } else {
+                            this.fail_card_drag(tr(this.language,
+                                "拖放尚未就绪，请按住卡片移出窗口后再松开",
+                                "Drag was not ready. Hold the card outside the window before releasing.").into(), cx);
+                        }
                         return None;
                     }
-                    let payload = if outside && drag.paste_id().is_some() {
+                    let payload = if outside {
                         this.drag_preparation.as_ref().filter(|prepared| prepared.token == token)
                             .and_then(|prepared| prepared.result.clone())
                     } else { None };
@@ -324,19 +305,15 @@ impl ClipboardView {
                         Some(Err(error)) => { this.fail_card_drag(error, cx); return None; }
                         None => None,
                     };
-                    let session = this.external_drag.as_mut()?;
-                    session.native_active = payload.is_some();
-                    let position = (pointer.x - session.offset.0, pointer.y - session.offset.1);
-                    Some((session.preview_hwnd, position, payload, ExternalDragOptions {
-                        source_window: source, preview_window: Some(session.preview_hwnd),
-                        preview_offset: session.offset,
-                    }))
+                    this.external_drag.as_mut()?.native_active = payload.is_some();
+                    Some(payload)
                 });
-                let Ok(Some((preview, position, payload, options))) = state else { break; };
+                let Ok(Some(payload)) = state else { break; };
+                let position = (pointer.x - offset.0, pointer.y - offset.1);
                 // Native movement may re-enter GPUI. Never hold App/Window borrows here.
                 if last_position != Some(position) {
-                    let movement = native::move_drag_preview(preview, position.0, position.1)
-                        .and_then(|_| if last_position.is_none() { native::show_drag_preview(preview) } else { Ok(()) });
+                    let movement = native::move_drag_preview(preview_hwnd, position.0, position.1)
+                        .and_then(|_| if last_position.is_none() { native::show_drag_preview(preview_hwnd) } else { Ok(()) });
                     if let Err(error) = movement {
                         let _ = view.update(cx, |this, cx| this.fail_card_drag(format!("{error:#}"), cx));
                         break;
@@ -344,6 +321,11 @@ impl ClipboardView {
                     last_position = Some(position);
                 }
                 if let Some(payload) = payload {
+                    let options = ExternalDragOptions {
+                        source_window: source,
+                        preview_window: Some(preview_hwnd),
+                        preview_offset: offset,
+                    };
                     #[cfg(target_os = "linux")]
                     let result = cx.background_executor().spawn(async move {
                         native::run_external_drag(payload, options)
@@ -355,14 +337,13 @@ impl ClipboardView {
                     let keep = update_clipboard_window(&view, main, cx, |this, window, cx| {
                         let Some(session) = this.external_drag.as_mut().filter(|session| session.token == token) else { return false; };
                         session.native_active = false;
-                        let drag = session.drag.clone();
                         // OLE may have delivered framework file-drop events. They never own our session.
                         cx.stop_active_drag(window);
                         match result {
                             Ok(ExternalDragOutcome::ReturnedToSource) => true,
                             Ok(ExternalDragOutcome::ReleasedInSource) => {
                                 match native::poll_drag_pointer()
-                                    .and_then(|pointer| drag_client_point(options.source_window, pointer, window))
+                                    .and_then(|pointer| drag_client_point(source, pointer, window))
                                 {
                                     Ok(pointer) => {
                                         this.update_card_drag_target(&drag, pointer, cx);
@@ -373,8 +354,11 @@ impl ClipboardView {
                                 }
                                 false
                             }
-                            Ok(ExternalDragOutcome::Cancelled) => { this.cancel_card_drag(window, cx); false }
-                            Ok(ExternalDragOutcome::Dropped) => { this.finish_external_drag(cx); false }
+                            Ok(outcome @ (ExternalDragOutcome::Cancelled | ExternalDragOutcome::Dropped)) => {
+                                if outcome == ExternalDragOutcome::Cancelled { window.release_pointer(); }
+                                this.finish_external_drag(cx);
+                                false
+                            }
                             Err(error) => { this.fail_card_drag(format!("{error:#}"), cx); false }
                         }
                     }).unwrap_or(false);

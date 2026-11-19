@@ -224,10 +224,7 @@ fn pointer_press_layer(cx: &mut Context<ClipboardView>) -> impl IntoElement {
                 if phase != DispatchPhase::Capture {
                     return;
                 }
-                let Some(owner) = owner.upgrade() else {
-                    return;
-                };
-                owner.update(cx, |this, cx| {
+                let _ = owner.update(cx, |this, cx| {
                     if event.button == MouseButton::Left {
                         // A new native press cannot belong to a drag that missed MouseUp.
                         if this.card_drag_active(cx) {
