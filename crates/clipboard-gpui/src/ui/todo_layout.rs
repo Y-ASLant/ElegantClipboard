@@ -35,6 +35,33 @@ impl TodoListLayout {
         !self.filter_dirty
     }
 
+    fn sync_filter(&mut self, todos: &[Todo], query: &str, show_completed: bool) {
+        self.query.clear();
+        self.query.push_str(query);
+        self.show_completed = show_completed;
+        let normalized = query.to_lowercase();
+        self.ids.clear();
+        self.sources.clear();
+        self.indexes.clear();
+        for (source, todo) in todos.iter().enumerate() {
+            if (show_completed || !todo.status.is_finished())
+                && (normalized.is_empty() || todo.text.to_lowercase().contains(&normalized))
+            {
+                self.indexes.insert(todo.id, self.ids.len());
+                self.ids.push(todo.id);
+                self.sources.push(source);
+            }
+        }
+        self.filter_dirty = false;
+    }
+
+    pub(super) fn selected_index(&self, id: Option<i64>) -> Option<usize> {
+        if self.filter_dirty {
+            return None;
+        }
+        id.and_then(|id| self.indexes.get(&id).copied())
+    }
+
     pub fn record_height(&mut self, id: i64, height: f32) -> bool {
         if height <= 0. || self.heights.get(&id).copied() == Some(height) {
             return false;
@@ -92,22 +119,9 @@ impl ClipboardView {
             });
         }
         if filter_changed {
-            layout.show_completed = preference.show_completed;
-            layout.query.clear();
-            layout.query.push_str(query);
-            let normalized = query.to_lowercase();
-            layout.ids.clear();
-            layout.sources.clear();
-            layout.indexes.clear();
-            for (source, todo) in self.todos.iter().enumerate() {
-                if (self.todo_preference.value.show_completed || !todo.status.is_finished())
-                    && (normalized.is_empty() || todo.text.to_lowercase().contains(&normalized))
-                {
-                    let index = layout.ids.len();
-                    layout.ids.push(todo.id);
-                    layout.sources.push(source);
-                    layout.indexes.insert(todo.id, index);
-                }
+            layout.sync_filter(&self.todos, query, preference.show_completed);
+            if layout.selected_index(self.selected_todo).is_none() {
+                self.selected_todo = None;
             }
         }
         let scroll_anchor = (!filter_changed && !layout.offsets.is_empty())
@@ -134,7 +148,6 @@ impl ClipboardView {
             let top = layout.offsets[index.min(layout.ids.len())];
             self.todo_scroll.set_offset(point(px(0.), -(top + partial)));
         }
-        layout.filter_dirty = false;
         layout.geometry_dirty = false;
         drop(layout);
         if filter_changed || style_changed {
@@ -184,5 +197,40 @@ mod tests {
         );
         assert_eq!(layout.heights, HashMap::from([(1, 40.)]));
         assert!(layout.filter_dirty);
+    }
+
+    #[test]
+    fn memo_selection_only_survives_when_the_same_record_is_visible() {
+        let todo = |id, text: &str, status| Todo {
+            id,
+            text: text.into(),
+            status,
+            kind: MemoKind::Todo,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let mut layout = TodoListLayout::default();
+        let mut rows = [
+            todo(1, "Alpha", TodoStatus::Pending),
+            todo(2, "alpha also", TodoStatus::Done),
+        ];
+        layout.sync_filter(&rows, "ALPHA", true);
+        assert_eq!(layout.selected_index(Some(1)), Some(0));
+        assert_eq!(layout.selected_index(Some(2)), Some(1));
+
+        // Saving text out of the search while another memo still matches
+        // must not leave the old ID actionable or transfer its selection.
+        rows[0].text = "no longer matches".into();
+        layout.invalidate_filter();
+        assert_eq!(layout.selected_index(Some(1)), None);
+        layout.sync_filter(&rows, "ALPHA", true);
+        assert_eq!(layout.selected_index(Some(1)), None);
+        assert_eq!(layout.selected_index(None), None);
+        assert_eq!(layout.selected_index(Some(2)), Some(0));
+
+        layout.sync_filter(&rows, "ALPHA", false);
+        assert_eq!(layout.selected_index(Some(2)), None);
+        layout.sync_filter(&rows[..1], "", true);
+        assert_eq!(layout.selected_index(Some(2)), None);
     }
 }

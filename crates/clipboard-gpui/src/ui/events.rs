@@ -342,18 +342,9 @@ impl ClipboardView {
         let orphaned_editor_failed = self.editor_window.is_none()
             && match kind {
                 FailureKind::EditText { .. } => self.editor_save_pending,
-                FailureKind::Other => self.todo_edit_saving,
+                FailureKind::Todo => self.todo_edit_saving,
                 _ => false,
             };
-        let todo_command_failed = self.todo_edit_saving || self.todos_pending;
-        self.todos_pending = false;
-        if matches!(kind, FailureKind::Other) && todo_command_failed {
-            self.todo_notice = None;
-        }
-        self.todo_edit_saving = false;
-        if self.todo_draft.is_some() {
-            self.editor_error = Some(message.clone());
-        }
         if let FailureKind::Query(generation) = kind
             && !self.history.fail_query(generation)
         {
@@ -412,6 +403,18 @@ impl ClipboardView {
                 self.editor_save_pending = false;
                 self.editor_error = Some(message.clone());
                 window.refresh();
+            }
+            FailureKind::Todo => {
+                self.todos_pending = false;
+                self.todo_notice = None;
+                if std::mem::take(&mut self.todo_reorder_pending) {
+                    self.drag_motion = DragMotionState::default();
+                    self.todo_drop_target = None;
+                }
+                if std::mem::take(&mut self.todo_edit_saving) {
+                    self.editor_error = Some(message.clone());
+                    window.refresh();
+                }
             }
             FailureKind::SaveAs(id) if self.save_as_pending == Some(id) => {
                 self.save_as_pending = None;

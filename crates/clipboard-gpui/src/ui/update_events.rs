@@ -10,6 +10,7 @@ pub(super) enum UpdateCheck {
     Available(ReleaseInfo),
     Downloading,
     Ready(PathBuf),
+    Installing,
     Failed,
 }
 
@@ -18,7 +19,7 @@ impl ClipboardView {
     pub(super) fn start_update_check(&mut self, cx: &mut Context<Self>) {
         if matches!(
             self.update_check,
-            UpdateCheck::Checking | UpdateCheck::Downloading
+            UpdateCheck::Checking | UpdateCheck::Downloading | UpdateCheck::Installing
         ) {
             return;
         }
@@ -40,13 +41,30 @@ impl ClipboardView {
     }
 
     pub(super) fn start_update_install(&mut self, cx: &mut Context<Self>) {
+        let owner = cx.weak_entity();
+        let main = self.main_window;
+        cx.defer(move |cx| {
+            let _ = main.update(cx, |_, window, cx| {
+                let _ = owner.update(cx, |view, cx| view.install_update(window, cx));
+            });
+        });
+    }
+
+    fn install_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let UpdateCheck::Ready(path) = &self.update_check else {
             return;
         };
+        if !self.prepare_app_exit(cx) {
+            return;
+        }
         let path = path.clone();
         // 不在这里退出：worker 启动安装器成功后经 apply_update_install_started 退出，
         // 失败时 app 还活着能展示错误。
-        self.send(Command::InstallUpdate(path), cx);
+        if self.send(Command::InstallUpdate(path), cx) {
+            self.update_check = UpdateCheck::Installing;
+            self.close_editor(window, cx);
+            cx.notify();
+        }
     }
 
     pub(super) fn apply_update_checked(&mut self, result: Result<UpdateStatus, String>) -> bool {

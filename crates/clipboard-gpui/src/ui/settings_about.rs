@@ -133,6 +133,7 @@ impl SettingsWindowView {
                 #[cfg(windows)]
                 Some(UpdateCheck::Checking) => Some(tr(language, "检查中…", "Checking…")),
                 Some(UpdateCheck::Downloading) => Some(tr(language, "下载中…", "Downloading…")),
+                Some(UpdateCheck::Installing) => Some(tr(language, "安装中…", "Installing…")),
                 Some(UpdateCheck::UpToDate) => Some(tr(language, "已是最新", "Up to date")),
                 _ => None,
             };

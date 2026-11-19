@@ -172,22 +172,22 @@ impl ClipboardView {
         self.export_pending = false;
         match result {
             Ok(report) => {
-                let missing = report.missing_images + report.missing_icons;
-                self.is_error = missing != 0;
-                if missing != 0 {
-                    let included = report.included_images + report.included_icons;
+                let missing_media = report.missing_images + report.missing_icons;
+                let missing_blobs = report.missing_blobs;
+                self.is_error = missing_media != 0 || missing_blobs != 0;
+                if self.is_error {
+                    let included_media = report.included_images + report.included_icons;
+                    let included_blobs = report.included_blobs;
                     self.set_feedback_message(if self.language == LanguagePreference::English {
                         format!(
-                            "Backed up {} items and {} attachments to {}; {missing} source attachments were not included",
+                            "Incomplete backup: {} items, {included_media} image/icon attachments and {included_blobs} native-format attachments saved to {}. Missing: {missing_media} image/icon attachments and {missing_blobs} native-format attachments.",
                             report.total_items,
-                            included,
                             report.destination.display(),
                         )
                     } else {
                         format!(
-                            "已备份 {} 条记录、{} 个附件到 {}；{missing} 个源附件未包含在备份中",
+                            "备份不完整：已将 {} 条记录、{included_media} 个图片或图标附件和 {included_blobs} 个原生格式附件保存到 {}。缺失：{missing_media} 个图片或图标附件、{missing_blobs} 个原生格式附件。",
                             report.total_items,
-                            included,
                             report.destination.display(),
                         )
                     });

@@ -152,7 +152,8 @@ use gpui_kit::{
     component::{
         button::*,
         input::{
-            Input, InputEvent, InputState, NumberInputEvent, StepAction, Textarea, TextareaState,
+            EditorState, Input, InputEvent, InputState, NumberInputEvent, Rope, StepAction,
+            Textarea, TextareaState,
         },
         *,
     },
@@ -345,7 +346,10 @@ struct ClipboardView {
     editor: PreviewState,
     /// 正文编辑的独立窗口。备注仍用主窗口对话框。
     editor_window: Option<AnyWindowHandle>,
+    editor_input: Option<(Entity<EditorState>, Rope)>,
+    editor_discard_open: bool,
     note_input: Entity<InputState>,
+    note_original: Option<Rope>,
     note_save_pending: bool,
     editor_source_hash: Option<String>,
     editor_save_pending: bool,

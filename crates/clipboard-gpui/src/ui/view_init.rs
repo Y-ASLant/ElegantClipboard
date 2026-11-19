@@ -365,6 +365,8 @@ impl ClipboardView {
             located_matches: HashSet::new(),
             editor: PreviewState::default(),
             editor_window: None,
+            editor_input: None,
+            editor_discard_open: false,
             note_input: cx.new(|cx| {
                 InputState::new(window, cx).placeholder(tr(
                     language,
@@ -372,6 +374,7 @@ impl ClipboardView {
                     "Add a note (searchable)",
                 ))
             }),
+            note_original: None,
             note_save_pending: false,
             editor_source_hash: None,
             editor_save_pending: false,

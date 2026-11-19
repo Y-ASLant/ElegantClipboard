@@ -355,6 +355,8 @@ impl ClipboardView {
                 Some(self.history.category())
             };
             self.select_category(filter, window, cx);
+        } else if self.todos_open {
+            self.sync_todo_layout(window, cx);
         }
         true
     }

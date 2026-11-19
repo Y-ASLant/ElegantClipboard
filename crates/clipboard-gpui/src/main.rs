@@ -76,12 +76,19 @@ fn run(
         if let Some(source) = &options.import_backup {
             let data_dir = options.data_dir.clone().expect("参数已校验");
             let (path, report) = clipboard_platform::restore_backup_data(source, data_dir)?;
+            let missing_media = report.missing_images + report.missing_icons;
+            let status = if missing_media != 0 || report.missing_blobs != 0 {
+                "恢复不完整"
+            } else {
+                "恢复完成"
+            };
             println!(
-                "恢复完成：{} 条记录、{} 张图片、{} 个图标；{} 个源附件未包含在备份中。新数据库：{}",
+                "{status}：{} 条记录、{} 张图片、{} 个图标、{} 个原生格式附件；备份缺失 {missing_media} 个图片或图标附件和 {} 个原生格式附件。新数据库：{}",
                 report.total_items,
                 report.restored_images,
                 report.restored_icons,
-                report.missing_images + report.missing_icons,
+                report.restored_blobs,
+                report.missing_blobs,
                 path.display()
             );
             return Ok(());

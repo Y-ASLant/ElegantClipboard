@@ -54,6 +54,7 @@ impl ClipboardView {
         self.todos_open = true;
         self.selected_todo = None;
         self.sync_search_prompt(window, cx);
+        self.sync_todo_layout(window, cx);
         self.scroll_to_top();
         self.load_todos(cx);
         cx.notify();
@@ -90,44 +91,58 @@ impl ClipboardView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ids = self.todo_layout.borrow().ids.clone();
-        if ids.is_empty() {
-            return;
-        }
-        let current = self
-            .selected_todo
-            .and_then(|id| ids.iter().position(|item| *item == id));
-        if direction < 0 && current == Some(0) {
+        self.sync_todo_layout(window, cx);
+        let layout = self.todo_layout.borrow();
+        let current = layout.selected_index(self.selected_todo);
+        if direction < 0 && current.unwrap_or(0) == 0 {
+            drop(layout);
             self.search
                 .update(cx, |search, cx| search.focus(window, cx));
             return;
         }
-        let next = match current {
-            Some(index) => index.saturating_add_signed(direction).min(ids.len() - 1),
-            None => usize::from(direction > 0).saturating_mul(ids.len() - 1),
+        let next = current.map_or(0, |index| index.saturating_add_signed(direction));
+        let next = next.min(layout.ids.len().saturating_sub(1));
+        let Some(&id) = layout.ids.get(next) else {
+            return;
         };
-        self.selected_todo = Some(ids[next]);
+        drop(layout);
+        self.selected_todo = Some(id);
         self.todo_scroll
             .scroll_to_item(next, ScrollStrategy::Nearest);
         cx.notify();
     }
 
     pub(super) fn edit_selected_todo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(id) = self.selected_todo else {
+        if !self.todos_open || self.todos_pending {
+            return;
+        }
+        self.sync_todo_layout(window, cx);
+        let layout = self.todo_layout.borrow();
+        let Some(index) = layout.selected_index(self.selected_todo) else {
             return;
         };
-        let Some(text) = self
-            .todos
-            .iter()
-            .find(|todo| todo.id == id)
-            .map(|todo| todo.text.clone())
-        else {
-            return;
-        };
+        let todo = &self.todos[layout.sources[index]];
+        let (id, text) = (todo.id, todo.text.clone());
+        drop(layout);
         self.open_todo_editor(Some(id), text, window, cx);
     }
 
     pub(super) fn remove_todo(&mut self, id: i64, cx: &mut Context<Self>) {
+        if self
+            .todo_draft
+            .as_ref()
+            .is_some_and(|draft| draft.id == Some(id))
+        {
+            let message = self.editor_draft_blocker(cx).unwrap_or_else(|| {
+                tr(
+                    self.language,
+                    "请先关闭备忘录编辑器，然后重试。",
+                    "Close the memo editor, then try again.",
+                )
+            });
+            self.reveal_editor(message, cx);
+            return;
+        }
         if !self.todos_pending && self.send(Command::DeleteTodo(id), cx) {
             self.todo_notice = None;
             self.todos_pending = true;
@@ -135,8 +150,18 @@ impl ClipboardView {
         }
     }
 
-    pub(super) fn remove_selected_todo(&mut self, cx: &mut Context<Self>) {
-        if let Some(id) = self.selected_todo {
+    fn remove_selected_todo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.todos_open || self.todos_pending {
+            return;
+        }
+        self.sync_todo_layout(window, cx);
+        let id = {
+            let layout = self.todo_layout.borrow();
+            layout
+                .selected_index(self.selected_todo)
+                .map(|index| layout.ids[index])
+        };
+        if let Some(id) = id {
             self.remove_todo(id, cx);
         }
     }
@@ -236,6 +261,7 @@ impl ClipboardView {
             || self.editor.id.is_some()
             || self.editor_window.is_some()
             || self.todo_draft.is_some()
+            || matches!(self.update_check, UpdateCheck::Installing)
     }
 
     pub(super) fn open_todo_editor(
@@ -246,6 +272,9 @@ impl ClipboardView {
         cx: &mut Context<Self>,
     ) {
         if self.todo_editor_unavailable() {
+            if let Some(message) = self.editor_draft_blocker(cx) {
+                self.reveal_editor(message, cx);
+            }
             return;
         }
         let kind = id
@@ -260,10 +289,10 @@ impl ClipboardView {
     }
 
     pub(super) fn save_todo_editor(&mut self, text: String, cx: &mut Context<Self>) {
-        if self.todo_edit_saving {
+        if self.todos_pending || self.editor_discard_open {
             return;
         }
-        let Some(draft) = self.todo_draft.clone() else {
+        let Some(draft) = &self.todo_draft else {
             return;
         };
         let adding = draft.id.is_none();
@@ -278,9 +307,12 @@ impl ClipboardView {
             if adding {
                 self.todo_notice = Some(TodoNotice::Added);
             }
+            self.todos_pending = true;
             self.todo_edit_saving = true;
             self.editor_error = None;
             cx.notify();
+        } else {
+            self.editor_error = Some(self.message.clone());
         }
     }
 
@@ -320,6 +352,9 @@ impl ClipboardView {
         self.todos_pending = false;
         self.todo_reorder_pending = false;
         self.todo_drop_target = None;
+        if self.todos_open {
+            self.sync_todo_layout(window, cx);
+        }
         if self.todo_edit_saving {
             self.todo_edit_saving = false;
             self.close_editor(window, cx);
@@ -351,8 +386,8 @@ impl ClipboardView {
             .on_action(cx.listener(|this, _: &EditSelectedTodo, window, cx| {
                 this.edit_selected_todo(window, cx);
             }))
-            .on_action(cx.listener(|this, _: &RemoveSelectedTodo, _, cx| {
-                this.remove_selected_todo(cx);
+            .on_action(cx.listener(|this, _: &RemoveSelectedTodo, window, cx| {
+                this.remove_selected_todo(window, cx);
             }))
             .relative()
             .flex_1()
