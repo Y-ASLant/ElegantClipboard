@@ -19,14 +19,13 @@ pub(super) struct TodoDraft {
 impl ClipboardView {
     pub(super) fn select_toolbar_tab(
         &mut self,
-        index: usize,
+        tab: ToolbarTab,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match self.toolbar_tabs().get(index).copied() {
-            Some(ToolbarTab::Todos) => self.open_todos(window, cx),
-            Some(ToolbarTab::Category(filter)) => self.select_category(filter, window, cx),
-            None => {}
+        match tab {
+            ToolbarTab::Todos => self.open_todos(window, cx),
+            ToolbarTab::Category(filter) => self.select_category(filter, window, cx),
         }
     }
 

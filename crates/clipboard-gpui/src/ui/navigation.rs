@@ -1,6 +1,5 @@
 pub(super) const HISTORY_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-use super::category_tabs::ToolbarTab;
 use super::*;
 pub(super) fn history_row_height(
     item: &clipboard_core::database::ClipboardItem,
@@ -345,12 +344,12 @@ impl ClipboardView {
             return;
         }
         let tabs = self.toolbar_tabs();
-        if let Some(next) = self.toolbar_tab_index().checked_add_signed(direction) {
-            match tabs.get(next) {
-                Some(ToolbarTab::Todos) => self.open_todos(window, cx),
-                Some(ToolbarTab::Category(filter)) => self.select_category(*filter, window, cx),
-                None => {}
-            }
+        if let Some(&tab) = self
+            .toolbar_tab_index(&tabs)
+            .checked_add_signed(direction)
+            .and_then(|index| tabs.get(index))
+        {
+            self.select_toolbar_tab(tab, window, cx);
         }
     }
     pub(super) fn scroll_to_top(&mut self) {

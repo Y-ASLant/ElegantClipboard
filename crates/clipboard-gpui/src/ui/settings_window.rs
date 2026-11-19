@@ -225,11 +225,10 @@ impl SettingsWindowView {
         let fonts = entity.read(cx).fonts.value.clone();
         let (ui_font_size, card_font_size, preview_font_size) =
             Self::bind_font_size_inputs(window, cx, fonts.clone());
-        let font_default_label = tr(language, "系统默认", "System default");
         let (ui_font_select, ui_font_select_subscription) = Self::bind_font_select(
             &owner,
             &fonts,
-            font_default_label,
+            language,
             settings_fonts::FontPickerTarget::Ui,
             window,
             cx,
@@ -237,7 +236,7 @@ impl SettingsWindowView {
         let (card_font_select, card_font_select_subscription) = Self::bind_font_select(
             &owner,
             &fonts,
-            font_default_label,
+            language,
             settings_fonts::FontPickerTarget::Card,
             window,
             cx,
@@ -245,7 +244,7 @@ impl SettingsWindowView {
         let (preview_font_select, preview_font_select_subscription) = Self::bind_font_select(
             &owner,
             &fonts,
-            font_default_label,
+            language,
             settings_fonts::FontPickerTarget::Preview,
             window,
             cx,
