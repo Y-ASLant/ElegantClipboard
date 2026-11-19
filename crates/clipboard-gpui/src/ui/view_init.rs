@@ -505,8 +505,6 @@ impl ClipboardView {
             is_error: !startup_errors.is_empty(),
             history_reply_missed: false,
             feedback_pending: !startup_errors.is_empty(),
-            panel_status_token: 0,
-            panel_status_task: None,
             _subscriptions: vec![subscription, appearance, activation, bounds, feedback],
             _events: event_task,
             history_load_task,

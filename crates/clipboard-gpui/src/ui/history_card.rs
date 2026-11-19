@@ -59,7 +59,8 @@ impl ClipboardView {
             image_too_large,
             file_info.and_then(|info| info.total_size),
         );
-        let selected = !self.batch_mode && self.history.selected == Some(id);
+        let focused = self.history.selected == Some(id);
+        let selected = focused && !self.batch_mode;
         let marked = self.selected_ids.contains(&id);
         let (preview_text, highlights) = if is_image {
             (String::new(), Vec::new())
@@ -145,7 +146,7 @@ impl ClipboardView {
         let locate_color = cx.theme().primary;
         let border = if located {
             locate_color
-        } else if card.selected {
+        } else if focused {
             cx.theme().list_active_border
         } else {
             crate::design_system::container_border(cx)
@@ -176,13 +177,17 @@ impl ClipboardView {
             window,
             cx,
         );
-        let border = visual::transition_color(
-            ElementId::from((border_channel, id as usize)),
-            border,
-            surface_motion,
-            window,
-            cx,
-        );
+        let border = if self.batch_mode {
+            border
+        } else {
+            visual::transition_color(
+                ElementId::from((border_channel, id as usize)),
+                border,
+                surface_motion,
+                window,
+                cx,
+            )
+        };
         let action_opacity = gpui_kit::base::motion::transition(
             ElementId::from(("history-actions-opacity", id as usize)),
             if is_hovered && !self.card_drag_active(cx) {
@@ -220,11 +225,6 @@ impl ClipboardView {
             .relative()
             .on_hover(cx.listener(move |this, is_hovered: &bool, window, cx| {
                 hovered.update(cx, |hovered, _| hovered.content = *is_hovered);
-                // 鼠标驱动的焦点：悬停进入即转移选中态，与键盘/点击同一目标。
-                // 拖拽与批量模式下 selection 不参与渲染与快捷键，保持不变。
-                if *is_hovered && !this.batch_mode && !cx.has_active_drag() {
-                    this.history.selected = Some(id);
-                }
                 this.set_hover_source(id, *is_hovered, window, cx);
                 cx.notify();
             }))

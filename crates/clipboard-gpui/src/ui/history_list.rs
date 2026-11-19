@@ -94,6 +94,16 @@ impl ClipboardView {
                 this.select(this.page_step(), ScrollStrategy::Top, cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.batch_mode
+                    && event.keystroke.key == "space"
+                    && event.keystroke.modifiers == gpui_kit::Modifiers::default()
+                {
+                    cx.stop_propagation();
+                    if !event.is_held {
+                        this.toggle_focused_batch_mark(window, cx);
+                    }
+                    return;
+                }
                 // 多选快捷键为可改偏好，不做静态绑定；与偏好串匹配才进多选。
                 if event.is_held || this.batch_hotkey.value.trim().is_empty() {
                     return;

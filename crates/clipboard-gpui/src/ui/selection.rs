@@ -30,6 +30,17 @@ impl ClipboardView {
         self.selection_anchor = None;
         cx.notify();
     }
+
+    pub(super) fn toggle_focused_batch_mark(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(id) = self.history.selected {
+            self.toggle_selection(id, false, window, cx);
+        }
+    }
+
     pub(super) fn toggle_selection(
         &mut self,
         id: i64,
@@ -50,6 +61,8 @@ impl ClipboardView {
         }
         self.close_hover_preview("batch_selection", cx);
         self.batch_mode = true;
+        self.history.selected = Some(id);
+        window.focus(&self.list_focus, cx);
         self.selection_anchor = Some(id);
         if self.confirmation == Some(HistoryConfirmation::DeleteSelected) {
             self.close_history_confirmation(window, cx);
@@ -75,12 +88,12 @@ impl ClipboardView {
             return;
         }
         self.close_hover_preview("row_activated", cx);
-        self.history.selected = Some(id);
-        window.focus(&self.list_focus, cx);
         if self.batch_mode {
             self.toggle_selection(id, extend_range, window, cx);
             return;
         }
+        self.history.selected = Some(id);
+        window.focus(&self.list_focus, cx);
         let can_paste = self.paste_state.target().is_some_and(|target| {
             self._tray.is_some() && paste::is_external_target(window, target)
         });

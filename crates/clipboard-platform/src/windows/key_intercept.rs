@@ -1,6 +1,6 @@
 //! Low-level keyboard hook that forwards navigation keys to the history window
 //! while it is shown without activation, so the paste target keeps focus.
-pub use crate::key_intercept_types::InterceptedKey;
+pub use crate::key_intercept_types::{InterceptedKey, InterceptedText};
 use crate::key_intercept_types::{NAVIGATION_KEYS, control_shortcut};
 use anyhow::{Context, Result, anyhow};
 use async_channel::Sender;
@@ -18,7 +18,8 @@ use windows::Win32::{
             GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
             KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_CHAR, MapVirtualKeyW, SendInput,
             VIRTUAL_KEY, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_LEFT,
-            VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_UP,
+            VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE,
+            VK_UP,
         },
         WindowsAndMessaging::{
             CallNextHookEx, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, HC_ACTION,
@@ -58,10 +59,11 @@ fn foreground_is_ours() -> bool {
     process_id == unsafe { GetCurrentProcessId() }
 }
 
-fn classify(vk: u32) -> Option<InterceptedKey> {
+fn classify(info: &KBDLLHOOKSTRUCT) -> Option<InterceptedKey> {
     if key_down(VK_MENU) || key_down(VK_LWIN) || key_down(VK_RWIN) {
         return None;
     }
+    let vk = info.vkCode;
     let control = key_down(VK_CONTROL);
     let shift = key_down(VK_SHIFT);
     if let Some(index) = NAVIGATION_VKS.iter().position(|key| u32::from(key.0) == vk) {
@@ -80,7 +82,13 @@ fn classify(vk: u32) -> Option<InterceptedKey> {
             shift,
         });
     }
-    (character >= 0x20).then_some(InterceptedKey::Text)
+    (character >= 0x20).then_some(InterceptedKey::Text(InterceptedText {
+        keycode: vk as u16,
+        scan_code: info.scanCode as u16,
+        extended: info.flags.0 & LLKHF_EXTENDED.0 != 0,
+        unmodified_space: vk == u32::from(VK_SPACE.0) && !shift,
+        is_held: false,
+    }))
 }
 
 unsafe extern "system" fn keyboard_hook(code: i32, message: WPARAM, data: LPARAM) -> LRESULT {
@@ -104,20 +112,13 @@ unsafe extern "system" fn keyboard_hook(code: i32, message: WPARAM, data: LPARAM
                     return;
                 }
                 // Never block the hook on the UI; classification reads async key state only.
-                let Some(key) = classify(info.vkCode) else {
+                let Some(mut key) = classify(&info) else {
                     return;
                 };
-                if key == InterceptedKey::Text {
-                    PENDING_TEXT
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .push((
-                            info.vkCode as u16,
-                            info.scanCode as u16,
-                            info.flags.0 & LLKHF_EXTENDED.0 != 0,
-                        ));
+                let is_held = !target.swallowed.insert(info.vkCode);
+                if let InterceptedKey::Text(text) = &mut key {
+                    text.is_held = is_held;
                 }
-                target.swallowed.insert(info.vkCode);
                 let _ = target.sender.try_send(key);
                 swallow = true;
             });
@@ -127,6 +128,16 @@ unsafe extern "system" fn keyboard_hook(code: i32, message: WPARAM, data: LPARAM
         LRESULT(1)
     } else {
         unsafe { CallNextHookEx(None, code, message, data) }
+    }
+}
+
+impl InterceptedText {
+    /// Queue the key for native text input rather than handling it as an application shortcut.
+    pub fn queue_for_replay(self) {
+        PENDING_TEXT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push((self.keycode, self.scan_code, self.extended));
     }
 }
 

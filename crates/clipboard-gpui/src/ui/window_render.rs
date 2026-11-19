@@ -1,10 +1,6 @@
 use super::*;
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tooltip::Tooltip;
-use std::time::Duration;
-
-const PANEL_STATUS_OK_FOR: Duration = Duration::from_secs(3);
-const PANEL_STATUS_ERR_FOR: Duration = Duration::from_secs(6);
 
 impl ClipboardView {
     pub(super) fn set_feedback_message(&mut self, message: String) {
@@ -24,10 +20,6 @@ impl ClipboardView {
         if !std::mem::take(&mut self.feedback_pending) || self.message.is_empty() {
             return;
         }
-        // Clear transient feedback so the search field goes back to showing the mode.
-        self.arm_panel_status_clear(cx);
-        cx.notify();
-
         if let Some(handle) = self.settings_window {
             let notification = feedback_notification(self.message.clone(), self.is_error);
             if handle
@@ -40,16 +32,25 @@ impl ClipboardView {
             }
         }
 
-        // Only suppress the OS toast when the search field can show the feedback.
-        let search_visible = !self.onboarding_visible()
+        if !self.onboarding_visible()
             && self
                 .main_window
-                .update(cx, |_, window, _| {
-                    native_window::is_window_shown(window)
-                        && !native_window::is_window_minimized(window)
+                .update(cx, |_, window, cx| {
+                    if !native_window::is_window_shown(window)
+                        || native_window::is_window_minimized(window)
+                    {
+                        return false;
+                    }
+                    window.push_notification(
+                        feedback_notification(self.message.clone(), self.is_error)
+                            .id::<ClipboardView>()
+                            .placement(gpui_kit::Anchor::BottomCenter),
+                        cx,
+                    );
+                    true
                 })
-                .unwrap_or(false);
-        if search_visible {
+                .unwrap_or(false)
+        {
             return;
         }
 
@@ -66,43 +67,12 @@ impl ClipboardView {
             .detach();
     }
 
-    fn arm_panel_status_clear(&mut self, cx: &mut Context<Self>) {
-        self.panel_status_token = self.panel_status_token.wrapping_add(1);
-        let token = self.panel_status_token;
-        let wait = if self.is_error {
-            PANEL_STATUS_ERR_FOR
-        } else {
-            PANEL_STATUS_OK_FOR
-        };
-        self.panel_status_task = Some(cx.spawn(async move |view, cx| {
-            cx.background_executor().timer(wait).await;
-            let _ = view.update(cx, |this, cx| {
-                if this.panel_status_token == token {
-                    this.message.clear();
-                    cx.notify();
-                }
-            });
-        }));
-    }
-
     pub(super) fn render_search_status(&self, window: &Window, cx: &Context<Self>) -> Div {
-        let muted = cx.theme().muted_foreground;
-        let (status, color): (SharedString, _) = if !self.message.is_empty() {
-            (
-                self.message.clone().into(),
-                if self.is_error {
-                    cx.theme().danger
-                } else {
-                    muted
-                },
-            )
-        } else if self.reorder_pending || self.todo_reorder_pending {
-            (
-                tr(self.language, "正在保存顺序…", "Saving order…").into(),
-                muted,
-            )
+        let status: SharedString = self.paste_mode_label(window).into();
+        let detail: SharedString = if self.reorder_pending || self.todo_reorder_pending {
+            tr(self.language, "正在保存…", "Saving…").into()
         } else {
-            (self.paste_mode_label(window).into(), muted)
+            self.status_count_label().into()
         };
         div()
             .flex()
@@ -110,13 +80,12 @@ impl ClipboardView {
             .gap(px(visual::SPACE_2))
             .max_w((window.viewport_size().width - px(PAGE_PADDING * 2.)) * 0.6)
             .text_size(px(visual::TEXT_SMALL))
-            .text_color(muted)
+            .text_color(cx.theme().muted_foreground)
             .child(
                 div()
                     .id("search-status")
                     .min_w_0()
                     .truncate()
-                    .text_color(color)
                     .child(status.clone())
                     .tooltip(move |window, cx| Tooltip::new(status.clone()).build(window, cx)),
             )
@@ -127,7 +96,7 @@ impl ClipboardView {
                     .gap(px(visual::SPACE_2))
                     .whitespace_nowrap()
                     .child("·")
-                    .child(self.status_count_label()),
+                    .child(detail),
             )
     }
 

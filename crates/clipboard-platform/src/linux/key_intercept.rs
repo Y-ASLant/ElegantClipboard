@@ -1,7 +1,7 @@
 //! X11 passive key grabs that forward navigation keys to the history window
 //! while it is shown without input focus, so the paste target keeps focus.
 use super::x11::X11;
-pub use crate::key_intercept_types::InterceptedKey;
+pub use crate::key_intercept_types::{InterceptedKey, InterceptedText};
 use crate::key_intercept_types::{NAVIGATION_KEYS, control_shortcut};
 use anyhow::{Result, bail};
 use async_channel::Sender;
@@ -54,7 +54,7 @@ fn is_printable(keysym: u32) -> bool {
     (0x20..0x7f).contains(&keysym)
 }
 
-fn classify(keysym: u32, state: u16) -> Option<InterceptedKey> {
+fn classify(keysym: u32, state: u16, keycode: u8, is_held: bool) -> Option<InterceptedKey> {
     let control = state & CONTROL != 0;
     let shift = state & SHIFT != 0;
     if let Some(key) = navigation_key(keysym) {
@@ -75,7 +75,11 @@ fn classify(keysym: u32, state: u16) -> Option<InterceptedKey> {
             shift,
         });
     }
-    Some(InterceptedKey::Text)
+    Some(InterceptedKey::Text(InterceptedText {
+        keycode: u16::from(keycode),
+        unmodified_space: keysym == u32::from(b' ') && !shift,
+        is_held,
+    }))
 }
 
 /// (keycode, base keysym, modifier sets to grab) for every forwarded key.
@@ -145,6 +149,16 @@ fn focus_is_ours(x: &X11, window: u32) -> Result<bool> {
     Ok(focus == window || x.pid(focus).is_ok_and(|pid| pid == std::process::id()))
 }
 
+impl InterceptedText {
+    /// Queue the key for native text input rather than handling it as an application shortcut.
+    pub fn queue_for_replay(self) {
+        PENDING_TEXT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push(self.keycode as u8);
+    }
+}
+
 /// Replay swallowed text keys after the history window has taken input focus.
 pub fn replay_pending_text() -> Result<()> {
     SUSPENDED.store(true, Ordering::Release);
@@ -205,10 +219,15 @@ impl KeyInterceptor {
                     // Map and focus changes arrive as events; no per-tick X round trips.
                     let mut viewable = is_viewable(&x, window)?;
                     let mut focused = focus_is_ours(&x, window)?;
+                    let mut last_release = None;
                     while !stopping.load(Ordering::Acquire) {
                         while let Some(event) = x.connection.poll_for_event()? {
                             let event = match event {
                                 Event::KeyPress(event) => event,
+                                Event::KeyRelease(event) => {
+                                    last_release = Some((event.detail, event.time));
+                                    continue;
+                                }
                                 Event::MapNotify(event) if event.window == window => {
                                     viewable = true;
                                     continue;
@@ -236,15 +255,13 @@ impl KeyInterceptor {
                             else {
                                 continue;
                             };
-                            let Some(key) = classify(*keysym, u16::from(event.state)) else {
+                            // Core X11 auto-repeat synthesizes a release and press with the same time.
+                            let is_held = last_release.take() == Some((event.detail, event.time));
+                            let Some(key) =
+                                classify(*keysym, u16::from(event.state), event.detail, is_held)
+                            else {
                                 continue;
                             };
-                            if key == InterceptedKey::Text {
-                                PENDING_TEXT
-                                    .lock()
-                                    .unwrap_or_else(|error| error.into_inner())
-                                    .push(event.detail);
-                            }
                             let _ = events.try_send(key);
                         }
                         let want = viewable && !focused && !SUSPENDED.load(Ordering::Acquire);
